@@ -1,0 +1,196 @@
+import {
+  DEEP_MAX_MESSAGE_COUNT,
+  DEEP_MIN_MESSAGE_COUNT,
+  KNOWN_ACCOUNTS_KEY,
+  QUICK_MAX_MESSAGE_COUNT,
+  QUICK_MIN_MESSAGE_COUNT,
+  STORAGE_SCHEMA_VERSION,
+  SUMMARY_CACHE_PREFIX,
+} from './constants.js';
+import { createDefaultSettings, migrateState } from './migrations.js';
+import type { PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
+
+function isSummaryKey(key: string): key is `summary:${string}` {
+  return key.startsWith(SUMMARY_CACHE_PREFIX);
+}
+
+function arraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export async function loadStorageState(): Promise<PersistedState> {
+  const raw = await browser.storage.local.get(null);
+  const state = migrateState(raw);
+
+  if ((raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION) {
+    await browser.storage.local.set(state);
+  }
+
+  return state;
+}
+
+export function sanitizeSettings(input: Partial<Settings>): Settings {
+  const defaults = createDefaultSettings();
+  const quick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
+  const deep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
+
+  return {
+    claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
+    quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
+    deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
+    debugMode: Boolean(input.debugMode ?? defaults.debugMode),
+  };
+}
+
+export async function saveSettings(settingsPatch: Partial<Settings>): Promise<Settings> {
+  const state = await loadStorageState();
+  const nextSettings = sanitizeSettings({ ...state.settings, ...settingsPatch });
+  await browser.storage.local.set({ settings: nextSettings });
+  return nextSettings;
+}
+
+export async function savePersonalities(personalities: Personality[]): Promise<Personality[]> {
+  const normalized = personalities.map((personality) => ({
+    ...personality,
+    name: personality.name.trim() || 'Unnamed',
+    content: personality.content,
+    updatedAt: personality.updatedAt || Date.now(),
+  }));
+
+  await browser.storage.local.set({ personalities: normalized });
+  return normalized;
+}
+
+export async function deletePersonality(personalityId: string): Promise<void> {
+  const state = await loadStorageState();
+  const personalities = state.personalities.filter((p) => p.id !== personalityId);
+  const accountMappings = Object.fromEntries(
+    Object.entries(state.accountMappings).filter(([, mapped]) => mapped !== personalityId),
+  );
+
+  const removals = Object.keys(state)
+    .filter((key) => isSummaryKey(key))
+    .filter((key) => {
+      const entry = state[key] as SummaryCacheEntry | undefined;
+      return entry?.personalityId === personalityId;
+    });
+
+  await browser.storage.local.set({ personalities, accountMappings });
+  if (removals.length > 0) {
+    await browser.storage.local.remove(removals);
+  }
+}
+
+export async function saveAccountMapping(accountId: string, personalityId: string | null): Promise<void> {
+  const state = await loadStorageState();
+  const nextMappings = { ...state.accountMappings };
+
+  if (personalityId) {
+    nextMappings[accountId] = personalityId;
+  } else {
+    delete nextMappings[accountId];
+  }
+
+  await browser.storage.local.set({ accountMappings: nextMappings });
+}
+
+export async function registerKnownAccount(accountId: string): Promise<void> {
+  const state = await loadStorageState();
+  if (state.knownAccounts.includes(accountId)) {
+    return;
+  }
+
+  const knownAccounts = [...state.knownAccounts, accountId].sort();
+  await browser.storage.local.set({ [KNOWN_ACCOUNTS_KEY]: knownAccounts });
+}
+
+export async function rekeyAccountIdentity(
+  legacyAccountId: string,
+  resolvedAccountId: string,
+): Promise<{
+  state: PersistedState;
+  mappingMigrated: boolean;
+  mappingConflict: boolean;
+  knownAccountsChanged: boolean;
+}> {
+  const state = await loadStorageState();
+
+  if (!legacyAccountId || !resolvedAccountId || legacyAccountId === resolvedAccountId) {
+    return { state, mappingMigrated: false, mappingConflict: false, knownAccountsChanged: false };
+  }
+
+  const legacyMapping = state.accountMappings[legacyAccountId];
+  const resolvedMapping = state.accountMappings[resolvedAccountId];
+
+  let accountMappings = state.accountMappings;
+  let mappingMigrated = false;
+  let mappingConflict = false;
+  let accountMappingsChanged = false;
+
+  if (legacyMapping && resolvedMapping) {
+    accountMappings = { ...state.accountMappings };
+    delete accountMappings[legacyAccountId];
+    mappingConflict = true;
+    accountMappingsChanged = true;
+  } else if (legacyMapping) {
+    accountMappings = { ...state.accountMappings, [resolvedAccountId]: legacyMapping };
+    delete accountMappings[legacyAccountId];
+    mappingMigrated = true;
+    accountMappingsChanged = true;
+  }
+
+  let knownAccounts = state.knownAccounts;
+  if (state.knownAccounts.includes(legacyAccountId)) {
+    knownAccounts = Array.from(
+      new Set(state.knownAccounts.map((id) => (id === legacyAccountId ? resolvedAccountId : id))),
+    ).sort();
+  }
+
+  const knownAccountsChanged = !arraysEqual(knownAccounts, state.knownAccounts);
+
+  if (accountMappingsChanged || knownAccountsChanged) {
+    await browser.storage.local.set({ accountMappings, [KNOWN_ACCOUNTS_KEY]: knownAccounts });
+  }
+
+  return {
+    state: accountMappingsChanged || knownAccountsChanged
+      ? { ...state, accountMappings, knownAccounts }
+      : state,
+    mappingMigrated,
+    mappingConflict,
+    knownAccountsChanged,
+  };
+}
+
+export async function getSummaryCache(groupId: string): Promise<SummaryCacheEntry | null> {
+  const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
+  const result = await browser.storage.local.get(key);
+  return (result[key] as SummaryCacheEntry | undefined) ?? null;
+}
+
+async function evictOldestSummariesAndRetry(key: string, entry: SummaryCacheEntry): Promise<void> {
+  const state = await loadStorageState();
+  const summaryEntries = Object.entries(state)
+    .filter(([summaryKey]) => isSummaryKey(summaryKey))
+    .map(([summaryKey, summaryEntry]) => [summaryKey, summaryEntry as SummaryCacheEntry] as const)
+    .sort((left, right) => left[1].generatedAt - right[1].generatedAt);
+
+  const keysToRemove = summaryEntries.slice(0, 10).map(([summaryKey]) => summaryKey);
+  if (keysToRemove.length > 0) {
+    await browser.storage.local.remove(keysToRemove);
+  }
+  await browser.storage.local.set({ [key]: entry });
+}
+
+export async function saveSummaryCache(groupId: string, entry: SummaryCacheEntry): Promise<void> {
+  const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
+  try {
+    await browser.storage.local.set({ [key]: entry });
+  } catch {
+    await evictOldestSummariesAndRetry(key, entry);
+  }
+}
+
+export async function removeSummaryCache(groupId: string): Promise<void> {
+  await browser.storage.local.remove(`${SUMMARY_CACHE_PREFIX}${groupId}`);
+}

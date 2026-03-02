@@ -1,0 +1,93 @@
+import type { FeatureType, Settings } from './types.js';
+
+// ─── Storage ─────────────────────────────────────────────────────────────
+
+export const STORAGE_SCHEMA_VERSION = 1;
+export const SUMMARY_CACHE_PREFIX = 'summary:';
+export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
+export const SUMMARY_EVICTION_COUNT = 10;
+
+// ─── Claude API ──────────────────────────────────────────────────────────
+
+export const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+export const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+export const ANTHROPIC_VERSION = '2023-06-01';
+
+export const MAX_TOKENS: Record<FeatureType, number> = {
+  'fast-reply': 800,
+  'help-me': 1200,
+  'fan-summary': 1600,
+  'chat-review': 1600,
+  'ping': 800,
+};
+
+// ─── Fansly API ──────────────────────────────────────────────────────────
+
+export const FANSLY_API_BASE = 'https://apiv3.fansly.com/api/v1';
+export const FANSLY_PAGE_LIMIT = 25;
+export const FANSLY_REQUEST_TIMEOUT_MS = 30_000;
+export const FANSLY_PAGINATION_DELAY_MS = 300;
+export const FANSLY_RETRY_DELAYS_MS = [1000, 2000, 4000];
+
+// ─── Message Counts ──────────────────────────────────────────────────────
+
+export const QUICK_DEFAULT_MESSAGE_COUNT = 100;
+export const QUICK_MIN_MESSAGE_COUNT = 5;
+export const QUICK_MAX_MESSAGE_COUNT = 200;
+export const DEEP_DEFAULT_MESSAGE_COUNT = 500;
+export const DEEP_MIN_MESSAGE_COUNT = 100;
+export const DEEP_MAX_MESSAGE_COUNT = 1000;
+
+// ─── Timeouts ────────────────────────────────────────────────────────────
+
+export const QUICK_OPERATION_TIMEOUT_MS = 60_000;
+export const DEEP_OPERATION_TIMEOUT_MS = 120_000;
+
+// ─── Intervals & Throttles ──────────────────────────────────────────────
+
+export const ROUTE_POLL_INTERVAL_MS = 500;
+export const STREAM_CHUNK_FLUSH_MS = 50;
+export const CONVERSATION_ATTACH_TIMEOUT_MS = 10_000;
+export const CONVERSATION_ATTACH_RETRY_MS = 50;
+export const PORT_RECONNECT_DELAYS_MS = [100, 200, 400];
+
+// ─── Feature Thresholds ─────────────────────────────────────────────────
+
+export const MIN_MESSAGES_FOR_DEEP = 30;
+export const PING_ACTIVE_DAYS = 5;
+export const PING_MIN_FAN_MESSAGES = 3;
+
+// ─── Earnings ────────────────────────────────────────────────────────────
+
+export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+// ─── UI ──────────────────────────────────────────────────────────────────
+
+export const OVERLAY_Z_INDEX = 2147483646;
+export const CHATMUSE_NAMESPACE = 'chatmuse';
+
+// ─── Feature Categories ─────────────────────────────────────────────────
+
+export const DEEP_FEATURES: FeatureType[] = ['fan-summary', 'chat-review'];
+export const QUICK_FEATURES: FeatureType[] = ['fast-reply', 'help-me', 'ping'];
+
+export const FEATURE_LABELS: Record<FeatureType, string> = {
+  'fast-reply': 'Reply',
+  'help-me': 'Help',
+  'fan-summary': 'Summary',
+  'chat-review': 'Review',
+  'ping': 'Ping',
+};
+
+// ─── Default Settings ───────────────────────────────────────────────────
+
+export const DEFAULT_SETTINGS: Settings = {
+  claudeApiKey: '',
+  quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
+  deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
+  debugMode: false,
+};
+
+// ─── Build ──────────────────────────────────────────────────────────────
+
+export const BUILD_TIME = __CHATMUSE_BUILD_TIME__;

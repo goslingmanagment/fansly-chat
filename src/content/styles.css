@@ -1,0 +1,696 @@
+/* ============================================================
+   ChatMuse — Dark purple theme CSS for Fansly integration
+   All classes prefixed with chatmuse- to avoid collisions.
+   ============================================================ */
+
+:root {
+  --chatmuse-bg: rgba(9, 16, 23, 0.96);
+  --chatmuse-panel: #16213e;
+  --chatmuse-panel-soft: #1e2a4a;
+  --chatmuse-panel-elevated: #24374a;
+  --chatmuse-text: #edf5f7;
+  --chatmuse-muted: #94a7b6;
+  --chatmuse-accent: #6c5ce7;
+  --chatmuse-accent-hover: #5a4bd5;
+  --chatmuse-accent-soft: #a29bfe;
+  --chatmuse-danger: #e74c3c;
+  --chatmuse-success: #00b894;
+  --chatmuse-warning: #fdcb6e;
+  --chatmuse-border: rgba(255, 255, 255, 0.08);
+  --chatmuse-border-accent: rgba(108, 92, 231, 0.3);
+  --chatmuse-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  --chatmuse-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color-scheme: dark;
+}
+
+/* ─── Root Container ─────────────────────────────────────────── */
+
+#chatmuse-root {
+  margin: 12px 0 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.chatmuse-hidden {
+  display: none !important;
+}
+
+/* ─── Button Bar (Toolbar) ───────────────────────────────────── */
+
+.chatmuse-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--chatmuse-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(108, 92, 231, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(18, 31, 43, 0.96), rgba(12, 21, 29, 0.98));
+  box-shadow: var(--chatmuse-shadow);
+}
+
+.chatmuse-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+
+.chatmuse-pill {
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--chatmuse-text);
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+/* ─── Base Button ────────────────────────────────────────────── */
+
+.chatmuse-button {
+  border: 1px solid var(--chatmuse-border-accent);
+  background: rgba(108, 92, 231, 0.14);
+  color: var(--chatmuse-text);
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+}
+
+.chatmuse-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(108, 92, 231, 0.22);
+}
+
+.chatmuse-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chatmuse-button-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--chatmuse-border);
+}
+
+.chatmuse-button-danger {
+  background: rgba(231, 76, 60, 0.16);
+  border-color: rgba(231, 76, 60, 0.3);
+}
+
+/* ─── Personality Pill ───────────────────────────────────────── */
+
+.chatmuse-personality {
+  align-self: center;
+  color: var(--chatmuse-accent-soft);
+}
+
+/* ─── Toolbar Layout ─────────────────────────────────────────── */
+
+.chatmuse-toolbar {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-color: rgba(108, 92, 231, 0.28);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(22, 33, 62, 0.98), rgba(20, 30, 55, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 12px 28px rgba(3, 8, 20, 0.18);
+}
+
+.chatmuse-toolbar-actions {
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.chatmuse-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chatmuse-toolbar-pill {
+  min-height: 32px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border-color: rgba(108, 92, 231, 0.24);
+  background: rgba(108, 92, 231, 0.18);
+  color: var(--chatmuse-accent-soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.chatmuse-toolbar-button {
+  min-height: 32px;
+  padding: 0 16px;
+  border-color: rgba(108, 92, 231, 0.36);
+  background: rgba(13, 24, 51, 0.12);
+  border-radius: 8px;
+  color: #eef2ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.chatmuse-toolbar-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(108, 92, 231, 0.16);
+  border-color: rgba(108, 92, 231, 0.46);
+}
+
+.chatmuse-toolbar-button:disabled {
+  opacity: 0.5;
+}
+
+.chatmuse-toolbar-toggle {
+  min-height: 30px;
+  padding: 0 12px;
+  border-color: rgba(108, 92, 231, 0.32);
+  background: rgba(10, 20, 45, 0.08);
+  border-radius: 999px;
+  color: var(--chatmuse-accent-soft);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.chatmuse-toolbar-toggle:hover:not(:disabled) {
+  background: rgba(108, 92, 231, 0.12);
+  border-color: rgba(108, 92, 231, 0.42);
+}
+
+.chatmuse-toolbar-toggle-active {
+  background: rgba(0, 184, 148, 0.16);
+  border-color: rgba(0, 184, 148, 0.34);
+  color: #dff8ed;
+}
+
+/* ─── Mapping Banner ─────────────────────────────────────────── */
+
+.chatmuse-banner {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--chatmuse-warning);
+  background: linear-gradient(180deg, rgba(29, 44, 58, 0.96), rgba(18, 30, 40, 0.98));
+  box-shadow: var(--chatmuse-shadow);
+}
+
+.chatmuse-banner-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.chatmuse-banner-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--chatmuse-text);
+}
+
+.chatmuse-banner-text {
+  font-size: 12px;
+  color: var(--chatmuse-muted);
+}
+
+.chatmuse-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ─── Form Elements ──────────────────────────────────────────── */
+
+.chatmuse-select,
+.chatmuse-input,
+.chatmuse-textarea {
+  width: 100%;
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(7, 14, 20, 0.94);
+  color: var(--chatmuse-text);
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+/* ─── Toast ──────────────────────────────────────────────────── */
+
+#chatmuse-toast-root {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483645;
+  display: grid;
+  gap: 10px;
+}
+
+.chatmuse-toast {
+  min-width: 260px;
+  max-width: 340px;
+  background: rgba(9, 16, 23, 0.97);
+  border: 1px solid var(--chatmuse-border);
+  color: var(--chatmuse-text);
+  padding: 12px;
+  border-radius: 14px;
+  box-shadow: var(--chatmuse-shadow);
+  display: grid;
+  gap: 10px;
+  animation: chatmuse-fade-in 0.15s ease;
+}
+
+.chatmuse-toast-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ─── Overlay ────────────────────────────────────────────────── */
+
+#chatmuse-overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.chatmuse-overlay-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.chatmuse-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 7, 11, 0.68);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+
+.chatmuse-overlay-backdrop.chatmuse-pass-through {
+  pointer-events: none;
+}
+
+.chatmuse-overlay-panel {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(86vh, 900px);
+  overflow: auto;
+  pointer-events: auto;
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid var(--chatmuse-border);
+  background:
+    radial-gradient(circle at top right, rgba(108, 92, 231, 0.18), transparent 26%),
+    linear-gradient(180deg, rgba(20, 31, 41, 0.98), rgba(11, 19, 27, 0.99));
+  box-shadow: var(--chatmuse-shadow);
+  display: grid;
+  gap: 16px;
+  animation: chatmuse-slide-up 0.2s ease;
+}
+
+.chatmuse-overlay-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chatmuse-overlay-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chatmuse-overlay-panel::-webkit-scrollbar-thumb {
+  background: var(--chatmuse-border);
+  border-radius: 3px;
+}
+
+/* ─── Overlay Header ─────────────────────────────────────────── */
+
+.chatmuse-overlay-header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.chatmuse-overlay-title {
+  display: grid;
+  gap: 4px;
+}
+
+.chatmuse-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chatmuse-accent-soft);
+}
+
+.chatmuse-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--chatmuse-text);
+}
+
+.chatmuse-subtitle {
+  font-size: 13px;
+  color: var(--chatmuse-muted);
+}
+
+.chatmuse-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--chatmuse-text);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.chatmuse-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Status ─────────────────────────────────────────────────── */
+
+.chatmuse-overlay-status {
+  font-size: 13px;
+  color: var(--chatmuse-accent-soft);
+}
+
+/* ─── Stream Text ────────────────────────────────────────────── */
+
+.chatmuse-stream {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-size: 14px;
+  color: var(--chatmuse-text);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--chatmuse-border);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+/* ─── Cards & Parts ──────────────────────────────────────────── */
+
+.chatmuse-parts {
+  display: grid;
+  gap: 12px;
+}
+
+.chatmuse-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chatmuse-card-recommended {
+  border-color: rgba(0, 184, 148, 0.3);
+  background: rgba(0, 184, 148, 0.08);
+}
+
+.chatmuse-card-followup {
+  border-color: rgba(108, 92, 231, 0.22);
+  background: rgba(108, 92, 231, 0.06);
+}
+
+.chatmuse-card-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chatmuse-accent-soft);
+}
+
+.chatmuse-card-hint {
+  font-size: 12px;
+  color: var(--chatmuse-muted);
+}
+
+.chatmuse-card-status {
+  font-size: 12px;
+  color: var(--chatmuse-accent-soft);
+}
+
+.chatmuse-card-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.chatmuse-card-actions,
+.chatmuse-overlay-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ─── Rating ─────────────────────────────────────────────────── */
+
+.chatmuse-rating-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 18px;
+  border: 1px solid var(--chatmuse-border);
+}
+
+.chatmuse-rating-badge {
+  font-size: 28px;
+  font-weight: 700;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.chatmuse-rating-excellent {
+  background: var(--chatmuse-success);
+  box-shadow: 0 0 12px rgba(0, 184, 148, 0.3);
+}
+
+.chatmuse-rating-good {
+  background: #55efc4;
+  color: #1a1a2e;
+  box-shadow: 0 0 12px rgba(85, 239, 196, 0.3);
+}
+
+.chatmuse-rating-average {
+  background: var(--chatmuse-warning);
+  color: #1a1a2e;
+  box-shadow: 0 0 12px rgba(253, 203, 110, 0.3);
+}
+
+.chatmuse-rating-below {
+  background: #e17055;
+  box-shadow: 0 0 12px rgba(225, 112, 85, 0.3);
+}
+
+.chatmuse-rating-poor {
+  background: var(--chatmuse-danger);
+  box-shadow: 0 0 12px rgba(231, 76, 60, 0.3);
+}
+
+.chatmuse-rating-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--chatmuse-muted);
+}
+
+/* ─── Errors ─────────────────────────────────────────────────── */
+
+.chatmuse-inline-error {
+  border: 1px solid rgba(231, 76, 60, 0.35);
+  background: rgba(231, 76, 60, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #ffdede;
+}
+
+.chatmuse-inline-note {
+  border: 1px solid rgba(0, 184, 148, 0.28);
+  background: rgba(0, 184, 148, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #dff8ed;
+}
+
+/* ─── Layout Helpers ─────────────────────────────────────────── */
+
+.chatmuse-grid {
+  display: grid;
+  gap: 14px;
+}
+
+/* ─── Debug Inspector ────────────────────────────────────────── */
+
+.chatmuse-debug-inspector {
+  border: 1px solid var(--chatmuse-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.chatmuse-debug-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 16px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chatmuse-accent-soft);
+}
+
+.chatmuse-debug-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chatmuse-debug-content {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.chatmuse-debug-section {
+  display: grid;
+  gap: 8px;
+}
+
+.chatmuse-debug-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chatmuse-muted);
+}
+
+.chatmuse-debug-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-size: 13px;
+  color: var(--chatmuse-text);
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(7, 14, 20, 0.94);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.chatmuse-debug-text::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chatmuse-debug-text::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chatmuse-debug-text::-webkit-scrollbar-thumb {
+  background: var(--chatmuse-border);
+  border-radius: 3px;
+}
+
+/* ─── Scroll Lock ────────────────────────────────────────────── */
+
+body.chatmuse-scroll-lock {
+  overflow: hidden !important;
+}
+
+/* ─── Spinner ────────────────────────────────────────────────── */
+
+.chatmuse-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--chatmuse-muted);
+  border-top-color: var(--chatmuse-accent);
+  border-radius: 50%;
+  animation: chatmuse-spin 0.6s linear infinite;
+}
+
+/* ─── Animations ─────────────────────────────────────────────── */
+
+@keyframes chatmuse-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes chatmuse-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chatmuse-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chatmuse-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .chatmuse-overlay-shell {
+    padding: 10px;
+  }
+
+  .chatmuse-overlay-panel {
+    padding: 16px;
+    max-height: 92vh;
+    border-radius: 20px;
+  }
+
+  .chatmuse-title {
+    font-size: 18px;
+  }
+}
