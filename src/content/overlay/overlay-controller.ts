@@ -23,6 +23,34 @@ interface PartCardOptions {
   autoPassThrough?: boolean;
 }
 
+type VisibleOverlayModel = Exclude<OverlayViewModel, { kind: 'hidden' }>;
+type StaticOverlayKind = Exclude<VisibleOverlayModel['kind'], 'loading'>;
+
+interface StaticViewState {
+  kind: StaticOverlayKind;
+  operationId: string | null;
+  root: HTMLElement;
+}
+
+interface LoadingViewState {
+  kind: 'loading';
+  operationId: string;
+  root: HTMLElement;
+  statusText: Text;
+  streamText: Text;
+  debugHost: HTMLDivElement;
+  actions: HTMLDivElement;
+  debugSnapshot: PromptDebugSnapshot | null;
+}
+
+type OverlayViewState = StaticViewState | LoadingViewState;
+
+interface OverlayRenderTraceState {
+  renderCount: number;
+  lastKind: OverlayViewModel['kind'] | null;
+  lastOperationId: string | null;
+}
+
 function titleForFeature(feature: FeatureType): string {
   switch (feature) {
     case 'fast-reply':
@@ -59,14 +87,32 @@ function ratingClass(rating: number): string {
   return 'chatmuse-rating-poor';
 }
 
+function operationIdForModel(model: OverlayViewModel): string | null {
+  return 'operationId' in model ? model.operationId ?? null : null;
+}
+
 export class OverlayController {
   private readonly root = ensureOverlayRoot();
   private model: OverlayViewModel = { kind: 'hidden' };
   private passThrough = false;
+  private shellEl: HTMLDivElement | null = null;
   private backdropEl: HTMLDivElement | null = null;
+  private panelEl: HTMLDivElement | null = null;
+  private headerEyebrowEl: HTMLDivElement | null = null;
+  private headerTitleEl: HTMLDivElement | null = null;
+  private headerSubtitleEl: HTMLDivElement | null = null;
+  private inlineErrorEl: HTMLDivElement | null = null;
+  private bodyEl: HTMLDivElement | null = null;
+  private currentView: OverlayViewState | null = null;
   private inlineError: UserFacingError | null = null;
   private debugPromptOpen = false;
   private debugPromptOperationId: string | null = null;
+  private renderTraceEnabledFromStorage: boolean | null = null;
+  private readonly renderTraceState: OverlayRenderTraceState = {
+    renderCount: 0,
+    lastKind: null,
+    lastOperationId: null,
+  };
 
   constructor(private readonly callbacks: OverlayCallbacks) {
     document.addEventListener('keydown', (event) => {
@@ -82,6 +128,11 @@ export class OverlayController {
   }
 
   render(model: OverlayViewModel, preserveInlineError = false): void {
+    const renderStart = performance.now();
+    const operationId = operationIdForModel(model);
+    let shellAction: 'mounted' | 'reused' | 'hidden' = 'reused';
+    let bodyAction: 'none' | 'rebuild-body' | 'update-loading' = 'none';
+
     this.model = model;
     if (model.kind === 'error') {
       this.inlineError = null;
@@ -91,14 +142,15 @@ export class OverlayController {
     if (model.kind === 'hidden' || model.kind === 'loading' || model.kind === 'error') {
       this.passThrough = false;
     }
-    this.backdropEl = null;
-    this.root.replaceChildren();
     document.body.classList.toggle('chatmuse-scroll-lock', model.kind !== 'hidden');
     this.root.style.pointerEvents = model.kind === 'hidden' ? 'none' : 'auto';
 
     if (model.kind === 'hidden') {
       this.debugPromptOpen = false;
       this.debugPromptOperationId = null;
+      this.teardownShell();
+      shellAction = 'hidden';
+      this.logRenderTrace(renderStart, model, operationId, shellAction, bodyAction);
       return;
     }
 
@@ -112,63 +164,14 @@ export class OverlayController {
       }
     }
 
-    const shell = document.createElement('div');
-    shell.className = 'chatmuse-overlay-shell';
-
-    const backdrop = document.createElement('div');
-    backdrop.className = 'chatmuse-overlay-backdrop';
-    this.backdropEl = backdrop;
+    if (this.ensureShell()) {
+      shellAction = 'mounted';
+    }
     this.syncBackdropPassThrough();
-    backdrop.addEventListener('click', () => {
-      if (!this.passThrough) {
-        if ('operationId' in model && model.kind === 'loading') {
-          this.callbacks.onCancel(model.operationId);
-        }
-        this.callbacks.onClose();
-      }
-    });
-
-    const panel = document.createElement('div');
-    panel.className = 'chatmuse-overlay-panel';
-    panel.addEventListener('pointerdown', () => {
-      if (!this.passThrough) {
-        return;
-      }
-      this.passThrough = false;
-      this.syncBackdropPassThrough();
-    });
-
-    panel.append(this.renderHeader(model));
-
-    if (model.kind !== 'error' && this.inlineError) {
-      const error = document.createElement('div');
-      error.className = 'chatmuse-inline-error';
-      error.textContent = this.inlineError.message;
-      panel.append(error);
-    }
-
-    switch (model.kind) {
-      case 'loading':
-        panel.append(this.renderLoading(model));
-        break;
-      case 'reply':
-        panel.append(this.renderReply(model));
-        break;
-      case 'helpMe':
-        panel.append(this.renderHelpMe(model));
-        break;
-      case 'readOnly':
-        panel.append(this.renderReadOnly(model));
-        break;
-      case 'error':
-        panel.append(this.renderError(model));
-        break;
-      default:
-        break;
-    }
-
-    shell.append(backdrop, panel);
-    this.root.append(shell);
+    this.updateHeader(model);
+    this.updateInlineError(model);
+    bodyAction = this.renderBody(model);
+    this.logRenderTrace(renderStart, model, operationId, shellAction, bodyAction);
   }
 
   private syncBackdropPassThrough(): void {
@@ -195,9 +198,48 @@ export class OverlayController {
     return splitModeRequested && part.sequenceIndex > 0 ? `Follow-up ${number}` : `Message ${number}`;
   }
 
-  // ─── Header ─────────────────────────────────────────────────────────
+  private ensureShell(): boolean {
+    if (
+      this.shellEl &&
+      this.shellEl.isConnected &&
+      this.backdropEl &&
+      this.panelEl &&
+      this.headerEyebrowEl &&
+      this.headerTitleEl &&
+      this.headerSubtitleEl &&
+      this.inlineErrorEl &&
+      this.bodyEl
+    ) {
+      return false;
+    }
 
-  private renderHeader(model: Exclude<OverlayViewModel, { kind: 'hidden' }>): HTMLElement {
+    const shell = document.createElement('div');
+    shell.className = 'chatmuse-overlay-shell';
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'chatmuse-overlay-backdrop';
+    backdrop.addEventListener('click', () => {
+      if (this.passThrough) {
+        return;
+      }
+      if (this.model.kind === 'loading') {
+        this.callbacks.onCancel(this.model.operationId);
+      }
+      if (this.model.kind !== 'hidden') {
+        this.callbacks.onClose();
+      }
+    });
+
+    const panel = document.createElement('div');
+    panel.className = 'chatmuse-overlay-panel';
+    panel.addEventListener('pointerdown', () => {
+      if (!this.passThrough) {
+        return;
+      }
+      this.passThrough = false;
+      this.syncBackdropPassThrough();
+    });
+
     const header = document.createElement('div');
     header.className = 'chatmuse-overlay-header';
 
@@ -205,20 +247,10 @@ export class OverlayController {
     title.className = 'chatmuse-overlay-title';
     const eyebrow = document.createElement('div');
     eyebrow.className = 'chatmuse-eyebrow';
-    const feature =
-      model.kind === 'helpMe'
-        ? 'Help Me'
-        : model.kind === 'loading' || model.kind === 'reply' || model.kind === 'readOnly'
-          ? titleForFeature(model.feature)
-          : 'ChatMuse';
-    eyebrow.textContent = feature;
     const h1 = document.createElement('div');
     h1.className = 'chatmuse-title';
-    h1.textContent =
-      model.kind === 'error' ? 'ChatMuse' : `${feature} — @${model.fanDisplayName || 'fan'}`;
     const subtitle = document.createElement('div');
     subtitle.className = 'chatmuse-subtitle';
-    subtitle.textContent = model.kind === 'error' ? 'Something went wrong' : 'Preview only. You send messages manually.';
     title.append(eyebrow, h1, subtitle);
 
     const close = document.createElement('button');
@@ -226,31 +258,141 @@ export class OverlayController {
     close.className = 'chatmuse-close';
     close.textContent = '\u00d7';
     close.addEventListener('click', () => {
-      if (model.kind === 'loading') {
-        this.callbacks.onCancel(model.operationId);
+      if (this.model.kind === 'loading') {
+        this.callbacks.onCancel(this.model.operationId);
       }
-      this.callbacks.onClose();
+      if (this.model.kind !== 'hidden') {
+        this.callbacks.onClose();
+      }
     });
 
     header.append(title, close);
-    return header;
+    const inlineError = document.createElement('div');
+    inlineError.className = 'chatmuse-inline-error chatmuse-hidden';
+
+    const body = document.createElement('div');
+
+    panel.append(header, inlineError, body);
+    shell.append(backdrop, panel);
+    this.root.replaceChildren(shell);
+
+    this.shellEl = shell;
+    this.backdropEl = backdrop;
+    this.panelEl = panel;
+    this.headerEyebrowEl = eyebrow;
+    this.headerTitleEl = h1;
+    this.headerSubtitleEl = subtitle;
+    this.inlineErrorEl = inlineError;
+    this.bodyEl = body;
+    this.currentView = null;
+    return true;
   }
 
-  // ─── Loading ────────────────────────────────────────────────────────
+  private teardownShell(): void {
+    this.root.replaceChildren();
+    this.shellEl = null;
+    this.backdropEl = null;
+    this.panelEl = null;
+    this.headerEyebrowEl = null;
+    this.headerTitleEl = null;
+    this.headerSubtitleEl = null;
+    this.inlineErrorEl = null;
+    this.bodyEl = null;
+    this.currentView = null;
+  }
 
-  private renderLoading(model: Extract<OverlayViewModel, { kind: 'loading' }>): HTMLElement {
+  private updateHeader(model: VisibleOverlayModel): void {
+    if (!this.headerEyebrowEl || !this.headerTitleEl || !this.headerSubtitleEl) {
+      return;
+    }
+
+    const feature =
+      model.kind === 'helpMe'
+        ? 'Help Me'
+        : model.kind === 'loading' || model.kind === 'reply' || model.kind === 'readOnly'
+          ? titleForFeature(model.feature)
+          : 'ChatMuse';
+    const titleText =
+      model.kind === 'error' ? 'ChatMuse' : `${feature} — @${model.fanDisplayName || 'fan'}`;
+    const subtitleText =
+      model.kind === 'error' ? 'Something went wrong' : 'Preview only. You send messages manually.';
+
+    if (this.headerEyebrowEl.textContent !== feature) {
+      this.headerEyebrowEl.textContent = feature;
+    }
+    if (this.headerTitleEl.textContent !== titleText) {
+      this.headerTitleEl.textContent = titleText;
+    }
+    if (this.headerSubtitleEl.textContent !== subtitleText) {
+      this.headerSubtitleEl.textContent = subtitleText;
+    }
+  }
+
+  private updateInlineError(model: VisibleOverlayModel): void {
+    if (!this.inlineErrorEl) {
+      return;
+    }
+
+    if (model.kind !== 'error' && this.inlineError) {
+      if (this.inlineErrorEl.textContent !== this.inlineError.message) {
+        this.inlineErrorEl.textContent = this.inlineError.message;
+      }
+      this.inlineErrorEl.classList.remove('chatmuse-hidden');
+      return;
+    }
+
+    if (this.inlineErrorEl.textContent) {
+      this.inlineErrorEl.textContent = '';
+    }
+    this.inlineErrorEl.classList.add('chatmuse-hidden');
+  }
+
+  private renderBody(model: VisibleOverlayModel): 'rebuild-body' | 'update-loading' {
+    if (!this.bodyEl) {
+      return 'rebuild-body';
+    }
+
+    if (model.kind === 'loading' && this.currentView?.kind === 'loading' && this.currentView.operationId === model.operationId) {
+      this.updateLoadingView(this.currentView, model);
+      return 'update-loading';
+    }
+
+    const nextView =
+      model.kind === 'loading'
+        ? this.createLoadingView(model)
+        : {
+            kind: model.kind,
+            operationId: operationIdForModel(model),
+            root:
+              model.kind === 'reply'
+                ? this.renderReply(model)
+                : model.kind === 'helpMe'
+                  ? this.renderHelpMe(model)
+                  : model.kind === 'readOnly'
+                    ? this.renderReadOnly(model)
+                    : this.renderError(model),
+          };
+
+    this.bodyEl.replaceChildren(nextView.root);
+    this.currentView = nextView;
+    return 'rebuild-body';
+  }
+
+  private createLoadingView(model: Extract<OverlayViewModel, { kind: 'loading' }>): LoadingViewState {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
     const status = document.createElement('div');
     status.className = 'chatmuse-overlay-status';
-    status.textContent = model.progress?.message ?? 'Generating\u2026';
+    const statusText = document.createTextNode('');
+    status.append(statusText);
 
     const stream = document.createElement('div');
     stream.className = 'chatmuse-stream';
-    stream.textContent = model.rawText || 'Waiting for Claude\u2026';
+    const streamText = document.createTextNode('');
+    stream.append(streamText);
 
-    const debugPrompt = model.debugPrompt ? this.renderDebugPrompt(model.debugPrompt) : null;
+    const debugHost = document.createElement('div');
 
     const actions = document.createElement('div');
     actions.className = 'chatmuse-overlay-actions';
@@ -258,15 +400,114 @@ export class OverlayController {
     cancel.type = 'button';
     cancel.className = 'chatmuse-button chatmuse-button-danger';
     cancel.textContent = 'Cancel';
-    cancel.addEventListener('click', () => this.callbacks.onCancel(model.operationId));
+    cancel.addEventListener('click', () => {
+      if (this.model.kind === 'loading') {
+        this.callbacks.onCancel(this.model.operationId);
+      }
+    });
     actions.append(cancel);
 
-    section.append(status, stream);
-    if (debugPrompt) {
-      section.append(debugPrompt);
+    section.append(status, stream, actions);
+
+    const view: LoadingViewState = {
+      kind: 'loading',
+      operationId: model.operationId,
+      root: section,
+      statusText,
+      streamText,
+      debugHost,
+      actions,
+      debugSnapshot: null,
+    };
+    this.updateLoadingView(view, model);
+    return view;
+  }
+
+  private updateLoadingView(
+    view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): void {
+    const statusText = model.progress?.message ?? 'Generating\u2026';
+    const streamText = model.rawText || 'Waiting for Claude\u2026';
+
+    if (view.statusText.data !== statusText) {
+      view.statusText.data = statusText;
     }
-    section.append(actions);
-    return section;
+    if (view.streamText.data !== streamText) {
+      view.streamText.data = streamText;
+    }
+    this.syncLoadingDebugPrompt(view, model);
+  }
+
+  private syncLoadingDebugPrompt(
+    view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): void {
+    const snapshot = model.debugPrompt ?? null;
+    if (!snapshot) {
+      if (view.debugHost.isConnected) {
+        view.debugHost.remove();
+      }
+      view.debugSnapshot = null;
+      return;
+    }
+
+    if (!view.debugHost.isConnected) {
+      view.root.insertBefore(view.debugHost, view.actions);
+    }
+    if (view.debugSnapshot !== snapshot) {
+      view.debugHost.replaceChildren(this.renderDebugPrompt(snapshot));
+      view.debugSnapshot = snapshot;
+    }
+  }
+
+  private isRenderTraceEnabled(): boolean {
+    if ((globalThis as { __CHATMUSE_OVERLAY_DEBUG__?: unknown }).__CHATMUSE_OVERLAY_DEBUG__ === true) {
+      return true;
+    }
+
+    if (this.renderTraceEnabledFromStorage !== null) {
+      return this.renderTraceEnabledFromStorage;
+    }
+
+    try {
+      this.renderTraceEnabledFromStorage = window.localStorage.getItem('chatmuse:overlay-debug') === '1';
+    } catch {
+      this.renderTraceEnabledFromStorage = false;
+    }
+
+    return this.renderTraceEnabledFromStorage;
+  }
+
+  private logRenderTrace(
+    renderStart: number,
+    model: OverlayViewModel,
+    operationId: string | null,
+    shellAction: 'mounted' | 'reused' | 'hidden',
+    bodyAction: 'none' | 'rebuild-body' | 'update-loading',
+  ): void {
+    const durationMs = performance.now() - renderStart;
+    const count = this.renderTraceState.renderCount + 1;
+    const sameKindAsPrevious = this.renderTraceState.lastKind === model.kind;
+    const sameOperationIdAsPrevious = this.renderTraceState.lastOperationId === operationId;
+
+    if (this.isRenderTraceEnabled()) {
+      console.debug('[ChatMuse overlay render]', {
+        count,
+        timestamp: new Date().toISOString(),
+        kind: model.kind,
+        operationId,
+        sameKindAsPrevious,
+        sameOperationIdAsPrevious,
+        shellAction,
+        bodyAction,
+        durationMs: Number(durationMs.toFixed(2)),
+      });
+    }
+
+    this.renderTraceState.renderCount = count;
+    this.renderTraceState.lastKind = model.kind;
+    this.renderTraceState.lastOperationId = operationId;
   }
 
   // ─── Part Card ──────────────────────────────────────────────────────
