@@ -11,6 +11,7 @@ import { buildPrompt } from '../shared/prompts.js';
 import {
   getSummaryCache,
   loadStorageState,
+  removeSummaryCache,
   rekeyAccountIdentity,
   saveSummaryCache,
 } from '../shared/storage.js';
@@ -482,6 +483,10 @@ export class OperationCoordinator {
       );
       if (!personality) {
         throw new ChatMuseError('no_mapping');
+      }
+
+      if (payload.feature === 'fan-summary' && payload.forceRegenerate) {
+        await removeSummaryCache(validated.urlGroupId);
       }
 
       // Summary cache check

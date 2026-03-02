@@ -523,6 +523,8 @@ export interface OverlayInsertPart {
   insertedOnce: boolean;
 }
 
+export type OverlayRerunActionLabel = 'Regenerate' | 'Refresh';
+
 export type OverlayViewModel =
   | { kind: 'hidden' }
   | {
@@ -545,11 +547,12 @@ export type OverlayViewModel =
       rawText: string;
       splitModeRequested?: boolean;
       debugPrompt?: PromptDebugSnapshot;
-      canRegenerate: boolean;
+      rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
     }
   | {
       kind: 'helpMe';
+      feature: 'help-me';
       fanDisplayName: string;
       operationId: string;
       rawText: string;
@@ -557,6 +560,7 @@ export type OverlayViewModel =
       engagingParts: OverlayInsertPart[];
       flirtyParts: OverlayInsertPart[];
       parseFallback: boolean;
+      rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
     }
   | {
@@ -572,7 +576,7 @@ export type OverlayViewModel =
         recommendations: string | null;
         parseFallback: boolean;
       };
-      canRefresh?: boolean;
+      rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
     }
   | {
@@ -583,3 +587,8 @@ export type OverlayViewModel =
       debugPrompt?: PromptDebugSnapshot;
       error: UserFacingError;
     };
+
+export type CompletedOverlayViewModel = Extract<
+  OverlayViewModel,
+  { kind: 'reply' | 'helpMe' | 'readOnly' }
+>;

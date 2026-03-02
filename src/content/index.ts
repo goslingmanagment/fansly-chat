@@ -4,6 +4,7 @@ import { getActiveConversationDisplayName } from './conversation-dom.js';
 import { ConversationMountController } from './conversation-mount-controller.js';
 import { installContentStyles } from './dom-anchor.js';
 import { MappingBanner } from './mapping-banner.js';
+import { CompletedOverlayCache } from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
@@ -11,7 +12,9 @@ import { ToastController } from './toast.js';
 import { splitByNext } from '../shared/split.js';
 import type {
   BackgroundPortMessage,
+  CompletedOverlayViewModel,
   FeatureType,
+  FeatureResult,
   OverlayInsertPart,
   PromptDebugSnapshot,
   ReplyMode,
@@ -44,6 +47,7 @@ export class ChatMuseContentApp {
     onMessage: (message) => this.handlePortMessage(message),
     onDisconnected: () => {
       this.toast.show('Extension reloaded. Please try again.');
+      this.completedOverlayCache.clearAll();
       this.overlay.render({ kind: 'hidden' });
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
@@ -61,6 +65,7 @@ export class ChatMuseContentApp {
   });
   private readonly root = document.createElement('div');
   private readonly mountController: ConversationMountController;
+  private readonly completedOverlayCache = new CompletedOverlayCache();
   private readonly overlay = new OverlayController({
     onClose: () => {
       this.overlay.render({ kind: 'hidden' });
@@ -75,8 +80,10 @@ export class ChatMuseContentApp {
       this.resetNextFastReplyMode();
       this.render();
     },
-    onRegenerate: (feature) => this.startFeature(feature, true),
-    onRefreshSummary: () => this.startFeature('fan-summary', true),
+    onRerun: (feature) => {
+      this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
+      this.startFeature(feature, true);
+    },
   });
   private overlayRawText = '';
 
@@ -89,30 +96,23 @@ export class ChatMuseContentApp {
   init(): void {
     installContentStyles(contentStyles);
     this.port.connect();
-
-    startRouteWatcher((groupId) => {
-      this.routeNonce += 1;
-      this.currentGroupId = groupId;
-      this.mountController.setActiveRoute(groupId);
-
-      if (!this.hasSentInit) {
-        this.port.send({ type: 'tab:init', groupId, routeNonce: this.routeNonce });
-        this.hasSentInit = true;
-      } else {
-        this.port.send({ type: 'tab:routeChanged', groupId, routeNonce: this.routeNonce });
-      }
-
-      this.render();
-    });
+    startRouteWatcher((groupId) => this.handleRouteChange(groupId));
   }
 
   private startFeature(feature: FeatureType, forceRegenerate: boolean): void {
-    if (!this.tabState) {
+    if (this.activeFeature) {
+      this.toast.show('Another operation is already in progress.');
       return;
     }
 
-    if (this.activeFeature) {
-      this.toast.show('Another operation is already in progress.');
+    const cachedResult = !forceRegenerate ? this.completedOverlayCache.get(this.currentGroupId, feature) : null;
+    if (cachedResult) {
+      this.lastFeature = feature;
+      this.overlay.render(cachedResult);
+      return;
+    }
+
+    if (!this.tabState) {
       return;
     }
 
@@ -195,6 +195,29 @@ export class ChatMuseContentApp {
 
   private resetNextFastReplyMode(): void {
     this.nextFastReplyMode = 'default';
+  }
+
+  private handleRouteChange(groupId: string | null): void {
+    const changed = this.currentGroupId !== groupId;
+    this.routeNonce += 1;
+    this.currentGroupId = groupId;
+    this.completedOverlayCache.setActiveGroup(groupId);
+    this.mountController.setActiveRoute(groupId);
+
+    if (changed && !this.activeFeature) {
+      this.overlay.render({ kind: 'hidden' });
+      this.clearOperationState(true);
+      this.overlayRawText = '';
+    }
+
+    if (!this.hasSentInit) {
+      this.port.send({ type: 'tab:init', groupId, routeNonce: this.routeNonce });
+      this.hasSentInit = true;
+    } else {
+      this.port.send({ type: 'tab:routeChanged', groupId, routeNonce: this.routeNonce });
+    }
+
+    this.render();
   }
 
   private handlePortMessage(message: BackgroundPortMessage): void {
@@ -293,60 +316,14 @@ export class ChatMuseContentApp {
     const feature = this.activeFeature;
     const rawText = message.result.rawText;
     this.overlayRawText = rawText;
-
-    if (feature === 'help-me') {
-      const parsed = message.result.helpMe;
-      this.overlay.render({
-        kind: 'helpMe',
-        fanDisplayName: message.fanDisplayName,
-        operationId: message.operationId,
-        rawText,
-        coaching: parsed?.coaching ?? null,
-        engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
-        flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
-        parseFallback: !parsed?.valid,
-      });
-    } else if (feature === 'fan-summary') {
-      this.overlay.render({
-        kind: 'readOnly',
-        feature,
-        fanDisplayName: message.fanDisplayName,
-        operationId: message.operationId,
-        rawText,
-        summaryMeta: message.result.summaryMeta,
-        canRefresh: true,
-      });
-    } else if (feature === 'chat-review') {
-      this.overlay.render({
-        kind: 'readOnly',
-        feature,
-        fanDisplayName: message.fanDisplayName,
-        operationId: message.operationId,
-        rawText,
-        reviewMeta: {
-          rating: message.result.chatReview?.rating ?? null,
-          evaluation: message.result.chatReview?.evaluation ?? null,
-          recommendations: message.result.chatReview?.recommendations ?? null,
-          parseFallback: !message.result.chatReview?.valid,
-        },
-      });
-    } else {
-      this.overlay.render({
-        kind: 'reply',
-        feature,
-        fanDisplayName: message.fanDisplayName,
-        operationId: message.operationId,
-        parts: createParts(
-          message.result.parts && message.result.parts.length > 0
-            ? message.result.parts
-            : splitByNext(rawText),
-        ),
-        rawText,
-        splitModeRequested: Boolean(message.result.splitModeRequested),
-        debugPrompt: feature === 'fast-reply' ? this.activeDebugPrompt ?? undefined : undefined,
-        canRegenerate: feature === 'fast-reply' || feature === 'ping',
-      });
-    }
+    const completedModel = this.buildCompletedOverlayModel(
+      feature,
+      message.operationId,
+      message.fanDisplayName,
+      message.result,
+    );
+    this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
+    this.overlay.render(completedModel);
 
     this.clearOperationState(false);
     this.render();
@@ -388,6 +365,68 @@ export class ChatMuseContentApp {
 
   private currentFanDisplayName(): string {
     return this.activeFanDisplayName ?? 'fan';
+  }
+
+  private buildCompletedOverlayModel(
+    feature: FeatureType,
+    operationId: string,
+    fanDisplayName: string,
+    result: FeatureResult,
+  ): CompletedOverlayViewModel {
+    const rawText = result.rawText;
+
+    if (feature === 'help-me') {
+      const parsed = result.helpMe;
+      return {
+        kind: 'helpMe',
+        feature,
+        fanDisplayName,
+        operationId,
+        rawText,
+        coaching: parsed?.coaching ?? null,
+        engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
+        flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
+        parseFallback: !parsed?.valid,
+        rerunActionLabel: 'Regenerate',
+      };
+    }
+
+    if (feature === 'fan-summary' || feature === 'chat-review') {
+      return {
+        kind: 'readOnly',
+        feature,
+        fanDisplayName,
+        operationId,
+        rawText,
+        summaryMeta: result.summaryMeta,
+        reviewMeta:
+          feature === 'chat-review'
+            ? {
+                rating: result.chatReview?.rating ?? null,
+                evaluation: result.chatReview?.evaluation ?? null,
+                recommendations: result.chatReview?.recommendations ?? null,
+                parseFallback: !result.chatReview?.valid,
+              }
+            : undefined,
+        rerunActionLabel: 'Refresh',
+      };
+    }
+
+    return {
+      kind: 'reply',
+      feature,
+      fanDisplayName,
+      operationId,
+      parts: createParts(
+        result.parts && result.parts.length > 0
+          ? result.parts
+          : splitByNext(rawText),
+      ),
+      rawText,
+      splitModeRequested: Boolean(result.splitModeRequested),
+      debugPrompt: feature === 'fast-reply' ? this.activeDebugPrompt ?? undefined : undefined,
+      rerunActionLabel: 'Regenerate',
+    };
   }
 
   private render(): void {

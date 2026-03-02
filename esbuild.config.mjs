@@ -23,6 +23,7 @@ async function ensureStaticFiles() {
   await writeFile(path.join(outdir, 'options.html'), optionsHtml);
   await writeFile(path.join(outdir, 'popup.html'), popupHtml);
   await writeFile(path.join(outdir, 'manifest.json'), manifest);
+  await cp(path.join(root, 'icons'), path.join(outdir, 'icons'), { recursive: true });
 }
 
 async function buildOnce() {

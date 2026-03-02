@@ -32,7 +32,39 @@ function createReplyModel(
     rawText: part.text,
     splitModeRequested: false,
     debugPrompt: undefined,
-    canRegenerate: true,
+    rerunActionLabel: 'Regenerate',
+  };
+}
+
+function createHelpMeModel(): Extract<OverlayViewModel, { kind: 'helpMe' }> {
+  return {
+    kind: 'helpMe',
+    feature: 'help-me',
+    fanDisplayName: 'fan',
+    operationId: 'help-op',
+    rawText: 'raw help',
+    coaching: 'Be direct',
+    engagingParts: [],
+    flirtyParts: [],
+    parseFallback: false,
+    rerunActionLabel: 'Regenerate',
+  };
+}
+
+function createReadOnlyModel(): Extract<OverlayViewModel, { kind: 'readOnly' }> {
+  return {
+    kind: 'readOnly',
+    feature: 'chat-review',
+    fanDisplayName: 'fan',
+    operationId: 'review-op',
+    rawText: 'review text',
+    reviewMeta: {
+      rating: 7,
+      evaluation: 'Solid',
+      recommendations: 'Keep pace',
+      parseFallback: false,
+    },
+    rerunActionLabel: 'Refresh',
   };
 }
 
@@ -83,8 +115,7 @@ describe('OverlayController', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
       onCancel: () => undefined,
-      onRegenerate: () => undefined,
-      onRefreshSummary: () => undefined,
+      onRerun: () => undefined,
     });
 
     controller.render(createLoadingModel('stream-op', ''));
@@ -116,8 +147,7 @@ describe('OverlayController', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
       onCancel: () => undefined,
-      onRegenerate: () => undefined,
-      onRefreshSummary: () => undefined,
+      onRerun: () => undefined,
     });
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
 
@@ -143,8 +173,7 @@ describe('OverlayController', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
       onCancel: () => undefined,
-      onRegenerate: () => undefined,
-      onRefreshSummary: () => undefined,
+      onRerun: () => undefined,
     });
     const part: OverlayInsertPart = {
       id: 'part-1',
@@ -164,5 +193,41 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatmuse-overlay-panel')).toBe(panel);
     expect(requireElement<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button').textContent).toBe('Insert again');
     expect(requireElement<HTMLDivElement>('.chatmuse-card-status').textContent).toBe('Inserted earlier.');
+  });
+
+  it('renders Help Me regenerate action through the generic rerun callback', () => {
+    const onRerun = vi.fn();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun,
+    });
+
+    controller.render(createHelpMeModel());
+
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'))
+      .find((element) => element.textContent === 'Regenerate');
+
+    expect(button).toBeDefined();
+    button!.click();
+    expect(onRerun).toHaveBeenCalledWith('help-me');
+  });
+
+  it('renders Chat Review refresh action through the generic rerun callback', () => {
+    const onRerun = vi.fn();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun,
+    });
+
+    controller.render(createReadOnlyModel());
+
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'))
+      .find((element) => element.textContent === 'Refresh');
+
+    expect(button).toBeDefined();
+    button!.click();
+    expect(onRerun).toHaveBeenCalledWith('chat-review');
   });
 });

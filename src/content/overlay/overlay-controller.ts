@@ -2,6 +2,7 @@ import { toUserError } from '../../shared/errors.js';
 import type {
   FeatureType,
   OverlayInsertPart,
+  OverlayRerunActionLabel,
   OverlayViewModel,
   PromptDebugSnapshot,
   UserFacingError,
@@ -12,8 +13,7 @@ import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTexta
 interface OverlayCallbacks {
   onClose: () => void;
   onCancel: (operationId: string) => void;
-  onRegenerate: (feature: FeatureType) => void;
-  onRefreshSummary: () => void;
+  onRerun: (feature: FeatureType) => void;
 }
 
 interface PartCardOptions {
@@ -307,11 +307,9 @@ export class OverlayController {
     }
 
     const feature =
-      model.kind === 'helpMe'
-        ? 'Help Me'
-        : model.kind === 'loading' || model.kind === 'reply' || model.kind === 'readOnly'
-          ? titleForFeature(model.feature)
-          : 'ChatMuse';
+      model.kind === 'loading' || model.kind === 'reply' || model.kind === 'helpMe' || model.kind === 'readOnly'
+        ? titleForFeature(model.feature)
+        : 'ChatMuse';
     const titleText =
       model.kind === 'error' ? 'ChatMuse' : `${feature} — @${model.fanDisplayName || 'fan'}`;
     const subtitleText =
@@ -638,17 +636,7 @@ export class OverlayController {
       section.append(this.renderDebugPrompt(model.debugPrompt));
     }
 
-    const actions = document.createElement('div');
-    actions.className = 'chatmuse-overlay-actions';
-    if (model.canRegenerate) {
-      const regenerate = document.createElement('button');
-      regenerate.type = 'button';
-      regenerate.className = 'chatmuse-button';
-      regenerate.textContent = 'Regenerate';
-      regenerate.addEventListener('click', () => this.callbacks.onRegenerate(model.feature));
-      actions.append(regenerate);
-    }
-    section.append(actions);
+    section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
     return section;
   }
 
@@ -688,6 +676,7 @@ export class OverlayController {
       section.append(fallback);
     }
 
+    section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
     return section;
   }
 
@@ -755,18 +744,28 @@ export class OverlayController {
       section.append(body);
     }
 
+    section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
+    return section;
+  }
+
+  private renderCompletedActions(
+    feature: FeatureType,
+    rerunActionLabel: OverlayRerunActionLabel | undefined,
+  ): HTMLElement {
     const actions = document.createElement('div');
     actions.className = 'chatmuse-overlay-actions';
-    if (model.canRefresh) {
-      const refresh = document.createElement('button');
-      refresh.type = 'button';
-      refresh.className = 'chatmuse-button';
-      refresh.textContent = 'Refresh';
-      refresh.addEventListener('click', () => this.callbacks.onRefreshSummary());
-      actions.append(refresh);
+
+    if (!rerunActionLabel) {
+      return actions;
     }
-    section.append(actions);
-    return section;
+
+    const rerun = document.createElement('button');
+    rerun.type = 'button';
+    rerun.className = 'chatmuse-button';
+    rerun.textContent = rerunActionLabel;
+    rerun.addEventListener('click', () => this.callbacks.onRerun(feature));
+    actions.append(rerun);
+    return actions;
   }
 
   // ─── Error ──────────────────────────────────────────────────────────
