@@ -16,6 +16,7 @@ import type {
   FeatureType,
   FeatureResult,
   OverlayInsertPart,
+  OperationProfilingSnapshot,
   PromptDebugSnapshot,
   ReplyMode,
   TabUiState,
@@ -39,6 +40,7 @@ export class ChatMuseContentApp {
   private activeOperationId: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
+  private activeProfiling: OperationProfilingSnapshot | null = null;
   private lastFeature: FeatureType | null = null;
   private nextFastReplyMode: ReplyMode = 'default';
   private hasSentInit = false;
@@ -152,6 +154,7 @@ export class ChatMuseContentApp {
     const domFanDisplayName = getActiveConversationDisplayName();
     const replyMode = feature === 'fast-reply' ? this.nextFastReplyMode : 'default';
     this.activeDebugPrompt = null;
+    this.activeProfiling = null;
     this.activeFeature = feature;
     this.activeOperationId = operationId;
     this.activeFanDisplayName = domFanDisplayName ?? 'fan';
@@ -163,6 +166,7 @@ export class ChatMuseContentApp {
       progress: null,
       rawText: '',
       debugPrompt: undefined,
+      profiling: undefined,
       canCancel: true,
       canRegenerate: feature === 'fast-reply' || feature === 'ping',
       operationId,
@@ -243,7 +247,7 @@ export class ChatMuseContentApp {
         break;
       case 'operation:error':
       case 'operation:discarded':
-        this.handleOperationError(message.operationId, message.error.message);
+        this.handleOperationError(message);
         break;
       default:
         break;
@@ -255,6 +259,7 @@ export class ChatMuseContentApp {
       return;
     }
 
+    this.activeProfiling = message.profiling ?? null;
     this.overlay.render({
       kind: 'loading',
       feature: message.feature,
@@ -262,6 +267,7 @@ export class ChatMuseContentApp {
       progress: message,
       rawText: this.currentRawText(),
       debugPrompt: this.activeDebugPrompt ?? undefined,
+      profiling: this.activeProfiling ?? undefined,
       canCancel: true,
       canRegenerate: message.feature === 'fast-reply' || message.feature === 'ping',
       operationId: message.operationId,
@@ -282,6 +288,7 @@ export class ChatMuseContentApp {
       progress: null,
       rawText: this.currentRawText(),
       debugPrompt: this.activeDebugPrompt,
+      profiling: this.activeProfiling ?? undefined,
       canCancel: true,
       canRegenerate: message.feature === 'fast-reply' || message.feature === 'ping',
       operationId: message.operationId,
@@ -302,6 +309,7 @@ export class ChatMuseContentApp {
       progress: null,
       rawText: current,
       debugPrompt: this.activeDebugPrompt ?? undefined,
+      profiling: this.activeProfiling ?? undefined,
       canCancel: true,
       canRegenerate: this.activeFeature === 'fast-reply' || this.activeFeature === 'ping',
       operationId,
@@ -321,6 +329,7 @@ export class ChatMuseContentApp {
       message.operationId,
       message.fanDisplayName,
       message.result,
+      message.profiling ?? this.activeProfiling ?? undefined,
     );
     this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
     this.overlay.render(completedModel);
@@ -329,17 +338,23 @@ export class ChatMuseContentApp {
     this.render();
   }
 
-  private handleOperationError(operationId: string, message: string): void {
-    if (this.activeOperationId === operationId) {
+  private handleOperationError(
+    message: Extract<
+      BackgroundPortMessage,
+      { type: 'operation:error' | 'operation:discarded' }
+    >,
+  ): void {
+    if (this.activeOperationId === message.operationId) {
       this.overlay.render({
         kind: 'error',
         feature: this.activeFeature ?? this.lastFeature ?? 'fast-reply',
         fanDisplayName: this.currentFanDisplayName(),
-        operationId,
+        operationId: message.operationId,
         debugPrompt: this.activeDebugPrompt ?? undefined,
+        profiling: message.profiling ?? this.activeProfiling ?? undefined,
         error: {
           code: 'unknown_error',
-          message,
+          message: message.error.message,
         },
       });
       this.clearOperationState(false);
@@ -347,13 +362,14 @@ export class ChatMuseContentApp {
       return;
     }
 
-    this.toast.show(message);
+    this.toast.show(message.error.message);
   }
 
   private clearOperationState(clearDebugPrompt: boolean): void {
     this.activeFeature = null;
     this.activeOperationId = null;
     this.activeFanDisplayName = null;
+    this.activeProfiling = null;
     if (clearDebugPrompt) {
       this.activeDebugPrompt = null;
     }
@@ -372,6 +388,7 @@ export class ChatMuseContentApp {
     operationId: string,
     fanDisplayName: string,
     result: FeatureResult,
+    profiling?: OperationProfilingSnapshot,
   ): CompletedOverlayViewModel {
     const rawText = result.rawText;
 
@@ -387,6 +404,7 @@ export class ChatMuseContentApp {
         engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
         flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
         parseFallback: !parsed?.valid,
+        profiling,
         rerunActionLabel: 'Regenerate',
       };
     }
@@ -408,6 +426,7 @@ export class ChatMuseContentApp {
                 parseFallback: !result.chatReview?.valid,
               }
             : undefined,
+        profiling,
         rerunActionLabel: 'Refresh',
       };
     }
@@ -425,6 +444,7 @@ export class ChatMuseContentApp {
       rawText,
       splitModeRequested: Boolean(result.splitModeRequested),
       debugPrompt: feature === 'fast-reply' ? this.activeDebugPrompt ?? undefined : undefined,
+      profiling,
       rerunActionLabel: 'Regenerate',
     };
   }

@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { ChatMuseError } from '../src/shared/errors.js';
 import type {
+  BackgroundPortMessage,
   FanSubscriptionContext,
   NormalizedTranscriptMessage,
 } from '../src/shared/types.js';
 
 let mockStorage: Record<string, unknown> = {};
+let currentNow = 1_700_000_000_000;
 
 const SESSION_CAPTURE = {
   accountId: 'account-1',
@@ -81,9 +84,19 @@ function buildFanslyClientMock() {
   };
 }
 
+function advanceNow(ms: number): number {
+  currentNow += ms;
+  return currentNow;
+}
+
+function postedMessages(port: { postMessage: ReturnType<typeof vi.fn> }): BackgroundPortMessage[] {
+  return port.postMessage.mock.calls.map(([message]) => message as BackgroundPortMessage);
+}
+
 async function createCoordinatorHarness(options?: {
   anthropicRawText?: string;
   fanslyClient?: ReturnType<typeof buildFanslyClientMock>;
+  anthropicClient?: { streamMessage: ReturnType<typeof vi.fn> };
 }) {
   const [{ OperationCoordinator }, { SessionStore }, { TabContextStore }] =
     await Promise.all([
@@ -96,7 +109,7 @@ async function createCoordinatorHarness(options?: {
   sessionStore.registerCapture(1, SESSION_CAPTURE);
 
   const fanslyClient = options?.fanslyClient ?? buildFanslyClientMock();
-  const anthropicClient = {
+  const anthropicClient = options?.anthropicClient ?? {
     streamMessage: vi.fn(async () => options?.anthropicRawText ?? 'Result'),
   };
 
@@ -116,6 +129,8 @@ async function createCoordinatorHarness(options?: {
 describe('OperationCoordinator', () => {
   beforeEach(() => {
     vi.resetModules();
+    currentNow = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => currentNow);
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: {
@@ -183,6 +198,10 @@ describe('OperationCoordinator', () => {
     };
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('removes the durable summary cache before a forced fan-summary refresh', async () => {
     const { coordinator } = await createCoordinatorHarness({
       anthropicRawText: 'Fresh summary',
@@ -225,6 +244,7 @@ describe('OperationCoordinator', () => {
       expect.objectContaining({ accountId: 'account-1' }),
       expect.anything(),
       'cache-only',
+      expect.any(Function),
     );
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
@@ -262,6 +282,7 @@ describe('OperationCoordinator', () => {
       expect.objectContaining({ accountId: 'account-1' }),
       expect.anything(),
       'full',
+      expect.any(Function),
     );
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -269,5 +290,297 @@ describe('OperationCoordinator', () => {
         user: expect.stringContaining('## Fan Subscription Data'),
       }),
     );
+  });
+
+  it('omits profiling data from progress and completion payloads when debug mode is off', async () => {
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText: 'hello there',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    expect(messages.filter((message) => message.type === 'operation:progress')).not.toHaveLength(0);
+    for (const message of messages) {
+      if (
+        message.type === 'operation:progress' ||
+        message.type === 'operation:complete' ||
+        message.type === 'operation:error' ||
+        message.type === 'operation:discarded'
+      ) {
+        expect(message).not.toHaveProperty('profiling');
+      }
+    }
+  });
+
+  it('includes profiling snapshots in debug mode and records the main stage breakdown', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAuthenticatedAccountId.mockImplementation(async () => {
+      advanceNow(50);
+      return 'account-1';
+    });
+    fanslyClient.loadMessages.mockImplementation(async (...args: any[]) => {
+      const onProgress = args[5] as
+        | ((progress: {
+            currentPage: number;
+            targetPages: number;
+            pageMessageCount: number;
+            collectedCount: number;
+          }) => void)
+        | undefined;
+      advanceNow(150);
+      onProgress?.({
+        currentPage: 1,
+        targetPages: 2,
+        pageMessageCount: 25,
+        collectedCount: 25,
+      });
+      advanceNow(250);
+      onProgress?.({
+        currentPage: 2,
+        targetPages: 2,
+        pageMessageCount: 5,
+        collectedCount: 30,
+      });
+      advanceNow(100);
+      return {
+        transcriptMessages: buildTranscriptMessages(30),
+        windowStartMs: 0,
+        pagesLoaded: 2,
+        targetPages: 2,
+      };
+    });
+    fanslyClient.getGroup.mockImplementation(async () => {
+      advanceNow(80);
+      return { users: [{ userId: 'account-1' }, { userId: 'fan-1' }] };
+    });
+    fanslyClient.getAccountNames.mockImplementation(async () => {
+      advanceNow(40);
+      return [{ id: 'fan-1', username: 'alice', displayName: 'Alice' }];
+    });
+    fanslyClient.getEarnings.mockImplementation(async () => {
+      advanceNow(90);
+      return null;
+    });
+    fanslyClient.getFanSubscriptionContext.mockImplementation(async (...args: any[]) => {
+      const onTrace = args[5] as ((event: { type: string }) => void) | undefined;
+      onTrace?.({ type: 'cache-miss' });
+      advanceNow(30);
+      onTrace?.({ type: 'cache-only-skip' });
+      return null;
+    });
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
+        advanceNow(200);
+        onText('Hello');
+        advanceNow(250);
+        onText(' there');
+        advanceNow(120);
+        return 'Hello there';
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({
+      fanslyClient,
+      anthropicClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const progressMessages = messages.filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress',
+    );
+    const completeMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(progressMessages.some((message) => Boolean(message.profiling))).toBe(true);
+    expect(completeMessage?.profiling).toBeDefined();
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
+    expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
+      'resolve-identity',
+      'load-messages',
+      'group-lookup',
+      'account-name-lookup',
+      'earnings',
+      'subscription-lookup',
+      'prompt-build',
+      'claude-ttfb',
+      'claude-stream',
+    ]);
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+      status: 'completed',
+      detail: 'first chunk received',
+    });
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
+      status: 'completed',
+      detail: '11 chars',
+    });
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'subscription-lookup')?.detail).toContain('cache miss -> cache-only skip');
+  });
+
+  it('includes partial profiling data on error in debug mode', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        advanceNow(300);
+        throw new ChatMuseError('network_error');
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.profiling).toBeDefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+  });
+
+  it('returns profiling data for ping_blocked before Claude work starts', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const nowSeconds = Math.floor(currentNow / 1000);
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      transcriptMessages: [
+        {
+          id: 'message-1',
+          createdAt: nowSeconds - 20,
+          senderId: 'account-1',
+          senderLabel: 'Model',
+          type: 1,
+          text: 'hello',
+          labels: [],
+        },
+        {
+          id: 'message-2',
+          createdAt: nowSeconds - 5,
+          senderId: 'fan-1',
+          senderLabel: 'Fan',
+          type: 1,
+          text: 'hey?',
+          labels: [],
+        },
+      ],
+      windowStartMs: 0,
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+
+    const { coordinator, port } = await createCoordinatorHarness({
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'ping-op',
+      feature: 'ping',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('ping_blocked');
+    expect(errorMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
+      'resolve-identity',
+      'load-messages',
+      'ping-analysis',
+    ]);
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'ping-analysis')?.detail).toBe('active');
+  });
+
+  it('returns summary-cache profiling for fan summary cache hits in debug mode', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const { coordinator, port, fanslyClient, anthropicClient } = await createCoordinatorHarness();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
+    expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
+      'resolve-identity',
+      'summary-cache-check',
+    ]);
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'summary-cache-check')).toMatchObject({
+      status: 'completed',
+      detail: 'cache hit',
+    });
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+    expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
   });
 });

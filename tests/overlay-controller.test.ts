@@ -1,19 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { OverlayController } from '../src/content/overlay/overlay-controller.js';
-import type { OverlayInsertPart, OverlayViewModel } from '../src/shared/types.js';
+import type {
+  OperationProfilingSnapshot,
+  OverlayInsertPart,
+  OverlayViewModel,
+} from '../src/shared/types.js';
 
 function createLoadingModel(
   operationId: string,
   rawText: string,
+  options?: {
+    progressMessage?: string;
+    profiling?: OperationProfilingSnapshot;
+  },
 ): Extract<OverlayViewModel, { kind: 'loading' }> {
   return {
     kind: 'loading',
     feature: 'fast-reply',
     fanDisplayName: 'fan',
-    progress: null,
+    progress: options?.progressMessage
+      ? {
+          operationId,
+          feature: 'fast-reply',
+          phase: 'generating',
+          message: options.progressMessage,
+        }
+      : null,
     rawText,
     debugPrompt: undefined,
+    profiling: options?.profiling,
     canCancel: true,
     canRegenerate: true,
     operationId,
@@ -32,6 +48,7 @@ function createReplyModel(
     rawText: part.text,
     splitModeRequested: false,
     debugPrompt: undefined,
+    profiling: undefined,
     rerunActionLabel: 'Regenerate',
   };
 }
@@ -47,6 +64,7 @@ function createHelpMeModel(): Extract<OverlayViewModel, { kind: 'helpMe' }> {
     engagingParts: [],
     flirtyParts: [],
     parseFallback: false,
+    profiling: undefined,
     rerunActionLabel: 'Regenerate',
   };
 }
@@ -64,7 +82,40 @@ function createReadOnlyModel(): Extract<OverlayViewModel, { kind: 'readOnly' }> 
       recommendations: 'Keep pace',
       parseFallback: false,
     },
+    profiling: undefined,
     rerunActionLabel: 'Refresh',
+  };
+}
+
+function createProfilingSnapshot(): OperationProfilingSnapshot {
+  return {
+    elapsedMs: 1850,
+    activeLabel: 'Load messages',
+    logEntries: [
+      { elapsedMs: 0, message: 'Resolve account identity' },
+      { elapsedMs: 125, message: 'Loaded messages page 1/2 (25 msgs, 25 collected)' },
+      { elapsedMs: 850, message: 'Loaded messages page 2/2 (5 msgs, 30 collected)' },
+    ],
+    stages: [
+      {
+        key: 'resolve-identity',
+        label: 'Resolve account identity',
+        status: 'completed',
+        startedElapsedMs: 0,
+        endedElapsedMs: 50,
+        durationMs: 50,
+        detail: 'resolved account-1',
+      },
+      {
+        key: 'load-messages',
+        label: 'Load messages',
+        status: 'completed',
+        startedElapsedMs: 50,
+        endedElapsedMs: 850,
+        durationMs: 800,
+        detail: '2 pages, 30 transcript messages',
+      },
+    ],
   };
 }
 
@@ -143,6 +194,41 @@ describe('OverlayController', () => {
     expect(records).toHaveLength(0);
   });
 
+  it('renders a profiling log and live status in loading view when profiling is present', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+    });
+
+    controller.render(
+      createLoadingModel('profile-op', '', {
+        progressMessage: 'Generating…',
+        profiling: createProfilingSnapshot(),
+      }),
+    );
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-overlay-status').textContent).toContain('Load messages');
+    expect(document.querySelector('.chatmuse-profiling')).not.toBeNull();
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-log').textContent).toContain(
+      'Loaded messages page 1/2 (25 msgs, 25 collected)',
+    );
+  });
+
+  it('keeps the non-debug loading fallback text when profiling is absent', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+    });
+
+    controller.render(createLoadingModel('plain-op', ''));
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-overlay-status').textContent).toBe('Generating…');
+    expect(requireElement<HTMLDivElement>('.chatmuse-stream').textContent).toBe('Waiting for Claude…');
+    expect(document.querySelector('.chatmuse-profiling')).toBeNull();
+  });
+
   it('emits render diagnostics for repeated loading renders when debug tracing is enabled', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
@@ -195,6 +281,30 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatmuse-card-status').textContent).toBe('Inserted earlier.');
   });
 
+  it('renders a profiling summary in completed views when profiling is present', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+    });
+    const part: OverlayInsertPart = {
+      id: 'part-1',
+      sequenceIndex: 0,
+      text: 'Hello there',
+      insertedAt: null,
+      insertedOnce: false,
+    };
+
+    controller.render({
+      ...createReplyModel(part),
+      profiling: createProfilingSnapshot(),
+    });
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('Total');
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('Load messages');
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('2 pages, 30 transcript messages');
+  });
+
   it('renders Help Me regenerate action through the generic rerun callback', () => {
     const onRerun = vi.fn();
     const controller = new OverlayController({
@@ -229,5 +339,29 @@ describe('OverlayController', () => {
     expect(button).toBeDefined();
     button!.click();
     expect(onRerun).toHaveBeenCalledWith('chat-review');
+  });
+
+  it('renders profiling summary below the error block when profiling is present', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+    });
+
+    controller.render({
+      kind: 'error',
+      feature: 'fast-reply',
+      fanDisplayName: 'fan',
+      operationId: 'error-op',
+      profiling: createProfilingSnapshot(),
+      error: {
+        code: 'unknown_error',
+        message: 'Something broke',
+      },
+    });
+
+    const grid = requireElement<HTMLDivElement>('.chatmuse-grid');
+    expect(grid.firstElementChild?.textContent).toBe('Something broke');
+    expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
   });
 });

@@ -555,6 +555,72 @@
   gap: 14px;
 }
 
+/* ─── Profiling ───────────────────────────────────────────────── */
+
+.chatmuse-profiling {
+  border: 1px solid var(--chatmuse-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.chatmuse-profiling-log,
+.chatmuse-profiling-summary {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.chatmuse-profiling-log {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.chatmuse-profiling-entry {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) 1fr;
+  gap: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chatmuse-profiling-elapsed {
+  color: var(--chatmuse-accent-soft);
+  font-weight: 700;
+}
+
+.chatmuse-profiling-message {
+  color: var(--chatmuse-muted);
+}
+
+.chatmuse-profiling-stage {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+
+.chatmuse-profiling-stage-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--chatmuse-text);
+}
+
+.chatmuse-profiling-stage-duration {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  color: var(--chatmuse-accent-soft);
+  white-space: nowrap;
+}
+
+.chatmuse-profiling-stage-detail {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--chatmuse-muted);
+  word-break: break-word;
+}
+
 /* ─── Debug Inspector ────────────────────────────────────────── */
 
 .chatmuse-debug-inspector {

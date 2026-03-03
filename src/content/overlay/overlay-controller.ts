@@ -4,6 +4,7 @@ import type {
   OverlayInsertPart,
   OverlayRerunActionLabel,
   OverlayViewModel,
+  OperationProfilingSnapshot,
   PromptDebugSnapshot,
   UserFacingError,
 } from '../../shared/types.js';
@@ -38,9 +39,12 @@ interface LoadingViewState {
   root: HTMLElement;
   statusText: Text;
   streamText: Text;
+  profilingHost: HTMLDivElement;
   debugHost: HTMLDivElement;
   actions: HTMLDivElement;
   debugSnapshot: PromptDebugSnapshot | null;
+  liveElapsedBaseMs: number | null;
+  liveElapsedStartedAt: number | null;
 }
 
 type OverlayViewState = StaticViewState | LoadingViewState;
@@ -87,6 +91,13 @@ function ratingClass(rating: number): string {
   return 'chatmuse-rating-poor';
 }
 
+function formatProfilingElapsed(ms: number): string {
+  if (ms < 1000) {
+    return `${Math.max(0, Math.round(ms))}ms`;
+  }
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 function operationIdForModel(model: OverlayViewModel): string | null {
   return 'operationId' in model ? model.operationId ?? null : null;
 }
@@ -107,6 +118,7 @@ export class OverlayController {
   private inlineError: UserFacingError | null = null;
   private debugPromptOpen = false;
   private debugPromptOperationId: string | null = null;
+  private loadingElapsedTimer: number | null = null;
   private renderTraceEnabledFromStorage: boolean | null = null;
   private readonly renderTraceState: OverlayRenderTraceState = {
     renderCount: 0,
@@ -146,12 +158,17 @@ export class OverlayController {
     this.root.style.pointerEvents = model.kind === 'hidden' ? 'none' : 'auto';
 
     if (model.kind === 'hidden') {
+      this.clearLoadingElapsedTimer();
       this.debugPromptOpen = false;
       this.debugPromptOperationId = null;
       this.teardownShell();
       shellAction = 'hidden';
       this.logRenderTrace(renderStart, model, operationId, shellAction, bodyAction);
       return;
+    }
+
+    if (model.kind !== 'loading') {
+      this.clearLoadingElapsedTimer();
     }
 
     if ('operationId' in model) {
@@ -182,6 +199,14 @@ export class OverlayController {
     window.requestAnimationFrame(() => {
       focusActiveConversationTextarea();
     });
+  }
+
+  private clearLoadingElapsedTimer(): void {
+    if (this.loadingElapsedTimer === null) {
+      return;
+    }
+    window.clearInterval(this.loadingElapsedTimer);
+    this.loadingElapsedTimer = null;
   }
 
   private scheduleInsertedReset(part: OverlayInsertPart, operationId: string): void {
@@ -289,6 +314,7 @@ export class OverlayController {
   }
 
   private teardownShell(): void {
+    this.clearLoadingElapsedTimer();
     this.root.replaceChildren();
     this.shellEl = null;
     this.backdropEl = null;
@@ -390,6 +416,9 @@ export class OverlayController {
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
+    const profilingHost = document.createElement('div');
+    profilingHost.className = 'chatmuse-hidden';
+
     const debugHost = document.createElement('div');
 
     const actions = document.createElement('div');
@@ -405,7 +434,7 @@ export class OverlayController {
     });
     actions.append(cancel);
 
-    section.append(status, stream, actions);
+    section.append(status, profilingHost, stream, actions);
 
     const view: LoadingViewState = {
       kind: 'loading',
@@ -413,9 +442,12 @@ export class OverlayController {
       root: section,
       statusText,
       streamText,
+      profilingHost,
       debugHost,
       actions,
       debugSnapshot: null,
+      liveElapsedBaseMs: null,
+      liveElapsedStartedAt: null,
     };
     this.updateLoadingView(view, model);
     return view;
@@ -425,16 +457,81 @@ export class OverlayController {
     view: LoadingViewState,
     model: Extract<OverlayViewModel, { kind: 'loading' }>,
   ): void {
-    const statusText = model.progress?.message ?? 'Generating\u2026';
     const streamText = model.rawText || 'Waiting for Claude\u2026';
 
-    if (view.statusText.data !== statusText) {
-      view.statusText.data = statusText;
-    }
+    this.syncLoadingProfiling(view, model);
+    this.refreshLoadingStatus(view, model);
     if (view.streamText.data !== streamText) {
       view.streamText.data = streamText;
     }
     this.syncLoadingDebugPrompt(view, model);
+  }
+
+  private refreshLoadingStatus(
+    view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): void {
+    const statusText = this.loadingStatusText(view, model);
+    if (view.statusText.data !== statusText) {
+      view.statusText.data = statusText;
+    }
+  }
+
+  private loadingStatusText(
+    view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): string {
+    if (!model.profiling) {
+      return model.progress?.message ?? 'Generating\u2026';
+    }
+
+    const label =
+      model.profiling.activeLabel ??
+      model.progress?.message ??
+      'Generating\u2026';
+    const elapsedMs =
+      view.liveElapsedBaseMs !== null &&
+      view.liveElapsedStartedAt !== null
+        ? view.liveElapsedBaseMs +
+          Math.max(0, Date.now() - view.liveElapsedStartedAt)
+        : model.profiling.elapsedMs;
+
+    return `${label} • ${formatProfilingElapsed(elapsedMs)}`;
+  }
+
+  private syncLoadingProfiling(
+    view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): void {
+    const snapshot = model.profiling ?? null;
+    if (!snapshot) {
+      view.liveElapsedBaseMs = null;
+      view.liveElapsedStartedAt = null;
+      view.profilingHost.replaceChildren();
+      view.profilingHost.classList.add('chatmuse-hidden');
+      this.clearLoadingElapsedTimer();
+      return;
+    }
+
+    view.liveElapsedBaseMs = snapshot.elapsedMs;
+    view.liveElapsedStartedAt = Date.now();
+    view.profilingHost.classList.remove('chatmuse-hidden');
+    view.profilingHost.replaceChildren(
+      this.renderProfilingCard(snapshot, 'loading'),
+    );
+
+    if (this.loadingElapsedTimer === null) {
+      this.loadingElapsedTimer = window.setInterval(() => {
+        if (
+          this.currentView?.kind !== 'loading' ||
+          this.model.kind !== 'loading'
+        ) {
+          this.clearLoadingElapsedTimer();
+          return;
+        }
+        this.refreshLoadingStatus(this.currentView, this.model);
+      }, 100);
+    }
   }
 
   private syncLoadingDebugPrompt(
@@ -596,6 +693,10 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
+    if (model.profiling) {
+      section.append(this.renderProfilingCard(model.profiling, 'summary'));
+    }
+
     if (model.splitModeRequested) {
       const helper = document.createElement('div');
       helper.className = 'chatmuse-inline-note';
@@ -646,6 +747,10 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
+    if (model.profiling) {
+      section.append(this.renderProfilingCard(model.profiling, 'summary'));
+    }
+
     const coaching = document.createElement('div');
     coaching.className = 'chatmuse-card';
     const coachingTitle = document.createElement('div');
@@ -685,6 +790,10 @@ export class OverlayController {
   private renderReadOnly(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): HTMLElement {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
+
+    if (model.profiling) {
+      section.append(this.renderProfilingCard(model.profiling, 'summary'));
+    }
 
     if (model.reviewMeta?.rating) {
       const ratingSection = document.createElement('div');
@@ -779,11 +888,118 @@ export class OverlayController {
     block.textContent = model.error.message;
     section.append(block);
 
+    if (model.profiling) {
+      section.append(this.renderProfilingCard(model.profiling, 'summary'));
+    }
+
     if (model.debugPrompt) {
       section.append(this.renderDebugPrompt(model.debugPrompt));
     }
 
     return section;
+  }
+
+  private renderProfilingCard(
+    snapshot: OperationProfilingSnapshot,
+    mode: 'loading' | 'summary',
+  ): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'chatmuse-profiling';
+    card.append(
+      this.createProfilingHeader(snapshot),
+      mode === 'loading'
+        ? this.renderProfilingLog(snapshot)
+        : this.renderProfilingSummary(snapshot),
+    );
+    return card;
+  }
+
+  private createProfilingHeader(
+    snapshot: OperationProfilingSnapshot,
+  ): HTMLElement {
+    const header = document.createElement('div');
+    header.className = 'chatmuse-debug-summary';
+    header.textContent = `Pipeline Profiling • ${formatProfilingElapsed(snapshot.elapsedMs)}`;
+    return header;
+  }
+
+  private renderProfilingLog(
+    snapshot: OperationProfilingSnapshot,
+  ): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'chatmuse-profiling-log';
+
+    for (const entry of snapshot.logEntries) {
+      const row = document.createElement('div');
+      row.className = 'chatmuse-profiling-entry';
+
+      const elapsed = document.createElement('div');
+      elapsed.className = 'chatmuse-profiling-elapsed';
+      elapsed.textContent = `+${formatProfilingElapsed(entry.elapsedMs)}`;
+
+      const message = document.createElement('div');
+      message.className = 'chatmuse-profiling-message';
+      message.textContent = entry.message;
+
+      row.append(elapsed, message);
+      container.append(row);
+    }
+
+    return container;
+  }
+
+  private renderProfilingSummary(
+    snapshot: OperationProfilingSnapshot,
+  ): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'chatmuse-profiling-summary';
+
+    const total = document.createElement('div');
+    total.className = 'chatmuse-profiling-stage';
+
+    const totalLabel = document.createElement('div');
+    totalLabel.className = 'chatmuse-profiling-stage-label';
+    totalLabel.textContent = 'Total';
+
+    const totalDuration = document.createElement('div');
+    totalDuration.className = 'chatmuse-profiling-stage-duration';
+    totalDuration.textContent = formatProfilingElapsed(snapshot.elapsedMs);
+
+    total.append(totalLabel, totalDuration);
+    container.append(total);
+
+    for (const stage of snapshot.stages) {
+      const row = document.createElement('div');
+      row.className = 'chatmuse-profiling-stage';
+
+      const label = document.createElement('div');
+      label.className = 'chatmuse-profiling-stage-label';
+      label.textContent = stage.label;
+
+      const duration = document.createElement('div');
+      duration.className = 'chatmuse-profiling-stage-duration';
+      duration.textContent =
+        stage.status === 'skipped'
+          ? 'skipped'
+          : stage.status === 'failed'
+            ? `${formatProfilingElapsed(stage.durationMs ?? 0)} failed`
+            : stage.durationMs !== undefined
+              ? formatProfilingElapsed(stage.durationMs)
+              : stage.status;
+
+      row.append(label, duration);
+
+      if (stage.detail) {
+        const detail = document.createElement('div');
+        detail.className = 'chatmuse-profiling-stage-detail';
+        detail.textContent = stage.detail;
+        row.append(detail);
+      }
+
+      container.append(row);
+    }
+
+    return container;
   }
 
   // ─── Debug Prompt Inspector ─────────────────────────────────────────

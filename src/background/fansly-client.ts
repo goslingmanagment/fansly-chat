@@ -66,6 +66,25 @@ export interface MessageLoadResult {
   targetPages: number;
 }
 
+export interface MessageLoadProgress {
+  currentPage: number;
+  targetPages: number;
+  pageMessageCount: number;
+  collectedCount: number;
+}
+
+export type SubscriptionLookupTraceEvent =
+  | { type: 'cache-hit' }
+  | { type: 'cache-miss' }
+  | { type: 'cache-only-skip' }
+  | { type: 'groups-start' }
+  | { type: 'groups-hit' }
+  | { type: 'groups-miss' }
+  | { type: 'groups-error'; code: string }
+  | { type: 'subscribers-start' }
+  | { type: 'subscribers-hit' }
+  | { type: 'subscribers-miss' };
+
 interface CachedSubscriberSubscription {
   expiresAt: number;
   value: FanSubscriptionContext | null;
@@ -444,18 +463,23 @@ export class FanslyClient {
     session: SessionTemplate,
     signal: AbortSignal,
     lookupMode: SubscriptionLookupMode = 'full',
+    onTrace?: (event: SubscriptionLookupTraceEvent) => void,
   ): Promise<FanSubscriptionContext | null> {
     const cacheKey = this.getSubscriberSubscriptionCacheKey(fanAccountId, session);
     const cached = this.readCachedSubscriberSubscription(cacheKey);
     if (cached !== undefined) {
+      onTrace?.({ type: 'cache-hit' });
       return cached;
     }
 
+    onTrace?.({ type: 'cache-miss' });
     if (lookupMode === 'cache-only') {
+      onTrace?.({ type: 'cache-only-skip' });
       return null;
     }
 
     try {
+      onTrace?.({ type: 'groups-start' });
       const activeSubscription =
         await this.getActiveConversationSubscriptionFromMessagingGroups(
           groupId,
@@ -464,9 +488,12 @@ export class FanslyClient {
           signal,
         );
       if (activeSubscription) {
+        onTrace?.({ type: 'groups-hit' });
         this.writeCachedSubscriberSubscription(cacheKey, activeSubscription);
         return activeSubscription;
       }
+
+      onTrace?.({ type: 'groups-miss' });
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         throw error;
@@ -474,12 +501,22 @@ export class FanslyClient {
       if (error instanceof ChatMuseError && error.code === 'session_expired') {
         throw error;
       }
+      onTrace?.({
+        type: 'groups-error',
+        code: error instanceof ChatMuseError ? error.code : 'unknown_error',
+      });
     }
 
+    onTrace?.({ type: 'subscribers-start' });
     const subscriberSubscription = await this.getSubscriptionFromSubscribers(
       fanAccountId,
       session,
       signal,
+    );
+    onTrace?.(
+      subscriberSubscription
+        ? { type: 'subscribers-hit' }
+        : { type: 'subscribers-miss' },
     );
     this.writeCachedSubscriberSubscription(cacheKey, subscriberSubscription);
     return subscriberSubscription;
@@ -491,7 +528,7 @@ export class FanslyClient {
     session: SessionTemplate,
     modelAccountId: string,
     signal: AbortSignal,
-    onProgress?: (currentPage: number, targetPages: number) => void,
+    onProgress?: (progress: MessageLoadProgress) => void,
   ): Promise<MessageLoadResult> {
     const targetPages = estimateTargetPages(requestedCount);
     const pages: FanslyMessagePageResponse[] = [];
@@ -505,7 +542,12 @@ export class FanslyClient {
       pages.push(page);
       currentPage += 1;
       collectedCount += messages.length;
-      onProgress?.(currentPage, targetPages);
+      onProgress?.({
+        currentPage,
+        targetPages,
+        pageMessageCount: messages.length,
+        collectedCount,
+      });
 
       before = extractOldestMessageId(messages);
       if (!before || messages.length < 25) {

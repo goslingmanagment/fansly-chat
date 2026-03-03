@@ -358,6 +358,49 @@ export interface UserFacingError {
   settingsLink?: boolean;
 }
 
+// ─── Operation Profiling ─────────────────────────────────────────────────
+
+export type OperationProfilingStageKey =
+  | 'resolve-identity'
+  | 'summary-cache-check'
+  | 'load-messages'
+  | 'ping-analysis'
+  | 'group-lookup'
+  | 'account-name-lookup'
+  | 'earnings'
+  | 'subscription-lookup'
+  | 'prompt-build'
+  | 'claude-ttfb'
+  | 'claude-stream';
+
+export type OperationProfilingStageStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped';
+
+export interface OperationProfilingLogEntry {
+  elapsedMs: number;
+  message: string;
+}
+
+export interface OperationProfilingStage {
+  key: OperationProfilingStageKey;
+  label: string;
+  status: OperationProfilingStageStatus;
+  startedElapsedMs: number;
+  endedElapsedMs?: number;
+  durationMs?: number;
+  detail?: string;
+}
+
+export interface OperationProfilingSnapshot {
+  elapsedMs: number;
+  activeLabel: string | null;
+  logEntries: OperationProfilingLogEntry[];
+  stages: OperationProfilingStage[];
+}
+
 // ─── Operation Progress ──────────────────────────────────────────────────
 
 export interface OperationProgressPayload {
@@ -367,6 +410,7 @@ export interface OperationProgressPayload {
   currentPage?: number;
   targetPages?: number;
   message?: string;
+  profiling?: OperationProfilingSnapshot;
 }
 
 // ─── Tab UI State ────────────────────────────────────────────────────────
@@ -482,18 +526,21 @@ export interface CompletePayload extends PortEnvelopeBase {
   operationId: string;
   result: FeatureResult;
   fanDisplayName: string;
+  profiling?: OperationProfilingSnapshot;
 }
 
 export interface ErrorPayload extends PortEnvelopeBase {
   type: 'operation:error';
   operationId: string;
   error: UserFacingError;
+  profiling?: OperationProfilingSnapshot;
 }
 
 export interface DiscardedPayload extends PortEnvelopeBase {
   type: 'operation:discarded';
   operationId: string;
   error: UserFacingError;
+  profiling?: OperationProfilingSnapshot;
 }
 
 export interface TabStatePayload extends PortEnvelopeBase {
@@ -535,6 +582,7 @@ export type OverlayViewModel =
       progress: OperationProgressPayload | null;
       rawText: string;
       debugPrompt?: PromptDebugSnapshot;
+      profiling?: OperationProfilingSnapshot;
       canCancel: boolean;
       canRegenerate: boolean;
       operationId: string;
@@ -548,6 +596,7 @@ export type OverlayViewModel =
       rawText: string;
       splitModeRequested?: boolean;
       debugPrompt?: PromptDebugSnapshot;
+      profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
     }
@@ -561,6 +610,7 @@ export type OverlayViewModel =
       engagingParts: OverlayInsertPart[];
       flirtyParts: OverlayInsertPart[];
       parseFallback: boolean;
+      profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
     }
@@ -577,6 +627,7 @@ export type OverlayViewModel =
         recommendations: string | null;
         parseFallback: boolean;
       };
+      profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
     }
@@ -586,6 +637,7 @@ export type OverlayViewModel =
       fanDisplayName: string;
       operationId: string | null;
       debugPrompt?: PromptDebugSnapshot;
+      profiling?: OperationProfilingSnapshot;
       error: UserFacingError;
     };
 

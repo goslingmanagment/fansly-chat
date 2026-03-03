@@ -22,8 +22,11 @@ import type {
   BackgroundPortMessage,
   CompletePayload,
   ContentPortMessage,
+  DiscardedPayload,
+  ErrorPayload,
   FeatureType,
   FeatureResult,
+  OperationPhase,
   OperationProgressPayload,
   OperationStartPayload,
   PingSegment,
@@ -33,7 +36,15 @@ import type {
   TabUiState,
 } from '../shared/types.js';
 import { AnthropicClient } from './anthropic-client.js';
+import type {
+  MessageLoadProgress,
+  SubscriptionLookupTraceEvent,
+} from './fansly-client.js';
 import { FanslyClient } from './fansly-client.js';
+import {
+  createOperationProfiler,
+  type OperationProfiler,
+} from './operation-profiling.js';
 import { SessionStore } from './session-store.js';
 import { TabContextStore } from './tab-context.js';
 
@@ -47,6 +58,7 @@ interface ActiveOperation {
   rawText: string;
   flushBuffer: string;
   flushTimer: number | null;
+  profiler: OperationProfiler | null;
 }
 
 function parseGroupIdFromUrl(url: string | undefined): string | null {
@@ -86,6 +98,41 @@ function resolveMappedPersonalityId(
   }
 
   return null;
+}
+
+function errorCode(error: unknown): string {
+  return error instanceof ChatMuseError ? error.code : 'unknown_error';
+}
+
+function describeMessageLoadProgress(progress: MessageLoadProgress): string {
+  return `Loaded messages page ${progress.currentPage}/${progress.targetPages} (${progress.pageMessageCount} msgs, ${progress.collectedCount} collected)`;
+}
+
+function describeSubscriptionTraceStep(
+  event: SubscriptionLookupTraceEvent,
+): string {
+  switch (event.type) {
+    case 'cache-hit':
+      return 'cache hit';
+    case 'cache-miss':
+      return 'cache miss';
+    case 'cache-only-skip':
+      return 'cache-only skip';
+    case 'groups-start':
+      return 'groups start';
+    case 'groups-hit':
+      return 'groups hit';
+    case 'groups-miss':
+      return 'groups miss';
+    case 'groups-error':
+      return `groups error (${event.code})`;
+    case 'subscribers-start':
+      return 'subscribers start';
+    case 'subscribers-hit':
+      return 'subscribers hit';
+    case 'subscribers-miss':
+      return 'subscribers miss';
+  }
 }
 
 export class OperationCoordinator {
@@ -233,8 +280,50 @@ export class OperationCoordinator {
   private sendProgress(
     tabId: number,
     progress: OperationProgressPayload,
+    profiler?: OperationProfiler | null,
   ): void {
-    this.send(tabId, { type: 'operation:progress', ...progress });
+    const profiling = profiler?.snapshot();
+    this.send(tabId, {
+      type: 'operation:progress',
+      ...progress,
+      ...(profiling ? { profiling } : {}),
+    });
+  }
+
+  private sendComplete(
+    tabId: number,
+    payload: CompletePayload,
+    profiler?: OperationProfiler | null,
+  ): void {
+    const profiling = profiler?.snapshot();
+    this.send(tabId, {
+      ...payload,
+      ...(profiling ? { profiling } : {}),
+    });
+  }
+
+  private sendError(
+    tabId: number,
+    payload: ErrorPayload,
+    profiler?: OperationProfiler | null,
+  ): void {
+    const profiling = profiler?.snapshot();
+    this.send(tabId, {
+      ...payload,
+      ...(profiling ? { profiling } : {}),
+    });
+  }
+
+  private sendDiscarded(
+    tabId: number,
+    payload: DiscardedPayload,
+    profiler?: OperationProfiler | null,
+  ): void {
+    const profiling = profiler?.snapshot();
+    this.send(tabId, {
+      ...payload,
+      ...(profiling ? { profiling } : {}),
+    });
   }
 
   private flushChunks(tabId: number, operation: ActiveOperation): void {
@@ -328,11 +417,11 @@ export class OperationCoordinator {
     this.tabContexts.setActiveOperation(tabId, null);
 
     if (notifyDiscard) {
-      this.send(tabId, {
+      this.sendDiscarded(tabId, {
         type: 'operation:discarded',
         operationId: active.operationId,
         error: toUserError(error ?? new ChatMuseError('chat_changed')),
-      });
+      }, active.profiler);
     }
   }
 
@@ -373,7 +462,7 @@ export class OperationCoordinator {
     // SPEC-CORRECT: BLOCK concurrent ops (don't auto-cancel like Codex)
     const existing = this.activeByTabId.get(tabId);
     if (existing) {
-      this.send(tabId, {
+      this.sendError(tabId, {
         type: 'operation:error',
         operationId: payload.operationId,
         error: toUserError(new ChatMuseError('another_operation')),
@@ -387,8 +476,11 @@ export class OperationCoordinator {
     }
 
     let timeout: number | null = null;
+    let debugEnabled = false;
     try {
       const validated = await this.validateStart(tabId, payload);
+      debugEnabled = validated.storage.settings.debugMode;
+      const profiler = createOperationProfiler(debugEnabled);
       const timeoutController = new AbortController();
       timeout = globalThis.setTimeout(
         () => timeoutController.abort(),
@@ -410,6 +502,7 @@ export class OperationCoordinator {
         rawText: '',
         flushBuffer: '',
         flushTimer: null,
+        profiler,
       };
 
       this.activeByTabId.set(tabId, active);
@@ -419,18 +512,106 @@ export class OperationCoordinator {
         validated.urlGroupId,
         payload.routeNonce,
       );
-      this.sendProgress(tabId, {
-        operationId: payload.operationId,
-        feature: payload.feature,
-        phase: 'loading-messages',
-        message:
-          payload.feature === 'ping' ? 'Loading messages…' : undefined,
-      });
-      const debugEnabled = validated.storage.settings.debugMode;
 
-      // Resolve model account identity
+      let progressPhase: OperationPhase = 'loading-messages';
+      let progressMessage: string | undefined =
+        payload.feature === 'ping' ? 'Loading messages…' : undefined;
+      let progressCurrentPage: number | undefined;
+      let progressTargetPages: number | undefined;
+
+      type OperationProgressUpdate = {
+        phase?: OperationPhase;
+        message?: string | undefined;
+        currentPage?: number | undefined;
+        targetPages?: number | undefined;
+      };
+
+      const sendOperationProgress = (updates?: OperationProgressUpdate): void => {
+        if (updates) {
+          if ('phase' in updates && updates.phase) {
+            progressPhase = updates.phase;
+          }
+          if ('message' in updates) {
+            progressMessage = updates.message;
+          }
+          if ('currentPage' in updates) {
+            progressCurrentPage = updates.currentPage;
+          }
+          if ('targetPages' in updates) {
+            progressTargetPages = updates.targetPages;
+          }
+        }
+
+        this.sendProgress(
+          tabId,
+          {
+            operationId: payload.operationId,
+            feature: payload.feature,
+            phase: progressPhase,
+            message: progressMessage,
+            currentPage: progressCurrentPage,
+            targetPages: progressTargetPages,
+          },
+          profiler,
+        );
+      };
+
+      const sendDebugProgress = (updates?: OperationProgressUpdate): void => {
+        if (!profiler.enabled) {
+          return;
+        }
+        sendOperationProgress(updates);
+      };
+
+      const startStage = (
+        key: Parameters<OperationProfiler['startStage']>[0],
+        label: string,
+        detail?: string,
+        progressUpdates?: OperationProgressUpdate,
+      ): void => {
+        profiler.startStage(key, label, detail);
+        profiler.log(label);
+        sendDebugProgress(progressUpdates);
+      };
+
+      const completeStage = (
+        key: Parameters<OperationProfiler['completeStage']>[0],
+        logMessage: string,
+        detail?: string,
+        progressUpdates?: OperationProgressUpdate,
+      ): void => {
+        profiler.completeStage(key, detail);
+        profiler.log(logMessage);
+        sendDebugProgress(progressUpdates);
+      };
+
+      const failStage = (
+        key: Parameters<OperationProfiler['failStage']>[0],
+        logMessage: string,
+        detail?: string,
+        progressUpdates?: OperationProgressUpdate,
+      ): void => {
+        profiler.failStage(key, detail);
+        profiler.log(logMessage);
+        sendDebugProgress(progressUpdates);
+      };
+
+      const skipStage = (
+        key: Parameters<OperationProfiler['skipStage']>[0],
+        label: string,
+        detail: string,
+        progressUpdates?: OperationProgressUpdate,
+      ): void => {
+        profiler.skipStage(key, label, detail);
+        profiler.log(`${label} skipped: ${detail}`);
+        sendDebugProgress(progressUpdates);
+      };
+
+      sendOperationProgress();
+
       let resolvedAccountId = validated.legacyAccountId;
       let authenticatedIdentityResolved = false;
+      startStage('resolve-identity', 'Resolve account identity');
       try {
         resolvedAccountId =
           await this.fanslyClient.getAuthenticatedAccountId(
@@ -438,17 +619,29 @@ export class OperationCoordinator {
             signal,
           );
         authenticatedIdentityResolved = true;
+        completeStage(
+          'resolve-identity',
+          `Resolved account identity: ${resolvedAccountId}`,
+          `resolved ${resolvedAccountId}`,
+        );
         logDebug(debugEnabled, 'account identity resolved', {
           legacyAccountId: validated.legacyAccountId,
           resolvedAccountId,
         });
       } catch (error) {
+        const failureCode = errorCode(error);
+        failStage(
+          'resolve-identity',
+          payload.feature === 'ping'
+            ? 'Resolve account identity failed, using legacy account id'
+            : `Resolve account identity failed: ${failureCode}`,
+          payload.feature === 'ping'
+            ? 'failed, using legacy account id'
+            : failureCode,
+        );
         logDebug(debugEnabled, 'account identity resolution failed', {
           legacyAccountId: validated.legacyAccountId,
-          code:
-            error instanceof ChatMuseError
-              ? error.code
-              : 'unknown_error',
+          code: failureCode,
         });
         if (payload.feature !== 'ping') {
           throw error;
@@ -490,15 +683,18 @@ export class OperationCoordinator {
         throw new ChatMuseError('no_mapping');
       }
 
-      if (payload.feature === 'fan-summary' && payload.forceRegenerate) {
-        await removeSummaryCache(validated.urlGroupId);
+      let cachedSummary = null;
+      if (payload.feature === 'fan-summary') {
+        startStage('summary-cache-check', 'Check summary cache');
+        if (payload.forceRegenerate) {
+          profiler.log('Forced summary refresh');
+          await removeSummaryCache(validated.urlGroupId);
+        }
+        cachedSummary = payload.forceRegenerate
+          ? null
+          : await getSummaryCache(validated.urlGroupId);
       }
 
-      // Summary cache check
-      const cachedSummary =
-        payload.feature === 'fan-summary' && !payload.forceRegenerate
-          ? await getSummaryCache(validated.urlGroupId)
-          : null;
       if (
         payload.feature === 'fan-summary' &&
         cachedSummary &&
@@ -516,50 +712,92 @@ export class OperationCoordinator {
           },
         };
         this.assertActive(tabId, payload.operationId);
-        this.send(tabId, {
+        completeStage(
+          'summary-cache-check',
+          'Summary cache hit',
+          'cache hit',
+        );
+        this.sendComplete(tabId, {
           type: 'operation:complete',
           operationId: payload.operationId,
           result,
           fanDisplayName: payload.domFanDisplayName ?? 'fan',
-        } satisfies CompletePayload);
+        }, profiler);
         this.clearCompletedOperation(tabId);
         return;
       }
 
-      // Load messages
+      if (payload.feature === 'fan-summary') {
+        completeStage(
+          'summary-cache-check',
+          `Summary cache miss${
+            payload.forceRegenerate ? ' after forced refresh' : ''
+          }`,
+          payload.forceRegenerate
+            ? 'forced refresh, cache miss'
+            : 'cache miss',
+        );
+      }
+
+      startStage('load-messages', 'Load messages');
+      profiler.log(`Requested ${validated.messageCount} messages`);
+      sendDebugProgress();
+      const shouldReportMessageProgress =
+        profiler.enabled || isDeepFeature(payload.feature);
       const messageLoad = await this.fanslyClient.loadMessages(
         validated.urlGroupId,
         validated.messageCount,
         validated.session,
         resolvedAccountId,
         signal,
-        isDeepFeature(payload.feature)
-          ? (currentPage, targetPages) => {
-              this.sendProgress(tabId, {
-                operationId: payload.operationId,
-                feature: payload.feature,
+        shouldReportMessageProgress
+          ? (progress) => {
+              if (profiler.enabled) {
+                profiler.log(describeMessageLoadProgress(progress));
+              }
+              if (isDeepFeature(payload.feature)) {
+                sendOperationProgress({
+                  phase: 'loading-messages',
+                  currentPage: progress.currentPage,
+                  targetPages: progress.targetPages,
+                  message: `Loading messages… ${progress.currentPage}/${progress.targetPages} pages`,
+                });
+                return;
+              }
+              sendDebugProgress({
                 phase: 'loading-messages',
-                currentPage,
-                targetPages,
-                message: `Loading messages… ${currentPage}/${targetPages} pages`,
+                currentPage: progress.currentPage,
+                targetPages: progress.targetPages,
               });
             }
           : undefined,
       );
+      completeStage(
+        'load-messages',
+        `Loaded messages: ${messageLoad.pagesLoaded} pages, ${messageLoad.transcriptMessages.length} transcript messages`,
+        `${messageLoad.pagesLoaded} pages, ${messageLoad.transcriptMessages.length} transcript messages`,
+      );
 
-      // Deep feature minimum check
-      if (isDeepFeature(payload.feature) && messageLoad.transcriptMessages.length < MIN_MESSAGES_FOR_DEEP) {
+      if (
+        isDeepFeature(payload.feature) &&
+        messageLoad.transcriptMessages.length < MIN_MESSAGES_FOR_DEEP
+      ) {
         throw new ChatMuseError('not_enough_history');
       }
 
-      // Ping segment analysis + active fan blocking
       let pingSegment: PingSegment | undefined;
       if (payload.feature === 'ping') {
+        startStage('ping-analysis', 'Analyze ping segment');
         const pingAnalysis = analyzePingSegment(
           messageLoad.transcriptMessages,
           Date.now(),
         );
         pingSegment = pingAnalysis.segment;
+        completeStage(
+          'ping-analysis',
+          `Ping segment selected: ${pingAnalysis.segment}`,
+          pingAnalysis.segment,
+        );
         logDebug(debugEnabled, 'ping segment selected', {
           groupId: validated.urlGroupId,
           segment: pingAnalysis.segment,
@@ -567,21 +805,20 @@ export class OperationCoordinator {
           latestFanTextAtMs: pingAnalysis.latestFanTextAtMs,
         });
 
-        // SPEC-CORRECT: BLOCK active fan pings
         if (pingSegment === 'active') {
-          this.send(tabId, {
+          this.sendError(tabId, {
             type: 'operation:error',
             operationId: payload.operationId,
             error: toUserError(new ChatMuseError('ping_blocked')),
-          });
+          }, profiler);
           this.clearCompletedOperation(tabId);
           return;
         }
       }
 
-      // Resolve fan identity
       let groupUsers: Array<{ userId: string }> | null = null;
       if (payload.feature !== 'ping' || authenticatedIdentityResolved) {
+        startStage('group-lookup', 'Load group users');
         try {
           const group = await this.fanslyClient.getGroup(
             validated.urlGroupId,
@@ -592,15 +829,29 @@ export class OperationCoordinator {
             (user): user is { userId: string } =>
               typeof user.userId === 'string' && user.userId.length > 0,
           );
+          completeStage(
+            'group-lookup',
+            `Loaded group users: ${groupUsers.length}`,
+            `${groupUsers.length} users`,
+          );
         } catch (error) {
+          const failureCode = errorCode(error);
+          failStage(
+            'group-lookup',
+            `Load group users failed: ${failureCode}`,
+            failureCode,
+          );
           logDebug(debugEnabled, 'group enrichment failed', {
             groupId: validated.urlGroupId,
-            code:
-              error instanceof ChatMuseError
-                ? error.code
-                : 'unknown_error',
+            code: failureCode,
           });
         }
+      } else {
+        skipStage(
+          'group-lookup',
+          'Load group users',
+          'skipped for ping without authenticated identity',
+        );
       }
 
       let fanAccountId: string | null = null;
@@ -611,6 +862,7 @@ export class OperationCoordinator {
         )?.userId ?? null;
 
       if (fanAccountId) {
+        startStage('account-name-lookup', 'Resolve fan display name');
         try {
           const accounts = await this.fanslyClient.getAccountNames(
             [fanAccountId],
@@ -623,26 +875,39 @@ export class OperationCoordinator {
             account?.displayName?.trim() ||
             payload.domFanDisplayName ||
             'fan';
+          completeStage(
+            'account-name-lookup',
+            `Resolved fan display name: ${fanDisplayName}`,
+            `resolved ${fanDisplayName}`,
+          );
         } catch (error) {
+          const failureCode = errorCode(error);
+          failStage(
+            'account-name-lookup',
+            `Resolve fan display name failed: ${failureCode}`,
+            failureCode,
+          );
           logDebug(debugEnabled, 'fan display name lookup failed', {
             fanAccountId,
-            code:
-              error instanceof ChatMuseError
-                ? error.code
-                : 'unknown_error',
+            code: failureCode,
           });
         }
+      } else {
+        skipStage(
+          'account-name-lookup',
+          'Resolve fan display name',
+          'fan account unavailable',
+        );
       }
 
       this.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
-      this.sendProgress(tabId, {
-        operationId: payload.operationId,
-        feature: payload.feature,
+      sendOperationProgress({
         phase: 'generating',
         message: 'Generating…',
+        currentPage: undefined,
+        targetPages: undefined,
       });
 
-      // Load earnings and subscription data (fail-open)
       let spendingData = '';
       let spendingDataVerified = false;
       let subscriptionData = '';
@@ -652,6 +917,61 @@ export class OperationCoordinator {
       );
 
       if (fanAccountId) {
+        startStage('earnings', 'Fetch earnings');
+        startStage('subscription-lookup', 'Lookup subscription');
+        const subscriptionTraceSteps: string[] = [];
+        const handleSubscriptionTrace = (
+          event: SubscriptionLookupTraceEvent,
+        ): void => {
+          const step = describeSubscriptionTraceStep(event);
+          switch (event.type) {
+            case 'cache-hit':
+            case 'cache-miss':
+            case 'cache-only-skip':
+            case 'groups-hit':
+            case 'groups-miss':
+            case 'groups-error':
+            case 'subscribers-hit':
+            case 'subscribers-miss':
+              subscriptionTraceSteps.push(step);
+              break;
+            default:
+              break;
+          }
+
+          switch (event.type) {
+            case 'groups-start':
+              profiler.log('Lookup subscription via messaging groups');
+              break;
+            case 'groups-hit':
+              profiler.log('Subscription found in messaging groups');
+              break;
+            case 'groups-miss':
+              profiler.log('Subscription missing from messaging groups');
+              break;
+            case 'groups-error':
+              profiler.log(
+                `Messaging groups lookup failed (${event.code}), falling back to subscribers`,
+              );
+              break;
+            case 'subscribers-start':
+              profiler.log('Lookup subscription via subscribers');
+              break;
+            case 'subscribers-hit':
+              profiler.log('Subscription found in subscribers');
+              break;
+            case 'subscribers-miss':
+              profiler.log('Subscription missing from subscribers');
+              break;
+            case 'cache-hit':
+            case 'cache-miss':
+            case 'cache-only-skip':
+              profiler.log(`Subscription lookup ${step}`);
+              break;
+          }
+          sendDebugProgress();
+        };
+
         const windowEndMs = Date.now();
         const [earningsResult, subscriptionResult] =
           await Promise.allSettled([
@@ -668,6 +988,7 @@ export class OperationCoordinator {
               validated.session,
               signal,
               subscriptionLookupMode,
+              handleSubscriptionTrace,
             ),
           ]);
 
@@ -676,8 +997,24 @@ export class OperationCoordinator {
           if (aggregated) {
             spendingData = formatFanSpendingData(aggregated);
             spendingDataVerified = true;
+            completeStage(
+              'earnings',
+              'Fetched earnings: data found',
+              'data found',
+            );
+          } else {
+            completeStage(
+              'earnings',
+              'Fetched earnings: no earnings data',
+              'no earnings data',
+            );
           }
         } else {
+          failStage(
+            'earnings',
+            'Fetch earnings failed (fail-open)',
+            'fail-open',
+          );
           logDebug(debugEnabled, 'earnings fetch failed (fail-open)', {
             fanAccountId,
           });
@@ -690,16 +1027,41 @@ export class OperationCoordinator {
               subscriptionResult.value,
             );
           }
+          const pathDetail = subscriptionTraceSteps.join(' -> ');
+          const subscriptionDetail = subscriptionResult.value
+            ? `${pathDetail} (${subscriptionResult.value.source})`
+            : `${pathDetail}${pathDetail ? ' -> ' : ''}not found`;
+          completeStage(
+            'subscription-lookup',
+            `Subscription lookup complete: ${subscriptionDetail}`,
+            subscriptionDetail,
+          );
         } else {
+          const failureDetail = subscriptionTraceSteps.length > 0
+            ? `${subscriptionTraceSteps.join(' -> ')} -> fail-open`
+            : 'fail-open';
+          failStage(
+            'subscription-lookup',
+            `Subscription lookup failed: ${failureDetail}`,
+            failureDetail,
+          );
           logDebug(
             debugEnabled,
             'subscription fetch failed (fail-open)',
             { fanAccountId },
           );
         }
+        sendDebugProgress();
+      } else {
+        skipStage('earnings', 'Fetch earnings', 'fan account unavailable');
+        skipStage(
+          'subscription-lookup',
+          'Lookup subscription',
+          'fan account unavailable',
+        );
       }
 
-      // Build prompt
+      startStage('prompt-build', 'Build Claude prompt');
       const formattedTranscript = formatTranscript(
         messageLoad.transcriptMessages,
       );
@@ -716,8 +1078,12 @@ export class OperationCoordinator {
             ? (payload.replyMode ?? 'default')
             : undefined,
       });
+      completeStage(
+        'prompt-build',
+        `Built Claude prompt: ${messageLoad.transcriptMessages.length} transcript messages`,
+        `${messageLoad.transcriptMessages.length} transcript messages`,
+      );
 
-      // Debug prompt snapshot
       if (debugEnabled) {
         this.send(tabId, {
           type: 'operation:debugPrompt',
@@ -734,7 +1100,10 @@ export class OperationCoordinator {
         });
       }
 
-      // Stream from Claude
+      let sawFirstChunk = false;
+      startStage('claude-ttfb', 'Wait for Claude TTFB');
+      profiler.log('Waiting for Claude');
+      sendDebugProgress();
       const rawText = await this.anthropicClient.streamMessage({
         apiKey: validated.storage.settings.claudeApiKey,
         system: prompt.system,
@@ -749,20 +1118,45 @@ export class OperationCoordinator {
           ) {
             return;
           }
+          if (!sawFirstChunk) {
+            sawFirstChunk = true;
+            profiler.completeStage('claude-ttfb', 'first chunk received');
+            profiler.log('Claude first token');
+            profiler.startStage('claude-stream', 'Stream Claude response');
+            profiler.log('Stream Claude response');
+            sendDebugProgress();
+          }
           current.rawText += chunk;
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
         },
       });
 
-      // Flush any remaining chunks
+      if (sawFirstChunk) {
+        completeStage(
+          'claude-stream',
+          `Claude stream complete: ${rawText.length} chars`,
+          `${rawText.length} chars`,
+        );
+      } else {
+        completeStage(
+          'claude-ttfb',
+          'Claude completed without streamed text',
+          'completed without streamed text',
+        );
+        skipStage(
+          'claude-stream',
+          'Stream Claude response',
+          'no streamed chunks',
+        );
+      }
+
       const current = this.assertActive(tabId, payload.operationId);
       if (current.flushTimer !== null) {
         clearTimeout(current.flushTimer);
         this.flushChunks(tabId, current);
       }
 
-      // Build result
       const result: FeatureResult =
         payload.feature === 'help-me'
           ? { rawText, helpMe: parseHelpMeXml(rawText) }
@@ -782,7 +1176,6 @@ export class OperationCoordinator {
                   .filter(Boolean),
               };
 
-      // Cache fan summary
       if (payload.feature === 'fan-summary') {
         const generatedAt = Date.now();
         result.summaryMeta = {
@@ -802,42 +1195,43 @@ export class OperationCoordinator {
         }
       }
 
-      this.send(tabId, {
+      this.sendComplete(tabId, {
         type: 'operation:complete',
         operationId: payload.operationId,
         result,
         fanDisplayName,
-      });
+      }, profiler);
 
       this.clearCompletedOperation(tabId);
     } catch (error) {
-      const operationId =
-        this.getActive(tabId)?.operationId ?? payload.operationId;
+      const active = this.getActive(tabId);
+      const operationId = active?.operationId ?? payload.operationId;
       if (this.cancelledOperationIds.delete(operationId)) {
         return;
       }
+      active?.profiler?.finalizeRunningStages('operation failed');
 
       if (
         error instanceof DOMException &&
         error.name === 'AbortError'
       ) {
-        const code = this.getActive(tabId)
+        const code = active
           ? new ChatMuseError('timed_out')
           : new ChatMuseError('chat_changed');
-        this.send(tabId, {
+        this.sendError(tabId, {
           type: 'operation:error',
           operationId,
           error: toUserError(code),
-        });
+        }, active?.profiler ?? null);
       } else {
-        this.send(tabId, {
+        this.sendError(tabId, {
           type: 'operation:error',
           operationId,
           error: toUserError(error),
-        });
+        }, active?.profiler ?? null);
       }
 
-      logDebug(false, 'operation error', error);
+      logDebug(debugEnabled, 'operation error', error);
       await this.cancelOperation(tabId);
     } finally {
       if (timeout !== null) {

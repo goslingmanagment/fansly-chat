@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import type { TabUiState } from '../src/shared/types.js';
+import type {
+  OperationProfilingSnapshot,
+  TabUiState,
+} from '../src/shared/types.js';
 
 function installDom() {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
@@ -41,6 +44,37 @@ function readyState(): TabUiState {
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',
+  };
+}
+
+function createProfilingSnapshot(): OperationProfilingSnapshot {
+  return {
+    elapsedMs: 1450,
+    activeLabel: 'Load messages',
+    logEntries: [
+      { elapsedMs: 0, message: 'Resolve account identity' },
+      { elapsedMs: 250, message: 'Loaded messages page 1/2 (25 msgs, 25 collected)' },
+    ],
+    stages: [
+      {
+        key: 'resolve-identity',
+        label: 'Resolve account identity',
+        status: 'completed',
+        startedElapsedMs: 0,
+        endedElapsedMs: 60,
+        durationMs: 60,
+        detail: 'resolved account-1',
+      },
+      {
+        key: 'load-messages',
+        label: 'Load messages',
+        status: 'completed',
+        startedElapsedMs: 60,
+        endedElapsedMs: 400,
+        durationMs: 340,
+        detail: '2 pages, 30 transcript messages',
+      },
+    ],
   };
 }
 
@@ -176,5 +210,84 @@ describe('ChatMuseContentApp', () => {
       groupId: 'group-1',
       forceRegenerate: true,
     }));
+  });
+
+  it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const profiling = createProfilingSnapshot();
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.activeFanDisplayName = 'alice';
+
+    app.handleProgress({
+      type: 'operation:progress',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      phase: 'loading-messages',
+      profiling,
+    });
+    app.handleDebugPrompt({
+      type: 'operation:debugPrompt',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      snapshot: {
+        feature: 'fast-reply',
+        system: 'system',
+        transcript: 'transcript',
+        fanSpendingData: '',
+        fanSubscriptionData: '',
+        user: 'user',
+      },
+    });
+    app.handleChunk('reply-op', 'Hello');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'reply-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Hello',
+        parts: ['Hello'],
+      },
+    });
+
+    expect(document.querySelector('.chatmuse-profiling-summary')?.textContent).toContain('Load messages');
+    const cached = app.completedOverlayCache.get('group-1', 'fast-reply');
+    expect(cached?.profiling).toEqual(profiling);
+  });
+
+  it('preserves profiling into the error overlay', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const profiling = createProfilingSnapshot();
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.activeFanDisplayName = 'alice';
+
+    app.handleProgress({
+      type: 'operation:progress',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      phase: 'generating',
+      profiling,
+    });
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: 'reply-op',
+      profiling,
+      error: {
+        code: 'unknown_error',
+        message: 'Network failed',
+      },
+    });
+
+    expect(document.querySelector('.chatmuse-grid .chatmuse-inline-error')?.textContent).toContain('Network failed');
+    expect(document.querySelector('.chatmuse-profiling-summary')?.textContent).toContain('Load messages');
   });
 });
