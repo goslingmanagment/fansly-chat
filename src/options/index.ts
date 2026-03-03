@@ -1,6 +1,7 @@
 import optionsStyles from './styles.css';
+import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
-import type { Personality, SessionSnapshotEntry } from '../shared/types.js';
+import type { FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
 
@@ -186,12 +187,67 @@ async function render(): Promise<void> {
     debugLabel,
   );
 
+  // ─── AI Models ───────────────────────────────────────────
+  const modelSection = createSection(
+    'AI Models',
+    'Pick which Claude model each feature uses. If you\'re not sure, leave everything on Claude Sonnet 4.6.',
+  );
+
+  const FEATURE_ROWS: Array<{ feature: FeatureType; label: string; helper: string }> = [
+    { feature: 'fast-reply', label: 'Fast Reply', helper: 'Quick replies you can insert into chat.' },
+    { feature: 'ping', label: 'Ping', helper: 'Reactivation messages for inactive fans.' },
+    { feature: 'help-me', label: 'Help Me', helper: 'Coaching and message ideas when you get stuck.' },
+    { feature: 'chat-review', label: 'Chat Review', helper: 'Deeper conversation analysis and strategy.' },
+    { feature: 'fan-summary', label: 'Fan Summary', helper: 'Longer summaries of the fan relationship and context.' },
+  ];
+
+  const modelSelects: HTMLSelectElement[] = [];
+
+  for (const { feature, label, helper } of FEATURE_ROWS) {
+    const select = document.createElement('select');
+    select.className = 'chatmuse-select';
+    select.dataset.feature = feature;
+
+    for (const model of CLAUDE_MODELS) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.label} \u2014 ${model.description}`;
+      select.append(option);
+    }
+
+    select.value = state.settings.featureModels[feature];
+    modelSelects.push(select);
+
+    const row = document.createElement('div');
+    row.style.display = 'grid';
+    row.style.gap = '4px';
+
+    const featureLabel = document.createElement('span');
+    featureLabel.textContent = label;
+    featureLabel.style.fontWeight = '700';
+
+    const helperText = document.createElement('div');
+    helperText.textContent = helper;
+    helperText.style.color = 'var(--chatmuse-muted)';
+    helperText.style.fontSize = '13px';
+    helperText.style.marginBottom = '4px';
+
+    row.append(featureLabel, helperText, select);
+    modelSection.append(row);
+  }
+
   const saveSettingsDebounced = debounce(async () => {
+    const featureModels: Record<string, string> = {};
+    for (const sel of modelSelects) {
+      featureModels[sel.dataset.feature!] = sel.value;
+    }
+
     await saveSettings({
       claudeApiKey: keyInput.value,
       quickMessageCount: Number(quickInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
+      featureModels: featureModels as Record<FeatureType, string>,
     });
   }, 350);
 
@@ -199,8 +255,12 @@ async function render(): Promise<void> {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
+  modelSelects.forEach((select) => {
+    select.addEventListener('change', saveSettingsDebounced);
+  });
 
   root.append(apiSection);
+  root.append(modelSection);
 
   // ─── Personalities ─────────────────────────────────────────
   const personalitiesSection = createSection('Model Personalities');

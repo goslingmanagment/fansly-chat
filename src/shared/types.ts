@@ -15,6 +15,7 @@ export interface Settings {
   quickMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
+  featureModels: Record<FeatureType, string>;
 }
 
 export interface Personality {
@@ -31,6 +32,7 @@ export interface SummaryCacheEntry {
   generatedAt: number;
   spendingDataVerified?: boolean;
   subscriptionLookupVerified?: boolean;
+  modelId?: string;
 }
 
 export interface PersistedState {
@@ -97,6 +99,7 @@ export interface PromptPayload {
 
 export interface PromptDebugSnapshot {
   feature: FeatureType;
+  modelId: string;
   system: string;
   transcript: string;
   fanSpendingData: string;
@@ -349,6 +352,7 @@ export type UserErrorCode =
   | 'no_mapping'
   | 'chat_changed'
   | 'extension_reloaded'
+  | 'model_unavailable'
   | 'insertion_failed'
   | 'unknown_error';
 

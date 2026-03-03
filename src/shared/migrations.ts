@@ -1,5 +1,6 @@
 import {
   DEEP_DEFAULT_MESSAGE_COUNT,
+  DEFAULT_FEATURE_MODELS,
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
@@ -11,6 +12,7 @@ export function createDefaultSettings(): Settings {
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
+    featureModels: { ...DEFAULT_FEATURE_MODELS },
   };
 }
 

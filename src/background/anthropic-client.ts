@@ -1,9 +1,10 @@
-import { ANTHROPIC_VERSION, CLAUDE_API_URL, CLAUDE_MODEL, MAX_TOKENS } from '../shared/constants.js';
+import { ANTHROPIC_VERSION, CLAUDE_API_URL, MAX_TOKENS } from '../shared/constants.js';
 import { ChatMuseError } from '../shared/errors.js';
 import type { FeatureType } from '../shared/types.js';
 
 interface StreamArgs {
   apiKey: string;
+  model: string;
   system: string;
   user: string;
   feature: FeatureType;
@@ -37,7 +38,7 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
 }
 
 export class AnthropicClient {
-  async streamMessage({ apiKey, system, user, feature, signal, onText }: StreamArgs): Promise<string> {
+  async streamMessage({ apiKey, model, system, user, feature, signal, onText }: StreamArgs): Promise<string> {
     let rawText = '';
     const response = await fetch(CLAUDE_API_URL, {
       method: 'POST',
@@ -49,7 +50,7 @@ export class AnthropicClient {
       },
       signal,
       body: JSON.stringify({
-        model: CLAUDE_MODEL,
+        model,
         stream: true,
         max_tokens: MAX_TOKENS[feature],
         system,
@@ -62,6 +63,24 @@ export class AnthropicClient {
     }
     if (response.status === 429 || response.status >= 500) {
       throw new ChatMuseError('claude_overloaded');
+    }
+    if (response.status === 400) {
+      try {
+        const body = await response.json() as { error?: { type?: string; message?: string } };
+        const errType = body?.error?.type ?? '';
+        const errMsg = body?.error?.message?.toLowerCase() ?? '';
+        if (
+          errType === 'not_found_error' ||
+          errMsg.includes('not found') ||
+          errMsg.includes('does not exist') ||
+          errMsg.includes('deprecated')
+        ) {
+          throw new ChatMuseError('model_unavailable');
+        }
+      } catch (e) {
+        if (e instanceof ChatMuseError) throw e;
+      }
+      throw new ChatMuseError('network_error');
     }
     if (!response.ok || !response.body) {
       throw new ChatMuseError('network_error');

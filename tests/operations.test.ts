@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { DEFAULT_MODEL_ID, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { ChatMuseError } from '../src/shared/errors.js';
 import type {
   BackgroundPortMessage,
@@ -138,6 +138,7 @@ describe('OperationCoordinator', () => {
         quickMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
+        featureModels: { ...DEFAULT_FEATURE_MODELS },
       },
       personalities: [
         {
@@ -158,6 +159,7 @@ describe('OperationCoordinator', () => {
         generatedAt: 2000,
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
+        modelId: DEFAULT_MODEL_ID,
       },
     };
 
@@ -818,5 +820,173 @@ describe('OperationCoordinator', () => {
     });
     expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
     expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('passes the per-feature model to streamMessage', async () => {
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'claude-haiku-4-5',
+    };
+
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'quick reply',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-haiku-4-5' }),
+    );
+  });
+
+  it('retries with default model on model_unavailable error', async () => {
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'claude-opus-4-5',
+    };
+
+    let callCount = 0;
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ model }: { model: string }) => {
+        callCount++;
+        if (callCount === 1 && model === 'claude-opus-4-5') {
+          throw new ChatMuseError('model_unavailable');
+        }
+        return 'Fallback result';
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ model: 'claude-opus-4-5' }),
+    );
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ model: DEFAULT_MODEL_ID }),
+    );
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage).toBeDefined();
+  });
+
+  it('does not retry when default model itself is unavailable', async () => {
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        throw new ChatMuseError('model_unavailable');
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage?.error.code).toBe('model_unavailable');
+  });
+
+  it('invalidates summary cache when model changes', async () => {
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fan-summary': 'claude-opus-4-6',
+    };
+
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
+      anthropicRawText: 'New model summary',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    // Cache had modelId: DEFAULT_MODEL_ID but we're using claude-opus-4-6 — should miss
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-opus-4-6' }),
+    );
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
+  });
+
+  it('treats legacy cache entries without modelId as cache misses', async () => {
+    // Override cache entry to remove modelId
+    (mockStorage as Record<string, unknown>)['summary:group-1'] = {
+      summary: 'Old summary',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      generatedAt: 2000,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      // no modelId field
+    };
+
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Regenerated summary',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
   });
 });

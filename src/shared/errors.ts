@@ -78,6 +78,11 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
     code: 'extension_reloaded',
     message: 'Extension reloaded. Please try again.',
   },
+  model_unavailable: {
+    code: 'model_unavailable',
+    message: 'Selected Claude model is unavailable. Check your model settings.',
+    settingsLink: true,
+  },
   insertion_failed: {
     code: 'insertion_failed',
     message: 'Could not insert into the Fansly message box. Copy the text instead.',
@@ -91,6 +96,10 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
 export function toUserError(error: unknown): UserFacingError {
   if (error instanceof ChatMuseError) {
     return ERROR_MESSAGES[error.code];
+  }
+  const code = (error as { code?: string })?.code;
+  if (typeof code === 'string' && code in ERROR_MESSAGES) {
+    return ERROR_MESSAGES[code as UserErrorCode];
   }
   return ERROR_MESSAGES.unknown_error;
 }

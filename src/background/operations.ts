@@ -1,5 +1,6 @@
 import {
   DEEP_OPERATION_TIMEOUT_MS,
+  DEFAULT_FEATURE_MODELS,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
@@ -114,7 +115,9 @@ function resolveMappedPersonalityId(
 }
 
 function errorCode(error: unknown): string {
-  return error instanceof ChatMuseError ? error.code : 'unknown_error';
+  if (error instanceof ChatMuseError) return error.code;
+  const code = (error as { code?: string })?.code;
+  return typeof code === 'string' ? code : 'unknown_error';
 }
 
 function describeMessageLoadProgress(progress: MessageLoadProgress): string {
@@ -699,6 +702,8 @@ export class OperationCoordinator {
         throw new ChatMuseError('no_mapping');
       }
 
+      const resolvedModel = validated.storage.settings.featureModels[payload.feature];
+
       let cachedSummary = null;
       if (payload.feature === 'fan-summary') {
         startStage('summary-cache-check', 'Check summary cache');
@@ -716,6 +721,7 @@ export class OperationCoordinator {
         cachedSummary &&
         cachedSummary.personalityId === personality.id &&
         cachedSummary.personalityUpdatedAt === personality.updatedAt &&
+        cachedSummary.modelId === resolvedModel &&
         cachedSummary.spendingDataVerified === true &&
         cachedSummary.subscriptionLookupVerified === true
       ) {
@@ -1116,6 +1122,7 @@ export class OperationCoordinator {
           feature: payload.feature,
           snapshot: {
             feature: payload.feature,
+            modelId: resolvedModel,
             system: prompt.system,
             transcript: formattedTranscript,
             fanSpendingData: spendingData,
@@ -1129,13 +1136,15 @@ export class OperationCoordinator {
       startStage('claude-ttfb', 'Wait for Claude TTFB');
       profiler.log('Waiting for Claude');
       sendDebugProgress();
-      const rawText = await this.anthropicClient.streamMessage({
+
+      const streamArgs = {
         apiKey: validated.storage.settings.claudeApiKey,
+        model: resolvedModel,
         system: prompt.system,
         user: prompt.user,
         feature: payload.feature,
         signal,
-        onText: (chunk) => {
+        onText: (chunk: string) => {
           const current = this.getActive(tabId);
           if (
             !current ||
@@ -1155,7 +1164,41 @@ export class OperationCoordinator {
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
         },
-      });
+      } as const;
+
+      let actualModel = resolvedModel;
+      let rawText: string;
+      try {
+        rawText = await this.anthropicClient.streamMessage(streamArgs);
+      } catch (err) {
+        const defaultModel = DEFAULT_FEATURE_MODELS[payload.feature];
+        const isModelError = err instanceof ChatMuseError
+          ? err.code === 'model_unavailable'
+          : (err as { code?: string })?.code === 'model_unavailable';
+        if (isModelError && resolvedModel !== defaultModel) {
+          actualModel = defaultModel;
+          profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
+          if (profiler.enabled) {
+            this.send(tabId, {
+              type: 'operation:debugPrompt',
+              operationId: payload.operationId,
+              feature: payload.feature,
+              snapshot: {
+                feature: payload.feature,
+                modelId: defaultModel,
+                system: streamArgs.system,
+                transcript: formattedTranscript,
+                fanSpendingData: spendingData,
+                fanSubscriptionData: subscriptionData,
+                user: streamArgs.user,
+              },
+            });
+          }
+          rawText = await this.anthropicClient.streamMessage({ ...streamArgs, model: defaultModel });
+        } else {
+          throw err;
+        }
+      }
 
       if (sawFirstChunk) {
         completeStage(
@@ -1208,7 +1251,7 @@ export class OperationCoordinator {
           stale: false,
           cached: false,
         };
-        if (spendingDataVerified && subscriptionLookupVerified) {
+        if (spendingDataVerified && subscriptionLookupVerified && actualModel === resolvedModel) {
           await saveSummaryCache(validated.urlGroupId, {
             summary: rawText,
             personalityId: personality.id,
@@ -1216,6 +1259,7 @@ export class OperationCoordinator {
             generatedAt,
             spendingDataVerified: true,
             subscriptionLookupVerified: true,
+            modelId: resolvedModel,
           });
         }
       }

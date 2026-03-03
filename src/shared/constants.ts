@@ -2,16 +2,40 @@ import type { FeatureType, Settings } from './types.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 1;
+export const STORAGE_SCHEMA_VERSION = 2;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // ─── Claude API ──────────────────────────────────────────────────────────
 
-export const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+export const DEFAULT_MODEL_ID = 'claude-sonnet-4-6';
 export const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_VERSION = '2023-06-01';
+
+export interface ClaudeModelEntry {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const CLAUDE_MODELS: ClaudeModelEntry[] = [
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Recommended' },
+  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', description: 'Balanced' },
+  { id: 'claude-opus-4-6',   label: 'Claude Opus 4.6',   description: 'Best quality' },
+  { id: 'claude-opus-4-5',   label: 'Claude Opus 4.5',   description: 'Best quality (older)' },
+  { id: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5',  description: 'Fastest & cheapest' },
+];
+
+export const CLAUDE_MODEL_IDS = new Set(CLAUDE_MODELS.map((m) => m.id));
+
+export const DEFAULT_FEATURE_MODELS: Record<FeatureType, string> = {
+  'fast-reply': DEFAULT_MODEL_ID,
+  'help-me': DEFAULT_MODEL_ID,
+  'fan-summary': DEFAULT_MODEL_ID,
+  'chat-review': DEFAULT_MODEL_ID,
+  'ping': DEFAULT_MODEL_ID,
+};
 
 export const MAX_TOKENS: Record<FeatureType, number> = {
   'fast-reply': 800,
@@ -86,6 +110,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
   debugMode: false,
+  featureModels: { ...DEFAULT_FEATURE_MODELS },
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

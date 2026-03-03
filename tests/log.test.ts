@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { DEFAULT_FEATURE_MODELS } from '../src/shared/constants.js';
 import { logDebug, isDebugEnabled } from '../src/shared/log.js';
 
 describe('logDebug', () => {
@@ -61,11 +62,11 @@ describe('logDebug', () => {
 
 describe('isDebugEnabled', () => {
   it('returns true when debugMode is true', () => {
-    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: true })).toBe(true);
+    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: true, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(true);
   });
 
   it('returns false when debugMode is false', () => {
-    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: false })).toBe(false);
+    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: false, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(false);
   });
 
   it('returns false for null', () => {

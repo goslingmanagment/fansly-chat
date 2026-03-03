@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { Personality, SummaryCacheEntry } from '../src/shared/types.js';
-import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import type { FeatureType, Personality, SummaryCacheEntry } from '../src/shared/types.js';
+import { DEFAULT_MODEL_ID, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { migrateState, createDefaultSettings, createSeedState } from '../src/shared/migrations.js';
 
 // ─── Mock browser.storage.local ─────────────────────────────────────────
@@ -95,6 +95,20 @@ describe('migrateState', () => {
     expect(result.settings.deepMessageCount).toBe(createDefaultSettings().deepMessageCount);
   });
 
+  it('populates featureModels with defaults when migrating from schema 1', () => {
+    const legacy = {
+      schemaVersion: 1,
+      settings: { claudeApiKey: 'sk-test', quickMessageCount: 100, deepMessageCount: 500, debugMode: false },
+      personalities: [],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+    const result = migrateState(legacy);
+    expect(result.settings.featureModels).toBeDefined();
+    expect(result.settings.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
+    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+  });
+
   it('carries forward summary:* keys during migration', () => {
     const legacy = {
       schemaVersion: 0,
@@ -136,6 +150,53 @@ describe('sanitizeSettings', () => {
     expect(result.claudeApiKey).toBe('');
     expect(result.debugMode).toBe(false);
   });
+
+  it('defaults featureModels when missing from input', () => {
+    const result = storage.sanitizeSettings({});
+    expect(result.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
+  });
+
+  it('preserves valid model choices', () => {
+    const result = storage.sanitizeSettings({
+      featureModels: {
+        'fast-reply': 'claude-haiku-4-5',
+        'help-me': DEFAULT_MODEL_ID,
+        'fan-summary': 'claude-opus-4-6',
+        'chat-review': DEFAULT_MODEL_ID,
+        'ping': DEFAULT_MODEL_ID,
+      },
+    });
+    expect(result.featureModels['fast-reply']).toBe('claude-haiku-4-5');
+    expect(result.featureModels['fan-summary']).toBe('claude-opus-4-6');
+  });
+
+  it('falls back to default for unknown model IDs', () => {
+    const result = storage.sanitizeSettings({
+      featureModels: {
+        'fast-reply': 'claude-nonexistent-model',
+        'help-me': DEFAULT_MODEL_ID,
+        'fan-summary': DEFAULT_MODEL_ID,
+        'chat-review': DEFAULT_MODEL_ID,
+        'ping': DEFAULT_MODEL_ID,
+      },
+    });
+    expect(result.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
+  });
+
+  it('fills missing feature keys from defaults in partial featureModels', () => {
+    const result = storage.sanitizeSettings({
+      featureModels: {
+        'fast-reply': 'claude-haiku-4-5',
+      } as Record<FeatureType, string>,
+    });
+    expect(result.featureModels['fast-reply']).toBe('claude-haiku-4-5');
+    expect(result.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['chat-review']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
+  });
 });
 
 // ─── loadStorageState ───────────────────────────────────────────────────
@@ -159,6 +220,23 @@ describe('loadStorageState', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock access
     const setBrowser = (globalThis as unknown as Record<string, any>).browser;
     expect(setBrowser.storage.local.set).toHaveBeenCalled();
+  });
+
+  it('deep-merges featureModels on load even when schema matches', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: {
+        ...createDefaultSettings(),
+        featureModels: { 'fast-reply': 'claude-haiku-4-5' },
+      },
+      personalities: [],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+    const result = await storage.loadStorageState();
+    expect(result.settings.featureModels['fast-reply']).toBe('claude-haiku-4-5');
+    expect(result.settings.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
+    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
   });
 });
 

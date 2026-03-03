@@ -1,4 +1,5 @@
 import {
+  CLAUDE_MODEL_IDS,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
@@ -8,7 +9,7 @@ import {
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
-import type { PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
+import type { FeatureType, PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
 
 function isSummaryKey(key: string): key is `summary:${string}` {
   return key.startsWith(SUMMARY_CACHE_PREFIX);
@@ -21,6 +22,7 @@ function arraysEqual(left: string[], right: string[]): boolean {
 export async function loadStorageState(): Promise<PersistedState> {
   const raw = await browser.storage.local.get(null);
   const state = migrateState(raw);
+  state.settings = sanitizeSettings(state.settings);
 
   if ((raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION) {
     await browser.storage.local.set(state);
@@ -34,11 +36,23 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const quick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
   const deep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
 
+  const rawModels = input.featureModels && typeof input.featureModels === 'object'
+    ? input.featureModels as Partial<Record<FeatureType, string>>
+    : {};
+  const featureModels = { ...defaults.featureModels };
+  for (const feature of Object.keys(defaults.featureModels) as FeatureType[]) {
+    const candidate = rawModels[feature];
+    if (candidate && CLAUDE_MODEL_IDS.has(candidate)) {
+      featureModels[feature] = candidate;
+    }
+  }
+
   return {
     claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),
+    featureModels,
   };
 }
 
