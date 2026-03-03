@@ -146,10 +146,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
       }
 
       const startedElapsedMs = elapsed();
-      const label =
-        detail !== undefined
-          ? labelOrDetail ?? key
-          : labelOrDetail ?? key;
+      const label = detail !== undefined ? labelOrDetail ?? key : key;
       stages.push({
         key,
         label,

@@ -84,7 +84,7 @@ describe('createOperationProfiler', () => {
     ]);
   });
 
-  it('records skipped stages without leaving them active', () => {
+  it('records skipped stages with an explicit label and detail', () => {
     const profiler = createOperationProfiler(true);
 
     profiler.skipStage(
@@ -98,9 +98,29 @@ describe('createOperationProfiler', () => {
       stages: [
         expect.objectContaining({
           key: 'account-name-lookup',
+          label: 'Resolve fan display name',
           status: 'skipped',
           durationMs: 0,
           detail: 'fan account unavailable',
+        }),
+      ],
+    });
+  });
+
+  it('uses the stage key as the label when skipStage receives only detail', () => {
+    const profiler = createOperationProfiler(true);
+
+    profiler.skipStage('claude-stream', 'no streamed chunks');
+
+    expect(profiler.snapshot()).toMatchObject({
+      activeLabel: null,
+      stages: [
+        expect.objectContaining({
+          key: 'claude-stream',
+          label: 'claude-stream',
+          status: 'skipped',
+          durationMs: 0,
+          detail: 'no streamed chunks',
         }),
       ],
     });

@@ -340,6 +340,57 @@ describe('OperationCoordinator', () => {
     }
   });
 
+  it('omits profiling data from non-debug error payloads', async () => {
+    const nowSeconds = Math.floor(currentNow / 1000);
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      transcriptMessages: [
+        {
+          id: 'message-1',
+          createdAt: nowSeconds - 20,
+          senderId: 'account-1',
+          senderLabel: 'Model',
+          type: 1,
+          text: 'hello',
+          labels: [],
+        },
+        {
+          id: 'message-2',
+          createdAt: nowSeconds - 5,
+          senderId: 'fan-1',
+          senderLabel: 'Fan',
+          type: 1,
+          text: 'hey?',
+          labels: [],
+        },
+      ],
+      windowStartMs: 0,
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    const { coordinator, port } = await createCoordinatorHarness({
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'ping-op',
+      feature: 'ping',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('ping_blocked');
+    expect(errorMessage).not.toHaveProperty('profiling');
+  });
+
   it('preserves non-debug deep-feature page progress without profiling snapshots', async () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.loadMessages.mockImplementation(async (...args: any[]) => {
@@ -419,6 +470,51 @@ describe('OperationCoordinator', () => {
       'full',
     );
     expect(progressMessages.some((message) => 'profiling' in message)).toBe(false);
+  });
+
+  it('omits profiling data from non-debug discarded payloads on cancel', async () => {
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({ signal }: { signal: AbortSignal }) => new Promise<string>((_resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicClient,
+    });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await streamStarted;
+    await coordinator.cancelOperation(1, undefined, true);
+    await startPromise;
+
+    const messages = postedMessages(port);
+    const discardedMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:discarded' }> =>
+        message.type === 'operation:discarded',
+    );
+
+    expect(discardedMessage?.error.code).toBe('chat_changed');
+    expect(discardedMessage).not.toHaveProperty('profiling');
+    expect(messages.some((message) => message.type === 'operation:error')).toBe(false);
   });
 
   it('includes profiling snapshots in debug mode and records the main stage breakdown', async () => {
