@@ -216,6 +216,7 @@ describe('OverlayController', () => {
   });
 
   it('keeps the non-debug loading fallback text when profiling is absent', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
     const controller = new OverlayController({
       onClose: () => undefined,
       onCancel: () => undefined,
@@ -224,9 +225,16 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('plain-op', ''));
 
+    const grid = requireElement<HTMLDivElement>('.chatmuse-grid');
     expect(requireElement<HTMLDivElement>('.chatmuse-overlay-status').textContent).toBe('Generating…');
     expect(requireElement<HTMLDivElement>('.chatmuse-stream').textContent).toBe('Waiting for Claude…');
     expect(document.querySelector('.chatmuse-profiling')).toBeNull();
+    expect(Array.from(grid.children).map((element) => element.className)).toEqual([
+      'chatmuse-overlay-status',
+      'chatmuse-stream',
+      'chatmuse-overlay-actions',
+    ]);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
   });
 
   it('emits render diagnostics for repeated loading renders when debug tracing is enabled', () => {

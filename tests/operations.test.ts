@@ -244,7 +244,6 @@ describe('OperationCoordinator', () => {
       expect.objectContaining({ accountId: 'account-1' }),
       expect.anything(),
       'cache-only',
-      expect.any(Function),
     );
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
@@ -282,7 +281,6 @@ describe('OperationCoordinator', () => {
       expect.objectContaining({ accountId: 'account-1' }),
       expect.anything(),
       'full',
-      expect.any(Function),
     );
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -293,8 +291,10 @@ describe('OperationCoordinator', () => {
   });
 
   it('omits profiling data from progress and completion payloads when debug mode is off', async () => {
+    const fanslyClient = buildFanslyClientMock();
     const { coordinator, port } = await createCoordinatorHarness({
       anthropicRawText: 'hello there',
+      fanslyClient,
     });
 
     await coordinator.startOperation(1, {
@@ -309,7 +309,25 @@ describe('OperationCoordinator', () => {
     });
 
     const messages = postedMessages(port);
-    expect(messages.filter((message) => message.type === 'operation:progress')).not.toHaveLength(0);
+    const progressMessages = messages.filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress',
+    );
+    expect(progressMessages).toHaveLength(2);
+    expect(progressMessages.map((message) => message.phase)).toEqual([
+      'loading-messages',
+      'generating',
+    ]);
+    expect(progressMessages.some((message) => message.currentPage !== undefined)).toBe(false);
+    const nonDebugLoadMessagesArgs = fanslyClient.loadMessages.mock.calls[0] as unknown[];
+    expect(nonDebugLoadMessagesArgs?.[5]).toBeUndefined();
+    expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledWith(
+      'group-1',
+      'fan-1',
+      expect.objectContaining({ accountId: 'account-1' }),
+      expect.anything(),
+      'cache-only',
+    );
     for (const message of messages) {
       if (
         message.type === 'operation:progress' ||
@@ -320,6 +338,87 @@ describe('OperationCoordinator', () => {
         expect(message).not.toHaveProperty('profiling');
       }
     }
+  });
+
+  it('preserves non-debug deep-feature page progress without profiling snapshots', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockImplementation(async (...args: any[]) => {
+      const onProgress = args[5] as
+        | ((progress: {
+            currentPage: number;
+            targetPages: number;
+            pageMessageCount: number;
+            collectedCount: number;
+          }) => void)
+        | undefined;
+      onProgress?.({
+        currentPage: 1,
+        targetPages: 2,
+        pageMessageCount: 25,
+        collectedCount: 25,
+      });
+      onProgress?.({
+        currentPage: 2,
+        targetPages: 2,
+        pageMessageCount: 5,
+        collectedCount: 30,
+      });
+      return {
+        transcriptMessages: buildTranscriptMessages(30),
+        windowStartMs: 0,
+        pagesLoaded: 2,
+        targetPages: 2,
+      };
+    });
+
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText:
+        '<rating>7</rating><evaluation>Solid</evaluation><recommendations>Keep going</recommendations>',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const progressMessages = postedMessages(port).filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress',
+    );
+
+    expect(progressMessages).toHaveLength(4);
+    expect(progressMessages.map((message) => message.phase)).toEqual([
+      'loading-messages',
+      'loading-messages',
+      'loading-messages',
+      'generating',
+    ]);
+    expect(progressMessages[1]).toMatchObject({
+      currentPage: 1,
+      targetPages: 2,
+      message: 'Loading messages… 1/2 pages',
+    });
+    expect(progressMessages[2]).toMatchObject({
+      currentPage: 2,
+      targetPages: 2,
+      message: 'Loading messages… 2/2 pages',
+    });
+    const deepFeatureLoadMessagesArgs = fanslyClient.loadMessages.mock.calls[0] as unknown[];
+    expect(typeof deepFeatureLoadMessagesArgs?.[5]).toBe('function');
+    expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledWith(
+      'group-1',
+      'fan-1',
+      expect.objectContaining({ accountId: 'account-1' }),
+      expect.anything(),
+      'full',
+    );
+    expect(progressMessages.some((message) => 'profiling' in message)).toBe(false);
   });
 
   it('includes profiling snapshots in debug mode and records the main stage breakdown', async () => {
@@ -478,6 +577,47 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
+    expect(errorMessage?.profiling).toBeDefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+  });
+
+  it('includes profiling data on timeout/abort in debug mode', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        advanceNow(300);
+        throw new DOMException('Aborted', 'AbortError');
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('timed_out');
     expect(errorMessage?.profiling).toBeDefined();
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'failed',

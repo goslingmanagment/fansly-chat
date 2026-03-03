@@ -39,7 +39,7 @@ interface LoadingViewState {
   root: HTMLElement;
   statusText: Text;
   streamText: Text;
-  profilingHost: HTMLDivElement;
+  profilingHost: HTMLDivElement | null;
   debugHost: HTMLDivElement;
   actions: HTMLDivElement;
   debugSnapshot: PromptDebugSnapshot | null;
@@ -416,9 +416,6 @@ export class OverlayController {
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
-    const profilingHost = document.createElement('div');
-    profilingHost.className = 'chatmuse-hidden';
-
     const debugHost = document.createElement('div');
 
     const actions = document.createElement('div');
@@ -434,7 +431,7 @@ export class OverlayController {
     });
     actions.append(cancel);
 
-    section.append(status, profilingHost, stream, actions);
+    section.append(status, stream, actions);
 
     const view: LoadingViewState = {
       kind: 'loading',
@@ -442,7 +439,7 @@ export class OverlayController {
       root: section,
       statusText,
       streamText,
-      profilingHost,
+      profilingHost: null,
       debugHost,
       actions,
       debugSnapshot: null,
@@ -507,15 +504,27 @@ export class OverlayController {
     if (!snapshot) {
       view.liveElapsedBaseMs = null;
       view.liveElapsedStartedAt = null;
-      view.profilingHost.replaceChildren();
-      view.profilingHost.classList.add('chatmuse-hidden');
+      if (view.profilingHost) {
+        view.profilingHost.replaceChildren();
+        view.profilingHost.remove();
+        view.profilingHost = null;
+      }
       this.clearLoadingElapsedTimer();
       return;
     }
 
+    if (!view.profilingHost) {
+      view.profilingHost = document.createElement('div');
+      const stream = view.streamText.parentElement;
+      if (stream) {
+        view.root.insertBefore(view.profilingHost, stream);
+      } else {
+        view.root.insertBefore(view.profilingHost, view.actions);
+      }
+    }
+
     view.liveElapsedBaseMs = snapshot.elapsedMs;
     view.liveElapsedStartedAt = Date.now();
-    view.profilingHost.classList.remove('chatmuse-hidden');
     view.profilingHost.replaceChildren(
       this.renderProfilingCard(snapshot, 'loading'),
     );
