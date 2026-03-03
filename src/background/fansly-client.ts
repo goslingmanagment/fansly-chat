@@ -24,6 +24,7 @@ import type {
   NormalizedTranscriptMessage,
   RouteKey,
   SessionTemplate,
+  SubscriptionLookupMode,
 } from '../shared/types.js';
 import { SessionStore } from './session-store.js';
 
@@ -442,11 +443,16 @@ export class FanslyClient {
     fanAccountId: string,
     session: SessionTemplate,
     signal: AbortSignal,
+    lookupMode: SubscriptionLookupMode = 'full',
   ): Promise<FanSubscriptionContext | null> {
     const cacheKey = this.getSubscriberSubscriptionCacheKey(fanAccountId, session);
     const cached = this.readCachedSubscriberSubscription(cacheKey);
     if (cached !== undefined) {
       return cached;
+    }
+
+    if (lookupMode === 'cache-only') {
+      return null;
     }
 
     try {

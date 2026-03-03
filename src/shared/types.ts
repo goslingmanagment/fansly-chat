@@ -5,6 +5,7 @@ export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers';
 export type FanSubscriptionSource = '/api/v1/messaging/groups' | '/api/v1/subscribers';
+export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
 
 // ─── Settings & Storage ──────────────────────────────────────────────────

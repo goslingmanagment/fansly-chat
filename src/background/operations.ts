@@ -27,6 +27,7 @@ import type {
   OperationProgressPayload,
   OperationStartPayload,
   PingSegment,
+  SubscriptionLookupMode,
   RouteChangedPayload,
   TabStatePayload,
   TabUiState,
@@ -62,6 +63,10 @@ function isDeepFeature(feature: FeatureType): boolean {
 
 function resolveTimeout(feature: FeatureType): number {
   return isDeepFeature(feature) ? DEEP_OPERATION_TIMEOUT_MS : QUICK_OPERATION_TIMEOUT_MS;
+}
+
+function resolveSubscriptionLookupMode(feature: FeatureType): SubscriptionLookupMode {
+  return isDeepFeature(feature) ? 'full' : 'cache-only';
 }
 
 function resolveMappedPersonalityId(
@@ -642,6 +647,9 @@ export class OperationCoordinator {
       let spendingDataVerified = false;
       let subscriptionData = '';
       let subscriptionLookupVerified = false;
+      const subscriptionLookupMode = resolveSubscriptionLookupMode(
+        payload.feature,
+      );
 
       if (fanAccountId) {
         const windowEndMs = Date.now();
@@ -659,6 +667,7 @@ export class OperationCoordinator {
               fanAccountId,
               validated.session,
               signal,
+              subscriptionLookupMode,
             ),
           ]);
 
@@ -675,7 +684,7 @@ export class OperationCoordinator {
         }
 
         if (subscriptionResult.status === 'fulfilled') {
-          subscriptionLookupVerified = true;
+          subscriptionLookupVerified = subscriptionLookupMode === 'full';
           if (subscriptionResult.value) {
             subscriptionData = formatFanSubscriptionData(
               subscriptionResult.value,
