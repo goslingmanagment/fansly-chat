@@ -9,6 +9,7 @@ import { CompletedOverlayCache } from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
+import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import { ToastController } from './toast.js';
 import { splitByNext } from '../shared/split.js';
 import type {
@@ -164,59 +165,64 @@ export class ChatMuseContentApp {
   private renderSurfaces(): void {
     this.cancelScheduledLoadingRender();
 
-    // Overlay-only features — active loading
-    if (this.activeFeature && isOverlayOnlyFeature(this.activeFeature)) {
-      this.inlinePanel.hide();
-      this.overlay.render(this.buildActiveLoadingModel());
-      return;
-    }
-
-    // Inline quick features — active operation
-    if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
-      if (this.quickSurfaceMode === 'overlay') {
+    const scrollSnapshot = captureScrollSnapshot(this.root);
+    try {
+      // Overlay-only features — active loading
+      if (this.activeFeature && isOverlayOnlyFeature(this.activeFeature)) {
         this.inlinePanel.hide();
-        this.overlay.render(this.buildActiveLoadingModel({ canRegenerate: true }), {
-          dismissMode: 'collapse-to-inline',
-        });
+        this.overlay.render(this.buildActiveLoadingModel());
         return;
       }
-      // inline mode
-      this.overlay.render({ kind: 'hidden' });
-      if (this.quickInlineVisible) {
-        this.inlinePanel.render(this.buildActiveLoadingModel({ canRegenerate: true }));
-      } else {
-        this.inlinePanel.hide();
-      }
-      return;
-    }
 
-    // No active quick feature — check for completed/cached inline results
-    if (this.quickInlineVisible && this.lastFeature && isInlineQuickFeature(this.lastFeature)) {
-      const cached = this.completedOverlayCache.get(this.currentGroupId, this.lastFeature);
-      if (cached) {
+      // Inline quick features — active operation
+      if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
         if (this.quickSurfaceMode === 'overlay') {
           this.inlinePanel.hide();
-          this.overlay.render(cached, { dismissMode: 'collapse-to-inline' });
+          this.overlay.render(this.buildActiveLoadingModel({ canRegenerate: true }), {
+            dismissMode: 'collapse-to-inline',
+          });
+          return;
+        }
+        // inline mode
+        this.overlay.render({ kind: 'hidden' });
+        if (this.quickInlineVisible) {
+          this.inlinePanel.render(this.buildActiveLoadingModel({ canRegenerate: true }));
         } else {
-          this.overlay.render({ kind: 'hidden' });
-          this.inlinePanel.render(cached);
+          this.inlinePanel.hide();
         }
         return;
       }
-    }
 
-    // Deep feature result in overlay (completed, error, or cache hit)
-    if (this.deepOverlayModel) {
+      // No active quick feature — check for completed/cached inline results
+      if (this.quickInlineVisible && this.lastFeature && isInlineQuickFeature(this.lastFeature)) {
+        const cached = this.completedOverlayCache.get(this.currentGroupId, this.lastFeature);
+        if (cached) {
+          if (this.quickSurfaceMode === 'overlay') {
+            this.inlinePanel.hide();
+            this.overlay.render(cached, { dismissMode: 'collapse-to-inline' });
+          } else {
+            this.overlay.render({ kind: 'hidden' });
+            this.inlinePanel.render(cached);
+          }
+          return;
+        }
+      }
+
+      // Deep feature result in overlay (completed, error, or cache hit)
+      if (this.deepOverlayModel) {
+        this.inlinePanel.hide();
+        this.overlay.render(this.deepOverlayModel);
+        return;
+      }
+
+      // Nothing to show — hide both surfaces
       this.inlinePanel.hide();
-      this.overlay.render(this.deepOverlayModel);
-      return;
-    }
-
-    // Nothing to show — hide both surfaces
-    this.inlinePanel.hide();
-    this.overlay.render({ kind: 'hidden' });
-    if (this.quickSurfaceMode === 'overlay') {
-      this.quickSurfaceMode = 'inline';
+      this.overlay.render({ kind: 'hidden' });
+      if (this.quickSurfaceMode === 'overlay') {
+        this.quickSurfaceMode = 'inline';
+      }
+    } finally {
+      applyScrollCompensation(this.root, scrollSnapshot);
     }
   }
 
