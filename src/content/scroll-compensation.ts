@@ -69,6 +69,24 @@ function setCache(root: HTMLElement, container: HTMLElement | null): void {
   cachedContainer = container;
 }
 
+function findScrollableInSiblingBranches(branch: HTMLElement, direction: 'previous' | 'next'): HTMLElement | null {
+  let sibling = direction === 'previous'
+    ? branch.previousElementSibling
+    : branch.nextElementSibling;
+  while (sibling) {
+    if (sibling instanceof HTMLElement) {
+      const candidate = findBestScrollableInSubtree(sibling);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    sibling = direction === 'previous'
+      ? sibling.previousElementSibling
+      : sibling.nextElementSibling;
+  }
+  return null;
+}
+
 function findScrollContainer(seed: HTMLElement): HTMLElement | null {
   if (isCachedContainerValid(seed)) {
     return cachedContainer;
@@ -84,16 +102,12 @@ function findScrollContainer(seed: HTMLElement): HTMLElement | null {
   // ChatMuse mounts in the composer branch.
   let branch = seed.parentElement;
   while (branch) {
-    let sibling = branch.previousElementSibling;
-    while (sibling) {
-      if (sibling instanceof HTMLElement) {
-        const candidate = findBestScrollableInSubtree(sibling);
-        if (candidate) {
-          setCache(seed, candidate);
-          return candidate;
-        }
-      }
-      sibling = sibling.previousElementSibling;
+    const candidate =
+      findScrollableInSiblingBranches(branch, 'previous')
+      ?? findScrollableInSiblingBranches(branch, 'next');
+    if (candidate) {
+      setCache(seed, candidate);
+      return candidate;
     }
 
     branch = branch.parentElement;

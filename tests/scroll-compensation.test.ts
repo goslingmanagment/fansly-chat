@@ -228,4 +228,33 @@ describe('scroll-compensation', () => {
     applyScrollCompensation(root, snapshot);
     expect(messageScroll.scrollTop).toBe(1400 + 280);
   });
+
+  it('finds sibling scroll container when messages branch is after composer branch', () => {
+    const layoutRoot = document.createElement('div');
+    const composerBranch = document.createElement('section');
+    const inputParent = document.createElement('div');
+    const root = document.createElement('div');
+    stubLayout(root, { offsetHeight: 0 });
+    inputParent.appendChild(root);
+    composerBranch.appendChild(inputParent);
+
+    const messagesBranch = document.createElement('section');
+    const wrapper = document.createElement('div');
+    const messageScroll = document.createElement('div');
+    messageScroll.style.overflowY = 'auto';
+    stubLayout(messageScroll, {
+      scrollHeight: 2000,
+      clientHeight: 600,
+      scrollTop: 1400,
+    });
+    wrapper.appendChild(messageScroll);
+    messagesBranch.appendChild(wrapper);
+
+    layoutRoot.append(composerBranch, messagesBranch);
+    document.body.appendChild(layoutRoot);
+
+    const snapshot = captureScrollSnapshot(root);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.container).toBe(messageScroll);
+  });
 });
