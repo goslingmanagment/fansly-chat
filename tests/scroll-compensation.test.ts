@@ -102,7 +102,7 @@ describe('scroll-compensation', () => {
     expect(container.scrollTop).toBe(200); // unchanged
   });
 
-  it('does not adjust when height delta is zero', () => {
+  it('does not adjust scrollTop during streaming updates when height delta is ~0', () => {
     const { root, container } = buildScrollableTree(280, {
       scrollHeight: 1000,
       clientHeight: 600,
@@ -111,7 +111,7 @@ describe('scroll-compensation', () => {
 
     const snapshot = captureScrollSnapshot(root);
 
-    // No height change
+    // Streaming text update keeps the panel height effectively unchanged.
     applyScrollCompensation(root, snapshot);
     expect(container.scrollTop).toBe(400);
   });
@@ -184,13 +184,18 @@ describe('scroll-compensation', () => {
     expect(container.scrollTop).toBeLessThanOrEqual(1000 - 600);
   });
 
-  it('finds scroll container that is a sibling (flex layout)', () => {
+  it('finds and adjusts sibling message scroll container', () => {
     // Simulates Fansly layout:
-    //   flexParent
-    //     ├── messageScroll  (overflow-y: auto, scrollable)
-    //     └── inputParent
+    //   layoutRoot
+    //     ├── messagesBranch
+    //     │    └── wrapper
+    //     │         └── messageScroll (overflow-y: auto, scrollable)
+    //     └── composerBranch
+    //          └── inputParent
     //         └── root
-    const flexParent = document.createElement('div');
+    const layoutRoot = document.createElement('div');
+    const messagesBranch = document.createElement('section');
+    const wrapper = document.createElement('div');
     const messageScroll = document.createElement('div');
     messageScroll.style.overflowY = 'auto';
     stubLayout(messageScroll, {
@@ -199,14 +204,18 @@ describe('scroll-compensation', () => {
       scrollTop: 1400, // at bottom: gap = 2000 - 1400 - 600 = 0
     });
 
+    wrapper.appendChild(messageScroll);
+    messagesBranch.appendChild(wrapper);
+
+    const composerBranch = document.createElement('section');
     const inputParent = document.createElement('div');
     const root = document.createElement('div');
     stubLayout(root, { offsetHeight: 0 });
 
     inputParent.appendChild(root);
-    flexParent.appendChild(messageScroll);
-    flexParent.appendChild(inputParent);
-    document.body.appendChild(flexParent);
+    composerBranch.appendChild(inputParent);
+    layoutRoot.append(messagesBranch, composerBranch);
+    document.body.appendChild(layoutRoot);
 
     const snapshot = captureScrollSnapshot(root);
     expect(snapshot).not.toBeNull();
