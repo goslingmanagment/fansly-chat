@@ -59,7 +59,7 @@ export class ButtonBar {
     this.root.append(this.personalityLabel, this.actions);
   }
 
-  render(state: TabUiState | null, activeFeature: FeatureType | null, nextReplyMode: ReplyMode): void {
+  render(state: TabUiState | null, activeFeature: FeatureType | null, nextReplyMode: ReplyMode, activeLoading = false): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatmuse-hidden', !hasState);
     if (!state) {
@@ -76,11 +76,18 @@ export class ButtonBar {
       const button = this.buttons.get(entry.feature)!;
       const isActive = activeFeature === entry.feature;
       button.disabled = Boolean(activeFeature && !isActive) || disableForPrereqs;
-      button.textContent = isActive ? `${entry.label}…` : entry.label;
+      if (isActive && activeLoading) {
+        button.innerHTML = '';
+        button.append(
+          document.createTextNode(entry.label),
+          (() => { const s = document.createElement('span'); s.className = 'chatmuse-spinner'; return s; })(),
+        );
+      } else {
+        button.textContent = isActive ? entry.label : entry.label;
+      }
     }
 
-    const replyButton = this.buttons.get('fast-reply');
-    this.replyModeToggle.disabled = Boolean(replyButton?.disabled);
+    this.replyModeToggle.disabled = Boolean(activeFeature) || disableForPrereqs;
     this.replyModeToggle.setAttribute('aria-pressed', nextReplyMode === 'preferSplit' ? 'true' : 'false');
     this.replyModeToggle.classList.toggle('chatmuse-toolbar-toggle-active', nextReplyMode === 'preferSplit');
   }

@@ -194,6 +194,14 @@
   box-shadow: none;
 }
 
+.chatmuse-toolbar-button .chatmuse-spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .chatmuse-toolbar-toggle:hover:not(:disabled) {
   background: rgba(108, 92, 231, 0.12);
   border-color: rgba(108, 92, 231, 0.42);
@@ -203,6 +211,70 @@
   background: rgba(0, 184, 148, 0.16);
   border-color: rgba(0, 184, 148, 0.34);
   color: #dff8ed;
+}
+
+/* ─── Inline Panel ──────────────────────────────────────────── */
+
+.chatmuse-inline-panel {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--chatmuse-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(20, 31, 41, 0.98), rgba(11, 19, 27, 0.99));
+  box-shadow: var(--chatmuse-shadow);
+  contain: layout style;
+  overflow: hidden;
+}
+
+.chatmuse-inline-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--chatmuse-border);
+  min-height: 40px;
+}
+
+.chatmuse-inline-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--chatmuse-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatmuse-inline-panel-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chatmuse-inline-panel-action {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--chatmuse-text);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatmuse-inline-panel-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chatmuse-inline-panel-body {
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-anchor: none;
+  padding: 12px 14px;
+  display: grid;
+  gap: 12px;
 }
 
 /* ─── Mapping Banner ─────────────────────────────────────────── */
@@ -746,6 +818,10 @@ body.chatmuse-scroll-lock {
 /* ─── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 720px) {
+  .chatmuse-inline-panel-body {
+    max-height: 45vh;
+  }
+
   .chatmuse-overlay-shell {
     padding: 10px;
   }

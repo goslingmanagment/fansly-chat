@@ -148,6 +148,7 @@ function installDom() {
   vi.stubGlobal('Event', window.Event);
   vi.stubGlobal('CustomEvent', window.CustomEvent);
   vi.stubGlobal('MutationObserver', window.MutationObserver);
+  vi.stubGlobal('KeyboardEvent', window.KeyboardEvent);
   return dom;
 }
 
@@ -167,6 +168,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
 
     controller.render(createLoadingModel('stream-op', ''));
@@ -199,6 +201,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
 
     controller.render(
@@ -221,6 +224,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
 
     controller.render(createLoadingModel('plain-op', ''));
@@ -242,6 +246,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
 
@@ -268,6 +273,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
     const part: OverlayInsertPart = {
       id: 'part-1',
@@ -294,6 +300,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
     const part: OverlayInsertPart = {
       id: 'part-1',
@@ -319,6 +326,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun,
+      onCollapse: () => undefined,
     });
 
     controller.render(createHelpMeModel());
@@ -337,6 +345,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun,
+      onCollapse: () => undefined,
     });
 
     controller.render(createReadOnlyModel());
@@ -354,6 +363,7 @@ describe('OverlayController', () => {
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,
+      onCollapse: () => undefined,
     });
 
     controller.render({
@@ -371,5 +381,155 @@ describe('OverlayController', () => {
     const grid = requireElement<HTMLDivElement>('.chatmuse-grid');
     expect(grid.firstElementChild?.textContent).toBe('Something broke');
     expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
+  });
+
+  // ─── Dismiss Mode Tests ───────────────────────────────────────────────
+
+  it('collapse-to-inline dismiss mode: Escape calls onCollapse', () => {
+    const onCollapse = vi.fn();
+    const onClose = vi.fn();
+    const onCancel = vi.fn();
+    const controller = new OverlayController({
+      onClose,
+      onCancel,
+      onRerun: () => undefined,
+      onCollapse,
+    });
+
+    controller.render(createLoadingModel('collapse-op', 'text'), {
+      dismissMode: 'collapse-to-inline',
+    });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(onCollapse).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('collapse-to-inline dismiss mode: backdrop click calls onCollapse', () => {
+    const onCollapse = vi.fn();
+    const onClose = vi.fn();
+    const controller = new OverlayController({
+      onClose,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse,
+    });
+
+    controller.render(createLoadingModel('collapse-op', 'text'), {
+      dismissMode: 'collapse-to-inline',
+    });
+    const backdrop = document.querySelector('.chatmuse-overlay-backdrop') as HTMLElement;
+    backdrop.click();
+
+    expect(onCollapse).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('collapse-to-inline dismiss mode: X button calls onCollapse', () => {
+    const onCollapse = vi.fn();
+    const onClose = vi.fn();
+    const controller = new OverlayController({
+      onClose,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse,
+    });
+
+    controller.render(createLoadingModel('collapse-op', 'text'), {
+      dismissMode: 'collapse-to-inline',
+    });
+    const closeBtn = document.querySelector('.chatmuse-close') as HTMLButtonElement;
+    closeBtn.click();
+
+    expect(onCollapse).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('default loading dismiss calls onCancel + onClose', () => {
+    const onClose = vi.fn();
+    const onCancel = vi.fn();
+    const onCollapse = vi.fn();
+    const controller = new OverlayController({
+      onClose,
+      onCancel,
+      onRerun: () => undefined,
+      onCollapse,
+    });
+
+    controller.render(createLoadingModel('default-op', 'text'));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(onCancel).toHaveBeenCalledWith('default-op');
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onCollapse).not.toHaveBeenCalled();
+  });
+
+  it('default completed reply dismiss calls onClose only', () => {
+    const onClose = vi.fn();
+    const onCancel = vi.fn();
+    const controller = new OverlayController({
+      onClose,
+      onCancel,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const part: OverlayInsertPart = {
+      id: 'part-1',
+      sequenceIndex: 0,
+      text: 'Hello',
+      insertedAt: null,
+      insertedOnce: false,
+    };
+
+    controller.render(createReplyModel(part));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('explicit Cancel button always calls onCancel regardless of dismissMode', () => {
+    const onCancel = vi.fn();
+    const onCollapse = vi.fn();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel,
+      onRerun: () => undefined,
+      onCollapse,
+    });
+
+    controller.render(createLoadingModel('cancel-op', 'text'), {
+      dismissMode: 'collapse-to-inline',
+    });
+    const cancelButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'),
+    ).find((element) => element.textContent === 'Cancel');
+
+    expect(cancelButton).toBeDefined();
+    cancelButton!.click();
+
+    expect(onCancel).toHaveBeenCalledWith('cancel-op');
+    // onCollapse should NOT be called by the explicit Cancel button
+    expect(onCollapse).not.toHaveBeenCalled();
+  });
+
+  it('close dismiss mode + Escape calls onClose only (no cancel)', () => {
+    const onClose = vi.fn();
+    const onCancel = vi.fn();
+    const controller = new OverlayController({
+      onClose,
+      onCancel,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createLoadingModel('close-op', 'text'), {
+      dismissMode: 'close',
+    });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

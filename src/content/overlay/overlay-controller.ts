@@ -11,10 +11,18 @@ import type {
 import { ensureOverlayRoot } from '../dom-anchor.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
 
+type OverlayDismissMode = 'close' | 'cancel-and-close' | 'collapse-to-inline';
+
+interface OverlayRenderOptions {
+  preserveInlineError?: boolean;
+  dismissMode?: OverlayDismissMode;
+}
+
 interface OverlayCallbacks {
   onClose: () => void;
   onCancel: (operationId: string) => void;
   onRerun: (feature: FeatureType) => void;
+  onCollapse: () => void;
 }
 
 interface PartCardOptions {
@@ -119,6 +127,7 @@ export class OverlayController {
   private debugPromptOpen = false;
   private debugPromptOperationId: string | null = null;
   private loadingElapsedTimer: number | null = null;
+  private dismissMode: OverlayDismissMode = 'close';
   private renderTraceEnabledFromStorage: boolean | null = null;
   private readonly renderTraceState: OverlayRenderTraceState = {
     renderCount: 0,
@@ -129,17 +138,27 @@ export class OverlayController {
   constructor(private readonly callbacks: OverlayCallbacks) {
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && this.model.kind !== 'hidden') {
-        if ('operationId' in this.model && this.model.operationId) {
-          if (this.model.kind === 'loading') {
-            this.callbacks.onCancel(this.model.operationId);
-          }
-        }
-        this.callbacks.onClose();
+        this.handleDismiss();
       }
     });
   }
 
-  render(model: OverlayViewModel, preserveInlineError = false): void {
+  private handleDismiss(): void {
+    if (this.model.kind === 'hidden') return;
+    const mode = this.dismissMode;
+    if (mode === 'collapse-to-inline') {
+      this.callbacks.onCollapse();
+    } else {
+      if (mode === 'cancel-and-close' && this.model.kind === 'loading' && 'operationId' in this.model && this.model.operationId) {
+        this.callbacks.onCancel(this.model.operationId);
+      }
+      this.callbacks.onClose();
+    }
+  }
+
+  render(model: OverlayViewModel, options?: OverlayRenderOptions | boolean): void {
+    const opts: OverlayRenderOptions =
+      typeof options === 'boolean' ? { preserveInlineError: options } : (options ?? {});
     const renderStart = performance.now();
     const operationId = operationIdForModel(model);
     let shellAction: 'mounted' | 'reused' | 'hidden' = 'reused';
@@ -148,11 +167,19 @@ export class OverlayController {
     this.model = model;
     if (model.kind === 'error') {
       this.inlineError = null;
-    } else if (!preserveInlineError) {
+    } else if (!opts.preserveInlineError) {
       this.inlineError = null;
     }
     if (model.kind === 'hidden' || model.kind === 'loading' || model.kind === 'error') {
       this.passThrough = false;
+    }
+    // Set dismiss mode: explicit option > default based on kind
+    if (opts.dismissMode) {
+      this.dismissMode = opts.dismissMode;
+    } else if (model.kind === 'loading') {
+      this.dismissMode = 'cancel-and-close';
+    } else {
+      this.dismissMode = 'close';
     }
     document.body.classList.toggle('chatmuse-scroll-lock', model.kind !== 'hidden');
     this.root.style.pointerEvents = model.kind === 'hidden' ? 'none' : 'auto';
@@ -247,12 +274,7 @@ export class OverlayController {
       if (this.passThrough) {
         return;
       }
-      if (this.model.kind === 'loading') {
-        this.callbacks.onCancel(this.model.operationId);
-      }
-      if (this.model.kind !== 'hidden') {
-        this.callbacks.onClose();
-      }
+      this.handleDismiss();
     });
 
     const panel = document.createElement('div');
@@ -283,12 +305,7 @@ export class OverlayController {
     close.className = 'chatmuse-close';
     close.textContent = '\u00d7';
     close.addEventListener('click', () => {
-      if (this.model.kind === 'loading') {
-        this.callbacks.onCancel(this.model.operationId);
-      }
-      if (this.model.kind !== 'hidden') {
-        this.callbacks.onClose();
-      }
+      this.handleDismiss();
     });
 
     header.append(title, close);
