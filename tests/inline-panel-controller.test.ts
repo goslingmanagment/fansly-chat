@@ -104,7 +104,7 @@ function installDom() {
   return dom;
 }
 
-function requireElement<T extends Element>(root: HTMLElement, selector: string): T {
+function requireElement<T extends Element>(root: ParentNode, selector: string): T {
   const element = root.querySelector(selector);
   if (!element) {
     throw new Error(`Missing element for selector: ${selector}`);
@@ -357,6 +357,49 @@ describe('InlinePanelController', () => {
     controller.render(createReplyModel([part]));
 
     expect(requireElement(controller.root, '.chatmuse-card-status').textContent).toBe('Inserted earlier.');
+  });
+
+  // ─── Header Row Structure ────────────────────────────────────
+
+  it('card has chatmuse-card-header-row as direct child containing title and actions', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createReplyModel([createPart('Hello')]));
+
+    const card = requireElement(controller.root, '.chatmuse-card');
+    const headerRow = requireElement(card, ':scope > .chatmuse-card-header-row');
+    expect(headerRow).toBeTruthy();
+    expect(requireElement(headerRow, '.chatmuse-card-title').textContent).toBe('Message 1');
+    expect(requireElement(headerRow, '.chatmuse-card-actions')).toBeTruthy();
+    // Actions should NOT be a sibling of card-text
+    expect(card.querySelector(':scope > .chatmuse-card-actions')).toBeNull();
+  });
+
+  it('status renders inside header row when insertedOnce is true', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const part = createPart('Hello');
+    part.insertedOnce = true;
+    controller.render(createReplyModel([part]));
+
+    const headerRow = requireElement(controller.root, '.chatmuse-card-header-row');
+    expect(requireElement(headerRow, '.chatmuse-card-status').textContent).toBe('Inserted earlier.');
+  });
+
+  it('hint renders inside header row in split mode', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const model = createReplyModel([createPart('First', 0), createPart('Second', 1)]);
+    model.splitModeRequested = true;
+    controller.render(model);
+
+    const cards = controller.root.querySelectorAll('.chatmuse-card');
+    expect(cards).toHaveLength(2);
+    const firstHeaderRow = requireElement(cards[0] as HTMLElement, '.chatmuse-card-header-row');
+    expect(requireElement(firstHeaderRow, '.chatmuse-card-hint').textContent).toBe('Suggested first send.');
   });
 
   it('reply Regenerate button calls onRerun', () => {

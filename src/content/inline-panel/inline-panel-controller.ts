@@ -306,25 +306,28 @@ export class InlinePanelController {
       card.classList.add('chatmuse-card-followup');
     }
 
-    const label = document.createElement('div');
+    // Header row: title + hint + status + actions on one line
+    const headerRow = document.createElement('div');
+    headerRow.className = 'chatmuse-card-header-row';
+
+    const label = document.createElement('span');
     label.className = 'chatmuse-card-title';
     label.textContent = title;
+    headerRow.append(label);
 
-    const hint = options.hint ? document.createElement('div') : null;
-    if (hint) {
+    if (options.hint) {
+      const hint = document.createElement('span');
       hint.className = 'chatmuse-card-hint';
-      hint.textContent = options.hint ?? null;
+      hint.textContent = options.hint;
+      headerRow.append(hint);
     }
 
-    const statusEl = options.status ? document.createElement('div') : null;
-    if (statusEl) {
+    if (options.status) {
+      const statusEl = document.createElement('span');
       statusEl.className = 'chatmuse-card-status';
-      statusEl.textContent = options.status ?? null;
+      statusEl.textContent = options.status;
+      headerRow.append(statusEl);
     }
-
-    const text = document.createElement('div');
-    text.className = 'chatmuse-card-text';
-    text.textContent = part.text;
 
     const actions = document.createElement('div');
     actions.className = 'chatmuse-card-actions';
@@ -365,10 +368,13 @@ export class InlinePanelController {
     });
 
     actions.append(insert, copy);
-    card.append(label);
-    if (hint) card.append(hint);
-    if (statusEl) card.append(statusEl);
-    card.append(text, actions);
+    headerRow.append(actions);
+
+    const text = document.createElement('div');
+    text.className = 'chatmuse-card-text';
+    text.textContent = part.text;
+
+    card.append(headerRow, text);
     return card;
   }
 

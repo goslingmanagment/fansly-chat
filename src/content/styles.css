@@ -277,6 +277,104 @@
   gap: 12px;
 }
 
+/* ─── Inline Panel — Compact Overrides ──────────────────────── */
+
+.chatmuse-inline-panel {
+  border-radius: 12px;
+}
+
+.chatmuse-inline-panel .chatmuse-inline-panel-header {
+  padding: 6px 10px;
+  min-height: 32px;
+}
+
+.chatmuse-inline-panel .chatmuse-inline-panel-title {
+  font-size: 12px;
+}
+
+.chatmuse-inline-panel .chatmuse-inline-panel-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.chatmuse-inline-panel .chatmuse-inline-panel-body {
+  padding: 8px 10px;
+  max-height: 280px;
+  gap: 8px;
+}
+
+.chatmuse-inline-panel .chatmuse-grid {
+  gap: 8px;
+}
+
+.chatmuse-inline-panel .chatmuse-parts {
+  gap: 8px;
+}
+
+.chatmuse-inline-panel .chatmuse-card {
+  padding: 8px 10px;
+  gap: 6px;
+  border-radius: 10px;
+}
+
+.chatmuse-inline-panel .chatmuse-card-header-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.chatmuse-inline-panel .chatmuse-card-header-row .chatmuse-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.chatmuse-inline-panel .chatmuse-card-header-row .chatmuse-card-actions {
+  margin-left: auto;
+}
+
+.chatmuse-inline-panel .chatmuse-card-title {
+  font-size: 11px;
+}
+
+.chatmuse-inline-panel .chatmuse-card-hint,
+.chatmuse-inline-panel .chatmuse-card-status {
+  font-size: 11px;
+}
+
+.chatmuse-inline-panel .chatmuse-card-text {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.chatmuse-inline-panel .chatmuse-card-actions {
+  gap: 6px;
+}
+
+.chatmuse-inline-panel .chatmuse-button {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.chatmuse-inline-panel .chatmuse-stream {
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.chatmuse-inline-panel .chatmuse-inline-error {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
 /* ─── Mapping Banner ─────────────────────────────────────────── */
 
 .chatmuse-banner {
@@ -818,7 +916,7 @@ body.chatmuse-scroll-lock {
 /* ─── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 720px) {
-  .chatmuse-inline-panel-body {
+  .chatmuse-inline-panel .chatmuse-inline-panel-body {
     max-height: 45vh;
   }
 
