@@ -607,6 +607,7 @@ export class ChatMuseContentApp {
         engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
         flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
         parseFallback: !parsed?.valid,
+        debugPrompt: this.activeDebugPrompt ?? undefined,
         profiling,
         rerunActionLabel: 'Regenerate',
       };
@@ -629,6 +630,7 @@ export class ChatMuseContentApp {
                 parseFallback: !result.chatReview?.valid,
               }
             : undefined,
+        debugPrompt: this.activeDebugPrompt ?? undefined,
         profiling,
         rerunActionLabel: 'Refresh',
       };

@@ -807,6 +807,10 @@ export class OverlayController {
       section.append(fallback);
     }
 
+    if (model.debugPrompt) {
+      section.append(this.renderDebugPrompt(model.debugPrompt));
+    }
+
     section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
     return section;
   }
@@ -877,6 +881,10 @@ export class OverlayController {
       body.className = 'chatmuse-stream';
       body.textContent = model.rawText;
       section.append(body);
+    }
+
+    if (model.debugPrompt) {
+      section.append(this.renderDebugPrompt(model.debugPrompt));
     }
 
     section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));

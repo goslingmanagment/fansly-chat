@@ -616,6 +616,7 @@ export type OverlayViewModel =
       parseFallback: boolean;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
+      debugPrompt?: PromptDebugSnapshot;
       error?: UserFacingError;
     }
   | {
@@ -633,6 +634,7 @@ export type OverlayViewModel =
       };
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
+      debugPrompt?: PromptDebugSnapshot;
       error?: UserFacingError;
     }
   | {

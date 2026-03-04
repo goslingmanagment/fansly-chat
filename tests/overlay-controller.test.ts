@@ -5,6 +5,7 @@ import type {
   OperationProfilingSnapshot,
   OverlayInsertPart,
   OverlayViewModel,
+  PromptDebugSnapshot,
 } from '../src/shared/types.js';
 
 function createLoadingModel(
@@ -53,7 +54,21 @@ function createReplyModel(
   };
 }
 
-function createHelpMeModel(): Extract<OverlayViewModel, { kind: 'helpMe' }> {
+function createDebugSnapshot(): PromptDebugSnapshot {
+  return {
+    feature: 'fast-reply',
+    modelId: 'claude-sonnet-4-20250514',
+    system: 'You are a helpful assistant.',
+    transcript: 'Fan: hello\nModel: hi there',
+    fanSpendingData: '$50 total',
+    fanSubscriptionData: 'Active sub',
+    user: 'Reply to the fan.',
+  };
+}
+
+function createHelpMeModel(
+  options?: { debugPrompt?: PromptDebugSnapshot },
+): Extract<OverlayViewModel, { kind: 'helpMe' }> {
   return {
     kind: 'helpMe',
     feature: 'help-me',
@@ -64,12 +79,15 @@ function createHelpMeModel(): Extract<OverlayViewModel, { kind: 'helpMe' }> {
     engagingParts: [],
     flirtyParts: [],
     parseFallback: false,
+    debugPrompt: options?.debugPrompt,
     profiling: undefined,
     rerunActionLabel: 'Regenerate',
   };
 }
 
-function createReadOnlyModel(): Extract<OverlayViewModel, { kind: 'readOnly' }> {
+function createReadOnlyModel(
+  options?: { debugPrompt?: PromptDebugSnapshot },
+): Extract<OverlayViewModel, { kind: 'readOnly' }> {
   return {
     kind: 'readOnly',
     feature: 'chat-review',
@@ -82,6 +100,7 @@ function createReadOnlyModel(): Extract<OverlayViewModel, { kind: 'readOnly' }> 
       recommendations: 'Keep pace',
       parseFallback: false,
     },
+    debugPrompt: options?.debugPrompt,
     profiling: undefined,
     rerunActionLabel: 'Refresh',
   };
@@ -531,5 +550,37 @@ describe('OverlayController', () => {
 
     expect(onClose).toHaveBeenCalledOnce();
     expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  // ─── Debug Prompt Tests ──────────────────────────────────────────────
+
+  it('renders debug prompt inspector in Help Me view when debugPrompt is present', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createHelpMeModel({ debugPrompt: createDebugSnapshot() }));
+
+    const inspector = document.querySelector('.chatmuse-debug-inspector');
+    expect(inspector).not.toBeNull();
+    expect(inspector?.querySelector('.chatmuse-debug-summary')?.textContent).toBe('Claude Input');
+  });
+
+  it('renders debug prompt inspector in Read Only view when debugPrompt is present', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReadOnlyModel({ debugPrompt: createDebugSnapshot() }));
+
+    const inspector = document.querySelector('.chatmuse-debug-inspector');
+    expect(inspector).not.toBeNull();
+    expect(inspector?.querySelector('.chatmuse-debug-summary')?.textContent).toBe('Claude Input');
   });
 });
