@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import type {
+  CompareInlineViewModel,
   OperationProfilingSnapshot,
   TabUiState,
 } from '../src/shared/types.js';
@@ -46,6 +47,8 @@ function readyState(): TabUiState {
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',
+    compareCardCount: 2,
+    compareDraftCount: 1,
   };
 }
 
@@ -77,6 +80,53 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
         detail: '2 pages, 30 transcript messages',
       },
     ],
+  };
+}
+
+function createCompareModel(overrides?: Partial<CompareInlineViewModel>): CompareInlineViewModel {
+  return {
+    kind: 'compare',
+    fanDisplayName: 'alice',
+    operationId: null,
+    activeCardId: 'current',
+    progress: null,
+    canCancel: false,
+    canRegenerate: true,
+    tabs: [
+      {
+        cardId: 'current',
+        label: 'Closer (current)',
+        source: 'current',
+        status: 'reply',
+        rawText: 'Current reply',
+        parts: [
+          {
+            id: 'current-0',
+            sequenceIndex: 0,
+            text: 'Current reply',
+            insertedAt: null,
+            insertedOnce: false,
+          },
+        ],
+      },
+      {
+        cardId: 'system-prompt-v2-lora',
+        label: 'system-prompt-v2-lora',
+        source: 'draft',
+        status: 'reply',
+        rawText: 'Draft reply',
+        parts: [
+          {
+            id: 'draft-0',
+            sequenceIndex: 0,
+            text: 'Draft reply',
+            insertedAt: null,
+            insertedOnce: false,
+          },
+        ],
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -512,6 +562,73 @@ describe('ChatMuseContentApp', () => {
     expect(app.deepOverlayModel.kind).toBe('readOnly');
     // Inline panel still hidden
     expect(inlineRoot.classList.contains('chatmuse-hidden')).toBe(true);
+  });
+
+  it('reopens cached compare results in the inline panel without sending a new request', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.completedCompareCache.set('group-1', createCompareModel());
+
+    app.startCompare(false);
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(app.comparePanelVisible).toBe(true);
+    expect(app.inlinePanel.root.querySelector('.chatmuse-compare-tab')?.textContent).toContain('Closer (current)');
+  });
+
+  it('reopens an active compare session when the panel was closed', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeCompareModel = createCompareModel({
+      operationId: 'compare-op',
+      canCancel: true,
+      canRegenerate: false,
+      progress: {
+        operationId: 'compare-op',
+        phase: 'generating',
+        message: 'Generating compare replies…',
+      },
+    });
+    app.comparePanelVisible = false;
+
+    app.startCompare(false);
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(app.comparePanelVisible).toBe(true);
+  });
+
+  it('clears cached compare results on conversation change and starts a new compare request', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.mountController = { setActiveRoute: vi.fn() };
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.completedCompareCache.set('group-1', createCompareModel());
+
+    app.handleRouteChange('group-2');
+
+    expect(app.completedCompareCache.get('group-2')).toBeNull();
+
+    sendSpy.mockClear();
+    app.startCompare(false);
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'compare:start',
+      groupId: 'group-2',
+    }));
   });
 
   it('port disconnect resets all surfaces and state', async () => {

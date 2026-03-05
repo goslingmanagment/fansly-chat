@@ -4,6 +4,7 @@ import { ChatMuseError } from '../src/shared/errors.js';
 import type {
   AggregatedEarnings,
   BackgroundPortMessage,
+  CompareModelCard,
   FanSubscriptionContext,
   MonthlyEarningsRow,
   NormalizedTranscriptMessage,
@@ -122,11 +123,22 @@ async function createCoordinatorHarness(options?: {
     fanslyClient as never,
     anthropicClient as never,
   ) as any;
-  const port = { postMessage: vi.fn() };
+  const port = {
+    postMessage: vi.fn(),
+    onDisconnect: { addListener: vi.fn() },
+  };
 
   coordinator.portsByTabId.set(1, port);
 
   return { coordinator, fanslyClient, anthropicClient, port };
+}
+
+function mockCompareCards(cards: CompareModelCard[]) {
+  vi.doMock('../src/shared/compare-cards.js', () => ({
+    getCompareDraftCount: () => cards.filter((card) => card.source === 'draft').length,
+    resolveMappedPersonalityId: () => null,
+    resolveCompareModelCards: () => cards,
+  }));
 }
 
 describe('OperationCoordinator', () => {
@@ -204,6 +216,7 @@ describe('OperationCoordinator', () => {
   });
 
   afterEach(() => {
+    vi.doUnmock('../src/shared/compare-cards.js');
     vi.restoreAllMocks();
   });
 
@@ -293,6 +306,220 @@ describe('OperationCoordinator', () => {
         user: expect.stringContaining('## Fan Subscription Data'),
       }),
     );
+  });
+
+  it('returns compare_cards_unavailable when compare has fewer than two cards', async () => {
+    mockCompareCards([
+      {
+        id: 'draft-only',
+        label: 'draft-only',
+        content: 'Draft only personality',
+        source: 'draft',
+      },
+    ]);
+    mockStorage.personalities = [];
+    mockStorage.accountMappings = {};
+
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness();
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:error' }> =>
+        message.type === 'compare:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('compare_cards_unavailable');
+    expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('runs compare cards with one shared prep pass and the fast-reply model for each card', async () => {
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+      {
+        id: 'draft-2',
+        label: 'draft-2',
+        content: 'Second draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ system, onText }: { system: string; onText: (text: string) => void }) => {
+        const text = system.includes('Current baseline personality')
+          ? 'Current reply'
+          : system.includes('Second draft personality variant')
+            ? 'Draft 2 reply'
+            : 'Draft 1 reply';
+        onText(text);
+        return text;
+      }),
+    };
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'preferSplit',
+    });
+
+    const messages = postedMessages(port);
+    const readyMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:ready' }> =>
+        message.type === 'compare:ready',
+    );
+    const chunkMessages = messages.filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:chunk' }> =>
+        message.type === 'compare:chunk',
+    );
+    const completeMessages = messages.filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardComplete' }> =>
+        message.type === 'compare:cardComplete',
+    );
+
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getGroup).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getEarnings).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getMonthlyEarnings).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledTimes(1);
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(3);
+    for (const call of anthropicClient.streamMessage.mock.calls) {
+      expect(call[0]).toEqual(
+        expect.objectContaining({ model: DEFAULT_FEATURE_MODELS['fast-reply'], feature: 'fast-reply' }),
+      );
+    }
+    expect(readyMessage?.cards.map((card) => card.label)).toEqual(['Closer (current)', 'draft-1', 'draft-2']);
+    expect(new Set(chunkMessages.map((message) => message.cardId))).toEqual(
+      new Set(['current:personality-1', 'draft-1', 'draft-2']),
+    );
+    expect(completeMessages).toHaveLength(3);
+    expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+  });
+
+  it('allows mixed compare outcomes and still completes the overall compare session', async () => {
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ system }: { system: string }) => {
+        if (system.includes('Current baseline personality')) {
+          throw new ChatMuseError('network_error');
+        }
+        return 'Draft reply';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const cardError = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
+        message.type === 'compare:cardError',
+    );
+    const cardComplete = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardComplete' }> =>
+        message.type === 'compare:cardComplete',
+    );
+
+    expect(cardError?.cardId).toBe('current:personality-1');
+    expect(cardError?.error.code).toBe('network_error');
+    expect(cardComplete?.cardId).toBe('draft-1');
+    expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+  });
+
+  it('sends compare:discarded when an active compare session is cancelled', async () => {
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({ signal }: { signal: AbortSignal }) => new Promise<string>((_resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await streamStarted;
+    await coordinator.cancelOperation(1, undefined, true);
+    await startPromise;
+
+    const discardedMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:discarded' }> =>
+        message.type === 'compare:discarded',
+    );
+
+    expect(discardedMessage?.error.code).toBe('chat_changed');
   });
 
   it('omits profiling data from progress and completion payloads when debug mode is off', async () => {
@@ -1226,20 +1453,24 @@ describe('OperationCoordinator', () => {
     const { coordinator } = await createCoordinatorHarness({ anthropicClient });
 
     // Simulate old port with its own disconnect handler
-    const oldPort = { postMessage: vi.fn() };
+    const oldPort = {
+      postMessage: vi.fn(),
+      onDisconnect: { addListener: vi.fn() },
+    };
     coordinator.registerPort(Object.assign(oldPort, {
       sender: { tab: { id: 1 } },
       onMessage: { addListener: vi.fn() },
-      onDisconnect: { addListener: vi.fn() },
     }));
-    const oldDisconnectHandler = oldPort.onDisconnect.addListener.mock.calls[0][0];
+    const oldDisconnectHandler = oldPort.onDisconnect.addListener.mock.calls[0]![0]!;
 
     // New port replaces the old one
-    const newPort = { postMessage: vi.fn() };
+    const newPort = {
+      postMessage: vi.fn(),
+      onDisconnect: { addListener: vi.fn() },
+    };
     coordinator.registerPort(Object.assign(newPort, {
       sender: { tab: { id: 1 } },
       onMessage: { addListener: vi.fn() },
-      onDisconnect: { addListener: vi.fn() },
     }));
 
     // Start operation on the new port

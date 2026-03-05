@@ -1,3 +1,4 @@
+import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { loadStorageState } from '../shared/storage.js';
 import type { PopupStatus } from '../shared/types.js';
 import { FanslyClient } from './fansly-client.js';
@@ -45,6 +46,8 @@ export function registerRuntimeApi({
             hasPersonalities: false,
             mappedPersonalityId: null,
             mappedPersonalityName: null,
+            compareCardCount: 0,
+            compareDraftCount: 0,
             accountLabel: 'Not connected',
           } satisfies PopupStatus;
         }
@@ -57,17 +60,16 @@ export function registerRuntimeApi({
         context.groupId = parseGroupIdFromUrl(tabUrl) ?? context.groupId;
         context.accountId = accountId;
 
-        const mappedPersonalityId =
-          (accountId
-            ? (state.accountMappings[accountId] ?? null)
-            : null) ??
-          (legacyAccountId && legacyAccountId !== accountId
-            ? (state.accountMappings[legacyAccountId] ?? null)
-            : null);
+        const mappedPersonalityId = resolveMappedPersonalityId(
+          state.accountMappings,
+          accountId,
+          legacyAccountId,
+        );
         const mappedPersonalityName =
           state.personalities.find((p) => p.id === mappedPersonalityId)
             ?.name ?? null;
         const connected = Boolean(session?.connected);
+        const compareDraftCount = getCompareDraftCount();
 
         return {
           tabId,
@@ -78,6 +80,8 @@ export function registerRuntimeApi({
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,
+          compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
+          compareDraftCount,
           accountLabel:
             mappedPersonalityName ??
             (accountId ? 'Unmapped account' : 'Not connected'),

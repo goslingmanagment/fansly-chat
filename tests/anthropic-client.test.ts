@@ -14,7 +14,7 @@ function mockFetchResponse(status: number, body?: unknown, options?: { bodyStrea
             controller.enqueue(new TextEncoder().encode(options.bodyStream));
             controller.close();
           },
-        })
+        }) as unknown as Response['body']
       : null,
   };
   vi.stubGlobal('fetch', vi.fn(async () => response));

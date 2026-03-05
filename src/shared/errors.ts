@@ -83,6 +83,10 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
     message: 'Selected Claude model is unavailable. Check your model settings.',
     settingsLink: true,
   },
+  compare_cards_unavailable: {
+    code: 'compare_cards_unavailable',
+    message: 'Compare needs at least two model cards. Add files in prompts/drafts or map a personality.',
+  },
   insertion_failed: {
     code: 'insertion_failed',
     message: 'Could not insert into the Fansly message box. Copy the text instead.',

@@ -3,6 +3,7 @@ import { ButtonBar } from './button-bar.js';
 import { getActiveConversationDisplayName } from './conversation-dom.js';
 import { ConversationMountController } from './conversation-mount-controller.js';
 import { installContentStyles } from './dom-anchor.js';
+import { CompletedCompareCache } from './inline-panel/completed-compare-cache.js';
 import { InlinePanelController } from './inline-panel/inline-panel-controller.js';
 import { MappingBanner } from './mapping-banner.js';
 import { CompletedOverlayCache } from './overlay/completed-overlay-cache.js';
@@ -14,6 +15,8 @@ import { ToastController } from './toast.js';
 import { splitByNext } from '../shared/split.js';
 import type {
   BackgroundPortMessage,
+  CompareInlineTabState,
+  CompareInlineViewModel,
   CompletedOverlayViewModel,
   FeatureType,
   FeatureResult,
@@ -58,6 +61,8 @@ export class ChatMuseContentApp {
   private nextFastReplyMode: ReplyMode = 'default';
   private hasSentInit = false;
   private overlayRawText = '';
+  private activeCompareModel: CompareInlineViewModel | null = null;
+  private comparePanelVisible = false;
 
   // Inline quick surface state
   private quickSurfaceMode: 'inline' | 'overlay' = 'inline';
@@ -74,7 +79,10 @@ export class ChatMuseContentApp {
     onDisconnected: () => {
       this.toast.show('Extension reloaded. Please try again.');
       this.completedOverlayCache.clearAll();
+      this.completedCompareCache.clearAll();
       this.quickInlineVisible = false;
+      this.comparePanelVisible = false;
+      this.activeCompareModel = null;
       this.quickSurfaceMode = 'inline';
       this.suppressedTerminalOpId = null;
       this.clearOperationState(true);
@@ -84,6 +92,7 @@ export class ChatMuseContentApp {
   });
   private readonly buttonBar = new ButtonBar({
     onFeatureClick: (feature) => this.startFeature(feature, false),
+    onCompareClick: () => this.startCompare(false),
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
   });
   private readonly mappingBanner = new MappingBanner({
@@ -94,21 +103,53 @@ export class ChatMuseContentApp {
   private readonly root = document.createElement('div');
   private readonly mountController: ConversationMountController;
   private readonly completedOverlayCache = new CompletedOverlayCache();
+  private readonly completedCompareCache = new CompletedCompareCache();
   private readonly inlinePanel = new InlinePanelController({
     onClose: () => {
-      this.quickInlineVisible = false;
+      if (this.activeCompareModel || this.completedCompareCache.get(this.currentGroupId)) {
+        this.comparePanelVisible = false;
+      } else {
+        this.quickInlineVisible = false;
+      }
       this.renderSurfaces();
     },
     onExpand: () => {
+      if (this.activeCompareModel || this.completedCompareCache.get(this.currentGroupId)) {
+        return;
+      }
       this.quickSurfaceMode = 'overlay';
       this.renderSurfaces();
     },
     onCancel: (operationId) => {
+      if (this.activeCompareModel?.operationId === operationId) {
+        this.port.send({ type: 'compare:cancel', operationId });
+        this.activeCompareModel = null;
+        this.comparePanelVisible = false;
+        this.completedCompareCache.clear(this.currentGroupId);
+        this.renderAll();
+        return;
+      }
       this.port.send({ type: 'operation:cancel', operationId });
+      this.quickInlineVisible = false;
+      this.clearOperationState(true);
+      this.renderAll();
     },
     onRerun: (feature) => {
       this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
       this.startFeature(feature, true);
+    },
+    onCompareRerun: () => {
+      this.completedCompareCache.clear(this.currentGroupId);
+      this.startCompare(true);
+    },
+    onCompareTabSelect: (cardId) => {
+      const compareModel = this.activeCompareModel ?? this.completedCompareCache.get(this.currentGroupId);
+      if (!compareModel) {
+        return;
+      }
+      compareModel.activeCardId = cardId;
+      this.comparePanelVisible = true;
+      this.renderSurfaces();
     },
   });
   private readonly overlay = new OverlayController({
@@ -153,8 +194,15 @@ export class ChatMuseContentApp {
   // ─── Surface Rendering ──────────────────────────────────────────────
 
   private renderButtonBar(): void {
-    const activeLoading = this.activeFeature !== null && this.activeOperationId !== null;
-    this.buttonBar.render(this.tabState, this.activeFeature, this.nextFastReplyMode, activeLoading);
+    const activeAction =
+      this.activeCompareModel?.operationId
+        ? 'compare'
+        : this.activeFeature;
+    const activeLoading = Boolean(
+      this.activeCompareModel?.operationId ||
+      (this.activeFeature !== null && this.activeOperationId !== null),
+    );
+    this.buttonBar.render(this.tabState, activeAction, this.nextFastReplyMode, activeLoading);
   }
 
   private renderAll(): void {
@@ -167,6 +215,11 @@ export class ChatMuseContentApp {
 
     const scrollSnapshot = captureScrollSnapshot(this.root);
     try {
+      const visibleCompareModel =
+        this.comparePanelVisible
+          ? (this.activeCompareModel ?? this.completedCompareCache.get(this.currentGroupId))
+          : null;
+
       // Overlay-only features — active loading
       if (this.activeFeature && isOverlayOnlyFeature(this.activeFeature)) {
         this.inlinePanel.hide();
@@ -190,6 +243,12 @@ export class ChatMuseContentApp {
         } else {
           this.inlinePanel.hide();
         }
+        return;
+      }
+
+      if (visibleCompareModel) {
+        this.overlay.render({ kind: 'hidden' });
+        this.inlinePanel.render(visibleCompareModel);
         return;
       }
 
@@ -244,10 +303,15 @@ export class ChatMuseContentApp {
   private scheduleLoadingRender(): void {
     if (this.pendingLoadingFrame !== null) return;
     const capturedOpId = this.activeOperationId;
+    const capturedCompareOpId = this.activeCompareModel?.operationId ?? null;
     const capturedNonce = this.routeNonce;
     this.pendingLoadingFrame = requestAnimationFrame(() => {
       this.pendingLoadingFrame = null;
-      if (this.activeOperationId !== capturedOpId || this.routeNonce !== capturedNonce) return;
+      if (
+        this.activeOperationId !== capturedOpId ||
+        (this.activeCompareModel?.operationId ?? null) !== capturedCompareOpId ||
+        this.routeNonce !== capturedNonce
+      ) return;
       this.renderSurfaces();
     });
   }
@@ -273,10 +337,12 @@ export class ChatMuseContentApp {
       return;
     }
 
-    if (this.activeFeature) {
+    if (this.activeFeature || this.activeCompareModel?.operationId) {
       this.toast.show('Another operation is already in progress.');
       return;
     }
+
+    this.comparePanelVisible = false;
 
     // Cache hit
     const cachedResult = !forceRegenerate ? this.completedOverlayCache.get(this.currentGroupId, feature) : null;
@@ -336,6 +402,7 @@ export class ChatMuseContentApp {
     this.lastFeature = feature;
     this.overlayRawText = '';
     this.suppressedTerminalOpId = null;
+    this.comparePanelVisible = false;
 
     if (isInlineQuickFeature(feature)) {
       this.quickInlineVisible = false;
@@ -362,8 +429,80 @@ export class ChatMuseContentApp {
     this.renderButtonBar();
   }
 
-  private toggleNextFastReplyMode(): void {
+  private startCompare(forceRegenerate: boolean): void {
+    if (this.activeCompareModel?.operationId) {
+      if (!this.comparePanelVisible && this.suppressedTerminalOpId !== this.activeCompareModel.operationId) {
+        this.comparePanelVisible = true;
+        this.renderSurfaces();
+      }
+      return;
+    }
+
     if (this.activeFeature) {
+      this.toast.show('Another operation is already in progress.');
+      return;
+    }
+
+    const cachedCompare = !forceRegenerate
+      ? this.completedCompareCache.get(this.currentGroupId)
+      : null;
+    if (cachedCompare) {
+      this.comparePanelVisible = true;
+      this.renderSurfaces();
+      return;
+    }
+
+    if (!this.tabState) {
+      return;
+    }
+    if (!this.tabState.hasApiKey) {
+      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
+        actionLabel: 'Settings',
+        onAction: () => { void browser.runtime.openOptionsPage(); },
+      });
+      return;
+    }
+    if (!this.tabState.connected) {
+      this.toast.show('Not connected to Fansly. Browse Fansly to establish a connection.');
+      return;
+    }
+    if (this.tabState.compareCardCount < 2) {
+      this.toast.show('Compare needs at least two model cards. Add files in prompts/drafts or map a personality.');
+      return;
+    }
+
+    const operationId = crypto.randomUUID();
+    const domFanDisplayName = getActiveConversationDisplayName();
+    this.cancelScheduledLoadingRender();
+    this.activeCompareModel = {
+      kind: 'compare',
+      fanDisplayName: domFanDisplayName ?? 'fan',
+      operationId,
+      tabs: [],
+      activeCardId: null,
+      progress: null,
+      canCancel: true,
+      canRegenerate: false,
+    };
+    this.quickInlineVisible = false;
+    this.comparePanelVisible = false;
+    this.suppressedTerminalOpId = null;
+    this.renderButtonBar();
+
+    this.port.send({
+      type: 'compare:start',
+      operationId,
+      groupId: this.currentGroupId,
+      routeNonce: this.routeNonce,
+      domFanDisplayName,
+      forceRegenerate,
+      replyMode: this.nextFastReplyMode,
+    });
+    this.resetNextFastReplyMode();
+  }
+
+  private toggleNextFastReplyMode(): void {
+    if (this.activeFeature || this.activeCompareModel?.operationId) {
       return;
     }
     this.nextFastReplyMode = this.nextFastReplyMode === 'preferSplit' ? 'default' : 'preferSplit';
@@ -378,9 +517,11 @@ export class ChatMuseContentApp {
 
   private handleRouteChange(groupId: string | null): void {
     const changed = this.currentGroupId !== groupId;
+    const previousGroupId = this.currentGroupId;
     this.routeNonce += 1;
     this.currentGroupId = groupId;
     this.completedOverlayCache.setActiveGroup(groupId);
+    this.completedCompareCache.setActiveGroup(groupId);
     this.mountController.setActiveRoute(groupId);
 
     if (changed) {
@@ -389,8 +530,15 @@ export class ChatMuseContentApp {
         this.quickSurfaceMode = 'inline';
         this.suppressedTerminalOpId = this.activeOperationId;
         this.renderSurfaces();
+      } else if (this.activeCompareModel?.operationId) {
+        this.comparePanelVisible = false;
+        this.suppressedTerminalOpId = this.activeCompareModel.operationId;
+        this.activeCompareModel = null;
+        this.completedCompareCache.clear(previousGroupId);
+        this.renderSurfaces();
       } else if (!this.activeFeature) {
         this.quickInlineVisible = false;
+        this.comparePanelVisible = false;
         this.deepOverlayModel = null;
         this.clearOperationState(true);
         this.overlayRawText = '';
@@ -422,6 +570,28 @@ export class ChatMuseContentApp {
       case 'operation:progress':
         this.handleProgress(message);
         break;
+      case 'compare:ready':
+        this.handleCompareReady(message);
+        break;
+      case 'compare:progress':
+        this.handleCompareProgress(message);
+        break;
+      case 'compare:chunk':
+        this.handleCompareChunk(message);
+        break;
+      case 'compare:cardComplete':
+        this.handleCompareCardComplete(message);
+        break;
+      case 'compare:cardError':
+        this.handleCompareCardError(message);
+        break;
+      case 'compare:complete':
+        this.handleCompareComplete(message);
+        break;
+      case 'compare:error':
+      case 'compare:discarded':
+        this.handleCompareTerminal(message);
+        break;
       case 'operation:debugPrompt':
         this.handleDebugPrompt(message);
         break;
@@ -447,6 +617,165 @@ export class ChatMuseContentApp {
     this.activeProfiling = message.profiling ?? null;
     this.activeProgress = message;
     this.scheduleLoadingRender();
+  }
+
+  private activeCompareFor(operationId: string): CompareInlineViewModel | null {
+    if (!this.activeCompareModel || this.activeCompareModel.operationId !== operationId) {
+      return null;
+    }
+    return this.activeCompareModel;
+  }
+
+  private findCompareTab(
+    operationId: string,
+    cardId: string,
+  ): CompareInlineTabState | null {
+    const model = this.activeCompareFor(operationId);
+    if (!model) {
+      return null;
+    }
+    return model.tabs.find((tab) => tab.cardId === cardId) ?? null;
+  }
+
+  private handleCompareReady(
+    message: Extract<BackgroundPortMessage, { type: 'compare:ready' }>,
+  ): void {
+    const model = this.activeCompareFor(message.operationId);
+    if (!model) {
+      return;
+    }
+    model.fanDisplayName = message.fanDisplayName;
+    model.tabs = message.cards.map((card) => ({
+      cardId: card.id,
+      label: card.label,
+      source: card.source,
+      status: 'loading',
+      rawText: '',
+      parts: [],
+    }));
+    model.activeCardId = model.tabs[0]?.cardId ?? null;
+    this.comparePanelVisible = true;
+    this.renderAll();
+  }
+
+  private handleCompareProgress(
+    message: Extract<BackgroundPortMessage, { type: 'compare:progress' }>,
+  ): void {
+    const model = this.activeCompareFor(message.operationId);
+    if (!model) {
+      return;
+    }
+    if (message.fanDisplayName) {
+      model.fanDisplayName = message.fanDisplayName;
+    }
+    model.progress = message;
+    this.scheduleLoadingRender();
+  }
+
+  private handleCompareChunk(
+    message: Extract<BackgroundPortMessage, { type: 'compare:chunk' }>,
+  ): void {
+    const tab = this.findCompareTab(message.operationId, message.cardId);
+    if (!tab) {
+      return;
+    }
+    tab.rawText += message.text;
+    this.scheduleLoadingRender();
+  }
+
+  private handleCompareCardComplete(
+    message: Extract<BackgroundPortMessage, { type: 'compare:cardComplete' }>,
+  ): void {
+    const model = this.activeCompareFor(message.operationId);
+    const tab = this.findCompareTab(message.operationId, message.cardId);
+    if (!model || !tab) {
+      return;
+    }
+    model.fanDisplayName = message.fanDisplayName;
+    tab.status = 'reply';
+    tab.rawText = message.result.rawText;
+    tab.parts = createParts(
+      message.result.parts && message.result.parts.length > 0
+        ? message.result.parts
+        : splitByNext(message.result.rawText),
+    );
+    tab.splitModeRequested = Boolean(message.result.splitModeRequested);
+    tab.error = undefined;
+    this.renderSurfaces();
+  }
+
+  private handleCompareCardError(
+    message: Extract<BackgroundPortMessage, { type: 'compare:cardError' }>,
+  ): void {
+    const tab = this.findCompareTab(message.operationId, message.cardId);
+    if (!tab) {
+      return;
+    }
+    tab.status = 'error';
+    tab.error = message.error;
+    this.renderSurfaces();
+  }
+
+  private handleCompareComplete(
+    message: Extract<BackgroundPortMessage, { type: 'compare:complete' }>,
+  ): void {
+    const model = this.activeCompareFor(message.operationId);
+    if (!model) {
+      return;
+    }
+
+    if (this.suppressedTerminalOpId === message.operationId) {
+      this.suppressedTerminalOpId = null;
+      this.activeCompareModel = null;
+      this.comparePanelVisible = false;
+      this.renderButtonBar();
+      return;
+    }
+
+    model.operationId = null;
+    model.progress = null;
+    model.canCancel = false;
+    model.canRegenerate = true;
+    model.fanDisplayName = message.fanDisplayName;
+    const completedModel: CompareInlineViewModel = {
+      kind: 'compare',
+      fanDisplayName: model.fanDisplayName,
+      operationId: null,
+      tabs: model.tabs,
+      activeCardId: model.activeCardId,
+      progress: null,
+      canCancel: false,
+      canRegenerate: true,
+    };
+    this.completedCompareCache.set(this.currentGroupId, completedModel);
+    this.activeCompareModel = null;
+    this.renderAll();
+  }
+
+  private handleCompareTerminal(
+    message: Extract<
+      BackgroundPortMessage,
+      { type: 'compare:error' | 'compare:discarded' }
+    >,
+  ): void {
+    if (this.activeCompareModel?.operationId === message.operationId) {
+      if (this.suppressedTerminalOpId === message.operationId) {
+        this.suppressedTerminalOpId = null;
+        this.activeCompareModel = null;
+        this.comparePanelVisible = false;
+        this.renderButtonBar();
+        return;
+      }
+
+      this.activeCompareModel = null;
+      this.comparePanelVisible = false;
+      this.completedCompareCache.clear(this.currentGroupId);
+      this.renderButtonBar();
+    }
+
+    if (message.type === 'compare:error') {
+      this.toast.show(message.error.message);
+    }
   }
 
   private handleDebugPrompt(message: Extract<BackgroundPortMessage, { type: 'operation:debugPrompt' }>): void {

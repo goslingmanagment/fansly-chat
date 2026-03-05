@@ -25,6 +25,16 @@ export interface Personality {
   updatedAt: number;
 }
 
+export interface CompareDraftCard {
+  id: string;
+  label: string;
+  content: string;
+}
+
+export interface CompareModelCard extends CompareDraftCard {
+  source: 'draft' | 'current';
+}
+
 export interface SummaryCacheEntry {
   summary: string;
   personalityId: string;
@@ -379,6 +389,7 @@ export type UserErrorCode =
   | 'chat_changed'
   | 'extension_reloaded'
   | 'model_unavailable'
+  | 'compare_cards_unavailable'
   | 'insertion_failed'
   | 'unknown_error';
 
@@ -454,6 +465,8 @@ export interface TabUiState {
   hasPersonalities: boolean;
   mappedPersonalityId: string | null;
   mappedPersonalityName: string | null;
+  compareCardCount: number;
+  compareDraftCount: number;
 }
 
 export interface PopupStatus extends TabUiState {
@@ -496,6 +509,16 @@ export interface PortEnvelopeBase {
     | 'operation:complete'
     | 'operation:error'
     | 'operation:discarded'
+    | 'compare:start'
+    | 'compare:cancel'
+    | 'compare:ready'
+    | 'compare:progress'
+    | 'compare:chunk'
+    | 'compare:cardComplete'
+    | 'compare:cardError'
+    | 'compare:error'
+    | 'compare:complete'
+    | 'compare:discarded'
     | 'settings:changed'
     | 'mapping:changed';
 }
@@ -525,8 +548,23 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   replyMode?: ReplyMode;
 }
 
+export interface CompareStartPayload extends PortEnvelopeBase {
+  type: 'compare:start';
+  operationId: string;
+  groupId: string | null;
+  routeNonce: number;
+  domFanDisplayName: string | null;
+  forceRegenerate?: boolean;
+  replyMode?: ReplyMode;
+}
+
 export interface OperationCancelPayload extends PortEnvelopeBase {
   type: 'operation:cancel';
+  operationId: string;
+}
+
+export interface CompareCancelPayload extends PortEnvelopeBase {
+  type: 'compare:cancel';
   operationId: string;
 }
 
@@ -534,13 +572,29 @@ export type ContentPortMessage =
   | TabInitPayload
   | RouteChangedPayload
   | OperationStartPayload
-  | OperationCancelPayload;
+  | OperationCancelPayload
+  | CompareStartPayload
+  | CompareCancelPayload;
 
 // Background → Content
 
 export interface ChunkPayload extends PortEnvelopeBase {
   type: 'operation:chunk';
   operationId: string;
+  text: string;
+}
+
+export interface CompareReadyPayload extends PortEnvelopeBase {
+  type: 'compare:ready';
+  operationId: string;
+  fanDisplayName: string;
+  cards: Array<Pick<CompareModelCard, 'id' | 'label' | 'source'>>;
+}
+
+export interface CompareChunkPayload extends PortEnvelopeBase {
+  type: 'compare:chunk';
+  operationId: string;
+  cardId: string;
   text: string;
 }
 
@@ -573,6 +627,44 @@ export interface DiscardedPayload extends PortEnvelopeBase {
   profiling?: OperationProfilingSnapshot;
 }
 
+export interface CompareCardCompletePayload extends PortEnvelopeBase {
+  type: 'compare:cardComplete';
+  operationId: string;
+  cardId: string;
+  result: FeatureResult;
+  fanDisplayName: string;
+  profiling?: OperationProfilingSnapshot;
+}
+
+export interface CompareCardErrorPayload extends PortEnvelopeBase {
+  type: 'compare:cardError';
+  operationId: string;
+  cardId: string;
+  error: UserFacingError;
+  profiling?: OperationProfilingSnapshot;
+}
+
+export interface CompareErrorPayload extends PortEnvelopeBase {
+  type: 'compare:error';
+  operationId: string;
+  error: UserFacingError;
+  profiling?: OperationProfilingSnapshot;
+}
+
+export interface CompareCompletePayload extends PortEnvelopeBase {
+  type: 'compare:complete';
+  operationId: string;
+  fanDisplayName: string;
+  profiling?: OperationProfilingSnapshot;
+}
+
+export interface CompareDiscardedPayload extends PortEnvelopeBase {
+  type: 'compare:discarded';
+  operationId: string;
+  error: UserFacingError;
+  profiling?: OperationProfilingSnapshot;
+}
+
 export interface TabStatePayload extends PortEnvelopeBase {
   type: 'tab:state' | 'settings:changed' | 'mapping:changed';
   state: TabUiState;
@@ -582,14 +674,36 @@ export interface ProgressEnvelope extends PortEnvelopeBase, OperationProgressPay
   type: 'operation:progress';
 }
 
+export interface CompareProgressPayload {
+  operationId: string;
+  phase: OperationPhase;
+  currentPage?: number;
+  targetPages?: number;
+  message?: string;
+  fanDisplayName?: string;
+  profiling?: OperationProfilingSnapshot;
+}
+
+export interface CompareProgressEnvelope extends PortEnvelopeBase, CompareProgressPayload {
+  type: 'compare:progress';
+}
+
 export type BackgroundPortMessage =
   | ChunkPayload
+  | CompareReadyPayload
+  | CompareChunkPayload
   | DebugPromptPayload
   | CompletePayload
   | ErrorPayload
   | DiscardedPayload
+  | CompareCardCompletePayload
+  | CompareCardErrorPayload
+  | CompareErrorPayload
+  | CompareCompletePayload
+  | CompareDiscardedPayload
   | TabStatePayload
-  | ProgressEnvelope;
+  | ProgressEnvelope
+  | CompareProgressEnvelope;
 
 // ─── Overlay View Model ──────────────────────────────────────────────────
 
@@ -602,6 +716,28 @@ export interface OverlayInsertPart {
 }
 
 export type OverlayRerunActionLabel = 'Regenerate' | 'Refresh';
+
+export interface CompareInlineTabState {
+  cardId: string;
+  label: string;
+  source: 'draft' | 'current';
+  status: 'loading' | 'reply' | 'error';
+  rawText: string;
+  parts: OverlayInsertPart[];
+  splitModeRequested?: boolean;
+  error?: UserFacingError;
+}
+
+export interface CompareInlineViewModel {
+  kind: 'compare';
+  fanDisplayName: string;
+  operationId: string | null;
+  tabs: CompareInlineTabState[];
+  activeCardId: string | null;
+  progress: CompareProgressPayload | null;
+  canCancel: boolean;
+  canRegenerate: boolean;
+}
 
 export type OverlayViewModel =
   | { kind: 'hidden' }
@@ -677,3 +813,7 @@ export type CompletedOverlayViewModel = Extract<
   OverlayViewModel,
   { kind: 'reply' | 'helpMe' | 'readOnly' }
 >;
+
+export type InlinePanelViewModel =
+  | OverlayViewModel
+  | CompareInlineViewModel;
