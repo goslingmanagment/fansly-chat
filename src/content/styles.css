@@ -631,6 +631,7 @@
   word-break: break-word;
   line-height: 1.55;
   font-size: 14px;
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-card-actions,
