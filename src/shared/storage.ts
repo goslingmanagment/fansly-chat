@@ -33,8 +33,10 @@ export async function loadStorageState(): Promise<PersistedState> {
 
 export function sanitizeSettings(input: Partial<Settings>): Settings {
   const defaults = createDefaultSettings();
-  const quick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
-  const deep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
+  const rawQuick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
+  const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
+  const quick = Number.isFinite(rawQuick) ? rawQuick : defaults.quickMessageCount;
+  const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
 
   const rawModels = input.featureModels && typeof input.featureModels === 'object'
     ? input.featureModels as Partial<Record<FeatureType, string>>

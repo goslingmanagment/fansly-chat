@@ -180,6 +180,7 @@ export class OperationCoordinator {
       void this.handlePortMessage(tabId, message as ContentPortMessage);
     });
     port.onDisconnect.addListener(() => {
+      if (this.portsByTabId.get(tabId) !== port) return;
       this.portsByTabId.delete(tabId);
       void this.cancelOperation(tabId);
     });
@@ -240,9 +241,13 @@ export class OperationCoordinator {
       case 'operation:start':
         await this.startOperation(tabId, message);
         break;
-      case 'operation:cancel':
-        await this.cancelOperation(tabId);
+      case 'operation:cancel': {
+        const active = this.activeByTabId.get(tabId);
+        if (active && active.operationId === message.operationId) {
+          await this.cancelOperation(tabId);
+        }
         break;
+      }
       default:
         break;
     }

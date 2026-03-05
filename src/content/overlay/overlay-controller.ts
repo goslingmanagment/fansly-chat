@@ -696,9 +696,14 @@ export class OverlayController {
     copy.className = 'chatmuse-button chatmuse-button-secondary';
     copy.textContent = 'Copy';
     copy.addEventListener('click', async () => {
-      await copyToClipboard(part.text);
-      this.inlineError = null;
-      this.render(this.model);
+      try {
+        await copyToClipboard(part.text);
+        this.inlineError = null;
+        this.render(this.model);
+      } catch (error) {
+        this.inlineError = toUserError(error);
+        this.render(this.model, true);
+      }
     });
 
     actions.append(insert, copy);

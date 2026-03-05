@@ -197,6 +197,25 @@ describe('sanitizeSettings', () => {
     expect(result.featureModels['chat-review']).toBe(DEFAULT_MODEL_ID);
     expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
   });
+
+  it('falls back to default when quickMessageCount is NaN-producing string', () => {
+    const result = storage.sanitizeSettings({ quickMessageCount: 'abc' as unknown as number });
+    const defaults = createDefaultSettings();
+    expect(result.quickMessageCount).toBe(defaults.quickMessageCount);
+    expect(Number.isFinite(result.quickMessageCount)).toBe(true);
+  });
+
+  it('falls back to default when deepMessageCount is NaN-producing string', () => {
+    const result = storage.sanitizeSettings({ deepMessageCount: 'not-a-number' as unknown as number });
+    const defaults = createDefaultSettings();
+    expect(result.deepMessageCount).toBe(defaults.deepMessageCount);
+    expect(Number.isFinite(result.deepMessageCount)).toBe(true);
+  });
+
+  it('still clamps valid numeric strings', () => {
+    const result = storage.sanitizeSettings({ quickMessageCount: '999' as unknown as number });
+    expect(result.quickMessageCount).toBe(200);
+  });
 });
 
 // ─── loadStorageState ───────────────────────────────────────────────────

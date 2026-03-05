@@ -1210,4 +1210,101 @@ describe('OperationCoordinator', () => {
     const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
     expect(promptUser).toContain('(some months could not be fetched)');
   });
+
+  it('stale port disconnect does not cancel current operation (Bug 1)', async () => {
+    let resolveStream: ((text: string) => void) | null = null;
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => { resolveStreamStarted = resolve; });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        () => {
+          resolveStreamStarted?.();
+          return new Promise<string>((resolve) => { resolveStream = resolve; });
+        },
+      ),
+    };
+    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+
+    // Simulate old port with its own disconnect handler
+    const oldPort = { postMessage: vi.fn() };
+    coordinator.registerPort(Object.assign(oldPort, {
+      sender: { tab: { id: 1 } },
+      onMessage: { addListener: vi.fn() },
+      onDisconnect: { addListener: vi.fn() },
+    }));
+    const oldDisconnectHandler = oldPort.onDisconnect.addListener.mock.calls[0][0];
+
+    // New port replaces the old one
+    const newPort = { postMessage: vi.fn() };
+    coordinator.registerPort(Object.assign(newPort, {
+      sender: { tab: { id: 1 } },
+      onMessage: { addListener: vi.fn() },
+      onDisconnect: { addListener: vi.fn() },
+    }));
+
+    // Start operation on the new port
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'new-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    // Wait until the stream is active
+    await streamStarted;
+
+    // Old port disconnects — should NOT cancel the new operation
+    oldDisconnectHandler();
+
+    // Operation should still be active
+    expect(coordinator.activeByTabId.has(1)).toBe(true);
+
+    resolveStream!('Result');
+    await startPromise;
+  });
+
+  it('cancel with mismatched operationId does not cancel current operation (Bug 2)', async () => {
+    let resolveStream: ((text: string) => void) | null = null;
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => { resolveStreamStarted = resolve; });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        () => {
+          resolveStreamStarted?.();
+          return new Promise<string>((resolve) => { resolveStream = resolve; });
+        },
+      ),
+    };
+    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'current-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    // Wait until the stream is active
+    await streamStarted;
+
+    // Simulate cancel for a stale operation
+    await coordinator.handlePortMessage(1, {
+      type: 'operation:cancel',
+      operationId: 'old-stale-op',
+    });
+
+    // Operation should still be active (mismatched operationId)
+    expect(coordinator.activeByTabId.has(1)).toBe(true);
+
+    resolveStream!('Result');
+    await startPromise;
+  });
 });

@@ -60,10 +60,7 @@ function buildFanSubscriptionSection(fanSubscriptionData: string): string {
 }
 
 function applyTemplate(template: string, replacements: Record<string, string>): string {
-  return Object.entries(replacements).reduce(
-    (output, [key, value]) => output.replaceAll(`{${key}}`, value),
-    template,
-  );
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => replacements[key] ?? match);
 }
 
 /**

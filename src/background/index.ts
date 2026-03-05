@@ -34,8 +34,20 @@ browser.tabs.onRemoved.addListener((tabId) => {
   void coordinator.handleTabRemoved(tabId);
 });
 
-browser.storage.onChanged.addListener(() => {
-  void coordinator.refreshAllTabs('settings:changed');
+const UI_RELEVANT_KEYS = new Set([
+  'settings',
+  'personalities',
+  'accountMappings',
+  'knownAccounts',
+  'schemaVersion',
+]);
+
+browser.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  const hasRelevantKey = Object.keys(changes).some((k) => UI_RELEVANT_KEYS.has(k));
+  if (hasRelevantKey) {
+    void coordinator.refreshAllTabs('settings:changed');
+  }
 });
 
 void loadStorageState();

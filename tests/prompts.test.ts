@@ -212,3 +212,34 @@ describe('ping segment substitution', () => {
     expect(result.user).not.toContain('Segment B');
   });
 });
+
+// ─── Placeholder injection resistance ────────────────────────────────────
+
+describe('placeholder injection resistance', () => {
+  it('does not expand placeholder-like text in fan transcript', () => {
+    const result = buildPrompt(buildTestInput({
+      transcript: 'Fan: {personality} is leaking',
+    }));
+    expect(result.user).toContain('{personality} is leaking');
+    expect(result.user).not.toContain('Stay playful. is leaking');
+  });
+
+  it('does not expand placeholder-like text in transcript (cross-key injection)', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'fast-reply',
+      transcript: 'Fan: check {splitReplyInstructions} here',
+      replyMode: 'preferSplit',
+    }));
+    // The literal text should remain, not be expanded to split instructions
+    expect(result.user).toContain('{splitReplyInstructions} here');
+    expect(result.user).not.toContain('Split mode is on for this reply. here');
+  });
+
+  it('does not expand placeholder-like text in spending data', () => {
+    const result = buildPrompt(buildTestInput({
+      fanSpendingData: 'Total: {personality}',
+    }));
+    expect(result.user).toContain('{personality}');
+    expect(result.user).not.toContain('Stay playful');
+  });
+});

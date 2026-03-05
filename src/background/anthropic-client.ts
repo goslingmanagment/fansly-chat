@@ -80,7 +80,7 @@ export class AnthropicClient {
       } catch (e) {
         if (e instanceof ChatMuseError) throw e;
       }
-      throw new ChatMuseError('network_error');
+      throw new ChatMuseError('unknown_error');
     }
     if (!response.ok || !response.body) {
       throw new ChatMuseError('network_error');

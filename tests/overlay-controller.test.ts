@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+
+vi.mock('../src/content/textarea.js', () => ({
+  insertIntoFanslyTextarea: vi.fn(async () => undefined),
+  copyToClipboard: vi.fn(async () => undefined),
+  focusActiveConversationTextarea: vi.fn(() => null),
+}));
+
 import { OverlayController } from '../src/content/overlay/overlay-controller.js';
+import { copyToClipboard } from '../src/content/textarea.js';
 import type {
   OperationProfilingSnapshot,
   OverlayInsertPart,
@@ -582,5 +590,38 @@ describe('OverlayController', () => {
     const inspector = document.querySelector('.chatmuse-debug-inspector');
     expect(inspector).not.toBeNull();
     expect(inspector?.querySelector('.chatmuse-debug-summary')?.textContent).toBe('Claude Input');
+  });
+
+  it('shows inline error when copy to clipboard fails (Bug 6)', async () => {
+    const mockCopy = vi.mocked(copyToClipboard);
+    mockCopy.mockRejectedValueOnce(new DOMException('Not allowed', 'NotAllowedError'));
+
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    const part: OverlayInsertPart = {
+      id: 'part-1',
+      sequenceIndex: 0,
+      text: 'Hello there',
+      insertedAt: null,
+      insertedOnce: false,
+    };
+
+    controller.render(createReplyModel(part));
+
+    const copyButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button'),
+    ).find((button) => button.textContent === 'Copy');
+    expect(copyButton).toBeDefined();
+
+    copyButton!.click();
+    await vi.waitFor(() => {
+      const errorEl = document.querySelector('.chatmuse-inline-error');
+      expect(errorEl).not.toBeNull();
+    });
   });
 });
