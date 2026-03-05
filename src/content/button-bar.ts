@@ -1,6 +1,8 @@
 import { FEATURE_LABELS } from '../shared/constants.js';
 import type { FeatureType, ReplyMode, TabUiState } from '../shared/types.js';
 
+type ToolbarAction = FeatureType | 'compare';
+
 const FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: FEATURE_LABELS['fast-reply'] },
   { feature: 'help-me', label: FEATURE_LABELS['help-me'] },
@@ -11,6 +13,7 @@ const FEATURES: Array<{ feature: FeatureType; label: string }> = [
 
 interface ButtonBarCallbacks {
   onFeatureClick: (feature: FeatureType) => void;
+  onCompareClick: () => void;
   onReplyModeToggle: () => void;
 }
 
@@ -19,7 +22,7 @@ export class ButtonBar {
   private readonly actions: HTMLElement;
   private readonly personalityLabel: HTMLElement;
   private readonly replyModeToggle!: HTMLButtonElement;
-  private readonly buttons = new Map<FeatureType, HTMLButtonElement>();
+  private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
 
   constructor(private readonly callbacks: ButtonBarCallbacks) {
     this.root = document.createElement('div');
@@ -40,13 +43,20 @@ export class ButtonBar {
         const group = document.createElement('div');
         group.className = 'chatmuse-toolbar-group';
 
+        const compareButton = document.createElement('button');
+        compareButton.type = 'button';
+        compareButton.className = 'chatmuse-button chatmuse-toolbar-button';
+        compareButton.textContent = 'Compare';
+        compareButton.addEventListener('click', () => this.callbacks.onCompareClick());
+        this.buttons.set('compare', compareButton);
+
         this.replyModeToggle = document.createElement('button');
         this.replyModeToggle.type = 'button';
         this.replyModeToggle.className = 'chatmuse-button chatmuse-toolbar-toggle';
         this.replyModeToggle.textContent = '2-part';
         this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
-        group.append(button, this.replyModeToggle);
+        group.append(button, compareButton, this.replyModeToggle);
         this.actions.append(group);
       } else {
         this.actions.append(button);
@@ -59,7 +69,12 @@ export class ButtonBar {
     this.root.append(this.personalityLabel, this.actions);
   }
 
-  render(state: TabUiState | null, activeFeature: FeatureType | null, nextReplyMode: ReplyMode, activeLoading = false): void {
+  render(
+    state: TabUiState | null,
+    activeAction: ToolbarAction | null,
+    nextReplyMode: ReplyMode,
+    activeLoading = false,
+  ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatmuse-hidden', !hasState);
     if (!state) {
@@ -71,11 +86,13 @@ export class ButtonBar {
 
     const disableForPrereqs =
       !state.connected || !state.hasApiKey || !state.hasPersonalities || !state.mappedPersonalityId;
+    const disableCompareForPrereqs =
+      !state.connected || !state.hasApiKey || state.compareCardCount < 2;
 
     for (const entry of FEATURES) {
       const button = this.buttons.get(entry.feature)!;
-      const isActive = activeFeature === entry.feature;
-      button.disabled = Boolean(activeFeature && !isActive) || disableForPrereqs;
+      const isActive = activeAction === entry.feature;
+      button.disabled = Boolean(activeAction && !isActive) || disableForPrereqs;
       if (isActive && activeLoading) {
         button.innerHTML = '';
         button.append(
@@ -87,7 +104,21 @@ export class ButtonBar {
       }
     }
 
-    this.replyModeToggle.disabled = Boolean(activeFeature) || disableForPrereqs;
+    const compareButton = this.buttons.get('compare')!;
+    const compareActive = activeAction === 'compare';
+    compareButton.disabled =
+      Boolean(activeAction && !compareActive) || disableCompareForPrereqs;
+    if (compareActive && activeLoading) {
+      compareButton.innerHTML = '';
+      compareButton.append(
+        document.createTextNode('Compare'),
+        (() => { const s = document.createElement('span'); s.className = 'chatmuse-spinner'; return s; })(),
+      );
+    } else {
+      compareButton.textContent = 'Compare';
+    }
+
+    this.replyModeToggle.disabled = Boolean(activeAction) || (!state.connected || !state.hasApiKey);
     this.replyModeToggle.setAttribute('aria-pressed', nextReplyMode === 'preferSplit' ? 'true' : 'false');
     this.replyModeToggle.classList.toggle('chatmuse-toolbar-toggle-active', nextReplyMode === 'preferSplit');
   }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import type {
+  CompareInlineViewModel,
   OverlayInsertPart,
   OverlayViewModel,
 } from '../src/shared/types.js';
@@ -69,6 +70,43 @@ function createErrorModel(): Extract<OverlayViewModel, { kind: 'error' }> {
   };
 }
 
+function createCompareModel(
+  overrides?: Partial<CompareInlineViewModel>,
+): CompareInlineViewModel {
+  return {
+    kind: 'compare',
+    fanDisplayName: 'fan',
+    operationId: 'compare-op',
+    activeCardId: 'current',
+    progress: {
+      operationId: 'compare-op',
+      phase: 'generating',
+      message: 'Generating compare replies…',
+    },
+    canCancel: true,
+    canRegenerate: false,
+    tabs: [
+      {
+        cardId: 'current',
+        label: 'Current',
+        source: 'current',
+        status: 'reply',
+        rawText: 'Current reply',
+        parts: [createPart('Current reply')],
+      },
+      {
+        cardId: 'draft',
+        label: 'Draft',
+        source: 'draft',
+        status: 'loading',
+        rawText: '',
+        parts: [],
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function createPart(text: string, index = 0): OverlayInsertPart {
   return {
     id: `part-${index}`,
@@ -132,12 +170,16 @@ describe('InlinePanelController', () => {
     onExpand: () => void;
     onCancel: (operationId: string) => void;
     onRerun: (feature: string) => void;
+    onCompareRerun: () => void;
+    onCompareTabSelect: (cardId: string) => void;
   }>) {
     return new InlinePanelController({
       onClose: overrides?.onClose ?? (() => undefined),
       onExpand: overrides?.onExpand ?? (() => undefined),
       onCancel: overrides?.onCancel ?? (() => undefined),
       onRerun: overrides?.onRerun ?? (() => undefined),
+      onCompareRerun: overrides?.onCompareRerun ?? (() => undefined),
+      onCompareTabSelect: overrides?.onCompareTabSelect ?? (() => undefined),
     });
   }
 
@@ -413,5 +455,123 @@ describe('InlinePanelController', () => {
     regenButton!.click();
 
     expect(onRerun).toHaveBeenCalledWith('fast-reply');
+  });
+
+  it('renders compare tabs and notifies when switching tabs', () => {
+    const onCompareTabSelect = vi.fn();
+    const controller = createController({ onCompareTabSelect });
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel());
+
+    expect(requireElement(controller.root, '.chatmuse-compare-summary').textContent).toBe('Comparing current + 1 draft');
+    const tabs = controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-compare-tab');
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0]?.textContent).toContain('Current');
+    expect(tabs[1]?.textContent).toContain('Draft');
+    expect(tabs[1]?.querySelector('.chatmuse-spinner')).not.toBeNull();
+
+    tabs[1]!.click();
+    expect(onCompareTabSelect).toHaveBeenCalledWith('draft');
+  });
+
+  it('renders compare reply content for the active tab and supports regenerate all', () => {
+    const onCompareRerun = vi.fn();
+    const controller = createController({ onCompareRerun });
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel({
+      operationId: null,
+      canCancel: false,
+      canRegenerate: true,
+    }));
+
+    expect(requireElement(controller.root, '.chatmuse-card-text').textContent).toBe('Current reply');
+    const buttons = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button'));
+    expect(buttons.some((button) => button.textContent === 'Insert')).toBe(true);
+    expect(buttons.some((button) => button.textContent === 'Copy')).toBe(true);
+
+    const regenerate = buttons.find((button) => button.textContent === 'Regenerate all');
+    expect(regenerate).toBeDefined();
+    regenerate!.click();
+    expect(onCompareRerun).toHaveBeenCalledOnce();
+  });
+
+  it('renders compare summary for multiple draft tabs', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel({
+      tabs: [
+        {
+          cardId: 'current',
+          label: 'Current',
+          source: 'current',
+          status: 'reply',
+          rawText: 'Current reply',
+          parts: [createPart('Current reply')],
+        },
+        {
+          cardId: 'draft-1',
+          label: 'Draft 1',
+          source: 'draft',
+          status: 'reply',
+          rawText: 'Draft 1 reply',
+          parts: [createPart('Draft 1 reply')],
+        },
+        {
+          cardId: 'draft-2',
+          label: 'Draft 2',
+          source: 'draft',
+          status: 'reply',
+          rawText: 'Draft 2 reply',
+          parts: [createPart('Draft 2 reply')],
+        },
+        {
+          cardId: 'draft-3',
+          label: 'Draft 3',
+          source: 'draft',
+          status: 'reply',
+          rawText: 'Draft 3 reply',
+          parts: [createPart('Draft 3 reply')],
+        },
+      ],
+    }));
+
+    expect(requireElement(controller.root, '.chatmuse-compare-summary').textContent).toBe('Comparing current + 3 drafts');
+    expect(controller.root.querySelectorAll('.chatmuse-compare-tab')).toHaveLength(4);
+  });
+
+  it('renders compare error state for the active tab', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel({
+      activeCardId: 'draft',
+      tabs: [
+        {
+          cardId: 'current',
+          label: 'Current',
+          source: 'current',
+          status: 'reply',
+          rawText: 'Current reply',
+          parts: [createPart('Current reply')],
+        },
+        {
+          cardId: 'draft',
+          label: 'Draft',
+          source: 'draft',
+          status: 'error',
+          rawText: '',
+          parts: [],
+          error: {
+            code: 'unknown_error',
+            message: 'Draft failed',
+          },
+        },
+      ],
+    }));
+
+    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toBe('Draft failed');
   });
 });

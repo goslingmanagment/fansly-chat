@@ -1,10 +1,12 @@
+import { watch as watchFs } from 'node:fs';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
+import { ensureCompareDraftRegistry } from './build/compare-drafts-registry.mjs';
 
 const root = process.cwd();
 const outdir = path.join(root, 'dist');
-const watch = process.argv.includes('--watch');
+const watchMode = process.argv.includes('--watch');
 
 const entryPoints = {
   background: path.join(root, 'src/background/index.ts'),
@@ -27,6 +29,7 @@ async function ensureStaticFiles() {
 }
 
 async function buildOnce() {
+  await ensureCompareDraftRegistry(root);
   await rm(outdir, { recursive: true, force: true });
   await mkdir(outdir, { recursive: true });
 
@@ -50,7 +53,7 @@ async function buildOnce() {
   await ensureStaticFiles();
 }
 
-if (!watch) {
+if (!watchMode) {
   await buildOnce();
 } else {
   await buildOnce();
@@ -74,6 +77,7 @@ if (!watch) {
         name: 'chatmuse-static-copy',
         setup(build) {
           build.onEnd(async () => {
+            await ensureCompareDraftRegistry(root);
             await ensureStaticFiles();
           });
         },
@@ -82,5 +86,25 @@ if (!watch) {
   });
 
   await ctx.watch();
+  const draftsWatchPaths = [
+    path.join(root, 'prompts'),
+    path.join(root, 'prompts', 'drafts'),
+  ];
+  const watchers = draftsWatchPaths.map((watchPath) =>
+    watchFs(watchPath, { persistent: true }, async (_eventType, filename) => {
+      if (typeof filename === 'string' && !filename.toLowerCase().endsWith('.md')) {
+        return;
+      }
+      try {
+        await ensureCompareDraftRegistry(root);
+        await ctx.rebuild();
+      } catch (error) {
+        console.error('Failed to rebuild compare drafts registry', error);
+      }
+    }),
+  );
+  process.on('exit', () => {
+    watchers.forEach((watcher) => watcher.close());
+  });
   console.log('Watching ChatMuse...');
 }

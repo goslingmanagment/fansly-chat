@@ -1,7 +1,10 @@
 import { FEATURE_LABELS } from '../../shared/constants.js';
 import { toUserError } from '../../shared/errors.js';
 import type {
+  CompareInlineTabState,
+  CompareInlineViewModel,
   FeatureType,
+  InlinePanelViewModel,
   OverlayInsertPart,
   OverlayViewModel,
   UserFacingError,
@@ -13,6 +16,8 @@ interface InlinePanelCallbacks {
   onExpand: () => void;
   onCancel: (operationId: string) => void;
   onRerun: (feature: FeatureType) => void;
+  onCompareRerun: () => void;
+  onCompareTabSelect: (cardId: string) => void;
 }
 
 interface InlinePanelRenderOptions {
@@ -28,7 +33,7 @@ interface LoadingViewState {
 }
 
 interface StaticViewState {
-  kind: 'reply' | 'error';
+  kind: 'reply' | 'error' | 'compare';
   operationId: string | null;
   root: HTMLElement;
 }
@@ -43,13 +48,33 @@ function isEditableElement(el: Element | null): boolean {
   return false;
 }
 
+function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
+  const currentCount = tabs.filter((tab) => tab.source === 'current').length;
+  const draftCount = tabs.filter((tab) => tab.source === 'draft').length;
+
+  if (currentCount > 0 && draftCount > 0) {
+    return `Comparing current + ${draftCount} draft${draftCount === 1 ? '' : 's'}`;
+  }
+
+  if (draftCount > 0) {
+    return `Comparing ${draftCount} draft${draftCount === 1 ? '' : 's'}`;
+  }
+
+  if (currentCount > 0) {
+    return 'Comparing current';
+  }
+
+  return null;
+}
+
 export class InlinePanelController {
   readonly root: HTMLDivElement;
   private readonly headerEl: HTMLDivElement;
   private readonly titleEl: HTMLDivElement;
   private readonly bodyEl: HTMLDivElement;
+  private readonly expandButton: HTMLButtonElement;
   private currentView: InlineViewState | null = null;
-  private model: OverlayViewModel = { kind: 'hidden' };
+  private model: InlinePanelViewModel = { kind: 'hidden' };
   private inlineError: UserFacingError | null = null;
 
   constructor(private readonly callbacks: InlinePanelCallbacks) {
@@ -66,12 +91,12 @@ export class InlinePanelController {
     const actions = document.createElement('div');
     actions.className = 'chatmuse-inline-panel-actions';
 
-    const expand = document.createElement('button');
-    expand.type = 'button';
-    expand.className = 'chatmuse-inline-panel-action';
-    expand.textContent = '\u2197';
-    expand.title = 'Expand';
-    expand.addEventListener('click', () => this.callbacks.onExpand());
+    this.expandButton = document.createElement('button');
+    this.expandButton.type = 'button';
+    this.expandButton.className = 'chatmuse-inline-panel-action';
+    this.expandButton.textContent = '\u2197';
+    this.expandButton.title = 'Expand';
+    this.expandButton.addEventListener('click', () => this.callbacks.onExpand());
 
     const close = document.createElement('button');
     close.type = 'button';
@@ -80,7 +105,7 @@ export class InlinePanelController {
     close.title = 'Close';
     close.addEventListener('click', () => this.callbacks.onClose());
 
-    actions.append(expand, close);
+    actions.append(this.expandButton, close);
     this.headerEl.append(this.titleEl, actions);
 
     // Body
@@ -98,7 +123,7 @@ export class InlinePanelController {
     });
   }
 
-  render(model: OverlayViewModel, options?: InlinePanelRenderOptions): void {
+  render(model: InlinePanelViewModel, options?: InlinePanelRenderOptions): void {
     if (model.kind === 'hidden') {
       this.hide();
       return;
@@ -113,13 +138,15 @@ export class InlinePanelController {
     }
 
     // Update header
-    const feature = 'feature' in model ? model.feature : null;
+    const featureLabel = model.kind === 'compare'
+      ? 'Compare'
+      : ('feature' in model ? FEATURE_LABELS[model.feature] ?? model.feature : 'ChatMuse');
     const fanDisplayName = 'fanDisplayName' in model ? model.fanDisplayName : 'fan';
-    const featureLabel = feature ? FEATURE_LABELS[feature] ?? feature : 'ChatMuse';
     const titleText = `${featureLabel} — @${fanDisplayName || 'fan'}`;
     if (this.titleEl.textContent !== titleText) {
       this.titleEl.textContent = titleText;
     }
+    this.expandButton.style.display = model.kind === 'compare' ? 'none' : '';
 
     // Show panel
     this.root.classList.remove('chatmuse-hidden');
@@ -136,7 +163,7 @@ export class InlinePanelController {
     this.root.classList.add('chatmuse-hidden');
   }
 
-  private renderBody(model: Exclude<OverlayViewModel, { kind: 'hidden' }>): void {
+  private renderBody(model: Exclude<InlinePanelViewModel, { kind: 'hidden' }>): void {
     // Smart diff for loading: update in-place if same operationId
     if (
       model.kind === 'loading' &&
@@ -150,6 +177,12 @@ export class InlinePanelController {
     let view: InlineViewState;
     if (model.kind === 'loading') {
       view = this.createLoadingView(model);
+    } else if (model.kind === 'compare') {
+      view = {
+        kind: 'compare',
+        operationId: model.operationId,
+        root: this.renderCompareBody(model),
+      };
     } else if (model.kind === 'reply') {
       view = {
         kind: 'reply',
@@ -250,7 +283,6 @@ export class InlinePanelController {
           this.createPartCard(
             this.partTitle(part, model.splitModeRequested),
             part,
-            model.operationId,
             {
               hint: isSplit
                 ? (part.sequenceIndex === 0 ? 'Suggested first send.' : 'Suggested follow-up after message 1.')
@@ -287,6 +319,156 @@ export class InlinePanelController {
     return section;
   }
 
+  private renderCompareBody(model: CompareInlineViewModel): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'chatmuse-grid';
+
+    if (model.tabs.length === 0) {
+      const waiting = document.createElement('div');
+      waiting.className = 'chatmuse-stream';
+      waiting.textContent = model.progress?.message ?? 'Preparing compare…';
+      section.append(waiting);
+      return section;
+    }
+
+    const summaryText = formatCompareSummary(model.tabs);
+    if (summaryText) {
+      const summary = document.createElement('div');
+      summary.className = 'chatmuse-compare-summary';
+      summary.textContent = summaryText;
+      section.append(summary);
+    }
+
+    const tabs = document.createElement('div');
+    tabs.className = 'chatmuse-compare-tabs';
+    model.tabs.forEach((tab) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chatmuse-compare-tab';
+      if (tab.cardId === model.activeCardId) {
+        button.classList.add('chatmuse-compare-tab-active');
+      }
+      button.addEventListener('click', () => this.callbacks.onCompareTabSelect(tab.cardId));
+
+      const label = document.createElement('span');
+      label.textContent = tab.label;
+      button.append(label);
+
+      if (tab.source === 'current') {
+        const badge = document.createElement('span');
+        badge.className = 'chatmuse-compare-tab-badge';
+        badge.textContent = 'Current';
+        button.append(badge);
+      }
+
+      if (tab.status === 'loading') {
+        const spinner = document.createElement('span');
+        spinner.className = 'chatmuse-spinner';
+        button.append(spinner);
+      }
+
+      tabs.append(button);
+    });
+    section.append(tabs);
+
+    const activeTab =
+      model.tabs.find((tab) => tab.cardId === model.activeCardId) ??
+      model.tabs[0] ??
+      null;
+    if (activeTab) {
+      section.append(this.renderCompareActiveTab(model, activeTab));
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'chatmuse-card-actions';
+    if (model.canCancel && model.operationId) {
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'chatmuse-button chatmuse-button-danger';
+      cancel.textContent = 'Cancel all';
+      cancel.addEventListener('click', () => this.callbacks.onCancel(model.operationId!));
+      actions.append(cancel);
+    }
+    if (model.canRegenerate) {
+      const rerun = document.createElement('button');
+      rerun.type = 'button';
+      rerun.className = 'chatmuse-button';
+      rerun.textContent = 'Regenerate all';
+      rerun.addEventListener('click', () => this.callbacks.onCompareRerun());
+      actions.append(rerun);
+    }
+    if (actions.childElementCount > 0) {
+      section.append(actions);
+    }
+
+    return section;
+  }
+
+  private renderCompareActiveTab(
+    model: CompareInlineViewModel,
+    tab: CompareInlineTabState,
+  ): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'chatmuse-grid';
+
+    if (this.inlineError) {
+      const errorBanner = document.createElement('div');
+      errorBanner.className = 'chatmuse-inline-error';
+      errorBanner.textContent = this.inlineError.message;
+      section.append(errorBanner);
+    }
+
+    if (tab.status === 'loading') {
+      const status = document.createElement('div');
+      status.className = 'chatmuse-overlay-status';
+      status.textContent = model.progress?.message ?? 'Generating…';
+      const stream = document.createElement('div');
+      stream.className = 'chatmuse-stream';
+      stream.textContent = tab.rawText || 'Waiting for Claude…';
+      section.append(status, stream);
+      return section;
+    }
+
+    if (tab.status === 'error') {
+      const error = document.createElement('div');
+      error.className = 'chatmuse-inline-error';
+      error.textContent = tab.error?.message ?? 'Something went wrong.';
+      section.append(error);
+      return section;
+    }
+
+    if (tab.parts.length > 0) {
+      const parts = document.createElement('div');
+      parts.className = 'chatmuse-parts';
+      tab.parts.forEach((part) => {
+        const isSplit = tab.splitModeRequested && tab.parts.length > 1;
+        parts.append(
+          this.createPartCard(
+            this.partTitle(part, tab.splitModeRequested),
+            part,
+            {
+              hint: isSplit
+                ? (part.sequenceIndex === 0 ? 'Suggested first send.' : 'Suggested follow-up after message 1.')
+                : undefined,
+              emphasis: isSplit
+                ? (part.sequenceIndex === 0 ? 'recommended' : 'followup')
+                : undefined,
+              status: part.insertedOnce ? 'Inserted earlier.' : undefined,
+            },
+          ),
+        );
+      });
+      section.append(parts);
+      return section;
+    }
+
+    const raw = document.createElement('div');
+    raw.className = 'chatmuse-stream';
+    raw.textContent = tab.rawText;
+    section.append(raw);
+    return section;
+  }
+
   private partTitle(part: OverlayInsertPart, splitModeRequested?: boolean): string {
     const number = part.sequenceIndex + 1;
     return splitModeRequested && part.sequenceIndex > 0 ? `Follow-up ${number}` : `Message ${number}`;
@@ -295,7 +477,6 @@ export class InlinePanelController {
   private createPartCard(
     title: string,
     part: OverlayInsertPart,
-    operationId: string,
     options: { hint?: string; emphasis?: 'recommended' | 'followup'; status?: string } = {},
   ): HTMLElement {
     const card = document.createElement('div');
@@ -344,7 +525,7 @@ export class InlinePanelController {
         part.insertedAt = Date.now();
         this.inlineError = null;
         this.render(this.model);
-        this.scheduleInsertedReset(part, operationId);
+        this.scheduleInsertedReset(part);
         this.queueComposerFocus();
       } catch (error) {
         this.inlineError = toUserError(error);
@@ -378,10 +559,10 @@ export class InlinePanelController {
     return card;
   }
 
-  private scheduleInsertedReset(part: OverlayInsertPart, operationId: string): void {
+  private scheduleInsertedReset(part: OverlayInsertPart): void {
     window.setTimeout(() => {
       part.insertedAt = null;
-      if ('operationId' in this.model && (this.model as { operationId?: string }).operationId === operationId) {
+      if (this.model.kind !== 'hidden') {
         this.render(this.model);
       }
     }, 2000);
