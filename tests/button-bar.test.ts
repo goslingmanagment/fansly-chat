@@ -44,6 +44,7 @@ describe('ButtonBar compare button', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
       onReplyModeToggle: () => undefined,
     });
     document.body.append(bar.root);
@@ -54,7 +55,7 @@ describe('ButtonBar compare button', () => {
       mappedPersonalityName: null,
       compareCardCount: 2,
       compareDraftCount: 2,
-    }), null, 'default', false);
+    }), null, 'default', false, false);
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
     const reply = buttons.find((button) => button.textContent === 'Reply');
@@ -68,6 +69,7 @@ describe('ButtonBar compare button', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
       onReplyModeToggle: () => undefined,
     });
     document.body.append(bar.root);
@@ -75,11 +77,55 @@ describe('ButtonBar compare button', () => {
     bar.render(buildState({
       compareCardCount: 1,
       compareDraftCount: 1,
-    }), null, 'default', false);
+    }), null, 'default', false, false);
 
     const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Compare');
 
     expect(compare?.disabled).toBe(true);
+  });
+
+  it('hides Reopen when there is no completed compare cache to restore', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', false, false);
+
+    const reopen = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Reopen');
+
+    expect(reopen?.classList.contains('chatmuse-hidden')).toBe(true);
+  });
+
+  it('shows enabled Reopen when a completed compare can be restored even without connection or API key', () => {
+    const restoreSpy = vi.fn();
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: restoreSpy,
+      onReplyModeToggle: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState({
+      connected: false,
+      hasApiKey: false,
+    }), null, 'default', false, true);
+
+    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
+    const compare = buttons.find((button) => button.textContent === 'Compare');
+    const reopen = buttons.find((button) => button.textContent === 'Reopen');
+
+    expect(compare?.disabled).toBe(true);
+    expect(reopen?.classList.contains('chatmuse-hidden')).toBe(false);
+    expect(reopen?.disabled).toBe(false);
+
+    reopen?.click();
+    expect(restoreSpy).toHaveBeenCalledTimes(1);
   });
 });

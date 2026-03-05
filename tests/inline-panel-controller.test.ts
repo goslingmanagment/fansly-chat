@@ -470,6 +470,8 @@ describe('InlinePanelController', () => {
     expect(tabs[0]?.textContent).toContain('Current');
     expect(tabs[1]?.textContent).toContain('Draft');
     expect(tabs[1]?.querySelector('.chatmuse-spinner')).not.toBeNull();
+    expect(tabs[0]?.getAttribute('aria-pressed')).toBe('true');
+    expect(tabs[1]?.getAttribute('aria-pressed')).toBe('false');
 
     tabs[1]!.click();
     expect(onCompareTabSelect).toHaveBeenCalledWith('draft');

@@ -709,14 +709,42 @@ describe('ChatMuseContentApp', () => {
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
-    app.completedCompareCache.set('group-1', {
-      model: createCompareModel(),
-      fingerprint: await app.computeCompareFingerprint(),
+    app.activeCompareModel = createCompareModel({
+      operationId: 'compare-op',
+      canCancel: true,
+      canRegenerate: false,
+      progress: {
+        operationId: 'compare-op',
+        phase: 'generating',
+        message: 'Generating compare replies…',
+      },
+    });
+    app.comparePanelVisible = true;
+    app.pendingCompareFingerprint = await app.computeCompareFingerprint();
+
+    app.handleCompareComplete({
+      type: 'compare:complete',
+      operationId: 'compare-op',
+      fanDisplayName: 'alice',
     });
 
-    const restored = await app.restoreCompletedComparePanel();
+    const inlineRoot = app.inlinePanel.root as HTMLElement;
+    const buttonBarRoot = app.buttonBar.root as HTMLElement;
+    const closeButton = (Array.from(
+      inlineRoot.querySelectorAll('.chatmuse-inline-panel-action'),
+    ) as HTMLButtonElement[]).find((button) => button.textContent === '\u00d7');
+    closeButton?.click();
 
-    expect(restored).toBe(true);
+    expect(app.comparePanelVisible).toBe(false);
+    expect(app.activeCompareModel).toBeNull();
+    expect(app.completedCompareCache.get('group-1')).not.toBeNull();
+
+    const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
+      .find((button) => button.textContent === 'Reopen');
+    expect(reopenButton?.classList.contains('chatmuse-hidden')).toBe(false);
+
+    await app.reopenCompletedCompare();
+
     expect(app.comparePanelVisible).toBe(true);
     expect(app.inlinePanel.root.querySelector('.chatmuse-compare-tab')?.textContent).toContain('Closer (current)');
   });
@@ -742,11 +770,57 @@ describe('ChatMuseContentApp', () => {
       ],
     });
 
-    const restored = await app.restoreCompletedComparePanel();
+    app.renderButtonBar();
+    const buttonBarRoot = app.buttonBar.root as HTMLElement;
+    const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
+      .find((button) => button.textContent === 'Reopen');
+    expect(reopenButton?.classList.contains('chatmuse-hidden')).toBe(false);
 
-    expect(restored).toBe(false);
+    await app.reopenCompletedCompare();
+
     expect(app.comparePanelVisible).toBe(false);
     expect(app.completedCompareCache.get('group-1')).toBeNull();
+    expect(document.querySelector('.chatmuse-toast')?.textContent).toContain('Saved compare is outdated. Run Compare again.');
+  });
+
+  it('closing a completed compare hides the panel, preserves the cache, and exposes Reopen', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeCompareModel = createCompareModel({
+      operationId: 'compare-op',
+      canCancel: true,
+      canRegenerate: false,
+      progress: {
+        operationId: 'compare-op',
+        phase: 'generating',
+        message: 'Generating compare replies…',
+      },
+    });
+    app.comparePanelVisible = true;
+
+    app.handleCompareComplete({
+      type: 'compare:complete',
+      operationId: 'compare-op',
+      fanDisplayName: 'alice',
+    });
+
+    const inlineRoot = app.inlinePanel.root as HTMLElement;
+    const buttonBarRoot = app.buttonBar.root as HTMLElement;
+    const closeButton = (Array.from(
+      inlineRoot.querySelectorAll('.chatmuse-inline-panel-action'),
+    ) as HTMLButtonElement[]).find((button) => button.textContent === '\u00d7');
+    closeButton?.click();
+
+    const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
+      .find((button) => button.textContent === 'Reopen');
+
+    expect(app.comparePanelVisible).toBe(false);
+    expect(app.activeCompareModel).toBeNull();
+    expect(app.completedCompareCache.get('group-1')).not.toBeNull();
+    expect(reopenButton?.classList.contains('chatmuse-hidden')).toBe(false);
   });
 
   it('port disconnect resets all surfaces and state', async () => {
