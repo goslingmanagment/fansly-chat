@@ -14,6 +14,7 @@ const FEATURES: Array<{ feature: FeatureType; label: string }> = [
 interface ButtonBarCallbacks {
   onFeatureClick: (feature: FeatureType) => void;
   onCompareClick: () => void;
+  onCompareRestoreClick: () => void;
   onReplyModeToggle: () => void;
 }
 
@@ -21,6 +22,7 @@ export class ButtonBar {
   readonly root: HTMLElement;
   private readonly actions: HTMLElement;
   private readonly personalityLabel: HTMLElement;
+  private readonly compareRestoreButton!: HTMLButtonElement;
   private readonly replyModeToggle!: HTMLButtonElement;
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
 
@@ -50,13 +52,20 @@ export class ButtonBar {
         compareButton.addEventListener('click', () => this.callbacks.onCompareClick());
         this.buttons.set('compare', compareButton);
 
+        this.compareRestoreButton = document.createElement('button');
+        this.compareRestoreButton.type = 'button';
+        this.compareRestoreButton.className =
+          'chatmuse-button chatmuse-toolbar-button chatmuse-button-secondary chatmuse-toolbar-button-secondary chatmuse-hidden';
+        this.compareRestoreButton.textContent = 'Reopen';
+        this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
+
         this.replyModeToggle = document.createElement('button');
         this.replyModeToggle.type = 'button';
         this.replyModeToggle.className = 'chatmuse-button chatmuse-toolbar-toggle';
         this.replyModeToggle.textContent = '2-part';
         this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
-        group.append(button, compareButton, this.replyModeToggle);
+        group.append(button, compareButton, this.compareRestoreButton, this.replyModeToggle);
         this.actions.append(group);
       } else {
         this.actions.append(button);
@@ -74,6 +83,7 @@ export class ButtonBar {
     activeAction: ToolbarAction | null,
     nextReplyMode: ReplyMode,
     activeLoading = false,
+    showCompareRestore = false,
   ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatmuse-hidden', !hasState);
@@ -117,6 +127,9 @@ export class ButtonBar {
     } else {
       compareButton.textContent = 'Compare';
     }
+
+    this.compareRestoreButton.classList.toggle('chatmuse-hidden', !showCompareRestore);
+    this.compareRestoreButton.disabled = Boolean(activeAction);
 
     this.replyModeToggle.disabled = Boolean(activeAction) || (!state.connected || !state.hasApiKey);
     this.replyModeToggle.setAttribute('aria-pressed', nextReplyMode === 'preferSplit' ? 'true' : 'false');

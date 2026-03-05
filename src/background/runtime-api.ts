@@ -2,6 +2,7 @@ import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/comp
 import { loadStorageState } from '../shared/storage.js';
 import type { PopupStatus } from '../shared/types.js';
 import { FanslyClient } from './fansly-client.js';
+import { parseGroupIdFromUrl } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
 import { TabContextStore } from './tab-context.js';
 
@@ -11,14 +12,6 @@ export interface RuntimeApiDeps {
   fanslyClient: FanslyClient;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
-}
-
-function parseGroupIdFromUrl(url: string | undefined): string | null {
-  if (!url) {
-    return null;
-  }
-  const match = /\/messages\/([^/?#]+)/.exec(url);
-  return match?.[1] ?? null;
 }
 
 export function registerRuntimeApi({

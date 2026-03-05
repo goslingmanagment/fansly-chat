@@ -101,6 +101,9 @@ export class ChatMuseContentApp {
     onCompareClick: () => {
       void this.startCompare(false);
     },
+    onCompareRestoreClick: () => {
+      void this.reopenCompletedCompare();
+    },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
   });
   private readonly mappingBanner = new MappingBanner({
@@ -122,7 +125,7 @@ export class ChatMuseContentApp {
       } else {
         this.quickInlineVisible = false;
       }
-      this.renderSurfaces();
+      this.renderAll();
     },
     onExpand: () => {
       if (this.activeCompareModel) {
@@ -214,7 +217,13 @@ export class ChatMuseContentApp {
       this.activeCompareModel?.operationId ||
       (this.activeFeature !== null && this.activeOperationId !== null),
     );
-    this.buttonBar.render(this.tabState, activeAction, this.nextFastReplyMode, activeLoading);
+    this.buttonBar.render(
+      this.tabState,
+      activeAction,
+      this.nextFastReplyMode,
+      activeLoading,
+      this.hasRestorableCompletedCompare(),
+    );
   }
 
   private renderAll(): void {
@@ -508,6 +517,10 @@ export class ChatMuseContentApp {
       replyMode: this.nextFastReplyMode,
     });
     this.resetNextFastReplyMode();
+  }
+
+  private async reopenCompletedCompare(): Promise<void> {
+    await this.restoreCompletedComparePanelInternal(true);
   }
 
   private toggleNextFastReplyMode(): void {
@@ -942,6 +955,21 @@ export class ChatMuseContentApp {
   }
 
   private async restoreCompletedComparePanel(): Promise<boolean> {
+    return this.restoreCompletedComparePanelInternal(false);
+  }
+
+  private hasRestorableCompletedCompare(): boolean {
+    return Boolean(
+      !this.activeFeature &&
+      !this.activeCompareModel &&
+      !this.comparePanelVisible &&
+      this.completedCompareCache.get(this.currentGroupId),
+    );
+  }
+
+  private async restoreCompletedComparePanelInternal(
+    notifyOnStale: boolean,
+  ): Promise<boolean> {
     if (this.activeCompareModel?.operationId) {
       return false;
     }
@@ -954,6 +982,12 @@ export class ChatMuseContentApp {
     const fingerprint = await this.computeCompareFingerprint();
     if (cached.fingerprint !== fingerprint) {
       this.completedCompareCache.clear(this.currentGroupId);
+      this.activeCompareModel = null;
+      this.comparePanelVisible = false;
+      this.renderAll();
+      if (notifyOnStale) {
+        this.toast.show('Saved compare is outdated. Run Compare again.');
+      }
       return false;
     }
 

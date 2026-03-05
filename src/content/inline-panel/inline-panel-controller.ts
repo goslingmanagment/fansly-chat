@@ -345,7 +345,9 @@ export class InlinePanelController {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'chatmuse-compare-tab';
-      if (tab.cardId === model.activeCardId) {
+      const isActive = tab.cardId === model.activeCardId;
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      if (isActive) {
         button.classList.add('chatmuse-compare-tab-active');
       }
       button.addEventListener('click', () => this.callbacks.onCompareTabSelect(tab.cardId));
