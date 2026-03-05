@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FanslyClient } from '../src/background/fansly-client.js';
 import { SessionStore } from '../src/background/session-store.js';
-import type { FanslySubscriberSubscriptionRecord } from '../src/shared/types.js';
+import type { FanslySubscriberSubscriptionRecord, MonthlyEarningsRow } from '../src/shared/types.js';
 
 const SESSION_CAPTURE = {
   accountId: 'account-1',
@@ -178,5 +178,52 @@ describe('FanslyClient subscription lookup modes', () => {
 
     expect(cachedResult).toEqual(fullResult);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('FanslyClient getMonthlyEarnings', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('returns monthly rows from monthlystats endpoint', async () => {
+    const { client, session } = createClientHarness();
+    const rows: MonthlyEarningsRow[] = [
+      { year: 2026, month: 2, totalGross: 195000, totalNet: 156000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 1 },
+      { year: 2026, month: 1, totalGross: 400000, totalNet: 320000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 2 },
+    ];
+    const fetchMock = vi.fn(async () => jsonSuccessResponse(rows));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.getMonthlyEarnings(
+      'fan-1',
+      0,
+      Date.now(),
+      session,
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual(rows);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = String((fetchMock.mock.calls as unknown[][])[0]?.[0]);
+    expect(url).toContain('/monthlystats/accounts');
+    expect(url).toContain('correlationAccountId=fan-1');
+  });
+
+  it('returns empty array when API returns no data', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () => jsonSuccessResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.getMonthlyEarnings(
+      'fan-1',
+      0,
+      Date.now(),
+      session,
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual([]);
   });
 });

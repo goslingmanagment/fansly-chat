@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MODEL_ID, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { ChatMuseError } from '../src/shared/errors.js';
 import type {
+  AggregatedEarnings,
   BackgroundPortMessage,
   FanSubscriptionContext,
+  MonthlyEarningsRow,
   NormalizedTranscriptMessage,
 } from '../src/shared/types.js';
 
@@ -77,7 +79,8 @@ function buildFanslyClientMock() {
         displayName: 'Alice',
       },
     ]),
-    getEarnings: vi.fn(async () => null),
+    getEarnings: vi.fn(async (): Promise<AggregatedEarnings | null> => null),
+    getMonthlyEarnings: vi.fn(async (): Promise<MonthlyEarningsRow[]> => []),
     getFanSubscriptionContext: vi.fn(
       async (): Promise<FanSubscriptionContext | null> => null,
     ),
@@ -222,7 +225,7 @@ describe('OperationCoordinator', () => {
     expect((globalThis as any).browser.storage.local.remove).toHaveBeenCalledWith('summary:group-1');
   });
 
-  it('uses cache-only subscription lookup for fast-reply and proceeds without subscription data on cache miss', async () => {
+  it('uses full subscription lookup for fast-reply and proceeds without subscription data when not found', async () => {
     const fanslyClient = buildFanslyClientMock();
     const { coordinator, anthropicClient } = await createCoordinatorHarness({
       anthropicRawText: 'hey babe',
@@ -245,7 +248,7 @@ describe('OperationCoordinator', () => {
       'fan-1',
       expect.objectContaining({ accountId: 'account-1' }),
       expect.anything(),
-      'cache-only',
+      'full',
     );
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
@@ -328,7 +331,7 @@ describe('OperationCoordinator', () => {
       'fan-1',
       expect.objectContaining({ accountId: 'account-1' }),
       expect.anything(),
-      'cache-only',
+      'full',
     );
     for (const message of messages) {
       if (
@@ -577,7 +580,8 @@ describe('OperationCoordinator', () => {
       const onTrace = args[5] as ((event: { type: string }) => void) | undefined;
       onTrace?.({ type: 'cache-miss' });
       advanceNow(30);
-      onTrace?.({ type: 'cache-only-skip' });
+      onTrace?.({ type: 'groups-miss' });
+      onTrace?.({ type: 'subscribers-miss' });
       return null;
     });
 
@@ -640,7 +644,7 @@ describe('OperationCoordinator', () => {
       status: 'completed',
       detail: '11 chars',
     });
-    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'subscription-lookup')?.detail).toContain('cache miss -> cache-only skip');
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'subscription-lookup')?.detail).toContain('cache miss -> groups miss -> subscribers miss');
   });
 
   it('includes partial profiling data on error in debug mode', async () => {
@@ -988,5 +992,222 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
     expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
+  });
+
+  it('derives totals from monthlystats when stats fails', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockRejectedValue(new Error('stats 500'));
+    fanslyClient.getMonthlyEarnings.mockResolvedValue([
+      { year: 2026, month: 2, totalGross: 195000, totalNet: 156000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 1 },
+      { year: 2026, month: 1, totalGross: 400000, totalNet: 320000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 2 },
+    ] satisfies MonthlyEarningsRow[]);
+
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'hey babe',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    expect(promptUser).toContain('Total gross (all-time): $595.00');
+    expect(promptUser).toContain('Total net (all-time): $476.00');
+    expect(promptUser).toContain('Monthly totals:');
+  });
+
+  it('produces zeroed spending data when both earnings calls succeed empty', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(null);
+    fanslyClient.getMonthlyEarnings.mockResolvedValue([]);
+
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'hey babe',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    expect(promptUser).toContain('FAN SPENDING DATA:');
+    expect(promptUser).toContain('Total gross (all-time): $0.00');
+  });
+
+  it('fetches per-month type breakdown for deep features', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    const monthlyRows: MonthlyEarningsRow[] = [
+      { year: 2026, month: 2, totalGross: 195000, totalNet: 156000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 1 },
+      { year: 2026, month: 1, totalGross: 400000, totalNet: 320000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 2 },
+      { year: 2025, month: 12, totalGross: 100000, totalNet: 80000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 3 },
+    ];
+    fanslyClient.getMonthlyEarnings.mockResolvedValue(monthlyRows);
+
+    const allTimeAggregated: AggregatedEarnings = {
+      correlationAccountId: 'fan-1',
+      windowStartIso: new Date(0).toISOString(),
+      windowEndIso: new Date(currentNow).toISOString(),
+      totalGross: 695000,
+      totalNet: 556000,
+      breakdown: [
+        { label: 'Subscription', type: 2110, gross: 695000, net: 556000 },
+      ],
+      monthlyTotals: [],
+    };
+    const perMonthAggregated: AggregatedEarnings = {
+      ...allTimeAggregated,
+      totalGross: 195000,
+      totalNet: 156000,
+      breakdown: [
+        { label: 'Subscription', type: 2110, gross: 195000, net: 156000 },
+      ],
+    };
+
+    let callCount = 0;
+    fanslyClient.getEarnings.mockImplementation(async () => {
+      callCount++;
+      return callCount === 1 ? allTimeAggregated : perMonthAggregated;
+    });
+
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText:
+        '<rating>7</rating><evaluation>Solid</evaluation><recommendations>Keep going</recommendations>',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    // 1 all-time call + 3 per-month calls
+    expect(fanslyClient.getEarnings).toHaveBeenCalledTimes(4);
+    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    expect(promptUser).toContain('Monthly breakdown by type:');
+  });
+
+  it('caps per-month breakdown at 12 months', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    const monthlyRows: MonthlyEarningsRow[] = Array.from({ length: 15 }, (_, i) => {
+      const d = new Date(2026, 2 - i, 1); // Mar 2026 backwards
+      return {
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        totalGross: 100000,
+        totalNet: 80000,
+        accountId: 'a',
+        correlationAccountId: 'fan-1',
+        timestamp: i,
+      };
+    });
+    fanslyClient.getMonthlyEarnings.mockResolvedValue(monthlyRows);
+    fanslyClient.getEarnings.mockResolvedValue({
+      correlationAccountId: 'fan-1',
+      windowStartIso: new Date(0).toISOString(),
+      windowEndIso: new Date(currentNow).toISOString(),
+      totalGross: 100000,
+      totalNet: 80000,
+      breakdown: [{ label: 'Subscription', type: 2110, gross: 100000, net: 80000 }],
+      monthlyTotals: [],
+    } satisfies AggregatedEarnings);
+
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicRawText:
+        '<rating>7</rating><evaluation>Solid</evaluation><recommendations>Keep going</recommendations>',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    // 1 all-time + 12 per-month (not 15)
+    expect(fanslyClient.getEarnings).toHaveBeenCalledTimes(13);
+  });
+
+  it('marks monthlyBreakdowns as partial when per-month fetches fail', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getMonthlyEarnings.mockResolvedValue([
+      { year: 2026, month: 2, totalGross: 195000, totalNet: 156000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 1 },
+      { year: 2026, month: 1, totalGross: 400000, totalNet: 320000, accountId: 'a', correlationAccountId: 'fan-1', timestamp: 2 },
+    ] satisfies MonthlyEarningsRow[]);
+
+    let callCount = 0;
+    fanslyClient.getEarnings.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // all-time stats call succeeds
+        return {
+          correlationAccountId: 'fan-1',
+          windowStartIso: new Date(0).toISOString(),
+          windowEndIso: new Date(currentNow).toISOString(),
+          totalGross: 595000,
+          totalNet: 476000,
+          breakdown: [{ label: 'Subscription', type: 2110, gross: 595000, net: 476000 }],
+          monthlyTotals: [],
+        } satisfies AggregatedEarnings;
+      }
+      // per-month calls: first succeeds, second fails
+      if (callCount === 2) {
+        return {
+          correlationAccountId: 'fan-1',
+          windowStartIso: '',
+          windowEndIso: '',
+          totalGross: 195000,
+          totalNet: 156000,
+          breakdown: [{ label: 'Subscription', type: 2110, gross: 195000, net: 156000 }],
+          monthlyTotals: [],
+        } satisfies AggregatedEarnings;
+      }
+      throw new Error('per-month fetch failed');
+    });
+
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText:
+        '<rating>7</rating><evaluation>Solid</evaluation><recommendations>Keep going</recommendations>',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    expect(promptUser).toContain('(some months could not be fetched)');
   });
 });

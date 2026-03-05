@@ -5,7 +5,12 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
-import { formatFanSpendingData } from '../shared/earnings.js';
+import { mapWithConcurrency } from '../shared/concurrency.js';
+import {
+  aggregateMonthlyEarnings,
+  formatFanSpendingData,
+  monthWindowMs,
+} from '../shared/earnings.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import { buildPrompt } from '../shared/prompts.js';
@@ -20,6 +25,7 @@ import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
+  AggregatedEarnings,
   BackgroundPortMessage,
   CompletePayload,
   ContentPortMessage,
@@ -91,8 +97,8 @@ function resolveTimeout(feature: FeatureType): number {
   return isDeepFeature(feature) ? DEEP_OPERATION_TIMEOUT_MS : QUICK_OPERATION_TIMEOUT_MS;
 }
 
-function resolveSubscriptionLookupMode(feature: FeatureType): SubscriptionLookupMode {
-  return isDeepFeature(feature) ? 'full' : 'cache-only';
+function resolveSubscriptionLookupMode(_feature: FeatureType): SubscriptionLookupMode {
+  return 'full';
 }
 
 function resolveMappedPersonalityId(
@@ -1011,11 +1017,18 @@ export class OperationCoordinator {
               subscriptionLookupMode,
             );
         const windowEndMs = Date.now();
-        const [earningsResult, subscriptionResult] =
+        const [monthlyResult, earningsResult, subscriptionResult] =
           await Promise.allSettled([
+            this.fanslyClient.getMonthlyEarnings(
+              fanAccountId,
+              0,
+              windowEndMs,
+              validated.session,
+              signal,
+            ),
             this.fanslyClient.getEarnings(
               fanAccountId,
-              messageLoad.windowStartMs,
+              0,
               windowEndMs,
               validated.session,
               signal,
@@ -1023,23 +1036,97 @@ export class OperationCoordinator {
             subscriptionRequest,
           ]);
 
-        if (earningsResult.status === 'fulfilled') {
-          const aggregated = earningsResult.value;
-          if (aggregated) {
-            spendingData = formatFanSpendingData(aggregated);
-            spendingDataVerified = true;
-            completeStage(
-              'earnings',
-              'Fetched earnings: data found',
-              'data found',
+        const monthlyRows =
+          monthlyResult.status === 'fulfilled'
+            ? monthlyResult.value
+            : [];
+        const monthlyTotals = aggregateMonthlyEarnings(monthlyRows);
+        const statsAggregated =
+          earningsResult.status === 'fulfilled'
+            ? earningsResult.value
+            : null;
+
+        const bothEarningsFulfilled =
+          earningsResult.status === 'fulfilled' &&
+          monthlyResult.status === 'fulfilled';
+
+        if (
+          statsAggregated ||
+          monthlyTotals.length > 0 ||
+          bothEarningsFulfilled
+        ) {
+          const aggregated: AggregatedEarnings = statsAggregated ?? {
+            correlationAccountId: fanAccountId,
+            windowStartIso: new Date(0).toISOString(),
+            windowEndIso: new Date(windowEndMs).toISOString(),
+            totalGross: monthlyTotals.reduce(
+              (sum, m) => sum + m.totalGross,
+              0,
+            ),
+            totalNet: monthlyTotals.reduce(
+              (sum, m) => sum + m.totalNet,
+              0,
+            ),
+            breakdown: [],
+            monthlyTotals: [],
+          };
+          aggregated.monthlyTotals = monthlyTotals;
+
+          if (
+            isDeepFeature(payload.feature) &&
+            monthlyTotals.length > 0
+          ) {
+            const recentMonths = monthlyTotals.slice(0, 12);
+            const monthlyResults = await mapWithConcurrency(
+              recentMonths,
+              4,
+              async (month) => {
+                const { start, end } = monthWindowMs(
+                  month.year,
+                  month.month,
+                );
+                try {
+                  const monthAgg =
+                    await this.fanslyClient.getEarnings(
+                      fanAccountId,
+                      start,
+                      end,
+                      validated.session,
+                      signal,
+                    );
+                  return {
+                    year: month.year,
+                    month: month.month,
+                    breakdown: monthAgg?.breakdown ?? [],
+                    failed: false,
+                  };
+                } catch {
+                  return {
+                    year: month.year,
+                    month: month.month,
+                    breakdown: [] as import('../shared/types.js').EarningsBreakdownEntry[],
+                    failed: true,
+                  };
+                }
+              },
             );
-          } else {
-            completeStage(
-              'earnings',
-              'Fetched earnings: no earnings data',
-              'no earnings data',
-            );
+            aggregated.monthlyBreakdowns = monthlyResults
+              .filter((mb) => mb.breakdown.length > 0)
+              .map(({ failed: _, ...rest }) => rest);
+            if (monthlyResults.some((mb) => mb.failed)) {
+              aggregated.monthlyBreakdownsPartial = true;
+            }
           }
+
+          spendingData = formatFanSpendingData(aggregated);
+          spendingDataVerified = statsAggregated !== null;
+          completeStage(
+            'earnings',
+            statsAggregated
+              ? 'Fetched earnings: data found'
+              : 'Fetched earnings: partial (monthly only)',
+            statsAggregated ? 'data found' : 'partial',
+          );
         } else {
           failStage(
             'earnings',

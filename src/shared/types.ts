@@ -205,6 +205,32 @@ export interface AggregatedEarnings {
   totalGross: number;
   totalNet: number;
   breakdown: EarningsBreakdownEntry[];
+  monthlyTotals: MonthlyEarningsTotal[];
+  monthlyBreakdowns?: MonthlyTypeBreakdown[];
+  monthlyBreakdownsPartial?: boolean;
+}
+
+export interface MonthlyEarningsRow {
+  year: number;
+  month: number;
+  totalGross: number;
+  totalNet: number;
+  accountId: string;
+  correlationAccountId: string;
+  timestamp: number;
+}
+
+export interface MonthlyEarningsTotal {
+  year: number;
+  month: number;
+  totalGross: number;
+  totalNet: number;
+}
+
+export interface MonthlyTypeBreakdown {
+  year: number;
+  month: number;
+  breakdown: EarningsBreakdownEntry[];
 }
 
 // ─── Subscriptions ───────────────────────────────────────────────────────

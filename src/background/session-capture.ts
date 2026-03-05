@@ -12,8 +12,8 @@ function decodeLegacyAccountKey(authorization: string): string | null {
   }
 }
 
-function normalizeRouteKey(url: string): RouteKey | null {
-  if (url.includes('/api/v1/account/wallets/earnings/stats/accounts')) {
+export function normalizeRouteKey(url: string): RouteKey | null {
+  if (url.includes('/api/v1/account/wallets/earnings/')) {
     return 'earnings';
   }
   if (url.includes('/api/v1/subscribers')) {

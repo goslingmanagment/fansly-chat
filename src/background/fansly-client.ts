@@ -21,6 +21,7 @@ import type {
   FanslySubscribersResponse,
   FanSubscriptionContext,
   FanSubscriptionSource,
+  MonthlyEarningsRow,
   NormalizedTranscriptMessage,
   RouteKey,
   SessionTemplate,
@@ -348,6 +349,26 @@ export class FanslyClient {
     }
 
     return aggregateEarnings(rows, fanAccountId, windowStartMs, windowEndMs);
+  }
+
+  async getMonthlyEarnings(
+    fanAccountId: string,
+    windowStartMs: number,
+    windowEndMs: number,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<MonthlyEarningsRow[]> {
+    const url = new URL(
+      'https://apiv3.fansly.com/api/v1/account/wallets/earnings/monthlystats/accounts',
+    );
+    url.searchParams.set('correlationAccountId', fanAccountId);
+    url.searchParams.set('before', String(windowEndMs));
+    url.searchParams.set('after', String(windowStartMs));
+    const rows = await this.fetchEnvelope<MonthlyEarningsRow[]>(url, session, 'earnings', signal, true);
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return [];
+    }
+    return rows;
   }
 
   private async getActiveConversationSubscriptionFromMessagingGroups(
