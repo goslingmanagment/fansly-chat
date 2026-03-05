@@ -374,7 +374,7 @@ describe('rekeyAccountIdentity', () => {
     expect(result.mappingMigrated).toBe(true);
     expect(result.state.accountMappings.resolved).toBe('p1');
     expect(result.state.accountMappings.legacy).toBeUndefined();
-    expect(result.state.knownAccounts).toContain('resolved');
+    expect(result.state.knownAccounts).toEqual(['resolved']);
   });
 
   it('handles conflict when both have mappings (resolved wins)', async () => {
@@ -402,6 +402,42 @@ describe('rekeyAccountIdentity', () => {
     const result = await storage.rekeyAccountIdentity('same', 'same');
     expect(result.mappingMigrated).toBe(false);
     expect(result.mappingConflict).toBe(false);
+  });
+});
+
+// ─── reconcileKnownAccounts ─────────────────────────────────────────────
+
+describe('reconcileKnownAccounts', () => {
+  it('prunes stale unmapped accounts from polluted storage', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [],
+      accountMappings: {},
+      knownAccounts: ['active', 'stale'],
+    };
+
+    const result = await storage.reconcileKnownAccounts(['active']);
+
+    expect(result.knownAccounts).toEqual(['active']);
+    expect(mockStorage.knownAccounts).toEqual(['active']);
+  });
+
+  it('keeps mapped but disconnected accounts in knownAccounts', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [],
+      accountMappings: {
+        mappedOffline: 'p1',
+      },
+      knownAccounts: ['mappedOffline', 'stale'],
+    };
+
+    const result = await storage.reconcileKnownAccounts(['active']);
+
+    expect(result.knownAccounts).toEqual(['active', 'mappedOffline']);
+    expect(mockStorage.knownAccounts).toEqual(['active', 'mappedOffline']);
   });
 });
 

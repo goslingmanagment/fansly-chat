@@ -1,5 +1,9 @@
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
-import { loadStorageState } from '../shared/storage.js';
+import {
+  loadStorageState,
+  reconcileKnownAccounts,
+  rekeyAccountIdentity,
+} from '../shared/storage.js';
 import type { PopupStatus } from '../shared/types.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
@@ -112,7 +116,27 @@ export function registerRuntimeApi({
           }),
         );
 
-        return sessionStore.snapshot();
+        const snapshot = sessionStore.snapshot();
+
+        for (const session of snapshot) {
+          if (
+            session.resolvedAccountId &&
+            session.resolvedAccountId !== session.legacyAccountId
+          ) {
+            await rekeyAccountIdentity(
+              session.legacyAccountId,
+              session.resolvedAccountId,
+            );
+          }
+        }
+
+        await reconcileKnownAccounts(
+          snapshot.map(
+            (session) => session.resolvedAccountId ?? session.legacyAccountId,
+          ),
+        );
+
+        return snapshot;
       }
 
       return undefined;
