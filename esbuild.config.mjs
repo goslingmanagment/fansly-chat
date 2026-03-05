@@ -1,12 +1,13 @@
-import { watch as watchFs } from 'node:fs';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync, watch as watchFs } from 'node:fs';
+import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
-import { ensureCompareDraftRegistry } from './build/compare-drafts-registry.mjs';
 
 const root = process.cwd();
 const outdir = path.join(root, 'dist');
 const watchMode = process.argv.includes('--watch');
+const promptsDir = path.join(root, 'prompts');
+const draftsDir = path.join(promptsDir, 'drafts');
 
 const entryPoints = {
   background: path.join(root, 'src/background/index.ts'),
@@ -14,6 +15,54 @@ const entryPoints = {
   options: path.join(root, 'src/options/index.ts'),
   popup: path.join(root, 'src/popup/index.ts'),
 };
+
+function compareDraftNames(left, right) {
+  return left.localeCompare(right, 'en', {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
+function modelCardDraftsPlugin() {
+  return /** @type {esbuild.Plugin} */ ({
+    name: 'chatmuse-virtual-drafts',
+    setup(build) {
+      build.onResolve({ filter: /^virtual:model-card-drafts$/ }, () => ({
+        path: 'virtual:model-card-drafts',
+        namespace: 'chatmuse-virtual-drafts',
+      }));
+
+      build.onLoad(
+        { filter: /.*/, namespace: 'chatmuse-virtual-drafts' },
+        async () => {
+          let files;
+          try {
+            files = (await readdir(draftsDir))
+              .filter((filename) => filename.toLowerCase().endsWith('.md'))
+              .sort(compareDraftNames);
+          } catch {
+            files = [];
+          }
+
+          const imports = files.map(
+            (filename, index) =>
+              `import draft${index} from ${JSON.stringify(path.join(draftsDir, filename))};`,
+          );
+          const entries = files.map(
+            (filename, index) =>
+              `${JSON.stringify(filename.replace(/\.md$/i, ''))}: draft${index}`,
+          );
+
+          return {
+            contents: `${imports.join('\n')}\nexport default { ${entries.join(', ')} };\n`,
+            resolveDir: root,
+            loader: 'ts',
+          };
+        },
+      );
+    },
+  });
+}
 
 async function ensureStaticFiles() {
   await mkdir(path.join(outdir, 'icons'), { recursive: true });
@@ -29,7 +78,6 @@ async function ensureStaticFiles() {
 }
 
 async function buildOnce() {
-  await ensureCompareDraftRegistry(root);
   await rm(outdir, { recursive: true, force: true });
   await mkdir(outdir, { recursive: true });
 
@@ -48,6 +96,7 @@ async function buildOnce() {
     define: {
       __CHATMUSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
+    plugins: [modelCardDraftsPlugin()],
   });
 
   await ensureStaticFiles();
@@ -73,11 +122,11 @@ if (!watchMode) {
       __CHATMUSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
     plugins: [
+      modelCardDraftsPlugin(),
       {
         name: 'chatmuse-static-copy',
         setup(build) {
           build.onEnd(async () => {
-            await ensureCompareDraftRegistry(root);
             await ensureStaticFiles();
           });
         },
@@ -86,20 +135,31 @@ if (!watchMode) {
   });
 
   await ctx.watch();
-  const draftsWatchPaths = [
-    path.join(root, 'prompts'),
-    path.join(root, 'prompts', 'drafts'),
-  ];
-  const watchers = draftsWatchPaths.map((watchPath) =>
+  const watchTargets = [
+    {
+      watchPath: promptsDir,
+      shouldRebuild(filename) {
+        return filename === 'drafts';
+      },
+    },
+    {
+      watchPath: draftsDir,
+      shouldRebuild(filename) {
+        return typeof filename !== 'string' || filename.toLowerCase().endsWith('.md');
+      },
+    },
+  ].filter(({ watchPath }) => existsSync(watchPath));
+
+  const watchers = watchTargets.map(({ watchPath, shouldRebuild }) =>
     watchFs(watchPath, { persistent: true }, async (_eventType, filename) => {
-      if (typeof filename === 'string' && !filename.toLowerCase().endsWith('.md')) {
+      if (!shouldRebuild(filename)) {
         return;
       }
+
       try {
-        await ensureCompareDraftRegistry(root);
         await ctx.rebuild();
       } catch (error) {
-        console.error('Failed to rebuild compare drafts registry', error);
+        console.error('Failed to rebuild compare drafts module', error);
       }
     }),
   );

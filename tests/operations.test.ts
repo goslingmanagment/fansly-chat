@@ -511,7 +511,11 @@ describe('OperationCoordinator', () => {
     });
 
     await streamStarted;
-    await coordinator.cancelOperation(1, undefined, true);
+    expect(coordinator.activeByTabId.has(1)).toBe(false);
+    expect(coordinator.activeCompareByTabId.get(1)?.operationId).toBe('compare-op');
+    expect(coordinator.tabContexts.get(1)?.activeOperationId).toBeNull();
+
+    coordinator.cancelCompare(1, undefined, true);
     await startPromise;
 
     const discardedMessage = postedMessages(port).find(

@@ -12,7 +12,11 @@ import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import { ToastController } from './toast.js';
+import {
+  getCompareCardsFingerprintForPersonality,
+} from '../shared/compare-cards.js';
 import { splitByNext } from '../shared/split.js';
+import { loadStorageState } from '../shared/storage.js';
 import type {
   BackgroundPortMessage,
   CompareInlineTabState,
@@ -63,6 +67,7 @@ export class ChatMuseContentApp {
   private overlayRawText = '';
   private activeCompareModel: CompareInlineViewModel | null = null;
   private comparePanelVisible = false;
+  private pendingCompareFingerprint: string | null = null;
 
   // Inline quick surface state
   private quickSurfaceMode: 'inline' | 'overlay' = 'inline';
@@ -83,6 +88,7 @@ export class ChatMuseContentApp {
       this.quickInlineVisible = false;
       this.comparePanelVisible = false;
       this.activeCompareModel = null;
+      this.pendingCompareFingerprint = null;
       this.quickSurfaceMode = 'inline';
       this.suppressedTerminalOpId = null;
       this.clearOperationState(true);
@@ -92,7 +98,9 @@ export class ChatMuseContentApp {
   });
   private readonly buttonBar = new ButtonBar({
     onFeatureClick: (feature) => this.startFeature(feature, false),
-    onCompareClick: () => this.startCompare(false),
+    onCompareClick: () => {
+      void this.startCompare(false);
+    },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
   });
   private readonly mappingBanner = new MappingBanner({
@@ -106,15 +114,18 @@ export class ChatMuseContentApp {
   private readonly completedCompareCache = new CompletedCompareCache();
   private readonly inlinePanel = new InlinePanelController({
     onClose: () => {
-      if (this.activeCompareModel || this.completedCompareCache.get(this.currentGroupId)) {
+      if (this.activeCompareModel?.operationId) {
         this.comparePanelVisible = false;
+      } else if (this.activeCompareModel) {
+        this.comparePanelVisible = false;
+        this.activeCompareModel = null;
       } else {
         this.quickInlineVisible = false;
       }
       this.renderSurfaces();
     },
     onExpand: () => {
-      if (this.activeCompareModel || this.completedCompareCache.get(this.currentGroupId)) {
+      if (this.activeCompareModel) {
         return;
       }
       this.quickSurfaceMode = 'overlay';
@@ -125,6 +136,7 @@ export class ChatMuseContentApp {
         this.port.send({ type: 'compare:cancel', operationId });
         this.activeCompareModel = null;
         this.comparePanelVisible = false;
+        this.pendingCompareFingerprint = null;
         this.completedCompareCache.clear(this.currentGroupId);
         this.renderAll();
         return;
@@ -140,10 +152,10 @@ export class ChatMuseContentApp {
     },
     onCompareRerun: () => {
       this.completedCompareCache.clear(this.currentGroupId);
-      this.startCompare(true);
+      void this.startCompare(true);
     },
     onCompareTabSelect: (cardId) => {
-      const compareModel = this.activeCompareModel ?? this.completedCompareCache.get(this.currentGroupId);
+      const compareModel = this.activeCompareModel;
       if (!compareModel) {
         return;
       }
@@ -217,7 +229,7 @@ export class ChatMuseContentApp {
     try {
       const visibleCompareModel =
         this.comparePanelVisible
-          ? (this.activeCompareModel ?? this.completedCompareCache.get(this.currentGroupId))
+          ? this.activeCompareModel
           : null;
 
       // Overlay-only features — active loading
@@ -343,6 +355,9 @@ export class ChatMuseContentApp {
     }
 
     this.comparePanelVisible = false;
+    if (this.activeCompareModel && !this.activeCompareModel.operationId) {
+      this.activeCompareModel = null;
+    }
 
     // Cache hit
     const cachedResult = !forceRegenerate ? this.completedOverlayCache.get(this.currentGroupId, feature) : null;
@@ -429,7 +444,7 @@ export class ChatMuseContentApp {
     this.renderButtonBar();
   }
 
-  private startCompare(forceRegenerate: boolean): void {
+  private async startCompare(forceRegenerate: boolean): Promise<void> {
     if (this.activeCompareModel?.operationId) {
       if (!this.comparePanelVisible && this.suppressedTerminalOpId !== this.activeCompareModel.operationId) {
         this.comparePanelVisible = true;
@@ -440,15 +455,6 @@ export class ChatMuseContentApp {
 
     if (this.activeFeature) {
       this.toast.show('Another operation is already in progress.');
-      return;
-    }
-
-    const cachedCompare = !forceRegenerate
-      ? this.completedCompareCache.get(this.currentGroupId)
-      : null;
-    if (cachedCompare) {
-      this.comparePanelVisible = true;
-      this.renderSurfaces();
       return;
     }
 
@@ -471,9 +477,12 @@ export class ChatMuseContentApp {
       return;
     }
 
+    const fingerprint = await this.computeCompareFingerprint();
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
     this.cancelScheduledLoadingRender();
+    this.completedCompareCache.clear(this.currentGroupId);
+    this.pendingCompareFingerprint = fingerprint;
     this.activeCompareModel = {
       kind: 'compare',
       fanDisplayName: domFanDisplayName ?? 'fan',
@@ -525,6 +534,7 @@ export class ChatMuseContentApp {
     this.mountController.setActiveRoute(groupId);
 
     if (changed) {
+      this.pendingCompareFingerprint = null;
       if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
         this.quickInlineVisible = false;
         this.quickSurfaceMode = 'inline';
@@ -540,6 +550,7 @@ export class ChatMuseContentApp {
         this.quickInlineVisible = false;
         this.comparePanelVisible = false;
         this.deepOverlayModel = null;
+        this.activeCompareModel = null;
         this.clearOperationState(true);
         this.overlayRawText = '';
         this.renderSurfaces();
@@ -728,18 +739,14 @@ export class ChatMuseContentApp {
       this.suppressedTerminalOpId = null;
       this.activeCompareModel = null;
       this.comparePanelVisible = false;
+      this.pendingCompareFingerprint = null;
       this.renderButtonBar();
       return;
     }
 
-    model.operationId = null;
-    model.progress = null;
-    model.canCancel = false;
-    model.canRegenerate = true;
-    model.fanDisplayName = message.fanDisplayName;
     const completedModel: CompareInlineViewModel = {
       kind: 'compare',
-      fanDisplayName: model.fanDisplayName,
+      fanDisplayName: message.fanDisplayName,
       operationId: null,
       tabs: model.tabs,
       activeCardId: model.activeCardId,
@@ -747,8 +754,13 @@ export class ChatMuseContentApp {
       canCancel: false,
       canRegenerate: true,
     };
-    this.completedCompareCache.set(this.currentGroupId, completedModel);
-    this.activeCompareModel = null;
+    this.completedCompareCache.set(this.currentGroupId, {
+      model: completedModel,
+      fingerprint: this.pendingCompareFingerprint,
+    });
+    this.pendingCompareFingerprint = null;
+    this.activeCompareModel = completedModel;
+    this.comparePanelVisible = true;
     this.renderAll();
   }
 
@@ -763,12 +775,14 @@ export class ChatMuseContentApp {
         this.suppressedTerminalOpId = null;
         this.activeCompareModel = null;
         this.comparePanelVisible = false;
+        this.pendingCompareFingerprint = null;
         this.renderButtonBar();
         return;
       }
 
       this.activeCompareModel = null;
       this.comparePanelVisible = false;
+      this.pendingCompareFingerprint = null;
       this.completedCompareCache.clear(this.currentGroupId);
       this.renderButtonBar();
     }
@@ -913,6 +927,40 @@ export class ChatMuseContentApp {
 
   private currentFanDisplayName(): string {
     return this.activeFanDisplayName ?? 'fan';
+  }
+
+  private async computeCompareFingerprint(): Promise<string | null> {
+    if (!this.tabState) {
+      return null;
+    }
+
+    const storage = await loadStorageState();
+    return getCompareCardsFingerprintForPersonality(
+      storage,
+      this.tabState.mappedPersonalityId,
+    );
+  }
+
+  private async restoreCompletedComparePanel(): Promise<boolean> {
+    if (this.activeCompareModel?.operationId) {
+      return false;
+    }
+
+    const cached = this.completedCompareCache.get(this.currentGroupId);
+    if (!cached) {
+      return false;
+    }
+
+    const fingerprint = await this.computeCompareFingerprint();
+    if (cached.fingerprint !== fingerprint) {
+      this.completedCompareCache.clear(this.currentGroupId);
+      return false;
+    }
+
+    this.activeCompareModel = cached.model;
+    this.comparePanelVisible = true;
+    this.renderAll();
+    return true;
   }
 
   private buildCompletedOverlayModel(
