@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import {
+  DEFAULT_FEATURE_MODELS,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import type {
   CompareInlineViewModel,
   OperationProfilingSnapshot,
   TabUiState,
 } from '../src/shared/types.js';
+
+let mockStorageState: Record<string, unknown>;
 
 function installDom() {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
@@ -32,6 +38,34 @@ function installDom() {
   (globalThis as Record<string, unknown>).browser = {
     runtime: {
       openOptionsPage: vi.fn(async () => undefined),
+    },
+    storage: {
+      local: {
+        get: vi.fn(async (keys?: string | string[] | Record<string, unknown> | null) => {
+          if (keys === null || keys === undefined) {
+            return { ...mockStorageState };
+          }
+          if (typeof keys === 'string') {
+            return { [keys]: mockStorageState[keys] };
+          }
+          if (Array.isArray(keys)) {
+            const result: Record<string, unknown> = {};
+            for (const key of keys) {
+              result[key] = mockStorageState[key];
+            }
+            return result;
+          }
+          return {};
+        }),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(mockStorageState, items);
+        }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            delete mockStorageState[key];
+          }
+        }),
+      },
     },
   };
   return dom;
@@ -130,6 +164,32 @@ function createCompareModel(overrides?: Partial<CompareInlineViewModel>): Compar
   };
 }
 
+function createStorageState(overrides?: Partial<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    settings: {
+      claudeApiKey: 'sk-test',
+      quickMessageCount: 100,
+      deepMessageCount: 500,
+      debugMode: false,
+      featureModels: { ...DEFAULT_FEATURE_MODELS },
+    },
+    personalities: [
+      {
+        id: 'personality-1',
+        name: 'Closer',
+        content: 'Sell smoothly',
+        updatedAt: 1000,
+      },
+    ],
+    accountMappings: {
+      'account-1': 'personality-1',
+    },
+    knownAccounts: [],
+    ...overrides,
+  };
+}
+
 async function loadAppClass() {
   vi.resetModules();
   const module = await import('../src/content/index.js');
@@ -138,6 +198,7 @@ async function loadAppClass() {
 
 describe('ChatMuseContentApp', () => {
   beforeEach(() => {
+    mockStorageState = createStorageState();
     installDom();
   });
 
@@ -564,7 +625,7 @@ describe('ChatMuseContentApp', () => {
     expect(inlineRoot.classList.contains('chatmuse-hidden')).toBe(true);
   });
 
-  it('reopens cached compare results in the inline panel without sending a new request', async () => {
+  it('starts a fresh compare run instead of reopening completed cached compare results', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
     const sendSpy = vi.fn();
@@ -572,13 +633,21 @@ describe('ChatMuseContentApp', () => {
     app.port.send = sendSpy;
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
-    app.completedCompareCache.set('group-1', createCompareModel());
+    const fingerprint = await app.computeCompareFingerprint();
+    app.completedCompareCache.set('group-1', {
+      model: createCompareModel(),
+      fingerprint,
+    });
 
-    app.startCompare(false);
+    await app.startCompare(false);
 
-    expect(sendSpy).not.toHaveBeenCalled();
-    expect(app.comparePanelVisible).toBe(true);
-    expect(app.inlinePanel.root.querySelector('.chatmuse-compare-tab')?.textContent).toContain('Closer (current)');
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'compare:start',
+      groupId: 'group-1',
+      forceRegenerate: false,
+    }));
+    expect(app.completedCompareCache.get('group-1')).toBeNull();
+    expect(app.comparePanelVisible).toBe(false);
   });
 
   it('reopens an active compare session when the panel was closed', async () => {
@@ -601,7 +670,7 @@ describe('ChatMuseContentApp', () => {
     });
     app.comparePanelVisible = false;
 
-    app.startCompare(false);
+    await app.startCompare(false);
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(app.comparePanelVisible).toBe(true);
@@ -616,19 +685,68 @@ describe('ChatMuseContentApp', () => {
     app.mountController = { setActiveRoute: vi.fn() };
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
-    app.completedCompareCache.set('group-1', createCompareModel());
+    app.completedCompareCache.set('group-1', {
+      model: createCompareModel(),
+      fingerprint: await app.computeCompareFingerprint(),
+    });
 
     app.handleRouteChange('group-2');
 
     expect(app.completedCompareCache.get('group-2')).toBeNull();
 
     sendSpy.mockClear();
-    app.startCompare(false);
+    await app.startCompare(false);
 
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'compare:start',
       groupId: 'group-2',
     }));
+  });
+
+  it('restores the closed completed compare panel when the fingerprint still matches', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.completedCompareCache.set('group-1', {
+      model: createCompareModel(),
+      fingerprint: await app.computeCompareFingerprint(),
+    });
+
+    const restored = await app.restoreCompletedComparePanel();
+
+    expect(restored).toBe(true);
+    expect(app.comparePanelVisible).toBe(true);
+    expect(app.inlinePanel.root.querySelector('.chatmuse-compare-tab')?.textContent).toContain('Closer (current)');
+  });
+
+  it('invalidates closed completed compare cache when the fingerprint changes', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.completedCompareCache.set('group-1', {
+      model: createCompareModel(),
+      fingerprint: await app.computeCompareFingerprint(),
+    });
+    mockStorageState = createStorageState({
+      personalities: [
+        {
+          id: 'personality-1',
+          name: 'Closer',
+          content: 'Changed draft baseline',
+          updatedAt: 2000,
+        },
+      ],
+    });
+
+    const restored = await app.restoreCompletedComparePanel();
+
+    expect(restored).toBe(false);
+    expect(app.comparePanelVisible).toBe(false);
+    expect(app.completedCompareCache.get('group-1')).toBeNull();
   });
 
   it('port disconnect resets all surfaces and state', async () => {

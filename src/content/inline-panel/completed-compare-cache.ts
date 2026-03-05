@@ -1,8 +1,13 @@
 import type { CompareInlineViewModel } from '../../shared/types.js';
 
+export interface CompletedCompareEntry {
+  model: CompareInlineViewModel;
+  fingerprint: string | null;
+}
+
 export class CompletedCompareCache {
   private activeGroupId: string | null = null;
-  private completedModel: CompareInlineViewModel | null = null;
+  private completedEntry: CompletedCompareEntry | null = null;
 
   setActiveGroup(groupId: string | null): void {
     if (this.activeGroupId === groupId) {
@@ -10,24 +15,24 @@ export class CompletedCompareCache {
     }
 
     this.activeGroupId = groupId;
-    this.completedModel = null;
+    this.completedEntry = null;
   }
 
-  get(groupId: string | null): CompareInlineViewModel | null {
+  get(groupId: string | null): CompletedCompareEntry | null {
     if (!groupId || this.activeGroupId !== groupId) {
       return null;
     }
 
-    return this.completedModel;
+    return this.completedEntry;
   }
 
-  set(groupId: string | null, model: CompareInlineViewModel): void {
+  set(groupId: string | null, entry: CompletedCompareEntry): void {
     if (!groupId) {
       return;
     }
 
     this.setActiveGroup(groupId);
-    this.completedModel = model;
+    this.completedEntry = entry;
   }
 
   clear(groupId: string | null): void {
@@ -35,10 +40,10 @@ export class CompletedCompareCache {
       return;
     }
 
-    this.completedModel = null;
+    this.completedEntry = null;
   }
 
   clearAll(): void {
-    this.completedModel = null;
+    this.completedEntry = null;
   }
 }

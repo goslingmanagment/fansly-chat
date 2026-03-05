@@ -319,7 +319,9 @@
 .chatmuse-inline-panel .chatmuse-compare-tabs {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab {
