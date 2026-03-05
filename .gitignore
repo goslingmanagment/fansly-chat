@@ -2,4 +2,7 @@ node_modules/
 dist/
 .DS_Store
 TODO.md
+TOMO.md
 reviews/
+drafts/
+prompts/drafts/
