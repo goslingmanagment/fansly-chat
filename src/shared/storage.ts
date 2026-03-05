@@ -120,6 +120,25 @@ export async function registerKnownAccount(accountId: string): Promise<void> {
   await browser.storage.local.set({ [KNOWN_ACCOUNTS_KEY]: knownAccounts });
 }
 
+export async function reconcileKnownAccounts(
+  activeCanonicalAccountIds: string[],
+): Promise<PersistedState> {
+  const state = await loadStorageState();
+  const knownAccounts = Array.from(
+    new Set([
+      ...activeCanonicalAccountIds.filter((accountId) => Boolean(accountId)),
+      ...Object.keys(state.accountMappings),
+    ]),
+  ).sort();
+
+  if (arraysEqual(knownAccounts, state.knownAccounts)) {
+    return state;
+  }
+
+  await browser.storage.local.set({ [KNOWN_ACCOUNTS_KEY]: knownAccounts });
+  return { ...state, knownAccounts };
+}
+
 export async function rekeyAccountIdentity(
   legacyAccountId: string,
   resolvedAccountId: string,

@@ -15,6 +15,12 @@ export class SessionStore {
   private readonly accountByTabId = new Map<number, string>();
 
   registerCapture(tabId: number, capture: SessionCaptureResult): SessionTemplate {
+    const previousAccountId = this.accountByTabId.get(tabId) ?? null;
+    if (previousAccountId && previousAccountId !== capture.accountId) {
+      this.accountByTabId.delete(tabId);
+      this.pruneOrphanedSession(previousAccountId);
+    }
+
     const existing = this.sessionsByAccount.get(capture.accountId);
     const session: SessionTemplate = {
       accountId: capture.accountId,
@@ -90,17 +96,45 @@ export class SessionStore {
   }
 
   forgetTab(tabId: number): void {
+    const accountId = this.accountByTabId.get(tabId);
     this.accountByTabId.delete(tabId);
+
+    if (accountId) {
+      this.pruneOrphanedSession(accountId);
+    }
   }
 
   snapshot(): SessionSnapshotEntry[] {
-    return Array.from(this.sessionsByAccount.entries()).map(([legacyAccountId, session]) => ({
-      legacyAccountId,
-      resolvedAccountId: session.resolvedAccountId,
-      username: session.resolvedUsername,
-      displayName: session.resolvedDisplayName,
-      connected: session.connected,
-      lastSeenAt: session.lastSeenAt,
-    }));
+    const activeAccountIds = new Set(this.accountByTabId.values());
+
+    return Array.from(activeAccountIds)
+      .map((legacyAccountId) => {
+        const session = this.sessionsByAccount.get(legacyAccountId);
+        if (!session) {
+          return null;
+        }
+
+        return {
+          legacyAccountId,
+          resolvedAccountId: session.resolvedAccountId,
+          username: session.resolvedUsername,
+          displayName: session.resolvedDisplayName,
+          connected: session.connected,
+          lastSeenAt: session.lastSeenAt,
+        } satisfies SessionSnapshotEntry;
+      })
+      .filter((entry): entry is SessionSnapshotEntry => entry !== null);
+  }
+
+  private pruneOrphanedSession(accountId: string): void {
+    if (!this.isAccountReferenced(accountId)) {
+      this.sessionsByAccount.delete(accountId);
+    }
+  }
+
+  private isAccountReferenced(accountId: string): boolean {
+    return Array.from(this.accountByTabId.values()).some(
+      (referencedAccountId) => referencedAccountId === accountId,
+    );
   }
 }

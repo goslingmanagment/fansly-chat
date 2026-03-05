@@ -116,9 +116,28 @@ function buildSessionLookup(sessions: SessionSnapshotEntry[]): Map<string, Sessi
   return lookup;
 }
 
+function buildConnectionRows(
+  sessions: SessionSnapshotEntry[],
+): Array<{ accountId: string; session: SessionSnapshotEntry }> {
+  const deduped = new Map<string, SessionSnapshotEntry>();
+
+  sessions.forEach((session) => {
+    const canonicalAccountId = session.resolvedAccountId ?? session.legacyAccountId;
+    const existing = deduped.get(canonicalAccountId);
+    if (!existing || session.lastSeenAt > existing.lastSeenAt) {
+      deduped.set(canonicalAccountId, session);
+    }
+  });
+
+  return Array.from(deduped.entries()).map(([accountId, session]) => ({
+    accountId,
+    session,
+  }));
+}
+
 async function render(): Promise<void> {
-  const state = await loadStorageState();
   const sessions = (await browser.runtime.sendMessage({ type: 'getSessionsSnapshot' })) as SessionSnapshotEntry[];
+  const state = await loadStorageState();
   const sessionsByAccountId = buildSessionLookup(sessions);
 
   root.replaceChildren();
@@ -418,20 +437,9 @@ async function render(): Promise<void> {
   sessionsGrid.style.display = 'grid';
   sessionsGrid.style.gap = '10px';
 
-  const connectionRows = new Map<string, { accountId: string; session: SessionSnapshotEntry | null }>();
+  const connectionRows = buildConnectionRows(sessions);
 
-  state.knownAccounts.forEach((accountId) => {
-    const session = sessionsByAccountId.get(accountId) ?? null;
-    const canonicalAccountId = session?.resolvedAccountId ?? session?.legacyAccountId ?? accountId;
-    connectionRows.set(canonicalAccountId, { accountId: canonicalAccountId, session });
-  });
-
-  sessions.forEach((session) => {
-    const canonicalAccountId = session.resolvedAccountId ?? session.legacyAccountId;
-    connectionRows.set(canonicalAccountId, { accountId: canonicalAccountId, session });
-  });
-
-  Array.from(connectionRows.values())
+  connectionRows
     .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
     .forEach(({ accountId, session }) => {
       const card = document.createElement('div');
@@ -457,7 +465,7 @@ async function render(): Promise<void> {
       sessionsGrid.append(card);
     });
 
-  if (connectionRows.size === 0) {
+  if (connectionRows.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No active sessions captured yet.';
     empty.style.color = 'var(--chatmuse-muted)';
