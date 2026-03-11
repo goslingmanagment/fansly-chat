@@ -186,6 +186,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
     accountMappings: {
       'account-1': 'personality-1',
     },
+    accountAliases: {},
     knownAccounts: [],
     ...overrides,
   };

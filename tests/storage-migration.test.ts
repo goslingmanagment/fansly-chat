@@ -48,6 +48,7 @@ describe('migrateState', () => {
     expect(result.settings).toEqual(createDefaultSettings());
     expect(result.personalities).toEqual([]);
     expect(result.accountMappings).toEqual({});
+    expect(result.accountAliases).toEqual({});
     expect(result.knownAccounts).toEqual([]);
   });
 
@@ -62,12 +63,14 @@ describe('migrateState', () => {
       settings: { ...createDefaultSettings(), debugMode: true },
       personalities: [{ id: 'p1', name: 'Test', content: 'test', updatedAt: 1000 }],
       accountMappings: { acc1: 'p1' },
+      accountAliases: { legacy: 'resolved' },
       knownAccounts: ['acc1'],
     };
     const result = migrateState(existing);
     expect(result.settings.debugMode).toBe(true);
     expect(result.personalities).toHaveLength(1);
     expect(result.accountMappings.acc1).toBe('p1');
+    expect(result.accountAliases).toEqual({ legacy: 'resolved' });
     expect(result.knownAccounts).toEqual(['acc1']);
   });
 
@@ -85,6 +88,7 @@ describe('migrateState', () => {
     expect(result.personalities).toHaveLength(1);
     expect(result.personalities[0]!.name).toBe('Legacy');
     expect(result.accountMappings.acc1).toBe('p1');
+    expect(result.accountAliases).toEqual({});
   });
 
   it('fills in default settings for missing fields during migration', () => {
@@ -120,9 +124,11 @@ describe('migrateState', () => {
 
   it('defaults knownAccounts to empty array when missing or non-array', () => {
     const result1 = migrateState({ schemaVersion: STORAGE_SCHEMA_VERSION, settings: createDefaultSettings(), personalities: [], accountMappings: {} });
+    expect(result1.accountAliases).toEqual({});
     expect(result1.knownAccounts).toEqual([]);
 
     const result2 = migrateState({ schemaVersion: STORAGE_SCHEMA_VERSION, settings: createDefaultSettings(), personalities: [], accountMappings: {}, knownAccounts: 'not-array' });
+    expect(result2.accountAliases).toEqual({});
     expect(result2.knownAccounts).toEqual([]);
   });
 });
@@ -328,10 +334,32 @@ describe('saveAccountMapping', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: {},
+      accountAliases: {},
       knownAccounts: [],
     };
     await storage.saveAccountMapping('acc1', 'p1');
     expect((mockStorage.accountMappings as Record<string, string>).acc1).toBe('p1');
+  });
+
+  it('stores mappings under the canonical account id when a legacy alias exists', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [],
+      accountMappings: {
+        legacy: 'stale',
+      },
+      accountAliases: {
+        legacy: 'resolved',
+      },
+      knownAccounts: [],
+    };
+
+    await storage.saveAccountMapping('legacy', 'p1');
+
+    expect(mockStorage.accountMappings).toEqual({
+      resolved: 'p1',
+    });
   });
 
   it('removes a mapping when personalityId is null', async () => {
@@ -340,6 +368,7 @@ describe('saveAccountMapping', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: { acc1: 'p1' },
+      accountAliases: {},
       knownAccounts: [],
     };
     await storage.saveAccountMapping('acc1', null);
@@ -356,6 +385,7 @@ describe('registerKnownAccount', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: {},
+      accountAliases: {},
       knownAccounts: ['b'],
     };
     await storage.registerKnownAccount('a');
@@ -368,6 +398,7 @@ describe('registerKnownAccount', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: {},
+      accountAliases: {},
       knownAccounts: ['a'],
     };
     await storage.registerKnownAccount('a');
@@ -384,12 +415,14 @@ describe('rekeyAccountIdentity', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: { legacy: 'p1' },
+      accountAliases: {},
       knownAccounts: ['legacy'],
     };
     const result = await storage.rekeyAccountIdentity('legacy', 'resolved');
     expect(result.mappingMigrated).toBe(true);
     expect(result.state.accountMappings.resolved).toBe('p1');
     expect(result.state.accountMappings.legacy).toBeUndefined();
+    expect(result.state.accountAliases).toEqual({ legacy: 'resolved' });
     expect(result.state.knownAccounts).toEqual(['resolved']);
   });
 
@@ -399,12 +432,14 @@ describe('rekeyAccountIdentity', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: { legacy: 'p1', resolved: 'p2' },
+      accountAliases: {},
       knownAccounts: [],
     };
     const result = await storage.rekeyAccountIdentity('legacy', 'resolved');
     expect(result.mappingConflict).toBe(true);
     expect(result.state.accountMappings.resolved).toBe('p2');
     expect(result.state.accountMappings.legacy).toBeUndefined();
+    expect(result.state.accountAliases).toEqual({ legacy: 'resolved' });
   });
 
   it('no-ops when ids are equal', async () => {
@@ -413,11 +448,13 @@ describe('rekeyAccountIdentity', () => {
       settings: createDefaultSettings(),
       personalities: [],
       accountMappings: {},
+      accountAliases: {},
       knownAccounts: [],
     };
     const result = await storage.rekeyAccountIdentity('same', 'same');
     expect(result.mappingMigrated).toBe(false);
     expect(result.mappingConflict).toBe(false);
+    expect(result.state.accountAliases).toEqual({});
   });
 });
 

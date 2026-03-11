@@ -26,6 +26,7 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
     settings: createDefaultSettings(),
     personalities: [],
     accountMappings: {},
+    accountAliases: {},
     knownAccounts: [],
     ...overrides,
   };
@@ -140,6 +141,9 @@ describe('runtime-api getSessionsSnapshot', () => {
       resolved: 'p1',
       mappedOffline: 'p2',
     });
+    expect(mockStorage.accountAliases).toEqual({
+      legacy: 'resolved',
+    });
     expect(mockStorage.knownAccounts).toEqual(['mappedOffline', 'resolved']);
   });
 
@@ -167,5 +171,6 @@ describe('runtime-api getSessionsSnapshot', () => {
     expect(mockStorage.accountMappings).toEqual({
       mappedOffline: 'p1',
     });
+    expect(mockStorage.accountAliases).toEqual({});
   });
 });

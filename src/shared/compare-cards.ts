@@ -1,20 +1,23 @@
 import modelCardDrafts from 'virtual:model-card-drafts';
+import { buildAccountLookupOrder } from './account-aliases.js';
 import type { CompareModelCard, PersistedState } from './types.js';
 
 export function resolveMappedPersonalityId(
   accountMappings: Record<string, string>,
   resolvedAccountId: string | null,
   legacyAccountId: string | null,
+  accountAliases: Record<string, string> = {},
 ): string | null {
-  if (resolvedAccountId) {
-    const resolved = accountMappings[resolvedAccountId];
-    if (resolved) {
-      return resolved;
+  const lookupOrder = buildAccountLookupOrder(
+    accountAliases,
+    resolvedAccountId,
+    legacyAccountId,
+  );
+  for (const accountId of lookupOrder) {
+    const mapped = accountMappings[accountId];
+    if (mapped) {
+      return mapped;
     }
-  }
-
-  if (legacyAccountId && legacyAccountId !== resolvedAccountId) {
-    return accountMappings[legacyAccountId] ?? null;
   }
 
   return null;
@@ -99,6 +102,7 @@ export function resolveCompareModelCards(
     storage.accountMappings,
     resolvedAccountId,
     legacyAccountId,
+    storage.accountAliases,
   );
   return resolveCompareModelCardsForPersonality(storage, personalityId);
 }
