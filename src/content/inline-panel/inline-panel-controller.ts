@@ -1,6 +1,7 @@
 import { FEATURE_LABELS } from '../../shared/constants.js';
 import { toUserError } from '../../shared/errors.js';
 import type {
+  AnthropicSpendSummary,
   CompareInlineTabState,
   CompareInlineViewModel,
   FeatureType,
@@ -67,10 +68,31 @@ function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
   return null;
 }
 
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
+function formatUsd(value: number, approximate = false): string {
+  const digits = value >= 1 ? 2 : value >= 0.01 ? 4 : 6;
+  return `${approximate ? '~' : ''}$${value.toFixed(digits)}`;
+}
+
+function formatCacheEffect(spend: AnthropicSpendSummary): string {
+  if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
+    return 'cache neutral';
+  }
+  return `cache ${spend.cacheEffectKind} ${formatUsd(
+    spend.cacheEffectUsd,
+    spend.approximate,
+  )}`;
+}
+
 export class InlinePanelController {
   readonly root: HTMLDivElement;
   private readonly headerEl: HTMLDivElement;
+  private readonly headerInfoEl: HTMLDivElement;
   private readonly titleEl: HTMLDivElement;
+  private readonly metaEl: HTMLDivElement;
   private readonly bodyEl: HTMLDivElement;
   private readonly expandButton: HTMLButtonElement;
   private currentView: InlineViewState | null = null;
@@ -85,8 +107,14 @@ export class InlinePanelController {
     this.headerEl = document.createElement('div');
     this.headerEl.className = 'chatmuse-inline-panel-header';
 
+    this.headerInfoEl = document.createElement('div');
+    this.headerInfoEl.className = 'chatmuse-inline-panel-header-info';
+
     this.titleEl = document.createElement('div');
     this.titleEl.className = 'chatmuse-inline-panel-title';
+
+    this.metaEl = document.createElement('div');
+    this.metaEl.className = 'chatmuse-inline-panel-meta chatmuse-hidden';
 
     const actions = document.createElement('div');
     actions.className = 'chatmuse-inline-panel-actions';
@@ -106,7 +134,8 @@ export class InlinePanelController {
     close.addEventListener('click', () => this.callbacks.onClose());
 
     actions.append(this.expandButton, close);
-    this.headerEl.append(this.titleEl, actions);
+    this.headerInfoEl.append(this.titleEl, this.metaEl);
+    this.headerEl.append(this.headerInfoEl, actions);
 
     // Body
     this.bodyEl = document.createElement('div');
@@ -147,6 +176,7 @@ export class InlinePanelController {
       this.titleEl.textContent = titleText;
     }
     this.expandButton.style.display = model.kind === 'compare' ? 'none' : '';
+    this.renderHeaderMeta(model);
 
     // Show panel
     this.root.classList.remove('chatmuse-hidden');
@@ -202,6 +232,106 @@ export class InlinePanelController {
 
     this.bodyEl.replaceChildren(view.root);
     this.currentView = view;
+  }
+
+  private renderHeaderMeta(
+    model: Exclude<InlinePanelViewModel, { kind: 'hidden' }>,
+  ): void {
+    if (model.kind === 'compare') {
+      this.metaEl.replaceChildren();
+      this.metaEl.classList.add('chatmuse-hidden');
+      return;
+    }
+
+    const spend = model.anthropicSpend;
+    if (!spend && model.kind !== 'loading') {
+      this.metaEl.replaceChildren();
+      this.metaEl.classList.add('chatmuse-hidden');
+      return;
+    }
+
+    const primaryText = spend
+      ? `Cost ${formatUsd(spend.totalUsd, spend.approximate)} • Tokens ${formatTokenCount(
+          spend.totalTokens,
+        )}`
+      : 'Cost pending • Tokens pending';
+    const secondaryText = spend
+      ? `write ${formatTokenCount(spend.cacheWriteTokens)} • read ${formatTokenCount(
+          spend.cacheReadTokens,
+        )} • ${formatCacheEffect(spend)}`
+      : 'write pending • read pending • cache pending';
+
+    this.setHeaderMetaContent(primaryText, secondaryText);
+    this.metaEl.classList.remove('chatmuse-hidden');
+  }
+
+  private setHeaderMetaContent(primaryText: string, secondaryText: string): void {
+    const existingPrimary = this.metaEl.querySelector<HTMLElement>(
+      '.chatmuse-inline-panel-meta-primary',
+    );
+    const existingSecondary = this.metaEl.querySelector<HTMLElement>(
+      '.chatmuse-inline-panel-meta-secondary',
+    );
+
+    if (!existingPrimary || !existingSecondary) {
+      const primary = document.createElement('div');
+      primary.className = 'chatmuse-inline-panel-meta-primary';
+      primary.textContent = primaryText;
+
+      const secondary = document.createElement('div');
+      secondary.className = 'chatmuse-inline-panel-meta-secondary';
+      secondary.textContent = secondaryText;
+
+      this.metaEl.replaceChildren(primary, secondary);
+      return;
+    }
+
+    if (existingPrimary.textContent !== primaryText) {
+      existingPrimary.textContent = primaryText;
+    }
+    if (existingSecondary.textContent !== secondaryText) {
+      existingSecondary.textContent = secondaryText;
+    }
+  }
+
+  private createSpendStrip(
+    spend?: AnthropicSpendSummary,
+    placeholder = false,
+  ): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'chatmuse-spend-strip chatmuse-spend-strip-inline';
+
+    const primary = document.createElement('div');
+    primary.className = 'chatmuse-spend-strip-primary';
+
+    const secondary = document.createElement('div');
+    secondary.className = 'chatmuse-spend-strip-secondary';
+
+    if (!spend && placeholder) {
+      section.classList.add('chatmuse-spend-strip-pending');
+      primary.textContent = 'Cost pending • Tokens pending';
+      secondary.textContent = 'write pending • read pending • cache pending';
+      section.append(primary, secondary);
+      return section;
+    }
+
+    if (!spend) {
+      return section;
+    }
+
+    primary.textContent = `Cost ${formatUsd(
+      spend.totalUsd,
+      spend.approximate,
+    )} • Tokens ${formatTokenCount(spend.totalTokens)}`;
+    secondary.textContent =
+      `input ${formatTokenCount(spend.inputTokens)} • ` +
+      `write ${formatTokenCount(spend.cacheWriteTokens)} • ` +
+      `read ${formatTokenCount(spend.cacheReadTokens)} • ` +
+      `output ${formatTokenCount(spend.outputTokens)} • ` +
+      formatCacheEffect(spend);
+
+    section.append(primary, secondary);
+    return section;
   }
 
   // ─── Loading ─────────────────────────────────────────────────────────
@@ -421,6 +551,7 @@ export class InlinePanelController {
     }
 
     if (tab.status === 'loading') {
+      section.append(this.createSpendStrip(undefined, true));
       const status = document.createElement('div');
       status.className = 'chatmuse-overlay-status';
       status.textContent = model.progress?.message ?? 'Generating…';
@@ -432,11 +563,18 @@ export class InlinePanelController {
     }
 
     if (tab.status === 'error') {
+      if (tab.anthropicSpend) {
+        section.append(this.createSpendStrip(tab.anthropicSpend));
+      }
       const error = document.createElement('div');
       error.className = 'chatmuse-inline-error';
       error.textContent = tab.error?.message ?? 'Something went wrong.';
       section.append(error);
       return section;
+    }
+
+    if (tab.anthropicSpend) {
+      section.append(this.createSpendStrip(tab.anthropicSpend));
     }
 
     if (tab.parts.length > 0) {

@@ -193,6 +193,10 @@ async function render(): Promise<void> {
   debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
 
+  const promptCachingInput = document.createElement('input');
+  promptCachingInput.type = 'checkbox';
+  promptCachingInput.checked = state.settings.promptCachingEnabled;
+
   const debugLabel = document.createElement('label');
   debugLabel.style.display = 'flex';
   debugLabel.style.gap = '10px';
@@ -200,10 +204,21 @@ async function render(): Promise<void> {
   debugLabel.style.fontWeight = '700';
   debugLabel.append(debugInput, document.createTextNode('Enable debug mode'));
 
+  const promptCachingLabel = document.createElement('label');
+  promptCachingLabel.style.display = 'flex';
+  promptCachingLabel.style.gap = '10px';
+  promptCachingLabel.style.alignItems = 'center';
+  promptCachingLabel.style.fontWeight = '700';
+  promptCachingLabel.append(
+    promptCachingInput,
+    document.createTextNode('Enable prompt caching'),
+  );
+
   apiSection.append(
     labeledField('Quick feature message count', quickInput),
     labeledField('Deep feature message count', deepInput),
     debugLabel,
+    promptCachingLabel,
   );
 
   // ─── AI Models ───────────────────────────────────────────
@@ -266,11 +281,12 @@ async function render(): Promise<void> {
       quickMessageCount: Number(quickInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
+      promptCachingEnabled: promptCachingInput.checked,
       featureModels: featureModels as Record<FeatureType, string>,
     });
   }, 350);
 
-  [keyInput, quickInput, deepInput, debugInput].forEach((element) => {
+  [keyInput, quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });

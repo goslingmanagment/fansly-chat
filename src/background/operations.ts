@@ -17,7 +17,7 @@ import {
 } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
-import { buildPrompt } from '../shared/prompts.js';
+import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
 import {
   getSummaryCache,
   loadStorageState,
@@ -30,6 +30,8 @@ import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
+  AnthropicCostEstimate,
+  AnthropicSpendSummary,
   AnthropicUsageMetrics,
   BackgroundPortMessage,
   CompareStartPayload,
@@ -52,6 +54,12 @@ import type {
   TabUiState,
 } from '../shared/types.js';
 import { AnthropicClient } from './anthropic-client.js';
+import {
+  buildAnthropicSpendSummary,
+  createZeroAnthropicSpendSummary,
+  estimateAnthropicCost,
+  formatAnthropicCostLog,
+} from './anthropic-cost.js';
 import {
   cancelCompareOperation,
   executeCompare,
@@ -83,6 +91,7 @@ interface ActiveOperation {
   rawText: string;
   flushBuffer: string;
   flushTimer: number | null;
+  anthropicSpend: AnthropicSpendSummary | null;
   profiler: OperationProfiler;
 }
 
@@ -279,12 +288,14 @@ export class OperationCoordinator {
   private sendProgress(
     tabId: number,
     progress: OperationProgressPayload,
+    anthropicSpend?: AnthropicSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       type: 'operation:progress',
       ...progress,
+      ...(anthropicSpend ? { anthropicSpend } : {}),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -292,11 +303,13 @@ export class OperationCoordinator {
   private sendComplete(
     tabId: number,
     payload: CompletePayload,
+    anthropicSpend?: AnthropicSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       ...payload,
+      ...(anthropicSpend ? { anthropicSpend } : {}),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -304,11 +317,13 @@ export class OperationCoordinator {
   private sendError(
     tabId: number,
     payload: ErrorPayload,
+    anthropicSpend?: AnthropicSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       ...payload,
+      ...(anthropicSpend ? { anthropicSpend } : {}),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -316,11 +331,13 @@ export class OperationCoordinator {
   private sendDiscarded(
     tabId: number,
     payload: DiscardedPayload,
+    anthropicSpend?: AnthropicSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       ...payload,
+      ...(anthropicSpend ? { anthropicSpend } : {}),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -423,7 +440,7 @@ export class OperationCoordinator {
         type: 'operation:discarded',
         operationId: active.operationId,
         error: toUserError(error ?? new ChatMuseError('chat_changed')),
-      }, active.profiler);
+      }, active.anthropicSpend ?? createZeroAnthropicSpendSummary(), active.profiler);
     }
   }
 
@@ -505,6 +522,7 @@ export class OperationCoordinator {
         rawText: '',
         flushBuffer: '',
         flushTimer: null,
+        anthropicSpend: null,
         profiler,
       };
 
@@ -555,6 +573,7 @@ export class OperationCoordinator {
             currentPage: progressCurrentPage,
             targetPages: progressTargetPages,
           },
+          active.anthropicSpend ?? undefined,
           profiler,
         );
       };
@@ -728,7 +747,7 @@ export class OperationCoordinator {
           operationId: payload.operationId,
           result,
           fanDisplayName: payload.domFanDisplayName ?? 'fan',
-        }, profiler);
+        }, createZeroAnthropicSpendSummary(), profiler);
         this.clearCompletedOperation(tabId);
         return;
       }
@@ -816,7 +835,7 @@ export class OperationCoordinator {
             type: 'operation:error',
             operationId: payload.operationId,
             error: toUserError(new ChatMuseError('ping_blocked')),
-          }, profiler);
+          }, createZeroAnthropicSpendSummary(), profiler);
           this.clearCompletedOperation(tabId);
           return;
         }
@@ -1172,6 +1191,12 @@ export class OperationCoordinator {
             ? (payload.replyMode ?? 'default')
             : undefined,
       });
+      const systemBlocks = validated.storage.settings.promptCachingEnabled
+        ? prompt.systemBlocks
+        : stripPromptCacheControl(prompt.systemBlocks);
+      const userBlocks = validated.storage.settings.promptCachingEnabled
+        ? prompt.userBlocks
+        : stripPromptCacheControl(prompt.userBlocks);
       completeStage(
         'prompt-build',
         `Built Claude prompt: ${messageLoad.transcriptMessages.length} transcript messages`,
@@ -1200,11 +1225,33 @@ export class OperationCoordinator {
       profiler.log('Waiting for Claude');
       sendDebugProgress();
 
+      let actualModel = resolvedModel;
+      let latestAnthropicSpend: AnthropicSpendSummary | null = null;
+      const handleAnthropicUsage = (
+        usage: AnthropicUsageMetrics,
+      ): AnthropicCostEstimate => {
+        const cost = estimateAnthropicCost(actualModel, usage);
+        const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
+        latestAnthropicSpend = spend;
+        const current = this.getActive(tabId);
+        if (current?.operationId === payload.operationId) {
+          current.anthropicSpend = spend;
+        }
+        profiler.setAnthropicUsage(usage);
+        profiler.setAnthropicCost(cost);
+        profiler.log(formatAnthropicUsageLog(usage));
+        profiler.log(formatAnthropicCostLog(cost));
+        logDebug(debugEnabled, 'anthropic usage', usage);
+        logDebug(debugEnabled, 'anthropic cost', cost);
+        sendOperationProgress();
+        return cost;
+      };
+
       const streamArgs = {
         apiKey: validated.storage.settings.claudeApiKey,
-        model: resolvedModel,
-        systemBlocks: prompt.systemBlocks,
-        userBlocks: prompt.userBlocks,
+        model: actualModel,
+        systemBlocks,
+        userBlocks,
         feature: payload.feature,
         signal,
         onText: (chunk: string) => {
@@ -1228,14 +1275,10 @@ export class OperationCoordinator {
           this.scheduleChunkFlush(tabId, current);
         },
         onUsage: (usage: AnthropicUsageMetrics) => {
-          profiler.setAnthropicUsage(usage);
-          profiler.log(formatAnthropicUsageLog(usage));
-          logDebug(debugEnabled, 'anthropic usage', usage);
-          sendDebugProgress();
+          handleAnthropicUsage(usage);
         },
       } as const;
 
-      let actualModel = resolvedModel;
       let rawText: string;
       try {
         rawText = await this.anthropicClient.streamMessage(streamArgs);
@@ -1338,7 +1381,7 @@ export class OperationCoordinator {
         operationId: payload.operationId,
         result,
         fanDisplayName,
-      }, profiler);
+      }, latestAnthropicSpend ?? createZeroAnthropicSpendSummary(), profiler);
 
       this.clearCompletedOperation(tabId);
     } catch (error) {
@@ -1364,6 +1407,7 @@ export class OperationCoordinator {
         this.sendError(
           tabId,
           errorPayload,
+          active?.anthropicSpend ?? createZeroAnthropicSpendSummary(),
           active?.profiler ?? NO_OP_PROFILER,
         );
       } else {
@@ -1375,6 +1419,7 @@ export class OperationCoordinator {
         this.sendError(
           tabId,
           errorPayload,
+          active?.anthropicSpend ?? createZeroAnthropicSpendSummary(),
           active?.profiler ?? NO_OP_PROFILER,
         );
       }

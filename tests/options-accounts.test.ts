@@ -17,6 +17,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       quickMessageCount: 30,
       deepMessageCount: 200,
       debugMode: false,
+      promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],

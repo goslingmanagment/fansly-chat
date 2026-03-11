@@ -10,6 +10,7 @@ vi.mock('../src/content/textarea.js', () => ({
 import { OverlayController } from '../src/content/overlay/overlay-controller.js';
 import { copyToClipboard } from '../src/content/textarea.js';
 import type {
+  AnthropicSpendSummary,
   OperationProfilingSnapshot,
   OverlayInsertPart,
   OverlayViewModel,
@@ -22,6 +23,7 @@ function createLoadingModel(
   options?: {
     progressMessage?: string;
     profiling?: OperationProfilingSnapshot;
+    anthropicSpend?: AnthropicSpendSummary;
   },
 ): Extract<OverlayViewModel, { kind: 'loading' }> {
   return {
@@ -38,6 +40,7 @@ function createLoadingModel(
       : null,
     rawText,
     debugPrompt: undefined,
+    anthropicSpend: options?.anthropicSpend,
     profiling: options?.profiling,
     canCancel: true,
     canRegenerate: true,
@@ -47,6 +50,10 @@ function createLoadingModel(
 
 function createReplyModel(
   part: OverlayInsertPart,
+  options?: {
+    anthropicSpend?: AnthropicSpendSummary;
+    profiling?: OperationProfilingSnapshot;
+  },
 ): Extract<OverlayViewModel, { kind: 'reply' }> {
   return {
     kind: 'reply',
@@ -57,7 +64,8 @@ function createReplyModel(
     rawText: part.text,
     splitModeRequested: false,
     debugPrompt: undefined,
-    profiling: undefined,
+    anthropicSpend: options?.anthropicSpend,
+    profiling: options?.profiling,
     rerunActionLabel: 'Regenerate',
   };
 }
@@ -124,6 +132,16 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
       cache_read_input_tokens: 90,
       output_tokens: 11,
     },
+    anthropicCost: {
+      modelId: 'claude-sonnet-4-6',
+      inputUsd: 0.00126,
+      cacheWrite5mUsd: 0.00045,
+      cacheWrite1hUsd: 0.00108,
+      cacheReadUsd: 0.000027,
+      outputUsd: 0.000165,
+      totalUsd: 0.002982,
+      approximate: false,
+    },
     logEntries: [
       { elapsedMs: 0, message: 'Resolve account identity' },
       { elapsedMs: 125, message: 'Loaded messages page 1/2 (25 msgs, 25 collected)' },
@@ -149,6 +167,36 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
         detail: '2 pages, 30 transcript messages',
       },
     ],
+  };
+}
+
+function createSpendSummary(
+  overrides?: Partial<AnthropicSpendSummary>,
+): AnthropicSpendSummary {
+  return {
+    totalTokens: 821,
+    inputTokens: 420,
+    cacheWriteTokens: 300,
+    cacheReadTokens: 90,
+    outputTokens: 11,
+    totalUsd: 0.002982,
+    uncachedUsd: 0.002595,
+    cacheEffectUsd: 0.000387,
+    cacheEffectKind: 'overhead',
+    cacheWriteUsd: 0.00153,
+    cacheReadUsd: 0.000027,
+    approximate: false,
+    ...overrides,
+  };
+}
+
+function createPart(text: string, index = 0): OverlayInsertPart {
+  return {
+    id: `part-${index}`,
+    sequenceIndex: index,
+    text,
+    insertedAt: null,
+    insertedOnce: false,
   };
 }
 
@@ -251,6 +299,21 @@ describe('OverlayController', () => {
     );
   });
 
+  it('renders a spend placeholder in loading view before usage arrives', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createLoadingModel('pending-op', ''));
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-spend-summary').textContent).toContain(
+      'Pending',
+    );
+  });
+
   it('keeps the non-debug loading fallback text when profiling is absent', () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval');
     const controller = new OverlayController({
@@ -267,6 +330,7 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatmuse-stream').textContent).toBe('Waiting for Claude…');
     expect(document.querySelector('.chatmuse-profiling')).toBeNull();
     expect(Array.from(grid.children).map((element) => element.className)).toEqual([
+      'chatmuse-loading-spend-host',
       'chatmuse-overlay-status',
       'chatmuse-stream',
       'chatmuse-overlay-actions',
@@ -417,6 +481,35 @@ describe('OverlayController', () => {
     const grid = requireElement<HTMLDivElement>('.chatmuse-grid');
     expect(grid.firstElementChild?.textContent).toBe('Something broke');
     expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
+  });
+
+  it('renders spend summary and Claude cost row in completed reply views', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(
+      createReplyModel(createPart('Reply text'), {
+        anthropicSpend: createSpendSummary({
+          cacheEffectKind: 'saved',
+          cacheEffectUsd: 0.00045,
+        }),
+        profiling: createProfilingSnapshot(),
+      }),
+    );
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-spend-summary').textContent).toContain(
+      '$0.002982',
+    );
+    expect(requireElement<HTMLDivElement>('.chatmuse-spend-summary').textContent).toContain(
+      'Cache saved',
+    );
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain(
+      'Claude cost',
+    );
   });
 
   // ─── Dismiss Mode Tests ───────────────────────────────────────────────

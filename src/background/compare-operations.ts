@@ -7,12 +7,14 @@ import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earni
 import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
-import { buildPrompt } from '../shared/prompts.js';
+import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
 import { rekeyAccountIdentity, loadStorageState } from '../shared/storage.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { formatTranscript } from '../shared/transcript.js';
 import type {
   AggregatedEarnings,
+  AnthropicCostEstimate,
+  AnthropicSpendSummary,
   AnthropicUsageMetrics,
   BackgroundPortMessage,
   CompareCardCompletePayload,
@@ -27,10 +29,17 @@ import type {
   CompareStartPayload,
   FeatureResult,
   OperationPhase,
+  OperationProfilingSnapshot,
   ReplyMode,
   SessionTemplate,
 } from '../shared/types.js';
 import type { AnthropicClient } from './anthropic-client.js';
+import {
+  buildAnthropicSpendSummary,
+  createZeroAnthropicSpendSummary,
+  estimateAnthropicCost,
+  formatAnthropicCostLog,
+} from './anthropic-cost.js';
 import type {
   SubscriptionLookupTraceEvent,
   FanslyClient,
@@ -92,6 +101,23 @@ function formatAnthropicUsageLog(usage: AnthropicUsageMetrics): string {
   return `Claude usage: input_tokens=${usage.input_tokens}, cache_creation_input_tokens=${usage.cache_creation_input_tokens}, cache_read_input_tokens=${usage.cache_read_input_tokens}, output_tokens=${usage.output_tokens}`;
 }
 
+function buildCompareCardProfilingSnapshot(
+  profiler: OperationProfiler,
+  usage?: AnthropicUsageMetrics,
+  cost?: AnthropicCostEstimate,
+): OperationProfilingSnapshot | undefined {
+  const snapshot = profiler.snapshot();
+  if (!snapshot) {
+    return undefined;
+  }
+
+  return {
+    ...snapshot,
+    ...(usage ? { anthropicUsage: { ...usage } } : {}),
+    ...(cost ? { anthropicCost: { ...cost } } : {}),
+  };
+}
+
 function sendCompareReady(
   context: CompareOperationsContext,
   tabId: number,
@@ -127,8 +153,9 @@ function sendCompareCardComplete(
   tabId: number,
   payload: CompareCardCompletePayload,
   profiler: OperationProfiler = NO_OP_PROFILER,
+  profilingOverride?: OperationProfilingSnapshot,
 ): void {
-  const profiling = profiler.snapshot();
+  const profiling = profilingOverride ?? profiler.snapshot();
   context.send(tabId, {
     ...payload,
     ...(profiling ? { profiling } : {}),
@@ -140,8 +167,9 @@ function sendCompareCardError(
   tabId: number,
   payload: CompareCardErrorPayload,
   profiler: OperationProfiler = NO_OP_PROFILER,
+  profilingOverride?: OperationProfilingSnapshot,
 ): void {
-  const profiling = profiler.snapshot();
+  const profiling = profilingOverride ?? profiler.snapshot();
   context.send(tabId, {
     ...payload,
     ...(profiling ? { profiling } : {}),
@@ -892,13 +920,25 @@ export async function executeCompare(
         fanDisplayName: promptInputs.fanDisplayName,
         replyMode: promptInputs.replyMode,
       });
+      const systemBlocks = validated.storage.settings.promptCachingEnabled
+        ? prompt.systemBlocks
+        : stripPromptCacheControl(prompt.systemBlocks);
+      const userBlocks = validated.storage.settings.promptCachingEnabled
+        ? prompt.userBlocks
+        : stripPromptCacheControl(prompt.userBlocks);
 
-      const streamToCard = async (model: string): Promise<string> =>
-        context.anthropicClient.streamMessage({
+      let cardUsage: AnthropicUsageMetrics | undefined;
+      let cardCost: AnthropicCostEstimate | undefined;
+      let cardSpend: AnthropicSpendSummary | undefined;
+      let actualModel = resolvedModel;
+
+      const streamToCard = async (model: string): Promise<string> => {
+        actualModel = model;
+        return context.anthropicClient.streamMessage({
           apiKey: validated.storage.settings.claudeApiKey,
           model,
-          systemBlocks: prompt.systemBlocks,
-          userBlocks: prompt.userBlocks,
+          systemBlocks,
+          userBlocks,
           feature: 'fast-reply',
           signal,
           onText: (chunk) => {
@@ -923,12 +963,21 @@ export async function executeCompare(
             );
           },
           onUsage: (usage) => {
-            profiler.setAnthropicUsage(usage);
+            const cost = estimateAnthropicCost(actualModel, usage);
+            const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
+            cardUsage = { ...usage };
+            cardCost = { ...cost };
+            cardSpend = { ...spend };
             profiler.log(formatAnthropicUsageLog(usage));
+            profiler.log(formatAnthropicCostLog(cost));
             logDebug(debugEnabled, 'anthropic usage', {
               cardId: card.id,
-              model,
+              model: actualModel,
               ...usage,
+            });
+            logDebug(debugEnabled, 'anthropic cost', {
+              cardId: card.id,
+              ...cost,
             });
             sendDebugCompareProgress({
               phase: 'generating',
@@ -937,6 +986,7 @@ export async function executeCompare(
             });
           },
         });
+      };
 
       let rawText = '';
       try {
@@ -954,6 +1004,11 @@ export async function executeCompare(
         ) {
           return;
         } else {
+          const profiling = buildCompareCardProfilingSnapshot(
+            profiler,
+            cardUsage,
+            cardCost,
+          );
           sendCompareCardError(
             context,
             tabId,
@@ -962,8 +1017,11 @@ export async function executeCompare(
               operationId: payload.operationId,
               cardId: card.id,
               error: toUserError(error),
+              anthropicSpend:
+                cardSpend ?? createZeroAnthropicSpendSummary(),
             },
             profiler,
+            profiling,
           );
           return;
         }
@@ -1002,8 +1060,10 @@ export async function executeCompare(
           cardId: card.id,
           result,
           fanDisplayName,
+          anthropicSpend: cardSpend ?? createZeroAnthropicSpendSummary(),
         },
         profiler,
+        buildCompareCardProfilingSnapshot(profiler, cardUsage, cardCost),
       );
     };
 

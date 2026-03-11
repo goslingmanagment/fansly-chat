@@ -1,5 +1,7 @@
 import { toUserError } from '../../shared/errors.js';
 import type {
+  AnthropicCostEstimate,
+  AnthropicSpendSummary,
   AnthropicUsageMetrics,
   FeatureType,
   OverlayInsertPart,
@@ -48,6 +50,7 @@ interface LoadingViewState {
   root: HTMLElement;
   statusText: Text;
   streamText: Text;
+  spendHost: HTMLDivElement;
   profilingHost: HTMLDivElement | null;
   debugHost: HTMLDivElement;
   actions: HTMLDivElement;
@@ -109,6 +112,42 @@ function formatProfilingElapsed(ms: number): string {
 
 function formatAnthropicUsageSummary(usage: AnthropicUsageMetrics): string {
   return `input ${usage.input_tokens} • cache create ${usage.cache_creation_input_tokens} • cache read ${usage.cache_read_input_tokens} • output ${usage.output_tokens}`;
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
+function formatUsd(value: number, approximate = false): string {
+  const digits = value >= 1 ? 2 : value >= 0.01 ? 4 : 6;
+  return `${approximate ? '~' : ''}$${value.toFixed(digits)}`;
+}
+
+function formatCacheEffectLabel(spend: AnthropicSpendSummary): string {
+  if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
+    return 'Cache neutral';
+  }
+  return `Cache ${spend.cacheEffectKind}`;
+}
+
+function formatCacheEffectValue(spend: AnthropicSpendSummary): string {
+  if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
+    return '$0.000000';
+  }
+  return formatUsd(spend.cacheEffectUsd, spend.approximate);
+}
+
+function formatAnthropicCostSummary(cost: AnthropicCostEstimate): string {
+  return `total ${formatUsd(cost.totalUsd, cost.approximate)} • input ${formatUsd(
+    cost.inputUsd,
+    cost.approximate,
+  )} • write ${formatUsd(
+    cost.cacheWrite5mUsd + cost.cacheWrite1hUsd,
+    cost.approximate,
+  )} • read ${formatUsd(cost.cacheReadUsd, cost.approximate)} • output ${formatUsd(
+    cost.outputUsd,
+    cost.approximate,
+  )}`;
 }
 
 function operationIdForModel(model: OverlayViewModel): string | null {
@@ -438,6 +477,9 @@ export class OverlayController {
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
+    const spendHost = document.createElement('div');
+    spendHost.className = 'chatmuse-loading-spend-host';
+
     const debugHost = document.createElement('div');
 
     const actions = document.createElement('div');
@@ -453,7 +495,7 @@ export class OverlayController {
     });
     actions.append(cancel);
 
-    section.append(status, stream, actions);
+    section.append(spendHost, status, stream, actions);
 
     const view: LoadingViewState = {
       kind: 'loading',
@@ -461,6 +503,7 @@ export class OverlayController {
       root: section,
       statusText,
       streamText,
+      spendHost,
       profilingHost: null,
       debugHost,
       actions,
@@ -478,6 +521,7 @@ export class OverlayController {
   ): void {
     const streamText = model.rawText || 'Waiting for Claude\u2026';
 
+    this.syncLoadingSpend(view, model);
     this.syncLoadingProfiling(view, model);
     this.refreshLoadingStatus(view, model);
     if (view.streamText.data !== streamText) {
@@ -494,6 +538,29 @@ export class OverlayController {
     if (view.statusText.data !== statusText) {
       view.statusText.data = statusText;
     }
+  }
+
+  private syncLoadingSpend(
+    view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): void {
+    const spend = model.anthropicSpend;
+    const spendKey = spend
+      ? [
+          spend.totalTokens,
+          spend.totalUsd,
+          spend.cacheEffectUsd,
+          spend.cacheEffectKind,
+          spend.approximate ? 'approx' : 'exact',
+        ].join(':')
+      : 'pending';
+    if (view.spendHost.dataset.spendKey === spendKey) {
+      return;
+    }
+    view.spendHost.dataset.spendKey = spendKey;
+    view.spendHost.replaceChildren(
+      this.renderSpendStrip(spend, { placeholder: true }),
+    );
   }
 
   private loadingStatusText(
@@ -729,6 +796,10 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
+    if (model.anthropicSpend) {
+      section.append(this.renderSpendStrip(model.anthropicSpend));
+    }
+
     if (model.profiling) {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
     }
@@ -783,6 +854,10 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
+    if (model.anthropicSpend) {
+      section.append(this.renderSpendStrip(model.anthropicSpend));
+    }
+
     if (model.profiling) {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
     }
@@ -830,6 +905,10 @@ export class OverlayController {
   private renderReadOnly(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): HTMLElement {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
+
+    if (model.anthropicSpend) {
+      section.append(this.renderSpendStrip(model.anthropicSpend));
+    }
 
     if (model.profiling) {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
@@ -927,6 +1006,10 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
+    if (model.anthropicSpend) {
+      section.append(this.renderSpendStrip(model.anthropicSpend));
+    }
+
     const block = document.createElement('div');
     block.className = 'chatmuse-inline-error';
     block.textContent = model.error.message;
@@ -941,6 +1024,74 @@ export class OverlayController {
     }
 
     return section;
+  }
+
+  private renderSpendStrip(
+    spend?: AnthropicSpendSummary,
+    options?: { placeholder?: boolean },
+  ): HTMLElement {
+    const strip = document.createElement('div');
+    strip.className = 'chatmuse-spend-summary';
+
+    const stats = document.createElement('div');
+    stats.className = 'chatmuse-spend-stats';
+
+    const createStat = (
+      label: string,
+      value: string,
+      extraClass?: string,
+    ): HTMLElement => {
+      const stat = document.createElement('div');
+      stat.className = `chatmuse-spend-stat${extraClass ? ` ${extraClass}` : ''}`;
+
+      const statLabel = document.createElement('div');
+      statLabel.className = 'chatmuse-spend-stat-label';
+      statLabel.textContent = label;
+
+      const statValue = document.createElement('div');
+      statValue.className = 'chatmuse-spend-stat-value';
+      statValue.textContent = value;
+
+      stat.append(statLabel, statValue);
+      return stat;
+    };
+
+    const breakdown = document.createElement('div');
+    breakdown.className = 'chatmuse-spend-breakdown';
+
+    if (!spend && options?.placeholder) {
+      strip.classList.add('chatmuse-spend-summary-pending');
+      stats.append(
+        createStat('Cost', 'Pending'),
+        createStat('Tokens', 'Pending'),
+        createStat('Cache', 'Pending'),
+      );
+      breakdown.textContent = 'input pending • write pending • read pending • output pending';
+      strip.append(stats, breakdown);
+      return strip;
+    }
+
+    if (!spend) {
+      return strip;
+    }
+
+    stats.append(
+      createStat('Cost', formatUsd(spend.totalUsd, spend.approximate)),
+      createStat('Tokens', formatTokenCount(spend.totalTokens)),
+      createStat(
+        formatCacheEffectLabel(spend),
+        formatCacheEffectValue(spend),
+        `chatmuse-spend-stat-${spend.cacheEffectKind}`,
+      ),
+    );
+    breakdown.textContent =
+      `input ${formatTokenCount(spend.inputTokens)} • ` +
+      `write ${formatTokenCount(spend.cacheWriteTokens)} • ` +
+      `read ${formatTokenCount(spend.cacheReadTokens)} • ` +
+      `output ${formatTokenCount(spend.outputTokens)}`;
+
+    strip.append(stats, breakdown);
+    return strip;
   }
 
   private renderProfilingCard(
@@ -1032,6 +1183,29 @@ export class OverlayController {
 
       usageRow.append(usageLabel, usageDuration, usageDetail);
       container.append(usageRow);
+    }
+
+    if (snapshot.anthropicCost) {
+      const costRow = document.createElement('div');
+      costRow.className = 'chatmuse-profiling-stage';
+
+      const costLabel = document.createElement('div');
+      costLabel.className = 'chatmuse-profiling-stage-label';
+      costLabel.textContent = 'Claude cost';
+
+      const costDuration = document.createElement('div');
+      costDuration.className = 'chatmuse-profiling-stage-duration';
+      costDuration.textContent = formatUsd(
+        snapshot.anthropicCost.totalUsd,
+        snapshot.anthropicCost.approximate,
+      );
+
+      const costDetail = document.createElement('div');
+      costDetail.className = 'chatmuse-profiling-stage-detail';
+      costDetail.textContent = formatAnthropicCostSummary(snapshot.anthropicCost);
+
+      costRow.append(costLabel, costDuration, costDetail);
+      container.append(costRow);
     }
 
     for (const stage of snapshot.stages) {

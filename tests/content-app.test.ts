@@ -172,6 +172,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
       quickMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
+      promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
     },
     personalities: [

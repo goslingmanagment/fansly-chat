@@ -15,6 +15,7 @@ export interface Settings {
   quickMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
+  promptCachingEnabled: boolean;
   featureModels: Record<FeatureType, string>;
 }
 
@@ -113,11 +114,43 @@ export interface PromptTextBlock {
   cache_control?: PromptCacheControl;
 }
 
+export interface AnthropicCacheCreationUsage {
+  ephemeral_5m_input_tokens: number;
+  ephemeral_1h_input_tokens: number;
+}
+
 export interface AnthropicUsageMetrics {
   input_tokens: number;
   cache_creation_input_tokens: number;
   cache_read_input_tokens: number;
   output_tokens: number;
+  cache_creation?: AnthropicCacheCreationUsage;
+}
+
+export interface AnthropicCostEstimate {
+  modelId: string;
+  inputUsd: number;
+  cacheWrite5mUsd: number;
+  cacheWrite1hUsd: number;
+  cacheReadUsd: number;
+  outputUsd: number;
+  totalUsd: number;
+  approximate: boolean;
+}
+
+export interface AnthropicSpendSummary {
+  totalTokens: number;
+  inputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  totalUsd: number;
+  uncachedUsd: number;
+  cacheEffectUsd: number;
+  cacheEffectKind: 'saved' | 'overhead' | 'neutral';
+  cacheWriteUsd: number;
+  cacheReadUsd: number;
+  approximate: boolean;
 }
 
 export interface PromptPayload {
@@ -461,6 +494,7 @@ export interface OperationProfilingSnapshot {
   logEntries: OperationProfilingLogEntry[];
   stages: OperationProfilingStage[];
   anthropicUsage?: AnthropicUsageMetrics;
+  anthropicCost?: AnthropicCostEstimate;
 }
 
 // ─── Operation Progress ──────────────────────────────────────────────────
@@ -472,6 +506,7 @@ export interface OperationProgressPayload {
   currentPage?: number;
   targetPages?: number;
   message?: string;
+  anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -631,6 +666,7 @@ export interface CompletePayload extends PortEnvelopeBase {
   operationId: string;
   result: FeatureResult;
   fanDisplayName: string;
+  anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -638,6 +674,7 @@ export interface ErrorPayload extends PortEnvelopeBase {
   type: 'operation:error';
   operationId: string;
   error: UserFacingError;
+  anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -645,6 +682,7 @@ export interface DiscardedPayload extends PortEnvelopeBase {
   type: 'operation:discarded';
   operationId: string;
   error: UserFacingError;
+  anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -654,6 +692,7 @@ export interface CompareCardCompletePayload extends PortEnvelopeBase {
   cardId: string;
   result: FeatureResult;
   fanDisplayName: string;
+  anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -662,6 +701,7 @@ export interface CompareCardErrorPayload extends PortEnvelopeBase {
   operationId: string;
   cardId: string;
   error: UserFacingError;
+  anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -745,6 +785,7 @@ export interface CompareInlineTabState {
   status: 'loading' | 'reply' | 'error';
   rawText: string;
   parts: OverlayInsertPart[];
+  anthropicSpend?: AnthropicSpendSummary;
   splitModeRequested?: boolean;
   error?: UserFacingError;
 }
@@ -769,6 +810,7 @@ export type OverlayViewModel =
       progress: OperationProgressPayload | null;
       rawText: string;
       debugPrompt?: PromptDebugSnapshot;
+      anthropicSpend?: AnthropicSpendSummary;
       profiling?: OperationProfilingSnapshot;
       canCancel: boolean;
       canRegenerate: boolean;
@@ -783,6 +825,7 @@ export type OverlayViewModel =
       rawText: string;
       splitModeRequested?: boolean;
       debugPrompt?: PromptDebugSnapshot;
+      anthropicSpend?: AnthropicSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
@@ -797,6 +840,7 @@ export type OverlayViewModel =
       engagingParts: OverlayInsertPart[];
       flirtyParts: OverlayInsertPart[];
       parseFallback: boolean;
+      anthropicSpend?: AnthropicSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       debugPrompt?: PromptDebugSnapshot;
@@ -815,6 +859,7 @@ export type OverlayViewModel =
         recommendations: string | null;
         parseFallback: boolean;
       };
+      anthropicSpend?: AnthropicSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       debugPrompt?: PromptDebugSnapshot;
@@ -826,6 +871,7 @@ export type OverlayViewModel =
       fanDisplayName: string;
       operationId: string | null;
       debugPrompt?: PromptDebugSnapshot;
+      anthropicSpend?: AnthropicSpendSummary;
       profiling?: OperationProfilingSnapshot;
       error: UserFacingError;
     };

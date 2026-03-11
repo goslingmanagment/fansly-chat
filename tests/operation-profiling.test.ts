@@ -40,6 +40,16 @@ describe('createOperationProfiler', () => {
       cache_read_input_tokens: 90,
       output_tokens: 11,
     });
+    profiler.setAnthropicCost({
+      modelId: 'claude-sonnet-4-6',
+      inputUsd: 0.00126,
+      cacheWrite5mUsd: 0,
+      cacheWrite1hUsd: 0.0018,
+      cacheReadUsd: 0.000027,
+      outputUsd: 0.000165,
+      totalUsd: 0.003252,
+      approximate: false,
+    });
     advanceNow(125);
     profiler.completeStage('resolve-identity', 'resolved account-1');
 
@@ -53,6 +63,16 @@ describe('createOperationProfiler', () => {
         cache_creation_input_tokens: 300,
         cache_read_input_tokens: 90,
         output_tokens: 11,
+      },
+      anthropicCost: {
+        modelId: 'claude-sonnet-4-6',
+        inputUsd: 0.00126,
+        cacheWrite5mUsd: 0,
+        cacheWrite1hUsd: 0.0018,
+        cacheReadUsd: 0.000027,
+        outputUsd: 0.000165,
+        totalUsd: 0.003252,
+        approximate: false,
       },
     });
     expect(snapshot?.stages).toEqual([

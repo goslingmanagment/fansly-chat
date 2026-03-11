@@ -148,7 +148,7 @@ describe('AnthropicClient error mapping', () => {
 });
 
 describe('AnthropicClient streaming requests', () => {
-  it('sends system and user content as text blocks without an undocumented beta header', async () => {
+  it('sends 1-hour cache TTL blocks without an anthropic-beta header', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_start',
@@ -174,6 +174,9 @@ describe('AnthropicClient streaming requests', () => {
     expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');
     expect(headers).not.toHaveProperty('anthropic-beta');
     expect(body.system).toEqual(streamArgs().systemBlocks);
+    expect(
+      (body.system as Array<{ cache_control?: { ttl?: string } }>)[1]?.cache_control?.ttl,
+    ).toBe('1h');
     expect(body.messages).toEqual([
       {
         role: 'user',
@@ -186,7 +189,7 @@ describe('AnthropicClient streaming requests', () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_start',
-        'data: {"type":"message_start","message":{"usage":{"input_tokens":120,"cache_creation_input_tokens":40,"cache_read_input_tokens":0,"output_tokens":3}}}',
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":120,"cache_creation_input_tokens":40,"cache_read_input_tokens":0,"output_tokens":3,"cache_creation":{"ephemeral_1h_input_tokens":20}}}}',
         '',
         'event: content_block_delta',
         'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}',
@@ -195,7 +198,7 @@ describe('AnthropicClient streaming requests', () => {
         'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" there"}}',
         '',
         'event: message_delta',
-        'data: {"type":"message_delta","usage":{"input_tokens":120,"cache_creation_input_tokens":40,"cache_read_input_tokens":55,"output_tokens":9}}',
+        'data: {"type":"message_delta","usage":{"input_tokens":120,"cache_creation_input_tokens":40,"cache_read_input_tokens":55,"output_tokens":9,"cache_creation":{"ephemeral_5m_input_tokens":20}}}',
         '',
         'event: message_stop',
         'data: {"type":"message_stop"}',
@@ -211,12 +214,26 @@ describe('AnthropicClient streaming requests', () => {
     expect(rawText).toBe('Hello there');
     expect(onText).toHaveBeenNthCalledWith(1, 'Hello');
     expect(onText).toHaveBeenNthCalledWith(2, ' there');
-    expect(onUsage).toHaveBeenCalledTimes(1);
-    expect(onUsage).toHaveBeenCalledWith({
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(onUsage).toHaveBeenNthCalledWith(1, {
+      input_tokens: 120,
+      cache_creation_input_tokens: 40,
+      cache_read_input_tokens: 0,
+      output_tokens: 3,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 0,
+        ephemeral_1h_input_tokens: 20,
+      },
+    });
+    expect(onUsage).toHaveBeenNthCalledWith(2, {
       input_tokens: 120,
       cache_creation_input_tokens: 40,
       cache_read_input_tokens: 55,
       output_tokens: 9,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 20,
+        ephemeral_1h_input_tokens: 20,
+      },
     });
   });
 });

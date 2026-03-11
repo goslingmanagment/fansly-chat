@@ -18,6 +18,7 @@ import {
 import { splitByNext } from '../shared/split.js';
 import { loadStorageState } from '../shared/storage.js';
 import type {
+  AnthropicSpendSummary,
   BackgroundPortMessage,
   CompareInlineTabState,
   CompareInlineViewModel,
@@ -59,6 +60,7 @@ export class ChatMuseContentApp {
   private activeOperationId: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
+  private activeAnthropicSpend: AnthropicSpendSummary | null = null;
   private activeProfiling: OperationProfilingSnapshot | null = null;
   private activeProgress: OperationProgressPayload | null = null;
   private lastFeature: FeatureType | null = null;
@@ -314,6 +316,7 @@ export class ChatMuseContentApp {
       progress: this.activeProgress,
       rawText: this.overlayRawText,
       debugPrompt: this.activeDebugPrompt ?? undefined,
+      anthropicSpend: this.activeAnthropicSpend ?? undefined,
       profiling: this.activeProfiling ?? undefined,
       canCancel: true,
       canRegenerate: options?.canRegenerate ?? false,
@@ -418,6 +421,7 @@ export class ChatMuseContentApp {
     const replyMode = feature === 'fast-reply' ? this.nextFastReplyMode : 'default';
     this.cancelScheduledLoadingRender();
     this.activeDebugPrompt = null;
+    this.activeAnthropicSpend = null;
     this.activeProfiling = null;
     this.activeProgress = null;
     this.activeFeature = feature;
@@ -638,6 +642,17 @@ export class ChatMuseContentApp {
     if (this.activeOperationId !== message.operationId) {
       return;
     }
+    this.activeAnthropicSpend = message.anthropicSpend ?? this.activeAnthropicSpend;
+    if (
+      message.anthropicSpend &&
+      this.activeFeature &&
+      isInlineQuickFeature(this.activeFeature) &&
+      this.quickSurfaceMode === 'inline' &&
+      !this.quickInlineVisible
+    ) {
+      this.quickSurfaceEverOpened = true;
+      this.quickInlineVisible = true;
+    }
     this.activeProfiling = message.profiling ?? null;
     this.activeProgress = message;
     this.scheduleLoadingRender();
@@ -723,6 +738,7 @@ export class ChatMuseContentApp {
         ? message.result.parts
         : splitByNext(message.result.rawText),
     );
+    tab.anthropicSpend = message.anthropicSpend;
     tab.splitModeRequested = Boolean(message.result.splitModeRequested);
     tab.error = undefined;
     this.renderSurfaces();
@@ -736,6 +752,7 @@ export class ChatMuseContentApp {
       return;
     }
     tab.status = 'error';
+    tab.anthropicSpend = message.anthropicSpend;
     tab.error = message.error;
     this.renderSurfaces();
   }
@@ -854,6 +871,7 @@ export class ChatMuseContentApp {
       message.operationId,
       message.fanDisplayName,
       message.result,
+      message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
     this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
@@ -892,6 +910,8 @@ export class ChatMuseContentApp {
         fanDisplayName: this.currentFanDisplayName(),
         operationId: message.operationId,
         debugPrompt: this.activeDebugPrompt ?? undefined,
+        anthropicSpend:
+          message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
         profiling: message.profiling ?? this.activeProfiling ?? undefined,
         error: {
           code: 'unknown_error',
@@ -930,6 +950,7 @@ export class ChatMuseContentApp {
     this.activeFeature = null;
     this.activeOperationId = null;
     this.activeFanDisplayName = null;
+    this.activeAnthropicSpend = null;
     this.activeProfiling = null;
     this.activeProgress = null;
     if (fullReset) {
@@ -1002,6 +1023,7 @@ export class ChatMuseContentApp {
     operationId: string,
     fanDisplayName: string,
     result: FeatureResult,
+    anthropicSpend?: AnthropicSpendSummary,
     profiling?: OperationProfilingSnapshot,
   ): CompletedOverlayViewModel {
     const rawText = result.rawText;
@@ -1019,6 +1041,7 @@ export class ChatMuseContentApp {
         flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
         parseFallback: !parsed?.valid,
         debugPrompt: this.activeDebugPrompt ?? undefined,
+        anthropicSpend,
         profiling,
         rerunActionLabel: 'Regenerate',
       };
@@ -1042,6 +1065,7 @@ export class ChatMuseContentApp {
               }
             : undefined,
         debugPrompt: this.activeDebugPrompt ?? undefined,
+        anthropicSpend,
         profiling,
         rerunActionLabel: 'Refresh',
       };
@@ -1060,6 +1084,7 @@ export class ChatMuseContentApp {
       rawText,
       splitModeRequested: Boolean(result.splitModeRequested),
       debugPrompt: this.activeDebugPrompt ?? undefined,
+      anthropicSpend,
       profiling,
       rerunActionLabel: 'Regenerate',
     };
