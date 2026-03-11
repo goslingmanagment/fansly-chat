@@ -1,5 +1,6 @@
 import { toUserError } from '../../shared/errors.js';
 import type {
+  AnthropicUsageMetrics,
   FeatureType,
   OverlayInsertPart,
   OverlayRerunActionLabel,
@@ -104,6 +105,10 @@ function formatProfilingElapsed(ms: number): string {
     return `${Math.max(0, Math.round(ms))}ms`;
   }
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatAnthropicUsageSummary(usage: AnthropicUsageMetrics): string {
+  return `input ${usage.input_tokens} • cache create ${usage.cache_creation_input_tokens} • cache read ${usage.cache_read_input_tokens} • output ${usage.output_tokens}`;
 }
 
 function operationIdForModel(model: OverlayViewModel): string | null {
@@ -1006,6 +1011,28 @@ export class OverlayController {
 
     total.append(totalLabel, totalDuration);
     container.append(total);
+
+    if (snapshot.anthropicUsage) {
+      const usageRow = document.createElement('div');
+      usageRow.className = 'chatmuse-profiling-stage';
+
+      const usageLabel = document.createElement('div');
+      usageLabel.className = 'chatmuse-profiling-stage-label';
+      usageLabel.textContent = 'Claude usage';
+
+      const usageDuration = document.createElement('div');
+      usageDuration.className = 'chatmuse-profiling-stage-duration';
+      usageDuration.textContent = 'tokens';
+
+      const usageDetail = document.createElement('div');
+      usageDetail.className = 'chatmuse-profiling-stage-detail';
+      usageDetail.textContent = formatAnthropicUsageSummary(
+        snapshot.anthropicUsage,
+      );
+
+      usageRow.append(usageLabel, usageDuration, usageDetail);
+      container.append(usageRow);
+    }
 
     for (const stage of snapshot.stages) {
       const row = document.createElement('div');

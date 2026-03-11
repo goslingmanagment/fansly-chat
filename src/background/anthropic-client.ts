@@ -1,15 +1,20 @@
 import { ANTHROPIC_VERSION, CLAUDE_API_URL, MAX_TOKENS } from '../shared/constants.js';
 import { ChatMuseError } from '../shared/errors.js';
-import type { FeatureType } from '../shared/types.js';
+import type {
+  AnthropicUsageMetrics,
+  FeatureType,
+  PromptTextBlock,
+} from '../shared/types.js';
 
 interface StreamArgs {
   apiKey: string;
   model: string;
-  system: string;
-  user: string;
+  systemBlocks: PromptTextBlock[];
+  userBlocks: PromptTextBlock[];
   feature: FeatureType;
   signal: AbortSignal;
   onText: (text: string) => void;
+  onUsage?: (usage: AnthropicUsageMetrics) => void;
 }
 
 function parseSseBlock(block: string): { event: string; data: string } | null {
@@ -37,9 +42,47 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
   return { event, data: dataLines.join('\n') };
 }
 
+function mergeUsage(
+  current: AnthropicUsageMetrics | null,
+  next?: Partial<AnthropicUsageMetrics>,
+): AnthropicUsageMetrics | null {
+  if (!next) {
+    return current;
+  }
+
+  return {
+    input_tokens:
+      typeof next.input_tokens === 'number'
+        ? next.input_tokens
+        : current?.input_tokens ?? 0,
+    cache_creation_input_tokens:
+      typeof next.cache_creation_input_tokens === 'number'
+        ? next.cache_creation_input_tokens
+        : current?.cache_creation_input_tokens ?? 0,
+    cache_read_input_tokens:
+      typeof next.cache_read_input_tokens === 'number'
+        ? next.cache_read_input_tokens
+        : current?.cache_read_input_tokens ?? 0,
+    output_tokens:
+      typeof next.output_tokens === 'number'
+        ? next.output_tokens
+        : current?.output_tokens ?? 0,
+  };
+}
+
 export class AnthropicClient {
-  async streamMessage({ apiKey, model, system, user, feature, signal, onText }: StreamArgs): Promise<string> {
+  async streamMessage({
+    apiKey,
+    model,
+    systemBlocks,
+    userBlocks,
+    feature,
+    signal,
+    onText,
+    onUsage,
+  }: StreamArgs): Promise<string> {
     let rawText = '';
+    let usage: AnthropicUsageMetrics | null = null;
     const response = await fetch(CLAUDE_API_URL, {
       method: 'POST',
       headers: {
@@ -53,8 +96,8 @@ export class AnthropicClient {
         model,
         stream: true,
         max_tokens: MAX_TOKENS[feature],
-        system,
-        messages: [{ role: 'user', content: user }],
+        system: systemBlocks,
+        messages: [{ role: 'user', content: userBlocks }],
       }),
     });
 
@@ -106,6 +149,8 @@ export class AnthropicClient {
         // Protect against malformed SSE data
         let payload: {
           type?: string;
+          message?: { usage?: Partial<AnthropicUsageMetrics> };
+          usage?: Partial<AnthropicUsageMetrics>;
           delta?: { type?: string; text?: string };
           error?: { type?: string };
         };
@@ -117,6 +162,14 @@ export class AnthropicClient {
 
         if (parsed.event === 'error' || payload.type === 'error') {
           throw new ChatMuseError('claude_overloaded');
+        }
+
+        if (parsed.event === 'message_start') {
+          usage = mergeUsage(usage, payload.message?.usage);
+        }
+
+        if (parsed.event === 'message_delta') {
+          usage = mergeUsage(usage, payload.usage);
         }
 
         if (
@@ -132,6 +185,10 @@ export class AnthropicClient {
       if (done) {
         break;
       }
+    }
+
+    if (usage) {
+      onUsage?.(usage);
     }
 
     return rawText;

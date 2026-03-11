@@ -34,6 +34,12 @@ describe('createOperationProfiler', () => {
 
     profiler.startStage('resolve-identity', 'Resolve account identity');
     profiler.log('Resolve account identity');
+    profiler.setAnthropicUsage({
+      input_tokens: 420,
+      cache_creation_input_tokens: 300,
+      cache_read_input_tokens: 90,
+      output_tokens: 11,
+    });
     advanceNow(125);
     profiler.completeStage('resolve-identity', 'resolved account-1');
 
@@ -42,6 +48,12 @@ describe('createOperationProfiler', () => {
       elapsedMs: 125,
       activeLabel: null,
       logEntries: [{ elapsedMs: 0, message: 'Resolve account identity' }],
+      anthropicUsage: {
+        input_tokens: 420,
+        cache_creation_input_tokens: 300,
+        cache_read_input_tokens: 90,
+        output_tokens: 11,
+      },
     });
     expect(snapshot?.stages).toEqual([
       expect.objectContaining({

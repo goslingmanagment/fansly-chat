@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MODEL_ID, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { ChatMuseError } from '../src/shared/errors.js';
+import { flattenPromptBlocks } from '../src/shared/prompts.js';
 import type {
   AggregatedEarnings,
   BackgroundPortMessage,
@@ -95,6 +96,24 @@ function advanceNow(ms: number): number {
 
 function postedMessages(port: { postMessage: ReturnType<typeof vi.fn> }): BackgroundPortMessage[] {
   return port.postMessage.mock.calls.map(([message]) => message as BackgroundPortMessage);
+}
+
+function flattenUserBlocksFromStreamCall(
+  anthropicClient: { streamMessage: ReturnType<typeof vi.fn> },
+  callIndex = 0,
+): string {
+  return flattenPromptBlocks(
+    anthropicClient.streamMessage.mock.calls[callIndex]?.[0].userBlocks ?? [],
+  );
+}
+
+function flattenSystemBlocksFromStreamCall(
+  anthropicClient: { streamMessage: ReturnType<typeof vi.fn> },
+  callIndex = 0,
+): string {
+  return flattenPromptBlocks(
+    anthropicClient.streamMessage.mock.calls[callIndex]?.[0].systemBlocks ?? [],
+  );
 }
 
 async function createCoordinatorHarness(options?: {
@@ -267,8 +286,13 @@ describe('OperationCoordinator', () => {
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         feature: 'fast-reply',
-        user: expect.not.stringContaining('## Fan Subscription Data'),
+        userBlocks: expect.any(Array),
       }),
+    );
+    expect(anthropicClient.streamMessage.mock.calls[0]?.[0]).not.toHaveProperty('system');
+    expect(anthropicClient.streamMessage.mock.calls[0]?.[0]).not.toHaveProperty('user');
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).not.toContain(
+      '## Fan Subscription Data',
     );
   });
 
@@ -303,8 +327,13 @@ describe('OperationCoordinator', () => {
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         feature: 'chat-review',
-        user: expect.stringContaining('## Fan Subscription Data'),
+        userBlocks: expect.any(Array),
       }),
+    );
+    expect(anthropicClient.streamMessage.mock.calls[0]?.[0]).not.toHaveProperty('system');
+    expect(anthropicClient.streamMessage.mock.calls[0]?.[0]).not.toHaveProperty('user');
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain(
+      '## Fan Subscription Data',
     );
   });
 
@@ -363,7 +392,8 @@ describe('OperationCoordinator', () => {
       },
     ]);
     const anthropicClient = {
-      streamMessage: vi.fn(async ({ system, onText }: { system: string; onText: (text: string) => void }) => {
+      streamMessage: vi.fn(async ({ systemBlocks, onText }: { systemBlocks: Array<{ text: string }>; onText: (text: string) => void }) => {
+        const system = systemBlocks.map((block) => block.text).join('');
         const text = system.includes('Current baseline personality')
           ? 'Current reply'
           : system.includes('Second draft personality variant')
@@ -405,9 +435,19 @@ describe('OperationCoordinator', () => {
     expect(fanslyClient.getMonthlyEarnings).toHaveBeenCalledTimes(1);
     expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledTimes(1);
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(3);
-    for (const call of anthropicClient.streamMessage.mock.calls) {
+    for (const [index, call] of anthropicClient.streamMessage.mock.calls.entries()) {
       expect(call[0]).toEqual(
-        expect.objectContaining({ model: DEFAULT_FEATURE_MODELS['fast-reply'], feature: 'fast-reply' }),
+        expect.objectContaining({
+          model: DEFAULT_FEATURE_MODELS['fast-reply'],
+          feature: 'fast-reply',
+          systemBlocks: expect.any(Array),
+          userBlocks: expect.any(Array),
+        }),
+      );
+      expect(call[0]).not.toHaveProperty('system');
+      expect(call[0]).not.toHaveProperty('user');
+      expect(flattenSystemBlocksFromStreamCall(anthropicClient, index)).toContain(
+        '## Model Personality',
       );
     }
     expect(readyMessage?.cards.map((card) => card.label)).toEqual(['Closer (current)', 'draft-1', 'draft-2']);
@@ -434,7 +474,8 @@ describe('OperationCoordinator', () => {
       },
     ]);
     const anthropicClient = {
-      streamMessage: vi.fn(async ({ system }: { system: string }) => {
+      streamMessage: vi.fn(async ({ systemBlocks }: { systemBlocks: Array<{ text: string }> }) => {
+        const system = systemBlocks.map((block) => block.text).join('');
         if (system.includes('Current baseline personality')) {
           throw new ChatMuseError('network_error');
         }
@@ -817,12 +858,29 @@ describe('OperationCoordinator', () => {
     });
 
     const anthropicClient = {
-      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
+      streamMessage: vi.fn(async ({
+        onText,
+        onUsage,
+      }: {
+        onText: (text: string) => void;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
         advanceNow(200);
         onText('Hello');
         advanceNow(250);
         onText(' there');
         advanceNow(120);
+        onUsage?.({
+          input_tokens: 420,
+          cache_creation_input_tokens: 300,
+          cache_read_input_tokens: 90,
+          output_tokens: 11,
+        });
         return 'Hello there';
       }),
     };
@@ -852,10 +910,27 @@ describe('OperationCoordinator', () => {
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
         message.type === 'operation:complete',
     );
+    const debugPromptMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:debugPrompt' }> =>
+        message.type === 'operation:debugPrompt',
+    );
 
     expect(progressMessages.some((message) => Boolean(message.profiling))).toBe(true);
     expect(completeMessage?.profiling).toBeDefined();
+    expect(completeMessage?.profiling?.anthropicUsage).toEqual({
+      input_tokens: 420,
+      cache_creation_input_tokens: 300,
+      cache_read_input_tokens: 90,
+      output_tokens: 11,
+    });
+    expect(debugPromptMessage?.snapshot.system).toBe(
+      flattenSystemBlocksFromStreamCall(anthropicClient),
+    );
+    expect(debugPromptMessage?.snapshot.user).toBe(
+      flattenUserBlocksFromStreamCall(anthropicClient),
+    );
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
     expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',
@@ -1250,7 +1325,7 @@ describe('OperationCoordinator', () => {
     });
 
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
-    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    const promptUser = flattenUserBlocksFromStreamCall(anthropicClient);
     expect(promptUser).toContain('Total gross (all-time): $595.00');
     expect(promptUser).toContain('Total net (all-time): $476.00');
     expect(promptUser).toContain('Monthly totals:');
@@ -1278,7 +1353,7 @@ describe('OperationCoordinator', () => {
     });
 
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
-    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    const promptUser = flattenUserBlocksFromStreamCall(anthropicClient);
     expect(promptUser).toContain('FAN SPENDING DATA:');
     expect(promptUser).toContain('Total gross (all-time): $0.00');
   });
@@ -1336,7 +1411,7 @@ describe('OperationCoordinator', () => {
 
     // 1 all-time call + 3 per-month calls
     expect(fanslyClient.getEarnings).toHaveBeenCalledTimes(4);
-    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    const promptUser = flattenUserBlocksFromStreamCall(anthropicClient);
     expect(promptUser).toContain('Monthly breakdown by type:');
   });
 
@@ -1438,7 +1513,7 @@ describe('OperationCoordinator', () => {
       forceRegenerate: false,
     });
 
-    const promptUser = (anthropicClient.streamMessage.mock.calls[0] as any[])[0].user as string;
+    const promptUser = flattenUserBlocksFromStreamCall(anthropicClient);
     expect(promptUser).toContain('(some months could not be fetched)');
   });
 

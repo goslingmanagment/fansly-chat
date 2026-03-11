@@ -30,6 +30,7 @@ import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
+  AnthropicUsageMetrics,
   BackgroundPortMessage,
   CompareStartPayload,
   CompletePayload,
@@ -102,6 +103,10 @@ function isDeepFeature(feature: FeatureType): boolean {
 
 function resolveTimeout(feature: FeatureType): number {
   return isDeepFeature(feature) ? DEEP_OPERATION_TIMEOUT_MS : QUICK_OPERATION_TIMEOUT_MS;
+}
+
+function formatAnthropicUsageLog(usage: AnthropicUsageMetrics): string {
+  return `Claude usage: input_tokens=${usage.input_tokens}, cache_creation_input_tokens=${usage.cache_creation_input_tokens}, cache_read_input_tokens=${usage.cache_read_input_tokens}, output_tokens=${usage.output_tokens}`;
 }
 
 export class OperationCoordinator {
@@ -1198,8 +1203,8 @@ export class OperationCoordinator {
       const streamArgs = {
         apiKey: validated.storage.settings.claudeApiKey,
         model: resolvedModel,
-        system: prompt.system,
-        user: prompt.user,
+        systemBlocks: prompt.systemBlocks,
+        userBlocks: prompt.userBlocks,
         feature: payload.feature,
         signal,
         onText: (chunk: string) => {
@@ -1221,6 +1226,12 @@ export class OperationCoordinator {
           current.rawText += chunk;
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
+        },
+        onUsage: (usage: AnthropicUsageMetrics) => {
+          profiler.setAnthropicUsage(usage);
+          profiler.log(formatAnthropicUsageLog(usage));
+          logDebug(debugEnabled, 'anthropic usage', usage);
+          sendDebugProgress();
         },
       } as const;
 
@@ -1244,11 +1255,11 @@ export class OperationCoordinator {
               snapshot: {
                 feature: payload.feature,
                 modelId: defaultModel,
-                system: streamArgs.system,
+                system: prompt.system,
                 transcript: formattedTranscript,
                 fanSpendingData: spendingData,
                 fanSubscriptionData: subscriptionData,
-                user: streamArgs.user,
+                user: prompt.user,
               },
             });
           }

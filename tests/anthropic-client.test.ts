@@ -25,11 +25,31 @@ function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('.
   return {
     apiKey: 'sk-test',
     model: 'claude-sonnet-4-20250514',
-    system: 'test',
-    user: 'test',
+    systemBlocks: [
+      { type: 'text' as const, text: 'system prefix\n\n' },
+      {
+        type: 'text' as const,
+        text: 'system personality',
+        cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
+      },
+    ],
+    userBlocks: [
+      {
+        type: 'text' as const,
+        text: 'static user prefix',
+        cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
+      },
+      {
+        type: 'text' as const,
+        text: 'dynamic user context',
+        cache_control: { type: 'ephemeral' as const },
+      },
+      { type: 'text' as const, text: 'uncached tail' },
+    ],
     feature: 'fast-reply' as const,
     signal: new AbortController().signal,
     onText: vi.fn(),
+    onUsage: vi.fn(),
     ...overrides,
   };
 }
@@ -124,5 +144,79 @@ describe('AnthropicClient error mapping', () => {
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({ code: 'network_error' }),
     );
+  });
+});
+
+describe('AnthropicClient streaming requests', () => {
+  it('sends system and user content as text blocks without an undocumented beta header', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_start',
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_creation_input_tokens":4,"cache_read_input_tokens":0,"output_tokens":1}}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    await client.streamMessage(streamArgs());
+
+    const fetchMock = vi.mocked(fetch);
+    const request = fetchMock.mock.calls[0]?.[1];
+    const headers = request?.headers as Record<string, string>;
+    const body = JSON.parse(String(request?.body)) as {
+      system: unknown;
+      messages: Array<{ role: string; content: unknown }>;
+    };
+
+    expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');
+    expect(headers).not.toHaveProperty('anthropic-beta');
+    expect(body.system).toEqual(streamArgs().systemBlocks);
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: streamArgs().userBlocks,
+      },
+    ]);
+  });
+
+  it('streams text deltas and reports cumulative usage metrics', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_start',
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":120,"cache_creation_input_tokens":40,"cache_read_input_tokens":0,"output_tokens":3}}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" there"}}',
+        '',
+        'event: message_delta',
+        'data: {"type":"message_delta","usage":{"input_tokens":120,"cache_creation_input_tokens":40,"cache_read_input_tokens":55,"output_tokens":9}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+    const onText = vi.fn();
+    const onUsage = vi.fn();
+
+    const rawText = await client.streamMessage(streamArgs({ onText, onUsage }));
+
+    expect(rawText).toBe('Hello there');
+    expect(onText).toHaveBeenNthCalledWith(1, 'Hello');
+    expect(onText).toHaveBeenNthCalledWith(2, ' there');
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledWith({
+      input_tokens: 120,
+      cache_creation_input_tokens: 40,
+      cache_read_input_tokens: 55,
+      output_tokens: 9,
+    });
   });
 });

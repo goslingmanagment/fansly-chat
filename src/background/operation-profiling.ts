@@ -1,4 +1,5 @@
 import type {
+  AnthropicUsageMetrics,
   OperationProfilingSnapshot,
   OperationProfilingStage,
   OperationProfilingStageKey,
@@ -19,6 +20,7 @@ export interface OperationProfiler {
     labelOrDetail?: string,
     detail?: string,
   ): void;
+  setAnthropicUsage(usage: AnthropicUsageMetrics): void;
   snapshot(): OperationProfilingSnapshot | undefined;
   finalizeRunningStages(detail?: string): OperationProfilingSnapshot | undefined;
 }
@@ -31,6 +33,7 @@ function buildSnapshot(
   startMs: number,
   logEntries: OperationProfilingSnapshot['logEntries'],
   stages: OperationProfilingStage[],
+  anthropicUsage?: AnthropicUsageMetrics,
 ): OperationProfilingSnapshot {
   const activeStages = stages.filter((stage) => stage.status === 'running');
 
@@ -42,6 +45,7 @@ function buildSnapshot(
         : null,
     logEntries: logEntries.map((entry) => ({ ...entry })),
     stages: stages.map(cloneStage),
+    ...(anthropicUsage ? { anthropicUsage: { ...anthropicUsage } } : {}),
   };
 }
 
@@ -54,6 +58,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
       completeStage: () => undefined,
       failStage: () => undefined,
       skipStage: () => undefined,
+      setAnthropicUsage: () => undefined,
       snapshot: () => undefined,
       finalizeRunningStages: () => undefined,
     };
@@ -63,6 +68,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
   const logEntries: OperationProfilingSnapshot['logEntries'] = [];
   const stages: OperationProfilingStage[] = [];
   const stageByKey = new Map<OperationProfilingStageKey, OperationProfilingStage>();
+  let anthropicUsage: AnthropicUsageMetrics | undefined;
 
   const elapsed = (): number => Math.max(0, Date.now() - startMs);
 
@@ -162,8 +168,11 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
       });
       stageByKey.set(key, stages[stages.length - 1]!);
     },
+    setAnthropicUsage(usage: AnthropicUsageMetrics): void {
+      anthropicUsage = { ...usage };
+    },
     snapshot(): OperationProfilingSnapshot | undefined {
-      return buildSnapshot(startMs, logEntries, stages);
+      return buildSnapshot(startMs, logEntries, stages, anthropicUsage);
     },
     finalizeRunningStages(detail?: string): OperationProfilingSnapshot | undefined {
       for (const stage of stages) {
@@ -178,7 +187,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
           stage.detail = detail;
         }
       }
-      return buildSnapshot(startMs, logEntries, stages);
+      return buildSnapshot(startMs, logEntries, stages, anthropicUsage);
     },
   };
 }

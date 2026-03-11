@@ -118,6 +118,12 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
   return {
     elapsedMs: 1850,
     activeLabel: 'Load messages',
+    anthropicUsage: {
+      input_tokens: 420,
+      cache_creation_input_tokens: 300,
+      cache_read_input_tokens: 90,
+      output_tokens: 11,
+    },
     logEntries: [
       { elapsedMs: 0, message: 'Resolve account identity' },
       { elapsedMs: 125, message: 'Loaded messages page 1/2 (25 msgs, 25 collected)' },
@@ -343,6 +349,9 @@ describe('OverlayController', () => {
     });
 
     expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('Total');
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('Claude usage');
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('cache read 90');
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('input 420');
     expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('Load messages');
     expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain('2 pages, 30 transcript messages');
   });
