@@ -101,6 +101,15 @@ export function flattenPromptBlocks(
   return blocks.map((block) => block.text).join('');
 }
 
+export function stripPromptCacheControl(
+  blocks: ReadonlyArray<PromptTextBlock>,
+): PromptTextBlock[] {
+  return blocks.map((block) => ({
+    type: block.type,
+    text: block.text,
+  }));
+}
+
 function warnPromptCachingFallback(
   feature: FeatureType,
   anchor: string,

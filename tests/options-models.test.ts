@@ -14,6 +14,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       quickMessageCount: 30,
       deepMessageCount: 200,
       debugMode: false,
+      promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
       ...overrides,
     },
@@ -136,6 +137,18 @@ describe('Options page — AI Models section', () => {
     expect(values['fast-reply']).toBe(DEFAULT_FEATURE_MODELS['fast-reply']);
   });
 
+  it('renders prompt caching enabled by default', async () => {
+    await loadOptionsPage(makeState());
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const promptCachingLabel = labels.find((label) =>
+      label.textContent?.includes('Enable prompt caching'),
+    );
+    const checkbox = promptCachingLabel?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+
+    expect(checkbox?.checked).toBe(true);
+  });
+
   it('saves featureModels when a dropdown changes', async () => {
     await loadOptionsPage(makeState());
 
@@ -155,5 +168,28 @@ describe('Options page — AI Models section', () => {
     const saved = savedSettings as { featureModels?: Record<string, string> };
     expect(saved.featureModels).toBeDefined();
     expect(saved.featureModels!['fan-summary']).toBe('claude-opus-4-6');
+  });
+
+  it('saves promptCachingEnabled when the checkbox changes', async () => {
+    await loadOptionsPage(makeState());
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const promptCachingLabel = labels.find((label) =>
+      label.textContent?.includes('Enable prompt caching'),
+    );
+    const checkbox = promptCachingLabel?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!checkbox) {
+      throw new Error('Prompt caching checkbox not found');
+    }
+
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('not saved yet');
+    }, { timeout: 2000 });
+
+    const saved = savedSettings as { promptCachingEnabled?: boolean };
+    expect(saved.promptCachingEnabled).toBe(false);
   });
 });

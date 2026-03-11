@@ -10,6 +10,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       quickMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
+      promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
     },
     personalities: [],

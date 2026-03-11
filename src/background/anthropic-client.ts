@@ -1,6 +1,7 @@
 import { ANTHROPIC_VERSION, CLAUDE_API_URL, MAX_TOKENS } from '../shared/constants.js';
 import { ChatMuseError } from '../shared/errors.js';
 import type {
+  AnthropicCacheCreationUsage,
   AnthropicUsageMetrics,
   FeatureType,
   PromptTextBlock,
@@ -50,6 +51,21 @@ function mergeUsage(
     return current;
   }
 
+  const nextCacheCreation = next.cache_creation as Partial<AnthropicCacheCreationUsage> | undefined;
+  const currentCacheCreation = current?.cache_creation;
+  const cacheCreation = nextCacheCreation || currentCacheCreation
+    ? {
+        ephemeral_5m_input_tokens:
+          typeof nextCacheCreation?.ephemeral_5m_input_tokens === 'number'
+            ? nextCacheCreation.ephemeral_5m_input_tokens
+            : currentCacheCreation?.ephemeral_5m_input_tokens ?? 0,
+        ephemeral_1h_input_tokens:
+          typeof nextCacheCreation?.ephemeral_1h_input_tokens === 'number'
+            ? nextCacheCreation.ephemeral_1h_input_tokens
+            : currentCacheCreation?.ephemeral_1h_input_tokens ?? 0,
+      }
+    : undefined;
+
   return {
     input_tokens:
       typeof next.input_tokens === 'number'
@@ -67,7 +83,31 @@ function mergeUsage(
       typeof next.output_tokens === 'number'
         ? next.output_tokens
         : current?.output_tokens ?? 0,
+    ...(cacheCreation ? { cache_creation: cacheCreation } : {}),
   };
+}
+
+function usageEquals(
+  left: AnthropicUsageMetrics | null,
+  right: AnthropicUsageMetrics | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.input_tokens === right.input_tokens &&
+    left.cache_creation_input_tokens === right.cache_creation_input_tokens &&
+    left.cache_read_input_tokens === right.cache_read_input_tokens &&
+    left.output_tokens === right.output_tokens &&
+    (left.cache_creation?.ephemeral_5m_input_tokens ?? 0) ===
+      (right.cache_creation?.ephemeral_5m_input_tokens ?? 0) &&
+    (left.cache_creation?.ephemeral_1h_input_tokens ?? 0) ===
+      (right.cache_creation?.ephemeral_1h_input_tokens ?? 0)
+  );
 }
 
 export class AnthropicClient {
@@ -165,11 +205,27 @@ export class AnthropicClient {
         }
 
         if (parsed.event === 'message_start') {
-          usage = mergeUsage(usage, payload.message?.usage);
+          const nextUsage = mergeUsage(usage, payload.message?.usage);
+          if (!usageEquals(usage, nextUsage)) {
+            usage = nextUsage;
+            if (usage) {
+              onUsage?.(usage);
+            }
+          } else {
+            usage = nextUsage;
+          }
         }
 
         if (parsed.event === 'message_delta') {
-          usage = mergeUsage(usage, payload.usage);
+          const nextUsage = mergeUsage(usage, payload.usage);
+          if (!usageEquals(usage, nextUsage)) {
+            usage = nextUsage;
+            if (usage) {
+              onUsage?.(usage);
+            }
+          } else {
+            usage = nextUsage;
+          }
         }
 
         if (
@@ -185,10 +241,6 @@ export class AnthropicClient {
       if (done) {
         break;
       }
-    }
-
-    if (usage) {
-      onUsage?.(usage);
     }
 
     return rawText;

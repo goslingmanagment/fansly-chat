@@ -62,11 +62,11 @@ describe('logDebug', () => {
 
 describe('isDebugEnabled', () => {
   it('returns true when debugMode is true', () => {
-    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: true, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(true);
+    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: true, promptCachingEnabled: true, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(true);
   });
 
   it('returns false when debugMode is false', () => {
-    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: false, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(false);
+    expect(isDebugEnabled({ claudeApiKey: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: false, promptCachingEnabled: true, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(false);
   });
 
   it('returns false for null', () => {

@@ -149,6 +149,22 @@ describe('sanitizeSettings', () => {
     const result = storage.sanitizeSettings({});
     expect(result.claudeApiKey).toBe('');
     expect(result.debugMode).toBe(false);
+    expect(result.promptCachingEnabled).toBe(true);
+  });
+
+  it('defaults promptCachingEnabled to true for legacy settings', () => {
+    const result = storage.sanitizeSettings({
+      claudeApiKey: 'sk-test',
+      debugMode: false,
+    });
+    expect(result.promptCachingEnabled).toBe(true);
+  });
+
+  it('preserves explicit promptCachingEnabled values', () => {
+    const result = storage.sanitizeSettings({
+      promptCachingEnabled: false,
+    });
+    expect(result.promptCachingEnabled).toBe(false);
   });
 
   it('defaults featureModels when missing from input', () => {

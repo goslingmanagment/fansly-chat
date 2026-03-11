@@ -12,6 +12,7 @@ export function createDefaultSettings(): Settings {
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
+    promptCachingEnabled: true,
     featureModels: { ...DEFAULT_FEATURE_MODELS },
   };
 }

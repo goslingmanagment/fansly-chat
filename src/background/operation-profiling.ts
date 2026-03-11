@@ -1,4 +1,5 @@
 import type {
+  AnthropicCostEstimate,
   AnthropicUsageMetrics,
   OperationProfilingSnapshot,
   OperationProfilingStage,
@@ -21,6 +22,7 @@ export interface OperationProfiler {
     detail?: string,
   ): void;
   setAnthropicUsage(usage: AnthropicUsageMetrics): void;
+  setAnthropicCost(cost: AnthropicCostEstimate): void;
   snapshot(): OperationProfilingSnapshot | undefined;
   finalizeRunningStages(detail?: string): OperationProfilingSnapshot | undefined;
 }
@@ -34,6 +36,7 @@ function buildSnapshot(
   logEntries: OperationProfilingSnapshot['logEntries'],
   stages: OperationProfilingStage[],
   anthropicUsage?: AnthropicUsageMetrics,
+  anthropicCost?: AnthropicCostEstimate,
 ): OperationProfilingSnapshot {
   const activeStages = stages.filter((stage) => stage.status === 'running');
 
@@ -46,6 +49,7 @@ function buildSnapshot(
     logEntries: logEntries.map((entry) => ({ ...entry })),
     stages: stages.map(cloneStage),
     ...(anthropicUsage ? { anthropicUsage: { ...anthropicUsage } } : {}),
+    ...(anthropicCost ? { anthropicCost: { ...anthropicCost } } : {}),
   };
 }
 
@@ -59,6 +63,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
       failStage: () => undefined,
       skipStage: () => undefined,
       setAnthropicUsage: () => undefined,
+      setAnthropicCost: () => undefined,
       snapshot: () => undefined,
       finalizeRunningStages: () => undefined,
     };
@@ -69,6 +74,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
   const stages: OperationProfilingStage[] = [];
   const stageByKey = new Map<OperationProfilingStageKey, OperationProfilingStage>();
   let anthropicUsage: AnthropicUsageMetrics | undefined;
+  let anthropicCost: AnthropicCostEstimate | undefined;
 
   const elapsed = (): number => Math.max(0, Date.now() - startMs);
 
@@ -171,8 +177,17 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
     setAnthropicUsage(usage: AnthropicUsageMetrics): void {
       anthropicUsage = { ...usage };
     },
+    setAnthropicCost(cost: AnthropicCostEstimate): void {
+      anthropicCost = { ...cost };
+    },
     snapshot(): OperationProfilingSnapshot | undefined {
-      return buildSnapshot(startMs, logEntries, stages, anthropicUsage);
+      return buildSnapshot(
+        startMs,
+        logEntries,
+        stages,
+        anthropicUsage,
+        anthropicCost,
+      );
     },
     finalizeRunningStages(detail?: string): OperationProfilingSnapshot | undefined {
       for (const stage of stages) {
@@ -187,7 +202,13 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
           stage.detail = detail;
         }
       }
-      return buildSnapshot(startMs, logEntries, stages, anthropicUsage);
+      return buildSnapshot(
+        startMs,
+        logEntries,
+        stages,
+        anthropicUsage,
+        anthropicCost,
+      );
     },
   };
 }

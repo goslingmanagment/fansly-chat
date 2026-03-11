@@ -172,6 +172,7 @@ describe('OperationCoordinator', () => {
         quickMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
+        promptCachingEnabled: true,
         featureModels: { ...DEFAULT_FEATURE_MODELS },
       },
       personalities: [
@@ -434,7 +435,7 @@ describe('OperationCoordinator', () => {
     expect(fanslyClient.getEarnings).toHaveBeenCalledTimes(1);
     expect(fanslyClient.getMonthlyEarnings).toHaveBeenCalledTimes(1);
     expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledTimes(1);
-    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(3);
+    expect(anthropicClient.streamMessage.mock.calls.length).toBeGreaterThanOrEqual(3);
     for (const [index, call] of anthropicClient.streamMessage.mock.calls.entries()) {
       expect(call[0]).toEqual(
         expect.objectContaining({
@@ -450,12 +451,152 @@ describe('OperationCoordinator', () => {
         '## Model Personality',
       );
     }
+    const systemPrompts = new Set(
+      anthropicClient.streamMessage.mock.calls.map((_, index) =>
+        flattenSystemBlocksFromStreamCall(anthropicClient, index),
+      ),
+    );
+    expect(systemPrompts.size).toBeGreaterThanOrEqual(3);
+    expect(
+      Array.from(systemPrompts).some((prompt) =>
+        prompt.includes('Current baseline personality'),
+      ),
+    ).toBe(true);
+    expect(
+      Array.from(systemPrompts).some((prompt) =>
+        prompt.includes('Draft personality variant'),
+      ),
+    ).toBe(true);
+    expect(
+      Array.from(systemPrompts).some((prompt) =>
+        prompt.includes('Second draft personality variant'),
+      ),
+    ).toBe(true);
     expect(readyMessage?.cards.map((card) => card.label)).toEqual(['Closer (current)', 'draft-1', 'draft-2']);
     expect(new Set(chunkMessages.map((message) => message.cardId))).toEqual(
       new Set(['current:personality-1', 'draft-1', 'draft-2']),
     );
     expect(completeMessages).toHaveLength(3);
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+  });
+
+  it('keeps per-card profiling cost snapshots isolated during debug compare runs', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        systemBlocks,
+        onUsage,
+      }: {
+        systemBlocks: Array<{ text: string }>;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        const system = systemBlocks.map((block) => block.text).join('');
+        if (system.includes('Current baseline personality')) {
+          onUsage?.({
+            input_tokens: 100,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 5,
+            output_tokens: 8,
+          });
+          await Promise.resolve();
+          return 'Current reply';
+        }
+
+        onUsage?.({
+          input_tokens: 200,
+          cache_creation_input_tokens: 20,
+          cache_read_input_tokens: 10,
+          output_tokens: 16,
+        });
+        return 'Draft reply';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const completeMessages = postedMessages(port).filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardComplete' }> =>
+        message.type === 'compare:cardComplete',
+    );
+
+    const currentCard = completeMessages.find((message) => message.cardId === 'current:personality-1');
+    const draftCard = completeMessages.find((message) => message.cardId === 'draft-1');
+
+    expect(currentCard?.profiling?.anthropicUsage).toEqual({
+      input_tokens: 100,
+      cache_creation_input_tokens: 10,
+      cache_read_input_tokens: 5,
+      output_tokens: 8,
+    });
+    expect(currentCard?.profiling?.anthropicCost?.totalUsd).toBe(0.00046);
+    expect(currentCard?.profiling?.anthropicCost?.approximate).toBe(true);
+    expect(currentCard?.anthropicSpend).toEqual({
+      totalTokens: 123,
+      inputTokens: 100,
+      cacheWriteTokens: 10,
+      cacheReadTokens: 5,
+      outputTokens: 8,
+      totalUsd: 0.00046,
+      uncachedUsd: 0.000465,
+      cacheEffectUsd: 0.000005,
+      cacheEffectKind: 'saved',
+      cacheWriteUsd: 0.000038,
+      cacheReadUsd: 0.000002,
+      approximate: true,
+    });
+    expect(draftCard?.profiling?.anthropicUsage).toEqual({
+      input_tokens: 200,
+      cache_creation_input_tokens: 20,
+      cache_read_input_tokens: 10,
+      output_tokens: 16,
+    });
+    expect(draftCard?.profiling?.anthropicCost?.totalUsd).toBe(0.000918);
+    expect(draftCard?.profiling?.anthropicCost?.approximate).toBe(true);
+    expect(draftCard?.anthropicSpend).toEqual({
+      totalTokens: 246,
+      inputTokens: 200,
+      cacheWriteTokens: 20,
+      cacheReadTokens: 10,
+      outputTokens: 16,
+      totalUsd: 0.000918,
+      uncachedUsd: 0.00093,
+      cacheEffectUsd: 0.000012,
+      cacheEffectKind: 'saved',
+      cacheWriteUsd: 0.000075,
+      cacheReadUsd: 0.000003,
+      approximate: true,
+    });
   });
 
   it('allows mixed compare outcomes and still completes the overall compare session', async () => {
@@ -474,11 +615,34 @@ describe('OperationCoordinator', () => {
       },
     ]);
     const anthropicClient = {
-      streamMessage: vi.fn(async ({ systemBlocks }: { systemBlocks: Array<{ text: string }> }) => {
+      streamMessage: vi.fn(async ({
+        systemBlocks,
+        onUsage,
+      }: {
+        systemBlocks: Array<{ text: string }>;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
         const system = systemBlocks.map((block) => block.text).join('');
         if (system.includes('Current baseline personality')) {
+          onUsage?.({
+            input_tokens: 50,
+            cache_creation_input_tokens: 4,
+            cache_read_input_tokens: 2,
+            output_tokens: 0,
+          });
           throw new ChatMuseError('network_error');
         }
+        onUsage?.({
+          input_tokens: 75,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 3,
+          output_tokens: 6,
+        });
         return 'Draft reply';
       }),
     };
@@ -506,7 +670,35 @@ describe('OperationCoordinator', () => {
 
     expect(cardError?.cardId).toBe('current:personality-1');
     expect(cardError?.error.code).toBe('network_error');
+    expect(cardError?.anthropicSpend).toEqual({
+      totalTokens: 56,
+      inputTokens: 50,
+      cacheWriteTokens: 4,
+      cacheReadTokens: 2,
+      outputTokens: 0,
+      totalUsd: 0.000166,
+      uncachedUsd: 0.000168,
+      cacheEffectUsd: 0.000002,
+      cacheEffectKind: 'saved',
+      cacheWriteUsd: 0.000015,
+      cacheReadUsd: 0.000001,
+      approximate: true,
+    });
     expect(cardComplete?.cardId).toBe('draft-1');
+    expect(cardComplete?.anthropicSpend).toEqual({
+      totalTokens: 89,
+      inputTokens: 75,
+      cacheWriteTokens: 5,
+      cacheReadTokens: 3,
+      outputTokens: 6,
+      totalUsd: 0.000335,
+      uncachedUsd: 0.000339,
+      cacheEffectUsd: 0.000004,
+      cacheEffectKind: 'saved',
+      cacheWriteUsd: 0.000019,
+      cacheReadUsd: 0.000001,
+      approximate: true,
+    });
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
@@ -615,6 +807,72 @@ describe('OperationCoordinator', () => {
         expect(message).not.toHaveProperty('profiling');
       }
     }
+  });
+
+  it('includes anthropicSpend in non-debug progress and completion payloads once usage arrives', async () => {
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        onText,
+        onUsage,
+      }: {
+        onText: (text: string) => void;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        onUsage?.({
+          input_tokens: 100,
+          cache_creation_input_tokens: 10,
+          cache_read_input_tokens: 5,
+          output_tokens: 8,
+        });
+        onText('Hello');
+        return 'Hello';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const progressWithSpend = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress' && Boolean(message.anthropicSpend),
+    );
+    const completeMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(progressWithSpend?.anthropicSpend).toEqual({
+      totalTokens: 123,
+      inputTokens: 100,
+      cacheWriteTokens: 10,
+      cacheReadTokens: 5,
+      outputTokens: 8,
+      totalUsd: 0.00046,
+      uncachedUsd: 0.000465,
+      cacheEffectUsd: 0.000005,
+      cacheEffectKind: 'saved',
+      cacheWriteUsd: 0.000038,
+      cacheReadUsd: 0.000002,
+      approximate: true,
+    });
+    expect(completeMessage?.anthropicSpend).toEqual(progressWithSpend?.anthropicSpend);
+    expect(progressWithSpend).not.toHaveProperty('profiling');
+    expect(completeMessage).not.toHaveProperty('profiling');
   });
 
   it('omits profiling data from non-debug error payloads', async () => {
@@ -868,6 +1126,10 @@ describe('OperationCoordinator', () => {
           cache_creation_input_tokens: number;
           cache_read_input_tokens: number;
           output_tokens: number;
+          cache_creation?: {
+            ephemeral_5m_input_tokens: number;
+            ephemeral_1h_input_tokens: number;
+          };
         }) => void;
       }) => {
         advanceNow(200);
@@ -880,6 +1142,10 @@ describe('OperationCoordinator', () => {
           cache_creation_input_tokens: 300,
           cache_read_input_tokens: 90,
           output_tokens: 11,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 120,
+            ephemeral_1h_input_tokens: 180,
+          },
         });
         return 'Hello there';
       }),
@@ -922,6 +1188,20 @@ describe('OperationCoordinator', () => {
       cache_creation_input_tokens: 300,
       cache_read_input_tokens: 90,
       output_tokens: 11,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 120,
+        ephemeral_1h_input_tokens: 180,
+      },
+    });
+    expect(completeMessage?.profiling?.anthropicCost).toEqual({
+      modelId: DEFAULT_FEATURE_MODELS['fast-reply'],
+      inputUsd: 0.00126,
+      cacheWrite5mUsd: 0.00045,
+      cacheWrite1hUsd: 0.00108,
+      cacheReadUsd: 0.000027,
+      outputUsd: 0.000165,
+      totalUsd: 0.002982,
+      approximate: false,
     });
     expect(debugPromptMessage?.snapshot.system).toBe(
       flattenSystemBlocksFromStreamCall(anthropicClient),
@@ -931,6 +1211,7 @@ describe('OperationCoordinator', () => {
     );
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude cost: model=claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);
     expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',
@@ -1356,6 +1637,45 @@ describe('OperationCoordinator', () => {
     const promptUser = flattenUserBlocksFromStreamCall(anthropicClient);
     expect(promptUser).toContain('FAN SPENDING DATA:');
     expect(promptUser).toContain('Total gross (all-time): $0.00');
+  });
+
+  it('removes cache_control markers but preserves prompt text and block segmentation when prompt caching is off', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+      promptCachingEnabled: false,
+    };
+
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
+      anthropicRawText: 'hey babe',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const debugPromptMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:debugPrompt' }> =>
+        message.type === 'operation:debugPrompt',
+    );
+    const streamArgs = anthropicClient.streamMessage.mock.calls[0]?.[0] as {
+      systemBlocks: Array<{ text: string; cache_control?: unknown }>;
+      userBlocks: Array<{ text: string; cache_control?: unknown }>;
+    };
+
+    expect(streamArgs.systemBlocks).toHaveLength(2);
+    expect(streamArgs.userBlocks).toHaveLength(3);
+    expect(streamArgs.systemBlocks.every((block) => block.cache_control === undefined)).toBe(true);
+    expect(streamArgs.userBlocks.every((block) => block.cache_control === undefined)).toBe(true);
+    expect(flattenSystemBlocksFromStreamCall(anthropicClient)).toBe(debugPromptMessage?.snapshot.system);
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toBe(debugPromptMessage?.snapshot.user);
   });
 
   it('fetches per-month type breakdown for deep features', async () => {
