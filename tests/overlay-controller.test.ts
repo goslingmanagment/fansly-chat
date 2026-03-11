@@ -309,8 +309,8 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('pending-op', ''));
 
-    expect(requireElement<HTMLDivElement>('.chatmuse-spend-summary').textContent).toContain(
-      'Pending',
+    expect(requireElement<HTMLDivElement>('.chatmuse-spend-strip').textContent).toContain(
+      'pending',
     );
   });
 
@@ -501,11 +501,11 @@ describe('OverlayController', () => {
       }),
     );
 
-    expect(requireElement<HTMLDivElement>('.chatmuse-spend-summary').textContent).toContain(
+    expect(requireElement<HTMLDivElement>('.chatmuse-spend-strip').textContent).toContain(
       '$0.002982',
     );
-    expect(requireElement<HTMLDivElement>('.chatmuse-spend-summary').textContent).toContain(
-      'Cache saved',
+    expect(requireElement<HTMLDivElement>('.chatmuse-spend-strip').textContent).toContain(
+      'saved',
     );
     expect(requireElement<HTMLDivElement>('.chatmuse-profiling-summary').textContent).toContain(
       'Claude cost',

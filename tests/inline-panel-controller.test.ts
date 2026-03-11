@@ -237,15 +237,27 @@ describe('InlinePanelController', () => {
     expect(requireElement(controller.root, '.chatmuse-stream').textContent).toBe('Waiting for Claude\u2026');
   });
 
-  it('shows spend placeholder in the header while loading before usage arrives', () => {
+  it('hides header meta while loading before usage arrives', () => {
     const controller = createController();
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op', ''));
 
-    expect(requireElement(controller.root, '.chatmuse-inline-panel-meta-primary').textContent).toBe(
-      'Cost pending • Tokens pending',
-    );
+    const meta = requireElement(controller.root, '.chatmuse-inline-panel-meta');
+    expect(meta.classList.contains('chatmuse-hidden')).toBe(true);
+  });
+
+  it('shows header meta once spend arrives during loading', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createLoadingModel('op', 'chunk', {
+      anthropicSpend: createSpendSummary(),
+    }));
+
+    const meta = requireElement(controller.root, '.chatmuse-inline-panel-meta');
+    expect(meta.classList.contains('chatmuse-hidden')).toBe(false);
+    expect(requireElement(controller.root, '.chatmuse-inline-panel-meta-primary').textContent).toContain('$0.002982');
   });
 
   it('updates stream text with incoming chunks', () => {
@@ -273,7 +285,7 @@ describe('InlinePanelController', () => {
     expect(buttons[1]?.textContent).toBe('Copy');
   });
 
-  it('renders spend details in the header for completed replies', () => {
+  it('renders spend as single line in header with token breakdown in tooltip', () => {
     const controller = createController();
     document.body.append(controller.root);
 
@@ -283,12 +295,12 @@ describe('InlinePanelController', () => {
       }),
     );
 
-    expect(requireElement(controller.root, '.chatmuse-inline-panel-meta-primary').textContent).toContain(
-      'Cost $0.002982',
-    );
-    expect(requireElement(controller.root, '.chatmuse-inline-panel-meta-secondary').textContent).toContain(
-      'cache saved $0.000450',
-    );
+    const primary = requireElement<HTMLElement>(controller.root, '.chatmuse-inline-panel-meta-primary');
+    expect(primary.textContent).toContain('$0.002982');
+    expect(primary.textContent).toContain('saved');
+    // Secondary info moved to tooltip
+    expect(primary.title).toContain('in ');
+    expect(primary.title).toContain('out ');
   });
 
   it('renders error state with message and Regenerate button', () => {

@@ -10,6 +10,11 @@ import type {
   OverlayViewModel,
   UserFacingError,
 } from '../../shared/types.js';
+import {
+  formatCacheEffectInline,
+  formatSpendPrimary,
+  formatSpendSecondary,
+} from '../spend-format.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
 
 interface InlinePanelCallbacks {
@@ -68,24 +73,6 @@ function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
   return null;
 }
 
-function formatTokenCount(value: number): string {
-  return new Intl.NumberFormat('en-US').format(value);
-}
-
-function formatUsd(value: number, approximate = false): string {
-  const digits = value >= 1 ? 2 : value >= 0.01 ? 4 : 6;
-  return `${approximate ? '~' : ''}$${value.toFixed(digits)}`;
-}
-
-function formatCacheEffect(spend: AnthropicSpendSummary): string {
-  if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
-    return 'cache neutral';
-  }
-  return `cache ${spend.cacheEffectKind} ${formatUsd(
-    spend.cacheEffectUsd,
-    spend.approximate,
-  )}`;
-}
 
 export class InlinePanelController {
   readonly root: HTMLDivElement;
@@ -244,54 +231,36 @@ export class InlinePanelController {
     }
 
     const spend = model.anthropicSpend;
-    if (!spend && model.kind !== 'loading') {
+    if (!spend) {
       this.metaEl.replaceChildren();
       this.metaEl.classList.add('chatmuse-hidden');
       return;
     }
 
-    const primaryText = spend
-      ? `Cost ${formatUsd(spend.totalUsd, spend.approximate)} • Tokens ${formatTokenCount(
-          spend.totalTokens,
-        )}`
-      : 'Cost pending • Tokens pending';
-    const secondaryText = spend
-      ? `write ${formatTokenCount(spend.cacheWriteTokens)} • read ${formatTokenCount(
-          spend.cacheReadTokens,
-        )} • ${formatCacheEffect(spend)}`
-      : 'write pending • read pending • cache pending';
-
-    this.setHeaderMetaContent(primaryText, secondaryText);
+    this.setHeaderMetaContent(spend);
     this.metaEl.classList.remove('chatmuse-hidden');
   }
 
-  private setHeaderMetaContent(primaryText: string, secondaryText: string): void {
-    const existingPrimary = this.metaEl.querySelector<HTMLElement>(
-      '.chatmuse-inline-panel-meta-primary',
-    );
-    const existingSecondary = this.metaEl.querySelector<HTMLElement>(
-      '.chatmuse-inline-panel-meta-secondary',
-    );
+  private setHeaderMetaContent(spend: AnthropicSpendSummary): void {
+    const primary = document.createElement('div');
+    primary.className = 'chatmuse-inline-panel-meta-primary';
+    primary.textContent = formatSpendPrimary(spend);
 
-    if (!existingPrimary || !existingSecondary) {
-      const primary = document.createElement('div');
-      primary.className = 'chatmuse-inline-panel-meta-primary';
-      primary.textContent = primaryText;
-
-      const secondary = document.createElement('div');
-      secondary.className = 'chatmuse-inline-panel-meta-secondary';
-      secondary.textContent = secondaryText;
-
-      this.metaEl.replaceChildren(primary, secondary);
-      return;
+    const cacheEffect = formatCacheEffectInline(spend);
+    if (cacheEffect) {
+      primary.append(
+        document.createTextNode(' · '),
+        (() => {
+          const span = document.createElement('span');
+          span.className = `chatmuse-spend-cache-${cacheEffect.kind}`;
+          span.textContent = cacheEffect.text;
+          return span;
+        })(),
+      );
     }
 
-    if (existingPrimary.textContent !== primaryText) {
-      existingPrimary.textContent = primaryText;
-    }
-    if (existingSecondary.textContent !== secondaryText) {
-      existingSecondary.textContent = secondaryText;
-    }
+    primary.title = formatSpendSecondary(spend);
+    this.metaEl.replaceChildren(primary);
   }
 
   private createSpendStrip(
@@ -309,8 +278,8 @@ export class InlinePanelController {
 
     if (!spend && placeholder) {
       section.classList.add('chatmuse-spend-strip-pending');
-      primary.textContent = 'Cost pending • Tokens pending';
-      secondary.textContent = 'write pending • read pending • cache pending';
+      primary.textContent = 'Cost pending · Tokens pending';
+      secondary.textContent = 'in — · write — · read — · out —';
       section.append(primary, secondary);
       return section;
     }
@@ -319,16 +288,21 @@ export class InlinePanelController {
       return section;
     }
 
-    primary.textContent = `Cost ${formatUsd(
-      spend.totalUsd,
-      spend.approximate,
-    )} • Tokens ${formatTokenCount(spend.totalTokens)}`;
-    secondary.textContent =
-      `input ${formatTokenCount(spend.inputTokens)} • ` +
-      `write ${formatTokenCount(spend.cacheWriteTokens)} • ` +
-      `read ${formatTokenCount(spend.cacheReadTokens)} • ` +
-      `output ${formatTokenCount(spend.outputTokens)} • ` +
-      formatCacheEffect(spend);
+    primary.textContent = formatSpendPrimary(spend);
+    const cacheEffect = formatCacheEffectInline(spend);
+    if (cacheEffect) {
+      primary.append(
+        document.createTextNode(' · '),
+        (() => {
+          const span = document.createElement('span');
+          span.className = `chatmuse-spend-cache-${cacheEffect.kind}`;
+          span.textContent = cacheEffect.text;
+          return span;
+        })(),
+      );
+    }
+
+    secondary.textContent = formatSpendSecondary(spend);
 
     section.append(primary, secondary);
     return section;

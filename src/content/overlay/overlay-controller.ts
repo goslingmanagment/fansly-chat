@@ -1,6 +1,5 @@
 import { toUserError } from '../../shared/errors.js';
 import type {
-  AnthropicCostEstimate,
   AnthropicSpendSummary,
   AnthropicUsageMetrics,
   FeatureType,
@@ -12,6 +11,13 @@ import type {
   UserFacingError,
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
+import {
+  formatAnthropicCostSummary,
+  formatCacheEffectInline,
+  formatSpendPrimary,
+  formatSpendSecondary,
+  formatUsd,
+} from '../spend-format.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
 
 type OverlayDismissMode = 'close' | 'cancel-and-close' | 'collapse-to-inline';
@@ -114,41 +120,6 @@ function formatAnthropicUsageSummary(usage: AnthropicUsageMetrics): string {
   return `input ${usage.input_tokens} • cache create ${usage.cache_creation_input_tokens} • cache read ${usage.cache_read_input_tokens} • output ${usage.output_tokens}`;
 }
 
-function formatTokenCount(value: number): string {
-  return new Intl.NumberFormat('en-US').format(value);
-}
-
-function formatUsd(value: number, approximate = false): string {
-  const digits = value >= 1 ? 2 : value >= 0.01 ? 4 : 6;
-  return `${approximate ? '~' : ''}$${value.toFixed(digits)}`;
-}
-
-function formatCacheEffectLabel(spend: AnthropicSpendSummary): string {
-  if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
-    return 'Cache neutral';
-  }
-  return `Cache ${spend.cacheEffectKind}`;
-}
-
-function formatCacheEffectValue(spend: AnthropicSpendSummary): string {
-  if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
-    return '$0.000000';
-  }
-  return formatUsd(spend.cacheEffectUsd, spend.approximate);
-}
-
-function formatAnthropicCostSummary(cost: AnthropicCostEstimate): string {
-  return `total ${formatUsd(cost.totalUsd, cost.approximate)} • input ${formatUsd(
-    cost.inputUsd,
-    cost.approximate,
-  )} • write ${formatUsd(
-    cost.cacheWrite5mUsd + cost.cacheWrite1hUsd,
-    cost.approximate,
-  )} • read ${formatUsd(cost.cacheReadUsd, cost.approximate)} • output ${formatUsd(
-    cost.outputUsd,
-    cost.approximate,
-  )}`;
-}
 
 function operationIdForModel(model: OverlayViewModel): string | null {
   return 'operationId' in model ? model.operationId ?? null : null;
@@ -1031,43 +1002,19 @@ export class OverlayController {
     options?: { placeholder?: boolean },
   ): HTMLElement {
     const strip = document.createElement('div');
-    strip.className = 'chatmuse-spend-summary';
+    strip.className = 'chatmuse-spend-strip';
 
-    const stats = document.createElement('div');
-    stats.className = 'chatmuse-spend-stats';
+    const primary = document.createElement('div');
+    primary.className = 'chatmuse-spend-strip-primary';
 
-    const createStat = (
-      label: string,
-      value: string,
-      extraClass?: string,
-    ): HTMLElement => {
-      const stat = document.createElement('div');
-      stat.className = `chatmuse-spend-stat${extraClass ? ` ${extraClass}` : ''}`;
-
-      const statLabel = document.createElement('div');
-      statLabel.className = 'chatmuse-spend-stat-label';
-      statLabel.textContent = label;
-
-      const statValue = document.createElement('div');
-      statValue.className = 'chatmuse-spend-stat-value';
-      statValue.textContent = value;
-
-      stat.append(statLabel, statValue);
-      return stat;
-    };
-
-    const breakdown = document.createElement('div');
-    breakdown.className = 'chatmuse-spend-breakdown';
+    const secondary = document.createElement('div');
+    secondary.className = 'chatmuse-spend-strip-secondary';
 
     if (!spend && options?.placeholder) {
-      strip.classList.add('chatmuse-spend-summary-pending');
-      stats.append(
-        createStat('Cost', 'Pending'),
-        createStat('Tokens', 'Pending'),
-        createStat('Cache', 'Pending'),
-      );
-      breakdown.textContent = 'input pending • write pending • read pending • output pending';
-      strip.append(stats, breakdown);
+      strip.classList.add('chatmuse-spend-strip-pending');
+      primary.textContent = 'Cost pending · Tokens pending';
+      secondary.textContent = 'in — · write — · read — · out —';
+      strip.append(primary, secondary);
       return strip;
     }
 
@@ -1075,22 +1022,23 @@ export class OverlayController {
       return strip;
     }
 
-    stats.append(
-      createStat('Cost', formatUsd(spend.totalUsd, spend.approximate)),
-      createStat('Tokens', formatTokenCount(spend.totalTokens)),
-      createStat(
-        formatCacheEffectLabel(spend),
-        formatCacheEffectValue(spend),
-        `chatmuse-spend-stat-${spend.cacheEffectKind}`,
-      ),
-    );
-    breakdown.textContent =
-      `input ${formatTokenCount(spend.inputTokens)} • ` +
-      `write ${formatTokenCount(spend.cacheWriteTokens)} • ` +
-      `read ${formatTokenCount(spend.cacheReadTokens)} • ` +
-      `output ${formatTokenCount(spend.outputTokens)}`;
+    primary.textContent = formatSpendPrimary(spend);
+    const cacheEffect = formatCacheEffectInline(spend);
+    if (cacheEffect) {
+      primary.append(
+        document.createTextNode(' · '),
+        (() => {
+          const span = document.createElement('span');
+          span.className = `chatmuse-spend-cache-${cacheEffect.kind}`;
+          span.textContent = cacheEffect.text;
+          return span;
+        })(),
+      );
+    }
 
-    strip.append(stats, breakdown);
+    secondary.textContent = formatSpendSecondary(spend);
+
+    strip.append(primary, secondary);
     return strip;
   }
 
