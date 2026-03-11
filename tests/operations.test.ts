@@ -186,6 +186,7 @@ describe('OperationCoordinator', () => {
       accountMappings: {
         'account-1': 'personality-1',
       },
+      accountAliases: {},
       knownAccounts: [],
       'summary:group-1': {
         summary: 'Old summary',

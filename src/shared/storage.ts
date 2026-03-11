@@ -8,6 +8,10 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
+import {
+  collectAliasKeysForCanonical,
+  resolveCanonicalAccountId,
+} from './account-aliases.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
 import type { FeatureType, PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
 
@@ -101,11 +105,19 @@ export async function deletePersonality(personalityId: string): Promise<void> {
 export async function saveAccountMapping(accountId: string, personalityId: string | null): Promise<void> {
   const state = await loadStorageState();
   const nextMappings = { ...state.accountMappings };
+  const canonicalAccountId =
+    resolveCanonicalAccountId(state.accountAliases, accountId) ?? accountId;
+  const aliasKeys = collectAliasKeysForCanonical(
+    state.accountAliases,
+    canonicalAccountId,
+  );
+
+  for (const key of new Set([accountId, canonicalAccountId, ...aliasKeys])) {
+    delete nextMappings[key];
+  }
 
   if (personalityId) {
-    nextMappings[accountId] = personalityId;
-  } else {
-    delete nextMappings[accountId];
+    nextMappings[canonicalAccountId] = personalityId;
   }
 
   await browser.storage.local.set({ accountMappings: nextMappings });
@@ -159,9 +171,19 @@ export async function rekeyAccountIdentity(
   const resolvedMapping = state.accountMappings[resolvedAccountId];
 
   let accountMappings = state.accountMappings;
+  let accountAliases = state.accountAliases;
   let mappingMigrated = false;
   let mappingConflict = false;
   let accountMappingsChanged = false;
+  let accountAliasesChanged = false;
+
+  if (state.accountAliases[legacyAccountId] !== resolvedAccountId) {
+    accountAliases = {
+      ...state.accountAliases,
+      [legacyAccountId]: resolvedAccountId,
+    };
+    accountAliasesChanged = true;
+  }
 
   if (legacyMapping && resolvedMapping) {
     accountMappings = { ...state.accountMappings };
@@ -184,13 +206,17 @@ export async function rekeyAccountIdentity(
 
   const knownAccountsChanged = !arraysEqual(knownAccounts, state.knownAccounts);
 
-  if (accountMappingsChanged || knownAccountsChanged) {
-    await browser.storage.local.set({ accountMappings, [KNOWN_ACCOUNTS_KEY]: knownAccounts });
+  if (accountMappingsChanged || knownAccountsChanged || accountAliasesChanged) {
+    await browser.storage.local.set({
+      accountMappings,
+      accountAliases,
+      [KNOWN_ACCOUNTS_KEY]: knownAccounts,
+    });
   }
 
   return {
-    state: accountMappingsChanged || knownAccountsChanged
-      ? { ...state, accountMappings, knownAccounts }
+    state: accountMappingsChanged || knownAccountsChanged || accountAliasesChanged
+      ? { ...state, accountMappings, accountAliases, knownAccounts }
       : state,
     mappingMigrated,
     mappingConflict,

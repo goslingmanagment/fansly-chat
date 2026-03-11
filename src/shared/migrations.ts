@@ -23,6 +23,7 @@ export function createSeedState(): PersistedState {
     settings: createDefaultSettings(),
     personalities: [],
     accountMappings: {},
+    accountAliases: {},
     knownAccounts: [],
   };
 }
@@ -46,6 +47,9 @@ export function migrateState(raw: unknown): PersistedState {
     const current = record as unknown as PersistedState;
     return {
       ...current,
+      accountAliases: current.accountAliases && typeof current.accountAliases === 'object'
+        ? current.accountAliases
+        : {},
       knownAccounts: Array.isArray(current.knownAccounts) ? current.knownAccounts : [],
     };
   }
@@ -60,6 +64,9 @@ export function migrateState(raw: unknown): PersistedState {
   const accountMappings = record.accountMappings && typeof record.accountMappings === 'object'
     ? (record.accountMappings as Record<string, string>)
     : defaults.accountMappings;
+  const accountAliases = record.accountAliases && typeof record.accountAliases === 'object'
+    ? (record.accountAliases as Record<string, string>)
+    : defaults.accountAliases;
   const knownAccounts = Array.isArray(record.knownAccounts) ? record.knownAccounts : defaults.knownAccounts;
 
   // Carry forward any summary:* keys
@@ -75,6 +82,7 @@ export function migrateState(raw: unknown): PersistedState {
     settings: settings as Settings,
     personalities: personalities as PersistedState['personalities'],
     accountMappings,
+    accountAliases,
     knownAccounts: knownAccounts as string[],
     ...summaryEntries,
   };

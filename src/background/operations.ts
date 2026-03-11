@@ -261,6 +261,7 @@ export class OperationCoordinator {
       storage.accountMappings,
       accountId,
       legacyAccountId,
+      storage.accountAliases,
     );
     const mappedPersonalityName =
       storage.personalities.find((p) => p.id === mappedPersonalityId)?.name ??
@@ -693,6 +694,7 @@ export class OperationCoordinator {
         storage.accountMappings,
         resolvedAccountId,
         validated.legacyAccountId,
+        storage.accountAliases,
       );
       if (!personalityId) {
         throw new ChatMuseError('no_mapping');

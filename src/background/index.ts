@@ -38,6 +38,7 @@ const UI_RELEVANT_KEYS = new Set([
   'settings',
   'personalities',
   'accountMappings',
+  'accountAliases',
   'knownAccounts',
   'schemaVersion',
 ]);

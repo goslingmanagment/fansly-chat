@@ -61,6 +61,7 @@ export function registerRuntimeApi({
           state.accountMappings,
           accountId,
           legacyAccountId,
+          state.accountAliases,
         );
         const mappedPersonalityName =
           state.personalities.find((p) => p.id === mappedPersonalityId)

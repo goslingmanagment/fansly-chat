@@ -51,6 +51,7 @@ export interface PersistedState {
   settings: Settings;
   personalities: Personality[];
   accountMappings: Record<string, string>;
+  accountAliases: Record<string, string>;
   knownAccounts: string[];
   [summaryKey: `summary:${string}`]: SummaryCacheEntry | unknown;
 }

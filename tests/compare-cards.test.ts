@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_FEATURE_MODELS } from '../src/shared/constants.js';
+import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import type { PersistedState } from '../src/shared/types.js';
 
 function createStorage(overrides?: Partial<PersistedState>): PersistedState {
   return {
-    schemaVersion: 2,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 100,
@@ -15,6 +15,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
     },
     personalities: [],
     accountMappings: {},
+    accountAliases: {},
     knownAccounts: [],
     ...overrides,
   };
@@ -127,5 +128,18 @@ describe('compare cards', () => {
         'personality-1',
       ),
     ).not.toBe(baseFingerprint);
+  });
+
+  it('resolves a canonical mapping through a stored legacy alias', async () => {
+    const compareCards = await importCompareCardsModule({});
+
+    expect(
+      compareCards.resolveMappedPersonalityId(
+        { resolved: 'personality-1' },
+        null,
+        'legacy',
+        { legacy: 'resolved' },
+      ),
+    ).toBe('personality-1');
   });
 });

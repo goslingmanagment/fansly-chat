@@ -12,6 +12,7 @@ const UI_RELEVANT_KEYS = new Set([
   'settings',
   'personalities',
   'accountMappings',
+  'accountAliases',
   'knownAccounts',
   'schemaVersion',
 ]);
@@ -42,6 +43,10 @@ describe('storage.onChanged filter logic (Bug 7)', () => {
 
   it('triggers refresh for accountMappings key', () => {
     expect(shouldRefresh({ accountMappings: {} }, 'local')).toBe(true);
+  });
+
+  it('triggers refresh for accountAliases key', () => {
+    expect(shouldRefresh({ accountAliases: {} }, 'local')).toBe(true);
   });
 
   it('triggers refresh for knownAccounts key', () => {

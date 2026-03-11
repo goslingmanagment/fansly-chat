@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { DEFAULT_FEATURE_MODELS } from '../src/shared/constants.js';
+import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import type { PersistedState, SessionSnapshotEntry } from '../src/shared/types.js';
 
 let dom: InstanceType<typeof JSDOM>;
@@ -11,7 +11,7 @@ let onSnapshotRequest: (() => void) | null = null;
 
 function makeState(overrides?: Partial<PersistedState>): PersistedState {
   return {
-    schemaVersion: 2,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 30,
@@ -22,6 +22,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     accountMappings: {},
+    accountAliases: {},
     knownAccounts: [],
     ...overrides,
   };
