@@ -102,9 +102,29 @@ export interface PromptBuildInput {
   replyMode?: ReplyMode;
 }
 
+export interface PromptCacheControl {
+  type: 'ephemeral';
+  ttl?: '1h';
+}
+
+export interface PromptTextBlock {
+  type: 'text';
+  text: string;
+  cache_control?: PromptCacheControl;
+}
+
+export interface AnthropicUsageMetrics {
+  input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  output_tokens: number;
+}
+
 export interface PromptPayload {
   system: string;
   user: string;
+  systemBlocks: PromptTextBlock[];
+  userBlocks: PromptTextBlock[];
 }
 
 export interface PromptDebugSnapshot {
@@ -440,6 +460,7 @@ export interface OperationProfilingSnapshot {
   activeLabel: string | null;
   logEntries: OperationProfilingLogEntry[];
   stages: OperationProfilingStage[];
+  anthropicUsage?: AnthropicUsageMetrics;
 }
 
 // ─── Operation Progress ──────────────────────────────────────────────────

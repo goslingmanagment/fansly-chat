@@ -13,6 +13,7 @@ import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { formatTranscript } from '../shared/transcript.js';
 import type {
   AggregatedEarnings,
+  AnthropicUsageMetrics,
   BackgroundPortMessage,
   CompareCardCompletePayload,
   CompareCardErrorPayload,
@@ -86,6 +87,10 @@ interface ValidatedCompareStart {
 }
 
 const NO_OP_PROFILER = createOperationProfiler(false);
+
+function formatAnthropicUsageLog(usage: AnthropicUsageMetrics): string {
+  return `Claude usage: input_tokens=${usage.input_tokens}, cache_creation_input_tokens=${usage.cache_creation_input_tokens}, cache_read_input_tokens=${usage.cache_read_input_tokens}, output_tokens=${usage.output_tokens}`;
+}
 
 function sendCompareReady(
   context: CompareOperationsContext,
@@ -892,8 +897,8 @@ export async function executeCompare(
         context.anthropicClient.streamMessage({
           apiKey: validated.storage.settings.claudeApiKey,
           model,
-          system: prompt.system,
-          user: prompt.user,
+          systemBlocks: prompt.systemBlocks,
+          userBlocks: prompt.userBlocks,
           feature: 'fast-reply',
           signal,
           onText: (chunk) => {
@@ -916,6 +921,20 @@ export async function executeCompare(
               activeCompare,
               card.id,
             );
+          },
+          onUsage: (usage) => {
+            profiler.setAnthropicUsage(usage);
+            profiler.log(formatAnthropicUsageLog(usage));
+            logDebug(debugEnabled, 'anthropic usage', {
+              cardId: card.id,
+              model,
+              ...usage,
+            });
+            sendDebugCompareProgress({
+              phase: 'generating',
+              message: 'Generating compare replies…',
+              fanDisplayName,
+            });
           },
         });
 
