@@ -18,13 +18,6 @@ import {
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
-import {
-  getSummaryCache,
-  loadStorageState,
-  removeSummaryCache,
-  rekeyAccountIdentity,
-  saveSummaryCache,
-} from '../shared/storage.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
@@ -79,6 +72,7 @@ import {
   parseGroupIdFromUrl,
 } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
+import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 
 interface ActiveOperation {
@@ -125,13 +119,20 @@ export class OperationCoordinator {
   private readonly activeCompareByTabId = new Map<number, ActiveCompareOperation>();
   private readonly cancelledOperationIds = new Set<string>();
   private readonly cancelledCompareOperationIds = new Set<string>();
-  private readonly pendingIdentityResolutionByLegacyAccountId = new Map<string, Promise<void>>();
+  private readonly pendingIdentityResolutionByLegacyAccountId = new Map<
+    string,
+    {
+      promise: Promise<void>;
+      waitingTabIds: Set<number>;
+    }
+  >();
 
   constructor(
     private readonly sessionStore: SessionStore,
     private readonly tabContexts: TabContextStore,
     private readonly fanslyClient: FanslyClient,
     private readonly anthropicClient: AnthropicClient,
+    private readonly storageCoordinator: StorageCoordinator,
   ) {}
 
   registerPort(port: browser.runtime.Port): void {
@@ -239,13 +240,16 @@ export class OperationCoordinator {
       return;
     }
 
-    const inFlight = this.pendingIdentityResolutionByLegacyAccountId.get(
+    const pending = this.pendingIdentityResolutionByLegacyAccountId.get(
       legacyAccountId,
     );
-    if (inFlight) {
-      await inFlight;
+    if (pending) {
+      pending.waitingTabIds.add(tabId);
+      await pending.promise;
       return;
     }
+
+    const waitingTabIds = new Set([tabId]);
 
     const task = (async () => {
       const session = this.sessionStore.getSessionByAccount(legacyAccountId);
@@ -265,12 +269,24 @@ export class OperationCoordinator {
             session,
             controller.signal,
           );
-        await rekeyAccountIdentity(legacyAccountId, resolvedAccountId);
-        this.tabContexts.setAccount(
-          tabId,
-          session.resolvedAccountId ?? resolvedAccountId,
+        const rekeyResult = await this.storageCoordinator.rekeyAccountIdentity(
+          legacyAccountId,
+          resolvedAccountId,
         );
-        await this.refreshTabState(tabId, 'mapping:changed');
+        const canonicalAccountId = session.resolvedAccountId ?? resolvedAccountId;
+        await Promise.all(
+          Array.from(waitingTabIds).map(async (waitingTabId) => {
+            this.tabContexts.setAccount(waitingTabId, canonicalAccountId);
+            await this.refreshTabState(waitingTabId, 'mapping:changed');
+          }),
+        );
+        if (
+          rekeyResult.mappingMigrated ||
+          rekeyResult.mappingConflict ||
+          rekeyResult.knownAccountsChanged
+        ) {
+          await this.refreshAllTabs('mapping:changed');
+        }
       } catch {
         // Capture-time identity enrichment is best effort only.
       } finally {
@@ -280,7 +296,10 @@ export class OperationCoordinator {
       this.pendingIdentityResolutionByLegacyAccountId.delete(legacyAccountId);
     });
 
-    this.pendingIdentityResolutionByLegacyAccountId.set(legacyAccountId, task);
+    this.pendingIdentityResolutionByLegacyAccountId.set(legacyAccountId, {
+      promise: task,
+      waitingTabIds,
+    });
     await task;
   }
 
@@ -305,7 +324,7 @@ export class OperationCoordinator {
   }
 
   private async buildTabUiState(tabId: number): Promise<TabUiState> {
-    const storage = await loadStorageState();
+    const storage = await this.storageCoordinator.getState();
     const context = this.tabContexts.getOrCreate(tabId);
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId =
@@ -434,7 +453,7 @@ export class OperationCoordinator {
   ): Promise<ValidatedOperationStart> {
     const [tab, storage] = await Promise.all([
       browser.tabs.get(tabId),
-      loadStorageState(),
+      this.storageCoordinator.getState(),
     ]);
     const urlGroupId = parseGroupIdFromUrl(tab.url);
     if (
@@ -727,7 +746,7 @@ export class OperationCoordinator {
         }
       }
 
-      const rekeyResult = await rekeyAccountIdentity(
+      const rekeyResult = await this.storageCoordinator.rekeyAccountIdentity(
         validated.legacyAccountId,
         resolvedAccountId,
       );
@@ -770,11 +789,11 @@ export class OperationCoordinator {
         startStage('summary-cache-check', 'Check summary cache');
         if (payload.forceRegenerate) {
           profiler.log('Forced summary refresh');
-          await removeSummaryCache(validated.urlGroupId);
+          await this.storageCoordinator.removeSummaryCache(validated.urlGroupId);
         }
         cachedSummary = payload.forceRegenerate
           ? null
-          : await getSummaryCache(validated.urlGroupId);
+          : await this.storageCoordinator.getSummaryCache(validated.urlGroupId);
       }
 
       if (
@@ -1422,7 +1441,7 @@ export class OperationCoordinator {
           cached: false,
         };
         if (spendingDataVerified && subscriptionLookupVerified && actualModel === resolvedModel) {
-          await saveSummaryCache(validated.urlGroupId, {
+          await this.storageCoordinator.saveSummaryCache(validated.urlGroupId, {
             summary: rawText,
             personalityId: personality.id,
             personalityUpdatedAt: personality.updatedAt,
@@ -1497,6 +1516,7 @@ export class OperationCoordinator {
       cancelledCompareOperationIds: this.cancelledCompareOperationIds,
       sessionStore: this.sessionStore,
       tabContexts: this.tabContexts,
+      storageCoordinator: this.storageCoordinator,
       fanslyClient: this.fanslyClient,
       anthropicClient: this.anthropicClient,
       hasActiveFeature: (tabId) => this.activeByTabId.has(tabId),
