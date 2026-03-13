@@ -9,7 +9,7 @@ import {
   flattenPromptBlocks,
 } from '../src/shared/prompts.js';
 import { escapeForPrompt } from '../src/shared/prompt-injection.js';
-import type { FeatureType, Personality, PromptBuildInput } from '../src/shared/types.js';
+import type { FeatureType, Personality, PromptBuildInput, ReplyTone } from '../src/shared/types.js';
 
 const TEST_PERSONALITY: Personality = {
   id: 'personality-1',
@@ -70,6 +70,29 @@ function buildSplitReplyInstructions(
 - If a split would feel forced, return one clean message instead.`;
 }
 
+const TONE_INSTRUCTIONS: Record<Exclude<ReplyTone, 'none'>, string> = {
+  casual: `**IMPORTANT — Tone override: CASUAL.**
+The chatter wants a casual reply. Keep it light, friendly, conversational. No flirting, no selling. Just vibing. This tone directive takes priority over the personality's default style for this message.`,
+  flirty: `**IMPORTANT — Tone override: FLIRTY.**
+The chatter wants a flirty reply. Lean into attraction, tease, build tension. Be playful and suggestive without being explicit unless the conversation is already there. This tone directive takes priority over the personality's default style for this message.`,
+  upsell: `**IMPORTANT — Tone override: SOFT UPSELL.**
+The chatter wants to nudge toward a sale. The fan seems warm — weave in a natural, low-pressure mention of content or services. Don't hard-sell. Make it feel like sharing, not pitching. This tone directive takes priority over the personality's default style for this message.`,
+  tease: `**IMPORTANT — Tone override: TEASE.**
+The chatter wants a teasing reply. Be playful and a little withholding — hint at what's coming, dangle something enticing, make them want more. Keep it fun, not mean. This tone directive takes priority over the personality's default style for this message.`,
+  spicy: `**IMPORTANT — Tone override: SPICY.**
+The chatter wants a spicy reply. Turn up the heat. Be bold, direct, and sexually confident. Match or escalate the energy the fan is putting out. Don't hold back. This tone directive takes priority over the personality's default style for this message.`,
+};
+
+function buildToneInstructions(
+  feature: FeatureType,
+  replyTone: ReplyTone | undefined,
+): string {
+  if (feature !== 'fast-reply' || !replyTone || replyTone === 'none') {
+    return '';
+  }
+  return TONE_INSTRUCTIONS[replyTone];
+}
+
 function buildFanSpendingSection(fanSpendingData: string): string {
   const trimmed = fanSpendingData.trim();
   if (!trimmed) {
@@ -105,6 +128,7 @@ function buildCurrentFlatUser(input: PromptBuildInput): string {
       input.feature,
       input.replyMode,
     ),
+    toneInstructions: buildToneInstructions(input.feature, input.replyTone),
     segmentInstructions:
       input.feature === 'ping' && input.pingSegment
         ? PING_SEGMENT_INSTRUCTIONS[input.pingSegment]
@@ -231,6 +255,7 @@ describe('template variable substitution', () => {
       expect(result.user).not.toContain('{fanSubscriptionSection}');
       expect(result.user).not.toContain('{fanDisplayName}');
       expect(result.user).not.toContain('{splitReplyInstructions}');
+      expect(result.user).not.toContain('{toneInstructions}');
       expect(result.user).not.toContain('{segmentInstructions}');
     }
   });
@@ -325,6 +350,60 @@ describe('split reply instructions', () => {
       replyMode: 'preferSplit',
     }));
     expect(result.user).not.toContain('Split mode is on for this reply.');
+  });
+});
+
+// ─── Tone instructions ──────────────────────────────────────────────────
+
+describe('tone instructions', () => {
+  it.each([
+    ['casual', 'Tone override: CASUAL'],
+    ['flirty', 'Tone override: FLIRTY'],
+    ['upsell', 'Tone override: SOFT UPSELL'],
+    ['tease', 'Tone override: TEASE'],
+    ['spicy', 'Tone override: SPICY'],
+  ] as const)('includes %s tone instructions for fast-reply', (tone, expected) => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'fast-reply',
+      replyTone: tone,
+    }));
+    expect(result.user).toContain(expected);
+  });
+
+  it('does not include tone instructions when tone is none', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'fast-reply',
+      replyTone: 'none',
+    }));
+    expect(result.user).not.toContain('Tone:');
+  });
+
+  it('does not include tone instructions when tone is undefined', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'fast-reply',
+    }));
+    expect(result.user).not.toContain('Tone:');
+  });
+
+  it('does not include tone instructions for non-fast-reply features', () => {
+    for (const feature of ['help-me', 'fan-summary', 'chat-review'] as const) {
+      const result = buildPrompt(buildTestInput({
+        feature,
+        replyTone: 'flirty',
+      }));
+      expect(result.user).not.toContain('Tone:');
+    }
+  });
+
+  it('places tone instructions in the uncached task block', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'fast-reply',
+      replyTone: 'flirty',
+    }));
+    // Tone text should be in the last (uncached) user block
+    const lastBlock = result.userBlocks[result.userBlocks.length - 1];
+    expect(lastBlock?.text).toContain('Tone: Flirty');
+    expect(lastBlock?.cache_control).toBeUndefined();
   });
 });
 

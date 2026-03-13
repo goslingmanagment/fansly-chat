@@ -1,5 +1,5 @@
 import { FEATURE_LABELS } from '../shared/constants.js';
-import type { FeatureType, ReplyMode, TabUiState } from '../shared/types.js';
+import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/types.js';
 
 type ToolbarAction = FeatureType | 'compare';
 
@@ -11,11 +11,20 @@ const FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'ping', label: FEATURE_LABELS['ping'] },
 ];
 
+const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> = [
+  { tone: 'casual', label: 'Casual' },
+  { tone: 'flirty', label: 'Flirty' },
+  { tone: 'upsell', label: 'Upsell' },
+  { tone: 'tease', label: 'Tease' },
+  { tone: 'spicy', label: 'Spicy' },
+];
+
 interface ButtonBarCallbacks {
   onFeatureClick: (feature: FeatureType) => void;
   onCompareClick: () => void;
   onCompareRestoreClick: () => void;
   onReplyModeToggle: () => void;
+  onToneSelect: (tone: ReplyTone) => void;
 }
 
 export class ButtonBar {
@@ -24,6 +33,8 @@ export class ButtonBar {
   private readonly personalityLabel: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
   private readonly replyModeToggle!: HTMLButtonElement;
+  private readonly toneRow: HTMLElement;
+  private readonly tonePills = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
 
   constructor(private readonly callbacks: ButtonBarCallbacks) {
@@ -75,13 +86,30 @@ export class ButtonBar {
     this.personalityLabel = document.createElement('div');
     this.personalityLabel.className = 'chatmuse-pill chatmuse-personality chatmuse-toolbar-pill';
 
-    this.root.append(this.personalityLabel, this.actions);
+    this.toneRow = document.createElement('div');
+    this.toneRow.className = 'chatmuse-toolbar-tone-row';
+    for (const entry of TONE_OPTIONS) {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'chatmuse-tone-pill';
+      pill.textContent = entry.label;
+      pill.addEventListener('click', () => this.callbacks.onToneSelect(entry.tone));
+      this.tonePills.set(entry.tone, pill);
+      this.toneRow.append(pill);
+    }
+
+    const topRow = document.createElement('div');
+    topRow.className = 'chatmuse-toolbar-top-row';
+    topRow.append(this.personalityLabel, this.toneRow);
+
+    this.root.append(topRow, this.actions);
   }
 
   render(
     state: TabUiState | null,
     activeAction: ToolbarAction | null,
     nextReplyMode: ReplyMode,
+    nextReplyTone: ReplyTone,
     activeLoading = false,
     showCompareRestore = false,
   ): void {
@@ -134,5 +162,15 @@ export class ButtonBar {
     this.replyModeToggle.disabled = Boolean(activeAction) || (!state.connected || !state.hasApiKey);
     this.replyModeToggle.setAttribute('aria-pressed', nextReplyMode === 'preferSplit' ? 'true' : 'false');
     this.replyModeToggle.classList.toggle('chatmuse-toolbar-toggle-active', nextReplyMode === 'preferSplit');
+
+    const hideToneRow = !state.connected || !state.hasApiKey;
+    this.toneRow.classList.toggle('chatmuse-hidden', hideToneRow);
+    for (const entry of TONE_OPTIONS) {
+      const pill = this.tonePills.get(entry.tone)!;
+      const isActive = nextReplyTone === entry.tone;
+      pill.disabled = Boolean(activeAction);
+      pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      pill.classList.toggle('chatmuse-tone-pill-active', isActive);
+    }
   }
 }

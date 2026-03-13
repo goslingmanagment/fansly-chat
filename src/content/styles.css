@@ -224,6 +224,49 @@
   color: #dff8ed;
 }
 
+/* ─── Top Row (Personality + Tones) ────────────────────────── */
+
+.chatmuse-toolbar-top-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chatmuse-toolbar-tone-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chatmuse-tone-pill {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  border: 1px solid rgba(108, 92, 231, 0.24);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chatmuse-tone-pill:hover:not(:disabled) {
+  background: rgba(108, 92, 231, 0.12);
+  border-color: rgba(108, 92, 231, 0.42);
+}
+
+.chatmuse-tone-pill-active {
+  background: rgba(108, 92, 231, 0.22);
+  border-color: rgba(108, 92, 231, 0.5);
+  color: #fff;
+}
+
+.chatmuse-tone-pill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ─── Inline Panel ──────────────────────────────────────────── */
 
 .chatmuse-inline-panel {

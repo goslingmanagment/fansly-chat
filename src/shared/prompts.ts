@@ -11,6 +11,7 @@ import type {
   PromptPayload,
   PromptTextBlock,
   ReplyMode,
+  ReplyTone,
 } from './types.js';
 import { escapeForPrompt } from './prompt-injection.js';
 
@@ -64,6 +65,26 @@ function buildSplitReplyInstructions(feature: FeatureType, replyMode: ReplyMode 
 - Use [NEXT] only when the follow-up reads like a natural second thought or quick extra send.
 - Keep each part brief and casual.
 - If a split would feel forced, return one clean message instead.`;
+}
+
+const TONE_INSTRUCTIONS: Record<Exclude<ReplyTone, 'none'>, string> = {
+  casual: `**IMPORTANT — Tone override: CASUAL.**
+The chatter wants a casual reply. Keep it light, friendly, conversational. No flirting, no selling. Just vibing. This tone directive takes priority over the personality's default style for this message.`,
+  flirty: `**IMPORTANT — Tone override: FLIRTY.**
+The chatter wants a flirty reply. Lean into attraction, tease, build tension. Be playful and suggestive without being explicit unless the conversation is already there. This tone directive takes priority over the personality's default style for this message.`,
+  upsell: `**IMPORTANT — Tone override: SOFT UPSELL.**
+The chatter wants to nudge toward a sale. The fan seems warm — weave in a natural, low-pressure mention of content or services. Don't hard-sell. Make it feel like sharing, not pitching. This tone directive takes priority over the personality's default style for this message.`,
+  tease: `**IMPORTANT — Tone override: TEASE.**
+The chatter wants a teasing reply. Be playful and a little withholding — hint at what's coming, dangle something enticing, make them want more. Keep it fun, not mean. This tone directive takes priority over the personality's default style for this message.`,
+  spicy: `**IMPORTANT — Tone override: SPICY.**
+The chatter wants a spicy reply. Turn up the heat. Be bold, direct, and sexually confident. Match or escalate the energy the fan is putting out. Don't hold back. This tone directive takes priority over the personality's default style for this message.`,
+};
+
+function buildToneInstructions(feature: FeatureType, replyTone: ReplyTone | undefined): string {
+  if (feature !== 'fast-reply' || !replyTone || replyTone === 'none') {
+    return '';
+  }
+  return TONE_INSTRUCTIONS[replyTone];
 }
 
 function buildFanSpendingSection(fanSpendingData: string): string {
@@ -206,6 +227,7 @@ export function buildPrompt(input: PromptBuildInput): PromptPayload {
     fanSubscriptionSection: buildFanSubscriptionSection(input.fanSubscriptionData),
     fanDisplayName: escapeForPrompt(input.fanDisplayName),
     splitReplyInstructions: buildSplitReplyInstructions(input.feature, input.replyMode),
+    toneInstructions: buildToneInstructions(input.feature, input.replyTone),
     segmentInstructions:
       input.feature === 'ping' && input.pingSegment
         ? PING_SEGMENT_INSTRUCTIONS[input.pingSegment]
