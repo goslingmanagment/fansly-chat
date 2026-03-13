@@ -1,15 +1,3 @@
-function ensureFont(): void {
-  if (document.getElementById('chatmuse-font')) {
-    return;
-  }
-
-  const link = document.createElement('link');
-  link.id = 'chatmuse-font';
-  link.rel = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap';
-  document.head.append(link);
-}
-
 function ensureStyles(stylesText: string): void {
   if (document.getElementById('chatmuse-style')) {
     return;
@@ -22,7 +10,6 @@ function ensureStyles(stylesText: string): void {
 }
 
 export function installContentStyles(stylesText: string): void {
-  ensureFont();
   ensureStyles(stylesText);
 }
 

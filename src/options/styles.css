@@ -1,14 +1,14 @@
 :root {
-  --chatmuse-bg: #0a0a0f;
-  --chatmuse-panel: #111117;
+  --chatmuse-bg: #1b1e2e;
+  --chatmuse-panel: #1f2236;
   --chatmuse-text: #e8e8f0;
-  --chatmuse-muted: #5c5c70;
-  --chatmuse-accent: #7c6ef6;
-  --chatmuse-accent-soft: #a8a0ff;
+  --chatmuse-muted: #7a7d95;
+  --chatmuse-accent: #5b8af5;
+  --chatmuse-accent-soft: #8bb0ff;
   --chatmuse-success: #34d399;
   --chatmuse-danger: #f87171;
-  --chatmuse-border: rgba(255, 255, 255, 0.06);
-  --chatmuse-border-accent: rgba(124, 110, 246, 0.18);
+  --chatmuse-border: rgba(255, 255, 255, 0.05);
+  --chatmuse-border-accent: rgba(91, 138, 245, 0.18);
   color-scheme: dark;
 }
 
@@ -16,7 +16,7 @@ body {
   margin: 0;
   background: var(--chatmuse-bg);
   color: var(--chatmuse-text);
-  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
   max-width: 900px;
   margin: 0 auto;
@@ -75,7 +75,7 @@ h2 {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--chatmuse-border);
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.2);
   color: var(--chatmuse-text);
   padding: 9px 12px;
   border-radius: 10px;

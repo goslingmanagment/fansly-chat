@@ -85,6 +85,7 @@ export class InlinePanelController {
   private currentView: InlineViewState | null = null;
   private model: InlinePanelViewModel = { kind: 'hidden' };
   private inlineError: UserFacingError | null = null;
+  private lastFocusedReplyOpId: string | null = null;
 
   constructor(private readonly callbacks: InlinePanelCallbacks) {
     this.root = document.createElement('div');
@@ -137,6 +138,29 @@ export class InlinePanelController {
         this.callbacks.onClose();
       }
     });
+
+    // Enter-to-insert for completed fast replies
+    document.addEventListener('keydown', (event) => {
+      if (
+        event.key !== 'Enter' ||
+        event.metaKey || event.ctrlKey || event.altKey || event.shiftKey ||
+        event.repeat || event.isComposing
+      ) return;
+      if (this.model.kind !== 'reply') return;
+      if (this.root.classList.contains('chatmuse-hidden')) return;
+      if ('feature' in this.model && this.model.feature !== 'fast-reply') return;
+      if (isEditableElement(document.activeElement)) return;
+      if (
+        document.activeElement &&
+        document.activeElement !== document.body &&
+        !this.root.contains(document.activeElement)
+      ) return;
+      const parts = this.model.parts;
+      const next = this.getNextInsertablePart(parts);
+      if (!next) return;
+      event.preventDefault();
+      void this.insertPart(next);
+    });
   }
 
   render(model: InlinePanelViewModel, options?: InlinePanelRenderOptions): void {
@@ -176,6 +200,7 @@ export class InlinePanelController {
     this.model = { kind: 'hidden' };
     this.currentView = null;
     this.inlineError = null;
+    this.lastFocusedReplyOpId = null;
     this.bodyEl.replaceChildren();
     this.root.classList.add('chatmuse-hidden');
   }
@@ -219,6 +244,19 @@ export class InlinePanelController {
 
     this.bodyEl.replaceChildren(view.root);
     this.currentView = view;
+
+    // Auto-focus the first Insert button for newly visible completed fast replies
+    if (
+      model.kind === 'reply' &&
+      'feature' in model && model.feature === 'fast-reply' &&
+      model.operationId !== this.lastFocusedReplyOpId
+    ) {
+      this.lastFocusedReplyOpId = model.operationId;
+      queueMicrotask(() => {
+        const btn = view.root.querySelector<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+        btn?.focus();
+      });
+    }
   }
 
   private renderHeaderMeta(
@@ -632,19 +670,8 @@ export class InlinePanelController {
     insert.className = 'chatmuse-button';
     insert.textContent = part.insertedAt ? 'Inserted \u2713' : part.insertedOnce ? 'Insert again' : 'Insert';
     insert.disabled = Boolean(part.insertedAt && Date.now() - part.insertedAt < 2000);
-    insert.addEventListener('click', async () => {
-      try {
-        await insertIntoFanslyTextarea(part.text);
-        part.insertedOnce = true;
-        part.insertedAt = Date.now();
-        this.inlineError = null;
-        this.render(this.model);
-        this.scheduleInsertedReset(part);
-        this.queueComposerFocus();
-      } catch (error) {
-        this.inlineError = toUserError(error);
-        this.render(this.model, { preserveInlineError: true });
-      }
+    insert.addEventListener('click', () => {
+      void this.insertPart(part);
     });
 
     const copy = document.createElement('button');
@@ -671,6 +698,31 @@ export class InlinePanelController {
 
     card.append(headerRow, text);
     return card;
+  }
+
+  private async insertPart(part: OverlayInsertPart): Promise<void> {
+    try {
+      await insertIntoFanslyTextarea(part.text);
+      part.insertedOnce = true;
+      part.insertedAt = Date.now();
+      this.inlineError = null;
+      this.render(this.model);
+      this.scheduleInsertedReset(part);
+      this.queueComposerFocus();
+    } catch (error) {
+      this.inlineError = toUserError(error);
+      this.render(this.model, { preserveInlineError: true });
+    }
+  }
+
+  private getNextInsertablePart(parts: OverlayInsertPart[]): OverlayInsertPart | null {
+    const isAvailable = (p: OverlayInsertPart) =>
+      !p.insertedAt || Date.now() - p.insertedAt >= 2000;
+    return (
+      parts.find((p) => !p.insertedOnce && isAvailable(p)) ??
+      parts.find((p) => isAvailable(p)) ??
+      null
+    );
   }
 
   private scheduleInsertedReset(part: OverlayInsertPart): void {

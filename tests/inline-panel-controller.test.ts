@@ -711,4 +711,128 @@ describe('InlinePanelController', () => {
 
     expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toBe('Draft failed');
   });
+
+  // ─── Enter-to-insert ─────────────────────────────────────────
+
+  it('Enter inserts the first part for a visible fast-reply', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const part = createPart('Hey there!');
+    controller.render(createReplyModel([part]));
+    // Clear focus from auto-focus so Enter handler treats it as body focus
+    (document.activeElement as HTMLElement)?.blur?.();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Hey there!');
+    });
+  });
+
+  it('after part 1 is marked inserted, Enter targets part 2 for split replies', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const part1 = createPart('First', 0);
+    part1.insertedOnce = true;
+    const part2 = createPart('Second', 1);
+    const model = createReplyModel([part1, part2]);
+    model.splitModeRequested = true;
+    controller.render(model);
+    (document.activeElement as HTMLElement)?.blur?.();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Second');
+    });
+  });
+
+  it('Enter is ignored for hidden panel', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    // Panel starts hidden
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter is ignored during loading state', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createLoadingModel('op', 'text'));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter is ignored for error state', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createErrorModel());
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter is ignored when focus is in a textarea', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createReplyModel([createPart('Hello')]));
+
+    const textarea = document.createElement('textarea');
+    document.body.append(textarea);
+    textarea.focus();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter with modifier keys is ignored', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createReplyModel([createPart('Hello')]));
+    (document.activeElement as HTMLElement)?.blur?.();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('newly rendered fast reply focuses the first Insert button', async () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createReplyModel([createPart('Hello')]));
+    await vi.waitFor(() => {
+      const btn = controller.root.querySelector<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+      expect(document.activeElement).toBe(btn);
+    });
+  });
+
+  it('Enter is ignored for compare state', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel());
+    (document.activeElement as HTMLElement)?.blur?.();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
 });

@@ -726,4 +726,124 @@ describe('OverlayController', () => {
       expect(errorEl).not.toBeNull();
     });
   });
+
+  // ─── Enter-to-insert ─────────────────────────────────────────
+
+  it('Enter inserts the first part for a visible fast-reply', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReplyModel(createPart('Hey there!')));
+    (document.activeElement as HTMLElement)?.blur?.();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Hey there!');
+    });
+  });
+
+  it('Enter is ignored for hidden overlay', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    // Never rendered
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter is ignored during loading state', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createLoadingModel('op', 'text'));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter is ignored for helpMe view', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createHelpMeModel());
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter is ignored when focus is in an editable element', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReplyModel(createPart('Hello')));
+
+    const textarea = document.createElement('textarea');
+    document.body.append(textarea);
+    textarea.focus();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('Enter with modifier keys is ignored', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReplyModel(createPart('Hello')));
+    (document.activeElement as HTMLElement)?.blur?.();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('newly rendered fast reply focuses the first Insert button', async () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReplyModel(createPart('Hello')));
+    await vi.waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+      expect(document.activeElement).toBe(btn);
+    });
+  });
 });
