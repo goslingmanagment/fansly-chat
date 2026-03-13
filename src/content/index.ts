@@ -212,6 +212,18 @@ export class ChatMuseContentApp {
     installContentStyles(contentStyles);
     this.port.connect();
     startRouteWatcher((groupId) => this.handleRouteChange(groupId));
+
+    document.addEventListener('keydown', (e) => {
+      if (
+        (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyE' && !e.repeat &&
+        this.currentGroupId &&
+        !this.activeFeature &&
+        !this.activeCompareModel?.operationId
+      ) {
+        e.preventDefault();
+        this.startFeature('fast-reply', false);
+      }
+    });
   }
 
   // ─── Surface Rendering ──────────────────────────────────────────────

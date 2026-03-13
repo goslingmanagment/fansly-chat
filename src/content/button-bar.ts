@@ -29,7 +29,6 @@ interface ButtonBarCallbacks {
 
 export class ButtonBar {
   readonly root: HTMLElement;
-  private readonly actions: HTMLElement;
   private readonly personalityLabel: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
   private readonly replyModeToggle!: HTMLButtonElement;
@@ -41,9 +40,7 @@ export class ButtonBar {
     this.root = document.createElement('div');
     this.root.className = 'chatmuse-bar chatmuse-toolbar';
 
-    this.actions = document.createElement('div');
-    this.actions.className = 'chatmuse-actions chatmuse-toolbar-actions';
-
+    // Create all feature buttons (render() reads from this map)
     for (const entry of FEATURES) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -51,40 +48,33 @@ export class ButtonBar {
       button.textContent = entry.label;
       button.addEventListener('click', () => this.callbacks.onFeatureClick(entry.feature));
       this.buttons.set(entry.feature, button);
-
-      if (entry.feature === 'fast-reply') {
-        const group = document.createElement('div');
-        group.className = 'chatmuse-toolbar-group';
-
-        const compareButton = document.createElement('button');
-        compareButton.type = 'button';
-        compareButton.className = 'chatmuse-button chatmuse-toolbar-button';
-        compareButton.textContent = 'Compare';
-        compareButton.addEventListener('click', () => this.callbacks.onCompareClick());
-        this.buttons.set('compare', compareButton);
-
-        this.compareRestoreButton = document.createElement('button');
-        this.compareRestoreButton.type = 'button';
-        this.compareRestoreButton.className =
-          'chatmuse-button chatmuse-toolbar-button chatmuse-button-secondary chatmuse-toolbar-button-secondary chatmuse-hidden';
-        this.compareRestoreButton.textContent = 'Reopen';
-        this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
-
-        this.replyModeToggle = document.createElement('button');
-        this.replyModeToggle.type = 'button';
-        this.replyModeToggle.className = 'chatmuse-button chatmuse-toolbar-toggle';
-        this.replyModeToggle.textContent = '2-part';
-        this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
-
-        group.append(button, compareButton, this.compareRestoreButton, this.replyModeToggle);
-        this.actions.append(group);
-      } else {
-        this.actions.append(button);
-      }
     }
 
+    const replyButton = this.buttons.get('fast-reply')!;
+    replyButton.classList.add('chatmuse-toolbar-button-primary');
+
+    const compareButton = document.createElement('button');
+    compareButton.type = 'button';
+    compareButton.className = 'chatmuse-button chatmuse-toolbar-button';
+    compareButton.textContent = 'Compare';
+    compareButton.addEventListener('click', () => this.callbacks.onCompareClick());
+    this.buttons.set('compare', compareButton);
+
+    this.compareRestoreButton = document.createElement('button');
+    this.compareRestoreButton.type = 'button';
+    this.compareRestoreButton.className =
+      'chatmuse-button chatmuse-toolbar-button chatmuse-button-secondary chatmuse-toolbar-button-secondary chatmuse-hidden';
+    this.compareRestoreButton.textContent = 'Reopen';
+    this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
+
+    this.replyModeToggle = document.createElement('button');
+    this.replyModeToggle.type = 'button';
+    this.replyModeToggle.className = 'chatmuse-button chatmuse-toolbar-toggle';
+    this.replyModeToggle.textContent = '2-part';
+    this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
+
     this.personalityLabel = document.createElement('div');
-    this.personalityLabel.className = 'chatmuse-pill chatmuse-personality chatmuse-toolbar-pill';
+    this.personalityLabel.className = 'chatmuse-pill chatmuse-personality chatmuse-toolbar-pill chatmuse-toolbar-personality-end';
 
     this.toneRow = document.createElement('div');
     this.toneRow.className = 'chatmuse-toolbar-tone-row';
@@ -98,11 +88,11 @@ export class ButtonBar {
       this.toneRow.append(pill);
     }
 
-    const topRow = document.createElement('div');
-    topRow.className = 'chatmuse-toolbar-top-row';
-    topRow.append(this.personalityLabel, this.toneRow);
-
-    this.root.append(topRow, this.actions);
+    // Single row: [Reply] [Compare] [Reopen] [2-part] [Tones...] [Personality→right]
+    this.root.append(
+      replyButton, compareButton, this.compareRestoreButton,
+      this.replyModeToggle, this.toneRow, this.personalityLabel,
+    );
   }
 
   render(
