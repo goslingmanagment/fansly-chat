@@ -1,34 +1,45 @@
 /* ============================================================
-   ChatMuse — Dark purple theme CSS for Fansly integration
+   ChatMuse — Void theme
+   Refined minimalist dark UI for Fansly integration
    All classes prefixed with chatmuse- to avoid collisions.
    ============================================================ */
 
 :root {
-  --chatmuse-bg: rgba(9, 16, 23, 0.96);
-  --chatmuse-panel: #16213e;
-  --chatmuse-panel-soft: #1e2a4a;
-  --chatmuse-panel-elevated: #24374a;
-  --chatmuse-text: #edf5f7;
-  --chatmuse-muted: #94a7b6;
-  --chatmuse-accent: #6c5ce7;
-  --chatmuse-accent-hover: #5a4bd5;
-  --chatmuse-accent-soft: #a29bfe;
-  --chatmuse-danger: #e74c3c;
-  --chatmuse-success: #00b894;
-  --chatmuse-warning: #fdcb6e;
-  --chatmuse-border: rgba(255, 255, 255, 0.08);
-  --chatmuse-border-accent: rgba(108, 92, 231, 0.3);
-  --chatmuse-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
-  --chatmuse-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --chatmuse-bg: rgba(10, 10, 15, 0.97);
+  --chatmuse-panel: #111117;
+  --chatmuse-panel-soft: #16161e;
+  --chatmuse-panel-elevated: #1d1d28;
+  --chatmuse-text: #e8e8f0;
+  --chatmuse-muted: #5c5c70;
+  --chatmuse-accent: #7c6ef6;
+  --chatmuse-accent-hover: #6b5de4;
+  --chatmuse-accent-soft: #a8a0ff;
+  --chatmuse-danger: #f87171;
+  --chatmuse-success: #34d399;
+  --chatmuse-warning: #fbbf24;
+  --chatmuse-border: rgba(255, 255, 255, 0.06);
+  --chatmuse-border-accent: rgba(124, 110, 246, 0.18);
+  --chatmuse-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --chatmuse-font: 'Outfit', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   color-scheme: dark;
 }
 
 /* ─── Root Container ─────────────────────────────────────────── */
 
 #chatmuse-root {
-  margin: 12px 0 10px;
+  margin: 10px 0 8px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  font-family: var(--chatmuse-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#chatmuse-root button,
+#chatmuse-root select,
+#chatmuse-root input,
+#chatmuse-root textarea {
+  font-family: inherit;
 }
 
 .chatmuse-hidden {
@@ -40,69 +51,72 @@
 .chatmuse-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 8px 10px;
   border: 1px solid var(--chatmuse-border);
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(108, 92, 231, 0.18), transparent 28%),
-    linear-gradient(180deg, rgba(18, 31, 43, 0.96), rgba(12, 21, 29, 0.98));
+  border-radius: 14px;
+  background: var(--chatmuse-panel);
   box-shadow: var(--chatmuse-shadow);
 }
 
 .chatmuse-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
 }
 
 .chatmuse-pill {
   border: 1px solid var(--chatmuse-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--chatmuse-text);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--chatmuse-muted);
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: 10px;
+  padding: 5px 10px;
+  border-radius: 8px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
 }
 
 /* ─── Base Button ────────────────────────────────────────────── */
 
 .chatmuse-button {
-  border: 1px solid var(--chatmuse-border-accent);
-  background: rgba(108, 92, 231, 0.14);
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--chatmuse-text);
-  padding: 8px 12px;
-  border-radius: 12px;
+  padding: 7px 12px;
+  border-radius: 10px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+  transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease;
 }
 
 .chatmuse-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  background: rgba(108, 92, 231, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.chatmuse-button:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .chatmuse-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.35;
 }
 
 .chatmuse-button-secondary {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
   border-color: var(--chatmuse-border);
 }
 
 .chatmuse-button-danger {
-  background: rgba(231, 76, 60, 0.16);
-  border-color: rgba(231, 76, 60, 0.3);
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.2);
+  color: #fca5a5;
 }
 
 /* ─── Personality Pill ───────────────────────────────────────── */
@@ -117,19 +131,19 @@
 .chatmuse-toolbar {
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
-  padding: 10px 14px;
-  border-color: rgba(108, 92, 231, 0.28);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(22, 33, 62, 0.98), rgba(20, 30, 55, 0.98));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 12px 28px rgba(3, 8, 20, 0.18);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: var(--chatmuse-panel);
+  border-color: var(--chatmuse-border);
+  box-shadow: var(--chatmuse-shadow);
 }
 
 .chatmuse-toolbar-actions {
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -137,72 +151,84 @@
 .chatmuse-toolbar-group {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .chatmuse-toolbar-pill {
-  min-height: 32px;
-  padding: 0 16px;
-  border-radius: 14px;
-  border-color: rgba(108, 92, 231, 0.24);
-  background: rgba(108, 92, 231, 0.18);
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border-color: var(--chatmuse-border);
+  background: rgba(124, 110, 246, 0.08);
   color: var(--chatmuse-accent-soft);
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .chatmuse-toolbar-button {
-  min-height: 32px;
-  padding: 0 16px;
-  border-color: rgba(108, 92, 231, 0.36);
-  background: rgba(13, 24, 51, 0.12);
+  min-height: 30px;
+  padding: 0 11px;
+  border-color: var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
-  color: #eef2ff;
+  color: var(--chatmuse-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
   box-shadow: none;
 }
 
 .chatmuse-toolbar-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  background: rgba(108, 92, 231, 0.16);
-  border-color: rgba(108, 92, 231, 0.46);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .chatmuse-toolbar-button-secondary {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
   border-color: var(--chatmuse-border);
-  color: var(--chatmuse-text);
+  color: var(--chatmuse-muted);
 }
 
 .chatmuse-toolbar-button-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-toolbar-button:disabled {
-  opacity: 0.5;
+  opacity: 0.35;
+}
+
+.chatmuse-toolbar-button-primary {
+  background: rgba(124, 110, 246, 0.14);
+  border-color: var(--chatmuse-border-accent);
+  color: var(--chatmuse-accent-soft);
+}
+
+.chatmuse-toolbar-button-primary:hover:not(:disabled) {
+  background: rgba(124, 110, 246, 0.22);
+  border-color: rgba(124, 110, 246, 0.28);
 }
 
 .chatmuse-toolbar-toggle {
-  min-height: 30px;
-  padding: 0 12px;
-  border-color: rgba(108, 92, 231, 0.32);
-  background: rgba(10, 20, 45, 0.08);
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 999px;
-  color: var(--chatmuse-accent-soft);
+  color: var(--chatmuse-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
   box-shadow: none;
+  transition: all 150ms ease;
 }
 
 .chatmuse-toolbar-button .chatmuse-spinner {
@@ -214,56 +240,55 @@
 }
 
 .chatmuse-toolbar-toggle:hover:not(:disabled) {
-  background: rgba(108, 92, 231, 0.12);
-  border-color: rgba(108, 92, 231, 0.42);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-toolbar-toggle-active {
-  background: rgba(0, 184, 148, 0.16);
-  border-color: rgba(0, 184, 148, 0.34);
-  color: #dff8ed;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.24);
+  color: #6ee7b7;
 }
 
-/* ─── Top Row (Personality + Tones) ────────────────────────── */
+/* ─── Personality (pinned right) ─────────────────────────── */
 
-.chatmuse-toolbar-top-row {
-  flex-basis: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.chatmuse-toolbar-personality-end {
+  margin-left: auto;
 }
 
 .chatmuse-toolbar-tone-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .chatmuse-tone-pill {
   min-height: 26px;
-  padding: 0 10px;
+  padding: 0 9px;
   font-size: 11px;
-  border: 1px solid rgba(108, 92, 231, 0.24);
+  font-weight: 600;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--chatmuse-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 150ms ease;
 }
 
 .chatmuse-tone-pill:hover:not(:disabled) {
-  background: rgba(108, 92, 231, 0.12);
-  border-color: rgba(108, 92, 231, 0.42);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-tone-pill-active {
-  background: rgba(108, 92, 231, 0.22);
-  border-color: rgba(108, 92, 231, 0.5);
-  color: #fff;
+  background: rgba(124, 110, 246, 0.14);
+  border-color: rgba(124, 110, 246, 0.24);
+  color: var(--chatmuse-accent-soft);
 }
 
 .chatmuse-tone-pill:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: default;
 }
 
@@ -273,8 +298,8 @@
   display: grid;
   gap: 0;
   border: 1px solid var(--chatmuse-border);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(20, 31, 41, 0.98), rgba(11, 19, 27, 0.99));
+  border-radius: 14px;
+  background: var(--chatmuse-panel);
   box-shadow: var(--chatmuse-shadow);
   contain: layout style;
   overflow: hidden;
@@ -284,21 +309,21 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--chatmuse-border);
-  min-height: 40px;
+  min-height: 36px;
 }
 
 .chatmuse-inline-panel-header-info {
   min-width: 0;
   flex: 1;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .chatmuse-inline-panel-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--chatmuse-text);
   white-space: nowrap;
@@ -312,9 +337,9 @@
 }
 
 .chatmuse-inline-panel-meta-primary {
-  font-size: 11px;
-  font-weight: 800;
-  color: #f4f7ff;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-inline-panel-meta-primary[title] {
@@ -323,35 +348,37 @@
 
 .chatmuse-inline-panel-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .chatmuse-inline-panel-action {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   border: 1px solid var(--chatmuse-border);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--chatmuse-text);
-  font-size: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--chatmuse-muted);
+  font-size: 13px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: all 150ms ease;
 }
 
 .chatmuse-inline-panel-action:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-inline-panel-body {
-  max-height: 320px;
+  max-height: 300px;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 12px 14px;
+  padding: 10px 12px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 /* ─── Inline Panel — Compact Overrides ──────────────────────── */
@@ -362,32 +389,31 @@
 
 .chatmuse-inline-panel .chatmuse-inline-panel-header {
   padding: 6px 10px;
-  min-height: 32px;
+  min-height: 30px;
 }
 
 .chatmuse-inline-panel .chatmuse-inline-panel-header-info {
-  gap: 3px;
+  gap: 2px;
 }
 
 .chatmuse-inline-panel .chatmuse-inline-panel-title {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .chatmuse-inline-panel .chatmuse-inline-panel-meta-primary {
   font-size: 10px;
 }
 
-
 .chatmuse-inline-panel .chatmuse-inline-panel-action {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .chatmuse-inline-panel .chatmuse-inline-panel-body {
   padding: 8px 10px;
-  max-height: 280px;
+  max-height: 260px;
   gap: 8px;
 }
 
@@ -396,15 +422,15 @@
 }
 
 .chatmuse-inline-panel .chatmuse-compare-summary {
-  color: rgba(234, 236, 255, 0.78);
-  font-size: 12px;
+  color: var(--chatmuse-text);
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tabs {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -413,55 +439,46 @@
 .chatmuse-inline-panel .chatmuse-compare-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 30px;
+  gap: 5px;
+  min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(108, 92, 231, 0.24);
-  background: rgba(14, 24, 47, 0.42);
-  color: var(--chatmuse-text);
-  font-size: 12px;
-  font-weight: 700;
+  border: 1px solid var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--chatmuse-muted);
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
+  transition: all 150ms ease;
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab:hover:not(.chatmuse-compare-tab-active) {
-  background: rgba(20, 34, 64, 0.62);
-  border-color: rgba(108, 92, 231, 0.42);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab:focus-visible {
-  outline: 2px solid rgba(162, 155, 254, 0.9);
+  outline: 2px solid rgba(124, 110, 246, 0.6);
   outline-offset: 2px;
-  border-color: rgba(162, 155, 254, 0.62);
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab:active {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab-active {
-  border-color: rgba(108, 92, 231, 0.62);
-  background: rgba(108, 92, 231, 0.24);
-  color: #eef2ff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 0 0 1px rgba(108, 92, 231, 0.12);
+  border-color: rgba(124, 110, 246, 0.3);
+  background: rgba(124, 110, 246, 0.12);
+  color: var(--chatmuse-accent-soft);
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab-badge {
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 999px;
-  background: rgba(0, 184, 148, 0.18);
-  color: #dff8ed;
-  font-size: 10px;
-  font-weight: 800;
+  background: rgba(52, 211, 153, 0.14);
+  color: #6ee7b7;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .chatmuse-inline-panel .chatmuse-compare-tab .chatmuse-spinner {
@@ -471,7 +488,7 @@
 }
 
 .chatmuse-inline-panel .chatmuse-parts {
-  gap: 8px;
+  gap: 6px;
 }
 
 .chatmuse-inline-panel .chatmuse-card {
@@ -500,65 +517,65 @@
 }
 
 .chatmuse-inline-panel .chatmuse-card-title {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .chatmuse-inline-panel .chatmuse-card-hint,
 .chatmuse-inline-panel .chatmuse-card-status {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .chatmuse-inline-panel .chatmuse-card-text {
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .chatmuse-inline-panel .chatmuse-card-actions {
-  gap: 6px;
+  gap: 4px;
 }
 
 .chatmuse-inline-panel .chatmuse-button {
-  padding: 5px 10px;
-  font-size: 12px;
-  border-radius: 8px;
+  padding: 4px 9px;
+  font-size: 11px;
+  border-radius: 7px;
 }
 
 .chatmuse-inline-panel .chatmuse-stream {
-  padding: 10px;
-  border-radius: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .chatmuse-inline-panel .chatmuse-inline-error {
   padding: 6px 10px;
   border-radius: 8px;
-  font-size: 12px;
-}
-
-.chatmuse-inline-panel .chatmuse-spend-strip-primary {
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-spend-strip-secondary {
+.chatmuse-inline-panel .chatmuse-spend-strip-primary {
   font-size: 10px;
+}
+
+.chatmuse-inline-panel .chatmuse-spend-strip-secondary {
+  font-size: 9px;
 }
 
 /* ─── Mapping Banner ─────────────────────────────────────────── */
 
 .chatmuse-banner {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid var(--chatmuse-warning);
-  background: linear-gradient(180deg, rgba(29, 44, 58, 0.96), rgba(18, 30, 40, 0.98));
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  background: var(--chatmuse-panel);
   box-shadow: var(--chatmuse-shadow);
 }
 
 .chatmuse-banner-copy {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .chatmuse-banner-title {
@@ -574,7 +591,7 @@
 
 .chatmuse-banner-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -585,40 +602,55 @@
 .chatmuse-textarea {
   width: 100%;
   border: 1px solid var(--chatmuse-border);
-  background: rgba(7, 14, 20, 0.94);
+  background: rgba(0, 0, 0, 0.3);
   color: var(--chatmuse-text);
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  transition: border-color 150ms ease;
+}
+
+.chatmuse-select:focus,
+.chatmuse-input:focus,
+.chatmuse-textarea:focus {
+  outline: none;
+  border-color: var(--chatmuse-border-accent);
 }
 
 /* ─── Toast ──────────────────────────────────────────────────── */
 
 #chatmuse-toast-root {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  right: 16px;
+  bottom: 16px;
   z-index: 2147483645;
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  font-family: var(--chatmuse-font);
 }
 
 .chatmuse-toast {
-  min-width: 260px;
-  max-width: 340px;
-  background: rgba(9, 16, 23, 0.97);
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--chatmuse-panel);
   border: 1px solid var(--chatmuse-border);
   color: var(--chatmuse-text);
-  padding: 12px;
-  border-radius: 14px;
-  box-shadow: var(--chatmuse-shadow);
+  padding: 10px 12px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  font-size: 13px;
   animation: chatmuse-fade-in 0.15s ease;
+}
+
+.chatmuse-toast button {
+  font-family: inherit;
 }
 
 .chatmuse-toast-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -638,14 +670,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 20px;
 }
 
 .chatmuse-overlay-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(2, 7, 11, 0.68);
-  backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   pointer-events: auto;
 }
 
@@ -655,24 +688,32 @@
 
 .chatmuse-overlay-panel {
   position: relative;
-  width: min(760px, 100%);
-  max-height: min(86vh, 900px);
+  width: min(720px, 100%);
+  max-height: min(84vh, 860px);
   overflow: auto;
   pointer-events: auto;
   padding: 20px;
-  border-radius: 24px;
+  border-radius: 18px;
   border: 1px solid var(--chatmuse-border);
-  background:
-    radial-gradient(circle at top right, rgba(108, 92, 231, 0.18), transparent 26%),
-    linear-gradient(180deg, rgba(20, 31, 41, 0.98), rgba(11, 19, 27, 0.99));
-  box-shadow: var(--chatmuse-shadow);
+  background: #111117;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 16px 48px rgba(0, 0, 0, 0.5);
   display: grid;
-  gap: 16px;
-  animation: chatmuse-slide-up 0.2s ease;
+  gap: 14px;
+  font-family: var(--chatmuse-font);
+  animation: chatmuse-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chatmuse-overlay-panel button,
+.chatmuse-overlay-panel select,
+.chatmuse-overlay-panel input,
+.chatmuse-overlay-panel textarea {
+  font-family: inherit;
 }
 
 .chatmuse-overlay-panel::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .chatmuse-overlay-panel::-webkit-scrollbar-track {
@@ -680,7 +721,7 @@
 }
 
 .chatmuse-overlay-panel::-webkit-scrollbar-thumb {
-  background: var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
 
@@ -695,20 +736,22 @@
 
 .chatmuse-overlay-title {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .chatmuse-eyebrow {
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--chatmuse-accent-soft);
+  color: var(--chatmuse-muted);
 }
 
 .chatmuse-title {
-  font-size: 22px;
-  font-weight: 800;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--chatmuse-text);
+  letter-spacing: -0.01em;
 }
 
 .chatmuse-subtitle {
@@ -717,25 +760,28 @@
 }
 
 .chatmuse-close {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   border: 1px solid var(--chatmuse-border);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--chatmuse-text);
-  font-size: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--chatmuse-muted);
+  font-size: 16px;
   cursor: pointer;
+  transition: all 150ms ease;
+  flex-shrink: 0;
 }
 
 .chatmuse-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--chatmuse-text);
 }
 
 /* ─── Status ─────────────────────────────────────────────────── */
 
 .chatmuse-overlay-status {
   font-size: 13px;
-  color: var(--chatmuse-accent-soft);
+  color: var(--chatmuse-muted);
 }
 
 /* ─── Stream Text ────────────────────────────────────────────── */
@@ -743,46 +789,47 @@
 .chatmuse-stream {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.55;
+  line-height: 1.6;
   font-size: 14px;
   color: var(--chatmuse-text);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--chatmuse-border);
-  border-radius: 18px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 14px;
 }
 
 /* ─── Cards & Parts ──────────────────────────────────────────── */
 
 .chatmuse-parts {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .chatmuse-card {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 14px;
   border: 1px solid var(--chatmuse-border);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .chatmuse-card-recommended {
-  border-color: rgba(0, 184, 148, 0.3);
-  background: rgba(0, 184, 148, 0.08);
+  border-color: rgba(52, 211, 153, 0.2);
+  background: rgba(52, 211, 153, 0.04);
 }
 
 .chatmuse-card-followup {
-  border-color: rgba(108, 92, 231, 0.22);
-  background: rgba(108, 92, 231, 0.06);
+  border-color: rgba(124, 110, 246, 0.15);
+  background: rgba(124, 110, 246, 0.04);
 }
 
 .chatmuse-card-title {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--chatmuse-accent-soft);
+  color: var(--chatmuse-muted);
 }
 
 .chatmuse-card-hint {
@@ -798,7 +845,7 @@
 .chatmuse-card-text {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.55;
+  line-height: 1.6;
   font-size: 14px;
   color: var(--chatmuse-text);
 }
@@ -806,7 +853,7 @@
 .chatmuse-card-actions,
 .chatmuse-overlay-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -816,18 +863,18 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 14px;
   border: 1px solid var(--chatmuse-border);
 }
 
 .chatmuse-rating-badge {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -836,34 +883,32 @@
 }
 
 .chatmuse-rating-excellent {
-  background: var(--chatmuse-success);
-  box-shadow: 0 0 12px rgba(0, 184, 148, 0.3);
+  background: rgba(52, 211, 153, 0.2);
+  color: #34d399;
 }
 
 .chatmuse-rating-good {
-  background: #55efc4;
-  color: #1a1a2e;
-  box-shadow: 0 0 12px rgba(85, 239, 196, 0.3);
+  background: rgba(110, 231, 183, 0.2);
+  color: #6ee7b7;
 }
 
 .chatmuse-rating-average {
-  background: var(--chatmuse-warning);
-  color: #1a1a2e;
-  box-shadow: 0 0 12px rgba(253, 203, 110, 0.3);
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
 }
 
 .chatmuse-rating-below {
-  background: #e17055;
-  box-shadow: 0 0 12px rgba(225, 112, 85, 0.3);
+  background: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
 }
 
 .chatmuse-rating-poor {
-  background: var(--chatmuse-danger);
-  box-shadow: 0 0 12px rgba(231, 76, 60, 0.3);
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
 }
 
 .chatmuse-rating-label {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--chatmuse-muted);
 }
@@ -871,28 +916,28 @@
 /* ─── Errors ─────────────────────────────────────────────────── */
 
 .chatmuse-inline-error {
-  border: 1px solid rgba(231, 76, 60, 0.35);
-  background: rgba(231, 76, 60, 0.12);
-  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  background: rgba(248, 113, 113, 0.06);
+  border-radius: 10px;
   padding: 10px 12px;
   font-size: 13px;
-  color: #ffdede;
+  color: #fca5a5;
 }
 
 .chatmuse-inline-note {
-  border: 1px solid rgba(0, 184, 148, 0.28);
-  background: rgba(0, 184, 148, 0.08);
-  border-radius: 12px;
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  background: rgba(52, 211, 153, 0.06);
+  border-radius: 10px;
   padding: 10px 12px;
   font-size: 13px;
-  color: #dff8ed;
+  color: #6ee7b7;
 }
 
 /* ─── Layout Helpers ─────────────────────────────────────────── */
 
 .chatmuse-grid {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 /* ─── Spend Strip ────────────────────────────────────────────── */
@@ -903,58 +948,58 @@
 }
 
 .chatmuse-spend-strip-pending {
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .chatmuse-spend-strip-primary {
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--chatmuse-text);
   line-height: 1.3;
 }
 
 .chatmuse-spend-strip-secondary {
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--chatmuse-muted);
   line-height: 1.3;
 }
 
-.chatmuse-spend-cache-saved { color: #00b894; }
-.chatmuse-spend-cache-overhead { color: #fdcb6e; }
+.chatmuse-spend-cache-saved { color: #34d399; }
+.chatmuse-spend-cache-overhead { color: #fbbf24; }
 
 /* ─── Profiling ───────────────────────────────────────────────── */
 
 .chatmuse-profiling {
   border: 1px solid var(--chatmuse-border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
 }
 
 .chatmuse-profiling-log,
 .chatmuse-profiling-summary {
   display: grid;
-  gap: 10px;
-  padding: 0 16px 16px;
+  gap: 8px;
+  padding: 0 14px 14px;
 }
 
 .chatmuse-profiling-log {
-  max-height: 220px;
+  max-height: 200px;
   overflow-y: auto;
 }
 
 .chatmuse-profiling-entry {
   display: grid;
-  grid-template-columns: minmax(72px, auto) 1fr;
-  gap: 12px;
+  grid-template-columns: minmax(68px, auto) 1fr;
+  gap: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
 .chatmuse-profiling-elapsed {
   color: var(--chatmuse-accent-soft);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .chatmuse-profiling-message {
@@ -964,26 +1009,26 @@
 .chatmuse-profiling-stage {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 6px 12px;
+  gap: 4px 10px;
   align-items: baseline;
 }
 
 .chatmuse-profiling-stage-label {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--chatmuse-text);
 }
 
 .chatmuse-profiling-stage-duration {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--chatmuse-accent-soft);
   white-space: nowrap;
 }
 
 .chatmuse-profiling-stage-detail {
   grid-column: 1 / -1;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--chatmuse-muted);
   word-break: break-word;
 }
@@ -992,20 +1037,25 @@
 
 .chatmuse-debug-inspector {
   border: 1px solid var(--chatmuse-border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
 }
 
 .chatmuse-debug-summary {
   cursor: pointer;
   list-style: none;
-  padding: 14px 16px;
-  font-size: 12px;
-  font-weight: 800;
+  padding: 12px 14px;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--chatmuse-accent-soft);
+  color: var(--chatmuse-muted);
+  transition: color 150ms ease;
+}
+
+.chatmuse-debug-summary:hover {
+  color: var(--chatmuse-text);
 }
 
 .chatmuse-debug-summary::-webkit-details-marker {
@@ -1014,17 +1064,17 @@
 
 .chatmuse-debug-content {
   display: grid;
-  gap: 12px;
-  padding: 0 16px 16px;
+  gap: 10px;
+  padding: 0 14px 14px;
 }
 
 .chatmuse-debug-section {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .chatmuse-debug-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1034,20 +1084,20 @@
 .chatmuse-debug-text {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.55;
-  font-size: 13px;
+  line-height: 1.5;
+  font-size: 12px;
   color: var(--chatmuse-text);
-  padding: 12px;
-  border-radius: 14px;
+  padding: 10px;
+  border-radius: 10px;
   border: 1px solid var(--chatmuse-border);
-  background: rgba(7, 14, 20, 0.94);
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  max-height: 300px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  max-height: 280px;
   overflow-y: auto;
 }
 
 .chatmuse-debug-text::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .chatmuse-debug-text::-webkit-scrollbar-track {
@@ -1055,7 +1105,7 @@
 }
 
 .chatmuse-debug-text::-webkit-scrollbar-thumb {
-  background: var(--chatmuse-border);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
 
@@ -1071,10 +1121,10 @@ body.chatmuse-scroll-lock {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--chatmuse-muted);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
   border-top-color: var(--chatmuse-accent);
   border-radius: 50%;
-  animation: chatmuse-spin 0.6s linear infinite;
+  animation: chatmuse-spin 0.7s linear infinite;
 }
 
 /* ─── Animations ─────────────────────────────────────────────── */
@@ -1087,7 +1137,7 @@ body.chatmuse-scroll-lock {
 @keyframes chatmuse-slide-up {
   from {
     opacity: 0;
-    transform: translateY(16px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -1098,7 +1148,7 @@ body.chatmuse-scroll-lock {
 @keyframes chatmuse-slide-down {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
@@ -1126,17 +1176,16 @@ body.chatmuse-scroll-lock {
   }
 
   .chatmuse-overlay-shell {
-    padding: 10px;
+    padding: 8px;
   }
 
   .chatmuse-overlay-panel {
-    padding: 16px;
+    padding: 14px;
     max-height: 92vh;
-    border-radius: 20px;
+    border-radius: 14px;
   }
 
   .chatmuse-title {
-    font-size: 18px;
+    font-size: 17px;
   }
-
 }
