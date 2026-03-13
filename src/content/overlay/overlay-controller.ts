@@ -121,6 +121,14 @@ function formatAnthropicUsageSummary(usage: AnthropicUsageMetrics): string {
 }
 
 
+function isEditableElement(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
+  if ((el as HTMLElement).isContentEditable) return true;
+  return false;
+}
+
 function operationIdForModel(model: OverlayViewModel): string | null {
   return 'operationId' in model ? model.operationId ?? null : null;
 }
@@ -144,6 +152,7 @@ export class OverlayController {
   private loadingElapsedTimer: number | null = null;
   private dismissMode: OverlayDismissMode = 'close';
   private renderTraceEnabledFromStorage: boolean | null = null;
+  private lastFocusedReplyOpId: string | null = null;
   private readonly renderTraceState: OverlayRenderTraceState = {
     renderCount: 0,
     lastKind: null,
@@ -155,6 +164,27 @@ export class OverlayController {
       if (event.key === 'Escape' && this.model.kind !== 'hidden') {
         this.handleDismiss();
       }
+    });
+
+    // Enter-to-insert for completed fast replies
+    document.addEventListener('keydown', (event) => {
+      if (
+        event.key !== 'Enter' ||
+        event.metaKey || event.ctrlKey || event.altKey || event.shiftKey ||
+        event.repeat || event.isComposing
+      ) return;
+      if (this.model.kind !== 'reply') return;
+      if (this.model.feature !== 'fast-reply') return;
+      if (isEditableElement(document.activeElement)) return;
+      if (
+        document.activeElement &&
+        document.activeElement !== document.body &&
+        !this.root.contains(document.activeElement)
+      ) return;
+      const next = this.getNextInsertablePart(this.model.parts);
+      if (!next) return;
+      event.preventDefault();
+      void this.insertPart(next, { autoPassThrough: true });
     });
   }
 
@@ -249,6 +279,40 @@ export class OverlayController {
     }
     window.clearInterval(this.loadingElapsedTimer);
     this.loadingElapsedTimer = null;
+  }
+
+  private async insertPart(
+    part: OverlayInsertPart,
+    options?: { autoPassThrough?: boolean },
+  ): Promise<void> {
+    try {
+      await insertIntoFanslyTextarea(part.text);
+      part.insertedOnce = true;
+      part.insertedAt = Date.now();
+      this.inlineError = null;
+      if (options?.autoPassThrough) {
+        this.passThrough = true;
+      }
+      this.render(this.model);
+      const operationId = 'operationId' in this.model ? this.model.operationId : null;
+      if (operationId) {
+        this.scheduleInsertedReset(part, operationId);
+      }
+      this.queueComposerFocus();
+    } catch (error) {
+      this.inlineError = toUserError(error);
+      this.render(this.model, true);
+    }
+  }
+
+  private getNextInsertablePart(parts: OverlayInsertPart[]): OverlayInsertPart | null {
+    const isAvailable = (p: OverlayInsertPart) =>
+      !p.insertedAt || Date.now() - p.insertedAt >= 2000;
+    return (
+      parts.find((p) => !p.insertedOnce && isAvailable(p)) ??
+      parts.find((p) => isAvailable(p)) ??
+      null
+    );
   }
 
   private scheduleInsertedReset(part: OverlayInsertPart, operationId: string): void {
@@ -357,6 +421,7 @@ export class OverlayController {
     this.inlineErrorEl = null;
     this.bodyEl = null;
     this.currentView = null;
+    this.lastFocusedReplyOpId = null;
   }
 
   private updateHeader(model: VisibleOverlayModel): void {
@@ -431,6 +496,20 @@ export class OverlayController {
 
     this.bodyEl.replaceChildren(nextView.root);
     this.currentView = nextView;
+
+    // Auto-focus the first Insert button for newly visible completed fast replies
+    if (
+      model.kind === 'reply' &&
+      model.feature === 'fast-reply' &&
+      operationIdForModel(model) !== this.lastFocusedReplyOpId
+    ) {
+      this.lastFocusedReplyOpId = operationIdForModel(model);
+      queueMicrotask(() => {
+        const btn = nextView.root.querySelector<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+        btn?.focus();
+      });
+    }
+
     return 'rebuild-body';
   }
 
@@ -713,25 +792,8 @@ export class OverlayController {
     insert.className = 'chatmuse-button';
     insert.textContent = part.insertedAt ? 'Inserted \u2713' : part.insertedOnce ? 'Insert again' : 'Insert';
     insert.disabled = Boolean(part.insertedAt && Date.now() - part.insertedAt < 2000);
-    insert.addEventListener('click', async () => {
-      try {
-        await insertIntoFanslyTextarea(part.text);
-        part.insertedOnce = true;
-        part.insertedAt = Date.now();
-        this.inlineError = null;
-        if (options.autoPassThrough) {
-          this.passThrough = true;
-        }
-        this.render(this.model);
-        const operationId = 'operationId' in this.model ? this.model.operationId : null;
-        if (operationId) {
-          this.scheduleInsertedReset(part, operationId);
-        }
-        this.queueComposerFocus();
-      } catch (error) {
-        this.inlineError = toUserError(error);
-        this.render(this.model, true);
-      }
+    insert.addEventListener('click', () => {
+      void this.insertPart(part, { autoPassThrough: options.autoPassThrough });
     });
 
     const copy = document.createElement('button');
