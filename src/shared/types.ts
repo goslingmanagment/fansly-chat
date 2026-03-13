@@ -7,6 +7,7 @@ export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messaging
 export type FanSubscriptionSource = '/api/v1/messaging/groups' | '/api/v1/subscribers';
 export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
+export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'tease' | 'spicy';
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ export interface PromptBuildInput {
   fanDisplayName: string;
   pingSegment?: PingSegment;
   replyMode?: ReplyMode;
+  replyTone?: ReplyTone;
 }
 
 export interface PromptCacheControl {
@@ -603,6 +605,7 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   domFanDisplayName: string | null;
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
+  replyTone?: ReplyTone;
 }
 
 export interface CompareStartPayload extends PortEnvelopeBase {
@@ -613,6 +616,7 @@ export interface CompareStartPayload extends PortEnvelopeBase {
   domFanDisplayName: string | null;
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
+  replyTone?: ReplyTone;
 }
 
 export interface OperationCancelPayload extends PortEnvelopeBase {

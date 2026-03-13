@@ -31,6 +31,7 @@ import type {
   OperationProfilingSnapshot,
   PromptDebugSnapshot,
   ReplyMode,
+  ReplyTone,
   TabUiState,
 } from '../shared/types.js';
 
@@ -65,6 +66,7 @@ export class ChatMuseContentApp {
   private activeProgress: OperationProgressPayload | null = null;
   private lastFeature: FeatureType | null = null;
   private nextFastReplyMode: ReplyMode = 'default';
+  private nextReplyTone: ReplyTone = 'none';
   private hasSentInit = false;
   private overlayRawText = '';
   private activeCompareModel: CompareInlineViewModel | null = null;
@@ -95,6 +97,7 @@ export class ChatMuseContentApp {
       this.suppressedTerminalOpId = null;
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
+      this.resetNextReplyTone();
       this.renderAll();
     },
   });
@@ -107,6 +110,7 @@ export class ChatMuseContentApp {
       void this.reopenCompletedCompare();
     },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
+    onToneSelect: (tone) => this.selectTone(tone),
   });
   private readonly mappingBanner = new MappingBanner({
     onOpenSettings: () => {
@@ -175,6 +179,7 @@ export class ChatMuseContentApp {
       if (!this.activeFeature || !isInlineQuickFeature(this.activeFeature)) {
         this.clearOperationState(true);
         this.resetNextFastReplyMode();
+        this.resetNextReplyTone();
       }
       this.renderAll();
     },
@@ -183,6 +188,7 @@ export class ChatMuseContentApp {
       this.quickInlineVisible = false;
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
+      this.resetNextReplyTone();
       this.renderAll();
     },
     onRerun: (feature) => {
@@ -223,6 +229,7 @@ export class ChatMuseContentApp {
       this.tabState,
       activeAction,
       this.nextFastReplyMode,
+      this.nextReplyTone,
       activeLoading,
       this.hasRestorableCompletedCompare(),
     );
@@ -450,9 +457,11 @@ export class ChatMuseContentApp {
       domFanDisplayName,
       forceRegenerate,
       replyMode: feature === 'fast-reply' ? replyMode : undefined,
+      replyTone: feature === 'fast-reply' ? this.nextReplyTone : undefined,
     });
     if (feature === 'fast-reply') {
       this.resetNextFastReplyMode();
+      this.resetNextReplyTone();
     }
     this.renderButtonBar();
   }
@@ -519,8 +528,10 @@ export class ChatMuseContentApp {
       domFanDisplayName,
       forceRegenerate,
       replyMode: this.nextFastReplyMode,
+      replyTone: this.nextReplyTone,
     });
     this.resetNextFastReplyMode();
+    this.resetNextReplyTone();
   }
 
   private async reopenCompletedCompare(): Promise<void> {
@@ -537,6 +548,16 @@ export class ChatMuseContentApp {
 
   private resetNextFastReplyMode(): void {
     this.nextFastReplyMode = 'default';
+  }
+
+  private selectTone(tone: ReplyTone): void {
+    if (this.activeFeature || this.activeCompareModel?.operationId) return;
+    this.nextReplyTone = this.nextReplyTone === tone ? 'none' : tone;
+    this.renderButtonBar();
+  }
+
+  private resetNextReplyTone(): void {
+    this.nextReplyTone = 'none';
   }
 
   // ─── Route ──────────────────────────────────────────────────────────

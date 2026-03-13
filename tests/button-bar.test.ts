@@ -46,6 +46,7 @@ describe('ButtonBar compare button', () => {
       onCompareClick: () => undefined,
       onCompareRestoreClick: () => undefined,
       onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
     });
     document.body.append(bar.root);
 
@@ -55,7 +56,7 @@ describe('ButtonBar compare button', () => {
       mappedPersonalityName: null,
       compareCardCount: 2,
       compareDraftCount: 2,
-    }), null, 'default', false, false);
+    }), null, 'default', 'none', false, false);
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
     const reply = buttons.find((button) => button.textContent === 'Reply');
@@ -71,13 +72,14 @@ describe('ButtonBar compare button', () => {
       onCompareClick: () => undefined,
       onCompareRestoreClick: () => undefined,
       onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
     });
     document.body.append(bar.root);
 
     bar.render(buildState({
       compareCardCount: 1,
       compareDraftCount: 1,
-    }), null, 'default', false, false);
+    }), null, 'default', 'none', false, false);
 
     const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Compare');
@@ -91,10 +93,11 @@ describe('ButtonBar compare button', () => {
       onCompareClick: () => undefined,
       onCompareRestoreClick: () => undefined,
       onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), null, 'default', false, false);
+    bar.render(buildState(), null, 'default', 'none', false, false);
 
     const reopen = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Reopen');
@@ -109,13 +112,14 @@ describe('ButtonBar compare button', () => {
       onCompareClick: () => undefined,
       onCompareRestoreClick: restoreSpy,
       onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
     });
     document.body.append(bar.root);
 
     bar.render(buildState({
       connected: false,
       hasApiKey: false,
-    }), null, 'default', false, true);
+    }), null, 'default', 'none', false, true);
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
     const compare = buttons.find((button) => button.textContent === 'Compare');
@@ -127,5 +131,129 @@ describe('ButtonBar compare button', () => {
 
     reopen?.click();
     expect(restoreSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ButtonBar tone row', () => {
+  beforeEach(() => {
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('renders five tone pills', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', false, false);
+
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
+    expect(pills).toHaveLength(5);
+    expect(pills.map((p) => p.textContent)).toEqual(['Casual', 'Flirty', 'Upsell', 'Tease', 'Spicy']);
+  });
+
+  it('marks the active tone pill', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'flirty', false, false);
+
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
+    const flirty = pills.find((p) => p.textContent === 'Flirty');
+    const casual = pills.find((p) => p.textContent === 'Casual');
+
+    expect(flirty?.classList.contains('chatmuse-tone-pill-active')).toBe(true);
+    expect(flirty?.getAttribute('aria-pressed')).toBe('true');
+    expect(casual?.classList.contains('chatmuse-tone-pill-active')).toBe(false);
+    expect(casual?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('disables tone pills during active operation', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, false);
+
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
+    for (const pill of pills) {
+      expect(pill.disabled).toBe(true);
+    }
+  });
+
+  it('hides tone row when not connected', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState({ connected: false }), null, 'default', 'none', false, false);
+
+    const toneRow = bar.root.querySelector('.chatmuse-toolbar-tone-row');
+    expect(toneRow?.classList.contains('chatmuse-hidden')).toBe(true);
+  });
+
+  it('shows tone row without mapped personality when connected with API key', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState({
+      mappedPersonalityId: null,
+      mappedPersonalityName: null,
+      compareCardCount: 2,
+    }), null, 'default', 'none', false, false);
+
+    const toneRow = bar.root.querySelector('.chatmuse-toolbar-tone-row');
+    expect(toneRow?.classList.contains('chatmuse-hidden')).toBe(false);
+  });
+
+  it('calls onToneSelect when a pill is clicked', () => {
+    const toneSpy = vi.fn();
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: toneSpy,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', false, false);
+
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
+    const flirty = pills.find((p) => p.textContent === 'Flirty');
+    flirty?.click();
+
+    expect(toneSpy).toHaveBeenCalledWith('flirty');
   });
 });

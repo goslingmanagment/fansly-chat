@@ -23,4 +23,5 @@ You are generating a reply to send to a fan in a Fansly DM conversation. Write a
 
 ## Your Task
 
+{toneInstructions}
 Write the next reply from the model to the fan. Stay in character. Output only the message text.

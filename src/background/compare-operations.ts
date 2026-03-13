@@ -30,6 +30,7 @@ import type {
   OperationPhase,
   OperationProfilingSnapshot,
   ReplyMode,
+  ReplyTone,
   SessionTemplate,
 } from '../shared/types.js';
 import type { AnthropicClient } from './anthropic-client.js';
@@ -879,12 +880,14 @@ export async function executeCompare(
       fanSubscriptionData: subscriptionData,
       fanDisplayName,
       replyMode: payload.replyMode ?? 'default',
+      replyTone: payload.replyTone ?? 'none',
     } satisfies {
       transcript: string;
       fanSpendingData: string;
       fanSubscriptionData: string;
       fanDisplayName: string;
       replyMode: ReplyMode;
+      replyTone: ReplyTone;
     };
     completeStage(
       'prompt-build',
@@ -920,6 +923,7 @@ export async function executeCompare(
         fanSubscriptionData: promptInputs.fanSubscriptionData,
         fanDisplayName: promptInputs.fanDisplayName,
         replyMode: promptInputs.replyMode,
+        replyTone: promptInputs.replyTone,
       });
       const systemBlocks = validated.storage.settings.promptCachingEnabled
         ? prompt.systemBlocks

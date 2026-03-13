@@ -1267,6 +1267,10 @@ export class OperationCoordinator {
           payload.feature === 'fast-reply'
             ? (payload.replyMode ?? 'default')
             : undefined,
+        replyTone:
+          payload.feature === 'fast-reply'
+            ? (payload.replyTone ?? 'none')
+            : undefined,
       });
       const systemBlocks = validated.storage.settings.promptCachingEnabled
         ? prompt.systemBlocks
