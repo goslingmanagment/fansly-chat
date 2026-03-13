@@ -96,6 +96,7 @@ interface ActiveOperation {
 }
 
 const NO_OP_PROFILER = createOperationProfiler(false);
+const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
 
 interface ValidatedOperationStart {
   tab: browser.tabs.Tab;
@@ -124,6 +125,7 @@ export class OperationCoordinator {
   private readonly activeCompareByTabId = new Map<number, ActiveCompareOperation>();
   private readonly cancelledOperationIds = new Set<string>();
   private readonly cancelledCompareOperationIds = new Set<string>();
+  private readonly pendingIdentityResolutionByLegacyAccountId = new Map<string, Promise<void>>();
 
   constructor(
     private readonly sessionStore: SessionStore,
@@ -177,6 +179,7 @@ export class OperationCoordinator {
   async handleCapture(tabId: number, accountId: string): Promise<void> {
     this.tabContexts.setAccount(tabId, accountId);
     await this.refreshTabState(tabId);
+    void this.resolveCapturedIdentity(tabId, accountId);
   }
 
   async handleTabRemoved(tabId: number): Promise<void> {
@@ -226,6 +229,59 @@ export class OperationCoordinator {
       default:
         break;
     }
+  }
+
+  private async resolveCapturedIdentity(
+    tabId: number,
+    legacyAccountId: string,
+  ): Promise<void> {
+    if (!legacyAccountId) {
+      return;
+    }
+
+    const inFlight = this.pendingIdentityResolutionByLegacyAccountId.get(
+      legacyAccountId,
+    );
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+
+    const task = (async () => {
+      const session = this.sessionStore.getSessionByAccount(legacyAccountId);
+      if (!session || session.resolvedAccountId) {
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeout = globalThis.setTimeout(
+        () => controller.abort(),
+        CAPTURE_IDENTITY_TIMEOUT_MS,
+      );
+
+      try {
+        const resolvedAccountId =
+          await this.fanslyClient.getAuthenticatedAccountId(
+            session,
+            controller.signal,
+          );
+        await rekeyAccountIdentity(legacyAccountId, resolvedAccountId);
+        this.tabContexts.setAccount(
+          tabId,
+          session.resolvedAccountId ?? resolvedAccountId,
+        );
+        await this.refreshTabState(tabId, 'mapping:changed');
+      } catch {
+        // Capture-time identity enrichment is best effort only.
+      } finally {
+        globalThis.clearTimeout(timeout);
+      }
+    })().finally(() => {
+      this.pendingIdentityResolutionByLegacyAccountId.delete(legacyAccountId);
+    });
+
+    this.pendingIdentityResolutionByLegacyAccountId.set(legacyAccountId, task);
+    await task;
   }
 
   private async handleRouteChanged(
