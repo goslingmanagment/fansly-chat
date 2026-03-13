@@ -64,7 +64,9 @@ function buildSubscriptionContext(): FanSubscriptionContext {
 
 function buildFanslyClientMock() {
   return {
-    getAuthenticatedAccountId: vi.fn(async () => 'account-1'),
+    getAuthenticatedAccountId: vi.fn(
+      async (_session?: unknown, _signal?: AbortSignal) => 'account-1',
+    ),
     loadMessages: vi.fn(async () => ({
       transcriptMessages: buildTranscriptMessages(30),
       windowStartMs: 0,
@@ -149,7 +151,7 @@ async function createCoordinatorHarness(options?: {
 
   coordinator.portsByTabId.set(1, port);
 
-  return { coordinator, fanslyClient, anthropicClient, port };
+  return { coordinator, fanslyClient, anthropicClient, port, sessionStore };
 }
 
 function mockCompareCards(cards: CompareModelCard[]) {
@@ -257,6 +259,66 @@ describe('OperationCoordinator', () => {
     });
 
     expect((globalThis as any).browser.storage.local.remove).toHaveBeenCalledWith('summary:group-1');
+  });
+
+  it('auto-recovers a mapped personality when a new legacy alias is captured for the same account', async () => {
+    mockStorage = {
+      ...mockStorage,
+      accountMappings: {
+        'resolved-1': 'personality-1',
+      },
+      accountAliases: {},
+      knownAccounts: ['resolved-1'],
+    };
+
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAuthenticatedAccountId.mockImplementation(async (session: any) => {
+      session.resolvedAccountId = 'resolved-1';
+      return 'resolved-1';
+    });
+
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({
+      fanslyClient,
+    });
+
+    sessionStore.registerCapture(1, {
+      ...SESSION_CAPTURE,
+      accountId: 'legacy-1',
+    });
+
+    await coordinator.handleCapture(1, 'legacy-1');
+
+    await vi.waitFor(() => {
+      const stateMessages = postedMessages(port).filter(
+        (message) =>
+          message.type === 'tab:state' || message.type === 'mapping:changed',
+      );
+
+      expect(stateMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'tab:state',
+            state: expect.objectContaining({
+              accountId: 'legacy-1',
+              mappedPersonalityId: null,
+            }),
+          }),
+          expect.objectContaining({
+            type: 'mapping:changed',
+            state: expect.objectContaining({
+              accountId: 'resolved-1',
+              mappedPersonalityId: 'personality-1',
+              mappedPersonalityName: 'Closer',
+            }),
+          }),
+        ]),
+      );
+    });
+
+    expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
+    expect(mockStorage.accountAliases).toEqual({
+      'legacy-1': 'resolved-1',
+    });
   });
 
   it('uses full subscription lookup for fast-reply and proceeds without subscription data when not found', async () => {
