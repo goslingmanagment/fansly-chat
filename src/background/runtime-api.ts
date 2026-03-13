@@ -1,13 +1,9 @@
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
-import {
-  loadStorageState,
-  reconcileKnownAccounts,
-  rekeyAccountIdentity,
-} from '../shared/storage.js';
 import type { PopupStatus } from '../shared/types.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
+import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
@@ -16,22 +12,33 @@ export interface RuntimeApiDeps {
   fanslyClient: FanslyClient;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
+  storageCoordinator: StorageCoordinator;
 }
 
 export function registerRuntimeApi({
   fanslyClient,
   sessionStore,
   tabContexts,
+  storageCoordinator,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: { type: string; tabId?: number }) => {
       if (message.type === 'getPopupStatus') {
-        const [activeTab] = await browser.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
-        const tabId = message.tabId ?? activeTab?.id;
-        const tabUrl = activeTab?.url;
+        let tabId: number | undefined;
+        let tabUrl: string | undefined;
+
+        if (message.tabId !== undefined) {
+          const tab = await browser.tabs.get(message.tabId);
+          tabId = tab.id ?? message.tabId;
+          tabUrl = tab.url;
+        } else {
+          const [activeTab] = await browser.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+          tabId = activeTab?.id;
+          tabUrl = activeTab?.url;
+        }
 
         if (!tabId) {
           return {
@@ -49,7 +56,7 @@ export function registerRuntimeApi({
           } satisfies PopupStatus;
         }
 
-        const state = await loadStorageState();
+        const state = await storageCoordinator.getState();
         const session = sessionStore.getSessionForTab(tabId);
         const legacyAccountId = sessionStore.getAccountIdForTab(tabId);
         const accountId = session?.resolvedAccountId ?? legacyAccountId;
@@ -124,14 +131,14 @@ export function registerRuntimeApi({
             session.resolvedAccountId &&
             session.resolvedAccountId !== session.legacyAccountId
           ) {
-            await rekeyAccountIdentity(
+            await storageCoordinator.rekeyAccountIdentity(
               session.legacyAccountId,
               session.resolvedAccountId,
             );
           }
         }
 
-        await reconcileKnownAccounts(
+        await storageCoordinator.reconcileKnownAccounts(
           snapshot.map(
             (session) => session.resolvedAccountId ?? session.legacyAccountId,
           ),

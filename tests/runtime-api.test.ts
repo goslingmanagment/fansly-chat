@@ -38,6 +38,13 @@ async function installRuntimeApiHarness(fanslyClient: {
   vi.resetModules();
   onMessageListener = undefined;
 
+  const tabsQuery = vi.fn<() => Promise<Array<{ id: number; url?: string }>>>(
+    async () => [],
+  );
+  const tabsGet = vi.fn<(tabId: number) => Promise<{ id: number; url?: string }>>(
+    async (tabId: number) => ({ id: tabId, url: undefined }),
+  );
+
   (globalThis as Record<string, unknown>).browser = {
     storage: {
       local: {
@@ -71,28 +78,32 @@ async function installRuntimeApiHarness(fanslyClient: {
       },
     },
     tabs: {
-      query: vi.fn(async () => []),
+      query: tabsQuery,
+      get: tabsGet,
     },
   };
 
-  const [{ registerRuntimeApi }, { SessionStore }, { TabContextStore }] = await Promise.all([
+  const [{ registerRuntimeApi }, { SessionStore }, { StorageCoordinator }, { TabContextStore }] = await Promise.all([
     import('../src/background/runtime-api.js'),
     import('../src/background/session-store.js'),
+    import('../src/background/storage-coordinator.js'),
     import('../src/background/tab-context.js'),
   ]);
 
   const sessionStore = new SessionStore();
+  const storageCoordinator = new StorageCoordinator();
   registerRuntimeApi({
     fanslyClient: fanslyClient as never,
     sessionStore,
     tabContexts: new TabContextStore(),
+    storageCoordinator,
   });
 
   if (!onMessageListener) {
     throw new Error('Runtime listener was not registered');
   }
 
-  return { sessionStore };
+  return { sessionStore, tabsQuery, tabsGet };
 }
 
 describe('runtime-api getSessionsSnapshot', () => {
@@ -172,5 +183,65 @@ describe('runtime-api getSessionsSnapshot', () => {
       mappedOffline: 'p1',
     });
     expect(mockStorage.accountAliases).toEqual({});
+  });
+});
+
+describe('runtime-api getPopupStatus', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('uses the requested tab url when tabId is provided', async () => {
+    mockStorage = createStorage({
+      personalities: [
+        {
+          id: 'p1',
+          name: 'Closer',
+          content: 'Sell smoothly',
+          updatedAt: 1000,
+        },
+      ],
+      accountMappings: {
+        other: 'p1',
+      },
+    });
+
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+
+    const { sessionStore, tabsQuery, tabsGet } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(1, makeCapture('active'));
+    sessionStore.registerCapture(2, makeCapture('other'));
+
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
+    tabsGet.mockImplementation(async (tabId: number) => ({
+      id: tabId,
+      url: tabId === 2
+        ? 'https://fansly.com/messages/other-group'
+        : 'https://fansly.com/messages/active-group',
+    }));
+
+    const result = await onMessageListener?.({
+      type: 'getPopupStatus',
+      tabId: 2,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        tabId: 2,
+        accountId: 'other',
+        groupId: 'other-group',
+        mappedPersonalityId: 'p1',
+        mappedPersonalityName: 'Closer',
+      }),
+    );
+    expect(tabsGet).toHaveBeenCalledWith(2);
+    expect(tabsQuery).not.toHaveBeenCalled();
   });
 });

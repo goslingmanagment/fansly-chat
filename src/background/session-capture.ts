@@ -1,4 +1,3 @@
-import { registerKnownAccount } from '../shared/storage.js';
 import type { RouteKey } from '../shared/types.js';
 import { SessionStore, type SessionCaptureResult } from './session-store.js';
 
@@ -78,7 +77,7 @@ function extractCapture(
 
 export function initializeSessionCapture(
   sessionStore: SessionStore,
-  onCapture: (tabId: number, accountId: string) => void,
+  onCapture: (tabId: number, accountId: string) => void | Promise<void>,
 ): void {
   browser.webRequest.onBeforeSendHeaders.addListener(
     (details) => {
@@ -93,8 +92,7 @@ export function initializeSessionCapture(
       }
 
       sessionStore.registerCapture(details.tabId, capture);
-      void registerKnownAccount(capture.accountId);
-      onCapture(details.tabId, capture.accountId);
+      void onCapture(details.tabId, capture.accountId);
     },
     { urls: ['https://apiv3.fansly.com/*'] },
     ['requestHeaders'],

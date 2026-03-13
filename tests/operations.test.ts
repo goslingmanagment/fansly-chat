@@ -123,10 +123,11 @@ async function createCoordinatorHarness(options?: {
   fanslyClient?: ReturnType<typeof buildFanslyClientMock>;
   anthropicClient?: { streamMessage: ReturnType<typeof vi.fn> };
 }) {
-  const [{ OperationCoordinator }, { SessionStore }, { TabContextStore }] =
+  const [{ OperationCoordinator }, { SessionStore }, { StorageCoordinator }, { TabContextStore }] =
     await Promise.all([
       import('../src/background/operations.js'),
       import('../src/background/session-store.js'),
+      import('../src/background/storage-coordinator.js'),
       import('../src/background/tab-context.js'),
     ]);
 
@@ -137,12 +138,14 @@ async function createCoordinatorHarness(options?: {
   const anthropicClient = options?.anthropicClient ?? {
     streamMessage: vi.fn(async () => options?.anthropicRawText ?? 'Result'),
   };
+  const storageCoordinator = new StorageCoordinator();
 
   const coordinator = new OperationCoordinator(
     sessionStore,
     new TabContextStore(),
     fanslyClient as never,
     anthropicClient as never,
+    storageCoordinator,
   ) as any;
   const port = {
     postMessage: vi.fn(),
@@ -151,7 +154,14 @@ async function createCoordinatorHarness(options?: {
 
   coordinator.portsByTabId.set(1, port);
 
-  return { coordinator, fanslyClient, anthropicClient, port, sessionStore };
+  return {
+    coordinator,
+    fanslyClient,
+    anthropicClient,
+    port,
+    sessionStore,
+    storageCoordinator,
+  };
 }
 
 function mockCompareCards(cards: CompareModelCard[]) {
@@ -318,6 +328,92 @@ describe('OperationCoordinator', () => {
     expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
     expect(mockStorage.accountAliases).toEqual({
       'legacy-1': 'resolved-1',
+    });
+  });
+
+  it('refreshes every waiting tab after a shared identity resolution completes', async () => {
+    mockStorage = {
+      ...mockStorage,
+      accountMappings: {
+        'resolved-1': 'personality-1',
+      },
+      accountAliases: {},
+      knownAccounts: ['resolved-1'],
+    };
+
+    let resolveIdentity: ((value: string) => void) | null = null;
+    const identityReady = new Promise<string>((resolve) => {
+      resolveIdentity = resolve;
+    });
+
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAuthenticatedAccountId.mockImplementation(async (session: any) => {
+      const resolvedAccountId = await identityReady;
+      session.resolvedAccountId = resolvedAccountId;
+      return resolvedAccountId;
+    });
+
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({
+      fanslyClient,
+    });
+    const secondPort = {
+      postMessage: vi.fn(),
+      onDisconnect: { addListener: vi.fn() },
+    };
+
+    coordinator.portsByTabId.set(2, secondPort);
+    sessionStore.registerCapture(1, {
+      ...SESSION_CAPTURE,
+      accountId: 'legacy-1',
+    });
+    sessionStore.registerCapture(2, {
+      ...SESSION_CAPTURE,
+      accountId: 'legacy-1',
+    });
+
+    void coordinator.handleCapture(1, 'legacy-1');
+    void coordinator.handleCapture(2, 'legacy-1');
+
+    await vi.waitFor(() => {
+      expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
+    });
+
+    const releaseIdentity = resolveIdentity as ((value: string) => void) | null;
+    if (!releaseIdentity) {
+      throw new Error('Identity resolver was not initialized');
+    }
+    releaseIdentity('resolved-1');
+
+    await vi.waitFor(() => {
+      const firstMessages = postedMessages(port).filter(
+        (message) => message.type === 'mapping:changed',
+      );
+      const secondMessages = postedMessages(secondPort).filter(
+        (message) => message.type === 'mapping:changed',
+      );
+
+      expect(firstMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'mapping:changed',
+            state: expect.objectContaining({
+              accountId: 'resolved-1',
+              mappedPersonalityId: 'personality-1',
+            }),
+          }),
+        ]),
+      );
+      expect(secondMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'mapping:changed',
+            state: expect.objectContaining({
+              accountId: 'resolved-1',
+              mappedPersonalityId: 'personality-1',
+            }),
+          }),
+        ]),
+      );
     });
   });
 

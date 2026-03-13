@@ -8,7 +8,6 @@ import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
-import { rekeyAccountIdentity, loadStorageState } from '../shared/storage.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { formatTranscript } from '../shared/transcript.js';
 import type {
@@ -55,6 +54,7 @@ import {
   parseGroupIdFromUrl,
 } from './operation-utils.js';
 import type { SessionStore } from './session-store.js';
+import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 
 export interface ActiveCompareCardState {
@@ -79,6 +79,7 @@ export interface CompareOperationsContext {
   cancelledCompareOperationIds: Set<string>;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
+  storageCoordinator: StorageCoordinator;
   fanslyClient: FanslyClient;
   anthropicClient: AnthropicClient;
   hasActiveFeature: (tabId: number) => boolean;
@@ -89,7 +90,7 @@ export interface CompareOperationsContext {
 interface ValidatedCompareStart {
   tab: browser.tabs.Tab;
   urlGroupId: string;
-  storage: Awaited<ReturnType<typeof loadStorageState>>;
+  storage: Awaited<ReturnType<StorageCoordinator['getState']>>;
   session: SessionTemplate;
   legacyAccountId: string;
   messageCount: number;
@@ -271,7 +272,7 @@ async function validateCompareStart(
 ): Promise<ValidatedCompareStart> {
   const [tab, storage] = await Promise.all([
     browser.tabs.get(tabId),
-    loadStorageState(),
+    context.storageCoordinator.getState(),
   ]);
   const urlGroupId = parseGroupIdFromUrl(tab.url);
   if (
@@ -560,7 +561,7 @@ export async function executeCompare(
       throw error;
     }
 
-    const rekeyResult = await rekeyAccountIdentity(
+    const rekeyResult = await context.storageCoordinator.rekeyAccountIdentity(
       validated.legacyAccountId,
       resolvedAccountId,
     );

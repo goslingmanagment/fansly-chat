@@ -212,7 +212,7 @@ Tests cover shared business logic: prompt building, transcript processing, XML p
 npm test
 ```
 
-All 136 tests should pass. No network calls — everything is unit-tested with mocks.
+All tests should pass. No network calls — everything is unit-tested with mocks.
 
 ## Security Considerations
 
@@ -230,7 +230,7 @@ Fan messages are untrusted input. Before inclusion in prompts:
 
 ### DOM Security
 
-- No use of `innerHTML` or `insertAdjacentHTML` anywhere in the codebase
+- No rendering of untrusted HTML. UI content is built with DOM nodes and `textContent`; the only `innerHTML` usage clears extension-owned button content before re-rendering a spinner.
 - All UI is built with `document.createElement` and `textContent`
 - CSS is injected as a text string into a `<style>` element
 
