@@ -456,6 +456,46 @@ describe('OperationCoordinator', () => {
     );
   });
 
+  it('includes the selected tone in fast-reply debug prompts and uncached user blocks', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Flirty reply',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+      replyTone: 'flirty',
+    });
+
+    const debugPromptMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:debugPrompt' }> =>
+        message.type === 'operation:debugPrompt',
+    );
+    const streamArgs = anthropicClient.streamMessage.mock.calls[0]?.[0] as {
+      userBlocks: Array<{ text: string; cache_control?: unknown }>;
+    };
+    const lastUserBlock = streamArgs.userBlocks[streamArgs.userBlocks.length - 1];
+
+    expect(debugPromptMessage?.snapshot.user).toContain('Tone override: FLIRTY');
+    expect(debugPromptMessage?.snapshot.user).toContain(
+      'intent and energy of this reply should shift',
+    );
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain('Tone override: FLIRTY');
+    expect(lastUserBlock?.text).toContain('Tone override: FLIRTY');
+    expect(lastUserBlock?.cache_control).toBeUndefined();
+  });
+
   it('uses full subscription lookup for deep features and still includes subscription data in the prompt', async () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getFanSubscriptionContext.mockResolvedValue(
@@ -637,6 +677,48 @@ describe('OperationCoordinator', () => {
     );
     expect(completeMessages).toHaveLength(3);
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+  });
+
+  it('includes the selected tone in compare reply prompts', async () => {
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
+        onText('Reply');
+        return 'Reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+      replyTone: 'upsell',
+    });
+
+    expect(flattenUserBlocksFromStreamCall(anthropicClient, 0)).toContain('Tone override: SOFT UPSELL');
+    expect(flattenUserBlocksFromStreamCall(anthropicClient, 1)).toContain('Tone override: SOFT UPSELL');
+    expect(flattenUserBlocksFromStreamCall(anthropicClient, 0)).toContain(
+      'intent and energy of this reply should shift',
+    );
   });
 
   it('keeps per-card profiling cost snapshots isolated during debug compare runs', async () => {
