@@ -69,22 +69,32 @@ function buildSplitReplyInstructions(feature: FeatureType, replyMode: ReplyMode 
 
 const TONE_INSTRUCTIONS: Record<Exclude<ReplyTone, 'none'>, string> = {
   casual: `**IMPORTANT — Tone override: CASUAL.**
-The chatter wants a casual reply. Keep it light, friendly, conversational. No flirting, no selling. Just vibing. This tone directive takes priority over the personality's default style for this message.`,
+Make this reply clearly casual — light, friendly, low-key. Prioritize relaxed banter, easy check-ins, and everyday phrasing.
+Steer toward warmth and comfort rather than flirting, selling, or escalating.`,
   flirty: `**IMPORTANT — Tone override: FLIRTY.**
-The chatter wants a flirty reply. Lean into attraction, tease, build tension. Be playful and suggestive without being explicit unless the conversation is already there. This tone directive takes priority over the personality's default style for this message.`,
+Make this reply clearly flirty. Lean into attraction, warmth, charm, and playful tension. Make the fan feel desired and pulled closer.
+Be suggestive but do not jump to explicit content unless the conversation is already there.`,
   upsell: `**IMPORTANT — Tone override: SOFT UPSELL.**
-The chatter wants to nudge toward a sale. The fan seems warm — weave in a natural, low-pressure mention of content or services. Don't hard-sell. Make it feel like sharing, not pitching. This tone directive takes priority over the personality's default style for this message.`,
+Weave a natural, low-pressure monetization nudge into this reply. Mention content, perks, or a next paid step when it fits.
+Keep it organic — sharing, not pitching. Do not sound transactional or scripted.`,
   tease: `**IMPORTANT — Tone override: TEASE.**
-The chatter wants a teasing reply. Be playful and a little withholding — hint at what's coming, dangle something enticing, make them want more. Keep it fun, not mean. This tone directive takes priority over the personality's default style for this message.`,
+Make this reply playfully withholding. Hint, dangle, and imply instead of giving everything away.
+Build anticipation — make the fan lean in for more. Keep it fun and enticing, not mean or cold.
+Hold back on explicit delivery; the power of this tone is in what you don't say yet.`,
   spicy: `**IMPORTANT — Tone override: SPICY.**
-The chatter wants a spicy reply. Turn up the heat. Be bold, direct, and sexually confident. Match or escalate the energy the fan is putting out. Don't hold back. This tone directive takes priority over the personality's default style for this message.`,
+Make this reply noticeably hot and sexually confident. Be bold, direct, and physically charged.
+Do not settle for cute, merely flirty, or complimentary. Lead with desire, temptation, and body-focused subtext.
+Match the fan's energy and push it upward. Keep escalation believable — don't snap from neutral to extreme with no runway.`,
 };
+
+const TONE_FOOTER =
+  'The personality still controls voice, cadence, emoji habits, slang, and message length — only the intent and energy of this reply should shift.';
 
 function buildToneInstructions(feature: FeatureType, replyTone: ReplyTone | undefined): string {
   if (feature !== 'fast-reply' || !replyTone || replyTone === 'none') {
     return '';
   }
-  return TONE_INSTRUCTIONS[replyTone];
+  return TONE_INSTRUCTIONS[replyTone] + '\n' + TONE_FOOTER;
 }
 
 function buildFanSpendingSection(fanSpendingData: string): string {

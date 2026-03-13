@@ -341,6 +341,27 @@ describe('ChatMuseContentApp', () => {
     }));
   });
 
+  it('sends the selected reply tone with fast-reply operations and resets it after dispatch', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.selectTone('flirty');
+
+    app.startFeature('fast-reply', false);
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'operation:start',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      replyTone: 'flirty',
+    }));
+    expect(app.nextReplyTone).toBe('none');
+  });
+
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
@@ -650,6 +671,26 @@ describe('ChatMuseContentApp', () => {
     }));
     expect(app.completedCompareCache.get('group-1')).toBeNull();
     expect(app.comparePanelVisible).toBe(false);
+  });
+
+  it('sends the selected reply tone with compare operations and resets it after dispatch', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.selectTone('upsell');
+
+    await app.startCompare(false);
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'compare:start',
+      groupId: 'group-1',
+      replyTone: 'upsell',
+    }));
+    expect(app.nextReplyTone).toBe('none');
   });
 
   it('reopens an active compare session when the panel was closed', async () => {
