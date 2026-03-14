@@ -824,6 +824,36 @@ describe('InlinePanelController', () => {
     });
   });
 
+  it('Enter on the focused Insert button only inserts once', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createReplyModel([createPart('Hello')]));
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(
+        controller.root.querySelector('.chatmuse-card-actions .chatmuse-button'),
+      );
+    });
+
+    const insertButton = requireElement<HTMLButtonElement>(
+      controller.root,
+      '.chatmuse-card-actions .chatmuse-button',
+    );
+    insertButton.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    }));
+    // Real browsers follow Enter on a focused button with a click activation.
+    insertButton.click();
+
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('Enter is ignored for compare state', async () => {
     const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
     vi.mocked(insertIntoFanslyTextarea).mockClear();

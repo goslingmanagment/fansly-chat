@@ -54,6 +54,12 @@ function isEditableElement(el: Element | null): boolean {
   return false;
 }
 
+function isInteractiveElement(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'BUTTON' || tag === 'A' || tag === 'SELECT' || tag === 'SUMMARY';
+}
+
 function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
   const currentCount = tabs.filter((tab) => tab.source === 'current').length;
   const draftCount = tabs.filter((tab) => tab.source === 'draft').length;
@@ -150,6 +156,7 @@ export class InlinePanelController {
       if (this.root.classList.contains('chatmuse-hidden')) return;
       if ('feature' in this.model && this.model.feature !== 'fast-reply') return;
       if (isEditableElement(document.activeElement)) return;
+      if (isInteractiveElement(document.activeElement)) return;
       if (
         document.activeElement &&
         document.activeElement !== document.body &&

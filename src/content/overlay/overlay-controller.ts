@@ -129,6 +129,12 @@ function isEditableElement(el: Element | null): boolean {
   return false;
 }
 
+function isInteractiveElement(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'BUTTON' || tag === 'A' || tag === 'SELECT' || tag === 'SUMMARY';
+}
+
 function operationIdForModel(model: OverlayViewModel): string | null {
   return 'operationId' in model ? model.operationId ?? null : null;
 }
@@ -176,6 +182,7 @@ export class OverlayController {
       if (this.model.kind !== 'reply') return;
       if (this.model.feature !== 'fast-reply') return;
       if (isEditableElement(document.activeElement)) return;
+      if (isInteractiveElement(document.activeElement)) return;
       if (
         document.activeElement &&
         document.activeElement !== document.body &&
