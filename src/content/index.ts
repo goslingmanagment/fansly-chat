@@ -53,6 +53,14 @@ function isOverlayOnlyFeature(f: FeatureType): f is 'help-me' | 'chat-review' | 
   return f === 'help-me' || f === 'chat-review' || f === 'fan-summary';
 }
 
+function isEditableElement(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
+  if ((el as HTMLElement).isContentEditable) return true;
+  return false;
+}
+
 export class ChatMuseContentApp {
   private routeNonce = 0;
   private currentGroupId: string | null = null;
@@ -216,6 +224,7 @@ export class ChatMuseContentApp {
     document.addEventListener('keydown', (e) => {
       if (
         (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyE' && !e.repeat &&
+        !isEditableElement(document.activeElement) &&
         this.currentGroupId &&
         !this.activeFeature &&
         !this.activeCompareModel?.operationId
