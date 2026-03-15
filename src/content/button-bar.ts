@@ -88,9 +88,11 @@ export class ButtonBar {
       this.toneRow.append(pill);
     }
 
-    // Single row: [Reply] [Compare] [Reopen] [2-part] [Tones...] [Personality→right]
+    const pingButton = this.buttons.get('ping')!;
+
+    // Single row: [Reply] [Compare] [Ping] [Reopen] [2-part] [Tones...] [Personality→right]
     this.root.append(
-      replyButton, compareButton, this.compareRestoreButton,
+      replyButton, compareButton, pingButton, this.compareRestoreButton,
       this.replyModeToggle, this.toneRow, this.personalityLabel,
     );
   }
