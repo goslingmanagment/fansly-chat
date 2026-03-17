@@ -956,10 +956,7 @@ export class ChatMuseContentApp {
         anthropicSpend:
           message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
         profiling: message.profiling ?? this.activeProfiling ?? undefined,
-        error: {
-          code: 'unknown_error',
-          message: message.error.message,
-        },
+        error: message.error,
       };
 
       if (isInlineQuickFeature(feature)) {

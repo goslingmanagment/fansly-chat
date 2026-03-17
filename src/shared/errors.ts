@@ -119,17 +119,50 @@ export function getErrorMessage(
   return STATIC_ERROR_MESSAGES[code];
 }
 
+function attachTechnicalDetail(
+  base: UserFacingError,
+  code: UserErrorCode,
+  message: unknown,
+): UserFacingError {
+  if (typeof message !== 'string') {
+    return base;
+  }
+
+  const detail = message.trim();
+  if (!detail || detail === code || detail === base.message) {
+    return base;
+  }
+
+  return {
+    ...base,
+    detail,
+  };
+}
+
 export function toUserError(error: unknown): UserFacingError {
   if (error instanceof ChatMuseError) {
-    return getErrorMessage(error.code, error.provider ?? 'anthropic');
+    return attachTechnicalDetail(
+      getErrorMessage(error.code, error.provider ?? 'anthropic'),
+      error.code,
+      error.message,
+    );
   }
-  const code = (error as { code?: string })?.code;
-  const provider = normalizeClaudeProvider((error as { provider?: string | null | undefined })?.provider);
+  const errorLike = error as {
+    code?: string;
+    message?: string;
+    provider?: string | null | undefined;
+  };
+  const code = errorLike?.code;
+  const provider = normalizeClaudeProvider(errorLike?.provider);
   if (
     typeof code === 'string' &&
     (code === 'missing_api_key' || code === 'invalid_api_key' || code in STATIC_ERROR_MESSAGES)
   ) {
-    return getErrorMessage(code as UserErrorCode, provider);
+    return attachTechnicalDetail(
+      getErrorMessage(code as UserErrorCode, provider),
+      code as UserErrorCode,
+      errorLike?.message,
+    );
   }
   return STATIC_ERROR_MESSAGES.unknown_error;
 }

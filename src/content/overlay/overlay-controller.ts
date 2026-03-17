@@ -1050,10 +1050,7 @@ export class OverlayController {
       section.append(this.renderSpendStrip(model.anthropicSpend));
     }
 
-    const block = document.createElement('div');
-    block.className = 'chatmuse-inline-error';
-    block.textContent = model.error.message;
-    section.append(block);
+    section.append(this.createErrorBlock(model.error));
 
     if (model.profiling) {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
@@ -1064,6 +1061,24 @@ export class OverlayController {
     }
 
     return section;
+  }
+
+  private createErrorBlock(error: UserFacingError): HTMLDivElement {
+    const block = document.createElement('div');
+    block.className = 'chatmuse-inline-error';
+
+    const message = document.createElement('div');
+    message.textContent = error.message;
+    block.append(message);
+
+    if (error.detail) {
+      const detail = document.createElement('div');
+      detail.className = 'chatmuse-inline-error-detail';
+      detail.textContent = error.detail;
+      block.append(detail);
+    }
+
+    return block;
   }
 
   private renderSpendStrip(

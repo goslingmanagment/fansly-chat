@@ -47,6 +47,7 @@ function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('.
       { type: 'text' as const, text: 'uncached tail' },
     ],
     feature: 'fast-reply' as const,
+    debugEnabled: false,
     signal: new AbortController().signal,
     onText: vi.fn(),
     onUsage: vi.fn(),
@@ -144,6 +145,66 @@ describe('AnthropicClient error mapping', () => {
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({ code: 'network_error' }),
     );
+  });
+
+  it('preserves fetch rejection detail and emits diagnostics when debug mode is enabled', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch sk-aw-live');
+    }));
+    const client = new AnthropicClient();
+
+    let thrown: unknown;
+    try {
+      await client.streamMessage(streamArgs({
+        provider: 'kiro',
+        apiKey: 'sk-aw-test',
+        debugEnabled: true,
+      }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: 'network_error',
+      provider: 'kiro',
+    });
+    expect((thrown as Error).message).toContain('Request failed before a response was received');
+    expect((thrown as Error).message).not.toContain('sk-aw-live');
+    expect(debugSpy).toHaveBeenCalledWith('[ChatMuse] claude request failed', expect.objectContaining({
+      provider: 'kiro',
+      requestUrl: 'https://api.kiro.cheap/v1/messages',
+      requestHost: 'api.kiro.cheap',
+      error: expect.objectContaining({
+        name: 'TypeError',
+        message: 'Failed to fetch [REDACTED]',
+      }),
+    }));
+    debugSpy.mockRestore();
+  });
+
+  it('attaches response detail for non-ok responses without a streaming body', async () => {
+    const response: Partial<Response> = {
+      status: 418,
+      ok: false,
+      body: null,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => response));
+    const client = new AnthropicClient();
+
+    let thrown: unknown;
+    try {
+      await client.streamMessage(streamArgs({ provider: 'kiro', apiKey: 'sk-aw-test' }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: 'network_error',
+      provider: 'kiro',
+    });
+    expect((thrown as Error).message).toContain('HTTP 418');
+    expect((thrown as Error).message).toContain('no streaming body');
   });
 });
 

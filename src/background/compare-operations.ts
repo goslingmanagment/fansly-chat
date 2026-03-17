@@ -949,6 +949,7 @@ export async function executeCompare(
           systemBlocks,
           userBlocks,
           feature: 'fast-reply',
+          debugEnabled,
           signal,
           onText: (chunk) => {
             const activeCompare = getActiveCompare(context, tabId);

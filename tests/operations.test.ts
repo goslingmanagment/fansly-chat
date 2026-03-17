@@ -960,7 +960,13 @@ describe('OperationCoordinator', () => {
             cache_read_input_tokens: 2,
             output_tokens: 0,
           });
-          throw new ChatMuseError('network_error');
+          throw new ChatMuseError(
+            'network_error',
+            'Kiro: HTTP 502 (upstream unavailable).',
+            undefined,
+            false,
+            'kiro',
+          );
         }
         onUsage?.({
           input_tokens: 75,
@@ -1005,6 +1011,7 @@ describe('OperationCoordinator', () => {
 
     expect(cardError?.cardId).toBe('current:personality-1');
     expect(cardError?.error.code).toBe('network_error');
+    expect(cardError?.error.detail).toBe('Kiro: HTTP 502 (upstream unavailable).');
     expect(cardError?.anthropicSpend).toEqual({
       totalTokens: 56,
       inputTokens: 50,
