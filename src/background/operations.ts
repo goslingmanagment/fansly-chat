@@ -1330,6 +1330,7 @@ export class OperationCoordinator {
 
       const streamArgs = {
         apiKey: validated.storage.settings.claudeApiKey,
+        apiBaseUrl: validated.storage.settings.claudeApiBaseUrl,
         model: actualModel,
         systemBlocks,
         userBlocks,

@@ -164,12 +164,15 @@ async function createCoordinatorHarness(options?: {
   };
 }
 
-function mockCompareCards(cards: CompareModelCard[]) {
-  vi.doMock('../src/shared/compare-cards.js', () => ({
-    getCompareDraftCount: () => cards.filter((card) => card.source === 'draft').length,
-    resolveMappedPersonalityId: () => null,
-    resolveCompareModelCards: () => cards,
-  }));
+async function mockCompareCards(cards: CompareModelCard[]) {
+  const compareCards = await import('../src/shared/compare-cards.js');
+  vi.spyOn(compareCards, 'getCompareDraftCount').mockReturnValue(
+    cards.filter((card) => card.source === 'draft').length,
+  );
+  vi.spyOn(compareCards, 'resolveMappedPersonalityId').mockReturnValue(null);
+  vi.spyOn(compareCards, 'resolveCompareModelCards').mockReturnValue(cards);
+  vi.spyOn(compareCards, 'getCompareCardsFingerprint').mockReturnValue('mock-compare-fingerprint');
+  vi.spyOn(compareCards, 'getCompareCardsFingerprintForPersonality').mockReturnValue('mock-compare-fingerprint');
 }
 
 describe('OperationCoordinator', () => {
@@ -181,6 +184,7 @@ describe('OperationCoordinator', () => {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: {
         claudeApiKey: 'sk-test',
+        claudeApiBaseUrl: '',
         quickMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
@@ -249,7 +253,6 @@ describe('OperationCoordinator', () => {
   });
 
   afterEach(() => {
-    vi.doUnmock('../src/shared/compare-cards.js');
     vi.restoreAllMocks();
   });
 
@@ -538,7 +541,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('returns compare_cards_unavailable when compare has fewer than two cards', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'draft-only',
         label: 'draft-only',
@@ -571,7 +574,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('runs compare cards with one shared prep pass and the fast-reply model for each card', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -680,7 +683,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('includes the selected tone in compare reply prompts', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -726,7 +729,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       debugMode: true,
     };
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -841,7 +844,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('allows mixed compare outcomes and still completes the overall compare session', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -899,12 +902,22 @@ describe('OperationCoordinator', () => {
       replyMode: 'default',
     });
 
-    const messages = postedMessages(port);
-    const cardError = messages.find(
+    await vi.waitFor(() => {
+      const nextMessages = postedMessages(port);
+      if (!nextMessages.some((message) => message.type === 'compare:cardError')) {
+        throw new Error('compare:cardError not emitted yet');
+      }
+      if (!nextMessages.some((message) => message.type === 'compare:cardComplete')) {
+        throw new Error('compare:cardComplete not emitted yet');
+      }
+    });
+
+    const finalMessages = postedMessages(port);
+    const cardError = finalMessages.find(
       (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
         message.type === 'compare:cardError',
     );
-    const cardComplete = messages.find(
+    const cardComplete = finalMessages.find(
       (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardComplete' }> =>
         message.type === 'compare:cardComplete',
     );
@@ -940,11 +953,11 @@ describe('OperationCoordinator', () => {
       cacheReadUsd: 0.000001,
       approximate: true,
     });
-    expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+    expect(finalMessages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
   it('sends compare:discarded when an active compare session is cancelled', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',

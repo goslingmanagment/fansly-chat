@@ -83,6 +83,11 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
     message: 'Selected Claude model is unavailable. Check your model settings.',
     settingsLink: true,
   },
+  proxy_access_not_granted: {
+    code: 'proxy_access_not_granted',
+    message: 'Proxy access not granted. Go to Settings and click Grant access for the Claude API Base URL.',
+    settingsLink: true,
+  },
   compare_cards_unavailable: {
     code: 'compare_cards_unavailable',
     message: 'Compare needs at least two model cards. Add files in prompts/drafts or map a personality.',

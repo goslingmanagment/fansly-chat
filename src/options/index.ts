@@ -1,4 +1,11 @@
 import optionsStyles from './styles.css';
+import {
+  getClaudeApiPermissionOrigin,
+  hasClaudeApiPermission,
+  isDirectAnthropicApiBaseUrl,
+  normalizeClaudeApiBaseUrl,
+  requestClaudeApiPermission,
+} from '../shared/claude-api.js';
 import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type { FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
@@ -57,6 +64,14 @@ function labeledField(labelText: string, input: HTMLElement): HTMLElement {
   label.style.fontWeight = '700';
   wrapper.append(label, input);
   return wrapper;
+}
+
+function createFieldNote(text: string): HTMLElement {
+  const note = document.createElement('div');
+  note.textContent = text;
+  note.style.color = 'var(--chatmuse-muted)';
+  note.style.fontSize = '13px';
+  return note;
 }
 
 function createButton(label: string, secondary = false, danger = false): HTMLButtonElement {
@@ -175,6 +190,39 @@ async function render(): Promise<void> {
   keyRow.append(keyInput, toggle);
   apiSection.append(labeledField('Claude API key', keyRow));
 
+  const apiBaseUrlInput = document.createElement('input');
+  apiBaseUrlInput.type = 'text';
+  apiBaseUrlInput.className = 'chatmuse-input';
+  apiBaseUrlInput.value = state.settings.claudeApiBaseUrl;
+  apiBaseUrlInput.placeholder = 'https://api.kiro.cheap/v1';
+  const apiBaseUrlField = document.createElement('div');
+  apiBaseUrlField.style.display = 'grid';
+  apiBaseUrlField.style.gap = '6px';
+  apiBaseUrlField.append(
+    apiBaseUrlInput,
+    createFieldNote('Optional. Leave blank to use Anthropic directly. Example: https://api.kiro.cheap/v1'),
+  );
+  apiSection.append(labeledField('Claude API Base URL', apiBaseUrlField));
+
+  const proxyPermissionRow = document.createElement('div');
+  proxyPermissionRow.style.display = 'none';
+  proxyPermissionRow.style.gap = '10px';
+  proxyPermissionRow.style.padding = '12px';
+  proxyPermissionRow.style.borderRadius = '16px';
+  proxyPermissionRow.style.border = '1px solid rgba(255,255,255,0.08)';
+  proxyPermissionRow.style.background = 'rgba(255,255,255,0.04)';
+
+  const proxyPermissionStatus = document.createElement('div');
+  proxyPermissionStatus.dataset.role = 'proxy-permission-status';
+  proxyPermissionStatus.style.color = 'var(--chatmuse-muted)';
+  proxyPermissionStatus.style.fontSize = '13px';
+
+  const grantProxyPermissionButton = createButton('Grant access', true);
+  grantProxyPermissionButton.dataset.role = 'proxy-permission-grant';
+
+  proxyPermissionRow.append(proxyPermissionStatus, grantProxyPermissionButton);
+  apiSection.append(proxyPermissionRow);
+
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
   quickInput.className = 'chatmuse-input';
@@ -236,6 +284,42 @@ async function render(): Promise<void> {
   ];
 
   const modelSelects: HTMLSelectElement[] = [];
+  let latestSavedApiBaseUrl = state.settings.claudeApiBaseUrl;
+  let permissionUiRequestId = 0;
+
+  async function refreshProxyPermissionUi(savedApiBaseUrl: string): Promise<void> {
+    const requestId = ++permissionUiRequestId;
+    const normalizedBaseUrl = normalizeClaudeApiBaseUrl(savedApiBaseUrl);
+
+    if (!normalizedBaseUrl || isDirectAnthropicApiBaseUrl(normalizedBaseUrl)) {
+      proxyPermissionRow.style.display = 'none';
+      proxyPermissionStatus.textContent = '';
+      grantProxyPermissionButton.textContent = 'Grant access';
+      grantProxyPermissionButton.disabled = false;
+      return;
+    }
+
+    proxyPermissionRow.style.display = 'grid';
+    const permissionOrigin = getClaudeApiPermissionOrigin(normalizedBaseUrl);
+    if (!permissionOrigin) {
+      proxyPermissionStatus.textContent = 'Access can be granted after you save a valid URL.';
+      grantProxyPermissionButton.textContent = 'Grant access';
+      grantProxyPermissionButton.disabled = true;
+      return;
+    }
+
+    const granted = await hasClaudeApiPermission(normalizedBaseUrl);
+    if (requestId !== permissionUiRequestId) {
+      return;
+    }
+
+    const originLabel = permissionOrigin.slice(0, -2);
+    proxyPermissionStatus.textContent = granted
+      ? `Access granted for ${originLabel}. Claude requests can use this proxy.`
+      : `Grant extension access for ${originLabel} before Claude requests can use this proxy.`;
+    grantProxyPermissionButton.textContent = granted ? 'Access granted' : 'Grant access';
+    grantProxyPermissionButton.disabled = granted;
+  }
 
   for (const { feature, label, helper } of FEATURE_ROWS) {
     const select = document.createElement('select');
@@ -276,23 +360,38 @@ async function render(): Promise<void> {
       featureModels[sel.dataset.feature!] = sel.value;
     }
 
-    await saveSettings({
+    const savedSettings = await saveSettings({
       claudeApiKey: keyInput.value,
+      claudeApiBaseUrl: apiBaseUrlInput.value,
       quickMessageCount: Number(quickInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
       featureModels: featureModels as Record<FeatureType, string>,
     });
+    latestSavedApiBaseUrl = savedSettings.claudeApiBaseUrl;
+    apiBaseUrlInput.value = savedSettings.claudeApiBaseUrl;
+    await refreshProxyPermissionUi(latestSavedApiBaseUrl);
   }, 350);
 
-  [keyInput, quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
+  [keyInput, apiBaseUrlInput, quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
   modelSelects.forEach((select) => {
     select.addEventListener('change', saveSettingsDebounced);
   });
+
+  grantProxyPermissionButton.addEventListener('click', async () => {
+    grantProxyPermissionButton.disabled = true;
+    try {
+      await requestClaudeApiPermission(latestSavedApiBaseUrl);
+    } finally {
+      await refreshProxyPermissionUi(latestSavedApiBaseUrl);
+    }
+  });
+
+  await refreshProxyPermissionUi(latestSavedApiBaseUrl);
 
   root.append(apiSection);
   root.append(modelSection);

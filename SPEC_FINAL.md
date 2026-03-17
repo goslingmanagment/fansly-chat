@@ -34,6 +34,7 @@ Minimum required permissions (shown to user at install time):
 - `webRequest` — for intercepting Fansly authentication headers
 - `tabs` — for tab-to-account identity mapping
 - Host permissions: `*://fansly.com/*` (content script injection), `*://apiv3.fansly.com/*`, `*://api.anthropic.com/*`
+- Optional host permissions: user-granted access for a custom Anthropic-compatible Claude proxy origin
 
 ---
 
@@ -450,6 +451,7 @@ Accessible from the toolbar popup. Contains:
 
 **API Configuration:**
 - **Claude API key** — password input field with show/hide toggle.
+- **Claude API Base URL** — optional text field for an Anthropic-compatible proxy base URL; blank uses direct Anthropic. Trailing slashes are stripped. Non-Anthropic hosts require a user-granted access prompt in Settings.
 
 **Message Counts:**
 - **Quick features** (Fast Reply, Help Me, Ping) — numeric input, default 100, range 5–200.
@@ -810,13 +812,13 @@ All other features always use fresh data.
 
 The extension communicates with two external services:
 - **Fansly API** — to load conversation history and fan spending statistics (using the chatter's existing Fansly session)
-- **Claude API (Anthropic)** — to generate AI responses (conversation transcripts, model personality content, and fan spending context are sent to Anthropic for processing)
+- **Claude API (Anthropic or compatible proxy)** — to generate AI responses (conversation transcripts, model personality content, and fan spending context are sent to Anthropic or a user-configured Anthropic-compatible proxy for processing)
 
 Sensitive secrets handling:
 - Session headers and Claude API key must never appear in UI text, console logs, or inter-component messages.
 - Only derived, non-secret state may be exposed (for example: connected/disconnected status, feature progress, error category).
 
-No agency-owned backend is used; required data is sent directly to Fansly and Anthropic APIs. All configuration data (settings, cached summaries, model personalities, account mappings) is stored locally in the browser. Conversation data sent to Claude is subject to Anthropic's data handling policies.
+No agency-owned backend is used; required data is sent directly to Fansly and Anthropic APIs or to a user-configured Anthropic-compatible proxy. All configuration data (settings, cached summaries, model personalities, account mappings) is stored locally in the browser. Conversation data sent to Claude is subject to the selected provider's data handling policies.
 
 ---
 

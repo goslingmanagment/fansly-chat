@@ -13,6 +13,7 @@ export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 
 export interface Settings {
   claudeApiKey: string;
+  claudeApiBaseUrl: string;
   quickMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
@@ -445,6 +446,7 @@ export type UserErrorCode =
   | 'chat_changed'
   | 'extension_reloaded'
   | 'model_unavailable'
+  | 'proxy_access_not_granted'
   | 'compare_cards_unavailable'
   | 'insertion_failed'
   | 'unknown_error';

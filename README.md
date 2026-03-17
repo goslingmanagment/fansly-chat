@@ -102,7 +102,7 @@ The extension icon appears in the toolbar. Navigate to [fansly.com](https://fans
 
 1. Click the ChatMuse toolbar icon and choose **Open Settings** (or right-click the icon → Extension Options)
 2. Paste your Claude API key in the **API Configuration** section
-3. The key is stored in `browser.storage.local` and never leaves the extension except in direct calls to `api.anthropic.com`
+3. The key is stored in `browser.storage.local` and never leaves the extension except in direct calls to Anthropic or an optional user-configured Anthropic-compatible proxy
 
 ## Configuration
 
@@ -218,7 +218,7 @@ All tests should pass. No network calls — everything is unit-tested with mocks
 
 ### API Key Handling
 
-The Claude API key is stored in `browser.storage.local` and sent only to `api.anthropic.com`. It is never logged, included in Fansly API calls, or exposed to page scripts. The debug logger redacts any object property matching known sensitive key names.
+The Claude API key is stored in `browser.storage.local` and sent only to Anthropic or an optional user-configured Anthropic-compatible proxy. It is never logged, included in Fansly API calls, or exposed to page scripts. The debug logger redacts any object property matching known sensitive key names.
 
 ### Prompt Injection Protection
 

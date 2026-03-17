@@ -9,6 +9,7 @@ import type { PersistedState, Settings } from './types.js';
 export function createDefaultSettings(): Settings {
   return {
     claudeApiKey: '',
+    claudeApiBaseUrl: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,

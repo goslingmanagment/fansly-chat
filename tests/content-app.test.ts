@@ -169,6 +169,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      claudeApiBaseUrl: '',
       quickMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
