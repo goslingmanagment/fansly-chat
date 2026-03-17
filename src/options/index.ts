@@ -5,7 +5,14 @@ import {
 } from '../shared/claude-api.js';
 import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
-import type { ClaudeProvider, FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
+import type {
+  ClaudeProvider,
+  FeatureType,
+  Personality,
+  ProviderConnectionTestResult,
+  ProviderDiagnostics,
+  SessionSnapshotEntry,
+} from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
 
@@ -147,9 +154,49 @@ function buildConnectionRows(
   }));
 }
 
+function formatBuildTime(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function formatCapabilityLabel(diagnostics: ProviderDiagnostics): string {
+  switch (diagnostics.capabilityStatus) {
+    case 'ready':
+      return 'Ready';
+    case 'missing_api_key':
+      return 'API key missing';
+    case 'host_access_missing':
+      return 'Host access missing';
+    default:
+      return 'Unknown';
+  }
+}
+
+function formatTestStatusLabel(result: ProviderConnectionTestResult): string {
+  switch (result.status) {
+    case 'ready':
+      return 'Connection test passed';
+    case 'missing_api_key':
+      return 'API key missing';
+    case 'host_access_missing':
+      return 'Host access missing';
+    case 'invalid_api_key':
+      return 'Invalid API key';
+    case 'http_error':
+      return result.httpStatus ? `Provider HTTP ${result.httpStatus}` : 'Provider HTTP error';
+    case 'pre_response_failure':
+      return 'Blocked before response';
+    default:
+      return 'Unknown';
+  }
+}
+
 async function render(): Promise<void> {
-  const sessions = (await browser.runtime.sendMessage({ type: 'getSessionsSnapshot' })) as SessionSnapshotEntry[];
-  const state = await loadStorageState();
+  const [sessions, state, initialProviderDiagnostics] = await Promise.all([
+    browser.runtime.sendMessage({ type: 'getSessionsSnapshot' }) as Promise<SessionSnapshotEntry[]>,
+    loadStorageState(),
+    browser.runtime.sendMessage({ type: 'getProviderDiagnostics' }) as Promise<ProviderDiagnostics>,
+  ]);
   const sessionsByAccountId = buildSessionLookup(sessions);
 
   root.replaceChildren();
@@ -272,6 +319,118 @@ async function render(): Promise<void> {
     promptCachingLabel,
   );
 
+  // ─── Provider Diagnostics ─────────────────────────────────
+  const diagnosticsSection = createSection(
+    'Provider Diagnostics',
+    'Check effective host access, build identity, and run a live background connection test for the selected provider.',
+  );
+  const manifest = browser.runtime.getManifest();
+  let latestProviderDiagnostics = initialProviderDiagnostics;
+  let latestConnectionTest: ProviderConnectionTestResult | null = null;
+
+  const diagnosticsCard = document.createElement('div');
+  diagnosticsCard.className = 'chatmuse-card';
+
+  const diagnosticsSummary = document.createElement('div');
+  diagnosticsSummary.style.display = 'grid';
+  diagnosticsSummary.style.gap = '6px';
+
+  const diagnosticsMeta = document.createElement('div');
+  diagnosticsMeta.style.display = 'grid';
+  diagnosticsMeta.style.gap = '6px';
+  diagnosticsMeta.style.fontSize = '13px';
+  diagnosticsMeta.style.color = 'var(--chatmuse-muted)';
+
+  const diagnosticsTestStatus = document.createElement('div');
+  diagnosticsTestStatus.style.display = 'grid';
+  diagnosticsTestStatus.style.gap = '4px';
+
+  const diagnosticsActions = document.createElement('div');
+  diagnosticsActions.className = 'chatmuse-card-actions';
+
+  const testConnectionButton = createButton('Test Provider Connection');
+  const openDebuggingButton = createButton('about:debugging', true);
+  openDebuggingButton.addEventListener('click', () => {
+    void window.open('about:debugging#/runtime/this-firefox', '_blank');
+  });
+  diagnosticsActions.append(testConnectionButton, openDebuggingButton);
+
+  const reloadHint = createFieldNote(
+    'If the host access check fails after a rebuild, run `npm run build`, then reload ChatMuse from about:debugging#/runtime/this-firefox.',
+  );
+
+  function updateDiagnosticsUi(
+    diagnostics: ProviderDiagnostics,
+    connectionTest: ProviderConnectionTestResult | null,
+  ): void {
+    diagnosticsSummary.replaceChildren();
+    diagnosticsMeta.replaceChildren();
+    diagnosticsTestStatus.replaceChildren();
+
+    const capability = document.createElement('div');
+    capability.style.fontWeight = '700';
+    capability.textContent = `${diagnostics.displayName} capability: ${formatCapabilityLabel(diagnostics)}`;
+    capability.style.color =
+      diagnostics.capabilityStatus === 'ready'
+        ? 'var(--chatmuse-success)'
+        : diagnostics.capabilityStatus === 'host_access_missing'
+          ? 'var(--chatmuse-danger)'
+          : 'var(--chatmuse-muted)';
+    diagnosticsSummary.append(capability);
+
+    const providerLine = document.createElement('div');
+    providerLine.textContent = `Provider: ${diagnostics.displayName}`;
+    const requestLine = document.createElement('div');
+    requestLine.textContent = `Request host: ${diagnostics.requestHost}`;
+    const hostAccessLine = document.createElement('div');
+    hostAccessLine.textContent = `Host access: ${diagnostics.hostPermissionGranted ? 'Granted' : 'Missing'} (${diagnostics.hostPermissionPattern})`;
+    const apiKeyLine = document.createElement('div');
+    apiKeyLine.textContent = `API key: ${diagnostics.hasApiKey ? 'Configured' : 'Missing'}`;
+    const buildLine = document.createElement('div');
+    buildLine.textContent = `Installed build: ${formatBuildTime(diagnostics.buildTime)} · v${manifest.version}`;
+    diagnosticsMeta.append(
+      providerLine,
+      requestLine,
+      hostAccessLine,
+      apiKeyLine,
+      buildLine,
+    );
+
+    if (connectionTest) {
+      const status = document.createElement('div');
+      status.style.fontWeight = '700';
+      status.textContent = formatTestStatusLabel(connectionTest);
+      status.style.color =
+        connectionTest.status === 'ready'
+          ? 'var(--chatmuse-success)'
+          : connectionTest.status === 'host_access_missing' ||
+              connectionTest.status === 'invalid_api_key' ||
+              connectionTest.status === 'pre_response_failure'
+            ? 'var(--chatmuse-danger)'
+            : 'var(--chatmuse-muted)';
+      const detail = document.createElement('div');
+      detail.textContent = connectionTest.detail;
+      detail.style.whiteSpace = 'pre-wrap';
+      const checkedAt = document.createElement('div');
+      checkedAt.textContent = `Checked: ${new Date(connectionTest.checkedAt).toLocaleString()}`;
+      checkedAt.style.fontSize = '12px';
+      checkedAt.style.color = 'var(--chatmuse-muted)';
+      diagnosticsTestStatus.append(status, detail, checkedAt);
+    }
+
+    testConnectionButton.textContent = `Test ${diagnostics.displayName} Connection`;
+  }
+
+  updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
+  diagnosticsCard.append(
+    diagnosticsSummary,
+    diagnosticsMeta,
+    diagnosticsActions,
+    diagnosticsTestStatus,
+    reloadHint,
+  );
+  diagnosticsSection.append(diagnosticsCard);
+
   // ─── AI Models ───────────────────────────────────────────
   const modelSection = createSection(
     'AI Models',
@@ -292,6 +451,12 @@ async function render(): Promise<void> {
     currentProvider = normalizeClaudeProvider(providerSelect.value);
     anthropicKeyField.wrapper.style.display = currentProvider === 'anthropic' ? 'grid' : 'none';
     kiroKeyField.wrapper.style.display = currentProvider === 'kiro' ? 'grid' : 'none';
+  }
+
+  async function refreshProviderDiagnostics(): Promise<void> {
+    latestProviderDiagnostics =
+      (await browser.runtime.sendMessage({ type: 'getProviderDiagnostics' })) as ProviderDiagnostics;
+    updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
   }
 
   for (const { feature, label, helper } of FEATURE_ROWS) {
@@ -327,7 +492,7 @@ async function render(): Promise<void> {
     modelSection.append(row);
   }
 
-  const saveSettingsDebounced = debounce(async () => {
+  async function persistCurrentSettings(): Promise<void> {
     const featureModels: Record<string, string> = {};
     for (const sel of modelSelects) {
       featureModels[sel.dataset.feature!] = sel.value;
@@ -350,6 +515,12 @@ async function render(): Promise<void> {
     anthropicKeyField.input.value = anthropicApiKey;
     kiroKeyField.input.value = kiroApiKey;
     refreshProviderUi();
+    latestConnectionTest = null;
+    await refreshProviderDiagnostics();
+  }
+
+  const saveSettingsDebounced = debounce(() => {
+    void persistCurrentSettings();
   }, 350);
 
   providerSelect.addEventListener('change', () => {
@@ -382,9 +553,25 @@ async function render(): Promise<void> {
   modelSelects.forEach((select) => {
     select.addEventListener('change', saveSettingsDebounced);
   });
+  testConnectionButton.addEventListener('click', async () => {
+    testConnectionButton.disabled = true;
+    latestConnectionTest = null;
+    updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
+
+    try {
+      await persistCurrentSettings();
+      latestConnectionTest =
+        (await browser.runtime.sendMessage({ type: 'runProviderConnectionTest' })) as ProviderConnectionTestResult;
+      await refreshProviderDiagnostics();
+      updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
+    } finally {
+      testConnectionButton.disabled = false;
+    }
+  });
   refreshProviderUi();
 
   root.append(apiSection);
+  root.append(diagnosticsSection);
   root.append(modelSection);
 
   // ─── Personalities ─────────────────────────────────────────

@@ -23,6 +23,11 @@ function createButton(label: string): HTMLButtonElement {
   return button;
 }
 
+function formatBuildTime(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
 async function render(): Promise<void> {
   const status = (await browser.runtime.sendMessage({ type: 'getPopupStatus' })) as PopupStatus;
 
@@ -62,7 +67,15 @@ async function render(): Promise<void> {
   const row2 = document.createElement('div');
   row2.textContent = `Conversation: ${status.groupId ?? 'No active chat'}`;
   row2.style.color = 'var(--chatmuse-muted)';
-  panel.append(row1, row2);
+  const row3 = document.createElement('div');
+  row3.textContent = `Provider: ${status.providerDiagnostics.displayName} · Host access ${status.providerDiagnostics.hostPermissionGranted ? 'ready' : 'missing'}`;
+  row3.style.color = status.providerDiagnostics.hostPermissionGranted
+    ? 'var(--chatmuse-success)'
+    : 'var(--chatmuse-danger)';
+  const row4 = document.createElement('div');
+  row4.textContent = `Build: ${formatBuildTime(status.providerDiagnostics.buildTime)}`;
+  row4.style.color = 'var(--chatmuse-muted)';
+  panel.append(row1, row2, row3, row4);
 
   const button = createButton('Open Settings');
   button.addEventListener('click', () => {

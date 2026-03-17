@@ -1,6 +1,9 @@
 import { hasClaudeApiKey } from '../shared/claude-api.js';
+import { DEFAULT_MODEL_ID } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
+import { getProviderDiagnostics } from '../shared/provider-runtime.js';
 import type { PopupStatus } from '../shared/types.js';
+import type { AnthropicClient } from './anthropic-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
@@ -10,6 +13,7 @@ import { TabContextStore } from './tab-context.js';
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 
 export interface RuntimeApiDeps {
+  anthropicClient: AnthropicClient;
   fanslyClient: FanslyClient;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
@@ -17,6 +21,7 @@ export interface RuntimeApiDeps {
 }
 
 export function registerRuntimeApi({
+  anthropicClient,
   fanslyClient,
   sessionStore,
   tabContexts,
@@ -27,6 +32,8 @@ export function registerRuntimeApi({
       if (message.type === 'getPopupStatus') {
         let tabId: number | undefined;
         let tabUrl: string | undefined;
+        const state = await storageCoordinator.getState();
+        const providerDiagnostics = await getProviderDiagnostics(state.settings);
 
         if (message.tabId !== undefined) {
           const tab = await browser.tabs.get(message.tabId);
@@ -55,10 +62,10 @@ export function registerRuntimeApi({
             compareCardCount: 0,
             compareDraftCount: 0,
             accountLabel: 'Not connected',
+            providerDiagnostics,
           } satisfies PopupStatus;
         }
 
-        const state = await storageCoordinator.getState();
         const session = sessionStore.getSessionForTab(tabId);
         const legacyAccountId = sessionStore.getAccountIdForTab(tabId);
         const accountId = session?.resolvedAccountId ?? legacyAccountId;
@@ -93,6 +100,7 @@ export function registerRuntimeApi({
           accountLabel:
             mappedPersonalityName ??
             (accountId ? 'Unmapped account' : 'Not connected'),
+          providerDiagnostics,
         } satisfies PopupStatus;
       }
 
@@ -148,6 +156,26 @@ export function registerRuntimeApi({
         );
 
         return snapshot;
+      }
+
+      if (message.type === 'getProviderDiagnostics') {
+        const state = await storageCoordinator.getState();
+        return getProviderDiagnostics(state.settings);
+      }
+
+      if (message.type === 'runProviderConnectionTest') {
+        const state = await storageCoordinator.getState();
+        const resolvedModel =
+          state.settings.featureModels['fast-reply'] ?? DEFAULT_MODEL_ID;
+        return anthropicClient.testConnection({
+          provider: state.settings.claudeProvider,
+          apiKey:
+            state.settings.claudeProvider === 'kiro'
+              ? state.settings.kiroApiKey
+              : state.settings.anthropicApiKey,
+          model: resolvedModel,
+          debugEnabled: Boolean(state.settings.debugMode),
+        });
       }
 
       return undefined;

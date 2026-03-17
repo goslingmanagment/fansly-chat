@@ -5,6 +5,10 @@ import {
 } from '../shared/constants.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
 import { resolveClaudeProviderSettings } from '../shared/claude-api.js';
+import {
+  buildHostAccessMissingDetail,
+  getProviderDiagnostics,
+} from '../shared/provider-runtime.js';
 import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
@@ -291,6 +295,19 @@ async function validateCompareStart(
 
   if (!resolvedProvider.apiKey) {
     throw new ChatMuseError('missing_api_key', undefined, undefined, false, resolvedProvider.provider);
+  }
+  const providerDiagnostics = await getProviderDiagnostics(storage.settings);
+  if (!providerDiagnostics.hostPermissionGranted) {
+    throw new ChatMuseError(
+      'provider_host_access_missing',
+      buildHostAccessMissingDetail(
+        providerDiagnostics.provider,
+        providerDiagnostics.requestHost,
+      ),
+      undefined,
+      false,
+      providerDiagnostics.provider,
+    );
   }
   if (!legacyAccountId || !session) {
     throw new ChatMuseError('not_connected');

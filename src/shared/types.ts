@@ -437,6 +437,8 @@ export type UserErrorCode =
   | 'fansly_server_error'
   | 'missing_api_key'
   | 'invalid_api_key'
+  | 'provider_host_access_missing'
+  | 'provider_connection_failed'
   | 'claude_overloaded'
   | 'no_personalities'
   | 'not_enough_history'
@@ -533,8 +535,41 @@ export interface TabUiState {
   compareDraftCount: number;
 }
 
+export type ProviderCapabilityStatus =
+  | 'ready'
+  | 'missing_api_key'
+  | 'host_access_missing';
+
+export interface ProviderDiagnostics {
+  provider: ClaudeProvider;
+  displayName: string;
+  requestUrl: string;
+  requestHost: string;
+  hostPermissionPattern: string;
+  hostPermissionGranted: boolean;
+  hasApiKey: boolean;
+  capabilityStatus: ProviderCapabilityStatus;
+  buildTime: string;
+}
+
+export type ProviderConnectionTestStatus =
+  | 'ready'
+  | 'missing_api_key'
+  | 'host_access_missing'
+  | 'invalid_api_key'
+  | 'http_error'
+  | 'pre_response_failure';
+
+export interface ProviderConnectionTestResult extends ProviderDiagnostics {
+  status: ProviderConnectionTestStatus;
+  checkedAt: number;
+  detail: string;
+  httpStatus?: number;
+}
+
 export interface PopupStatus extends TabUiState {
   accountLabel: string;
+  providerDiagnostics: ProviderDiagnostics;
 }
 
 export interface SessionSnapshotEntry {
@@ -551,11 +586,15 @@ export interface SessionSnapshotEntry {
 export interface RuntimeRequestMap {
   getPopupStatus: undefined;
   getSessionsSnapshot: undefined;
+  getProviderDiagnostics: undefined;
+  runProviderConnectionTest: undefined;
 }
 
 export interface RuntimeResponseMap {
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
+  getProviderDiagnostics: ProviderDiagnostics;
+  runProviderConnectionTest: ProviderConnectionTestResult;
 }
 
 // ─── Port Messages (Discriminated Unions) ────────────────────────────────

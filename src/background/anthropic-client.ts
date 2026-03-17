@@ -4,12 +4,18 @@ import {
 } from '../shared/claude-api.js';
 import { ChatMuseError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
+import {
+  buildHostAccessMissingDetail,
+  getProviderDiagnostics,
+} from '../shared/provider-runtime.js';
 import type {
   AnthropicCacheCreationUsage,
   AnthropicUsageMetrics,
   ClaudeProvider,
   FeatureType,
+  PromptPayload,
   PromptTextBlock,
+  ProviderConnectionTestResult,
 } from '../shared/types.js';
 
 const API_KEY_REGEX = /sk-(?:ant|aw)-[a-zA-Z0-9_-]+/g;
@@ -31,6 +37,15 @@ interface StreamArgs {
 interface ProviderErrorBody {
   error?: { type?: string; message?: string };
 }
+
+interface ConnectionTestArgs {
+  provider: ClaudeProvider;
+  apiKey: string;
+  model: string;
+  debugEnabled: boolean;
+}
+
+const CONNECTION_TEST_TIMEOUT_MS = 15_000;
 
 function providerLabel(provider: ClaudeProvider): string {
   return provider === 'kiro' ? 'Kiro' : 'Anthropic';
@@ -92,6 +107,63 @@ function streamDetail(
     provider,
     `Stream error event: ${detailParts.filter(Boolean).join(' | ')}.`,
   );
+}
+
+function preResponseFailureDetail(
+  provider: ClaudeProvider,
+  requestHost: string,
+  error: unknown,
+): string {
+  if (provider === 'kiro') {
+    return technicalDetail(
+      provider,
+      `Request failed before a response was received (${errorSummary(error)}). Firefox may be treating ${requestHost} as a normal browser CORS request. Reload or reinstall the extension, then run the provider self-test in Settings.`,
+    );
+  }
+
+  return technicalDetail(
+    provider,
+    `Request failed before a response was received (${errorSummary(error)}).`,
+  );
+}
+
+function buildHeaders(resolvedProvider: ReturnType<typeof resolveClaudeProviderSettings>): Record<string, string> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'x-api-key': resolvedProvider.apiKey,
+    'anthropic-version': ANTHROPIC_VERSION,
+  };
+
+  if (resolvedProvider.sendDangerousDirectBrowserAccessHeader) {
+    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  }
+
+  return headers;
+}
+
+function buildStreamBody(
+  model: string,
+  feature: FeatureType,
+  systemBlocks: PromptTextBlock[],
+  userBlocks: PromptTextBlock[],
+  maxTokens = MAX_TOKENS[feature],
+): string {
+  return JSON.stringify({
+    model,
+    stream: true,
+    max_tokens: maxTokens,
+    system: systemBlocks,
+    messages: [{ role: 'user', content: userBlocks }],
+  });
+}
+
+function buildConnectionTestPayload(model: string): PromptPayload {
+  return {
+    system: 'Connection test',
+    user: 'Reply with OK.',
+    systemBlocks: [{ type: 'text', text: 'Connection test. Reply with OK.' }],
+    userBlocks: [{ type: 'text', text: 'Reply with OK.' }],
+  };
 }
 
 function parseSseBlock(block: string): { event: string; data: string } | null {
@@ -187,6 +259,119 @@ function usageEquals(
 }
 
 export class AnthropicClient {
+  async testConnection({
+    provider,
+    apiKey,
+    model,
+    debugEnabled,
+  }: ConnectionTestArgs): Promise<ProviderConnectionTestResult> {
+    const resolvedProvider = resolveClaudeProviderSettings({
+      claudeProvider: provider,
+      anthropicApiKey: provider === 'anthropic' ? apiKey : '',
+      kiroApiKey: provider === 'kiro' ? apiKey : '',
+    });
+    const diagnostics = await getProviderDiagnostics({
+      claudeProvider: provider,
+      anthropicApiKey: provider === 'anthropic' ? apiKey : '',
+      kiroApiKey: provider === 'kiro' ? apiKey : '',
+    });
+    const checkedAt = Date.now();
+
+    if (!diagnostics.hasApiKey) {
+      return {
+        ...diagnostics,
+        checkedAt,
+        status: 'missing_api_key',
+        detail: technicalDetail(provider, 'API key is missing.'),
+      };
+    }
+
+    if (!diagnostics.hostPermissionGranted) {
+      return {
+        ...diagnostics,
+        checkedAt,
+        status: 'host_access_missing',
+        detail: buildHostAccessMissingDetail(provider, diagnostics.requestHost),
+      };
+    }
+
+    const requestContext = {
+      provider,
+      requestUrl: resolvedProvider.messagesUrl,
+      requestHost: diagnostics.requestHost,
+      model,
+      feature: 'fast-reply' as const,
+      connectionTest: true,
+    };
+
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => {
+      controller.abort();
+    }, CONNECTION_TEST_TIMEOUT_MS);
+
+    try {
+      const probePayload = buildConnectionTestPayload(model);
+      const response = await fetch(resolvedProvider.messagesUrl, {
+        method: 'POST',
+        headers: buildHeaders(resolvedProvider),
+        signal: controller.signal,
+        body: buildStreamBody(
+          model,
+          'fast-reply',
+          probePayload.systemBlocks,
+          probePayload.userBlocks,
+          1,
+        ),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        return {
+          ...diagnostics,
+          checkedAt,
+          status: 'invalid_api_key',
+          detail: responseDetail(provider, response.status),
+          httpStatus: response.status,
+        };
+      }
+
+      if (!response.ok || !response.body) {
+        return {
+          ...diagnostics,
+          checkedAt,
+          status: 'http_error',
+          detail: !response.body
+            ? responseDetail(provider, response.status, 'no streaming body')
+            : responseDetail(provider, response.status),
+          httpStatus: response.status,
+        };
+      }
+
+      void response.body.cancel().catch(() => undefined);
+
+      return {
+        ...diagnostics,
+        checkedAt,
+        status: 'ready',
+        detail: technicalDetail(provider, `Connection test succeeded (HTTP ${response.status}).`),
+        httpStatus: response.status,
+      };
+    } catch (error) {
+      logDebug(debugEnabled, 'claude connection test failed', {
+        ...requestContext,
+        error,
+      });
+
+      return {
+        ...diagnostics,
+        checkedAt,
+        status: 'pre_response_failure',
+        detail: preResponseFailureDetail(provider, diagnostics.requestHost, error),
+      };
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  }
+
   async streamMessage({
     provider,
     apiKey,
@@ -206,15 +391,7 @@ export class AnthropicClient {
       anthropicApiKey: provider === 'anthropic' ? apiKey : '',
       kiroApiKey: provider === 'kiro' ? apiKey : '',
     });
-
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-      'x-api-key': resolvedProvider.apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-    };
-    if (resolvedProvider.sendDangerousDirectBrowserAccessHeader) {
-      headers['anthropic-dangerous-direct-browser-access'] = 'true';
-    }
+    const headers = buildHeaders(resolvedProvider);
 
     const requestUrl = resolvedProvider.messagesUrl;
     const requestHost = new URL(requestUrl).host;
@@ -232,22 +409,39 @@ export class AnthropicClient {
         method: 'POST',
         headers,
         signal,
-        body: JSON.stringify({
-          model,
-          stream: true,
-          max_tokens: MAX_TOKENS[feature],
-          system: systemBlocks,
-          messages: [{ role: 'user', content: userBlocks }],
-        }),
+        body: buildStreamBody(model, feature, systemBlocks, userBlocks),
       });
     } catch (error) {
       logDebug(debugEnabled, 'claude request failed', {
         ...requestContext,
         error,
       });
+      const diagnostics = await getProviderDiagnostics({
+        claudeProvider: provider,
+        anthropicApiKey: provider === 'anthropic' ? apiKey : '',
+        kiroApiKey: provider === 'kiro' ? apiKey : '',
+      });
+      if (!diagnostics.hostPermissionGranted) {
+        throw new ChatMuseError(
+          'provider_host_access_missing',
+          buildHostAccessMissingDetail(provider, requestHost),
+          undefined,
+          false,
+          provider,
+        );
+      }
+      if (provider === 'kiro') {
+        throw new ChatMuseError(
+          'provider_connection_failed',
+          preResponseFailureDetail(provider, requestHost, error),
+          undefined,
+          false,
+          provider,
+        );
+      }
       throw new ChatMuseError(
         'network_error',
-        technicalDetail(provider, `Request failed before a response was received (${errorSummary(error)}).`),
+        preResponseFailureDetail(provider, requestHost, error),
         undefined,
         false,
         provider,

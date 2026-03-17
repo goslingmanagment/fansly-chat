@@ -66,7 +66,61 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
       },
     },
     runtime: {
-      sendMessage: vi.fn(async () => []),
+      sendMessage: vi.fn(async (message: { type: string }) => {
+        if (message.type === 'getSessionsSnapshot') {
+          return [];
+        }
+        if (message.type === 'getProviderDiagnostics') {
+          return {
+            provider: state.settings.claudeProvider,
+            displayName: state.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
+            requestUrl:
+              state.settings.claudeProvider === 'kiro'
+                ? 'https://api.kiro.cheap/v1/messages'
+                : 'https://api.anthropic.com/v1/messages',
+            requestHost:
+              state.settings.claudeProvider === 'kiro'
+                ? 'api.kiro.cheap'
+                : 'api.anthropic.com',
+            hostPermissionPattern:
+              state.settings.claudeProvider === 'kiro'
+                ? '*://api.kiro.cheap/*'
+                : '*://api.anthropic.com/*',
+            hostPermissionGranted: true,
+            hasApiKey: true,
+            capabilityStatus: 'ready',
+            buildTime: 'test-build',
+          };
+        }
+        if (message.type === 'runProviderConnectionTest') {
+          return {
+            provider: state.settings.claudeProvider,
+            displayName: state.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
+            requestUrl:
+              state.settings.claudeProvider === 'kiro'
+                ? 'https://api.kiro.cheap/v1/messages'
+                : 'https://api.anthropic.com/v1/messages',
+            requestHost:
+              state.settings.claudeProvider === 'kiro'
+                ? 'api.kiro.cheap'
+                : 'api.anthropic.com',
+            hostPermissionPattern:
+              state.settings.claudeProvider === 'kiro'
+                ? '*://api.kiro.cheap/*'
+                : '*://api.anthropic.com/*',
+            hostPermissionGranted: true,
+            hasApiKey: true,
+            capabilityStatus: 'ready',
+            buildTime: 'test-build',
+            status: 'ready',
+            checkedAt: 0,
+            detail: 'Connection test succeeded.',
+            httpStatus: 200,
+          };
+        }
+        return [];
+      }),
+      getManifest: vi.fn(() => ({ version: '1.0.0' })),
       openOptionsPage: vi.fn(async () => undefined),
     },
   };

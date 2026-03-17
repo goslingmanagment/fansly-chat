@@ -217,6 +217,9 @@ describe('OperationCoordinator', () => {
     };
 
     (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
       storage: {
         local: {
           get: vi.fn(async (keys?: string | string[] | Record<string, unknown> | null) => {
@@ -255,6 +258,46 @@ describe('OperationCoordinator', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('fails fast when provider host access is missing for Kiro', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      claudeProvider: 'kiro',
+      anthropicApiKey: '',
+      kiroApiKey: 'sk-aw-test',
+    };
+    (browser.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+    const fanslyClient = buildFanslyClientMock();
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => 'should not run'),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      fanslyClient,
+      anthropicClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('provider_host_access_missing');
+    expect(errorMessage?.error.detail).toContain('api.kiro.cheap');
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+    expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
   });
 
   it('removes the durable summary cache before a forced fan-summary refresh', async () => {
