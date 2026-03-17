@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
-  CLAUDE_MODELS,
   DEFAULT_FEATURE_MODELS,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
+import { getModelsForProvider } from '../src/shared/claude-models.js';
 import type { FeatureType, PersistedState } from '../src/shared/types.js';
 
 const EXPECTED_LABELS = ['Fast Reply', 'Ping', 'Help Me', 'Chat Review', 'Fan Summary'];
@@ -52,14 +52,25 @@ function installDom() {
 
 async function loadOptionsPage(state: PersistedState): Promise<void> {
   savedSettings = null;
+  let currentState: PersistedState = {
+    ...state,
+    settings: {
+      ...state.settings,
+      featureModels: { ...state.settings.featureModels },
+    },
+  };
 
   (globalThis as Record<string, unknown>).browser = {
     storage: {
       local: {
-        get: vi.fn(async () => state),
+        get: vi.fn(async () => currentState),
         set: vi.fn(async (data: Record<string, unknown>) => {
           if (data.settings) {
             savedSettings = data.settings as Record<string, unknown>;
+            currentState = {
+              ...currentState,
+              settings: data.settings as PersistedState['settings'],
+            };
           }
         }),
         remove: vi.fn(async () => undefined),
@@ -72,18 +83,18 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
         }
         if (message.type === 'getProviderDiagnostics') {
           return {
-            provider: state.settings.claudeProvider,
-            displayName: state.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
+            provider: currentState.settings.claudeProvider,
+            displayName: currentState.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
             requestUrl:
-              state.settings.claudeProvider === 'kiro'
+              currentState.settings.claudeProvider === 'kiro'
                 ? 'https://api.kiro.cheap/v1/messages'
                 : 'https://api.anthropic.com/v1/messages',
             requestHost:
-              state.settings.claudeProvider === 'kiro'
+              currentState.settings.claudeProvider === 'kiro'
                 ? 'api.kiro.cheap'
                 : 'api.anthropic.com',
             hostPermissionPattern:
-              state.settings.claudeProvider === 'kiro'
+              currentState.settings.claudeProvider === 'kiro'
                 ? '*://api.kiro.cheap/*'
                 : '*://api.anthropic.com/*',
             hostPermissionGranted: true,
@@ -94,18 +105,18 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
         }
         if (message.type === 'runProviderConnectionTest') {
           return {
-            provider: state.settings.claudeProvider,
-            displayName: state.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
+            provider: currentState.settings.claudeProvider,
+            displayName: currentState.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
             requestUrl:
-              state.settings.claudeProvider === 'kiro'
+              currentState.settings.claudeProvider === 'kiro'
                 ? 'https://api.kiro.cheap/v1/messages'
                 : 'https://api.anthropic.com/v1/messages',
             requestHost:
-              state.settings.claudeProvider === 'kiro'
+              currentState.settings.claudeProvider === 'kiro'
                 ? 'api.kiro.cheap'
                 : 'api.anthropic.com',
             hostPermissionPattern:
-              state.settings.claudeProvider === 'kiro'
+              currentState.settings.claudeProvider === 'kiro'
                 ? '*://api.kiro.cheap/*'
                 : '*://api.anthropic.com/*',
             hostPermissionGranted: true,
@@ -163,19 +174,56 @@ describe('Options page — AI Models section', () => {
     expect(labels).toEqual(EXPECTED_LABELS);
   });
 
-  it('each dropdown contains all CLAUDE_MODELS in registry order', async () => {
+  it('each Anthropic dropdown contains the Anthropic model list in registry order', async () => {
     await loadOptionsPage(makeState());
 
     const root = document.getElementById('chatmuse-options-root')!;
     const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select[data-feature]');
+    const anthropicModels = getModelsForProvider('anthropic');
 
     for (const select of selects) {
       const options = Array.from(select.options);
-      expect(options.length).toBe(CLAUDE_MODELS.length);
+      expect(options.length).toBe(anthropicModels.length);
       options.forEach((opt, i) => {
-        expect(opt.value).toBe(CLAUDE_MODELS[i]!.id);
+        expect(opt.value).toBe(anthropicModels[i]!.id);
       });
     }
+  });
+
+  it('switches to the Kiro model list, resets unsupported models, and shows a note', async () => {
+    await loadOptionsPage(makeState({
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fast-reply': 'claude-sonnet-4-6',
+      },
+    }));
+
+    const providerSelect = document.querySelector<HTMLSelectElement>('[data-role="claude-provider-select"]');
+    const replySelect = document.querySelector<HTMLSelectElement>(
+      'select.chatmuse-select[data-feature="fast-reply"]',
+    );
+    if (!providerSelect || !replySelect) {
+      throw new Error('Provider or model select not found');
+    }
+
+    providerSelect.value = 'kiro';
+    providerSelect.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) {
+        throw new Error('settings not saved yet');
+      }
+      expect((savedSettings as { claudeProvider?: string }).claudeProvider).toBe('kiro');
+    }, { timeout: 2000 });
+
+    const kiroModels = getModelsForProvider('kiro');
+    expect(Array.from(replySelect.options).map((option) => option.value)).toEqual(
+      kiroModels.map((model) => model.id),
+    );
+    expect(replySelect.value).toBe('claude-sonnet-4-5');
+    expect(document.body.textContent).toContain(
+      '5 model selections changed to Sonnet 4.5 because their previous models are not available on Kiro.',
+    );
   });
 
   it('initializes dropdowns from persisted featureModels', async () => {

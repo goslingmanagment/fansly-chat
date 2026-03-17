@@ -3,7 +3,12 @@ import {
   getClaudeProviderConfig,
   normalizeClaudeProvider,
 } from '../shared/claude-api.js';
-import { CLAUDE_MODELS } from '../shared/constants.js';
+import {
+  getDefaultModelId,
+  getModelLabel,
+  getModelsForProvider,
+  normalizeFeatureModelsForProvider,
+} from '../shared/claude-models.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type {
   ClaudeProvider,
@@ -434,8 +439,14 @@ async function render(): Promise<void> {
   // ─── AI Models ───────────────────────────────────────────
   const modelSection = createSection(
     'AI Models',
-    'Pick which Claude model each feature uses. If you\'re not sure, leave everything on Claude Sonnet 4.6.',
   );
+  const modelSectionLead = createFieldNote('');
+  modelSectionLead.style.fontSize = '14px';
+
+  const modelChangeNote = createFieldNote('');
+  modelChangeNote.style.display = 'none';
+  modelChangeNote.style.color = 'var(--chatmuse-warning)';
+  modelSection.append(modelSectionLead, modelChangeNote);
 
   const FEATURE_ROWS: Array<{ feature: FeatureType; label: string; helper: string }> = [
     { feature: 'fast-reply', label: 'Fast Reply', helper: 'Quick replies you can insert into chat.' },
@@ -445,12 +456,71 @@ async function render(): Promise<void> {
     { feature: 'fan-summary', label: 'Fan Summary', helper: 'Longer summaries of the fan relationship and context.' },
   ];
 
-  const modelSelects: HTMLSelectElement[] = [];
+  const featureLabels = Object.fromEntries(
+    FEATURE_ROWS.map(({ feature, label }) => [feature, label]),
+  ) as Record<FeatureType, string>;
+  const modelSelects = new Map<FeatureType, HTMLSelectElement>();
+  let currentFeatureModels = {
+    ...normalizeFeatureModelsForProvider(
+      currentProvider,
+      state.settings.featureModels,
+    ).featureModels,
+  };
 
   function refreshProviderUi(): void {
     currentProvider = normalizeClaudeProvider(providerSelect.value);
     anthropicKeyField.wrapper.style.display = currentProvider === 'anthropic' ? 'grid' : 'none';
     kiroKeyField.wrapper.style.display = currentProvider === 'kiro' ? 'grid' : 'none';
+  }
+
+  function collectFeatureModelsFromUi(): Record<FeatureType, string> {
+    return Object.fromEntries(
+      Array.from(modelSelects.entries()).map(([feature, select]) => [feature, select.value]),
+    ) as Record<FeatureType, string>;
+  }
+
+  function refreshModelSectionLead(): void {
+    modelSectionLead.textContent = `Pick which Claude model each feature uses. If you're not sure, leave everything on ${getModelLabel(getDefaultModelId(currentProvider))}.`;
+  }
+
+  function showModelChangeNote(
+    provider: ClaudeProvider,
+    changes: Array<{ feature: FeatureType; fromModelId: string; toModelId: string }>,
+  ): void {
+    if (changes.length === 0) {
+      modelChangeNote.textContent = '';
+      modelChangeNote.style.display = 'none';
+      return;
+    }
+
+    const providerName = getClaudeProviderConfig(provider).displayName;
+    if (changes.length === 1) {
+      const [change] = changes;
+      modelChangeNote.textContent = `${featureLabels[change.feature]} changed to ${getModelLabel(change.toModelId)} because ${getModelLabel(change.fromModelId)} is not available on ${providerName}.`;
+      modelChangeNote.style.display = 'block';
+      return;
+    }
+
+    modelChangeNote.textContent = `${changes.length} model selections changed to ${getModelLabel(getDefaultModelId(provider))} because their previous models are not available on ${providerName}.`;
+    modelChangeNote.style.display = 'block';
+  }
+
+  function renderModelSelectOptions(
+    provider: ClaudeProvider,
+    featureModels: Record<FeatureType, string>,
+  ): void {
+    const availableModels = getModelsForProvider(provider);
+    for (const [feature, select] of modelSelects.entries()) {
+      select.replaceChildren();
+      for (const model of availableModels) {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = `${model.label} \u2014 ${model.description}`;
+        select.append(option);
+      }
+      select.value = featureModels[feature];
+    }
+    refreshModelSectionLead();
   }
 
   async function refreshProviderDiagnostics(): Promise<void> {
@@ -463,16 +533,7 @@ async function render(): Promise<void> {
     const select = document.createElement('select');
     select.className = 'chatmuse-select';
     select.dataset.feature = feature;
-
-    for (const model of CLAUDE_MODELS) {
-      const option = document.createElement('option');
-      option.value = model.id;
-      option.textContent = `${model.label} \u2014 ${model.description}`;
-      select.append(option);
-    }
-
-    select.value = state.settings.featureModels[feature];
-    modelSelects.push(select);
+    modelSelects.set(feature, select);
 
     const row = document.createElement('div');
     row.style.display = 'grid';
@@ -491,12 +552,10 @@ async function render(): Promise<void> {
     row.append(featureLabel, helperText, select);
     modelSection.append(row);
   }
+  renderModelSelectOptions(currentProvider, currentFeatureModels);
 
   async function persistCurrentSettings(): Promise<void> {
-    const featureModels: Record<string, string> = {};
-    for (const sel of modelSelects) {
-      featureModels[sel.dataset.feature!] = sel.value;
-    }
+    currentFeatureModels = collectFeatureModelsFromUi();
 
     const savedSettings = await saveSettings({
       claudeProvider: currentProvider,
@@ -506,15 +565,17 @@ async function render(): Promise<void> {
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
-      featureModels: featureModels as Record<FeatureType, string>,
+      featureModels: currentFeatureModels,
     });
     currentProvider = savedSettings.claudeProvider;
     anthropicApiKey = savedSettings.anthropicApiKey;
     kiroApiKey = savedSettings.kiroApiKey;
+    currentFeatureModels = { ...savedSettings.featureModels };
     providerSelect.value = currentProvider;
     anthropicKeyField.input.value = anthropicApiKey;
     kiroKeyField.input.value = kiroApiKey;
     refreshProviderUi();
+    renderModelSelectOptions(currentProvider, currentFeatureModels);
     latestConnectionTest = null;
     await refreshProviderDiagnostics();
   }
@@ -525,6 +586,13 @@ async function render(): Promise<void> {
 
   providerSelect.addEventListener('change', () => {
     refreshProviderUi();
+    const normalized = normalizeFeatureModelsForProvider(
+      currentProvider,
+      collectFeatureModelsFromUi(),
+    );
+    currentFeatureModels = { ...normalized.featureModels };
+    renderModelSelectOptions(currentProvider, currentFeatureModels);
+    showModelChangeNote(currentProvider, normalized.changes);
     saveSettingsDebounced();
   });
 

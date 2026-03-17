@@ -1,4 +1,14 @@
 import type { ClaudeProvider, FeatureType, Settings } from './types.js';
+import { DEFAULT_FEATURE_MODELS } from './claude-models.js';
+export {
+  CLAUDE_MODELS,
+  CLAUDE_MODEL_IDS,
+  DEFAULT_FEATURE_MODELS,
+  DEFAULT_MODEL_ID,
+  getDefaultFeatureModels,
+  getDefaultModelId,
+  type ClaudeModelEntry,
+} from './claude-models.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
@@ -9,37 +19,12 @@ export const SUMMARY_EVICTION_COUNT = 10;
 
 // ─── Claude API ──────────────────────────────────────────────────────────
 
-export const DEFAULT_MODEL_ID = 'claude-sonnet-4-6';
 export const ANTHROPIC_API_BASE_URL = 'https://api.anthropic.com/v1';
 export const KIRO_API_BASE_URL = 'https://api.kiro.cheap/v1';
 export const DEFAULT_CLAUDE_PROVIDER: ClaudeProvider = 'anthropic';
 export const CLAUDE_API_BASE_URL = ANTHROPIC_API_BASE_URL;
 export const CLAUDE_API_URL = `${ANTHROPIC_API_BASE_URL}/messages`;
 export const ANTHROPIC_VERSION = '2023-06-01';
-
-export interface ClaudeModelEntry {
-  id: string;
-  label: string;
-  description: string;
-}
-
-export const CLAUDE_MODELS: ClaudeModelEntry[] = [
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Recommended' },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', description: 'Balanced' },
-  { id: 'claude-opus-4-6',   label: 'Claude Opus 4.6',   description: 'Best quality' },
-  { id: 'claude-opus-4-5',   label: 'Claude Opus 4.5',   description: 'Best quality (older)' },
-  { id: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5',  description: 'Fastest & cheapest' },
-];
-
-export const CLAUDE_MODEL_IDS = new Set(CLAUDE_MODELS.map((m) => m.id));
-
-export const DEFAULT_FEATURE_MODELS: Record<FeatureType, string> = {
-  'fast-reply': DEFAULT_MODEL_ID,
-  'help-me': DEFAULT_MODEL_ID,
-  'fan-summary': DEFAULT_MODEL_ID,
-  'chat-review': DEFAULT_MODEL_ID,
-  'ping': DEFAULT_MODEL_ID,
-};
 
 export const MAX_TOKENS: Record<FeatureType, number> = {
   'fast-reply': 800,
