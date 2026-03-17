@@ -74,6 +74,21 @@ describe('logDebug', () => {
     expect(spy).toHaveBeenCalledWith('[ChatMuse] test', [{ authorization: '[REDACTED]' }]);
     spy.mockRestore();
   });
+
+  it('serializes Error instances and redacts secrets in error fields', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const error = new Error('request failed with sk-aw-secret');
+    error.stack = 'Error: request failed with sk-aw-secret\n    at example';
+    logDebug(true, 'test', { error });
+    expect(spy).toHaveBeenCalledWith('[ChatMuse] test', {
+      error: {
+        name: 'Error',
+        message: 'request failed with [REDACTED]',
+        stack: 'Error: request failed with [REDACTED]\n    at example',
+      },
+    });
+    spy.mockRestore();
+  });
 });
 
 describe('isDebugEnabled', () => {

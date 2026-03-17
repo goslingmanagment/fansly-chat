@@ -482,11 +482,73 @@ describe('ChatMuseContentApp', () => {
       error: {
         code: 'unknown_error',
         message: 'Network failed',
+        detail: 'Kiro: HTTP 502 (upstream unavailable).',
       },
     });
 
     expect(document.querySelector('.chatmuse-grid .chatmuse-inline-error')?.textContent).toContain('Network failed');
+    expect(document.querySelector('.chatmuse-inline-error-detail')?.textContent).toBe('Kiro: HTTP 502 (upstream unavailable).');
     expect(document.querySelector('.chatmuse-profiling-summary')?.textContent).toContain('Load messages');
+  });
+
+  it('keeps toast-only quick-feature errors on the generic message', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.lastFeature = 'fast-reply';
+    app.quickSurfaceEverOpened = false;
+    app.quickInlineVisible = false;
+    app.quickSurfaceMode = 'inline';
+
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: 'reply-op',
+      error: {
+        code: 'network_error',
+        message: 'Connection error. Check your internet connection.',
+        detail: 'Kiro: HTTP 502 (upstream unavailable).',
+      },
+    });
+
+    const toast = document.querySelector('.chatmuse-toast');
+    expect(toast?.textContent).toContain('Connection error. Check your internet connection.');
+    expect(toast?.textContent).not.toContain('Kiro: HTTP 502 (upstream unavailable).');
+  });
+
+  it('renders technical detail for compare card errors in the inline panel', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeCompareModel = createCompareModel({
+      operationId: 'compare-op',
+      activeCardId: 'current',
+    });
+    app.comparePanelVisible = true;
+    app.renderAll();
+
+    app.handleCompareCardError({
+      type: 'compare:cardError',
+      operationId: 'compare-op',
+      cardId: 'current',
+      error: {
+        code: 'network_error',
+        message: 'Connection error. Check your internet connection.',
+        detail: 'Kiro: HTTP 502 (upstream unavailable).',
+      },
+    });
+
+    expect(app.inlinePanel.root.querySelector('.chatmuse-inline-error')?.textContent).toContain(
+      'Connection error. Check your internet connection.',
+    );
+    expect(app.inlinePanel.root.querySelector('.chatmuse-inline-error-detail')?.textContent).toBe(
+      'Kiro: HTTP 502 (upstream unavailable).',
+    );
   });
 
   it('discards suppressed completion after route change instead of caching under new group', async () => {

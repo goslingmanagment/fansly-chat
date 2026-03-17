@@ -47,6 +47,15 @@ describe('toUserError', () => {
     expect(result.message).toContain('Kiro API key');
   });
 
+  it('preserves technical detail from custom ChatMuseError messages', () => {
+    const err = new ChatMuseError('network_error', 'Kiro: HTTP 502 (upstream unavailable).', undefined, false, 'kiro');
+    const result = toUserError(err);
+
+    expect(result.code).toBe('network_error');
+    expect(result.message).toBe('Connection error. Check your internet connection.');
+    expect(result.detail).toBe('Kiro: HTTP 502 (upstream unavailable).');
+  });
+
   it('returns unknown_error for non-ChatMuseError', () => {
     const result = toUserError(new Error('random'));
     expect(result.code).toBe('unknown_error');

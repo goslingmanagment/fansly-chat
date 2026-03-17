@@ -1342,6 +1342,7 @@ export class OperationCoordinator {
         systemBlocks,
         userBlocks,
         feature: payload.feature,
+        debugEnabled,
         signal,
         onText: (chunk: string) => {
           const current = this.getActive(tabId);

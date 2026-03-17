@@ -3,6 +3,7 @@ import {
   resolveClaudeProviderSettings,
 } from '../shared/claude-api.js';
 import { ChatMuseError } from '../shared/errors.js';
+import { logDebug } from '../shared/log.js';
 import type {
   AnthropicCacheCreationUsage,
   AnthropicUsageMetrics,
@@ -11,6 +12,9 @@ import type {
   PromptTextBlock,
 } from '../shared/types.js';
 
+const API_KEY_REGEX = /sk-(?:ant|aw)-[a-zA-Z0-9_-]+/g;
+const MAX_ERROR_DETAIL_LENGTH = 180;
+
 interface StreamArgs {
   provider: ClaudeProvider;
   apiKey: string;
@@ -18,9 +22,76 @@ interface StreamArgs {
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
   feature: FeatureType;
+  debugEnabled: boolean;
   signal: AbortSignal;
   onText: (text: string) => void;
   onUsage?: (usage: AnthropicUsageMetrics) => void;
+}
+
+interface ProviderErrorBody {
+  error?: { type?: string; message?: string };
+}
+
+function providerLabel(provider: ClaudeProvider): string {
+  return provider === 'kiro' ? 'Kiro' : 'Anthropic';
+}
+
+function sanitizeDiagnosticText(value: string): string {
+  return value
+    .replace(API_KEY_REGEX, '[REDACTED]')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function clipDiagnosticText(value: string): string {
+  return value.length <= MAX_ERROR_DETAIL_LENGTH
+    ? value
+    : `${value.slice(0, MAX_ERROR_DETAIL_LENGTH - 1).trimEnd()}…`;
+}
+
+function technicalDetail(provider: ClaudeProvider, summary: string): string {
+  return clipDiagnosticText(`${providerLabel(provider)}: ${sanitizeDiagnosticText(summary)}`);
+}
+
+function errorSummary(error: unknown): string {
+  if (error instanceof Error) {
+    const summary = error.message ? `${error.name}: ${error.message}` : error.name;
+    return sanitizeDiagnosticText(summary || 'Unknown error');
+  }
+
+  if (typeof error === 'string') {
+    return sanitizeDiagnosticText(error);
+  }
+
+  return 'Unknown error';
+}
+
+function responseDetail(
+  provider: ClaudeProvider,
+  status: number,
+  suffix?: string,
+): string {
+  const base = `HTTP ${status}`;
+  return technicalDetail(provider, suffix ? `${base} (${suffix}).` : `${base}.`);
+}
+
+function streamDetail(
+  provider: ClaudeProvider,
+  event: string,
+  errorType?: string,
+  errorMessage?: string,
+): string {
+  const detailParts = [sanitizeDiagnosticText(event)];
+  if (errorType) {
+    detailParts.push(sanitizeDiagnosticText(errorType));
+  }
+  if (errorMessage) {
+    detailParts.push(sanitizeDiagnosticText(errorMessage));
+  }
+  return technicalDetail(
+    provider,
+    `Stream error event: ${detailParts.filter(Boolean).join(' | ')}.`,
+  );
 }
 
 function parseSseBlock(block: string): { event: string; data: string } | null {
@@ -123,6 +194,7 @@ export class AnthropicClient {
     systemBlocks,
     userBlocks,
     feature,
+    debugEnabled,
     signal,
     onText,
     onUsage,
@@ -144,9 +216,19 @@ export class AnthropicClient {
       headers['anthropic-dangerous-direct-browser-access'] = 'true';
     }
 
+    const requestUrl = resolvedProvider.messagesUrl;
+    const requestHost = new URL(requestUrl).host;
+    const requestContext = {
+      provider,
+      requestUrl,
+      requestHost,
+      model,
+      feature,
+    };
+
     let response: Response;
     try {
-      response = await fetch(resolvedProvider.messagesUrl, {
+      response = await fetch(requestUrl, {
         method: 'POST',
         headers,
         signal,
@@ -158,36 +240,117 @@ export class AnthropicClient {
           messages: [{ role: 'user', content: userBlocks }],
         }),
       });
-    } catch {
-      throw new ChatMuseError('network_error');
+    } catch (error) {
+      logDebug(debugEnabled, 'claude request failed', {
+        ...requestContext,
+        error,
+      });
+      throw new ChatMuseError(
+        'network_error',
+        technicalDetail(provider, `Request failed before a response was received (${errorSummary(error)}).`),
+        undefined,
+        false,
+        provider,
+      );
     }
 
     if (response.status === 401 || response.status === 403) {
-      throw new ChatMuseError('invalid_api_key', undefined, undefined, false, provider);
+      logDebug(debugEnabled, 'claude response error', {
+        ...requestContext,
+        status: response.status,
+        statusText: response.statusText,
+      });
+      throw new ChatMuseError(
+        'invalid_api_key',
+        responseDetail(provider, response.status),
+        undefined,
+        false,
+        provider,
+      );
     }
     if (response.status === 429 || response.status >= 500) {
-      throw new ChatMuseError('claude_overloaded');
+      logDebug(debugEnabled, 'claude response error', {
+        ...requestContext,
+        status: response.status,
+        statusText: response.statusText,
+      });
+      throw new ChatMuseError(
+        'claude_overloaded',
+        responseDetail(provider, response.status),
+        undefined,
+        false,
+        provider,
+      );
     }
     if (response.status === 400) {
+      let body: ProviderErrorBody | null = null;
+      let bodyParseError: unknown;
       try {
-        const body = await response.json() as { error?: { type?: string; message?: string } };
-        const errType = body?.error?.type ?? '';
-        const errMsg = body?.error?.message?.toLowerCase() ?? '';
-        if (
-          errType === 'not_found_error' ||
-          errMsg.includes('not found') ||
-          errMsg.includes('does not exist') ||
-          errMsg.includes('deprecated')
-        ) {
-          throw new ChatMuseError('model_unavailable');
-        }
-      } catch (e) {
-        if (e instanceof ChatMuseError) throw e;
+        body = await response.json() as ProviderErrorBody;
+      } catch (error) {
+        bodyParseError = error;
       }
-      throw new ChatMuseError('unknown_error');
+
+      const errType = body?.error?.type ?? '';
+      const errMsg = body?.error?.message?.toLowerCase() ?? '';
+      const diagnosticSuffix = [errType, body?.error?.message]
+        .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+        .map((part) => sanitizeDiagnosticText(part))
+        .join(' | ');
+
+      logDebug(debugEnabled, 'claude response error', {
+        ...requestContext,
+        status: response.status,
+        statusText: response.statusText,
+        providerErrorType: errType || undefined,
+        providerErrorMessage: body?.error?.message ? sanitizeDiagnosticText(body.error.message) : undefined,
+        bodyParseError,
+      });
+
+      if (
+        errType === 'not_found_error' ||
+        errMsg.includes('not found') ||
+        errMsg.includes('does not exist') ||
+        errMsg.includes('deprecated')
+      ) {
+        throw new ChatMuseError(
+          'model_unavailable',
+          responseDetail(provider, response.status, diagnosticSuffix || `model ${model} is unavailable`),
+          undefined,
+          false,
+          provider,
+        );
+      }
+
+      if (bodyParseError) {
+        throw new ChatMuseError(
+          'unknown_error',
+          technicalDetail(provider, 'HTTP 400 response body could not be parsed.'),
+          undefined,
+          false,
+          provider,
+        );
+      }
+
+      throw new ChatMuseError(
+        'unknown_error',
+        responseDetail(provider, response.status, diagnosticSuffix || 'request rejected'),
+        undefined,
+        false,
+        provider,
+      );
     }
     if (!response.ok || !response.body) {
-      throw new ChatMuseError('network_error');
+      logDebug(debugEnabled, 'claude response error', {
+        ...requestContext,
+        status: response.status,
+        statusText: response.statusText,
+        hasBody: Boolean(response.body),
+      });
+      const detail = !response.body
+        ? responseDetail(provider, response.status, 'no streaming body')
+        : responseDetail(provider, response.status);
+      throw new ChatMuseError('network_error', detail, undefined, false, provider);
     }
 
     const decoder = new TextDecoder();
@@ -213,7 +376,7 @@ export class AnthropicClient {
           message?: { usage?: Partial<AnthropicUsageMetrics> };
           usage?: Partial<AnthropicUsageMetrics>;
           delta?: { type?: string; text?: string };
-          error?: { type?: string };
+          error?: { type?: string; message?: string };
         };
         try {
           payload = JSON.parse(parsed.data) as typeof payload;
@@ -222,7 +385,21 @@ export class AnthropicClient {
         }
 
         if (parsed.event === 'error' || payload.type === 'error') {
-          throw new ChatMuseError('claude_overloaded');
+          logDebug(debugEnabled, 'claude stream error', {
+            ...requestContext,
+            sseEvent: parsed.event,
+            providerErrorType: payload.error?.type,
+            providerErrorMessage: payload.error?.message
+              ? sanitizeDiagnosticText(payload.error.message)
+              : undefined,
+          });
+          throw new ChatMuseError(
+            'claude_overloaded',
+            streamDetail(provider, parsed.event, payload.error?.type, payload.error?.message),
+            undefined,
+            false,
+            provider,
+          );
         }
 
         if (parsed.event === 'message_start') {

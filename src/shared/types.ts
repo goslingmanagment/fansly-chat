@@ -455,6 +455,7 @@ export type UserErrorCode =
 export interface UserFacingError {
   code: UserErrorCode;
   message: string;
+  detail?: string;
   settingsLink?: boolean;
 }
 
