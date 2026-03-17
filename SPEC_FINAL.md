@@ -33,8 +33,7 @@ Minimum required permissions (shown to user at install time):
 - `unlimitedStorage` — to avoid quota limits with accumulated fan summaries
 - `webRequest` — for intercepting Fansly authentication headers
 - `tabs` — for tab-to-account identity mapping
-- Host permissions: `*://fansly.com/*` (content script injection), `*://apiv3.fansly.com/*`, `*://api.anthropic.com/*`
-- Optional host permissions: user-granted access for a custom Anthropic-compatible Claude proxy origin
+- Host permissions: `*://fansly.com/*` (content script injection), `*://apiv3.fansly.com/*`, `*://api.anthropic.com/*`, `*://api.kiro.cheap/*`
 
 ---
 
@@ -273,7 +272,7 @@ Five buttons injected into the Fansly chat interface, positioned between the mes
 
 **One operation at a time:** Only one AI operation can run per tab. If the chatter clicks a button while another operation is running, it is blocked with a message: "Another operation is already in progress."
 
-**First-time error cascade:** When a button is clicked and prerequisites are missing, the extension checks in order and shows the first applicable error with a link to Settings: (1) Claude API key not set, (2) no model personalities configured, (3) no personality mapped for this account.
+**First-time error cascade:** When a button is clicked and prerequisites are missing, the extension checks in order and shows the first applicable error with a link to Settings: (1) selected provider API key not set, (2) no model personalities configured, (3) no personality mapped for this account.
 
 ### 3.3 Reply Preview Overlay
 
@@ -450,8 +449,11 @@ If a chatter logs out and into a different account in the same tab, the mapping 
 Accessible from the toolbar popup. Contains:
 
 **API Configuration:**
-- **Claude API key** — password input field with show/hide toggle.
-- **Claude API Base URL** — optional text field for an Anthropic-compatible proxy base URL; blank uses direct Anthropic. Trailing slashes are stripped. Non-Anthropic hosts require a user-granted access prompt in Settings.
+- **Provider** — select between `Anthropic` and `Kiro`.
+- **Anthropic API key** — password input field with show/hide toggle, shown when provider = `Anthropic`.
+- **Kiro API key** — password input field with show/hide toggle, shown when provider = `Kiro`.
+- Kiro uses the hardcoded Anthropic-compatible base URL `https://api.kiro.cheap/v1`.
+- No manual base URL entry or `Grant access` prompt is exposed in Settings.
 
 **Message Counts:**
 - **Quick features** (Fast Reply, Help Me, Ping) — numeric input, default 100, range 5–200.
@@ -475,13 +477,15 @@ Accessible from the toolbar popup. Contains:
 
 **Debug Mode:**
 - Toggle (default off). When enabled, the extension logs detailed information to the browser console: API requests and responses (with secrets redacted), message parsing steps, operation timings, and errors. When disabled, the extension is silent. Useful for troubleshooting — ask the chatter to enable debug mode and screenshot the console. One debug level only for v1 (no verbose/trace sub-levels).
-- **Redacted fields:** The `authorization` header and the Claude API key must be replaced with `[REDACTED]` in all debug output. Message content and personality text may be logged in debug mode, as the chatter already has access to this data.
+- **Redacted fields:** The `authorization` header plus Anthropic, Kiro, and legacy Claude API key fields must be replaced with `[REDACTED]` in all debug output. Message content and personality text may be logged in debug mode, as the chatter already has access to this data.
 
 ### 6.2 Defaults
 
 | Setting | Default |
 |---------|---------|
-| Claude API key | Empty (must be set before extension works) |
+| Claude provider | `anthropic` |
+| Anthropic API key | Empty |
+| Kiro API key | Empty |
 | Quick feature message count | 100 |
 | Deep feature message count | 500 |
 | Claude model | Hardcoded to Claude Sonnet (not configurable) |
@@ -493,9 +497,11 @@ All persistent data is stored in `browser.storage.local` under the following sch
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 5,
   "settings": {
-    "claudeApiKey": "sk-ant-...",
+    "claudeProvider": "anthropic",
+    "anthropicApiKey": "sk-ant-...",
+    "kiroApiKey": "",
     "quickMessageCount": 100,
     "deepMessageCount": 500,
     "debugMode": false
@@ -569,7 +575,7 @@ If the chatter triggers an AI action but no session exists for the current tab's
 **Architecture (required):**
 
 - All Fansly API and Claude API calls are made from the background script.
-- The Claude API key and Fansly session headers must not be exposed to content scripts or page context. Extension pages (popup, options) may access `browser.storage.local` directly — they run in the same privileged extension context as background.
+- Anthropic/Kiro API keys and Fansly session headers must not be exposed to content scripts or page context. Extension pages (popup, options) may access `browser.storage.local` directly — they run in the same privileged extension context as background.
 - The content script communicates with the background script via `browser.runtime` messaging.
 - Streaming AI responses use a `Port`-based connection (`browser.runtime.connect`) to avoid per-chunk serialization overhead.
 
@@ -758,8 +764,10 @@ Prerequisite checks for first-time setup are evaluated in strict order: API key 
 | Session expired | "Fansly session expired. Continue browsing Fansly to reconnect automatically." |
 | Fansly API error (server issue) | "Fansly server error. Please try again." |
 | Earnings stats unavailable | No chatter-facing error; continue with transcript-only context. |
-| Claude API key not set | "Claude API key not configured. Go to Settings to add it." |
-| Claude API key invalid | "Invalid Claude API key. Check your key in Settings." |
+| Anthropic API key not set | "Anthropic API key not configured. Go to Settings to add it." |
+| Anthropic API key invalid | "Invalid Anthropic API key. Check your key in Settings." |
+| Kiro API key not set | "Kiro API key not configured. Go to Settings to add it." |
+| Kiro API key invalid | "Invalid Kiro API key. Check your key in Settings." |
 | Claude API overloaded | "Claude is currently busy. Please try again shortly." |
 | No messages + feature requires minimum | "Not enough conversation history for this feature (at least 30 messages needed)." |
 | Another operation in progress | "Another operation is already in progress." |
@@ -812,13 +820,13 @@ All other features always use fresh data.
 
 The extension communicates with two external services:
 - **Fansly API** — to load conversation history and fan spending statistics (using the chatter's existing Fansly session)
-- **Claude API (Anthropic or compatible proxy)** — to generate AI responses (conversation transcripts, model personality content, and fan spending context are sent to Anthropic or a user-configured Anthropic-compatible proxy for processing)
+- **Claude API providers (Anthropic or Kiro)** — to generate AI responses (conversation transcripts, model personality content, and fan spending context are sent directly to Anthropic or to Kiro's Anthropic-compatible API at `https://api.kiro.cheap/v1`)
 
 Sensitive secrets handling:
-- Session headers and Claude API key must never appear in UI text, console logs, or inter-component messages.
+- Session headers and Anthropic/Kiro API keys must never appear in UI text, console logs, or inter-component messages.
 - Only derived, non-secret state may be exposed (for example: connected/disconnected status, feature progress, error category).
 
-No agency-owned backend is used; required data is sent directly to Fansly and Anthropic APIs or to a user-configured Anthropic-compatible proxy. All configuration data (settings, cached summaries, model personalities, account mappings) is stored locally in the browser. Conversation data sent to Claude is subject to the selected provider's data handling policies.
+No agency-owned backend is used; required data is sent directly to Fansly plus the selected Claude provider API. Anthropic uses `https://api.anthropic.com/v1`; Kiro uses the Anthropic-compatible `https://api.kiro.cheap/v1`. All configuration data (settings, cached summaries, model personalities, account mappings) is stored locally in the browser. Conversation data sent to Claude is subject to the selected provider's data handling policies.
 
 ---
 
@@ -923,7 +931,7 @@ Technical choices resolved before development. 41 normalized decisions covering 
 | 34 | Escape order | `&` → `<` → `>` | §8.3: order matters |
 | 35 | Safety preamble | `system` parameter | Same placement as #23 |
 | 36 | Debug mode | One level (on/off) | §6.1: "one debug level only for v1" |
-| 37 | Secrets redaction | All session headers + Claude API key | §10.5: "must never appear in logs" |
+| 37 | Secrets redaction | All session headers + Anthropic/Kiro API keys | §10.5: "must never appear in logs" |
 
 ### Implementation Sequence
 

@@ -183,8 +183,9 @@ describe('OperationCoordinator', () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: {
-        claudeApiKey: 'sk-test',
-        claudeApiBaseUrl: '',
+        claudeProvider: 'anthropic',
+        anthropicApiKey: 'sk-ant-test',
+        kiroApiKey: '',
         quickMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
@@ -540,6 +541,37 @@ describe('OperationCoordinator', () => {
     );
   });
 
+  it('passes the selected Kiro provider and key to streamMessage for operations', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      claudeProvider: 'kiro',
+      anthropicApiKey: 'sk-ant-unused',
+      kiroApiKey: 'sk-aw-live',
+    };
+
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Kiro reply',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kiro',
+        apiKey: 'sk-aw-live',
+      }),
+    );
+  });
+
   it('returns compare_cards_unavailable when compare has fewer than two cards', async () => {
     await mockCompareCards([
       {
@@ -571,6 +603,55 @@ describe('OperationCoordinator', () => {
 
     expect(errorMessage?.error.code).toBe('compare_cards_unavailable');
     expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('passes the selected Kiro provider and key to compare card requests', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      claudeProvider: 'kiro',
+      anthropicApiKey: 'sk-ant-unused',
+      kiroApiKey: 'sk-aw-live',
+    };
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
+        onText('Reply');
+        return 'Reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    for (const [call] of anthropicClient.streamMessage.mock.calls) {
+      expect(call).toEqual(expect.objectContaining({
+        provider: 'kiro',
+        apiKey: 'sk-aw-live',
+      }));
+    }
   });
 
   it('runs compare cards with one shared prep pass and the fast-reply model for each card', async () => {

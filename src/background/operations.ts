@@ -12,6 +12,10 @@ import {
   monthWindowMs,
 } from '../shared/earnings.js';
 import {
+  hasClaudeApiKey,
+  resolveClaudeProviderSettings,
+} from '../shared/claude-api.js';
+import {
   getCompareDraftCount,
   resolveMappedPersonalityId,
 } from '../shared/compare-cards.js';
@@ -348,7 +352,8 @@ export class OperationCoordinator {
       accountId,
       groupId: context.groupId,
       connected: Boolean(session?.connected),
-      hasApiKey: Boolean(storage.settings.claudeApiKey),
+      claudeProvider: storage.settings.claudeProvider,
+      hasApiKey: hasClaudeApiKey(storage.settings),
       hasPersonalities: storage.personalities.length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
@@ -466,9 +471,10 @@ export class OperationCoordinator {
 
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
+    const resolvedProvider = resolveClaudeProviderSettings(storage.settings);
 
-    if (!storage.settings.claudeApiKey) {
-      throw new ChatMuseError('missing_api_key');
+    if (!resolvedProvider.apiKey) {
+      throw new ChatMuseError('missing_api_key', undefined, undefined, false, resolvedProvider.provider);
     }
     if (storage.personalities.length === 0) {
       throw new ChatMuseError('no_personalities');
@@ -1307,6 +1313,7 @@ export class OperationCoordinator {
       sendDebugProgress();
 
       let actualModel = resolvedModel;
+      const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
       let latestAnthropicSpend: AnthropicSpendSummary | null = null;
       const handleAnthropicUsage = (
         usage: AnthropicUsageMetrics,
@@ -1329,8 +1336,8 @@ export class OperationCoordinator {
       };
 
       const streamArgs = {
-        apiKey: validated.storage.settings.claudeApiKey,
-        apiBaseUrl: validated.storage.settings.claudeApiBaseUrl,
+        provider: resolvedProvider.provider,
+        apiKey: resolvedProvider.apiKey,
         model: actualModel,
         systemBlocks,
         userBlocks,

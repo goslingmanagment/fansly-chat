@@ -13,8 +13,9 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeApiKey: 'sk-test',
-      claudeApiBaseUrl: '',
+      claudeProvider: 'anthropic',
+      anthropicApiKey: 'sk-ant-test',
+      kiroApiKey: '',
       quickMessageCount: 30,
       deepMessageCount: 200,
       debugMode: false,

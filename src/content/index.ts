@@ -12,6 +12,7 @@ import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import { ToastController } from './toast.js';
+import { getMissingApiKeyMessage } from '../shared/claude-api.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
@@ -418,7 +419,7 @@ export class ChatMuseContentApp {
     }
 
     if (!this.tabState.hasApiKey) {
-      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
+      this.toast.show(getMissingApiKeyMessage(this.tabState.claudeProvider), {
         actionLabel: 'Settings',
         onAction: () => { void browser.runtime.openOptionsPage(); },
       });
@@ -505,7 +506,7 @@ export class ChatMuseContentApp {
       return;
     }
     if (!this.tabState.hasApiKey) {
-      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
+      this.toast.show(getMissingApiKeyMessage(this.tabState.claudeProvider), {
         actionLabel: 'Settings',
         onAction: () => { void browser.runtime.openOptionsPage(); },
       });

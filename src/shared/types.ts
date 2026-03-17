@@ -1,6 +1,7 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
 export type FeatureType = 'fast-reply' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping';
+export type ClaudeProvider = 'anthropic' | 'kiro';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers';
@@ -12,8 +13,9 @@ export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
 export interface Settings {
-  claudeApiKey: string;
-  claudeApiBaseUrl: string;
+  claudeProvider: ClaudeProvider;
+  anthropicApiKey: string;
+  kiroApiKey: string;
   quickMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
@@ -446,7 +448,6 @@ export type UserErrorCode =
   | 'chat_changed'
   | 'extension_reloaded'
   | 'model_unavailable'
-  | 'proxy_access_not_granted'
   | 'compare_cards_unavailable'
   | 'insertion_failed'
   | 'unknown_error';
@@ -522,6 +523,7 @@ export interface TabUiState {
   accountId: string | null;
   groupId: string | null;
   connected: boolean;
+  claudeProvider: ClaudeProvider;
   hasApiKey: boolean;
   hasPersonalities: boolean;
   mappedPersonalityId: string | null;

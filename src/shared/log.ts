@@ -1,7 +1,14 @@
 import type { SessionTemplate, Settings } from './types.js';
 
-const SENSITIVE_KEY_PATTERNS = ['authorization', 'claudeapikey', 'fanslyclient', 'fanslysession'];
-const API_KEY_REGEX = /sk-ant-[a-zA-Z0-9_-]+/g;
+const SENSITIVE_KEY_PATTERNS = [
+  'authorization',
+  'claudeapikey',
+  'anthropicapikey',
+  'kiroapikey',
+  'fanslyclient',
+  'fanslysession',
+];
+const API_KEY_REGEX = /sk-(?:ant|aw)-[a-zA-Z0-9_-]+/g;
 
 function redactValue(value: unknown): unknown {
   if (typeof value === 'string') {

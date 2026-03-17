@@ -8,13 +8,18 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
-import { normalizeClaudeApiBaseUrl } from './claude-api.js';
+import { normalizeClaudeProvider } from './claude-api.js';
 import {
   collectAliasKeysForCanonical,
   resolveCanonicalAccountId,
 } from './account-aliases.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
 import type { FeatureType, PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
+
+type LegacySettingsInput = Partial<Settings> & {
+  claudeApiKey?: unknown;
+  claudeApiBaseUrl?: unknown;
+};
 
 function isSummaryKey(key: string): key is `summary:${string}` {
   return key.startsWith(SUMMARY_CACHE_PREFIX);
@@ -36,7 +41,7 @@ export async function loadStorageState(): Promise<PersistedState> {
   return state;
 }
 
-export function sanitizeSettings(input: Partial<Settings>): Settings {
+export function sanitizeSettings(input: LegacySettingsInput): Settings {
   const defaults = createDefaultSettings();
   const rawQuick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
   const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
@@ -55,10 +60,9 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   }
 
   return {
-    claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
-    claudeApiBaseUrl: normalizeClaudeApiBaseUrl(
-      String(input.claudeApiBaseUrl ?? defaults.claudeApiBaseUrl),
-    ),
+    claudeProvider: normalizeClaudeProvider(String(input.claudeProvider ?? defaults.claudeProvider)),
+    anthropicApiKey: String(input.anthropicApiKey ?? input.claudeApiKey ?? defaults.anthropicApiKey).trim(),
+    kiroApiKey: String(input.kiroApiKey ?? defaults.kiroApiKey).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),

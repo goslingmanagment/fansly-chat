@@ -83,7 +83,9 @@ describe('migrateState', () => {
     };
     const result = migrateState(legacy);
     expect(result.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
-    expect(result.settings.claudeApiKey).toBe('sk-test');
+    expect(result.settings.claudeProvider).toBe('anthropic');
+    expect(result.settings.anthropicApiKey).toBe('sk-test');
+    expect(result.settings.kiroApiKey).toBe('');
     expect(result.settings.debugMode).toBe(true);
     expect(result.personalities).toHaveLength(1);
     expect(result.personalities[0]!.name).toBe('Legacy');
@@ -94,9 +96,24 @@ describe('migrateState', () => {
   it('fills in default settings for missing fields during migration', () => {
     const partial = { schemaVersion: 0, settings: { claudeApiKey: 'key' } };
     const result = migrateState(partial);
-    expect(result.settings.claudeApiKey).toBe('key');
+    expect(result.settings.claudeProvider).toBe('anthropic');
+    expect(result.settings.anthropicApiKey).toBe('key');
+    expect(result.settings.kiroApiKey).toBe('');
     expect(result.settings.quickMessageCount).toBe(createDefaultSettings().quickMessageCount);
     expect(result.settings.deepMessageCount).toBe(createDefaultSettings().deepMessageCount);
+  });
+
+  it('drops legacy claudeApiBaseUrl during migration', () => {
+    const result = migrateState({
+      schemaVersion: 0,
+      settings: {
+        claudeApiKey: 'sk-test',
+        claudeApiBaseUrl: 'https://api.kiro.cheap/v1',
+      },
+    });
+
+    expect(result.settings.anthropicApiKey).toBe('sk-test');
+    expect((result.settings as unknown as Record<string, unknown>).claudeApiBaseUrl).toBeUndefined();
   });
 
   it('populates featureModels with defaults when migrating from schema 1', () => {
@@ -148,13 +165,14 @@ describe('sanitizeSettings', () => {
 
   it('trims API key', () => {
     const result = storage.sanitizeSettings({ claudeApiKey: '  sk-test  ' });
-    expect(result.claudeApiKey).toBe('sk-test');
+    expect(result.anthropicApiKey).toBe('sk-test');
   });
 
   it('fills defaults for missing fields', () => {
     const result = storage.sanitizeSettings({});
-    expect(result.claudeApiKey).toBe('');
-    expect(result.claudeApiBaseUrl).toBe('');
+    expect(result.claudeProvider).toBe('anthropic');
+    expect(result.anthropicApiKey).toBe('');
+    expect(result.kiroApiKey).toBe('');
     expect(result.debugMode).toBe(false);
     expect(result.promptCachingEnabled).toBe(true);
   });
@@ -164,6 +182,7 @@ describe('sanitizeSettings', () => {
       claudeApiKey: 'sk-test',
       debugMode: false,
     });
+    expect(result.anthropicApiKey).toBe('sk-test');
     expect(result.promptCachingEnabled).toBe(true);
   });
 
@@ -174,11 +193,20 @@ describe('sanitizeSettings', () => {
     expect(result.promptCachingEnabled).toBe(false);
   });
 
-  it('normalizes Claude API base URLs by trimming and removing trailing slashes', () => {
+  it('trims separate Anthropic and Kiro keys', () => {
     const result = storage.sanitizeSettings({
-      claudeApiBaseUrl: ' https://api.kiro.cheap/v1// ',
+      anthropicApiKey: '  sk-ant-test  ',
+      kiroApiKey: '  sk-aw-test  ',
     });
-    expect(result.claudeApiBaseUrl).toBe('https://api.kiro.cheap/v1');
+    expect(result.anthropicApiKey).toBe('sk-ant-test');
+    expect(result.kiroApiKey).toBe('sk-aw-test');
+  });
+
+  it('defaults provider to anthropic for invalid input', () => {
+    const result = storage.sanitizeSettings({
+      claudeProvider: 'unknown-provider' as 'anthropic',
+    });
+    expect(result.claudeProvider).toBe('anthropic');
   });
 
   it('defaults featureModels when missing from input', () => {

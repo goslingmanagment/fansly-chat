@@ -39,6 +39,14 @@ describe('toUserError', () => {
     expect(result.message).toContain('API key');
   });
 
+  it('maps provider-aware API key errors', () => {
+    const err = new ChatMuseError('invalid_api_key', undefined, undefined, false, 'kiro');
+    const result = toUserError(err);
+
+    expect(result.code).toBe('invalid_api_key');
+    expect(result.message).toContain('Kiro API key');
+  });
+
   it('returns unknown_error for non-ChatMuseError', () => {
     const result = toUserError(new Error('random'));
     expect(result.code).toBe('unknown_error');
@@ -57,5 +65,10 @@ describe('getErrorMessage', () => {
 
   it('returns settingsLink for no_mapping', () => {
     expect(getErrorMessage('no_mapping').settingsLink).toBe(true);
+  });
+
+  it('returns provider-aware missing key copy', () => {
+    expect(getErrorMessage('missing_api_key', 'anthropic').message).toContain('Anthropic API key');
+    expect(getErrorMessage('missing_api_key', 'kiro').message).toContain('Kiro API key');
   });
 });

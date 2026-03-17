@@ -12,10 +12,8 @@
   "host_permissions": [
     "*://fansly.com/*",
     "*://apiv3.fansly.com/*",
-    "*://api.anthropic.com/*"
-  ],
-  "optional_host_permissions": [
-    "*://*/*"
+    "*://api.anthropic.com/*",
+    "*://api.kiro.cheap/*"
   ],
   "background": {
     "scripts": ["background.js"]

@@ -1,19 +1,28 @@
-import type { FanslyApiErrorDetails, UserErrorCode, UserFacingError } from './types.js';
+import { getInvalidApiKeyMessage, getMissingApiKeyMessage, normalizeClaudeProvider } from './claude-api.js';
+import type { ClaudeProvider, FanslyApiErrorDetails, UserErrorCode, UserFacingError } from './types.js';
 
 export class ChatMuseError extends Error {
   readonly code: UserErrorCode;
   readonly details?: FanslyApiErrorDetails;
   readonly isOptional: boolean;
+  readonly provider?: ClaudeProvider;
 
-  constructor(code: UserErrorCode, message?: string, details?: FanslyApiErrorDetails, isOptional = false) {
+  constructor(
+    code: UserErrorCode,
+    message?: string,
+    details?: FanslyApiErrorDetails,
+    isOptional = false,
+    provider?: ClaudeProvider,
+  ) {
     super(message ?? code);
     this.code = code;
     this.details = details;
     this.isOptional = isOptional;
+    this.provider = provider ? normalizeClaudeProvider(provider) : undefined;
   }
 }
 
-const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
+const STATIC_ERROR_MESSAGES: Record<Exclude<UserErrorCode, 'missing_api_key' | 'invalid_api_key'>, UserFacingError> = {
   not_connected: {
     code: 'not_connected',
     message: 'Not connected to Fansly. Browse Fansly to establish a connection.',
@@ -25,16 +34,6 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
   fansly_server_error: {
     code: 'fansly_server_error',
     message: 'Fansly server error. Please try again.',
-  },
-  missing_api_key: {
-    code: 'missing_api_key',
-    message: 'Claude API key not configured. Go to Settings to add it.',
-    settingsLink: true,
-  },
-  invalid_api_key: {
-    code: 'invalid_api_key',
-    message: 'Invalid Claude API key. Check your key in Settings.',
-    settingsLink: true,
   },
   claude_overloaded: {
     code: 'claude_overloaded',
@@ -83,11 +82,6 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
     message: 'Selected Claude model is unavailable. Check your model settings.',
     settingsLink: true,
   },
-  proxy_access_not_granted: {
-    code: 'proxy_access_not_granted',
-    message: 'Proxy access not granted. Go to Settings and click Grant access for the Claude API Base URL.',
-    settingsLink: true,
-  },
   compare_cards_unavailable: {
     code: 'compare_cards_unavailable',
     message: 'Compare needs at least two model cards. Add files in prompts/drafts or map a personality.',
@@ -102,17 +96,40 @@ const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
   },
 };
 
-export function toUserError(error: unknown): UserFacingError {
-  if (error instanceof ChatMuseError) {
-    return ERROR_MESSAGES[error.code];
+export function getErrorMessage(
+  code: UserErrorCode,
+  provider: ClaudeProvider = 'anthropic',
+): UserFacingError {
+  if (code === 'missing_api_key') {
+    return {
+      code,
+      message: getMissingApiKeyMessage(provider),
+      settingsLink: true,
+    };
   }
-  const code = (error as { code?: string })?.code;
-  if (typeof code === 'string' && code in ERROR_MESSAGES) {
-    return ERROR_MESSAGES[code as UserErrorCode];
+
+  if (code === 'invalid_api_key') {
+    return {
+      code,
+      message: getInvalidApiKeyMessage(provider),
+      settingsLink: true,
+    };
   }
-  return ERROR_MESSAGES.unknown_error;
+
+  return STATIC_ERROR_MESSAGES[code];
 }
 
-export function getErrorMessage(code: UserErrorCode): UserFacingError {
-  return ERROR_MESSAGES[code];
+export function toUserError(error: unknown): UserFacingError {
+  if (error instanceof ChatMuseError) {
+    return getErrorMessage(error.code, error.provider ?? 'anthropic');
+  }
+  const code = (error as { code?: string })?.code;
+  const provider = normalizeClaudeProvider((error as { provider?: string | null | undefined })?.provider);
+  if (
+    typeof code === 'string' &&
+    (code === 'missing_api_key' || code === 'invalid_api_key' || code in STATIC_ERROR_MESSAGES)
+  ) {
+    return getErrorMessage(code as UserErrorCode, provider);
+  }
+  return STATIC_ERROR_MESSAGES.unknown_error;
 }
