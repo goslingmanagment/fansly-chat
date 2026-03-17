@@ -154,6 +154,7 @@ describe('sanitizeSettings', () => {
   it('fills defaults for missing fields', () => {
     const result = storage.sanitizeSettings({});
     expect(result.claudeApiKey).toBe('');
+    expect(result.claudeApiBaseUrl).toBe('');
     expect(result.debugMode).toBe(false);
     expect(result.promptCachingEnabled).toBe(true);
   });
@@ -171,6 +172,13 @@ describe('sanitizeSettings', () => {
       promptCachingEnabled: false,
     });
     expect(result.promptCachingEnabled).toBe(false);
+  });
+
+  it('normalizes Claude API base URLs by trimming and removing trailing slashes', () => {
+    const result = storage.sanitizeSettings({
+      claudeApiBaseUrl: ' https://api.kiro.cheap/v1// ',
+    });
+    expect(result.claudeApiBaseUrl).toBe('https://api.kiro.cheap/v1');
   });
 
   it('defaults featureModels when missing from input', () => {

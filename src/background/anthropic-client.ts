@@ -1,4 +1,10 @@
-import { ANTHROPIC_VERSION, CLAUDE_API_URL, MAX_TOKENS } from '../shared/constants.js';
+import { ANTHROPIC_VERSION, MAX_TOKENS } from '../shared/constants.js';
+import {
+  buildClaudeApiMessagesUrl,
+  hasClaudeApiPermission,
+  isDirectAnthropicApiBaseUrl,
+  resolveClaudeApiBaseUrl,
+} from '../shared/claude-api.js';
 import { ChatMuseError } from '../shared/errors.js';
 import type {
   AnthropicCacheCreationUsage,
@@ -9,6 +15,7 @@ import type {
 
 interface StreamArgs {
   apiKey: string;
+  apiBaseUrl: string;
   model: string;
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
@@ -113,6 +120,7 @@ function usageEquals(
 export class AnthropicClient {
   async streamMessage({
     apiKey,
+    apiBaseUrl,
     model,
     systemBlocks,
     userBlocks,
@@ -123,23 +131,37 @@ export class AnthropicClient {
   }: StreamArgs): Promise<string> {
     let rawText = '';
     let usage: AnthropicUsageMetrics | null = null;
-    const response = await fetch(CLAUDE_API_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      signal,
-      body: JSON.stringify({
-        model,
-        stream: true,
-        max_tokens: MAX_TOKENS[feature],
-        system: systemBlocks,
-        messages: [{ role: 'user', content: userBlocks }],
-      }),
-    });
+    const resolvedApiBaseUrl = resolveClaudeApiBaseUrl(apiBaseUrl);
+    if (!(await hasClaudeApiPermission(resolvedApiBaseUrl))) {
+      throw new ChatMuseError('proxy_access_not_granted');
+    }
+
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+    };
+    if (isDirectAnthropicApiBaseUrl(resolvedApiBaseUrl)) {
+      headers['anthropic-dangerous-direct-browser-access'] = 'true';
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(buildClaudeApiMessagesUrl(resolvedApiBaseUrl), {
+        method: 'POST',
+        headers,
+        signal,
+        body: JSON.stringify({
+          model,
+          stream: true,
+          max_tokens: MAX_TOKENS[feature],
+          system: systemBlocks,
+          messages: [{ role: 'user', content: userBlocks }],
+        }),
+      });
+    } catch {
+      throw new ChatMuseError('network_error');
+    }
 
     if (response.status === 401 || response.status === 403) {
       throw new ChatMuseError('invalid_api_key');

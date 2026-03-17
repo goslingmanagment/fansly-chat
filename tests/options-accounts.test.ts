@@ -14,6 +14,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      claudeApiBaseUrl: '',
       quickMessageCount: 30,
       deepMessageCount: 200,
       debugMode: false,
@@ -92,6 +93,10 @@ async function loadOptionsPage(options: {
         return currentSessions;
       }),
       openOptionsPage: vi.fn(async () => undefined),
+    },
+    permissions: {
+      contains: vi.fn(async () => true),
+      request: vi.fn(async () => true),
     },
   };
 

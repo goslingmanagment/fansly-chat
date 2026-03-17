@@ -941,6 +941,7 @@ export async function executeCompare(
         actualModel = model;
         return context.anthropicClient.streamMessage({
           apiKey: validated.storage.settings.claudeApiKey,
+          apiBaseUrl: validated.storage.settings.claudeApiBaseUrl,
           model,
           systemBlocks,
           userBlocks,

@@ -24,6 +24,7 @@ function mockFetchResponse(status: number, body?: unknown, options?: { bodyStrea
 function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('../src/background/anthropic-client.js').AnthropicClient>['streamMessage']>[0]>) {
   return {
     apiKey: 'sk-test',
+    apiBaseUrl: '',
     model: 'claude-sonnet-4-20250514',
     systemBlocks: [
       { type: 'text' as const, text: 'system prefix\n\n' },
@@ -56,9 +57,17 @@ function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('.
 
 // Dynamic import to pick up stubbed fetch
 let AnthropicClient: typeof import('../src/background/anthropic-client.js').AnthropicClient;
+let permissionsContainsMock: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   vi.resetModules();
+  permissionsContainsMock = vi.fn(async () => true);
+  vi.stubGlobal('browser', {
+    permissions: {
+      contains: permissionsContainsMock,
+      request: vi.fn(async () => true),
+    },
+  });
   const mod = await import('../src/background/anthropic-client.js');
   AnthropicClient = mod.AnthropicClient;
 });
@@ -164,6 +173,7 @@ describe('AnthropicClient streaming requests', () => {
     await client.streamMessage(streamArgs());
 
     const fetchMock = vi.mocked(fetch);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.anthropic.com/v1/messages');
     const request = fetchMock.mock.calls[0]?.[1];
     const headers = request?.headers as Record<string, string>;
     const body = JSON.parse(String(request?.body)) as {
@@ -183,6 +193,37 @@ describe('AnthropicClient streaming requests', () => {
         content: streamArgs().userBlocks,
       },
     ]);
+  });
+
+  it('uses a custom base URL and omits the direct-browser header', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    await client.streamMessage(streamArgs({ apiBaseUrl: 'https://api.kiro.cheap/v1/' }));
+
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.kiro.cheap/v1/messages');
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers).not.toHaveProperty('anthropic-dangerous-direct-browser-access');
+  });
+
+  it('fails before fetch when proxy host permission is missing', async () => {
+    permissionsContainsMock.mockResolvedValue(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new AnthropicClient();
+
+    await expect(
+      client.streamMessage(streamArgs({ apiBaseUrl: 'https://api.kiro.cheap/v1' })),
+    ).rejects.toThrow(expect.objectContaining({ code: 'proxy_access_not_granted' }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('streams text deltas and reports cumulative usage metrics', async () => {

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { CLAUDE_MODELS, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  CLAUDE_API_BASE_URL,
+  CLAUDE_MODELS,
+  DEFAULT_FEATURE_MODELS,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import type { FeatureType, PersistedState } from '../src/shared/types.js';
 
 const EXPECTED_LABELS = ['Fast Reply', 'Ping', 'Help Me', 'Chat Review', 'Fan Summary'];
@@ -11,6 +16,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      claudeApiBaseUrl: '',
       quickMessageCount: 30,
       deepMessageCount: 200,
       debugMode: false,
@@ -27,6 +33,10 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
 
 let dom: InstanceType<typeof JSDOM>;
 let savedSettings: Record<string, unknown> | null;
+let permissionGranted = true;
+let requestPermissionResult = true;
+let permissionsContainsMock: ReturnType<typeof vi.fn>;
+let permissionsRequestMock: ReturnType<typeof vi.fn>;
 
 function installDom() {
   dom = new JSDOM(
@@ -46,6 +56,13 @@ function installDom() {
 
 async function loadOptionsPage(state: PersistedState): Promise<void> {
   savedSettings = null;
+  permissionsContainsMock = vi.fn(async () => permissionGranted);
+  permissionsRequestMock = vi.fn(async ({ origins }: { origins?: string[] }) => {
+    if (requestPermissionResult && origins?.length) {
+      permissionGranted = true;
+    }
+    return requestPermissionResult;
+  });
 
   (globalThis as Record<string, unknown>).browser = {
     storage: {
@@ -63,6 +80,10 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
       sendMessage: vi.fn(async () => []),
       openOptionsPage: vi.fn(async () => undefined),
     },
+    permissions: {
+      contains: permissionsContainsMock,
+      request: permissionsRequestMock,
+    },
   };
 
   await import('../src/options/index.js');
@@ -79,6 +100,8 @@ describe('Options page — AI Models section', () => {
   beforeEach(() => {
     vi.resetModules();
     installDom();
+    permissionGranted = true;
+    requestPermissionResult = true;
   });
 
   afterEach(() => {
@@ -150,6 +173,13 @@ describe('Options page — AI Models section', () => {
     expect(checkbox?.checked).toBe(true);
   });
 
+  it('renders the saved API base URL', async () => {
+    await loadOptionsPage(makeState({ claudeApiBaseUrl: 'https://api.kiro.cheap/v1' }));
+
+    const input = document.querySelector<HTMLInputElement>('input[placeholder="https://api.kiro.cheap/v1"]');
+    expect(input?.value).toBe('https://api.kiro.cheap/v1');
+  });
+
   it('saves featureModels when a dropdown changes', async () => {
     await loadOptionsPage(makeState());
 
@@ -192,5 +222,57 @@ describe('Options page — AI Models section', () => {
 
     const saved = savedSettings as { promptCachingEnabled?: boolean };
     expect(saved.promptCachingEnabled).toBe(false);
+  });
+
+  it('saves a normalized Claude API base URL when the input changes', async () => {
+    await loadOptionsPage(makeState());
+
+    const input = document.querySelector<HTMLInputElement>('input[placeholder="https://api.kiro.cheap/v1"]');
+    if (!input) {
+      throw new Error('Claude API Base URL input not found');
+    }
+
+    input.value = ' https://api.kiro.cheap/v1/ ';
+    input.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('not saved yet');
+    }, { timeout: 2000 });
+
+    const saved = savedSettings as { claudeApiBaseUrl?: string };
+    expect(saved.claudeApiBaseUrl).toBe('https://api.kiro.cheap/v1');
+    expect(input.value).toBe('https://api.kiro.cheap/v1');
+  });
+
+  it('hides proxy permission controls for the direct Anthropic base URL', async () => {
+    await loadOptionsPage(makeState({ claudeApiBaseUrl: CLAUDE_API_BASE_URL }));
+
+    const row = document.querySelector<HTMLElement>('[data-role="proxy-permission-status"]')?.parentElement;
+    expect(row?.style.display).toBe('none');
+    expect(permissionsContainsMock).not.toHaveBeenCalled();
+  });
+
+  it('shows proxy permission state and requests access for a custom base URL', async () => {
+    permissionGranted = false;
+    await loadOptionsPage(makeState({ claudeApiBaseUrl: 'https://api.kiro.cheap/v1' }));
+
+    const status = document.querySelector<HTMLElement>('[data-role="proxy-permission-status"]');
+    const button = document.querySelector<HTMLButtonElement>('[data-role="proxy-permission-grant"]');
+
+    expect(status?.textContent).toContain('https://api.kiro.cheap');
+    expect(status?.textContent).toContain('Grant extension access');
+    expect(button?.disabled).toBe(false);
+
+    button?.click();
+
+    await vi.waitFor(() => {
+      expect(permissionsRequestMock).toHaveBeenCalledWith({
+        origins: ['https://api.kiro.cheap/*'],
+      });
+      expect(status?.textContent).toContain('Access granted for https://api.kiro.cheap');
+    }, { timeout: 2000 });
+
+    expect(button?.disabled).toBe(true);
+    expect(button?.textContent).toBe('Access granted');
   });
 });

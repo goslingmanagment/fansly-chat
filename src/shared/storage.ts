@@ -8,6 +8,7 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
+import { normalizeClaudeApiBaseUrl } from './claude-api.js';
 import {
   collectAliasKeysForCanonical,
   resolveCanonicalAccountId,
@@ -55,6 +56,9 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
 
   return {
     claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
+    claudeApiBaseUrl: normalizeClaudeApiBaseUrl(
+      String(input.claudeApiBaseUrl ?? defaults.claudeApiBaseUrl),
+    ),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),
