@@ -1,5 +1,8 @@
 import { hasClaudeApiKey } from '../shared/claude-api.js';
-import { DEFAULT_MODEL_ID } from '../shared/constants.js';
+import {
+  getDefaultModelId,
+  resolveProviderModelId,
+} from '../shared/claude-models.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { getProviderDiagnostics } from '../shared/provider-runtime.js';
 import type { PopupStatus } from '../shared/types.js';
@@ -165,12 +168,17 @@ export function registerRuntimeApi({
 
       if (message.type === 'runProviderConnectionTest') {
         const state = await storageCoordinator.getState();
+        const provider = state.settings.claudeProvider;
+        const selectedModel =
+          state.settings.featureModels['fast-reply'] ?? getDefaultModelId(provider);
         const resolvedModel =
-          state.settings.featureModels['fast-reply'] ?? DEFAULT_MODEL_ID;
+          resolveProviderModelId(provider, selectedModel) ??
+          resolveProviderModelId(provider, getDefaultModelId(provider)) ??
+          getDefaultModelId(provider);
         return anthropicClient.testConnection({
-          provider: state.settings.claudeProvider,
+          provider,
           apiKey:
-            state.settings.claudeProvider === 'kiro'
+            provider === 'kiro'
               ? state.settings.kiroApiKey
               : state.settings.anthropicApiKey,
           model: resolvedModel,

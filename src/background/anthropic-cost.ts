@@ -30,6 +30,13 @@ const MODEL_PRICING: Record<string, AnthropicPricing> = {
     cacheReadUsdPerMillion: 0.30,
     outputUsdPerMillion: 15,
   },
+  'claude-sonnet-4': {
+    inputUsdPerMillion: 3,
+    cacheWrite5mUsdPerMillion: 3.75,
+    cacheWrite1hUsdPerMillion: 6,
+    cacheReadUsdPerMillion: 0.30,
+    outputUsdPerMillion: 15,
+  },
   'claude-opus-4-5': {
     inputUsdPerMillion: 15,
     cacheWrite5mUsdPerMillion: 18.75,
@@ -50,6 +57,13 @@ const MODEL_PRICING: Record<string, AnthropicPricing> = {
     cacheWrite1hUsdPerMillion: 2,
     cacheReadUsdPerMillion: 0.10,
     outputUsdPerMillion: 5,
+  },
+  'claude-3-5-haiku': {
+    inputUsdPerMillion: 0.8,
+    cacheWrite5mUsdPerMillion: 1,
+    cacheWrite1hUsdPerMillion: 1.6,
+    cacheReadUsdPerMillion: 0.08,
+    outputUsdPerMillion: 4,
   },
 };
 

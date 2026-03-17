@@ -1,5 +1,4 @@
 import {
-  CLAUDE_MODEL_IDS,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
@@ -8,6 +7,7 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
+import { normalizeFeatureModelsForProvider } from './claude-models.js';
 import {
   inferClaudeProviderFromLegacyBaseUrl,
   normalizeClaudeProvider,
@@ -57,23 +57,28 @@ export function sanitizeSettings(input: LegacySettingsInput): Settings {
   const rawModels = input.featureModels && typeof input.featureModels === 'object'
     ? input.featureModels as Partial<Record<FeatureType, string>>
     : {};
-  const featureModels = { ...defaults.featureModels };
-  for (const feature of Object.keys(defaults.featureModels) as FeatureType[]) {
-    const candidate = rawModels[feature];
-    if (candidate && CLAUDE_MODEL_IDS.has(candidate)) {
-      featureModels[feature] = candidate;
-    }
-  }
+  const { featureModels } = normalizeFeatureModelsForProvider(
+    claudeProvider,
+    rawModels,
+  );
 
   return {
     claudeProvider,
     anthropicApiKey: String(
       input.anthropicApiKey ??
-      (claudeProvider === 'anthropic' ? input.claudeApiKey : defaults.anthropicApiKey),
+      (
+        claudeProvider === 'anthropic'
+          ? input.claudeApiKey ?? defaults.anthropicApiKey
+          : defaults.anthropicApiKey
+      ),
     ).trim(),
     kiroApiKey: String(
       input.kiroApiKey ??
-      (claudeProvider === 'kiro' ? input.claudeApiKey : defaults.kiroApiKey),
+      (
+        claudeProvider === 'kiro'
+          ? input.claudeApiKey ?? defaults.kiroApiKey
+          : defaults.kiroApiKey
+      ),
     ).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),

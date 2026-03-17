@@ -1,10 +1,13 @@
 import {
   DEEP_OPERATION_TIMEOUT_MS,
-  DEFAULT_FEATURE_MODELS,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
+import {
+  getDefaultModelId,
+  resolveProviderModelId,
+} from '../shared/claude-models.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
   aggregateMonthlyEarnings,
@@ -1329,14 +1332,22 @@ export class OperationCoordinator {
       profiler.log('Waiting for Claude');
       sendDebugProgress();
 
-      let actualModel = resolvedModel;
       const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
+      const resolvedApiModel =
+        resolveProviderModelId(resolvedProvider.provider, resolvedModel) ??
+        resolveProviderModelId(
+          resolvedProvider.provider,
+          getDefaultModelId(resolvedProvider.provider),
+        ) ??
+        getDefaultModelId(resolvedProvider.provider);
+      let actualModel = resolvedModel;
+      let actualApiModel = resolvedApiModel;
       let latestAnthropicSpend: AnthropicSpendSummary | null = null;
       const handleAnthropicUsage = (
         usage: AnthropicUsageMetrics,
       ): AnthropicCostEstimate => {
-        const cost = estimateAnthropicCost(actualModel, usage);
-        const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
+        const cost = estimateAnthropicCost(actualApiModel, usage);
+        const spend = buildAnthropicSpendSummary(actualApiModel, usage, cost);
         latestAnthropicSpend = spend;
         const current = this.getActive(tabId);
         if (current?.operationId === payload.operationId) {
@@ -1355,7 +1366,7 @@ export class OperationCoordinator {
       const streamArgs = {
         provider: resolvedProvider.provider,
         apiKey: resolvedProvider.apiKey,
-        model: actualModel,
+        model: actualApiModel,
         systemBlocks,
         userBlocks,
         feature: payload.feature,
@@ -1390,12 +1401,16 @@ export class OperationCoordinator {
       try {
         rawText = await this.anthropicClient.streamMessage(streamArgs);
       } catch (err) {
-        const defaultModel = DEFAULT_FEATURE_MODELS[payload.feature];
+        const defaultModel = getDefaultModelId(resolvedProvider.provider);
+        const defaultApiModel =
+          resolveProviderModelId(resolvedProvider.provider, defaultModel) ??
+          defaultModel;
         const isModelError = err instanceof ChatMuseError
           ? err.code === 'model_unavailable'
           : (err as { code?: string })?.code === 'model_unavailable';
         if (isModelError && resolvedModel !== defaultModel) {
           actualModel = defaultModel;
+          actualApiModel = defaultApiModel;
           profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
           if (profiler.enabled) {
             this.send(tabId, {
@@ -1413,7 +1428,10 @@ export class OperationCoordinator {
               },
             });
           }
-          rawText = await this.anthropicClient.streamMessage({ ...streamArgs, model: defaultModel });
+          rawText = await this.anthropicClient.streamMessage({
+            ...streamArgs,
+            model: defaultApiModel,
+          });
         } else {
           throw err;
         }
