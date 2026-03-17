@@ -46,6 +46,10 @@ function createParts(parts: string[]): OverlayInsertPart[] {
   }));
 }
 
+function formatErrorToastMessage(error: { message: string; detail?: string }): string {
+  return error.detail ? `${error.message} ${error.detail}` : error.message;
+}
+
 function isInlineQuickFeature(f: FeatureType): f is 'fast-reply' | 'ping' {
   return f === 'fast-reply' || f === 'ping';
 }
@@ -861,7 +865,7 @@ export class ChatMuseContentApp {
     }
 
     if (message.type === 'compare:error') {
-      this.toast.show(message.error.message);
+      this.toast.show(formatErrorToastMessage(message.error));
     }
   }
 
@@ -968,7 +972,7 @@ export class ChatMuseContentApp {
         } else if (this.quickInlineVisible) {
           this.inlinePanel.render(errorModel);
         } else {
-          this.toast.show(message.error.message);
+          this.toast.show(formatErrorToastMessage(message.error));
         }
         this.clearOperationState(false);
         this.renderButtonBar();
@@ -981,7 +985,7 @@ export class ChatMuseContentApp {
       return;
     }
 
-    this.toast.show(message.error.message);
+    this.toast.show(formatErrorToastMessage(message.error));
   }
 
   // ─── State Helpers ──────────────────────────────────────────────────

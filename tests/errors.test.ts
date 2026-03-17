@@ -56,6 +56,21 @@ describe('toUserError', () => {
     expect(result.detail).toBe('Kiro: HTTP 502 (upstream unavailable).');
   });
 
+  it('maps provider host access errors to provider-aware copy', () => {
+    const err = new ChatMuseError(
+      'provider_host_access_missing',
+      'Kiro: Host access to api.kiro.cheap is not active.',
+      undefined,
+      false,
+      'kiro',
+    );
+    const result = toUserError(err);
+
+    expect(result.code).toBe('provider_host_access_missing');
+    expect(result.message).toContain('Kiro host access is not active');
+    expect(result.detail).toContain('api.kiro.cheap');
+  });
+
   it('returns unknown_error for non-ChatMuseError', () => {
     const result = toUserError(new Error('random'));
     expect(result.code).toBe('unknown_error');

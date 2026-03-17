@@ -22,7 +22,13 @@ export class ChatMuseError extends Error {
   }
 }
 
-const STATIC_ERROR_MESSAGES: Record<Exclude<UserErrorCode, 'missing_api_key' | 'invalid_api_key'>, UserFacingError> = {
+const STATIC_ERROR_MESSAGES: Record<
+  Exclude<
+    UserErrorCode,
+    'missing_api_key' | 'invalid_api_key' | 'provider_host_access_missing' | 'provider_connection_failed'
+  >,
+  UserFacingError
+> = {
   not_connected: {
     code: 'not_connected',
     message: 'Not connected to Fansly. Browse Fansly to establish a connection.',
@@ -100,6 +106,8 @@ export function getErrorMessage(
   code: UserErrorCode,
   provider: ClaudeProvider = 'anthropic',
 ): UserFacingError {
+  const providerLabel = provider === 'kiro' ? 'Kiro' : 'Anthropic';
+
   if (code === 'missing_api_key') {
     return {
       code,
@@ -112,6 +120,22 @@ export function getErrorMessage(
     return {
       code,
       message: getInvalidApiKeyMessage(provider),
+      settingsLink: true,
+    };
+  }
+
+  if (code === 'provider_host_access_missing') {
+    return {
+      code,
+      message: `${providerLabel} host access is not active. Reload or reinstall the extension, then try again.`,
+      settingsLink: true,
+    };
+  }
+
+  if (code === 'provider_connection_failed') {
+    return {
+      code,
+      message: `${providerLabel} connection was blocked before a response was received. Check extension host access or reload the extension.`,
       settingsLink: true,
     };
   }
@@ -156,7 +180,13 @@ export function toUserError(error: unknown): UserFacingError {
   const provider = normalizeClaudeProvider(errorLike?.provider);
   if (
     typeof code === 'string' &&
-    (code === 'missing_api_key' || code === 'invalid_api_key' || code in STATIC_ERROR_MESSAGES)
+    (
+      code === 'missing_api_key' ||
+      code === 'invalid_api_key' ||
+      code === 'provider_host_access_missing' ||
+      code === 'provider_connection_failed' ||
+      code in STATIC_ERROR_MESSAGES
+    )
   ) {
     return attachTechnicalDetail(
       getErrorMessage(code as UserErrorCode, provider),

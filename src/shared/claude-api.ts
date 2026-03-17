@@ -80,6 +80,11 @@ export function getClaudeProviderConfig(provider: ClaudeProvider): typeof PROVID
   return PROVIDER_CONFIG[normalizeClaudeProvider(provider)];
 }
 
+export function getClaudeProviderHostPermissionPattern(provider: ClaudeProvider): string {
+  const host = new URL(getClaudeProviderConfig(provider).baseUrl).host;
+  return `*://${host}/*`;
+}
+
 export function resolveClaudeProviderSettings(
   settings: Partial<ClaudeSettingsSubset> | null | undefined,
 ): ResolvedClaudeProviderConfig {

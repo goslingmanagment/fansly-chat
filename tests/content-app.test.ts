@@ -491,7 +491,7 @@ describe('ChatMuseContentApp', () => {
     expect(document.querySelector('.chatmuse-profiling-summary')?.textContent).toContain('Load messages');
   });
 
-  it('keeps toast-only quick-feature errors on the generic message', async () => {
+  it('includes technical detail in toast-only quick-feature errors', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
 
@@ -516,7 +516,7 @@ describe('ChatMuseContentApp', () => {
 
     const toast = document.querySelector('.chatmuse-toast');
     expect(toast?.textContent).toContain('Connection error. Check your internet connection.');
-    expect(toast?.textContent).not.toContain('Kiro: HTTP 502 (upstream unavailable).');
+    expect(toast?.textContent).toContain('Kiro: HTTP 502 (upstream unavailable).');
   });
 
   it('renders technical detail for compare card errors in the inline panel', async () => {

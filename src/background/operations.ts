@@ -16,6 +16,10 @@ import {
   resolveClaudeProviderSettings,
 } from '../shared/claude-api.js';
 import {
+  buildHostAccessMissingDetail,
+  getProviderDiagnostics,
+} from '../shared/provider-runtime.js';
+import {
   getCompareDraftCount,
   resolveMappedPersonalityId,
 } from '../shared/compare-cards.js';
@@ -475,6 +479,19 @@ export class OperationCoordinator {
 
     if (!resolvedProvider.apiKey) {
       throw new ChatMuseError('missing_api_key', undefined, undefined, false, resolvedProvider.provider);
+    }
+    const providerDiagnostics = await getProviderDiagnostics(storage.settings);
+    if (!providerDiagnostics.hostPermissionGranted) {
+      throw new ChatMuseError(
+        'provider_host_access_missing',
+        buildHostAccessMissingDetail(
+          providerDiagnostics.provider,
+          providerDiagnostics.requestHost,
+        ),
+        undefined,
+        false,
+        providerDiagnostics.provider,
+      );
     }
     if (storage.personalities.length === 0) {
       throw new ChatMuseError('no_personalities');

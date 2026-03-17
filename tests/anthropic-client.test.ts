@@ -60,6 +60,11 @@ let AnthropicClient: typeof import('../src/background/anthropic-client.js').Anth
 
 beforeEach(async () => {
   vi.resetModules();
+  (globalThis as Record<string, unknown>).browser = {
+    permissions: {
+      contains: vi.fn(async () => true),
+    },
+  };
   const mod = await import('../src/background/anthropic-client.js');
   AnthropicClient = mod.AnthropicClient;
 });
@@ -147,7 +152,7 @@ describe('AnthropicClient error mapping', () => {
     );
   });
 
-  it('preserves fetch rejection detail and emits diagnostics when debug mode is enabled', async () => {
+  it('classifies Kiro pre-response failures and emits diagnostics when debug mode is enabled', async () => {
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new TypeError('Failed to fetch sk-aw-live');
@@ -166,7 +171,7 @@ describe('AnthropicClient error mapping', () => {
     }
 
     expect(thrown).toMatchObject({
-      code: 'network_error',
+      code: 'provider_connection_failed',
       provider: 'kiro',
     });
     expect((thrown as Error).message).toContain('Request failed before a response was received');
@@ -181,6 +186,21 @@ describe('AnthropicClient error mapping', () => {
       }),
     }));
     debugSpy.mockRestore();
+  });
+
+  it('classifies missing host access before surfacing a Kiro fetch failure', async () => {
+    (browser.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }));
+    const client = new AnthropicClient();
+
+    await expect(client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+    }))).rejects.toThrow(
+      expect.objectContaining({ code: 'provider_host_access_missing' }),
+    );
   });
 
   it('attaches response detail for non-ok responses without a streaming body', async () => {
@@ -263,6 +283,31 @@ describe('AnthropicClient streaming requests', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.kiro.cheap/v1/messages');
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers).not.toHaveProperty('anthropic-dangerous-direct-browser-access');
+  });
+
+  it('returns a successful provider connection test result for Kiro', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    const result = await client.testConnection({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+      model: 'claude-sonnet-4-6',
+      debugEnabled: false,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'kiro',
+      requestHost: 'api.kiro.cheap',
+      status: 'ready',
+      capabilityStatus: 'ready',
+    });
   });
 
   it('streams text deltas and reports cumulative usage metrics', async () => {

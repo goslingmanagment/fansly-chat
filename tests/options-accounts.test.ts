@@ -88,11 +88,63 @@ async function loadOptionsPage(options: {
       },
     },
     runtime: {
-      sendMessage: vi.fn(async () => {
-        callOrder.push('snapshot');
-        onSnapshotRequest?.();
-        return currentSessions;
+      sendMessage: vi.fn(async (message: { type: string }) => {
+        if (message.type === 'getSessionsSnapshot') {
+          callOrder.push('snapshot');
+          onSnapshotRequest?.();
+          return currentSessions;
+        }
+        if (message.type === 'getProviderDiagnostics') {
+          return {
+            provider: currentState.settings.claudeProvider,
+            displayName: currentState.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
+            requestUrl:
+              currentState.settings.claudeProvider === 'kiro'
+                ? 'https://api.kiro.cheap/v1/messages'
+                : 'https://api.anthropic.com/v1/messages',
+            requestHost:
+              currentState.settings.claudeProvider === 'kiro'
+                ? 'api.kiro.cheap'
+                : 'api.anthropic.com',
+            hostPermissionPattern:
+              currentState.settings.claudeProvider === 'kiro'
+                ? '*://api.kiro.cheap/*'
+                : '*://api.anthropic.com/*',
+            hostPermissionGranted: true,
+            hasApiKey: true,
+            capabilityStatus: 'ready',
+            buildTime: 'test-build',
+          };
+        }
+        if (message.type === 'runProviderConnectionTest') {
+          return {
+            provider: currentState.settings.claudeProvider,
+            displayName: currentState.settings.claudeProvider === 'kiro' ? 'Kiro' : 'Anthropic',
+            requestUrl:
+              currentState.settings.claudeProvider === 'kiro'
+                ? 'https://api.kiro.cheap/v1/messages'
+                : 'https://api.anthropic.com/v1/messages',
+            requestHost:
+              currentState.settings.claudeProvider === 'kiro'
+                ? 'api.kiro.cheap'
+                : 'api.anthropic.com',
+            hostPermissionPattern:
+              currentState.settings.claudeProvider === 'kiro'
+                ? '*://api.kiro.cheap/*'
+                : '*://api.anthropic.com/*',
+            hostPermissionGranted: true,
+            hasApiKey: true,
+            capabilityStatus: 'ready',
+            buildTime: 'test-build',
+            status: 'ready',
+            checkedAt: 0,
+            detail: 'Connection test succeeded.',
+            httpStatus: 200,
+          };
+        }
+        return undefined;
       }),
+      getManifest: vi.fn(() => ({ version: '1.0.0' })),
       openOptionsPage: vi.fn(async () => undefined),
     },
     permissions: {
