@@ -112,7 +112,9 @@ describe('migrateState', () => {
       },
     });
 
-    expect(result.settings.anthropicApiKey).toBe('sk-test');
+    expect(result.settings.claudeProvider).toBe('kiro');
+    expect(result.settings.anthropicApiKey).toBe('');
+    expect(result.settings.kiroApiKey).toBe('sk-test');
     expect((result.settings as unknown as Record<string, unknown>).claudeApiBaseUrl).toBeUndefined();
   });
 
@@ -207,6 +209,16 @@ describe('sanitizeSettings', () => {
       claudeProvider: 'unknown-provider' as 'anthropic',
     });
     expect(result.claudeProvider).toBe('anthropic');
+  });
+
+  it('maps legacy Kiro base URL records onto the Kiro provider', () => {
+    const result = storage.sanitizeSettings({
+      claudeApiKey: '  sk-aw-test  ',
+      claudeApiBaseUrl: 'https://api.kiro.cheap/v1/',
+    });
+    expect(result.claudeProvider).toBe('kiro');
+    expect(result.anthropicApiKey).toBe('');
+    expect(result.kiroApiKey).toBe('sk-aw-test');
   });
 
   it('defaults featureModels when missing from input', () => {
