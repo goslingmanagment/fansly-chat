@@ -469,4 +469,32 @@ describe('AnthropicClient streaming requests', () => {
       },
     });
   });
+
+  it('extracts Kiro text when the first content block is not text', async () => {
+    mockFetchResponse(200, {
+      content: [
+        { type: 'thinking' },
+        { type: 'text', text: 'Hello' },
+        { type: 'text', text: ' there' },
+      ],
+      usage: {
+        input_tokens: 12,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 2,
+      },
+    });
+    const client = new AnthropicClient();
+    const onText = vi.fn();
+
+    const rawText = await client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+      onText,
+    }));
+
+    expect(rawText).toBe('Hello there');
+    expect(onText).toHaveBeenCalledTimes(1);
+    expect(onText).toHaveBeenCalledWith('Hello there');
+  });
 });

@@ -274,6 +274,19 @@ async function readJsonBody<T>(
   }
 }
 
+function extractMessageText(body: ProviderMessageBody | null): string | null {
+  const content = body?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return null;
+  }
+
+  const text = content
+    .flatMap((block) => (typeof block?.text === 'string' ? [block.text] : []))
+    .join('');
+
+  return text.length > 0 ? text : null;
+}
+
 export class AnthropicClient {
   async testConnection({
     provider,
@@ -615,7 +628,7 @@ export class AnthropicClient {
         );
       }
 
-      const text = body?.content?.[0]?.text;
+      const text = extractMessageText(body);
       if (typeof text !== 'string') {
         logDebug(debugEnabled, 'claude response parse error', {
           ...requestContext,
@@ -627,7 +640,7 @@ export class AnthropicClient {
           'unknown_error',
           technicalDetail(
             provider,
-            `HTTP ${response.status} response body did not include content[0].text.`,
+            `HTTP ${response.status} response body did not include any text content blocks.`,
           ),
           undefined,
           false,
