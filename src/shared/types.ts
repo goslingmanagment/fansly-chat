@@ -7,7 +7,7 @@ export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messaging
 export type FanSubscriptionSource = '/api/v1/messaging/groups' | '/api/v1/subscribers';
 export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
-export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'tease' | 'spicy';
+export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
