@@ -15,7 +15,6 @@ const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> =
   { tone: 'casual', label: 'Casual' },
   { tone: 'flirty', label: 'Flirty' },
   { tone: 'upsell', label: 'Upsell' },
-  { tone: 'tease', label: 'Tease' },
   { tone: 'spicy', label: 'Spicy' },
 ];
 
@@ -88,12 +87,13 @@ export class ButtonBar {
       this.toneRow.append(pill);
     }
 
+    const summaryButton = this.buttons.get('fan-summary')!;
     const pingButton = this.buttons.get('ping')!;
 
-    // Single row: [Reply] [Compare] [Ping] [Reopen] [2-part] [Tones...] [Personality→right]
+    // Single row: [Reply] [2-part] [Tones...] [Summary] [Ping] [Personality→right]
     this.root.append(
-      replyButton, compareButton, pingButton, this.compareRestoreButton,
-      this.replyModeToggle, this.toneRow, this.personalityLabel,
+      replyButton,
+      this.replyModeToggle, this.toneRow, summaryButton, pingButton, this.personalityLabel,
     );
   }
 

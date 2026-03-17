@@ -30,7 +30,8 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
   };
 }
 
-describe('ButtonBar compare button', () => {
+// Compare button removed from toolbar for now
+describe.skip('ButtonBar compare button', () => {
   beforeEach(() => {
     installDom();
   });
@@ -157,8 +158,8 @@ describe('ButtonBar tone row', () => {
     bar.render(buildState(), null, 'default', 'none', false, false);
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
-    expect(pills).toHaveLength(5);
-    expect(pills.map((p) => p.textContent)).toEqual(['Casual', 'Flirty', 'Upsell', 'Tease', 'Spicy']);
+    expect(pills).toHaveLength(4);
+    expect(pills.map((p) => p.textContent)).toEqual(['Casual', 'Flirty', 'Upsell', 'Spicy']);
   });
 
   it('marks the active tone pill', () => {

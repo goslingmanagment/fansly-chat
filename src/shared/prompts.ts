@@ -73,14 +73,11 @@ Make this reply clearly casual — light, friendly, low-key. Prioritize relaxed 
 Steer toward warmth and comfort rather than flirting, selling, or escalating.`,
   flirty: `**IMPORTANT — Tone override: FLIRTY.**
 Make this reply clearly flirty. Lean into attraction, warmth, charm, and playful tension. Make the fan feel desired and pulled closer.
-Be suggestive but do not jump to explicit content unless the conversation is already there.`,
+Be suggestive but do not jump to explicit content unless the conversation is already there.
+Tease a little — hint and dangle instead of giving everything away. The power is in what you don't say yet.`,
   upsell: `**IMPORTANT — Tone override: SOFT UPSELL.**
 Weave a natural, low-pressure monetization nudge into this reply. Mention content, perks, or a next paid step when it fits.
 Keep it organic — sharing, not pitching. Do not sound transactional or scripted.`,
-  tease: `**IMPORTANT — Tone override: TEASE.**
-Make this reply playfully withholding. Hint, dangle, and imply instead of giving everything away.
-Build anticipation — make the fan lean in for more. Keep it fun and enticing, not mean or cold.
-Hold back on explicit delivery; the power of this tone is in what you don't say yet.`,
   spicy: `**IMPORTANT — Tone override: SPICY.**
 Make this reply noticeably hot and sexually confident. Be bold, direct, and physically charged.
 Do not settle for cute, merely flirty, or complimentary. Lead with desire, temptation, and body-focused subtext.
