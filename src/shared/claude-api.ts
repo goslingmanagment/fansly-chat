@@ -53,6 +53,29 @@ export function normalizeClaudeProvider(value: string | null | undefined): Claud
   return value === 'kiro' ? 'kiro' : DEFAULT_CLAUDE_PROVIDER;
 }
 
+function normalizeLegacyBaseUrl(value: string | null | undefined): string {
+  return String(value ?? '').trim().replace(/\/+$/, '');
+}
+
+export function inferClaudeProviderFromLegacyBaseUrl(
+  value: string | null | undefined,
+): ClaudeProvider | null {
+  const normalized = normalizeLegacyBaseUrl(value);
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === KIRO_API_BASE_URL) {
+    return 'kiro';
+  }
+
+  if (normalized === ANTHROPIC_API_BASE_URL) {
+    return 'anthropic';
+  }
+
+  return null;
+}
+
 export function getClaudeProviderConfig(provider: ClaudeProvider): typeof PROVIDER_CONFIG.anthropic {
   return PROVIDER_CONFIG[normalizeClaudeProvider(provider)];
 }

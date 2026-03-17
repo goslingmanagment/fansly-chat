@@ -5,6 +5,7 @@ import {
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
+import { inferClaudeProviderFromLegacyBaseUrl } from './claude-api.js';
 import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
@@ -24,11 +25,23 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
   const defaults = createDefaultSettings();
   const legacyClaudeApiKey =
     typeof raw?.claudeApiKey === 'string' ? raw.claudeApiKey : defaults.anthropicApiKey;
+  const legacyProvider = raw?.claudeProvider === 'anthropic' || raw?.claudeProvider === 'kiro'
+    ? raw.claudeProvider
+    : inferClaudeProviderFromLegacyBaseUrl(
+      typeof raw?.claudeApiBaseUrl === 'string' ? raw.claudeApiBaseUrl : null,
+    );
+  const claudeProvider = legacyProvider ?? defaults.claudeProvider;
 
   return {
-    claudeProvider: raw?.claudeProvider === 'kiro' ? 'kiro' : defaults.claudeProvider,
-    anthropicApiKey: String(raw?.anthropicApiKey ?? legacyClaudeApiKey),
-    kiroApiKey: String(raw?.kiroApiKey ?? defaults.kiroApiKey),
+    claudeProvider,
+    anthropicApiKey: String(
+      raw?.anthropicApiKey ??
+      (claudeProvider === 'anthropic' ? legacyClaudeApiKey : defaults.anthropicApiKey),
+    ),
+    kiroApiKey: String(
+      raw?.kiroApiKey ??
+      (claudeProvider === 'kiro' ? legacyClaudeApiKey : defaults.kiroApiKey),
+    ),
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
     deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),
     debugMode: Boolean(raw?.debugMode ?? defaults.debugMode),
