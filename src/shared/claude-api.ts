@@ -1,49 +1,85 @@
-import { CLAUDE_API_BASE_URL } from './constants.js';
+import {
+  ANTHROPIC_API_BASE_URL,
+  DEFAULT_CLAUDE_PROVIDER,
+  KIRO_API_BASE_URL,
+} from './constants.js';
+import type { ClaudeProvider, Settings } from './types.js';
 
-export function normalizeClaudeApiBaseUrl(value: string | null | undefined): string {
-  const normalized = String(value ?? '').trim().replace(/\/+$/, '');
-  return normalized;
+type ClaudeSettingsSubset = Pick<Settings, 'claudeProvider' | 'anthropicApiKey' | 'kiroApiKey'>;
+
+interface ClaudeProviderStaticConfig {
+  displayName: string;
+  apiKeyLabel: string;
+  apiKeyHelperText: string;
+  baseUrl: string;
+  sendDangerousDirectBrowserAccessHeader: boolean;
+  missingApiKeyMessage: string;
+  invalidApiKeyMessage: string;
 }
 
-export function resolveClaudeApiBaseUrl(value: string | null | undefined): string {
-  return normalizeClaudeApiBaseUrl(value) || CLAUDE_API_BASE_URL;
+export interface ResolvedClaudeProviderConfig extends ClaudeProviderStaticConfig {
+  provider: ClaudeProvider;
+  apiKey: string;
+  messagesUrl: string;
+  settingsKey: 'anthropicApiKey' | 'kiroApiKey';
 }
 
-export function isDirectAnthropicApiBaseUrl(value: string | null | undefined): boolean {
-  return resolveClaudeApiBaseUrl(value) === CLAUDE_API_BASE_URL;
+const PROVIDER_CONFIG: Record<ClaudeProvider, ClaudeProviderStaticConfig & {
+  settingsKey: 'anthropicApiKey' | 'kiroApiKey';
+}> = {
+  anthropic: {
+    displayName: 'Anthropic',
+    apiKeyLabel: 'Anthropic API key',
+    apiKeyHelperText: 'Regular Claude/Anthropic API key',
+    baseUrl: ANTHROPIC_API_BASE_URL,
+    sendDangerousDirectBrowserAccessHeader: true,
+    missingApiKeyMessage: 'Anthropic API key not configured. Go to Settings to add it.',
+    invalidApiKeyMessage: 'Invalid Anthropic API key. Check your key in Settings.',
+    settingsKey: 'anthropicApiKey',
+  },
+  kiro: {
+    displayName: 'Kiro',
+    apiKeyLabel: 'Kiro API key',
+    apiKeyHelperText: 'Kiro/AWStore API key',
+    baseUrl: KIRO_API_BASE_URL,
+    sendDangerousDirectBrowserAccessHeader: false,
+    missingApiKeyMessage: 'Kiro API key not configured. Go to Settings to add it.',
+    invalidApiKeyMessage: 'Invalid Kiro API key. Check your key in Settings.',
+    settingsKey: 'kiroApiKey',
+  },
+};
+
+export function normalizeClaudeProvider(value: string | null | undefined): ClaudeProvider {
+  return value === 'kiro' ? 'kiro' : DEFAULT_CLAUDE_PROVIDER;
 }
 
-export function buildClaudeApiMessagesUrl(value: string | null | undefined): string {
-  return `${resolveClaudeApiBaseUrl(value)}/messages`;
+export function getClaudeProviderConfig(provider: ClaudeProvider): typeof PROVIDER_CONFIG.anthropic {
+  return PROVIDER_CONFIG[normalizeClaudeProvider(provider)];
 }
 
-export function getClaudeApiPermissionOrigin(value: string | null | undefined): string | null {
-  const resolvedBaseUrl = resolveClaudeApiBaseUrl(value);
-  if (resolvedBaseUrl === CLAUDE_API_BASE_URL) {
-    return null;
-  }
+export function resolveClaudeProviderSettings(
+  settings: Partial<ClaudeSettingsSubset> | null | undefined,
+): ResolvedClaudeProviderConfig {
+  const provider = normalizeClaudeProvider(settings?.claudeProvider);
+  const config = getClaudeProviderConfig(provider);
+  const apiKey = String(settings?.[config.settingsKey] ?? '').trim();
 
-  try {
-    return `${new URL(resolvedBaseUrl).origin}/*`;
-  } catch {
-    return null;
-  }
+  return {
+    ...config,
+    provider,
+    apiKey,
+    messagesUrl: `${config.baseUrl}/messages`,
+  };
 }
 
-export async function hasClaudeApiPermission(value: string | null | undefined): Promise<boolean> {
-  const origin = getClaudeApiPermissionOrigin(value);
-  if (!origin) {
-    return true;
-  }
-
-  return browser.permissions.contains({ origins: [origin] });
+export function hasClaudeApiKey(settings: Partial<ClaudeSettingsSubset> | null | undefined): boolean {
+  return Boolean(resolveClaudeProviderSettings(settings).apiKey);
 }
 
-export async function requestClaudeApiPermission(value: string | null | undefined): Promise<boolean> {
-  const origin = getClaudeApiPermissionOrigin(value);
-  if (!origin) {
-    return false;
-  }
+export function getMissingApiKeyMessage(provider: ClaudeProvider): string {
+  return getClaudeProviderConfig(provider).missingApiKeyMessage;
+}
 
-  return browser.permissions.request({ origins: [origin] });
+export function getInvalidApiKeyMessage(provider: ClaudeProvider): string {
+  return getClaudeProviderConfig(provider).invalidApiKeyMessage;
 }

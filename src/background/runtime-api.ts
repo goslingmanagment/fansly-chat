@@ -1,3 +1,4 @@
+import { hasClaudeApiKey } from '../shared/claude-api.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import type { PopupStatus } from '../shared/types.js';
 import { FanslyClient } from './fansly-client.js';
@@ -46,6 +47,7 @@ export function registerRuntimeApi({
             accountId: null,
             groupId: null,
             connected: false,
+            claudeProvider: 'anthropic',
             hasApiKey: false,
             hasPersonalities: false,
             mappedPersonalityId: null,
@@ -81,7 +83,8 @@ export function registerRuntimeApi({
           accountId,
           groupId: context.groupId,
           connected,
-          hasApiKey: Boolean(state.settings.claudeApiKey),
+          claudeProvider: state.settings.claudeProvider,
+          hasApiKey: hasClaudeApiKey(state.settings),
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,

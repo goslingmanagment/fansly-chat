@@ -1,8 +1,8 @@
-import type { FeatureType, Settings } from './types.js';
+import type { ClaudeProvider, FeatureType, Settings } from './types.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 4;
+export const STORAGE_SCHEMA_VERSION = 5;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -10,8 +10,11 @@ export const SUMMARY_EVICTION_COUNT = 10;
 // ─── Claude API ──────────────────────────────────────────────────────────
 
 export const DEFAULT_MODEL_ID = 'claude-sonnet-4-6';
-export const CLAUDE_API_BASE_URL = 'https://api.anthropic.com/v1';
-export const CLAUDE_API_URL = `${CLAUDE_API_BASE_URL}/messages`;
+export const ANTHROPIC_API_BASE_URL = 'https://api.anthropic.com/v1';
+export const KIRO_API_BASE_URL = 'https://api.kiro.cheap/v1';
+export const DEFAULT_CLAUDE_PROVIDER: ClaudeProvider = 'anthropic';
+export const CLAUDE_API_BASE_URL = ANTHROPIC_API_BASE_URL;
+export const CLAUDE_API_URL = `${ANTHROPIC_API_BASE_URL}/messages`;
 export const ANTHROPIC_VERSION = '2023-06-01';
 
 export interface ClaudeModelEntry {
@@ -107,8 +110,9 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
 // ─── Default Settings ───────────────────────────────────────────────────
 
 export const DEFAULT_SETTINGS: Settings = {
-  claudeApiKey: '',
-  claudeApiBaseUrl: '',
+  claudeProvider: DEFAULT_CLAUDE_PROVIDER,
+  anthropicApiKey: '',
+  kiroApiKey: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
   debugMode: false,

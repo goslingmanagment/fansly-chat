@@ -20,6 +20,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
     accountId: 'account-1',
     groupId: 'group-1',
     connected: true,
+    claudeProvider: 'anthropic',
     hasApiKey: true,
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',

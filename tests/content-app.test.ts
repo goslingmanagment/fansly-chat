@@ -77,6 +77,7 @@ function readyState(): TabUiState {
     accountId: 'account-1',
     groupId: 'group-1',
     connected: true,
+    claudeProvider: 'anthropic',
     hasApiKey: true,
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
@@ -168,8 +169,9 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeApiKey: 'sk-test',
-      claudeApiBaseUrl: '',
+      claudeProvider: 'anthropic',
+      anthropicApiKey: 'sk-ant-test',
+      kiroApiKey: '',
       quickMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
@@ -361,6 +363,52 @@ describe('ChatMuseContentApp', () => {
       replyTone: 'flirty',
     }));
     expect(app.nextReplyTone).toBe('none');
+  });
+
+  it('shows an Anthropic-specific missing-key toast before starting a feature', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const toastShow = vi.fn();
+
+    app.toast = { show: toastShow };
+    app.port.send = vi.fn();
+    app.tabState = {
+      ...readyState(),
+      claudeProvider: 'anthropic',
+      hasApiKey: false,
+    };
+    app.currentGroupId = 'group-1';
+
+    app.startFeature('fast-reply', false);
+
+    expect(toastShow).toHaveBeenCalledWith(
+      'Anthropic API key not configured. Go to Settings to add it.',
+      expect.objectContaining({ actionLabel: 'Settings' }),
+    );
+    expect(app.port.send).not.toHaveBeenCalled();
+  });
+
+  it('shows a Kiro-specific missing-key toast before starting compare', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const toastShow = vi.fn();
+
+    app.toast = { show: toastShow };
+    app.port.send = vi.fn();
+    app.tabState = {
+      ...readyState(),
+      claudeProvider: 'kiro',
+      hasApiKey: false,
+    };
+    app.currentGroupId = 'group-1';
+
+    await app.startCompare(false);
+
+    expect(toastShow).toHaveBeenCalledWith(
+      'Kiro API key not configured. Go to Settings to add it.',
+      expect.objectContaining({ actionLabel: 'Settings' }),
+    );
+    expect(app.port.send).not.toHaveBeenCalled();
   });
 
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {

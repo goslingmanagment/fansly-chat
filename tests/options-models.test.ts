@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
-  CLAUDE_API_BASE_URL,
   CLAUDE_MODELS,
   DEFAULT_FEATURE_MODELS,
   STORAGE_SCHEMA_VERSION,
@@ -15,8 +14,9 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeApiKey: 'sk-test',
-      claudeApiBaseUrl: '',
+      claudeProvider: 'anthropic',
+      anthropicApiKey: 'sk-ant-test',
+      kiroApiKey: 'sk-aw-test',
       quickMessageCount: 30,
       deepMessageCount: 200,
       debugMode: false,
@@ -33,10 +33,6 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
 
 let dom: InstanceType<typeof JSDOM>;
 let savedSettings: Record<string, unknown> | null;
-let permissionGranted = true;
-let requestPermissionResult = true;
-let permissionsContainsMock: ReturnType<typeof vi.fn>;
-let permissionsRequestMock: ReturnType<typeof vi.fn>;
 
 function installDom() {
   dom = new JSDOM(
@@ -56,13 +52,6 @@ function installDom() {
 
 async function loadOptionsPage(state: PersistedState): Promise<void> {
   savedSettings = null;
-  permissionsContainsMock = vi.fn(async () => permissionGranted);
-  permissionsRequestMock = vi.fn(async ({ origins }: { origins?: string[] }) => {
-    if (requestPermissionResult && origins?.length) {
-      permissionGranted = true;
-    }
-    return requestPermissionResult;
-  });
 
   (globalThis as Record<string, unknown>).browser = {
     storage: {
@@ -80,10 +69,6 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
       sendMessage: vi.fn(async () => []),
       openOptionsPage: vi.fn(async () => undefined),
     },
-    permissions: {
-      contains: permissionsContainsMock,
-      request: permissionsRequestMock,
-    },
   };
 
   await import('../src/options/index.js');
@@ -100,8 +85,6 @@ describe('Options page — AI Models section', () => {
   beforeEach(() => {
     vi.resetModules();
     installDom();
-    permissionGranted = true;
-    requestPermissionResult = true;
   });
 
   afterEach(() => {
@@ -113,7 +96,7 @@ describe('Options page — AI Models section', () => {
     await loadOptionsPage(makeState());
 
     const root = document.getElementById('chatmuse-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select');
+    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select[data-feature]');
     expect(selects.length).toBe(5);
 
     const features = Array.from(selects).map((s) => s.dataset.feature);
@@ -130,7 +113,7 @@ describe('Options page — AI Models section', () => {
     await loadOptionsPage(makeState());
 
     const root = document.getElementById('chatmuse-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select');
+    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select[data-feature]');
 
     for (const select of selects) {
       const options = Array.from(select.options);
@@ -150,7 +133,7 @@ describe('Options page — AI Models section', () => {
     await loadOptionsPage(makeState({ featureModels: customModels }));
 
     const root = document.getElementById('chatmuse-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select');
+    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select[data-feature]');
 
     const values: Record<string, string> = {};
     for (const select of selects) {
@@ -173,11 +156,39 @@ describe('Options page — AI Models section', () => {
     expect(checkbox?.checked).toBe(true);
   });
 
-  it('renders the saved API base URL', async () => {
-    await loadOptionsPage(makeState({ claudeApiBaseUrl: 'https://api.kiro.cheap/v1' }));
+  it('renders the provider selector', async () => {
+    await loadOptionsPage(makeState({ claudeProvider: 'kiro' }));
 
-    const input = document.querySelector<HTMLInputElement>('input[placeholder="https://api.kiro.cheap/v1"]');
-    expect(input?.value).toBe('https://api.kiro.cheap/v1');
+    const providerSelect = document.querySelector<HTMLSelectElement>('[data-role="claude-provider-select"]');
+    expect(providerSelect?.value).toBe('kiro');
+    expect(Array.from(providerSelect?.options ?? []).map((option) => option.value)).toEqual([
+      'anthropic',
+      'kiro',
+    ]);
+  });
+
+  it('shows only the Anthropic key field when Anthropic is selected', async () => {
+    await loadOptionsPage(makeState({ claudeProvider: 'anthropic' }));
+
+    const anthropicField = document.querySelector<HTMLElement>('input[data-role="anthropic-api-key-input"]')?.closest('label');
+    const kiroField = document.querySelector<HTMLElement>('input[data-role="kiro-api-key-input"]')?.closest('label');
+
+    expect(anthropicField?.style.display).toBe('grid');
+    expect(kiroField?.style.display).toBe('none');
+    expect(anthropicField?.textContent).toContain('Anthropic API key');
+    expect(anthropicField?.textContent).toContain('Regular Claude/Anthropic API key');
+  });
+
+  it('shows only the Kiro key field when Kiro is selected', async () => {
+    await loadOptionsPage(makeState({ claudeProvider: 'kiro' }));
+
+    const anthropicField = document.querySelector<HTMLElement>('input[data-role="anthropic-api-key-input"]')?.closest('label');
+    const kiroField = document.querySelector<HTMLElement>('input[data-role="kiro-api-key-input"]')?.closest('label');
+
+    expect(anthropicField?.style.display).toBe('none');
+    expect(kiroField?.style.display).toBe('grid');
+    expect(kiroField?.textContent).toContain('Kiro API key');
+    expect(kiroField?.textContent).toContain('Kiro/AWStore API key');
   });
 
   it('saves featureModels when a dropdown changes', async () => {
@@ -224,55 +235,69 @@ describe('Options page — AI Models section', () => {
     expect(saved.promptCachingEnabled).toBe(false);
   });
 
-  it('saves a normalized Claude API base URL when the input changes', async () => {
+  it('saves provider selection when the selector changes', async () => {
     await loadOptionsPage(makeState());
 
-    const input = document.querySelector<HTMLInputElement>('input[placeholder="https://api.kiro.cheap/v1"]');
-    if (!input) {
-      throw new Error('Claude API Base URL input not found');
+    const providerSelect = document.querySelector<HTMLSelectElement>('[data-role="claude-provider-select"]');
+    if (!providerSelect) {
+      throw new Error('Provider selector not found');
     }
 
-    input.value = ' https://api.kiro.cheap/v1/ ';
-    input.dispatchEvent(new Event('change'));
+    providerSelect.value = 'kiro';
+    providerSelect.dispatchEvent(new Event('change'));
 
     await vi.waitFor(() => {
       if (!savedSettings) throw new Error('not saved yet');
     }, { timeout: 2000 });
 
-    const saved = savedSettings as { claudeApiBaseUrl?: string };
-    expect(saved.claudeApiBaseUrl).toBe('https://api.kiro.cheap/v1');
-    expect(input.value).toBe('https://api.kiro.cheap/v1');
+    const saved = savedSettings as { claudeProvider?: string };
+    expect(saved.claudeProvider).toBe('kiro');
   });
 
-  it('hides proxy permission controls for the direct Anthropic base URL', async () => {
-    await loadOptionsPage(makeState({ claudeApiBaseUrl: CLAUDE_API_BASE_URL }));
+  it('saves separate Anthropic and Kiro keys correctly', async () => {
+    await loadOptionsPage(makeState());
 
-    const row = document.querySelector<HTMLElement>('[data-role="proxy-permission-status"]')?.parentElement;
-    expect(row?.style.display).toBe('none');
-    expect(permissionsContainsMock).not.toHaveBeenCalled();
-  });
+    const anthropicInput = document.querySelector<HTMLInputElement>('input[data-role="anthropic-api-key-input"]');
+    const providerSelect = document.querySelector<HTMLSelectElement>('[data-role="claude-provider-select"]');
+    const kiroInput = document.querySelector<HTMLInputElement>('input[data-role="kiro-api-key-input"]');
 
-  it('shows proxy permission state and requests access for a custom base URL', async () => {
-    permissionGranted = false;
-    await loadOptionsPage(makeState({ claudeApiBaseUrl: 'https://api.kiro.cheap/v1' }));
+    if (!anthropicInput || !providerSelect || !kiroInput) {
+      throw new Error('Provider inputs not found');
+    }
 
-    const status = document.querySelector<HTMLElement>('[data-role="proxy-permission-status"]');
-    const button = document.querySelector<HTMLButtonElement>('[data-role="proxy-permission-grant"]');
-
-    expect(status?.textContent).toContain('https://api.kiro.cheap');
-    expect(status?.textContent).toContain('Grant extension access');
-    expect(button?.disabled).toBe(false);
-
-    button?.click();
+    anthropicInput.value = 'sk-ant-updated';
+    anthropicInput.dispatchEvent(new Event('input'));
 
     await vi.waitFor(() => {
-      expect(permissionsRequestMock).toHaveBeenCalledWith({
-        origins: ['https://api.kiro.cheap/*'],
-      });
-      expect(status?.textContent).toContain('Access granted for https://api.kiro.cheap');
+      if (!savedSettings) throw new Error('Anthropic key not saved yet');
+    }, { timeout: 2000 });
+    expect((savedSettings as { anthropicApiKey?: string }).anthropicApiKey).toBe('sk-ant-updated');
+
+    providerSelect.value = 'kiro';
+    providerSelect.dispatchEvent(new Event('change'));
+    kiroInput.value = 'sk-aw-updated';
+    kiroInput.dispatchEvent(new Event('input'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('Kiro key not saved yet');
+      expect((savedSettings as { kiroApiKey?: string }).kiroApiKey).toBe('sk-aw-updated');
     }, { timeout: 2000 });
 
-    expect(button?.disabled).toBe(true);
-    expect(button?.textContent).toBe('Access granted');
+    const saved = savedSettings as {
+      claudeProvider?: string;
+      anthropicApiKey?: string;
+      kiroApiKey?: string;
+    };
+    expect(saved.claudeProvider).toBe('kiro');
+    expect(saved.anthropicApiKey).toBe('sk-ant-updated');
+    expect(saved.kiroApiKey).toBe('sk-aw-updated');
+  });
+
+  it('does not render the raw base URL field or Grant access controls', async () => {
+    await loadOptionsPage(makeState());
+
+    expect(document.body.textContent).not.toContain('Claude API Base URL');
+    expect(document.body.textContent).not.toContain('Grant access');
+    expect(document.querySelector('[data-role="proxy-permission-status"]')).toBeNull();
   });
 });

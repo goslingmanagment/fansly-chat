@@ -1,14 +1,11 @@
 import optionsStyles from './styles.css';
 import {
-  getClaudeApiPermissionOrigin,
-  hasClaudeApiPermission,
-  isDirectAnthropicApiBaseUrl,
-  normalizeClaudeApiBaseUrl,
-  requestClaudeApiPermission,
+  getClaudeProviderConfig,
+  normalizeClaudeProvider,
 } from '../shared/claude-api.js';
 import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
-import type { FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
+import type { ClaudeProvider, FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
 
@@ -167,61 +164,67 @@ async function render(): Promise<void> {
   title.textContent = 'ChatMuse Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure Claude, personalities, mappings, and live Fansly connections.';
+  subtitle.textContent = 'Configure Anthropic or Kiro, personalities, mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatmuse-muted)';
   hero.append(title, subtitle);
   root.append(hero);
 
   // ─── API Configuration ─────────────────────────────────────
   const apiSection = createSection('API Configuration');
-  const keyInput = document.createElement('input');
-  keyInput.type = 'password';
-  keyInput.className = 'chatmuse-input';
-  keyInput.value = state.settings.claudeApiKey;
-  const toggle = createButton('Show', true);
-  toggle.addEventListener('click', () => {
-    keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
-    toggle.textContent = keyInput.type === 'password' ? 'Show' : 'Hide';
-  });
-  const keyRow = document.createElement('div');
-  keyRow.style.display = 'grid';
-  keyRow.style.gridTemplateColumns = '1fr auto';
-  keyRow.style.gap = '8px';
-  keyRow.append(keyInput, toggle);
-  apiSection.append(labeledField('Claude API key', keyRow));
+  let currentProvider = normalizeClaudeProvider(state.settings.claudeProvider);
+  let anthropicApiKey = state.settings.anthropicApiKey;
+  let kiroApiKey = state.settings.kiroApiKey;
 
-  const apiBaseUrlInput = document.createElement('input');
-  apiBaseUrlInput.type = 'text';
-  apiBaseUrlInput.className = 'chatmuse-input';
-  apiBaseUrlInput.value = state.settings.claudeApiBaseUrl;
-  apiBaseUrlInput.placeholder = 'https://api.kiro.cheap/v1';
-  const apiBaseUrlField = document.createElement('div');
-  apiBaseUrlField.style.display = 'grid';
-  apiBaseUrlField.style.gap = '6px';
-  apiBaseUrlField.append(
-    apiBaseUrlInput,
-    createFieldNote('Optional. Leave blank to use Anthropic directly. Example: https://api.kiro.cheap/v1'),
-  );
-  apiSection.append(labeledField('Claude API Base URL', apiBaseUrlField));
+  const providerSelect = document.createElement('select');
+  providerSelect.className = 'chatmuse-select';
+  providerSelect.dataset.role = 'claude-provider-select';
+  for (const provider of ['anthropic', 'kiro'] as ClaudeProvider[]) {
+    const option = document.createElement('option');
+    option.value = provider;
+    option.textContent = getClaudeProviderConfig(provider).displayName;
+    providerSelect.append(option);
+  }
+  providerSelect.value = currentProvider;
+  apiSection.append(labeledField('Provider', providerSelect));
 
-  const proxyPermissionRow = document.createElement('div');
-  proxyPermissionRow.style.display = 'none';
-  proxyPermissionRow.style.gap = '10px';
-  proxyPermissionRow.style.padding = '12px';
-  proxyPermissionRow.style.borderRadius = '16px';
-  proxyPermissionRow.style.border = '1px solid rgba(255,255,255,0.08)';
-  proxyPermissionRow.style.background = 'rgba(255,255,255,0.04)';
+  function createProviderKeyField(
+    provider: ClaudeProvider,
+    initialValue: string,
+  ): { wrapper: HTMLElement; input: HTMLInputElement } {
+    const config = getClaudeProviderConfig(provider);
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.className = 'chatmuse-input';
+    input.value = initialValue;
+    input.dataset.role = `${provider}-api-key-input`;
 
-  const proxyPermissionStatus = document.createElement('div');
-  proxyPermissionStatus.dataset.role = 'proxy-permission-status';
-  proxyPermissionStatus.style.color = 'var(--chatmuse-muted)';
-  proxyPermissionStatus.style.fontSize = '13px';
+    const toggle = createButton('Show', true);
+    toggle.addEventListener('click', () => {
+      input.type = input.type === 'password' ? 'text' : 'password';
+      toggle.textContent = input.type === 'password' ? 'Show' : 'Hide';
+    });
 
-  const grantProxyPermissionButton = createButton('Grant access', true);
-  grantProxyPermissionButton.dataset.role = 'proxy-permission-grant';
+    const row = document.createElement('div');
+    row.style.display = 'grid';
+    row.style.gridTemplateColumns = '1fr auto';
+    row.style.gap = '8px';
+    row.append(input, toggle);
 
-  proxyPermissionRow.append(proxyPermissionStatus, grantProxyPermissionButton);
-  apiSection.append(proxyPermissionRow);
+    const field = document.createElement('div');
+    field.style.display = 'grid';
+    field.style.gap = '6px';
+    field.dataset.role = `${provider}-api-key-field`;
+    field.append(row, createFieldNote(config.apiKeyHelperText));
+
+    return {
+      wrapper: labeledField(config.apiKeyLabel, field),
+      input,
+    };
+  }
+
+  const anthropicKeyField = createProviderKeyField('anthropic', anthropicApiKey);
+  const kiroKeyField = createProviderKeyField('kiro', kiroApiKey);
+  apiSection.append(anthropicKeyField.wrapper, kiroKeyField.wrapper);
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -284,41 +287,11 @@ async function render(): Promise<void> {
   ];
 
   const modelSelects: HTMLSelectElement[] = [];
-  let latestSavedApiBaseUrl = state.settings.claudeApiBaseUrl;
-  let permissionUiRequestId = 0;
 
-  async function refreshProxyPermissionUi(savedApiBaseUrl: string): Promise<void> {
-    const requestId = ++permissionUiRequestId;
-    const normalizedBaseUrl = normalizeClaudeApiBaseUrl(savedApiBaseUrl);
-
-    if (!normalizedBaseUrl || isDirectAnthropicApiBaseUrl(normalizedBaseUrl)) {
-      proxyPermissionRow.style.display = 'none';
-      proxyPermissionStatus.textContent = '';
-      grantProxyPermissionButton.textContent = 'Grant access';
-      grantProxyPermissionButton.disabled = false;
-      return;
-    }
-
-    proxyPermissionRow.style.display = 'grid';
-    const permissionOrigin = getClaudeApiPermissionOrigin(normalizedBaseUrl);
-    if (!permissionOrigin) {
-      proxyPermissionStatus.textContent = 'Access can be granted after you save a valid URL.';
-      grantProxyPermissionButton.textContent = 'Grant access';
-      grantProxyPermissionButton.disabled = true;
-      return;
-    }
-
-    const granted = await hasClaudeApiPermission(normalizedBaseUrl);
-    if (requestId !== permissionUiRequestId) {
-      return;
-    }
-
-    const originLabel = permissionOrigin.slice(0, -2);
-    proxyPermissionStatus.textContent = granted
-      ? `Access granted for ${originLabel}. Claude requests can use this proxy.`
-      : `Grant extension access for ${originLabel} before Claude requests can use this proxy.`;
-    grantProxyPermissionButton.textContent = granted ? 'Access granted' : 'Grant access';
-    grantProxyPermissionButton.disabled = granted;
+  function refreshProviderUi(): void {
+    currentProvider = normalizeClaudeProvider(providerSelect.value);
+    anthropicKeyField.wrapper.style.display = currentProvider === 'anthropic' ? 'grid' : 'none';
+    kiroKeyField.wrapper.style.display = currentProvider === 'kiro' ? 'grid' : 'none';
   }
 
   for (const { feature, label, helper } of FEATURE_ROWS) {
@@ -361,37 +334,55 @@ async function render(): Promise<void> {
     }
 
     const savedSettings = await saveSettings({
-      claudeApiKey: keyInput.value,
-      claudeApiBaseUrl: apiBaseUrlInput.value,
+      claudeProvider: currentProvider,
+      anthropicApiKey,
+      kiroApiKey,
       quickMessageCount: Number(quickInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
       featureModels: featureModels as Record<FeatureType, string>,
     });
-    latestSavedApiBaseUrl = savedSettings.claudeApiBaseUrl;
-    apiBaseUrlInput.value = savedSettings.claudeApiBaseUrl;
-    await refreshProxyPermissionUi(latestSavedApiBaseUrl);
+    currentProvider = savedSettings.claudeProvider;
+    anthropicApiKey = savedSettings.anthropicApiKey;
+    kiroApiKey = savedSettings.kiroApiKey;
+    providerSelect.value = currentProvider;
+    anthropicKeyField.input.value = anthropicApiKey;
+    kiroKeyField.input.value = kiroApiKey;
+    refreshProviderUi();
   }, 350);
 
-  [keyInput, apiBaseUrlInput, quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
+  providerSelect.addEventListener('change', () => {
+    refreshProviderUi();
+    saveSettingsDebounced();
+  });
+
+  anthropicKeyField.input.addEventListener('input', () => {
+    anthropicApiKey = anthropicKeyField.input.value;
+    saveSettingsDebounced();
+  });
+  anthropicKeyField.input.addEventListener('change', () => {
+    anthropicApiKey = anthropicKeyField.input.value;
+    saveSettingsDebounced();
+  });
+
+  kiroKeyField.input.addEventListener('input', () => {
+    kiroApiKey = kiroKeyField.input.value;
+    saveSettingsDebounced();
+  });
+  kiroKeyField.input.addEventListener('change', () => {
+    kiroApiKey = kiroKeyField.input.value;
+    saveSettingsDebounced();
+  });
+
+  [quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
   modelSelects.forEach((select) => {
     select.addEventListener('change', saveSettingsDebounced);
   });
-
-  grantProxyPermissionButton.addEventListener('click', async () => {
-    grantProxyPermissionButton.disabled = true;
-    try {
-      await requestClaudeApiPermission(latestSavedApiBaseUrl);
-    } finally {
-      await refreshProxyPermissionUi(latestSavedApiBaseUrl);
-    }
-  });
-
-  await refreshProxyPermissionUi(latestSavedApiBaseUrl);
+  refreshProviderUi();
 
   root.append(apiSection);
   root.append(modelSection);

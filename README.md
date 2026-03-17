@@ -78,7 +78,7 @@ If the fan has been active in the last 5 days, the ping is blocked — they don'
 ### Prerequisites
 
 - Firefox (tested on 128+)
-- A Claude API key from [console.anthropic.com](https://console.anthropic.com)
+- An Anthropic API key from [console.anthropic.com](https://console.anthropic.com) or a Kiro/AWStore API key
 - Node.js 18+ and npm
 
 ### Build
@@ -98,11 +98,17 @@ Output goes to `dist/`.
 
 The extension icon appears in the toolbar. Navigate to [fansly.com](https://fansly.com) and open a DM conversation — the ChatMuse button bar should appear.
 
-### Enter Your API Key
+### Choose Provider and Enter Your API Key
 
 1. Click the ChatMuse toolbar icon and choose **Open Settings** (or right-click the icon → Extension Options)
-2. Paste your Claude API key in the **API Configuration** section
-3. The key is stored in `browser.storage.local` and never leaves the extension except in direct calls to Anthropic or an optional user-configured Anthropic-compatible proxy
+2. In **API Configuration**, choose **Anthropic** or **Kiro**
+3. Paste the matching API key:
+   Anthropic uses a regular Claude/Anthropic API key
+   Kiro uses a Kiro/AWStore API key
+4. ChatMuse sends requests directly to the selected provider:
+   Anthropic uses `https://api.anthropic.com/v1`
+   Kiro uses the Anthropic-compatible `https://api.kiro.cheap/v1`
+5. No manual base URL entry or extra permission prompt is required
 
 ## Configuration
 
@@ -218,7 +224,7 @@ All tests should pass. No network calls — everything is unit-tested with mocks
 
 ### API Key Handling
 
-The Claude API key is stored in `browser.storage.local` and sent only to Anthropic or an optional user-configured Anthropic-compatible proxy. It is never logged, included in Fansly API calls, or exposed to page scripts. The debug logger redacts any object property matching known sensitive key names.
+Anthropic and Kiro API keys are stored in `browser.storage.local` and sent only to the selected provider. Kiro uses the Anthropic-compatible `https://api.kiro.cheap/v1` API. Keys are never logged, included in Fansly API calls, or exposed to page scripts. The debug logger redacts known sensitive key fields and key patterns.
 
 ### Prompt Injection Protection
 

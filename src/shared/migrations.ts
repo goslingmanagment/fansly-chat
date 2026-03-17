@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CLAUDE_PROVIDER,
   DEEP_DEFAULT_MESSAGE_COUNT,
   DEFAULT_FEATURE_MODELS,
   QUICK_DEFAULT_MESSAGE_COUNT,
@@ -8,13 +9,36 @@ import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
   return {
-    claudeApiKey: '',
-    claudeApiBaseUrl: '',
+    claudeProvider: DEFAULT_CLAUDE_PROVIDER,
+    anthropicApiKey: '',
+    kiroApiKey: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
     promptCachingEnabled: true,
     featureModels: { ...DEFAULT_FEATURE_MODELS },
+  };
+}
+
+function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined): Settings {
+  const defaults = createDefaultSettings();
+  const legacyClaudeApiKey =
+    typeof raw?.claudeApiKey === 'string' ? raw.claudeApiKey : defaults.anthropicApiKey;
+
+  return {
+    claudeProvider: raw?.claudeProvider === 'kiro' ? 'kiro' : defaults.claudeProvider,
+    anthropicApiKey: String(raw?.anthropicApiKey ?? legacyClaudeApiKey),
+    kiroApiKey: String(raw?.kiroApiKey ?? defaults.kiroApiKey),
+    quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
+    deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),
+    debugMode: Boolean(raw?.debugMode ?? defaults.debugMode),
+    promptCachingEnabled: Boolean(
+      raw?.promptCachingEnabled ?? defaults.promptCachingEnabled,
+    ),
+    featureModels:
+      raw?.featureModels && typeof raw.featureModels === 'object'
+        ? raw.featureModels as Settings['featureModels']
+        : defaults.featureModels,
   };
 }
 
@@ -58,7 +82,7 @@ export function migrateState(raw: unknown): PersistedState {
   // Incremental migration: preserve what exists, fill in defaults for missing fields
   const defaults = createSeedState();
   const settings = record.settings && typeof record.settings === 'object'
-    ? { ...defaults.settings, ...(record.settings as Partial<Settings>) }
+    ? migrateSettingsRecord(record.settings as Record<string, unknown>)
     : defaults.settings;
 
   const personalities = Array.isArray(record.personalities) ? record.personalities : defaults.personalities;

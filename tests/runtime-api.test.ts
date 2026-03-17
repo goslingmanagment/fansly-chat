@@ -244,4 +244,37 @@ describe('runtime-api getPopupStatus', () => {
     expect(tabsGet).toHaveBeenCalledWith(2);
     expect(tabsQuery).not.toHaveBeenCalled();
   });
+
+  it('derives hasApiKey from the selected provider', async () => {
+    mockStorage = createStorage({
+      settings: {
+        ...createDefaultSettings(),
+        claudeProvider: 'kiro',
+        anthropicApiKey: '',
+        kiroApiKey: 'sk-aw-live',
+      },
+    });
+
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+
+    const { sessionStore, tabsQuery } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(1, makeCapture('active'));
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
+
+    const result = await onMessageListener?.({
+      type: 'getPopupStatus',
+      tabId: 1,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      claudeProvider: 'kiro',
+      hasApiKey: true,
+    }));
+  });
 });

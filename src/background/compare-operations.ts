@@ -4,6 +4,7 @@ import {
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
+import { resolveClaudeProviderSettings } from '../shared/claude-api.js';
 import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
@@ -286,9 +287,10 @@ async function validateCompareStart(
 
   const session = context.sessionStore.getSessionForTab(tabId);
   const legacyAccountId = context.sessionStore.getAccountIdForTab(tabId);
+  const resolvedProvider = resolveClaudeProviderSettings(storage.settings);
 
-  if (!storage.settings.claudeApiKey) {
-    throw new ChatMuseError('missing_api_key');
+  if (!resolvedProvider.apiKey) {
+    throw new ChatMuseError('missing_api_key', undefined, undefined, false, resolvedProvider.provider);
   }
   if (!legacyAccountId || !session) {
     throw new ChatMuseError('not_connected');
@@ -936,12 +938,13 @@ export async function executeCompare(
       let cardCost: AnthropicCostEstimate | undefined;
       let cardSpend: AnthropicSpendSummary | undefined;
       let actualModel = resolvedModel;
+      const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
 
       const streamToCard = async (model: string): Promise<string> => {
         actualModel = model;
         return context.anthropicClient.streamMessage({
-          apiKey: validated.storage.settings.claudeApiKey,
-          apiBaseUrl: validated.storage.settings.claudeApiBaseUrl,
+          provider: resolvedProvider.provider,
+          apiKey: resolvedProvider.apiKey,
           model,
           systemBlocks,
           userBlocks,

@@ -38,10 +38,26 @@ describe('logDebug', () => {
     spy.mockRestore();
   });
 
-  it('redacts sk-ant-* patterns in string values', () => {
+  it('redacts anthropicApiKey and kiroApiKey fields', () => {
     const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    logDebug(true, 'test', { note: 'key is sk-ant-abc123_XYZ ok' });
-    expect(spy).toHaveBeenCalledWith('[ChatMuse] test', { note: 'key is [REDACTED] ok' });
+    logDebug(true, 'test', { anthropicApiKey: 'sk-ant-123', kiroApiKey: 'sk-aw-456' });
+    expect(spy).toHaveBeenCalledWith('[ChatMuse] test', {
+      anthropicApiKey: '[REDACTED]',
+      kiroApiKey: '[REDACTED]',
+    });
+    spy.mockRestore();
+  });
+
+  it('redacts sk-ant-* and sk-aw-* patterns in string values', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    logDebug(true, 'test', {
+      anthropic: 'key is sk-ant-abc123_XYZ ok',
+      kiro: 'key is sk-aw-abc123_XYZ ok',
+    });
+    expect(spy).toHaveBeenCalledWith('[ChatMuse] test', {
+      anthropic: 'key is [REDACTED] ok',
+      kiro: 'key is [REDACTED] ok',
+    });
     spy.mockRestore();
   });
 
@@ -62,11 +78,29 @@ describe('logDebug', () => {
 
 describe('isDebugEnabled', () => {
   it('returns true when debugMode is true', () => {
-    expect(isDebugEnabled({ claudeApiKey: '', claudeApiBaseUrl: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: true, promptCachingEnabled: true, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(true);
+    expect(isDebugEnabled({
+      claudeProvider: 'anthropic',
+      anthropicApiKey: '',
+      kiroApiKey: '',
+      quickMessageCount: 100,
+      deepMessageCount: 500,
+      debugMode: true,
+      promptCachingEnabled: true,
+      featureModels: { ...DEFAULT_FEATURE_MODELS },
+    })).toBe(true);
   });
 
   it('returns false when debugMode is false', () => {
-    expect(isDebugEnabled({ claudeApiKey: '', claudeApiBaseUrl: '', quickMessageCount: 100, deepMessageCount: 500, debugMode: false, promptCachingEnabled: true, featureModels: { ...DEFAULT_FEATURE_MODELS } })).toBe(false);
+    expect(isDebugEnabled({
+      claudeProvider: 'anthropic',
+      anthropicApiKey: '',
+      kiroApiKey: '',
+      quickMessageCount: 100,
+      deepMessageCount: 500,
+      debugMode: false,
+      promptCachingEnabled: true,
+      featureModels: { ...DEFAULT_FEATURE_MODELS },
+    })).toBe(false);
   });
 
   it('returns false for null', () => {

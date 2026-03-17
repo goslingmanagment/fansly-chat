@@ -1,21 +1,19 @@
 import { ANTHROPIC_VERSION, MAX_TOKENS } from '../shared/constants.js';
 import {
-  buildClaudeApiMessagesUrl,
-  hasClaudeApiPermission,
-  isDirectAnthropicApiBaseUrl,
-  resolveClaudeApiBaseUrl,
+  resolveClaudeProviderSettings,
 } from '../shared/claude-api.js';
 import { ChatMuseError } from '../shared/errors.js';
 import type {
   AnthropicCacheCreationUsage,
   AnthropicUsageMetrics,
+  ClaudeProvider,
   FeatureType,
   PromptTextBlock,
 } from '../shared/types.js';
 
 interface StreamArgs {
+  provider: ClaudeProvider;
   apiKey: string;
-  apiBaseUrl: string;
   model: string;
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
@@ -119,8 +117,8 @@ function usageEquals(
 
 export class AnthropicClient {
   async streamMessage({
+    provider,
     apiKey,
-    apiBaseUrl,
     model,
     systemBlocks,
     userBlocks,
@@ -131,23 +129,24 @@ export class AnthropicClient {
   }: StreamArgs): Promise<string> {
     let rawText = '';
     let usage: AnthropicUsageMetrics | null = null;
-    const resolvedApiBaseUrl = resolveClaudeApiBaseUrl(apiBaseUrl);
-    if (!(await hasClaudeApiPermission(resolvedApiBaseUrl))) {
-      throw new ChatMuseError('proxy_access_not_granted');
-    }
+    const resolvedProvider = resolveClaudeProviderSettings({
+      claudeProvider: provider,
+      anthropicApiKey: provider === 'anthropic' ? apiKey : '',
+      kiroApiKey: provider === 'kiro' ? apiKey : '',
+    });
 
     const headers: Record<string, string> = {
       'content-type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': resolvedProvider.apiKey,
       'anthropic-version': ANTHROPIC_VERSION,
     };
-    if (isDirectAnthropicApiBaseUrl(resolvedApiBaseUrl)) {
+    if (resolvedProvider.sendDangerousDirectBrowserAccessHeader) {
       headers['anthropic-dangerous-direct-browser-access'] = 'true';
     }
 
     let response: Response;
     try {
-      response = await fetch(buildClaudeApiMessagesUrl(resolvedApiBaseUrl), {
+      response = await fetch(resolvedProvider.messagesUrl, {
         method: 'POST',
         headers,
         signal,
@@ -164,7 +163,7 @@ export class AnthropicClient {
     }
 
     if (response.status === 401 || response.status === 403) {
-      throw new ChatMuseError('invalid_api_key');
+      throw new ChatMuseError('invalid_api_key', undefined, undefined, false, provider);
     }
     if (response.status === 429 || response.status >= 500) {
       throw new ChatMuseError('claude_overloaded');
