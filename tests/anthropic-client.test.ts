@@ -88,11 +88,33 @@ describe('AnthropicClient error mapping', () => {
     );
   });
 
+  it('maps Kiro 401 to invalid_api_key', async () => {
+    mockFetchResponse(401);
+    const client = new AnthropicClient();
+    await expect(client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+    }))).rejects.toThrow(
+      expect.objectContaining({ code: 'invalid_api_key', provider: 'kiro' }),
+    );
+  });
+
   it('maps 429 to claude_overloaded', async () => {
     mockFetchResponse(429);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({ code: 'claude_overloaded' }),
+    );
+  });
+
+  it('maps Kiro 429 to claude_overloaded', async () => {
+    mockFetchResponse(429);
+    const client = new AnthropicClient();
+    await expect(client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+    }))).rejects.toThrow(
+      expect.objectContaining({ code: 'claude_overloaded', provider: 'kiro' }),
     );
   });
 
@@ -111,6 +133,19 @@ describe('AnthropicClient error mapping', () => {
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({ code: 'model_unavailable' }),
+    );
+  });
+
+  it('maps Kiro 400 with not_found_error to model_unavailable', async () => {
+    mockFetchResponse(400, {
+      error: { type: 'not_found_error', message: 'model not found' },
+    });
+    const client = new AnthropicClient();
+    await expect(client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+    }))).rejects.toThrow(
+      expect.objectContaining({ code: 'model_unavailable', provider: 'kiro' }),
     );
   });
 
@@ -226,6 +261,26 @@ describe('AnthropicClient error mapping', () => {
     expect((thrown as Error).message).toContain('HTTP 418');
     expect((thrown as Error).message).toContain('no streaming body');
   });
+
+  it('maps malformed Kiro success bodies to unknown_error', async () => {
+    mockFetchResponse(200, {
+      content: [{ type: 'text' }],
+      usage: {
+        input_tokens: 1,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 1,
+      },
+    });
+    const client = new AnthropicClient();
+
+    await expect(client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+    }))).rejects.toThrow(
+      expect.objectContaining({ code: 'unknown_error', provider: 'kiro' }),
+    );
+  });
 });
 
 describe('AnthropicClient streaming requests', () => {
@@ -265,15 +320,12 @@ describe('AnthropicClient streaming requests', () => {
         content: streamArgs().userBlocks,
       },
     ]);
+    expect((body as { stream?: boolean }).stream).toBe(true);
   });
 
-  it('uses the Kiro base URL and omits the direct-browser header', async () => {
-    mockFetchResponse(200, undefined, {
-      bodyStream: [
-        'event: message_stop',
-        'data: {"type":"message_stop"}',
-        '',
-      ].join('\n'),
+  it('uses the Kiro base URL, omits the direct-browser header, and disables streaming', async () => {
+    mockFetchResponse(200, {
+      content: [{ type: 'text', text: 'Kiro ok' }],
     });
     const client = new AnthropicClient();
 
@@ -281,17 +333,27 @@ describe('AnthropicClient streaming requests', () => {
 
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.kiro.cheap/v1/messages');
-    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    const request = fetchMock.mock.calls[0]?.[1];
+    const headers = request?.headers as Record<string, string>;
+    const body = JSON.parse(String(request?.body)) as {
+      stream?: boolean;
+      system: unknown;
+      messages: Array<{ role: string; content: unknown }>;
+    };
     expect(headers).not.toHaveProperty('anthropic-dangerous-direct-browser-access');
+    expect(body.stream).toBe(false);
+    expect(body.system).toEqual(streamArgs().systemBlocks);
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: streamArgs().userBlocks,
+      },
+    ]);
   });
 
   it('returns a successful provider connection test result for Kiro', async () => {
-    mockFetchResponse(200, undefined, {
-      bodyStream: [
-        'event: message_stop',
-        'data: {"type":"message_stop"}',
-        '',
-      ].join('\n'),
+    mockFetchResponse(200, {
+      content: [{ type: 'text', text: 'OK' }],
     });
     const client = new AnthropicClient();
 
@@ -308,6 +370,11 @@ describe('AnthropicClient streaming requests', () => {
       status: 'ready',
       capabilityStatus: 'ready',
     });
+
+    const fetchMock = vi.mocked(fetch);
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as { stream?: boolean };
+    expect(body.stream).toBe(false);
   });
 
   it('streams text deltas and reports cumulative usage metrics', async () => {
@@ -351,6 +418,47 @@ describe('AnthropicClient streaming requests', () => {
       },
     });
     expect(onUsage).toHaveBeenNthCalledWith(2, {
+      input_tokens: 120,
+      cache_creation_input_tokens: 40,
+      cache_read_input_tokens: 55,
+      output_tokens: 9,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 20,
+        ephemeral_1h_input_tokens: 20,
+      },
+    });
+  });
+
+  it('parses Kiro JSON responses once and reports usage with emoji intact', async () => {
+    mockFetchResponse(200, {
+      content: [{ type: 'text', text: 'Привет 👋 café' }],
+      usage: {
+        input_tokens: 120,
+        cache_creation_input_tokens: 40,
+        cache_read_input_tokens: 55,
+        output_tokens: 9,
+        cache_creation: {
+          ephemeral_5m_input_tokens: 20,
+          ephemeral_1h_input_tokens: 20,
+        },
+      },
+    });
+    const client = new AnthropicClient();
+    const onText = vi.fn();
+    const onUsage = vi.fn();
+
+    const rawText = await client.streamMessage(streamArgs({
+      provider: 'kiro',
+      apiKey: 'sk-aw-test',
+      onText,
+      onUsage,
+    }));
+
+    expect(rawText).toBe('Привет 👋 café');
+    expect(onText).toHaveBeenCalledTimes(1);
+    expect(onText).toHaveBeenCalledWith('Привет 👋 café');
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledWith({
       input_tokens: 120,
       cache_creation_input_tokens: 40,
       cache_read_input_tokens: 55,

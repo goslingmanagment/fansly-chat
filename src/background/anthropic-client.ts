@@ -38,6 +38,11 @@ interface ProviderErrorBody {
   error?: { type?: string; message?: string };
 }
 
+interface ProviderMessageBody extends ProviderErrorBody {
+  content?: Array<{ type?: string; text?: string }>;
+  usage?: Partial<AnthropicUsageMetrics>;
+}
+
 interface ConnectionTestArgs {
   provider: ClaudeProvider;
   apiKey: string;
@@ -141,7 +146,8 @@ function buildHeaders(resolvedProvider: ReturnType<typeof resolveClaudeProviderS
   return headers;
 }
 
-function buildStreamBody(
+function buildMessageBody(
+  provider: ClaudeProvider,
   model: string,
   feature: FeatureType,
   systemBlocks: PromptTextBlock[],
@@ -150,7 +156,7 @@ function buildStreamBody(
 ): string {
   return JSON.stringify({
     model,
-    stream: true,
+    stream: provider !== 'kiro',
     max_tokens: maxTokens,
     system: systemBlocks,
     messages: [{ role: 'user', content: userBlocks }],
@@ -258,6 +264,16 @@ function usageEquals(
   );
 }
 
+async function readJsonBody<T>(
+  response: Response,
+): Promise<{ body: T | null; parseError?: unknown }> {
+  try {
+    return { body: await response.json() as T };
+  } catch (error) {
+    return { body: null, parseError: error };
+  }
+}
+
 export class AnthropicClient {
   async testConnection({
     provider,
@@ -315,7 +331,8 @@ export class AnthropicClient {
         method: 'POST',
         headers: buildHeaders(resolvedProvider),
         signal: controller.signal,
-        body: buildStreamBody(
+        body: buildMessageBody(
+          provider,
           model,
           'fast-reply',
           probePayload.systemBlocks,
@@ -330,6 +347,36 @@ export class AnthropicClient {
           checkedAt,
           status: 'invalid_api_key',
           detail: responseDetail(provider, response.status),
+          httpStatus: response.status,
+        };
+      }
+
+      if (provider === 'kiro' && response.ok) {
+        const { parseError } = await readJsonBody<ProviderMessageBody>(response);
+        if (parseError) {
+          logDebug(debugEnabled, 'claude connection test response parse error', {
+            ...requestContext,
+            status: response.status,
+            statusText: response.statusText,
+            parseError,
+          });
+          return {
+            ...diagnostics,
+            checkedAt,
+            status: 'http_error',
+            detail: technicalDetail(
+              provider,
+              `HTTP ${response.status} response body could not be parsed.`,
+            ),
+            httpStatus: response.status,
+          };
+        }
+
+        return {
+          ...diagnostics,
+          checkedAt,
+          status: 'ready',
+          detail: technicalDetail(provider, `Connection test succeeded (HTTP ${response.status}).`),
           httpStatus: response.status,
         };
       }
@@ -409,7 +456,7 @@ export class AnthropicClient {
         method: 'POST',
         headers,
         signal,
-        body: buildStreamBody(model, feature, systemBlocks, userBlocks),
+        body: buildMessageBody(provider, model, feature, systemBlocks, userBlocks),
       });
     } catch (error) {
       logDebug(debugEnabled, 'claude request failed', {
@@ -534,7 +581,7 @@ export class AnthropicClient {
         provider,
       );
     }
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       logDebug(debugEnabled, 'claude response error', {
         ...requestContext,
         status: response.status,
@@ -545,6 +592,71 @@ export class AnthropicClient {
         ? responseDetail(provider, response.status, 'no streaming body')
         : responseDetail(provider, response.status);
       throw new ChatMuseError('network_error', detail, undefined, false, provider);
+    }
+
+    if (provider === 'kiro') {
+      const { body, parseError } = await readJsonBody<ProviderMessageBody>(response);
+      if (parseError) {
+        logDebug(debugEnabled, 'claude response parse error', {
+          ...requestContext,
+          status: response.status,
+          statusText: response.statusText,
+          parseError,
+        });
+        throw new ChatMuseError(
+          'unknown_error',
+          technicalDetail(
+            provider,
+            `HTTP ${response.status} response body could not be parsed.`,
+          ),
+          undefined,
+          false,
+          provider,
+        );
+      }
+
+      const text = body?.content?.[0]?.text;
+      if (typeof text !== 'string') {
+        logDebug(debugEnabled, 'claude response parse error', {
+          ...requestContext,
+          status: response.status,
+          statusText: response.statusText,
+          responseBody: body,
+        });
+        throw new ChatMuseError(
+          'unknown_error',
+          technicalDetail(
+            provider,
+            `HTTP ${response.status} response body did not include content[0].text.`,
+          ),
+          undefined,
+          false,
+          provider,
+        );
+      }
+
+      const nextUsage = mergeUsage(null, body?.usage);
+      if (nextUsage) {
+        onUsage?.(nextUsage);
+      }
+      onText(text);
+      return text;
+    }
+
+    if (!response.body) {
+      logDebug(debugEnabled, 'claude response error', {
+        ...requestContext,
+        status: response.status,
+        statusText: response.statusText,
+        hasBody: false,
+      });
+      throw new ChatMuseError(
+        'network_error',
+        responseDetail(provider, response.status, 'no streaming body'),
+        undefined,
+        false,
+        provider,
+      );
     }
 
     const decoder = new TextDecoder();
