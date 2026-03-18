@@ -213,6 +213,7 @@ describe('OperationCoordinator', () => {
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
         modelId: DEFAULT_MODEL_ID,
+        provider: 'anthropic',
       },
     };
 
@@ -1930,6 +1931,64 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
     expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
+  });
+
+  it('invalidates summary cache when provider changes for the same model id', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      claudeProvider: 'kiro',
+      anthropicApiKey: 'sk-ant-test',
+      kiroApiKey: 'sk-aw-test',
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fan-summary': 'claude-opus-4-6',
+      },
+    };
+    (mockStorage as Record<string, unknown>)['summary:group-1'] = {
+      summary: 'Anthropic cached summary',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      generatedAt: 2000,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'claude-opus-4-6',
+      provider: 'anthropic',
+    };
+
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Kiro regenerated summary',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kiro',
+        model: 'claude-opus-4-6',
+      }),
+    );
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
+    expect((mockStorage as Record<string, any>)['summary:group-1']).toEqual(
+      expect.objectContaining({
+        summary: 'Kiro regenerated summary',
+        modelId: 'claude-opus-4-6',
+        provider: 'kiro',
+      }),
+    );
   });
 
   it('treats legacy cache entries without modelId as cache misses', async () => {
