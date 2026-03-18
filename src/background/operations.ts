@@ -1,27 +1,16 @@
 import {
   DEEP_OPERATION_TIMEOUT_MS,
+  DEFAULT_FEATURE_MODELS,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
-import {
-  getDefaultModelId,
-  resolveProviderModelId,
-} from '../shared/claude-models.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
   aggregateMonthlyEarnings,
   formatFanSpendingData,
   monthWindowMs,
 } from '../shared/earnings.js';
-import {
-  hasClaudeApiKey,
-  resolveClaudeProviderSettings,
-} from '../shared/claude-api.js';
-import {
-  buildHostAccessMissingDetail,
-  getProviderDiagnostics,
-} from '../shared/provider-runtime.js';
 import {
   getCompareDraftCount,
   resolveMappedPersonalityId,
@@ -359,8 +348,7 @@ export class OperationCoordinator {
       accountId,
       groupId: context.groupId,
       connected: Boolean(session?.connected),
-      claudeProvider: storage.settings.claudeProvider,
-      hasApiKey: hasClaudeApiKey(storage.settings),
+      hasApiKey: Boolean(storage.settings.claudeApiKey),
       hasPersonalities: storage.personalities.length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
@@ -478,23 +466,9 @@ export class OperationCoordinator {
 
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
-    const resolvedProvider = resolveClaudeProviderSettings(storage.settings);
 
-    if (!resolvedProvider.apiKey) {
-      throw new ChatMuseError('missing_api_key', undefined, undefined, false, resolvedProvider.provider);
-    }
-    const providerDiagnostics = await getProviderDiagnostics(storage.settings);
-    if (!providerDiagnostics.hostPermissionGranted) {
-      throw new ChatMuseError(
-        'provider_host_access_missing',
-        buildHostAccessMissingDetail(
-          providerDiagnostics.provider,
-          providerDiagnostics.requestHost,
-        ),
-        undefined,
-        false,
-        providerDiagnostics.provider,
-      );
+    if (!storage.settings.claudeApiKey) {
+      throw new ChatMuseError('missing_api_key');
     }
     if (storage.personalities.length === 0) {
       throw new ChatMuseError('no_personalities');
@@ -809,7 +783,6 @@ export class OperationCoordinator {
       }
 
       const resolvedModel = validated.storage.settings.featureModels[payload.feature];
-      const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
 
       let cachedSummary = null;
       if (payload.feature === 'fan-summary') {
@@ -829,7 +802,6 @@ export class OperationCoordinator {
         cachedSummary.personalityId === personality.id &&
         cachedSummary.personalityUpdatedAt === personality.updatedAt &&
         cachedSummary.modelId === resolvedModel &&
-        cachedSummary.provider === resolvedProvider.provider &&
         cachedSummary.spendingDataVerified === true &&
         cachedSummary.subscriptionLookupVerified === true
       ) {
@@ -1334,21 +1306,13 @@ export class OperationCoordinator {
       profiler.log('Waiting for Claude');
       sendDebugProgress();
 
-      const resolvedApiModel =
-        resolveProviderModelId(resolvedProvider.provider, resolvedModel) ??
-        resolveProviderModelId(
-          resolvedProvider.provider,
-          getDefaultModelId(resolvedProvider.provider),
-        ) ??
-        getDefaultModelId(resolvedProvider.provider);
       let actualModel = resolvedModel;
-      let actualApiModel = resolvedApiModel;
       let latestAnthropicSpend: AnthropicSpendSummary | null = null;
       const handleAnthropicUsage = (
         usage: AnthropicUsageMetrics,
       ): AnthropicCostEstimate => {
-        const cost = estimateAnthropicCost(actualApiModel, usage);
-        const spend = buildAnthropicSpendSummary(actualApiModel, usage, cost);
+        const cost = estimateAnthropicCost(actualModel, usage);
+        const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
         latestAnthropicSpend = spend;
         const current = this.getActive(tabId);
         if (current?.operationId === payload.operationId) {
@@ -1365,13 +1329,11 @@ export class OperationCoordinator {
       };
 
       const streamArgs = {
-        provider: resolvedProvider.provider,
-        apiKey: resolvedProvider.apiKey,
-        model: actualApiModel,
+        apiKey: validated.storage.settings.claudeApiKey,
+        model: actualModel,
         systemBlocks,
         userBlocks,
         feature: payload.feature,
-        debugEnabled,
         signal,
         onText: (chunk: string) => {
           const current = this.getActive(tabId);
@@ -1402,16 +1364,12 @@ export class OperationCoordinator {
       try {
         rawText = await this.anthropicClient.streamMessage(streamArgs);
       } catch (err) {
-        const defaultModel = getDefaultModelId(resolvedProvider.provider);
-        const defaultApiModel =
-          resolveProviderModelId(resolvedProvider.provider, defaultModel) ??
-          defaultModel;
+        const defaultModel = DEFAULT_FEATURE_MODELS[payload.feature];
         const isModelError = err instanceof ChatMuseError
           ? err.code === 'model_unavailable'
           : (err as { code?: string })?.code === 'model_unavailable';
         if (isModelError && resolvedModel !== defaultModel) {
           actualModel = defaultModel;
-          actualApiModel = defaultApiModel;
           profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
           if (profiler.enabled) {
             this.send(tabId, {
@@ -1429,10 +1387,7 @@ export class OperationCoordinator {
               },
             });
           }
-          rawText = await this.anthropicClient.streamMessage({
-            ...streamArgs,
-            model: defaultApiModel,
-          });
+          rawText = await this.anthropicClient.streamMessage({ ...streamArgs, model: defaultModel });
         } else {
           throw err;
         }
@@ -1498,7 +1453,6 @@ export class OperationCoordinator {
             spendingDataVerified: true,
             subscriptionLookupVerified: true,
             modelId: resolvedModel,
-            provider: resolvedProvider.provider,
           });
         }
       }

@@ -12,7 +12,6 @@ import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import { ToastController } from './toast.js';
-import { getMissingApiKeyMessage } from '../shared/claude-api.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
@@ -44,10 +43,6 @@ function createParts(parts: string[]): OverlayInsertPart[] {
     insertedAt: null,
     insertedOnce: false,
   }));
-}
-
-function formatErrorToastMessage(error: { message: string; detail?: string }): string {
-  return error.detail ? `${error.message} ${error.detail}` : error.message;
 }
 
 function isInlineQuickFeature(f: FeatureType): f is 'fast-reply' | 'ping' {
@@ -423,7 +418,7 @@ export class ChatMuseContentApp {
     }
 
     if (!this.tabState.hasApiKey) {
-      this.toast.show(getMissingApiKeyMessage(this.tabState.claudeProvider), {
+      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
         actionLabel: 'Settings',
         onAction: () => { void browser.runtime.openOptionsPage(); },
       });
@@ -510,7 +505,7 @@ export class ChatMuseContentApp {
       return;
     }
     if (!this.tabState.hasApiKey) {
-      this.toast.show(getMissingApiKeyMessage(this.tabState.claudeProvider), {
+      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
         actionLabel: 'Settings',
         onAction: () => { void browser.runtime.openOptionsPage(); },
       });
@@ -865,7 +860,7 @@ export class ChatMuseContentApp {
     }
 
     if (message.type === 'compare:error') {
-      this.toast.show(formatErrorToastMessage(message.error));
+      this.toast.show(message.error.message);
     }
   }
 
@@ -960,7 +955,10 @@ export class ChatMuseContentApp {
         anthropicSpend:
           message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
         profiling: message.profiling ?? this.activeProfiling ?? undefined,
-        error: message.error,
+        error: {
+          code: 'unknown_error',
+          message: message.error.message,
+        },
       };
 
       if (isInlineQuickFeature(feature)) {
@@ -972,7 +970,7 @@ export class ChatMuseContentApp {
         } else if (this.quickInlineVisible) {
           this.inlinePanel.render(errorModel);
         } else {
-          this.toast.show(formatErrorToastMessage(message.error));
+          this.toast.show(message.error.message);
         }
         this.clearOperationState(false);
         this.renderButtonBar();
@@ -985,7 +983,7 @@ export class ChatMuseContentApp {
       return;
     }
 
-    this.toast.show(formatErrorToastMessage(message.error));
+    this.toast.show(message.error.message);
   }
 
   // ─── State Helpers ──────────────────────────────────────────────────

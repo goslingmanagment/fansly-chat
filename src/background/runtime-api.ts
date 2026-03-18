@@ -1,12 +1,5 @@
-import { hasClaudeApiKey } from '../shared/claude-api.js';
-import {
-  getDefaultModelId,
-  resolveProviderModelId,
-} from '../shared/claude-models.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
-import { getProviderDiagnostics } from '../shared/provider-runtime.js';
 import type { PopupStatus } from '../shared/types.js';
-import type { AnthropicClient } from './anthropic-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
@@ -16,7 +9,6 @@ import { TabContextStore } from './tab-context.js';
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 
 export interface RuntimeApiDeps {
-  anthropicClient: AnthropicClient;
   fanslyClient: FanslyClient;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
@@ -24,7 +16,6 @@ export interface RuntimeApiDeps {
 }
 
 export function registerRuntimeApi({
-  anthropicClient,
   fanslyClient,
   sessionStore,
   tabContexts,
@@ -35,8 +26,6 @@ export function registerRuntimeApi({
       if (message.type === 'getPopupStatus') {
         let tabId: number | undefined;
         let tabUrl: string | undefined;
-        const state = await storageCoordinator.getState();
-        const providerDiagnostics = await getProviderDiagnostics(state.settings);
 
         if (message.tabId !== undefined) {
           const tab = await browser.tabs.get(message.tabId);
@@ -57,7 +46,6 @@ export function registerRuntimeApi({
             accountId: null,
             groupId: null,
             connected: false,
-            claudeProvider: 'anthropic',
             hasApiKey: false,
             hasPersonalities: false,
             mappedPersonalityId: null,
@@ -65,10 +53,10 @@ export function registerRuntimeApi({
             compareCardCount: 0,
             compareDraftCount: 0,
             accountLabel: 'Not connected',
-            providerDiagnostics,
           } satisfies PopupStatus;
         }
 
+        const state = await storageCoordinator.getState();
         const session = sessionStore.getSessionForTab(tabId);
         const legacyAccountId = sessionStore.getAccountIdForTab(tabId);
         const accountId = session?.resolvedAccountId ?? legacyAccountId;
@@ -93,8 +81,7 @@ export function registerRuntimeApi({
           accountId,
           groupId: context.groupId,
           connected,
-          claudeProvider: state.settings.claudeProvider,
-          hasApiKey: hasClaudeApiKey(state.settings),
+          hasApiKey: Boolean(state.settings.claudeApiKey),
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,
@@ -103,7 +90,6 @@ export function registerRuntimeApi({
           accountLabel:
             mappedPersonalityName ??
             (accountId ? 'Unmapped account' : 'Not connected'),
-          providerDiagnostics,
         } satisfies PopupStatus;
       }
 
@@ -159,31 +145,6 @@ export function registerRuntimeApi({
         );
 
         return snapshot;
-      }
-
-      if (message.type === 'getProviderDiagnostics') {
-        const state = await storageCoordinator.getState();
-        return getProviderDiagnostics(state.settings);
-      }
-
-      if (message.type === 'runProviderConnectionTest') {
-        const state = await storageCoordinator.getState();
-        const provider = state.settings.claudeProvider;
-        const selectedModel =
-          state.settings.featureModels['fast-reply'] ?? getDefaultModelId(provider);
-        const resolvedModel =
-          resolveProviderModelId(provider, selectedModel) ??
-          resolveProviderModelId(provider, getDefaultModelId(provider)) ??
-          getDefaultModelId(provider);
-        return anthropicClient.testConnection({
-          provider,
-          apiKey:
-            provider === 'kiro'
-              ? state.settings.kiroApiKey
-              : state.settings.anthropicApiKey,
-          model: resolvedModel,
-          debugEnabled: Boolean(state.settings.debugMode),
-        });
       }
 
       return undefined;

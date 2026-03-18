@@ -553,10 +553,6 @@
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-error-detail {
-  font-size: 10px;
-}
-
 .chatmuse-inline-panel .chatmuse-spend-strip-primary {
   font-size: 11px;
 }
@@ -926,13 +922,6 @@
   padding: 10px 12px;
   font-size: 13px;
   color: #fca5a5;
-}
-
-.chatmuse-inline-error-detail {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: rgba(252, 165, 165, 0.82);
 }
 
 .chatmuse-inline-note {

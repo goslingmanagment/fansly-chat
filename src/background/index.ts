@@ -32,7 +32,6 @@ initializeSessionCapture(sessionStore, async (tabId, accountId) => {
 });
 
 registerRuntimeApi({
-  anthropicClient,
   fanslyClient,
   sessionStore,
   tabContexts,

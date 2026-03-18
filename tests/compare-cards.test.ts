@@ -6,9 +6,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeProvider: 'anthropic',
-      anthropicApiKey: 'sk-ant-test',
-      kiroApiKey: '',
+      claudeApiKey: 'sk-test',
       quickMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,

@@ -77,9 +77,6 @@ async function installRuntimeApiHarness(fanslyClient: {
         }),
       },
     },
-    permissions: {
-      contains: vi.fn(async () => true),
-    },
     tabs: {
       query: tabsQuery,
       get: tabsGet,
@@ -96,23 +93,6 @@ async function installRuntimeApiHarness(fanslyClient: {
   const sessionStore = new SessionStore();
   const storageCoordinator = new StorageCoordinator();
   registerRuntimeApi({
-    anthropicClient: {
-      testConnection: vi.fn(async () => ({
-        provider: 'anthropic',
-        displayName: 'Anthropic',
-        requestUrl: 'https://api.anthropic.com/v1/messages',
-        requestHost: 'api.anthropic.com',
-        hostPermissionPattern: '*://api.anthropic.com/*',
-        hostPermissionGranted: true,
-        hasApiKey: true,
-        capabilityStatus: 'ready',
-        buildTime: 'test-build',
-        status: 'ready',
-        checkedAt: 0,
-        detail: 'Anthropic: Connection test succeeded (HTTP 200).',
-        httpStatus: 200,
-      })),
-    } as never,
     fanslyClient: fanslyClient as never,
     sessionStore,
     tabContexts: new TabContextStore(),
@@ -263,70 +243,5 @@ describe('runtime-api getPopupStatus', () => {
     );
     expect(tabsGet).toHaveBeenCalledWith(2);
     expect(tabsQuery).not.toHaveBeenCalled();
-  });
-
-  it('derives hasApiKey from the selected provider', async () => {
-    mockStorage = createStorage({
-      settings: {
-        ...createDefaultSettings(),
-        claudeProvider: 'kiro',
-        anthropicApiKey: '',
-        kiroApiKey: 'sk-aw-live',
-      },
-    });
-
-    const fanslyClient = {
-      getAuthenticatedAccount: vi.fn(async () => {
-        throw new Error('should not be called');
-      }),
-    };
-
-    const { sessionStore, tabsQuery } = await installRuntimeApiHarness(fanslyClient);
-    sessionStore.registerCapture(1, makeCapture('active'));
-    tabsQuery.mockResolvedValue([
-      { id: 1, url: 'https://fansly.com/messages/active-group' },
-    ]);
-
-    const result = await onMessageListener?.({
-      type: 'getPopupStatus',
-      tabId: 1,
-    });
-
-    expect(result).toEqual(expect.objectContaining({
-      claudeProvider: 'kiro',
-      hasApiKey: true,
-      providerDiagnostics: expect.objectContaining({
-        provider: 'kiro',
-        hostPermissionGranted: true,
-        capabilityStatus: 'ready',
-      }),
-    }));
-  });
-
-  it('returns provider diagnostics for the selected provider', async () => {
-    mockStorage = createStorage({
-      settings: {
-        ...createDefaultSettings(),
-        claudeProvider: 'kiro',
-        kiroApiKey: 'sk-aw-live',
-      },
-    });
-
-    const fanslyClient = {
-      getAuthenticatedAccount: vi.fn(async () => {
-        throw new Error('should not be called');
-      }),
-    };
-
-    await installRuntimeApiHarness(fanslyClient);
-
-    const result = await onMessageListener?.({ type: 'getProviderDiagnostics' });
-
-    expect(result).toEqual(expect.objectContaining({
-      provider: 'kiro',
-      requestHost: 'api.kiro.cheap',
-      hostPermissionPattern: '*://api.kiro.cheap/*',
-      capabilityStatus: 'ready',
-    }));
   });
 });

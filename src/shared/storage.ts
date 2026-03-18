@@ -1,4 +1,5 @@
 import {
+  CLAUDE_MODEL_IDS,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
@@ -7,22 +8,12 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
-import { normalizeFeatureModelsForProvider } from './claude-models.js';
-import {
-  inferClaudeProviderFromLegacyBaseUrl,
-  normalizeClaudeProvider,
-} from './claude-api.js';
 import {
   collectAliasKeysForCanonical,
   resolveCanonicalAccountId,
 } from './account-aliases.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
 import type { FeatureType, PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
-
-type LegacySettingsInput = Partial<Settings> & {
-  claudeApiKey?: unknown;
-  claudeApiBaseUrl?: unknown;
-};
 
 function isSummaryKey(key: string): key is `summary:${string}` {
   return key.startsWith(SUMMARY_CACHE_PREFIX);
@@ -44,42 +35,26 @@ export async function loadStorageState(): Promise<PersistedState> {
   return state;
 }
 
-export function sanitizeSettings(input: LegacySettingsInput): Settings {
+export function sanitizeSettings(input: Partial<Settings>): Settings {
   const defaults = createDefaultSettings();
   const rawQuick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
   const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
   const quick = Number.isFinite(rawQuick) ? rawQuick : defaults.quickMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
-  const claudeProvider = normalizeClaudeProvider(
-    input.claudeProvider ?? inferClaudeProviderFromLegacyBaseUrl(input.claudeApiBaseUrl),
-  );
 
   const rawModels = input.featureModels && typeof input.featureModels === 'object'
     ? input.featureModels as Partial<Record<FeatureType, string>>
     : {};
-  const { featureModels } = normalizeFeatureModelsForProvider(
-    claudeProvider,
-    rawModels,
-  );
+  const featureModels = { ...defaults.featureModels };
+  for (const feature of Object.keys(defaults.featureModels) as FeatureType[]) {
+    const candidate = rawModels[feature];
+    if (candidate && CLAUDE_MODEL_IDS.has(candidate)) {
+      featureModels[feature] = candidate;
+    }
+  }
 
   return {
-    claudeProvider,
-    anthropicApiKey: String(
-      input.anthropicApiKey ??
-      (
-        claudeProvider === 'anthropic'
-          ? input.claudeApiKey ?? defaults.anthropicApiKey
-          : defaults.anthropicApiKey
-      ),
-    ).trim(),
-    kiroApiKey: String(
-      input.kiroApiKey ??
-      (
-        claudeProvider === 'kiro'
-          ? input.claudeApiKey ?? defaults.kiroApiKey
-          : defaults.kiroApiKey
-      ),
-    ).trim(),
+    claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),

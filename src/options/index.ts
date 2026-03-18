@@ -1,23 +1,7 @@
 import optionsStyles from './styles.css';
-import {
-  getClaudeProviderConfig,
-  normalizeClaudeProvider,
-} from '../shared/claude-api.js';
-import {
-  getDefaultModelId,
-  getModelLabel,
-  getModelsForProvider,
-  normalizeFeatureModelsForProvider,
-} from '../shared/claude-models.js';
+import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
-import type {
-  ClaudeProvider,
-  FeatureType,
-  Personality,
-  ProviderConnectionTestResult,
-  ProviderDiagnostics,
-  SessionSnapshotEntry,
-} from '../shared/types.js';
+import type { FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
 
@@ -73,14 +57,6 @@ function labeledField(labelText: string, input: HTMLElement): HTMLElement {
   label.style.fontWeight = '700';
   wrapper.append(label, input);
   return wrapper;
-}
-
-function createFieldNote(text: string): HTMLElement {
-  const note = document.createElement('div');
-  note.textContent = text;
-  note.style.color = 'var(--chatmuse-muted)';
-  note.style.fontSize = '13px';
-  return note;
 }
 
 function createButton(label: string, secondary = false, danger = false): HTMLButtonElement {
@@ -159,49 +135,9 @@ function buildConnectionRows(
   }));
 }
 
-function formatBuildTime(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
-function formatCapabilityLabel(diagnostics: ProviderDiagnostics): string {
-  switch (diagnostics.capabilityStatus) {
-    case 'ready':
-      return 'Ready';
-    case 'missing_api_key':
-      return 'API key missing';
-    case 'host_access_missing':
-      return 'Host access missing';
-    default:
-      return 'Unknown';
-  }
-}
-
-function formatTestStatusLabel(result: ProviderConnectionTestResult): string {
-  switch (result.status) {
-    case 'ready':
-      return 'Connection test passed';
-    case 'missing_api_key':
-      return 'API key missing';
-    case 'host_access_missing':
-      return 'Host access missing';
-    case 'invalid_api_key':
-      return 'Invalid API key';
-    case 'http_error':
-      return result.httpStatus ? `Provider HTTP ${result.httpStatus}` : 'Provider HTTP error';
-    case 'pre_response_failure':
-      return 'Blocked before response';
-    default:
-      return 'Unknown';
-  }
-}
-
 async function render(): Promise<void> {
-  const [sessions, state, initialProviderDiagnostics] = await Promise.all([
-    browser.runtime.sendMessage({ type: 'getSessionsSnapshot' }) as Promise<SessionSnapshotEntry[]>,
-    loadStorageState(),
-    browser.runtime.sendMessage({ type: 'getProviderDiagnostics' }) as Promise<ProviderDiagnostics>,
-  ]);
+  const sessions = (await browser.runtime.sendMessage({ type: 'getSessionsSnapshot' })) as SessionSnapshotEntry[];
+  const state = await loadStorageState();
   const sessionsByAccountId = buildSessionLookup(sessions);
 
   root.replaceChildren();
@@ -216,67 +152,28 @@ async function render(): Promise<void> {
   title.textContent = 'ChatMuse Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure Anthropic or Kiro, personalities, mappings, and live Fansly connections.';
+  subtitle.textContent = 'Configure Claude, personalities, mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatmuse-muted)';
   hero.append(title, subtitle);
   root.append(hero);
 
   // ─── API Configuration ─────────────────────────────────────
   const apiSection = createSection('API Configuration');
-  let currentProvider = normalizeClaudeProvider(state.settings.claudeProvider);
-  let anthropicApiKey = state.settings.anthropicApiKey;
-  let kiroApiKey = state.settings.kiroApiKey;
-
-  const providerSelect = document.createElement('select');
-  providerSelect.className = 'chatmuse-select';
-  providerSelect.dataset.role = 'claude-provider-select';
-  for (const provider of ['anthropic', 'kiro'] as ClaudeProvider[]) {
-    const option = document.createElement('option');
-    option.value = provider;
-    option.textContent = getClaudeProviderConfig(provider).displayName;
-    providerSelect.append(option);
-  }
-  providerSelect.value = currentProvider;
-  apiSection.append(labeledField('Provider', providerSelect));
-
-  function createProviderKeyField(
-    provider: ClaudeProvider,
-    initialValue: string,
-  ): { wrapper: HTMLElement; input: HTMLInputElement } {
-    const config = getClaudeProviderConfig(provider);
-    const input = document.createElement('input');
-    input.type = 'password';
-    input.className = 'chatmuse-input';
-    input.value = initialValue;
-    input.dataset.role = `${provider}-api-key-input`;
-
-    const toggle = createButton('Show', true);
-    toggle.addEventListener('click', () => {
-      input.type = input.type === 'password' ? 'text' : 'password';
-      toggle.textContent = input.type === 'password' ? 'Show' : 'Hide';
-    });
-
-    const row = document.createElement('div');
-    row.style.display = 'grid';
-    row.style.gridTemplateColumns = '1fr auto';
-    row.style.gap = '8px';
-    row.append(input, toggle);
-
-    const field = document.createElement('div');
-    field.style.display = 'grid';
-    field.style.gap = '6px';
-    field.dataset.role = `${provider}-api-key-field`;
-    field.append(row, createFieldNote(config.apiKeyHelperText));
-
-    return {
-      wrapper: labeledField(config.apiKeyLabel, field),
-      input,
-    };
-  }
-
-  const anthropicKeyField = createProviderKeyField('anthropic', anthropicApiKey);
-  const kiroKeyField = createProviderKeyField('kiro', kiroApiKey);
-  apiSection.append(anthropicKeyField.wrapper, kiroKeyField.wrapper);
+  const keyInput = document.createElement('input');
+  keyInput.type = 'password';
+  keyInput.className = 'chatmuse-input';
+  keyInput.value = state.settings.claudeApiKey;
+  const toggle = createButton('Show', true);
+  toggle.addEventListener('click', () => {
+    keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
+    toggle.textContent = keyInput.type === 'password' ? 'Show' : 'Hide';
+  });
+  const keyRow = document.createElement('div');
+  keyRow.style.display = 'grid';
+  keyRow.style.gridTemplateColumns = '1fr auto';
+  keyRow.style.gap = '8px';
+  keyRow.append(keyInput, toggle);
+  apiSection.append(labeledField('Claude API key', keyRow));
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -324,129 +221,11 @@ async function render(): Promise<void> {
     promptCachingLabel,
   );
 
-  // ─── Provider Diagnostics ─────────────────────────────────
-  const diagnosticsSection = createSection(
-    'Provider Diagnostics',
-    'Check effective host access, build identity, and run a live background connection test for the selected provider.',
-  );
-  const manifest = browser.runtime.getManifest();
-  let latestProviderDiagnostics = initialProviderDiagnostics;
-  let latestConnectionTest: ProviderConnectionTestResult | null = null;
-
-  const diagnosticsCard = document.createElement('div');
-  diagnosticsCard.className = 'chatmuse-card';
-
-  const diagnosticsSummary = document.createElement('div');
-  diagnosticsSummary.style.display = 'grid';
-  diagnosticsSummary.style.gap = '6px';
-
-  const diagnosticsMeta = document.createElement('div');
-  diagnosticsMeta.style.display = 'grid';
-  diagnosticsMeta.style.gap = '6px';
-  diagnosticsMeta.style.fontSize = '13px';
-  diagnosticsMeta.style.color = 'var(--chatmuse-muted)';
-
-  const diagnosticsTestStatus = document.createElement('div');
-  diagnosticsTestStatus.style.display = 'grid';
-  diagnosticsTestStatus.style.gap = '4px';
-
-  const diagnosticsActions = document.createElement('div');
-  diagnosticsActions.className = 'chatmuse-card-actions';
-
-  const testConnectionButton = createButton('Test Provider Connection');
-  const openDebuggingButton = createButton('about:debugging', true);
-  openDebuggingButton.addEventListener('click', () => {
-    void window.open('about:debugging#/runtime/this-firefox', '_blank');
-  });
-  diagnosticsActions.append(testConnectionButton, openDebuggingButton);
-
-  const reloadHint = createFieldNote(
-    'If the host access check fails after a rebuild, run `npm run build`, then reload ChatMuse from about:debugging#/runtime/this-firefox.',
-  );
-
-  function updateDiagnosticsUi(
-    diagnostics: ProviderDiagnostics,
-    connectionTest: ProviderConnectionTestResult | null,
-  ): void {
-    diagnosticsSummary.replaceChildren();
-    diagnosticsMeta.replaceChildren();
-    diagnosticsTestStatus.replaceChildren();
-
-    const capability = document.createElement('div');
-    capability.style.fontWeight = '700';
-    capability.textContent = `${diagnostics.displayName} capability: ${formatCapabilityLabel(diagnostics)}`;
-    capability.style.color =
-      diagnostics.capabilityStatus === 'ready'
-        ? 'var(--chatmuse-success)'
-        : diagnostics.capabilityStatus === 'host_access_missing'
-          ? 'var(--chatmuse-danger)'
-          : 'var(--chatmuse-muted)';
-    diagnosticsSummary.append(capability);
-
-    const providerLine = document.createElement('div');
-    providerLine.textContent = `Provider: ${diagnostics.displayName}`;
-    const requestLine = document.createElement('div');
-    requestLine.textContent = `Request host: ${diagnostics.requestHost}`;
-    const hostAccessLine = document.createElement('div');
-    hostAccessLine.textContent = `Host access: ${diagnostics.hostPermissionGranted ? 'Granted' : 'Missing'} (${diagnostics.hostPermissionPattern})`;
-    const apiKeyLine = document.createElement('div');
-    apiKeyLine.textContent = `API key: ${diagnostics.hasApiKey ? 'Configured' : 'Missing'}`;
-    const buildLine = document.createElement('div');
-    buildLine.textContent = `Installed build: ${formatBuildTime(diagnostics.buildTime)} · v${manifest.version}`;
-    diagnosticsMeta.append(
-      providerLine,
-      requestLine,
-      hostAccessLine,
-      apiKeyLine,
-      buildLine,
-    );
-
-    if (connectionTest) {
-      const status = document.createElement('div');
-      status.style.fontWeight = '700';
-      status.textContent = formatTestStatusLabel(connectionTest);
-      status.style.color =
-        connectionTest.status === 'ready'
-          ? 'var(--chatmuse-success)'
-          : connectionTest.status === 'host_access_missing' ||
-              connectionTest.status === 'invalid_api_key' ||
-              connectionTest.status === 'pre_response_failure'
-            ? 'var(--chatmuse-danger)'
-            : 'var(--chatmuse-muted)';
-      const detail = document.createElement('div');
-      detail.textContent = connectionTest.detail;
-      detail.style.whiteSpace = 'pre-wrap';
-      const checkedAt = document.createElement('div');
-      checkedAt.textContent = `Checked: ${new Date(connectionTest.checkedAt).toLocaleString()}`;
-      checkedAt.style.fontSize = '12px';
-      checkedAt.style.color = 'var(--chatmuse-muted)';
-      diagnosticsTestStatus.append(status, detail, checkedAt);
-    }
-
-    testConnectionButton.textContent = `Test ${diagnostics.displayName} Connection`;
-  }
-
-  updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
-  diagnosticsCard.append(
-    diagnosticsSummary,
-    diagnosticsMeta,
-    diagnosticsActions,
-    diagnosticsTestStatus,
-    reloadHint,
-  );
-  diagnosticsSection.append(diagnosticsCard);
-
   // ─── AI Models ───────────────────────────────────────────
   const modelSection = createSection(
     'AI Models',
+    'Pick which Claude model each feature uses. If you\'re not sure, leave everything on Claude Sonnet 4.6.',
   );
-  const modelSectionLead = createFieldNote('');
-  modelSectionLead.style.fontSize = '14px';
-
-  const modelChangeNote = createFieldNote('');
-  modelChangeNote.style.display = 'none';
-  modelChangeNote.style.color = 'var(--chatmuse-warning)';
-  modelSection.append(modelSectionLead, modelChangeNote);
 
   const FEATURE_ROWS: Array<{ feature: FeatureType; label: string; helper: string }> = [
     { feature: 'fast-reply', label: 'Fast Reply', helper: 'Quick replies you can insert into chat.' },
@@ -456,84 +235,22 @@ async function render(): Promise<void> {
     { feature: 'fan-summary', label: 'Fan Summary', helper: 'Longer summaries of the fan relationship and context.' },
   ];
 
-  const featureLabels = Object.fromEntries(
-    FEATURE_ROWS.map(({ feature, label }) => [feature, label]),
-  ) as Record<FeatureType, string>;
-  const modelSelects = new Map<FeatureType, HTMLSelectElement>();
-  let currentFeatureModels = {
-    ...normalizeFeatureModelsForProvider(
-      currentProvider,
-      state.settings.featureModels,
-    ).featureModels,
-  };
-
-  function refreshProviderUi(): void {
-    currentProvider = normalizeClaudeProvider(providerSelect.value);
-    anthropicKeyField.wrapper.style.display = currentProvider === 'anthropic' ? 'grid' : 'none';
-    kiroKeyField.wrapper.style.display = currentProvider === 'kiro' ? 'grid' : 'none';
-  }
-
-  function collectFeatureModelsFromUi(): Record<FeatureType, string> {
-    return Object.fromEntries(
-      Array.from(modelSelects.entries()).map(([feature, select]) => [feature, select.value]),
-    ) as Record<FeatureType, string>;
-  }
-
-  function refreshModelSectionLead(): void {
-    modelSectionLead.textContent = `Pick which Claude model each feature uses. If you're not sure, leave everything on ${getModelLabel(getDefaultModelId(currentProvider))}.`;
-  }
-
-  function showModelChangeNote(
-    provider: ClaudeProvider,
-    changes: Array<{ feature: FeatureType; fromModelId: string; toModelId: string }>,
-  ): void {
-    if (changes.length === 0) {
-      modelChangeNote.textContent = '';
-      modelChangeNote.style.display = 'none';
-      return;
-    }
-
-    const providerName = getClaudeProviderConfig(provider).displayName;
-    if (changes.length === 1) {
-      const [change] = changes;
-      modelChangeNote.textContent = `${featureLabels[change.feature]} changed to ${getModelLabel(change.toModelId)} because ${getModelLabel(change.fromModelId)} is not available on ${providerName}.`;
-      modelChangeNote.style.display = 'block';
-      return;
-    }
-
-    modelChangeNote.textContent = `${changes.length} model selections changed to ${getModelLabel(getDefaultModelId(provider))} because their previous models are not available on ${providerName}.`;
-    modelChangeNote.style.display = 'block';
-  }
-
-  function renderModelSelectOptions(
-    provider: ClaudeProvider,
-    featureModels: Record<FeatureType, string>,
-  ): void {
-    const availableModels = getModelsForProvider(provider);
-    for (const [feature, select] of modelSelects.entries()) {
-      select.replaceChildren();
-      for (const model of availableModels) {
-        const option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = `${model.label} \u2014 ${model.description}`;
-        select.append(option);
-      }
-      select.value = featureModels[feature];
-    }
-    refreshModelSectionLead();
-  }
-
-  async function refreshProviderDiagnostics(): Promise<void> {
-    latestProviderDiagnostics =
-      (await browser.runtime.sendMessage({ type: 'getProviderDiagnostics' })) as ProviderDiagnostics;
-    updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
-  }
+  const modelSelects: HTMLSelectElement[] = [];
 
   for (const { feature, label, helper } of FEATURE_ROWS) {
     const select = document.createElement('select');
     select.className = 'chatmuse-select';
     select.dataset.feature = feature;
-    modelSelects.set(feature, select);
+
+    for (const model of CLAUDE_MODELS) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.label} \u2014 ${model.description}`;
+      select.append(option);
+    }
+
+    select.value = state.settings.featureModels[feature];
+    modelSelects.push(select);
 
     const row = document.createElement('div');
     row.style.display = 'grid';
@@ -552,94 +269,32 @@ async function render(): Promise<void> {
     row.append(featureLabel, helperText, select);
     modelSection.append(row);
   }
-  renderModelSelectOptions(currentProvider, currentFeatureModels);
 
-  async function persistCurrentSettings(): Promise<void> {
-    currentFeatureModels = collectFeatureModelsFromUi();
+  const saveSettingsDebounced = debounce(async () => {
+    const featureModels: Record<string, string> = {};
+    for (const sel of modelSelects) {
+      featureModels[sel.dataset.feature!] = sel.value;
+    }
 
-    const savedSettings = await saveSettings({
-      claudeProvider: currentProvider,
-      anthropicApiKey,
-      kiroApiKey,
+    await saveSettings({
+      claudeApiKey: keyInput.value,
       quickMessageCount: Number(quickInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
-      featureModels: currentFeatureModels,
+      featureModels: featureModels as Record<FeatureType, string>,
     });
-    currentProvider = savedSettings.claudeProvider;
-    anthropicApiKey = savedSettings.anthropicApiKey;
-    kiroApiKey = savedSettings.kiroApiKey;
-    currentFeatureModels = { ...savedSettings.featureModels };
-    providerSelect.value = currentProvider;
-    anthropicKeyField.input.value = anthropicApiKey;
-    kiroKeyField.input.value = kiroApiKey;
-    refreshProviderUi();
-    renderModelSelectOptions(currentProvider, currentFeatureModels);
-    latestConnectionTest = null;
-    await refreshProviderDiagnostics();
-  }
-
-  const saveSettingsDebounced = debounce(() => {
-    void persistCurrentSettings();
   }, 350);
 
-  providerSelect.addEventListener('change', () => {
-    refreshProviderUi();
-    const normalized = normalizeFeatureModelsForProvider(
-      currentProvider,
-      collectFeatureModelsFromUi(),
-    );
-    currentFeatureModels = { ...normalized.featureModels };
-    renderModelSelectOptions(currentProvider, currentFeatureModels);
-    showModelChangeNote(currentProvider, normalized.changes);
-    saveSettingsDebounced();
-  });
-
-  anthropicKeyField.input.addEventListener('input', () => {
-    anthropicApiKey = anthropicKeyField.input.value;
-    saveSettingsDebounced();
-  });
-  anthropicKeyField.input.addEventListener('change', () => {
-    anthropicApiKey = anthropicKeyField.input.value;
-    saveSettingsDebounced();
-  });
-
-  kiroKeyField.input.addEventListener('input', () => {
-    kiroApiKey = kiroKeyField.input.value;
-    saveSettingsDebounced();
-  });
-  kiroKeyField.input.addEventListener('change', () => {
-    kiroApiKey = kiroKeyField.input.value;
-    saveSettingsDebounced();
-  });
-
-  [quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
+  [keyInput, quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
   modelSelects.forEach((select) => {
     select.addEventListener('change', saveSettingsDebounced);
   });
-  testConnectionButton.addEventListener('click', async () => {
-    testConnectionButton.disabled = true;
-    latestConnectionTest = null;
-    updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
-
-    try {
-      await persistCurrentSettings();
-      latestConnectionTest =
-        (await browser.runtime.sendMessage({ type: 'runProviderConnectionTest' })) as ProviderConnectionTestResult;
-      await refreshProviderDiagnostics();
-      updateDiagnosticsUi(latestProviderDiagnostics, latestConnectionTest);
-    } finally {
-      testConnectionButton.disabled = false;
-    }
-  });
-  refreshProviderUi();
 
   root.append(apiSection);
-  root.append(diagnosticsSection);
   root.append(modelSection);
 
   // ─── Personalities ─────────────────────────────────────────

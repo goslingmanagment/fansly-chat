@@ -164,15 +164,12 @@ async function createCoordinatorHarness(options?: {
   };
 }
 
-async function mockCompareCards(cards: CompareModelCard[]) {
-  const compareCards = await import('../src/shared/compare-cards.js');
-  vi.spyOn(compareCards, 'getCompareDraftCount').mockReturnValue(
-    cards.filter((card) => card.source === 'draft').length,
-  );
-  vi.spyOn(compareCards, 'resolveMappedPersonalityId').mockReturnValue(null);
-  vi.spyOn(compareCards, 'resolveCompareModelCards').mockReturnValue(cards);
-  vi.spyOn(compareCards, 'getCompareCardsFingerprint').mockReturnValue('mock-compare-fingerprint');
-  vi.spyOn(compareCards, 'getCompareCardsFingerprintForPersonality').mockReturnValue('mock-compare-fingerprint');
+function mockCompareCards(cards: CompareModelCard[]) {
+  vi.doMock('../src/shared/compare-cards.js', () => ({
+    getCompareDraftCount: () => cards.filter((card) => card.source === 'draft').length,
+    resolveMappedPersonalityId: () => null,
+    resolveCompareModelCards: () => cards,
+  }));
 }
 
 describe('OperationCoordinator', () => {
@@ -183,9 +180,7 @@ describe('OperationCoordinator', () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: {
-        claudeProvider: 'anthropic',
-        anthropicApiKey: 'sk-ant-test',
-        kiroApiKey: '',
+        claudeApiKey: 'sk-test',
         quickMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
@@ -213,14 +208,10 @@ describe('OperationCoordinator', () => {
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
         modelId: DEFAULT_MODEL_ID,
-        provider: 'anthropic',
       },
     };
 
     (globalThis as Record<string, unknown>).browser = {
-      permissions: {
-        contains: vi.fn(async () => true),
-      },
       storage: {
         local: {
           get: vi.fn(async (keys?: string | string[] | Record<string, unknown> | null) => {
@@ -258,47 +249,8 @@ describe('OperationCoordinator', () => {
   });
 
   afterEach(() => {
+    vi.doUnmock('../src/shared/compare-cards.js');
     vi.restoreAllMocks();
-  });
-
-  it('fails fast when provider host access is missing for Kiro', async () => {
-    mockStorage.settings = {
-      ...(mockStorage.settings as Record<string, unknown>),
-      claudeProvider: 'kiro',
-      anthropicApiKey: '',
-      kiroApiKey: 'sk-aw-test',
-    };
-    (browser.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-
-    const fanslyClient = buildFanslyClientMock();
-    const anthropicClient = {
-      streamMessage: vi.fn(async () => 'should not run'),
-    };
-    const { coordinator, port } = await createCoordinatorHarness({
-      fanslyClient,
-      anthropicClient,
-    });
-
-    await coordinator.startOperation(1, {
-      type: 'operation:start',
-      operationId: 'reply-op',
-      feature: 'fast-reply',
-      groupId: 'group-1',
-      routeNonce: 1,
-      domFanDisplayName: 'alice',
-      forceRegenerate: false,
-      replyMode: 'default',
-    });
-
-    const errorMessage = postedMessages(port).find(
-      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
-        message.type === 'operation:error',
-    );
-
-    expect(errorMessage?.error.code).toBe('provider_host_access_missing');
-    expect(errorMessage?.error.detail).toContain('api.kiro.cheap');
-    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
-    expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
   });
 
   it('removes the durable summary cache before a forced fan-summary refresh', async () => {
@@ -585,39 +537,8 @@ describe('OperationCoordinator', () => {
     );
   });
 
-  it('passes the selected Kiro provider and key to streamMessage for operations', async () => {
-    mockStorage.settings = {
-      ...(mockStorage.settings as Record<string, unknown>),
-      claudeProvider: 'kiro',
-      anthropicApiKey: 'sk-ant-unused',
-      kiroApiKey: 'sk-aw-live',
-    };
-
-    const { coordinator, anthropicClient } = await createCoordinatorHarness({
-      anthropicRawText: 'Kiro reply',
-    });
-
-    await coordinator.startOperation(1, {
-      type: 'operation:start',
-      operationId: 'reply-op',
-      feature: 'fast-reply',
-      groupId: 'group-1',
-      routeNonce: 1,
-      domFanDisplayName: 'alice',
-      forceRegenerate: false,
-      replyMode: 'default',
-    });
-
-    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'kiro',
-        apiKey: 'sk-aw-live',
-      }),
-    );
-  });
-
   it('returns compare_cards_unavailable when compare has fewer than two cards', async () => {
-    await mockCompareCards([
+    mockCompareCards([
       {
         id: 'draft-only',
         label: 'draft-only',
@@ -649,57 +570,8 @@ describe('OperationCoordinator', () => {
     expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
   });
 
-  it('passes the selected Kiro provider and key to compare card requests', async () => {
-    mockStorage.settings = {
-      ...(mockStorage.settings as Record<string, unknown>),
-      claudeProvider: 'kiro',
-      anthropicApiKey: 'sk-ant-unused',
-      kiroApiKey: 'sk-aw-live',
-    };
-    await mockCompareCards([
-      {
-        id: 'current:personality-1',
-        label: 'Closer (current)',
-        content: 'Current baseline personality',
-        source: 'current',
-      },
-      {
-        id: 'draft-1',
-        label: 'draft-1',
-        content: 'Draft personality variant',
-        source: 'draft',
-      },
-    ]);
-
-    const anthropicClient = {
-      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
-        onText('Reply');
-        return 'Reply';
-      }),
-    };
-    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
-
-    await coordinator.startCompare(1, {
-      type: 'compare:start',
-      operationId: 'compare-op',
-      groupId: 'group-1',
-      routeNonce: 1,
-      domFanDisplayName: 'alice',
-      forceRegenerate: false,
-      replyMode: 'default',
-    });
-
-    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
-    for (const [call] of anthropicClient.streamMessage.mock.calls) {
-      expect(call).toEqual(expect.objectContaining({
-        provider: 'kiro',
-        apiKey: 'sk-aw-live',
-      }));
-    }
-  });
-
   it('runs compare cards with one shared prep pass and the fast-reply model for each card', async () => {
-    await mockCompareCards([
+    mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -808,7 +680,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('includes the selected tone in compare reply prompts', async () => {
-    await mockCompareCards([
+    mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -854,7 +726,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       debugMode: true,
     };
-    await mockCompareCards([
+    mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -969,7 +841,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('allows mixed compare outcomes and still completes the overall compare session', async () => {
-    await mockCompareCards([
+    mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -1004,13 +876,7 @@ describe('OperationCoordinator', () => {
             cache_read_input_tokens: 2,
             output_tokens: 0,
           });
-          throw new ChatMuseError(
-            'network_error',
-            'Kiro: HTTP 502 (upstream unavailable).',
-            undefined,
-            false,
-            'kiro',
-          );
+          throw new ChatMuseError('network_error');
         }
         onUsage?.({
           input_tokens: 75,
@@ -1033,29 +899,18 @@ describe('OperationCoordinator', () => {
       replyMode: 'default',
     });
 
-    await vi.waitFor(() => {
-      const nextMessages = postedMessages(port);
-      if (!nextMessages.some((message) => message.type === 'compare:cardError')) {
-        throw new Error('compare:cardError not emitted yet');
-      }
-      if (!nextMessages.some((message) => message.type === 'compare:cardComplete')) {
-        throw new Error('compare:cardComplete not emitted yet');
-      }
-    });
-
-    const finalMessages = postedMessages(port);
-    const cardError = finalMessages.find(
+    const messages = postedMessages(port);
+    const cardError = messages.find(
       (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
         message.type === 'compare:cardError',
     );
-    const cardComplete = finalMessages.find(
+    const cardComplete = messages.find(
       (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardComplete' }> =>
         message.type === 'compare:cardComplete',
     );
 
     expect(cardError?.cardId).toBe('current:personality-1');
     expect(cardError?.error.code).toBe('network_error');
-    expect(cardError?.error.detail).toBe('Kiro: HTTP 502 (upstream unavailable).');
     expect(cardError?.anthropicSpend).toEqual({
       totalTokens: 56,
       inputTokens: 50,
@@ -1085,11 +940,11 @@ describe('OperationCoordinator', () => {
       cacheReadUsd: 0.000001,
       approximate: true,
     });
-    expect(finalMessages.some((message) => message.type === 'compare:complete')).toBe(true);
+    expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
   it('sends compare:discarded when an active compare session is cancelled', async () => {
-    await mockCompareCards([
+    mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -1931,64 +1786,6 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
     expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
-  });
-
-  it('invalidates summary cache when provider changes for the same model id', async () => {
-    mockStorage.settings = {
-      ...(mockStorage.settings as Record<string, unknown>),
-      claudeProvider: 'kiro',
-      anthropicApiKey: 'sk-ant-test',
-      kiroApiKey: 'sk-aw-test',
-      featureModels: {
-        ...DEFAULT_FEATURE_MODELS,
-        'fan-summary': 'claude-opus-4-6',
-      },
-    };
-    (mockStorage as Record<string, unknown>)['summary:group-1'] = {
-      summary: 'Anthropic cached summary',
-      personalityId: 'personality-1',
-      personalityUpdatedAt: 1000,
-      generatedAt: 2000,
-      spendingDataVerified: true,
-      subscriptionLookupVerified: true,
-      modelId: 'claude-opus-4-6',
-      provider: 'anthropic',
-    };
-
-    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
-      anthropicRawText: 'Kiro regenerated summary',
-    });
-
-    await coordinator.startOperation(1, {
-      type: 'operation:start',
-      operationId: 'summary-op',
-      feature: 'fan-summary',
-      groupId: 'group-1',
-      routeNonce: 1,
-      domFanDisplayName: 'alice',
-      forceRegenerate: false,
-    });
-
-    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
-    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'kiro',
-        model: 'claude-opus-4-6',
-      }),
-    );
-
-    const completeMessage = postedMessages(port).find(
-      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
-        message.type === 'operation:complete',
-    );
-    expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
-    expect((mockStorage as Record<string, any>)['summary:group-1']).toEqual(
-      expect.objectContaining({
-        summary: 'Kiro regenerated summary',
-        modelId: 'claude-opus-4-6',
-        provider: 'kiro',
-      }),
-    );
   });
 
   it('treats legacy cache entries without modelId as cache misses', async () => {
