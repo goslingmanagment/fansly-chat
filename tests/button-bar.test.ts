@@ -30,7 +30,37 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
   };
 }
 
-// Compare button removed from toolbar for now
+describe('ButtonBar compare visibility', () => {
+  beforeEach(() => {
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('renders Compare in the toolbar when compare cards are available', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', false, false);
+
+    const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Compare');
+
+    expect(compare).toBeDefined();
+    expect(compare?.disabled).toBe(false);
+  });
+});
+
+// Additional compare button behavior coverage remains skipped for now.
 describe.skip('ButtonBar compare button', () => {
   beforeEach(() => {
     installDom();

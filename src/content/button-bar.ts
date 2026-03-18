@@ -90,14 +90,15 @@ export class ButtonBar {
     const summaryButton = this.buttons.get('fan-summary')!;
     const pingButton = this.buttons.get('ping')!;
 
-    // Single row: [Reply] [2-part] [Tones...] [Summary] [Ping] [Reopen?] [Personality→right]
+    // Single row: [Reply] [2-part] [Tones...] [Compare] [Reopen?] [Summary] [Ping] [Personality→right]
     this.root.append(
       replyButton,
       this.replyModeToggle,
       this.toneRow,
+      compareButton,
+      this.compareRestoreButton,
       summaryButton,
       pingButton,
-      this.compareRestoreButton,
       this.personalityLabel,
     );
   }
