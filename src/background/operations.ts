@@ -809,6 +809,7 @@ export class OperationCoordinator {
       }
 
       const resolvedModel = validated.storage.settings.featureModels[payload.feature];
+      const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
 
       let cachedSummary = null;
       if (payload.feature === 'fan-summary') {
@@ -828,6 +829,7 @@ export class OperationCoordinator {
         cachedSummary.personalityId === personality.id &&
         cachedSummary.personalityUpdatedAt === personality.updatedAt &&
         cachedSummary.modelId === resolvedModel &&
+        cachedSummary.provider === resolvedProvider.provider &&
         cachedSummary.spendingDataVerified === true &&
         cachedSummary.subscriptionLookupVerified === true
       ) {
@@ -1332,7 +1334,6 @@ export class OperationCoordinator {
       profiler.log('Waiting for Claude');
       sendDebugProgress();
 
-      const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
       const resolvedApiModel =
         resolveProviderModelId(resolvedProvider.provider, resolvedModel) ??
         resolveProviderModelId(
@@ -1497,6 +1498,7 @@ export class OperationCoordinator {
             spendingDataVerified: true,
             subscriptionLookupVerified: true,
             modelId: resolvedModel,
+            provider: resolvedProvider.provider,
           });
         }
       }

@@ -48,6 +48,7 @@ export interface SummaryCacheEntry {
   spendingDataVerified?: boolean;
   subscriptionLookupVerified?: boolean;
   modelId?: string;
+  provider?: ClaudeProvider;
 }
 
 export interface PersistedState {
