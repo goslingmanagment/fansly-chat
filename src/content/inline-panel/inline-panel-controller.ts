@@ -585,10 +585,10 @@ export class InlinePanelController {
       if (tab.anthropicSpend) {
         section.append(this.createSpendStrip(tab.anthropicSpend));
       }
-      section.append(this.createErrorBlock(tab.error ?? {
-        code: 'unknown_error',
-        message: 'Something went wrong.',
-      }));
+      const error = document.createElement('div');
+      error.className = 'chatmuse-inline-error';
+      error.textContent = tab.error?.message ?? 'Something went wrong.';
+      section.append(error);
       return section;
     }
 
@@ -753,7 +753,10 @@ export class InlinePanelController {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
-    section.append(this.createErrorBlock(model.error));
+    const block = document.createElement('div');
+    block.className = 'chatmuse-inline-error';
+    block.textContent = model.error.message;
+    section.append(block);
 
     const actions = document.createElement('div');
     actions.className = 'chatmuse-card-actions';
@@ -766,23 +769,5 @@ export class InlinePanelController {
     section.append(actions);
 
     return section;
-  }
-
-  private createErrorBlock(error: UserFacingError): HTMLDivElement {
-    const block = document.createElement('div');
-    block.className = 'chatmuse-inline-error';
-
-    const message = document.createElement('div');
-    message.textContent = error.message;
-    block.append(message);
-
-    if (error.detail) {
-      const detail = document.createElement('div');
-      detail.className = 'chatmuse-inline-error-detail';
-      detail.textContent = error.detail;
-      block.append(detail);
-    }
-
-    return block;
   }
 }

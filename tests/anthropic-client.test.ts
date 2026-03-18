@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { ChatMuseError } from '../src/shared/errors.js';
 
 // ─── Mock fetch ──────────────────────────────────────────────────────────
 
@@ -22,7 +23,6 @@ function mockFetchResponse(status: number, body?: unknown, options?: { bodyStrea
 
 function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('../src/background/anthropic-client.js').AnthropicClient>['streamMessage']>[0]>) {
   return {
-    provider: 'anthropic' as const,
     apiKey: 'sk-test',
     model: 'claude-sonnet-4-20250514',
     systemBlocks: [
@@ -47,7 +47,6 @@ function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('.
       { type: 'text' as const, text: 'uncached tail' },
     ],
     feature: 'fast-reply' as const,
-    debugEnabled: false,
     signal: new AbortController().signal,
     onText: vi.fn(),
     onUsage: vi.fn(),
@@ -60,11 +59,6 @@ let AnthropicClient: typeof import('../src/background/anthropic-client.js').Anth
 
 beforeEach(async () => {
   vi.resetModules();
-  (globalThis as Record<string, unknown>).browser = {
-    permissions: {
-      contains: vi.fn(async () => true),
-    },
-  };
   const mod = await import('../src/background/anthropic-client.js');
   AnthropicClient = mod.AnthropicClient;
 });
@@ -88,33 +82,11 @@ describe('AnthropicClient error mapping', () => {
     );
   });
 
-  it('maps Kiro 401 to invalid_api_key', async () => {
-    mockFetchResponse(401);
-    const client = new AnthropicClient();
-    await expect(client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-    }))).rejects.toThrow(
-      expect.objectContaining({ code: 'invalid_api_key', provider: 'kiro' }),
-    );
-  });
-
   it('maps 429 to claude_overloaded', async () => {
     mockFetchResponse(429);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({ code: 'claude_overloaded' }),
-    );
-  });
-
-  it('maps Kiro 429 to claude_overloaded', async () => {
-    mockFetchResponse(429);
-    const client = new AnthropicClient();
-    await expect(client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-    }))).rejects.toThrow(
-      expect.objectContaining({ code: 'claude_overloaded', provider: 'kiro' }),
     );
   });
 
@@ -133,19 +105,6 @@ describe('AnthropicClient error mapping', () => {
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({ code: 'model_unavailable' }),
-    );
-  });
-
-  it('maps Kiro 400 with not_found_error to model_unavailable', async () => {
-    mockFetchResponse(400, {
-      error: { type: 'not_found_error', message: 'model not found' },
-    });
-    const client = new AnthropicClient();
-    await expect(client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-    }))).rejects.toThrow(
-      expect.objectContaining({ code: 'model_unavailable', provider: 'kiro' }),
     );
   });
 
@@ -186,101 +145,6 @@ describe('AnthropicClient error mapping', () => {
       expect.objectContaining({ code: 'network_error' }),
     );
   });
-
-  it('classifies Kiro pre-response failures and emits diagnostics when debug mode is enabled', async () => {
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      throw new TypeError('Failed to fetch sk-aw-live');
-    }));
-    const client = new AnthropicClient();
-
-    let thrown: unknown;
-    try {
-      await client.streamMessage(streamArgs({
-        provider: 'kiro',
-        apiKey: 'sk-aw-test',
-        debugEnabled: true,
-      }));
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toMatchObject({
-      code: 'provider_connection_failed',
-      provider: 'kiro',
-    });
-    expect((thrown as Error).message).toContain('Request failed before a response was received');
-    expect((thrown as Error).message).not.toContain('sk-aw-live');
-    expect(debugSpy).toHaveBeenCalledWith('[ChatMuse] claude request failed', expect.objectContaining({
-      provider: 'kiro',
-      requestUrl: 'https://api.kiro.cheap/v1/messages',
-      requestHost: 'api.kiro.cheap',
-      error: expect.objectContaining({
-        name: 'TypeError',
-        message: 'Failed to fetch [REDACTED]',
-      }),
-    }));
-    debugSpy.mockRestore();
-  });
-
-  it('classifies missing host access before surfacing a Kiro fetch failure', async () => {
-    (browser.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      throw new TypeError('Failed to fetch');
-    }));
-    const client = new AnthropicClient();
-
-    await expect(client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-    }))).rejects.toThrow(
-      expect.objectContaining({ code: 'provider_host_access_missing' }),
-    );
-  });
-
-  it('attaches response detail for non-ok responses without a streaming body', async () => {
-    const response: Partial<Response> = {
-      status: 418,
-      ok: false,
-      body: null,
-    };
-    vi.stubGlobal('fetch', vi.fn(async () => response));
-    const client = new AnthropicClient();
-
-    let thrown: unknown;
-    try {
-      await client.streamMessage(streamArgs({ provider: 'kiro', apiKey: 'sk-aw-test' }));
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toMatchObject({
-      code: 'network_error',
-      provider: 'kiro',
-    });
-    expect((thrown as Error).message).toContain('HTTP 418');
-    expect((thrown as Error).message).toContain('no streaming body');
-  });
-
-  it('maps malformed Kiro success bodies to unknown_error', async () => {
-    mockFetchResponse(200, {
-      content: [{ type: 'text' }],
-      usage: {
-        input_tokens: 1,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-        output_tokens: 1,
-      },
-    });
-    const client = new AnthropicClient();
-
-    await expect(client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-    }))).rejects.toThrow(
-      expect.objectContaining({ code: 'unknown_error', provider: 'kiro' }),
-    );
-  });
 });
 
 describe('AnthropicClient streaming requests', () => {
@@ -300,7 +164,6 @@ describe('AnthropicClient streaming requests', () => {
     await client.streamMessage(streamArgs());
 
     const fetchMock = vi.mocked(fetch);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.anthropic.com/v1/messages');
     const request = fetchMock.mock.calls[0]?.[1];
     const headers = request?.headers as Record<string, string>;
     const body = JSON.parse(String(request?.body)) as {
@@ -320,61 +183,6 @@ describe('AnthropicClient streaming requests', () => {
         content: streamArgs().userBlocks,
       },
     ]);
-    expect((body as { stream?: boolean }).stream).toBe(true);
-  });
-
-  it('uses the Kiro base URL, omits the direct-browser header, and disables streaming', async () => {
-    mockFetchResponse(200, {
-      content: [{ type: 'text', text: 'Kiro ok' }],
-    });
-    const client = new AnthropicClient();
-
-    await client.streamMessage(streamArgs({ provider: 'kiro', apiKey: 'sk-aw-test' }));
-
-    const fetchMock = vi.mocked(fetch);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.kiro.cheap/v1/messages');
-    const request = fetchMock.mock.calls[0]?.[1];
-    const headers = request?.headers as Record<string, string>;
-    const body = JSON.parse(String(request?.body)) as {
-      stream?: boolean;
-      system: unknown;
-      messages: Array<{ role: string; content: unknown }>;
-    };
-    expect(headers).not.toHaveProperty('anthropic-dangerous-direct-browser-access');
-    expect(body.stream).toBe(false);
-    expect(body.system).toEqual(streamArgs().systemBlocks);
-    expect(body.messages).toEqual([
-      {
-        role: 'user',
-        content: streamArgs().userBlocks,
-      },
-    ]);
-  });
-
-  it('returns a successful provider connection test result for Kiro', async () => {
-    mockFetchResponse(200, {
-      content: [{ type: 'text', text: 'OK' }],
-    });
-    const client = new AnthropicClient();
-
-    const result = await client.testConnection({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-      model: 'claude-sonnet-4-6',
-      debugEnabled: false,
-    });
-
-    expect(result).toMatchObject({
-      provider: 'kiro',
-      requestHost: 'api.kiro.cheap',
-      status: 'ready',
-      capabilityStatus: 'ready',
-    });
-
-    const fetchMock = vi.mocked(fetch);
-    const request = fetchMock.mock.calls[0]?.[1];
-    const body = JSON.parse(String(request?.body)) as { stream?: boolean };
-    expect(body.stream).toBe(false);
   });
 
   it('streams text deltas and reports cumulative usage metrics', async () => {
@@ -427,74 +235,5 @@ describe('AnthropicClient streaming requests', () => {
         ephemeral_1h_input_tokens: 20,
       },
     });
-  });
-
-  it('parses Kiro JSON responses once and reports usage with emoji intact', async () => {
-    mockFetchResponse(200, {
-      content: [{ type: 'text', text: 'Привет 👋 café' }],
-      usage: {
-        input_tokens: 120,
-        cache_creation_input_tokens: 40,
-        cache_read_input_tokens: 55,
-        output_tokens: 9,
-        cache_creation: {
-          ephemeral_5m_input_tokens: 20,
-          ephemeral_1h_input_tokens: 20,
-        },
-      },
-    });
-    const client = new AnthropicClient();
-    const onText = vi.fn();
-    const onUsage = vi.fn();
-
-    const rawText = await client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-      onText,
-      onUsage,
-    }));
-
-    expect(rawText).toBe('Привет 👋 café');
-    expect(onText).toHaveBeenCalledTimes(1);
-    expect(onText).toHaveBeenCalledWith('Привет 👋 café');
-    expect(onUsage).toHaveBeenCalledTimes(1);
-    expect(onUsage).toHaveBeenCalledWith({
-      input_tokens: 120,
-      cache_creation_input_tokens: 40,
-      cache_read_input_tokens: 55,
-      output_tokens: 9,
-      cache_creation: {
-        ephemeral_5m_input_tokens: 20,
-        ephemeral_1h_input_tokens: 20,
-      },
-    });
-  });
-
-  it('extracts Kiro text when the first content block is not text', async () => {
-    mockFetchResponse(200, {
-      content: [
-        { type: 'thinking' },
-        { type: 'text', text: 'Hello' },
-        { type: 'text', text: ' there' },
-      ],
-      usage: {
-        input_tokens: 12,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-        output_tokens: 2,
-      },
-    });
-    const client = new AnthropicClient();
-    const onText = vi.fn();
-
-    const rawText = await client.streamMessage(streamArgs({
-      provider: 'kiro',
-      apiKey: 'sk-aw-test',
-      onText,
-    }));
-
-    expect(rawText).toBe('Hello there');
-    expect(onText).toHaveBeenCalledTimes(1);
-    expect(onText).toHaveBeenCalledWith('Hello there');
   });
 });

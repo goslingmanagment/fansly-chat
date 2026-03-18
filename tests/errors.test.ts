@@ -39,38 +39,6 @@ describe('toUserError', () => {
     expect(result.message).toContain('API key');
   });
 
-  it('maps provider-aware API key errors', () => {
-    const err = new ChatMuseError('invalid_api_key', undefined, undefined, false, 'kiro');
-    const result = toUserError(err);
-
-    expect(result.code).toBe('invalid_api_key');
-    expect(result.message).toContain('Kiro API key');
-  });
-
-  it('preserves technical detail from custom ChatMuseError messages', () => {
-    const err = new ChatMuseError('network_error', 'Kiro: HTTP 502 (upstream unavailable).', undefined, false, 'kiro');
-    const result = toUserError(err);
-
-    expect(result.code).toBe('network_error');
-    expect(result.message).toBe('Connection error. Check your internet connection.');
-    expect(result.detail).toBe('Kiro: HTTP 502 (upstream unavailable).');
-  });
-
-  it('maps provider host access errors to provider-aware copy', () => {
-    const err = new ChatMuseError(
-      'provider_host_access_missing',
-      'Kiro: Host access to api.kiro.cheap is not active.',
-      undefined,
-      false,
-      'kiro',
-    );
-    const result = toUserError(err);
-
-    expect(result.code).toBe('provider_host_access_missing');
-    expect(result.message).toContain('Kiro host access is not active');
-    expect(result.detail).toContain('api.kiro.cheap');
-  });
-
   it('returns unknown_error for non-ChatMuseError', () => {
     const result = toUserError(new Error('random'));
     expect(result.code).toBe('unknown_error');
@@ -89,10 +57,5 @@ describe('getErrorMessage', () => {
 
   it('returns settingsLink for no_mapping', () => {
     expect(getErrorMessage('no_mapping').settingsLink).toBe(true);
-  });
-
-  it('returns provider-aware missing key copy', () => {
-    expect(getErrorMessage('missing_api_key', 'anthropic').message).toContain('Anthropic API key');
-    expect(getErrorMessage('missing_api_key', 'kiro').message).toContain('Kiro API key');
   });
 });

@@ -1,7 +1,6 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
 export type FeatureType = 'fast-reply' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping';
-export type ClaudeProvider = 'anthropic' | 'kiro';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers';
@@ -13,9 +12,7 @@ export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
 export interface Settings {
-  claudeProvider: ClaudeProvider;
-  anthropicApiKey: string;
-  kiroApiKey: string;
+  claudeApiKey: string;
   quickMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
@@ -48,7 +45,6 @@ export interface SummaryCacheEntry {
   spendingDataVerified?: boolean;
   subscriptionLookupVerified?: boolean;
   modelId?: string;
-  provider?: ClaudeProvider;
 }
 
 export interface PersistedState {
@@ -438,8 +434,6 @@ export type UserErrorCode =
   | 'fansly_server_error'
   | 'missing_api_key'
   | 'invalid_api_key'
-  | 'provider_host_access_missing'
-  | 'provider_connection_failed'
   | 'claude_overloaded'
   | 'no_personalities'
   | 'not_enough_history'
@@ -458,7 +452,6 @@ export type UserErrorCode =
 export interface UserFacingError {
   code: UserErrorCode;
   message: string;
-  detail?: string;
   settingsLink?: boolean;
 }
 
@@ -527,7 +520,6 @@ export interface TabUiState {
   accountId: string | null;
   groupId: string | null;
   connected: boolean;
-  claudeProvider: ClaudeProvider;
   hasApiKey: boolean;
   hasPersonalities: boolean;
   mappedPersonalityId: string | null;
@@ -536,41 +528,8 @@ export interface TabUiState {
   compareDraftCount: number;
 }
 
-export type ProviderCapabilityStatus =
-  | 'ready'
-  | 'missing_api_key'
-  | 'host_access_missing';
-
-export interface ProviderDiagnostics {
-  provider: ClaudeProvider;
-  displayName: string;
-  requestUrl: string;
-  requestHost: string;
-  hostPermissionPattern: string;
-  hostPermissionGranted: boolean;
-  hasApiKey: boolean;
-  capabilityStatus: ProviderCapabilityStatus;
-  buildTime: string;
-}
-
-export type ProviderConnectionTestStatus =
-  | 'ready'
-  | 'missing_api_key'
-  | 'host_access_missing'
-  | 'invalid_api_key'
-  | 'http_error'
-  | 'pre_response_failure';
-
-export interface ProviderConnectionTestResult extends ProviderDiagnostics {
-  status: ProviderConnectionTestStatus;
-  checkedAt: number;
-  detail: string;
-  httpStatus?: number;
-}
-
 export interface PopupStatus extends TabUiState {
   accountLabel: string;
-  providerDiagnostics: ProviderDiagnostics;
 }
 
 export interface SessionSnapshotEntry {
@@ -587,15 +546,11 @@ export interface SessionSnapshotEntry {
 export interface RuntimeRequestMap {
   getPopupStatus: undefined;
   getSessionsSnapshot: undefined;
-  getProviderDiagnostics: undefined;
-  runProviderConnectionTest: undefined;
 }
 
 export interface RuntimeResponseMap {
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
-  getProviderDiagnostics: ProviderDiagnostics;
-  runProviderConnectionTest: ProviderConnectionTestResult;
 }
 
 // ─── Port Messages (Discriminated Unions) ────────────────────────────────

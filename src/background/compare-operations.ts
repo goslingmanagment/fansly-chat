@@ -1,17 +1,9 @@
 import {
+  DEFAULT_FEATURE_MODELS,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
-import {
-  getDefaultModelId,
-  resolveProviderModelId,
-} from '../shared/claude-models.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
-import { resolveClaudeProviderSettings } from '../shared/claude-api.js';
-import {
-  buildHostAccessMissingDetail,
-  getProviderDiagnostics,
-} from '../shared/provider-runtime.js';
 import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
@@ -294,23 +286,9 @@ async function validateCompareStart(
 
   const session = context.sessionStore.getSessionForTab(tabId);
   const legacyAccountId = context.sessionStore.getAccountIdForTab(tabId);
-  const resolvedProvider = resolveClaudeProviderSettings(storage.settings);
 
-  if (!resolvedProvider.apiKey) {
-    throw new ChatMuseError('missing_api_key', undefined, undefined, false, resolvedProvider.provider);
-  }
-  const providerDiagnostics = await getProviderDiagnostics(storage.settings);
-  if (!providerDiagnostics.hostPermissionGranted) {
-    throw new ChatMuseError(
-      'provider_host_access_missing',
-      buildHostAccessMissingDetail(
-        providerDiagnostics.provider,
-        providerDiagnostics.requestHost,
-      ),
-      undefined,
-      false,
-      providerDiagnostics.provider,
-    );
+  if (!storage.settings.claudeApiKey) {
+    throw new ChatMuseError('missing_api_key');
   }
   if (!legacyAccountId || !session) {
     throw new ChatMuseError('not_connected');
@@ -958,27 +936,15 @@ export async function executeCompare(
       let cardCost: AnthropicCostEstimate | undefined;
       let cardSpend: AnthropicSpendSummary | undefined;
       let actualModel = resolvedModel;
-      const resolvedProvider = resolveClaudeProviderSettings(validated.storage.settings);
-      let actualApiModel =
-        resolveProviderModelId(resolvedProvider.provider, resolvedModel) ??
-        resolveProviderModelId(
-          resolvedProvider.provider,
-          getDefaultModelId(resolvedProvider.provider),
-        ) ??
-        getDefaultModelId(resolvedProvider.provider);
 
       const streamToCard = async (model: string): Promise<string> => {
         actualModel = model;
-        actualApiModel =
-          resolveProviderModelId(resolvedProvider.provider, model) ?? model;
         return context.anthropicClient.streamMessage({
-          provider: resolvedProvider.provider,
-          apiKey: resolvedProvider.apiKey,
-          model: actualApiModel,
+          apiKey: validated.storage.settings.claudeApiKey,
+          model,
           systemBlocks,
           userBlocks,
           feature: 'fast-reply',
-          debugEnabled,
           signal,
           onText: (chunk) => {
             const activeCompare = getActiveCompare(context, tabId);
@@ -1002,8 +968,8 @@ export async function executeCompare(
             );
           },
           onUsage: (usage) => {
-            const cost = estimateAnthropicCost(actualApiModel, usage);
-            const spend = buildAnthropicSpendSummary(actualApiModel, usage, cost);
+            const cost = estimateAnthropicCost(actualModel, usage);
+            const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
             cardUsage = { ...usage };
             cardCost = { ...cost };
             cardSpend = { ...spend };
@@ -1011,7 +977,7 @@ export async function executeCompare(
             profiler.log(formatAnthropicCostLog(cost));
             logDebug(debugEnabled, 'anthropic usage', {
               cardId: card.id,
-              model: actualApiModel,
+              model: actualModel,
               ...usage,
             });
             logDebug(debugEnabled, 'anthropic cost', {
@@ -1031,7 +997,7 @@ export async function executeCompare(
       try {
         rawText = await streamToCard(resolvedModel);
       } catch (error) {
-        const defaultModel = getDefaultModelId(resolvedProvider.provider);
+        const defaultModel = DEFAULT_FEATURE_MODELS['fast-reply'];
         const isModelError = error instanceof ChatMuseError
           ? error.code === 'model_unavailable'
           : (error as { code?: string })?.code === 'model_unavailable';

@@ -77,7 +77,6 @@ function readyState(): TabUiState {
     accountId: 'account-1',
     groupId: 'group-1',
     connected: true,
-    claudeProvider: 'anthropic',
     hasApiKey: true,
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
@@ -169,9 +168,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeProvider: 'anthropic',
-      anthropicApiKey: 'sk-ant-test',
-      kiroApiKey: '',
+      claudeApiKey: 'sk-test',
       quickMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
@@ -365,52 +362,6 @@ describe('ChatMuseContentApp', () => {
     expect(app.nextReplyTone).toBe('none');
   });
 
-  it('shows an Anthropic-specific missing-key toast before starting a feature', async () => {
-    const ChatMuseContentApp = await loadAppClass();
-    const app = new ChatMuseContentApp() as any;
-    const toastShow = vi.fn();
-
-    app.toast = { show: toastShow };
-    app.port.send = vi.fn();
-    app.tabState = {
-      ...readyState(),
-      claudeProvider: 'anthropic',
-      hasApiKey: false,
-    };
-    app.currentGroupId = 'group-1';
-
-    app.startFeature('fast-reply', false);
-
-    expect(toastShow).toHaveBeenCalledWith(
-      'Anthropic API key not configured. Go to Settings to add it.',
-      expect.objectContaining({ actionLabel: 'Settings' }),
-    );
-    expect(app.port.send).not.toHaveBeenCalled();
-  });
-
-  it('shows a Kiro-specific missing-key toast before starting compare', async () => {
-    const ChatMuseContentApp = await loadAppClass();
-    const app = new ChatMuseContentApp() as any;
-    const toastShow = vi.fn();
-
-    app.toast = { show: toastShow };
-    app.port.send = vi.fn();
-    app.tabState = {
-      ...readyState(),
-      claudeProvider: 'kiro',
-      hasApiKey: false,
-    };
-    app.currentGroupId = 'group-1';
-
-    await app.startCompare(false);
-
-    expect(toastShow).toHaveBeenCalledWith(
-      'Kiro API key not configured. Go to Settings to add it.',
-      expect.objectContaining({ actionLabel: 'Settings' }),
-    );
-    expect(app.port.send).not.toHaveBeenCalled();
-  });
-
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
@@ -482,73 +433,11 @@ describe('ChatMuseContentApp', () => {
       error: {
         code: 'unknown_error',
         message: 'Network failed',
-        detail: 'Kiro: HTTP 502 (upstream unavailable).',
       },
     });
 
     expect(document.querySelector('.chatmuse-grid .chatmuse-inline-error')?.textContent).toContain('Network failed');
-    expect(document.querySelector('.chatmuse-inline-error-detail')?.textContent).toBe('Kiro: HTTP 502 (upstream unavailable).');
     expect(document.querySelector('.chatmuse-profiling-summary')?.textContent).toContain('Load messages');
-  });
-
-  it('includes technical detail in toast-only quick-feature errors', async () => {
-    const ChatMuseContentApp = await loadAppClass();
-    const app = new ChatMuseContentApp() as any;
-
-    app.tabState = readyState();
-    app.currentGroupId = 'group-1';
-    app.activeFeature = 'fast-reply';
-    app.activeOperationId = 'reply-op';
-    app.lastFeature = 'fast-reply';
-    app.quickSurfaceEverOpened = false;
-    app.quickInlineVisible = false;
-    app.quickSurfaceMode = 'inline';
-
-    app.handleOperationError({
-      type: 'operation:error',
-      operationId: 'reply-op',
-      error: {
-        code: 'network_error',
-        message: 'Connection error. Check your internet connection.',
-        detail: 'Kiro: HTTP 502 (upstream unavailable).',
-      },
-    });
-
-    const toast = document.querySelector('.chatmuse-toast');
-    expect(toast?.textContent).toContain('Connection error. Check your internet connection.');
-    expect(toast?.textContent).toContain('Kiro: HTTP 502 (upstream unavailable).');
-  });
-
-  it('renders technical detail for compare card errors in the inline panel', async () => {
-    const ChatMuseContentApp = await loadAppClass();
-    const app = new ChatMuseContentApp() as any;
-
-    app.tabState = readyState();
-    app.currentGroupId = 'group-1';
-    app.activeCompareModel = createCompareModel({
-      operationId: 'compare-op',
-      activeCardId: 'current',
-    });
-    app.comparePanelVisible = true;
-    app.renderAll();
-
-    app.handleCompareCardError({
-      type: 'compare:cardError',
-      operationId: 'compare-op',
-      cardId: 'current',
-      error: {
-        code: 'network_error',
-        message: 'Connection error. Check your internet connection.',
-        detail: 'Kiro: HTTP 502 (upstream unavailable).',
-      },
-    });
-
-    expect(app.inlinePanel.root.querySelector('.chatmuse-inline-error')?.textContent).toContain(
-      'Connection error. Check your internet connection.',
-    );
-    expect(app.inlinePanel.root.querySelector('.chatmuse-inline-error-detail')?.textContent).toBe(
-      'Kiro: HTTP 502 (upstream unavailable).',
-    );
   });
 
   it('discards suppressed completion after route change instead of caching under new group', async () => {

@@ -1,34 +1,19 @@
-import { getInvalidApiKeyMessage, getMissingApiKeyMessage, normalizeClaudeProvider } from './claude-api.js';
-import type { ClaudeProvider, FanslyApiErrorDetails, UserErrorCode, UserFacingError } from './types.js';
+import type { FanslyApiErrorDetails, UserErrorCode, UserFacingError } from './types.js';
 
 export class ChatMuseError extends Error {
   readonly code: UserErrorCode;
   readonly details?: FanslyApiErrorDetails;
   readonly isOptional: boolean;
-  readonly provider?: ClaudeProvider;
 
-  constructor(
-    code: UserErrorCode,
-    message?: string,
-    details?: FanslyApiErrorDetails,
-    isOptional = false,
-    provider?: ClaudeProvider,
-  ) {
+  constructor(code: UserErrorCode, message?: string, details?: FanslyApiErrorDetails, isOptional = false) {
     super(message ?? code);
     this.code = code;
     this.details = details;
     this.isOptional = isOptional;
-    this.provider = provider ? normalizeClaudeProvider(provider) : undefined;
   }
 }
 
-const STATIC_ERROR_MESSAGES: Record<
-  Exclude<
-    UserErrorCode,
-    'missing_api_key' | 'invalid_api_key' | 'provider_host_access_missing' | 'provider_connection_failed'
-  >,
-  UserFacingError
-> = {
+const ERROR_MESSAGES: Record<UserErrorCode, UserFacingError> = {
   not_connected: {
     code: 'not_connected',
     message: 'Not connected to Fansly. Browse Fansly to establish a connection.',
@@ -40,6 +25,16 @@ const STATIC_ERROR_MESSAGES: Record<
   fansly_server_error: {
     code: 'fansly_server_error',
     message: 'Fansly server error. Please try again.',
+  },
+  missing_api_key: {
+    code: 'missing_api_key',
+    message: 'Claude API key not configured. Go to Settings to add it.',
+    settingsLink: true,
+  },
+  invalid_api_key: {
+    code: 'invalid_api_key',
+    message: 'Invalid Claude API key. Check your key in Settings.',
+    settingsLink: true,
   },
   claude_overloaded: {
     code: 'claude_overloaded',
@@ -102,97 +97,17 @@ const STATIC_ERROR_MESSAGES: Record<
   },
 };
 
-export function getErrorMessage(
-  code: UserErrorCode,
-  provider: ClaudeProvider = 'anthropic',
-): UserFacingError {
-  const providerLabel = provider === 'kiro' ? 'Kiro' : 'Anthropic';
-
-  if (code === 'missing_api_key') {
-    return {
-      code,
-      message: getMissingApiKeyMessage(provider),
-      settingsLink: true,
-    };
-  }
-
-  if (code === 'invalid_api_key') {
-    return {
-      code,
-      message: getInvalidApiKeyMessage(provider),
-      settingsLink: true,
-    };
-  }
-
-  if (code === 'provider_host_access_missing') {
-    return {
-      code,
-      message: `${providerLabel} host access is not active. Reload or reinstall the extension, then try again.`,
-      settingsLink: true,
-    };
-  }
-
-  if (code === 'provider_connection_failed') {
-    return {
-      code,
-      message: `${providerLabel} connection was blocked before a response was received. Check extension host access or reload the extension.`,
-      settingsLink: true,
-    };
-  }
-
-  return STATIC_ERROR_MESSAGES[code];
-}
-
-function attachTechnicalDetail(
-  base: UserFacingError,
-  code: UserErrorCode,
-  message: unknown,
-): UserFacingError {
-  if (typeof message !== 'string') {
-    return base;
-  }
-
-  const detail = message.trim();
-  if (!detail || detail === code || detail === base.message) {
-    return base;
-  }
-
-  return {
-    ...base,
-    detail,
-  };
-}
-
 export function toUserError(error: unknown): UserFacingError {
   if (error instanceof ChatMuseError) {
-    return attachTechnicalDetail(
-      getErrorMessage(error.code, error.provider ?? 'anthropic'),
-      error.code,
-      error.message,
-    );
+    return ERROR_MESSAGES[error.code];
   }
-  const errorLike = error as {
-    code?: string;
-    message?: string;
-    provider?: string | null | undefined;
-  };
-  const code = errorLike?.code;
-  const provider = normalizeClaudeProvider(errorLike?.provider);
-  if (
-    typeof code === 'string' &&
-    (
-      code === 'missing_api_key' ||
-      code === 'invalid_api_key' ||
-      code === 'provider_host_access_missing' ||
-      code === 'provider_connection_failed' ||
-      code in STATIC_ERROR_MESSAGES
-    )
-  ) {
-    return attachTechnicalDetail(
-      getErrorMessage(code as UserErrorCode, provider),
-      code as UserErrorCode,
-      errorLike?.message,
-    );
+  const code = (error as { code?: string })?.code;
+  if (typeof code === 'string' && code in ERROR_MESSAGES) {
+    return ERROR_MESSAGES[code as UserErrorCode];
   }
-  return STATIC_ERROR_MESSAGES.unknown_error;
+  return ERROR_MESSAGES.unknown_error;
+}
+
+export function getErrorMessage(code: UserErrorCode): UserFacingError {
+  return ERROR_MESSAGES[code];
 }

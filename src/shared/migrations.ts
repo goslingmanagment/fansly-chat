@@ -1,57 +1,19 @@
 import {
-  DEFAULT_CLAUDE_PROVIDER,
   DEEP_DEFAULT_MESSAGE_COUNT,
   DEFAULT_FEATURE_MODELS,
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
-import { inferClaudeProviderFromLegacyBaseUrl } from './claude-api.js';
 import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
   return {
-    claudeProvider: DEFAULT_CLAUDE_PROVIDER,
-    anthropicApiKey: '',
-    kiroApiKey: '',
+    claudeApiKey: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
     promptCachingEnabled: true,
     featureModels: { ...DEFAULT_FEATURE_MODELS },
-  };
-}
-
-function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined): Settings {
-  const defaults = createDefaultSettings();
-  const legacyClaudeApiKey =
-    typeof raw?.claudeApiKey === 'string' ? raw.claudeApiKey : defaults.anthropicApiKey;
-  const legacyProvider = raw?.claudeProvider === 'anthropic' || raw?.claudeProvider === 'kiro'
-    ? raw.claudeProvider
-    : inferClaudeProviderFromLegacyBaseUrl(
-      typeof raw?.claudeApiBaseUrl === 'string' ? raw.claudeApiBaseUrl : null,
-    );
-  const claudeProvider = legacyProvider ?? defaults.claudeProvider;
-
-  return {
-    claudeProvider,
-    anthropicApiKey: String(
-      raw?.anthropicApiKey ??
-      (claudeProvider === 'anthropic' ? legacyClaudeApiKey : defaults.anthropicApiKey),
-    ),
-    kiroApiKey: String(
-      raw?.kiroApiKey ??
-      (claudeProvider === 'kiro' ? legacyClaudeApiKey : defaults.kiroApiKey),
-    ),
-    quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
-    deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),
-    debugMode: Boolean(raw?.debugMode ?? defaults.debugMode),
-    promptCachingEnabled: Boolean(
-      raw?.promptCachingEnabled ?? defaults.promptCachingEnabled,
-    ),
-    featureModels:
-      raw?.featureModels && typeof raw.featureModels === 'object'
-        ? raw.featureModels as Settings['featureModels']
-        : defaults.featureModels,
   };
 }
 
@@ -63,6 +25,30 @@ export function createSeedState(): PersistedState {
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],
+  };
+}
+
+function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined): Settings {
+  const defaults = createDefaultSettings();
+  const legacyAnthropicApiKey =
+    typeof raw?.anthropicApiKey === 'string' ? raw.anthropicApiKey : defaults.claudeApiKey;
+  const legacyClaudeApiKey =
+    typeof raw?.claudeApiKey === 'string' && raw.claudeApiKey.trim()
+      ? raw.claudeApiKey
+      : legacyAnthropicApiKey;
+
+  return {
+    claudeApiKey: legacyClaudeApiKey,
+    quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
+    deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),
+    debugMode: Boolean(raw?.debugMode ?? defaults.debugMode),
+    promptCachingEnabled: Boolean(
+      raw?.promptCachingEnabled ?? defaults.promptCachingEnabled,
+    ),
+    featureModels:
+      raw?.featureModels && typeof raw.featureModels === 'object'
+        ? raw.featureModels as Settings['featureModels']
+        : defaults.featureModels,
   };
 }
 
@@ -85,6 +71,10 @@ export function migrateState(raw: unknown): PersistedState {
     const current = record as unknown as PersistedState;
     return {
       ...current,
+      settings:
+        current.settings && typeof current.settings === 'object'
+          ? migrateSettingsRecord(current.settings as Record<string, unknown>)
+          : createDefaultSettings(),
       accountAliases: current.accountAliases && typeof current.accountAliases === 'object'
         ? current.accountAliases
         : {},
