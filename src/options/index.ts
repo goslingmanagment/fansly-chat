@@ -223,7 +223,7 @@ async function render(): Promise<void> {
 
   apiSection.append(
     labeledField('Quick feature message count', quickInput),
-    labeledField('Improve message count', improveInput),
+    labeledField('Fix message count', improveInput),
     labeledField('Deep feature message count', deepInput),
     debugLabel,
     promptCachingLabel,

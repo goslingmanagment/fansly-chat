@@ -486,7 +486,7 @@ export class ChatMuseContentApp {
       return;
     }
     if (feature === 'improve-draft' && !this.computeHasDraftText()) {
-      this.toast.show('Write a draft in the composer first, then use Improve.');
+      this.toast.show('Write a draft in the composer first, then use Fix.');
       this.renderButtonBar();
       return;
     }

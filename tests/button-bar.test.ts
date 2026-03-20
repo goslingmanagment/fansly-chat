@@ -320,7 +320,7 @@ describe('ButtonBar improve draft state', () => {
     vi.restoreAllMocks();
   });
 
-  it('disables Improve when the composer draft is empty', () => {
+  it('disables Fix when the composer draft is empty', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -333,8 +333,31 @@ describe('ButtonBar improve draft state', () => {
     bar.render(buildState(), null, 'default', 'none', false, false, false);
 
     const improve = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Improve');
+      .find((button) => button.textContent === 'Fix');
 
     expect(improve?.disabled).toBe(true);
+  });
+
+  it('renders Fix as the last main action before the personality pill', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const children = Array.from(bar.root.children);
+    const fixIndex = children.findIndex((child) => child.textContent === 'Fix');
+    const personalityIndex = children.findIndex((child) =>
+      child.classList.contains('chatmuse-toolbar-personality-end'),
+    );
+
+    expect(fixIndex).toBeGreaterThan(-1);
+    expect(personalityIndex).toBeGreaterThan(-1);
+    expect(fixIndex).toBe(personalityIndex - 1);
   });
 });

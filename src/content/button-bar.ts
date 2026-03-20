@@ -92,10 +92,10 @@ export class ButtonBar {
     // Help / Review / Summary / Compare stay implemented but are intentionally hidden from the toolbar for now.
     this.root.append(
       replyButton,
-      improveButton,
       pingButton,
       this.replyModeToggle,
       this.toneRow,
+      improveButton,
       this.personalityLabel,
     );
   }
