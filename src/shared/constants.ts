@@ -112,7 +112,7 @@ export const QUICK_FEATURES: FeatureType[] = ['fast-reply', 'improve-draft', 'he
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
   'fast-reply': 'Reply',
-  'improve-draft': 'Improve',
+  'improve-draft': 'Fix',
   'help-me': 'Help',
   'fan-summary': 'Summary',
   'chat-review': 'Review',

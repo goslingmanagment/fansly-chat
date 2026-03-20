@@ -156,7 +156,7 @@ describe('Options page — AI Models section', () => {
 
     const labels = Array.from(document.querySelectorAll('label'));
     const improveLabel = labels.find((label) =>
-      label.textContent?.includes('Improve message count'),
+      label.textContent?.includes('Fix message count'),
     );
     const input = improveLabel?.querySelector<HTMLInputElement>('input[type="number"]');
 
@@ -212,11 +212,11 @@ describe('Options page — AI Models section', () => {
 
     const labels = Array.from(document.querySelectorAll('label'));
     const improveLabel = labels.find((label) =>
-      label.textContent?.includes('Improve message count'),
+      label.textContent?.includes('Fix message count'),
     );
     const input = improveLabel?.querySelector<HTMLInputElement>('input[type="number"]');
     if (!input) {
-      throw new Error('Improve message count input not found');
+      throw new Error('Fix message count input not found');
     }
 
     input.value = '88';
