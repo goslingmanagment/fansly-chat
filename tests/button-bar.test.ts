@@ -338,7 +338,7 @@ describe('ButtonBar improve draft state', () => {
     expect(improve?.disabled).toBe(true);
   });
 
-  it('renders Fix as the last main action before the personality pill', () => {
+  it('renders Multi, then Fix, and keeps Ping as the last main action before the personality pill', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -351,13 +351,18 @@ describe('ButtonBar improve draft state', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const children = Array.from(bar.root.children);
+    const multiIndex = children.findIndex((child) => child.textContent === 'Multi');
     const fixIndex = children.findIndex((child) => child.textContent === 'Fix');
+    const pingIndex = children.findIndex((child) => child.textContent === 'Ping');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatmuse-toolbar-personality-end'),
     );
 
+    expect(multiIndex).toBeGreaterThan(-1);
     expect(fixIndex).toBeGreaterThan(-1);
+    expect(pingIndex).toBeGreaterThan(-1);
     expect(personalityIndex).toBeGreaterThan(-1);
-    expect(fixIndex).toBe(personalityIndex - 1);
+    expect(fixIndex).toBe(multiIndex + 1);
+    expect(pingIndex).toBe(personalityIndex - 1);
   });
 });
