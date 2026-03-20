@@ -2,6 +2,8 @@ import {
   CLAUDE_MODEL_IDS,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
+  IMPROVE_MAX_MESSAGE_COUNT,
+  IMPROVE_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
   QUICK_MAX_MESSAGE_COUNT,
   QUICK_MIN_MESSAGE_COUNT,
@@ -44,8 +46,10 @@ export async function loadStorageState(): Promise<PersistedState> {
 export function sanitizeSettings(input: Partial<Settings>): Settings {
   const defaults = createDefaultSettings();
   const rawQuick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
+  const rawImprove = Number(input.improveMessageCount ?? defaults.improveMessageCount);
   const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
   const quick = Number.isFinite(rawQuick) ? rawQuick : defaults.quickMessageCount;
+  const improve = Number.isFinite(rawImprove) ? rawImprove : defaults.improveMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
 
   const rawModels = input.featureModels && typeof input.featureModels === 'object'
@@ -62,6 +66,10 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   return {
     claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
+    improveMessageCount: Math.min(
+      IMPROVE_MAX_MESSAGE_COUNT,
+      Math.max(IMPROVE_MIN_MESSAGE_COUNT, improve),
+    ),
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),
     promptCachingEnabled: Boolean(input.promptCachingEnabled ?? defaults.promptCachingEnabled),

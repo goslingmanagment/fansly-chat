@@ -103,4 +103,15 @@ describe('CompletedOverlayCache', () => {
     expect(persisted.parts[0]!.insertedOnce).toBe(true);
     expect(persisted).toBe(reply);
   });
+
+  it('isolates cached results by optional cache key', () => {
+    const cache = new CompletedOverlayCache();
+    const reply = createReplyModel('reply-op');
+
+    cache.set('group-1', 'fast-reply', reply, 'draft-a');
+
+    expect(cache.get('group-1', 'fast-reply', 'draft-a')).toBe(reply);
+    expect(cache.get('group-1', 'fast-reply', 'draft-b')).toBeNull();
+    expect(cache.get('group-1', 'fast-reply')).toBeNull();
+  });
 });

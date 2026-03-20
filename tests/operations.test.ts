@@ -188,6 +188,7 @@ describe('OperationCoordinator', () => {
       settings: {
         claudeApiKey: 'sk-test',
         quickMessageCount: 100,
+        improveMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
         promptCachingEnabled: true,
@@ -1817,6 +1818,30 @@ describe('OperationCoordinator', () => {
     expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain('hey babe how was your day');
     expect(completeMessage?.result.parts).toEqual(['improved reply']);
     expect(completeMessage?.result.splitModeRequested).toBeUndefined();
+  });
+
+  it('uses the dedicated improve message count for improve-draft history', async () => {
+    (mockStorage.settings as Record<string, unknown>).quickMessageCount = 100;
+    (mockStorage.settings as Record<string, unknown>).improveMessageCount = 17;
+    const fanslyClient = buildFanslyClientMock();
+    const { coordinator } = await createCoordinatorHarness({ fanslyClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'improve-op',
+      feature: 'improve-draft',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      draftText: 'hey babe how was your day',
+      forceRegenerate: false,
+    });
+
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    const [groupId, messageCount] =
+      fanslyClient.loadMessages.mock.calls[0] as unknown as [string, number, ...unknown[]];
+    expect(groupId).toBe('group-1');
+    expect(messageCount).toBe(17);
   });
 
   it('retries with default model on model_unavailable error', async () => {

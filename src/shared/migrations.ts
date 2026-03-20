@@ -1,6 +1,7 @@
 import {
   DEEP_DEFAULT_MESSAGE_COUNT,
   DEFAULT_FEATURE_MODELS,
+  IMPROVE_DEFAULT_MESSAGE_COUNT,
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
@@ -10,6 +11,7 @@ export function createDefaultSettings(): Settings {
   return {
     claudeApiKey: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
+    improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
     promptCachingEnabled: true,
@@ -40,6 +42,7 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
   return {
     claudeApiKey: legacyClaudeApiKey,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
+    improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),
     deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),
     debugMode: Boolean(raw?.debugMode ?? defaults.debugMode),
     promptCachingEnabled: Boolean(

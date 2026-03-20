@@ -297,6 +297,29 @@ describe('template variable substitution', () => {
     expect(result.user).not.toContain('<babe>');
   });
 
+  it('tells improve-draft to convert internal-language drafts into the fan language', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'improve-draft',
+      draftText: 'напиши что скучала по нему',
+      transcript: '[14:30] Fan: hey baby i missed you too',
+    }));
+
+    expect(result.user).toContain('The current draft may be written in the chatter\'s internal language');
+    expect(result.user).toContain('Infer the fan\'s language from the transcript and write the final message in the fan\'s language');
+    expect(result.user).toContain('Think like a subtle psychologist');
+    expect(result.user).toContain('Output only the improved message text in the fan\'s language.');
+  });
+
+  it('allows improve-draft to strongly rewrite a bad draft while preserving the meaning', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'improve-draft',
+      draftText: 'скажи грубо что пусть покупает сейчас',
+    }));
+
+    expect(result.user).toContain('If the draft is awkward, weak, too blunt, badly phrased, unnatural, or strategically poor');
+    expect(result.user).toContain('Keep the underlying meaning, but rewrite it aggressively into the version that would work better for the fan.');
+  });
+
   it('leaves no unresolved placeholders for any feature', () => {
     for (const feature of FEATURES) {
       const result = buildPrompt(buildTestInput({

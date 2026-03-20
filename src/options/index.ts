@@ -182,6 +182,13 @@ async function render(): Promise<void> {
   quickInput.max = '200';
   quickInput.value = String(state.settings.quickMessageCount);
 
+  const improveInput = document.createElement('input');
+  improveInput.type = 'number';
+  improveInput.className = 'chatmuse-input';
+  improveInput.min = '5';
+  improveInput.max = '200';
+  improveInput.value = String(state.settings.improveMessageCount);
+
   const deepInput = document.createElement('input');
   deepInput.type = 'number';
   deepInput.className = 'chatmuse-input';
@@ -216,6 +223,7 @@ async function render(): Promise<void> {
 
   apiSection.append(
     labeledField('Quick feature message count', quickInput),
+    labeledField('Improve message count', improveInput),
     labeledField('Deep feature message count', deepInput),
     debugLabel,
     promptCachingLabel,
@@ -279,6 +287,7 @@ async function render(): Promise<void> {
     await saveSettings({
       claudeApiKey: keyInput.value,
       quickMessageCount: Number(quickInput.value),
+      improveMessageCount: Number(improveInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
@@ -286,7 +295,7 @@ async function render(): Promise<void> {
     });
   }, 350);
 
-  [keyInput, quickInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
+  [keyInput, quickInput, improveInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });

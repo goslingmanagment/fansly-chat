@@ -15,6 +15,7 @@ export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft'>;
 export interface Settings {
   claudeApiKey: string;
   quickMessageCount: number;
+  improveMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
   promptCachingEnabled: boolean;

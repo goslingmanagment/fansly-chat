@@ -8,6 +8,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 100,
+      improveMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
       promptCachingEnabled: true,

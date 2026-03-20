@@ -12,11 +12,12 @@ import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import { findActiveConversationTextarea } from './conversation-dom.js';
-import { getActiveConversationDraftText } from './textarea.js';
+import { getActiveConversationDraftText, insertIntoFanslyTextarea } from './textarea.js';
 import { ToastController } from './toast.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
+import { toUserError } from '../shared/errors.js';
 import { splitByNext } from '../shared/split.js';
 import { loadStorageState } from '../shared/storage.js';
 import type {
@@ -91,6 +92,7 @@ export class ChatMuseContentApp {
   private quickSurfaceEverOpened = false;
   private pendingLoadingFrame: number | null = null;
   private suppressedTerminalOpId: string | null = null;
+  private activeImproveDraftCacheKey: string | null = null;
   private observedDraftTextarea: HTMLTextAreaElement | null = null;
   private hasDraftText = false;
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
@@ -323,7 +325,13 @@ export class ChatMuseContentApp {
 
       // No active quick feature — check for completed/cached inline results
       if (this.quickInlineVisible && this.lastFeature && isInlineQuickFeature(this.lastFeature)) {
-        const cached = this.completedOverlayCache.get(this.currentGroupId, this.lastFeature);
+        const cached = this.completedOverlayCache.get(
+          this.currentGroupId,
+          this.lastFeature,
+          this.lastFeature === 'improve-draft'
+            ? this.buildImproveDraftCacheKey(getActiveConversationDraftText())
+            : undefined,
+        );
         if (cached) {
           if (this.quickSurfaceMode === 'overlay') {
             this.inlinePanel.hide();
@@ -398,7 +406,7 @@ export class ChatMuseContentApp {
   private startFeature(feature: FeatureType, forceRegenerate: boolean): void {
     // Same-feature click while active
     if (this.activeFeature === feature) {
-      if (isInlineQuickFeature(feature)) {
+      if (feature !== 'improve-draft' && isInlineQuickFeature(feature)) {
         if (!this.quickInlineVisible && this.suppressedTerminalOpId !== this.activeOperationId) {
           this.quickInlineVisible = true;
           this.renderSurfaces();
@@ -417,13 +425,27 @@ export class ChatMuseContentApp {
       this.activeCompareModel = null;
     }
 
+    const improveDraftText =
+      feature === 'improve-draft'
+        ? getActiveConversationDraftText().trim()
+        : undefined;
+    const improveDraftCacheKey = this.buildImproveDraftCacheKey(improveDraftText);
+
     // Cache hit
     const cachedResult =
-      !forceRegenerate && feature !== 'improve-draft'
-        ? this.completedOverlayCache.get(this.currentGroupId, feature)
+      !forceRegenerate
+        ? this.completedOverlayCache.get(
+            this.currentGroupId,
+            feature,
+            feature === 'improve-draft' ? improveDraftCacheKey : undefined,
+          )
         : null;
     if (cachedResult) {
       this.lastFeature = feature;
+      if (feature === 'improve-draft' && cachedResult.kind === 'reply') {
+        void this.applyImproveDraftResult(cachedResult);
+        return;
+      }
       if (isInlineQuickFeature(feature)) {
         this.quickInlineVisible = true;
         this.quickSurfaceMode = 'inline';
@@ -472,10 +494,7 @@ export class ChatMuseContentApp {
     // Start new operation
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
-    const draftText =
-      feature === 'improve-draft'
-        ? getActiveConversationDraftText().trim()
-        : undefined;
+    const draftText = improveDraftText;
     const replyMode = feature === 'fast-reply' ? this.nextFastReplyMode : 'default';
     this.cancelScheduledLoadingRender();
     this.activeDebugPrompt = null;
@@ -488,6 +507,8 @@ export class ChatMuseContentApp {
     this.lastFeature = feature;
     this.overlayRawText = '';
     this.suppressedTerminalOpId = null;
+    this.activeImproveDraftCacheKey =
+      feature === 'improve-draft' ? improveDraftCacheKey : null;
     this.comparePanelVisible = false;
 
     if (isInlineQuickFeature(feature)) {
@@ -909,6 +930,10 @@ export class ChatMuseContentApp {
     }
     this.overlayRawText += text;
 
+    if (this.activeFeature === 'improve-draft') {
+      return;
+    }
+
     if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
       if (!this.quickSurfaceEverOpened) {
         this.quickSurfaceEverOpened = true;
@@ -947,8 +972,26 @@ export class ChatMuseContentApp {
       message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
-    if (feature !== 'improve-draft') {
+    const improveDraftCacheKey = this.activeImproveDraftCacheKey;
+    if (feature === 'improve-draft') {
+      this.completedOverlayCache.set(
+        this.currentGroupId,
+        feature,
+        completedModel,
+        improveDraftCacheKey,
+      );
+    } else {
       this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
+    }
+
+    if (feature === 'improve-draft') {
+      this.clearOperationState(false);
+      if (completedModel.kind === 'reply') {
+        void this.applyImproveDraftResult(completedModel);
+      } else {
+        this.renderAll();
+      }
+      return;
     }
 
     if (isInlineQuickFeature(feature)) {
@@ -1028,6 +1071,7 @@ export class ChatMuseContentApp {
     this.activeAnthropicSpend = null;
     this.activeProfiling = null;
     this.activeProgress = null;
+    this.activeImproveDraftCacheKey = null;
     if (fullReset) {
       this.activeDebugPrompt = null;
       this.deepOverlayModel = null;
@@ -1040,6 +1084,36 @@ export class ChatMuseContentApp {
 
   private computeHasDraftText(): boolean {
     return getActiveConversationDraftText().trim().length > 0;
+  }
+
+  private buildImproveDraftCacheKey(draftText: string | undefined): string | null {
+    const trimmed = draftText?.trim() ?? '';
+    return trimmed || null;
+  }
+
+  private async applyImproveDraftResult(
+    model: Extract<CompletedOverlayViewModel, { kind: 'reply' }>,
+  ): Promise<void> {
+    const nextText = model.parts[0]?.text ?? (model.rawText.trim() || model.rawText);
+
+    try {
+      await insertIntoFanslyTextarea(nextText);
+      const firstPart = model.parts[0];
+      if (firstPart) {
+        firstPart.insertedOnce = true;
+        firstPart.insertedAt = null;
+      }
+      this.quickInlineVisible = false;
+      this.quickSurfaceMode = 'inline';
+      this.renderAll();
+    } catch (error) {
+      this.quickInlineVisible = true;
+      this.quickSurfaceMode = 'inline';
+      this.toast.show(toUserError(error).message);
+      this.overlay.render({ kind: 'hidden' });
+      this.inlinePanel.render(model);
+      this.renderButtonBar();
+    }
   }
 
   private detachDraftTextareaObserver(): void {
