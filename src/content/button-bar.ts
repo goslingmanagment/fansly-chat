@@ -68,7 +68,7 @@ export class ButtonBar {
     this.replyModeToggle = document.createElement('button');
     this.replyModeToggle.type = 'button';
     this.replyModeToggle.className = 'chatmuse-button chatmuse-toolbar-toggle';
-    this.replyModeToggle.textContent = '2-part';
+    this.replyModeToggle.textContent = 'Multi';
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
     this.personalityLabel = document.createElement('div');
@@ -92,10 +92,10 @@ export class ButtonBar {
     // Help / Review / Summary / Compare stay implemented but are intentionally hidden from the toolbar for now.
     this.root.append(
       replyButton,
-      pingButton,
       this.replyModeToggle,
-      this.toneRow,
       improveButton,
+      this.toneRow,
+      pingButton,
       this.personalityLabel,
     );
   }
