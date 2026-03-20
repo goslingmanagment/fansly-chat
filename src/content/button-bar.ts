@@ -3,11 +3,9 @@ import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/ty
 
 type ToolbarAction = FeatureType | 'compare';
 
-const FEATURES: Array<{ feature: FeatureType; label: string }> = [
+const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: FEATURE_LABELS['fast-reply'] },
-  { feature: 'help-me', label: FEATURE_LABELS['help-me'] },
-  { feature: 'fan-summary', label: FEATURE_LABELS['fan-summary'] },
-  { feature: 'chat-review', label: FEATURE_LABELS['chat-review'] },
+  { feature: 'improve-draft', label: FEATURE_LABELS['improve-draft'] },
   { feature: 'ping', label: FEATURE_LABELS['ping'] },
 ];
 
@@ -40,7 +38,7 @@ export class ButtonBar {
     this.root.className = 'chatmuse-bar chatmuse-toolbar';
 
     // Create all feature buttons (render() reads from this map)
-    for (const entry of FEATURES) {
+    for (const entry of TOOLBAR_FEATURES) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'chatmuse-button chatmuse-toolbar-button';
@@ -51,6 +49,7 @@ export class ButtonBar {
 
     const replyButton = this.buttons.get('fast-reply')!;
     replyButton.classList.add('chatmuse-toolbar-button-primary');
+    const improveButton = this.buttons.get('improve-draft')!;
 
     const compareButton = document.createElement('button');
     compareButton.type = 'button';
@@ -87,18 +86,16 @@ export class ButtonBar {
       this.toneRow.append(pill);
     }
 
-    const summaryButton = this.buttons.get('fan-summary')!;
     const pingButton = this.buttons.get('ping')!;
 
-    // Single row: [Reply] [2-part] [Tones...] [Compare] [Reopen?] [Summary] [Ping] [Personality→right]
+    // Main actions first, secondary controls later so narrow layouts degrade gracefully.
+    // Help / Review / Summary / Compare stay implemented but are intentionally hidden from the toolbar for now.
     this.root.append(
       replyButton,
+      improveButton,
+      pingButton,
       this.replyModeToggle,
       this.toneRow,
-      compareButton,
-      this.compareRestoreButton,
-      summaryButton,
-      pingButton,
       this.personalityLabel,
     );
   }
@@ -108,6 +105,7 @@ export class ButtonBar {
     activeAction: ToolbarAction | null,
     nextReplyMode: ReplyMode,
     nextReplyTone: ReplyTone,
+    hasDraftText: boolean,
     activeLoading = false,
     showCompareRestore = false,
   ): void {
@@ -125,10 +123,14 @@ export class ButtonBar {
     const disableCompareForPrereqs =
       !state.connected || !state.hasApiKey || state.compareCardCount < 2;
 
-    for (const entry of FEATURES) {
+    for (const entry of TOOLBAR_FEATURES) {
       const button = this.buttons.get(entry.feature)!;
       const isActive = activeAction === entry.feature;
-      button.disabled = Boolean(activeAction && !isActive) || disableForPrereqs;
+      const improveDisabled = entry.feature === 'improve-draft' && !hasDraftText;
+      button.disabled =
+        Boolean(activeAction && !isActive) ||
+        disableForPrereqs ||
+        improveDisabled;
       if (isActive && activeLoading) {
         button.innerHTML = '';
         button.append(
@@ -144,18 +146,8 @@ export class ButtonBar {
     const compareActive = activeAction === 'compare';
     compareButton.disabled =
       Boolean(activeAction && !compareActive) || disableCompareForPrereqs;
-    if (compareActive && activeLoading) {
-      compareButton.innerHTML = '';
-      compareButton.append(
-        document.createTextNode('Compare'),
-        (() => { const s = document.createElement('span'); s.className = 'chatmuse-spinner'; return s; })(),
-      );
-    } else {
-      compareButton.textContent = 'Compare';
-    }
-
-    this.compareRestoreButton.classList.toggle('chatmuse-hidden', !showCompareRestore);
-    this.compareRestoreButton.disabled = Boolean(activeAction);
+    this.compareRestoreButton.classList.add('chatmuse-hidden');
+    this.compareRestoreButton.disabled = true;
 
     this.replyModeToggle.disabled = Boolean(activeAction) || (!state.connected || !state.hasApiKey);
     this.replyModeToggle.setAttribute('aria-pressed', nextReplyMode === 'preferSplit' ? 'true' : 'false');

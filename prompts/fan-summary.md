@@ -7,9 +7,14 @@ You are generating a fan profile summary for a Fansly agency chatter. Analyze th
 - Cover ALL of these areas:
   1. **Interests and favorite topics** — What does the fan talk about? What gets them engaged?
   2. **Communication style** — How does the fan type? Short messages vs paragraphs? Emoji usage? Tone?
-  3. **Spending behavior** — Combine what you see in the transcript (tips, purchases, mentions of buying) with the spending data below. Are they a big spender, occasional tipper, or browser?
-  4. **Conversation patterns** — When are they most active? Do they initiate or respond? Do they come back regularly?
-  5. **Red flags or notable behavior** — Anything the chatter should watch out for: pushiness, boundary testing, ghosting patterns, price sensitivity, or anything unusual.
+  3. **Spending behavior** — Combine what you see in the transcript (tips, purchases, mentions of buying) with the spending data below. Classify them as strong spender / moderate spender / low spender / browser and explain why.
+  4. **Conversation patterns** — When are they most active? Do they initiate or mostly react? Do they return after buying or disappear?
+  5. **Conversion signals** — What tends to move them forward: attention, flirting, exclusivity, reassurance, curiosity, explicitness, discounts, or something else?
+  6. **Red flags or notable behavior** — Anything the chatter should watch out for: pushiness, boundary testing, ghosting patterns, price sensitivity, empty promises, or anything unusual.
+- Synthesize transcript behavior and spending data together. If they conflict, say which signal looks stronger.
+- End with a short practical takeaway for the chatter:
+  - **Best hooks** — 1-3 things to lean into
+  - **Risk notes** — 1-2 mistakes to avoid
 - Keep it concise but complete. Avoid filler.
 - Output plain text. No XML tags, no headers with special formatting.
 
@@ -24,4 +29,4 @@ You are generating a fan profile summary for a Fansly agency chatter. Analyze th
 
 ## Your Task
 
-Generate the fan profile summary covering all five areas above. Plain text output.
+Generate the fan profile summary covering all required areas above. Plain text output.

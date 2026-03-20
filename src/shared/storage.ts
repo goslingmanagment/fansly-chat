@@ -13,7 +13,13 @@ import {
   resolveCanonicalAccountId,
 } from './account-aliases.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
-import type { FeatureType, PersistedState, Personality, Settings, SummaryCacheEntry } from './types.js';
+import type {
+  ModelSelectableFeatureType,
+  PersistedState,
+  Personality,
+  Settings,
+  SummaryCacheEntry,
+} from './types.js';
 
 function isSummaryKey(key: string): key is `summary:${string}` {
   return key.startsWith(SUMMARY_CACHE_PREFIX);
@@ -43,10 +49,10 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
 
   const rawModels = input.featureModels && typeof input.featureModels === 'object'
-    ? input.featureModels as Partial<Record<FeatureType, string>>
+    ? input.featureModels as Partial<Record<ModelSelectableFeatureType, string>>
     : {};
   const featureModels = { ...defaults.featureModels };
-  for (const feature of Object.keys(defaults.featureModels) as FeatureType[]) {
+  for (const feature of Object.keys(defaults.featureModels) as ModelSelectableFeatureType[]) {
     const candidate = rawModels[feature];
     if (candidate && CLAUDE_MODEL_IDS.has(candidate)) {
       featureModels[feature] = candidate;

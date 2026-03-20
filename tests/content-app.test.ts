@@ -28,6 +28,7 @@ function installDom() {
   vi.stubGlobal('HTMLElement', window.HTMLElement);
   vi.stubGlobal('HTMLDivElement', window.HTMLDivElement);
   vi.stubGlobal('HTMLButtonElement', window.HTMLButtonElement);
+  vi.stubGlobal('HTMLTextAreaElement', window.HTMLTextAreaElement);
   vi.stubGlobal('Text', window.Text);
   vi.stubGlobal('Node', window.Node);
   vi.stubGlobal('Event', window.Event);
@@ -190,6 +191,30 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
     knownAccounts: [],
     ...overrides,
   };
+}
+
+function mountConversationComposer(initialValue = ''): HTMLTextAreaElement {
+  const routeRoot = document.createElement('app-messages-conversation-route');
+  const userName = document.createElement('app-account-username');
+  const userNameText = document.createElement('span');
+  userNameText.className = 'user-name';
+  userNameText.textContent = '@alice';
+  userName.append(userNameText);
+
+  const container = document.createElement('app-group-message-container');
+  const inputHost = document.createElement('app-group-message-input');
+  const textarea = document.createElement('textarea');
+  textarea.value = initialValue;
+  Object.defineProperty(textarea, 'offsetParent', {
+    configurable: true,
+    get: () => routeRoot,
+  });
+
+  inputHost.append(textarea);
+  container.append(inputHost);
+  routeRoot.append(userName, container);
+  document.body.append(routeRoot);
+  return textarea;
 }
 
 async function loadAppClass() {
@@ -360,6 +385,49 @@ describe('ChatMuseContentApp', () => {
       replyTone: 'flirty',
     }));
     expect(app.nextReplyTone).toBe('none');
+  });
+
+  it('sends the current composer draft with improve-draft operations', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    mountConversationComposer('hey babe how was your day');
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+
+    app.startFeature('improve-draft', false);
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'operation:start',
+      feature: 'improve-draft',
+      groupId: 'group-1',
+      draftText: 'hey babe how was your day',
+    }));
+  });
+
+  it('does not cache completed improve-draft results', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'improve-draft';
+    app.activeOperationId = 'improve-op';
+    app.activeFanDisplayName = 'alice';
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'improve-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Improved message',
+        parts: ['Improved message'],
+      },
+    });
+
+    expect(app.completedOverlayCache.get('group-1', 'improve-draft')).toBeNull();
   });
 
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {
@@ -784,7 +852,7 @@ describe('ChatMuseContentApp', () => {
 
     const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
       .find((button) => button.textContent === 'Reopen');
-    expect(reopenButton?.classList.contains('chatmuse-hidden')).toBe(false);
+    expect(reopenButton).toBeUndefined();
 
     await app.reopenCompletedCompare();
 
@@ -817,7 +885,7 @@ describe('ChatMuseContentApp', () => {
     const buttonBarRoot = app.buttonBar.root as HTMLElement;
     const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
       .find((button) => button.textContent === 'Reopen');
-    expect(reopenButton?.classList.contains('chatmuse-hidden')).toBe(false);
+    expect(reopenButton).toBeUndefined();
 
     await app.reopenCompletedCompare();
 
@@ -826,7 +894,7 @@ describe('ChatMuseContentApp', () => {
     expect(document.querySelector('.chatmuse-toast')?.textContent).toContain('Saved compare is outdated. Run Compare again.');
   });
 
-  it('closing a completed compare hides the panel, preserves the cache, and exposes Reopen', async () => {
+  it('closing a completed compare hides the panel and preserves the cache while compare stays hidden', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
 
@@ -863,7 +931,7 @@ describe('ChatMuseContentApp', () => {
     expect(app.comparePanelVisible).toBe(false);
     expect(app.activeCompareModel).toBeNull();
     expect(app.completedCompareCache.get('group-1')).not.toBeNull();
-    expect(reopenButton?.classList.contains('chatmuse-hidden')).toBe(false);
+    expect(reopenButton).toBeUndefined();
   });
 
   it('port disconnect resets all surfaces and state', async () => {

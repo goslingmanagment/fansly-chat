@@ -1,10 +1,10 @@
 import {
+  COMPARE_TEMPERATURE,
   DEFAULT_FEATURE_MODELS,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
-import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
@@ -567,6 +567,7 @@ export async function executeCompare(
       resolvedAccountId,
     );
     const storage = rekeyResult.state;
+    const { resolveCompareModelCards } = await import('../shared/compare-cards.js');
     const compareCards = resolveCompareModelCards(
       storage,
       resolvedAccountId,
@@ -942,6 +943,7 @@ export async function executeCompare(
         return context.anthropicClient.streamMessage({
           apiKey: validated.storage.settings.claudeApiKey,
           model,
+          temperature: COMPARE_TEMPERATURE,
           systemBlocks,
           userBlocks,
           feature: 'fast-reply',

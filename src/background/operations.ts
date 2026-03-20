@@ -1,4 +1,5 @@
 import {
+  FEATURE_TEMPERATURES,
   DEEP_OPERATION_TIMEOUT_MS,
   DEFAULT_FEATURE_MODELS,
   MIN_MESSAGES_FOR_DEEP,
@@ -34,6 +35,7 @@ import type {
   ErrorPayload,
   FeatureType,
   FeatureResult,
+  ModelSelectableFeatureType,
   OperationPhase,
   OperationProgressPayload,
   OperationStartPayload,
@@ -103,6 +105,10 @@ interface ValidatedOperationStart {
 
 function isDeepFeature(feature: FeatureType): boolean {
   return feature === 'fan-summary' || feature === 'chat-review';
+}
+
+function resolveModelFeature(feature: FeatureType): ModelSelectableFeatureType {
+  return feature === 'improve-draft' ? 'fast-reply' : feature;
 }
 
 function resolveTimeout(feature: FeatureType): number {
@@ -782,7 +788,15 @@ export class OperationCoordinator {
         throw new ChatMuseError('no_mapping');
       }
 
-      const resolvedModel = validated.storage.settings.featureModels[payload.feature];
+      if (
+        payload.feature === 'improve-draft' &&
+        !payload.draftText?.trim()
+      ) {
+        throw new ChatMuseError('unknown_error');
+      }
+
+      const modelFeature = resolveModelFeature(payload.feature);
+      const resolvedModel = validated.storage.settings.featureModels[modelFeature];
 
       let cachedSummary = null;
       if (payload.feature === 'fan-summary') {
@@ -1262,6 +1276,10 @@ export class OperationCoordinator {
         fanSpendingData: spendingData,
         fanSubscriptionData: subscriptionData,
         fanDisplayName,
+        draftText:
+          payload.feature === 'improve-draft'
+            ? payload.draftText?.trim()
+            : undefined,
         pingSegment,
         replyMode:
           payload.feature === 'fast-reply'
@@ -1331,6 +1349,7 @@ export class OperationCoordinator {
       const streamArgs = {
         apiKey: validated.storage.settings.claudeApiKey,
         model: actualModel,
+        temperature: FEATURE_TEMPERATURES[payload.feature],
         systemBlocks,
         userBlocks,
         feature: payload.feature,
@@ -1364,7 +1383,7 @@ export class OperationCoordinator {
       try {
         rawText = await this.anthropicClient.streamMessage(streamArgs);
       } catch (err) {
-        const defaultModel = DEFAULT_FEATURE_MODELS[payload.feature];
+        const defaultModel = DEFAULT_FEATURE_MODELS[modelFeature];
         const isModelError = err instanceof ChatMuseError
           ? err.code === 'model_unavailable'
           : (err as { code?: string })?.code === 'model_unavailable';
@@ -1423,6 +1442,11 @@ export class OperationCoordinator {
           ? { rawText, helpMe: parseHelpMeXml(rawText) }
           : payload.feature === 'chat-review'
             ? { rawText, chatReview: parseChatReviewXml(rawText) }
+            : payload.feature === 'improve-draft'
+              ? {
+                  rawText,
+                  parts: [rawText.trim() || rawText],
+                }
             : {
                 rawText,
                 ...(payload.feature === 'fast-reply'

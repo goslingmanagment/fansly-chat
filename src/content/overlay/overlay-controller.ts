@@ -77,6 +77,8 @@ function titleForFeature(feature: FeatureType): string {
   switch (feature) {
     case 'fast-reply':
       return 'Fast Reply';
+    case 'improve-draft':
+      return 'Improve Draft';
     case 'help-me':
       return 'Help Me';
     case 'fan-summary':

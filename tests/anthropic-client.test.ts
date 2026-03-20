@@ -21,10 +21,19 @@ function mockFetchResponse(status: number, body?: unknown, options?: { bodyStrea
   return response;
 }
 
-function streamArgs(overrides?: Partial<Parameters<InstanceType<typeof import('../src/background/anthropic-client.js').AnthropicClient>['streamMessage']>[0]>) {
+function streamArgs(
+  overrides?: Partial<
+    Parameters<
+      InstanceType<typeof import('../src/background/anthropic-client.js').AnthropicClient>['streamMessage']
+    >[0]
+  >,
+): Parameters<
+  InstanceType<typeof import('../src/background/anthropic-client.js').AnthropicClient>['streamMessage']
+>[0] {
   return {
     apiKey: 'sk-test',
     model: 'claude-sonnet-4-20250514',
+    temperature: 0.65,
     systemBlocks: [
       { type: 'text' as const, text: 'system prefix\n\n' },
       {
@@ -167,12 +176,14 @@ describe('AnthropicClient streaming requests', () => {
     const request = fetchMock.mock.calls[0]?.[1];
     const headers = request?.headers as Record<string, string>;
     const body = JSON.parse(String(request?.body)) as {
+      temperature: number;
       system: unknown;
       messages: Array<{ role: string; content: unknown }>;
     };
 
     expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');
     expect(headers).not.toHaveProperty('anthropic-beta');
+    expect(body.temperature).toBe(0.65);
     expect(body.system).toEqual(streamArgs().systemBlocks);
     expect(
       (body.system as Array<{ cache_control?: { ttl?: string } }>)[1]?.cache_control?.ttl,

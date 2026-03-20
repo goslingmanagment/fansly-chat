@@ -111,7 +111,7 @@ describe('migrateState', () => {
     });
 
     expect(result.settings.claudeApiKey).toBe('sk-ant-test');
-    expect((result.settings as Record<string, unknown>).anthropicApiKey).toBeUndefined();
+    expect((result.settings as unknown as Record<string, unknown>).anthropicApiKey).toBeUndefined();
   });
 
   it('preserves claudeApiKey when both key fields exist', () => {
@@ -127,7 +127,7 @@ describe('migrateState', () => {
     });
 
     expect(result.settings.claudeApiKey).toBe('sk-ant-primary');
-    expect((result.settings as Record<string, unknown>).anthropicApiKey).toBeUndefined();
+    expect((result.settings as unknown as Record<string, unknown>).anthropicApiKey).toBeUndefined();
   });
 
   it('populates featureModels with defaults when migrating from schema 1', () => {

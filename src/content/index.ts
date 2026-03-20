@@ -11,6 +11,8 @@ import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
+import { findActiveConversationTextarea } from './conversation-dom.js';
+import { getActiveConversationDraftText } from './textarea.js';
 import { ToastController } from './toast.js';
 import {
   getCompareCardsFingerprintForPersonality,
@@ -45,8 +47,10 @@ function createParts(parts: string[]): OverlayInsertPart[] {
   }));
 }
 
-function isInlineQuickFeature(f: FeatureType): f is 'fast-reply' | 'ping' {
-  return f === 'fast-reply' || f === 'ping';
+function isInlineQuickFeature(
+  f: FeatureType,
+): f is 'fast-reply' | 'improve-draft' | 'ping' {
+  return f === 'fast-reply' || f === 'improve-draft' || f === 'ping';
 }
 
 function isOverlayOnlyFeature(f: FeatureType): f is 'help-me' | 'chat-review' | 'fan-summary' {
@@ -87,8 +91,19 @@ export class ChatMuseContentApp {
   private quickSurfaceEverOpened = false;
   private pendingLoadingFrame: number | null = null;
   private suppressedTerminalOpId: string | null = null;
+  private observedDraftTextarea: HTMLTextAreaElement | null = null;
+  private hasDraftText = false;
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
   private deepOverlayModel: OverlayViewModel | null = null;
+
+  private readonly handleDraftInput = (): void => {
+    const nextHasDraftText = this.computeHasDraftText();
+    if (nextHasDraftText === this.hasDraftText) {
+      return;
+    }
+    this.hasDraftText = nextHasDraftText;
+    this.renderButtonBar();
+  };
 
   private readonly toast = new ToastController();
   private readonly port = new PortClient({
@@ -103,6 +118,7 @@ export class ChatMuseContentApp {
       this.pendingCompareFingerprint = null;
       this.quickSurfaceMode = 'inline';
       this.suppressedTerminalOpId = null;
+      this.detachDraftTextareaObserver();
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
       this.resetNextReplyTone();
@@ -238,6 +254,7 @@ export class ChatMuseContentApp {
   // ─── Surface Rendering ──────────────────────────────────────────────
 
   private renderButtonBar(): void {
+    this.syncDraftTextareaObserver();
     const activeAction =
       this.activeCompareModel?.operationId
         ? 'compare'
@@ -251,6 +268,7 @@ export class ChatMuseContentApp {
       activeAction,
       this.nextFastReplyMode,
       this.nextReplyTone,
+      this.hasDraftText,
       activeLoading,
       this.hasRestorableCompletedCompare(),
     );
@@ -400,7 +418,10 @@ export class ChatMuseContentApp {
     }
 
     // Cache hit
-    const cachedResult = !forceRegenerate ? this.completedOverlayCache.get(this.currentGroupId, feature) : null;
+    const cachedResult =
+      !forceRegenerate && feature !== 'improve-draft'
+        ? this.completedOverlayCache.get(this.currentGroupId, feature)
+        : null;
     if (cachedResult) {
       this.lastFeature = feature;
       if (isInlineQuickFeature(feature)) {
@@ -442,10 +463,19 @@ export class ChatMuseContentApp {
       this.toast.show('Not connected to Fansly. Browse Fansly to establish a connection.');
       return;
     }
+    if (feature === 'improve-draft' && !this.computeHasDraftText()) {
+      this.toast.show('Write a draft in the composer first, then use Improve.');
+      this.renderButtonBar();
+      return;
+    }
 
     // Start new operation
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
+    const draftText =
+      feature === 'improve-draft'
+        ? getActiveConversationDraftText().trim()
+        : undefined;
     const replyMode = feature === 'fast-reply' ? this.nextFastReplyMode : 'default';
     this.cancelScheduledLoadingRender();
     this.activeDebugPrompt = null;
@@ -476,6 +506,7 @@ export class ChatMuseContentApp {
       groupId: this.currentGroupId,
       routeNonce: this.routeNonce,
       domFanDisplayName,
+      draftText,
       forceRegenerate,
       replyMode: feature === 'fast-reply' ? replyMode : undefined,
       replyTone: feature === 'fast-reply' ? this.nextReplyTone : undefined,
@@ -916,7 +947,9 @@ export class ChatMuseContentApp {
       message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
-    this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
+    if (feature !== 'improve-draft') {
+      this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
+    }
 
     if (isInlineQuickFeature(feature)) {
       if (!this.quickSurfaceEverOpened) {
@@ -1003,6 +1036,30 @@ export class ChatMuseContentApp {
 
   private currentFanDisplayName(): string {
     return this.activeFanDisplayName ?? 'fan';
+  }
+
+  private computeHasDraftText(): boolean {
+    return getActiveConversationDraftText().trim().length > 0;
+  }
+
+  private detachDraftTextareaObserver(): void {
+    if (!this.observedDraftTextarea) {
+      return;
+    }
+    this.observedDraftTextarea.removeEventListener('input', this.handleDraftInput);
+    this.observedDraftTextarea.removeEventListener('change', this.handleDraftInput);
+    this.observedDraftTextarea = null;
+  }
+
+  private syncDraftTextareaObserver(): void {
+    const textarea = findActiveConversationTextarea();
+    if (textarea !== this.observedDraftTextarea) {
+      this.detachDraftTextareaObserver();
+      this.observedDraftTextarea = textarea;
+      this.observedDraftTextarea?.addEventListener('input', this.handleDraftInput);
+      this.observedDraftTextarea?.addEventListener('change', this.handleDraftInput);
+    }
+    this.hasDraftText = this.computeHasDraftText();
   }
 
   private async computeCompareFingerprint(): Promise<string | null> {

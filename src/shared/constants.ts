@@ -1,4 +1,4 @@
-import type { FeatureType, Settings } from './types.js';
+import type { FeatureType, ModelSelectableFeatureType, Settings } from './types.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ export const CLAUDE_MODELS: ClaudeModelEntry[] = [
 
 export const CLAUDE_MODEL_IDS = new Set(CLAUDE_MODELS.map((m) => m.id));
 
-export const DEFAULT_FEATURE_MODELS: Record<FeatureType, string> = {
+export const DEFAULT_FEATURE_MODELS: Record<ModelSelectableFeatureType, string> = {
   'fast-reply': DEFAULT_MODEL_ID,
   'help-me': DEFAULT_MODEL_ID,
   'fan-summary': DEFAULT_MODEL_ID,
@@ -39,11 +39,23 @@ export const DEFAULT_FEATURE_MODELS: Record<FeatureType, string> = {
 
 export const MAX_TOKENS: Record<FeatureType, number> = {
   'fast-reply': 800,
+  'improve-draft': 800,
   'help-me': 1200,
   'fan-summary': 1600,
   'chat-review': 1600,
   'ping': 800,
 };
+
+export const FEATURE_TEMPERATURES: Record<FeatureType, number> = {
+  'fast-reply': 0.65,
+  'improve-draft': 0.65,
+  'help-me': 0.45,
+  'fan-summary': 0.4,
+  'chat-review': 0.25,
+  'ping': 0.65,
+};
+
+export const COMPARE_TEMPERATURE = 0.35;
 
 // ─── Fansly API ──────────────────────────────────────────────────────────
 
@@ -93,10 +105,11 @@ export const CHATMUSE_NAMESPACE = 'chatmuse';
 // ─── Feature Categories ─────────────────────────────────────────────────
 
 export const DEEP_FEATURES: FeatureType[] = ['fan-summary', 'chat-review'];
-export const QUICK_FEATURES: FeatureType[] = ['fast-reply', 'help-me', 'ping'];
+export const QUICK_FEATURES: FeatureType[] = ['fast-reply', 'improve-draft', 'help-me', 'ping'];
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
   'fast-reply': 'Reply',
+  'improve-draft': 'Improve',
   'help-me': 'Help',
   'fan-summary': 'Summary',
   'chat-review': 'Review',
