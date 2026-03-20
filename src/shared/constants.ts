@@ -1,4 +1,6 @@
 import type { FeatureType, ModelSelectableFeatureType, Settings } from './types.js';
+import { FEATURE_POLICIES } from './features.js';
+import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
@@ -107,8 +109,16 @@ export const CHATMUSE_NAMESPACE = 'chatmuse';
 
 // ─── Feature Categories ─────────────────────────────────────────────────
 
-export const DEEP_FEATURES: FeatureType[] = ['fan-summary', 'chat-review'];
-export const QUICK_FEATURES: FeatureType[] = ['fast-reply', 'improve-draft', 'help-me', 'ping'];
+export const DEEP_FEATURES: FeatureType[] = (
+  Object.entries(FEATURE_POLICIES) as Array<[FeatureType, FeaturePolicy]>
+)
+  .filter(([, policy]) => policy.messageCountBucket === 'deep')
+  .map(([feature]) => feature);
+export const QUICK_FEATURES: FeatureType[] = (
+  Object.entries(FEATURE_POLICIES) as Array<[FeatureType, FeaturePolicy]>
+)
+  .filter(([, policy]) => policy.messageCountBucket !== 'deep')
+  .map(([feature]) => feature);
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
   'fast-reply': 'Reply',

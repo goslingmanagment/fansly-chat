@@ -18,6 +18,14 @@ import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
 import { toUserError } from '../shared/errors.js';
+import {
+  featureRequiresDraft,
+  featureSupportsReplyMode,
+  featureSupportsReplyTone,
+  getFeaturePolicy,
+  usesInlineFeatureSurface,
+  usesOverlayFeatureSurface,
+} from '../shared/features.js';
 import { splitByNext } from '../shared/split.js';
 import { loadStorageState } from '../shared/storage.js';
 import type {
@@ -32,6 +40,7 @@ import type {
   OverlayViewModel,
   OperationProgressPayload,
   OperationProfilingSnapshot,
+  OperationStartPayload,
   PromptDebugSnapshot,
   ReplyMode,
   ReplyTone,
@@ -46,16 +55,6 @@ function createParts(parts: string[]): OverlayInsertPart[] {
     insertedAt: null,
     insertedOnce: false,
   }));
-}
-
-function isInlineQuickFeature(
-  f: FeatureType,
-): f is 'fast-reply' | 'improve-draft' | 'ping' {
-  return f === 'fast-reply' || f === 'improve-draft' || f === 'ping';
-}
-
-function isOverlayOnlyFeature(f: FeatureType): f is 'help-me' | 'chat-review' | 'fan-summary' {
-  return f === 'help-me' || f === 'chat-review' || f === 'fan-summary';
 }
 
 function isEditableElement(el: Element | null): boolean {
@@ -202,7 +201,10 @@ export class ChatMuseContentApp {
   private readonly overlay = new OverlayController({
     onClose: () => {
       this.deepOverlayModel = null;
-      if (!this.activeFeature || !isInlineQuickFeature(this.activeFeature)) {
+      if (
+        !this.activeFeature ||
+        !usesInlineFeatureSurface(this.activeFeature)
+      ) {
         this.clearOperationState(true);
         this.resetNextFastReplyMode();
         this.resetNextReplyTone();
@@ -292,14 +294,14 @@ export class ChatMuseContentApp {
           : null;
 
       // Overlay-only features — active loading
-      if (this.activeFeature && isOverlayOnlyFeature(this.activeFeature)) {
+      if (this.activeFeature && usesOverlayFeatureSurface(this.activeFeature)) {
         this.inlinePanel.hide();
         this.overlay.render(this.buildActiveLoadingModel());
         return;
       }
 
-      // Inline quick features — active operation
-      if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
+      // Inline reply features — active operation
+      if (this.activeFeature && usesInlineFeatureSurface(this.activeFeature)) {
         if (this.quickSurfaceMode === 'overlay') {
           this.inlinePanel.hide();
           this.overlay.render(this.buildActiveLoadingModel({ canRegenerate: true }), {
@@ -324,13 +326,20 @@ export class ChatMuseContentApp {
       }
 
       // No active quick feature — check for completed/cached inline results
-      if (this.quickInlineVisible && this.lastFeature && isInlineQuickFeature(this.lastFeature)) {
+      if (
+        this.quickInlineVisible &&
+        this.lastFeature &&
+        usesInlineFeatureSurface(this.lastFeature)
+      ) {
         const cached = this.completedOverlayCache.get(
           this.currentGroupId,
           this.lastFeature,
-          this.lastFeature === 'improve-draft'
-            ? this.buildImproveDraftCacheKey(getActiveConversationDraftText())
-            : undefined,
+          this.buildFeatureCacheKey(
+            this.lastFeature,
+            featureRequiresDraft(this.lastFeature)
+              ? getActiveConversationDraftText()
+              : undefined,
+          ),
         );
         if (cached) {
           if (this.quickSurfaceMode === 'overlay') {
@@ -401,12 +410,182 @@ export class ChatMuseContentApp {
     }
   }
 
+  private buildFeatureCacheKey(
+    feature: FeatureType,
+    draftText: string | undefined,
+  ): string | undefined {
+    if (!featureRequiresDraft(feature)) {
+      return undefined;
+    }
+    return this.buildImproveDraftCacheKey(draftText) ?? undefined;
+  }
+
+  private restoreCachedFeatureResult(
+    feature: FeatureType,
+    cachedResult: CompletedOverlayViewModel,
+  ): void {
+    this.lastFeature = feature;
+    if (featureRequiresDraft(feature) && cachedResult.kind === 'reply') {
+      void this.applyImproveDraftResult(cachedResult);
+      return;
+    }
+    if (usesInlineFeatureSurface(feature)) {
+      this.quickInlineVisible = true;
+      this.quickSurfaceMode = 'inline';
+    } else {
+      this.deepOverlayModel = cachedResult;
+    }
+    this.renderSurfaces();
+  }
+
+  private ensureFeatureCanStart(feature: FeatureType): boolean {
+    if (!this.tabState) {
+      return false;
+    }
+
+    if (!this.tabState.hasApiKey) {
+      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
+        actionLabel: 'Settings',
+        onAction: () => { void browser.runtime.openOptionsPage(); },
+      });
+      return false;
+    }
+    if (!this.tabState.hasPersonalities) {
+      this.toast.show('No model personalities configured. Go to Settings to create one.', {
+        actionLabel: 'Settings',
+        onAction: () => { void browser.runtime.openOptionsPage(); },
+      });
+      return false;
+    }
+    if (!this.tabState.mappedPersonalityId) {
+      this.toast.show('No model personality assigned for this account. Select one to continue.', {
+        actionLabel: 'Settings',
+        onAction: () => { void browser.runtime.openOptionsPage(); },
+      });
+      return false;
+    }
+    if (!this.tabState.connected) {
+      this.toast.show('Not connected to Fansly. Browse Fansly to establish a connection.');
+      return false;
+    }
+    if (featureRequiresDraft(feature) && !this.computeHasDraftText()) {
+      this.toast.show('Write a draft in the composer first, then use Fix.');
+      this.renderButtonBar();
+      return false;
+    }
+
+    return true;
+  }
+
+  private buildOperationStartPayload(
+    feature: FeatureType,
+    operationId: string,
+    domFanDisplayName: string | null,
+    draftText: string | undefined,
+    forceRegenerate: boolean,
+  ): OperationStartPayload {
+    return {
+      type: 'operation:start',
+      operationId,
+      feature,
+      groupId: this.currentGroupId,
+      routeNonce: this.routeNonce,
+      domFanDisplayName,
+      draftText,
+      forceRegenerate,
+      replyMode: featureSupportsReplyMode(feature)
+        ? this.nextFastReplyMode
+        : undefined,
+      replyTone: featureSupportsReplyTone(feature)
+        ? this.nextReplyTone
+        : undefined,
+    };
+  }
+
+  private initializeFeatureOperation(
+    feature: FeatureType,
+    operationId: string,
+    domFanDisplayName: string | null,
+    improveDraftCacheKey: string | undefined,
+  ): void {
+    this.cancelScheduledLoadingRender();
+    this.activeDebugPrompt = null;
+    this.activeAnthropicSpend = null;
+    this.activeProfiling = null;
+    this.activeProgress = null;
+    this.activeFeature = feature;
+    this.activeOperationId = operationId;
+    this.activeFanDisplayName = domFanDisplayName ?? 'fan';
+    this.lastFeature = feature;
+    this.overlayRawText = '';
+    this.suppressedTerminalOpId = null;
+    this.activeImproveDraftCacheKey = improveDraftCacheKey ?? null;
+    this.comparePanelVisible = false;
+
+    if (usesInlineFeatureSurface(feature)) {
+      this.quickInlineVisible = false;
+      this.quickSurfaceEverOpened = false;
+      this.quickSurfaceMode = 'inline';
+    }
+
+    this.renderSurfaces();
+  }
+
+  private presentCompletedFeature(
+    feature: FeatureType,
+    completedModel: CompletedOverlayViewModel,
+  ): void {
+    if (featureRequiresDraft(feature)) {
+      this.clearOperationState(false);
+      if (completedModel.kind === 'reply') {
+        void this.applyImproveDraftResult(completedModel);
+      } else {
+        this.renderAll();
+      }
+      return;
+    }
+
+    if (usesInlineFeatureSurface(feature)) {
+      if (!this.quickSurfaceEverOpened) {
+        this.quickInlineVisible = true;
+      }
+      this.clearOperationState(false);
+    } else {
+      this.deepOverlayModel = completedModel;
+      this.clearOperationState(false);
+    }
+    this.renderAll();
+  }
+
+  private presentOperationError(
+    feature: FeatureType,
+    errorModel: OverlayViewModel,
+    messageText: string,
+  ): void {
+    if (usesInlineFeatureSurface(feature)) {
+      this.cancelScheduledLoadingRender();
+      if (this.quickSurfaceMode === 'overlay') {
+        this.overlay.render(errorModel, { dismissMode: 'close' });
+      } else if (this.quickInlineVisible) {
+        this.inlinePanel.render(errorModel);
+      } else {
+        this.toast.show(messageText);
+      }
+      this.clearOperationState(false);
+      this.renderButtonBar();
+      return;
+    }
+
+    this.deepOverlayModel = errorModel;
+    this.clearOperationState(false);
+    this.renderAll();
+  }
+
   // ─── Feature Lifecycle ──────────────────────────────────────────────
 
   private startFeature(feature: FeatureType, forceRegenerate: boolean): void {
-    // Same-feature click while active
     if (this.activeFeature === feature) {
-      if (feature !== 'improve-draft' && isInlineQuickFeature(feature)) {
+      if (usesInlineFeatureSurface(feature) && !featureRequiresDraft(feature)) {
         if (!this.quickInlineVisible && this.suppressedTerminalOpId !== this.activeOperationId) {
           this.quickInlineVisible = true;
           this.renderSurfaces();
@@ -425,115 +604,50 @@ export class ChatMuseContentApp {
       this.activeCompareModel = null;
     }
 
-    const improveDraftText =
-      feature === 'improve-draft'
-        ? getActiveConversationDraftText().trim()
-        : undefined;
-    const improveDraftCacheKey = this.buildImproveDraftCacheKey(improveDraftText);
+    const draftText = featureRequiresDraft(feature)
+      ? getActiveConversationDraftText().trim()
+      : undefined;
+    const improveDraftCacheKey = this.buildFeatureCacheKey(feature, draftText);
 
-    // Cache hit
     const cachedResult =
       !forceRegenerate
         ? this.completedOverlayCache.get(
             this.currentGroupId,
             feature,
-            feature === 'improve-draft' ? improveDraftCacheKey : undefined,
+            improveDraftCacheKey,
           )
         : null;
     if (cachedResult) {
-      this.lastFeature = feature;
-      if (feature === 'improve-draft' && cachedResult.kind === 'reply') {
-        void this.applyImproveDraftResult(cachedResult);
-        return;
-      }
-      if (isInlineQuickFeature(feature)) {
-        this.quickInlineVisible = true;
-        this.quickSurfaceMode = 'inline';
-      } else {
-        this.deepOverlayModel = cachedResult;
-      }
-      this.renderSurfaces();
+      this.restoreCachedFeatureResult(feature, cachedResult);
       return;
     }
 
-    if (!this.tabState) {
+    if (!this.ensureFeatureCanStart(feature)) {
       return;
     }
 
-    if (!this.tabState.hasApiKey) {
-      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
-      return;
-    }
-    if (!this.tabState.hasPersonalities) {
-      this.toast.show('No model personalities configured. Go to Settings to create one.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
-      return;
-    }
-    if (!this.tabState.mappedPersonalityId) {
-      this.toast.show('No model personality assigned for this account. Select one to continue.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
-      return;
-    }
-    if (!this.tabState.connected) {
-      this.toast.show('Not connected to Fansly. Browse Fansly to establish a connection.');
-      return;
-    }
-    if (feature === 'improve-draft' && !this.computeHasDraftText()) {
-      this.toast.show('Write a draft in the composer first, then use Fix.');
-      this.renderButtonBar();
-      return;
-    }
-
-    // Start new operation
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
-    const draftText = improveDraftText;
-    const replyMode = feature === 'fast-reply' ? this.nextFastReplyMode : 'default';
-    this.cancelScheduledLoadingRender();
-    this.activeDebugPrompt = null;
-    this.activeAnthropicSpend = null;
-    this.activeProfiling = null;
-    this.activeProgress = null;
-    this.activeFeature = feature;
-    this.activeOperationId = operationId;
-    this.activeFanDisplayName = domFanDisplayName ?? 'fan';
-    this.lastFeature = feature;
-    this.overlayRawText = '';
-    this.suppressedTerminalOpId = null;
-    this.activeImproveDraftCacheKey =
-      feature === 'improve-draft' ? improveDraftCacheKey : null;
-    this.comparePanelVisible = false;
-
-    if (isInlineQuickFeature(feature)) {
-      this.quickInlineVisible = false;
-      this.quickSurfaceEverOpened = false;
-      this.quickSurfaceMode = 'inline';
-    }
-    // renderSurfaces() handles overlay loading for deep features,
-    // and hides surfaces for inline quick (panel opens on first chunk).
-    this.renderSurfaces();
-
-    this.port.send({
-      type: 'operation:start',
-      operationId,
+    this.initializeFeatureOperation(
       feature,
-      groupId: this.currentGroupId,
-      routeNonce: this.routeNonce,
+      operationId,
       domFanDisplayName,
-      draftText,
-      forceRegenerate,
-      replyMode: feature === 'fast-reply' ? replyMode : undefined,
-      replyTone: feature === 'fast-reply' ? this.nextReplyTone : undefined,
-    });
-    if (feature === 'fast-reply') {
+      improveDraftCacheKey,
+    );
+
+    this.port.send(
+      this.buildOperationStartPayload(
+        feature,
+        operationId,
+        domFanDisplayName,
+        draftText,
+        forceRegenerate,
+      ),
+    );
+    if (featureSupportsReplyMode(feature)) {
       this.resetNextFastReplyMode();
+    }
+    if (featureSupportsReplyTone(feature)) {
       this.resetNextReplyTone();
     }
     this.renderButtonBar();
@@ -646,7 +760,10 @@ export class ChatMuseContentApp {
 
     if (changed) {
       this.pendingCompareFingerprint = null;
-      if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
+      if (
+        this.activeFeature &&
+        usesInlineFeatureSurface(this.activeFeature)
+      ) {
         this.quickInlineVisible = false;
         this.quickSurfaceMode = 'inline';
         this.suppressedTerminalOpId = this.activeOperationId;
@@ -740,7 +857,7 @@ export class ChatMuseContentApp {
     if (
       message.anthropicSpend &&
       this.activeFeature &&
-      isInlineQuickFeature(this.activeFeature) &&
+      usesInlineFeatureSurface(this.activeFeature) &&
       this.quickSurfaceMode === 'inline' &&
       !this.quickInlineVisible
     ) {
@@ -930,11 +1047,14 @@ export class ChatMuseContentApp {
     }
     this.overlayRawText += text;
 
-    if (this.activeFeature === 'improve-draft') {
+    if (this.activeFeature && featureRequiresDraft(this.activeFeature)) {
       return;
     }
 
-    if (this.activeFeature && isInlineQuickFeature(this.activeFeature)) {
+    if (
+      this.activeFeature &&
+      usesInlineFeatureSurface(this.activeFeature)
+    ) {
       if (!this.quickSurfaceEverOpened) {
         this.quickSurfaceEverOpened = true;
         if (this.quickSurfaceMode === 'inline') {
@@ -973,7 +1093,7 @@ export class ChatMuseContentApp {
       message.profiling ?? this.activeProfiling ?? undefined,
     );
     const improveDraftCacheKey = this.activeImproveDraftCacheKey;
-    if (feature === 'improve-draft') {
+    if (featureRequiresDraft(feature)) {
       this.completedOverlayCache.set(
         this.currentGroupId,
         feature,
@@ -984,26 +1104,7 @@ export class ChatMuseContentApp {
       this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
     }
 
-    if (feature === 'improve-draft') {
-      this.clearOperationState(false);
-      if (completedModel.kind === 'reply') {
-        void this.applyImproveDraftResult(completedModel);
-      } else {
-        this.renderAll();
-      }
-      return;
-    }
-
-    if (isInlineQuickFeature(feature)) {
-      if (!this.quickSurfaceEverOpened) {
-        this.quickInlineVisible = true;
-      }
-      this.clearOperationState(false);
-    } else {
-      this.deepOverlayModel = completedModel;
-      this.clearOperationState(false);
-    }
-    this.renderAll();
+    this.presentCompletedFeature(feature, completedModel);
   }
 
   private handleOperationError(
@@ -1037,25 +1138,7 @@ export class ChatMuseContentApp {
         },
       };
 
-      if (isInlineQuickFeature(feature)) {
-        this.cancelScheduledLoadingRender();
-        if (this.quickSurfaceMode === 'overlay') {
-          // Errors aren't cached, so collapse-to-inline is meaningless —
-          // use 'close' so dismiss hides the overlay cleanly.
-          this.overlay.render(errorModel, { dismissMode: 'close' });
-        } else if (this.quickInlineVisible) {
-          this.inlinePanel.render(errorModel);
-        } else {
-          this.toast.show(message.error.message);
-        }
-        this.clearOperationState(false);
-        this.renderButtonBar();
-        return;
-      }
-
-      this.deepOverlayModel = errorModel;
-      this.clearOperationState(false);
-      this.renderAll();
+      this.presentOperationError(feature, errorModel, message.error.message);
       return;
     }
 
@@ -1201,47 +1284,57 @@ export class ChatMuseContentApp {
   ): CompletedOverlayViewModel {
     const rawText = result.rawText;
 
-    if (feature === 'help-me') {
-      const parsed = result.helpMe;
-      return {
-        kind: 'helpMe',
-        feature,
-        fanDisplayName,
-        operationId,
-        rawText,
-        coaching: parsed?.coaching ?? null,
-        engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
-        flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
-        parseFallback: !parsed?.valid,
-        debugPrompt: this.activeDebugPrompt ?? undefined,
-        anthropicSpend,
-        profiling,
-        rerunActionLabel: 'Regenerate',
-      };
-    }
-
-    if (feature === 'fan-summary' || feature === 'chat-review') {
-      return {
-        kind: 'readOnly',
-        feature,
-        fanDisplayName,
-        operationId,
-        rawText,
-        summaryMeta: result.summaryMeta,
-        reviewMeta:
-          feature === 'chat-review'
-            ? {
-                rating: result.chatReview?.rating ?? null,
-                evaluation: result.chatReview?.evaluation ?? null,
-                recommendations: result.chatReview?.recommendations ?? null,
-                parseFallback: !result.chatReview?.valid,
-              }
-            : undefined,
-        debugPrompt: this.activeDebugPrompt ?? undefined,
-        anthropicSpend,
-        profiling,
-        rerunActionLabel: 'Refresh',
-      };
+    switch (getFeaturePolicy(feature).resultKind) {
+      case 'help-me': {
+        const parsed = result.helpMe;
+        return {
+          kind: 'helpMe',
+          feature: 'help-me',
+          fanDisplayName,
+          operationId,
+          rawText,
+          coaching: parsed?.coaching ?? null,
+          engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
+          flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
+          parseFallback: !parsed?.valid,
+          debugPrompt: this.activeDebugPrompt ?? undefined,
+          anthropicSpend,
+          profiling,
+          rerunActionLabel: 'Regenerate',
+        };
+      }
+      case 'summary':
+        return {
+          kind: 'readOnly',
+          feature: 'fan-summary',
+          fanDisplayName,
+          operationId,
+          rawText,
+          summaryMeta: result.summaryMeta,
+          debugPrompt: this.activeDebugPrompt ?? undefined,
+          anthropicSpend,
+          profiling,
+          rerunActionLabel: 'Refresh',
+        };
+      case 'chat-review':
+        return {
+          kind: 'readOnly',
+          feature: 'chat-review',
+          fanDisplayName,
+          operationId,
+          rawText,
+          summaryMeta: result.summaryMeta,
+          reviewMeta: {
+            rating: result.chatReview?.rating ?? null,
+            evaluation: result.chatReview?.evaluation ?? null,
+            recommendations: result.chatReview?.recommendations ?? null,
+            parseFallback: !result.chatReview?.valid,
+          },
+          debugPrompt: this.activeDebugPrompt ?? undefined,
+          anthropicSpend,
+          profiling,
+          rerunActionLabel: 'Refresh',
+        };
     }
 
     return {
