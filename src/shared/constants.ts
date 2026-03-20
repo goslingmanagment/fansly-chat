@@ -43,7 +43,7 @@ export const MAX_TOKENS: Record<FeatureType, number> = {
   'fast-reply': 800,
   'improve-draft': 800,
   'help-me': 1200,
-  'fan-summary': 1600,
+  'fan-summary': 4096,
   'chat-review': 1600,
   'ping': 800,
 };
@@ -75,7 +75,7 @@ export const QUICK_MAX_MESSAGE_COUNT = 200;
 export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
 export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
-export const DEEP_DEFAULT_MESSAGE_COUNT = 500;
+export const DEEP_DEFAULT_MESSAGE_COUNT = 1000;
 export const DEEP_MIN_MESSAGE_COUNT = 100;
 export const DEEP_MAX_MESSAGE_COUNT = 1000;
 
