@@ -4,6 +4,7 @@ import {
   DEFAULT_MODEL_ID,
   DEFAULT_FEATURE_MODELS,
   FEATURE_TEMPERATURES,
+  QUICK_OPERATION_TIMEOUT_MS,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { ChatMuseError } from '../src/shared/errors.js';
@@ -257,6 +258,7 @@ describe('OperationCoordinator', () => {
 
   afterEach(() => {
     vi.doUnmock('../src/shared/compare-cards.js');
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -995,6 +997,58 @@ describe('OperationCoordinator', () => {
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
+  it('treats unexpected compare card aborts as connection errors and still completes', async () => {
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        systemBlocks,
+      }: {
+        systemBlocks: Array<{ text: string }>;
+      }) => {
+        const system = systemBlocks.map((block) => block.text).join('');
+        if (system.includes('Current baseline personality')) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        return 'Draft reply';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const cardError = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
+        message.type === 'compare:cardError',
+    );
+
+    expect(cardError?.cardId).toBe('current:personality-1');
+    expect(cardError?.error.code).toBe('network_error');
+    expect(messages.some((message) => message.type === 'compare:cardComplete')).toBe(true);
+    expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+  });
+
   it('sends compare:discarded when an active compare session is cancelled', async () => {
     mockCompareCards([
       {
@@ -1050,6 +1104,67 @@ describe('OperationCoordinator', () => {
     );
 
     expect(discardedMessage?.error.code).toBe('chat_changed');
+  });
+
+  it('sends compare:error when compare generation hits the shared timeout', async () => {
+    vi.useFakeTimers();
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+
+    let startedStreams = 0;
+    let resolveStreamsStarted: (() => void) | null = null;
+    const streamsStarted = new Promise<void>((resolve) => {
+      resolveStreamsStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({ signal }: { signal: AbortSignal }) => new Promise<string>((_resolve, reject) => {
+          startedStreams += 1;
+          if (startedStreams === 2) {
+            resolveStreamsStarted?.();
+          }
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await streamsStarted;
+    await vi.advanceTimersByTimeAsync(QUICK_OPERATION_TIMEOUT_MS);
+    await startPromise;
+
+    const messages = postedMessages(port);
+    const errorMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:error' }> =>
+        message.type === 'compare:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('timed_out');
+    expect(messages.some((message) => message.type === 'compare:complete')).toBe(false);
   });
 
   it('omits profiling data from progress and completion payloads when debug mode is off', async () => {
@@ -1567,7 +1682,7 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
   });
 
-  it('includes profiling data on timeout/abort in debug mode', async () => {
+  it('maps unexpected aborts to network_error in debug mode', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       debugMode: true,
@@ -1593,6 +1708,60 @@ describe('OperationCoordinator', () => {
       forceRegenerate: false,
       replyMode: 'default',
     });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('network_error');
+    expect(errorMessage?.profiling).toBeDefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+  });
+
+  it('includes profiling data on true timeout in debug mode', async () => {
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({ signal }: { signal: AbortSignal }) => new Promise<string>((_resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicClient,
+    });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await streamStarted;
+    await vi.advanceTimersByTimeAsync(QUICK_OPERATION_TIMEOUT_MS);
+    await startPromise;
 
     const errorMessage = postedMessages(port).find(
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>

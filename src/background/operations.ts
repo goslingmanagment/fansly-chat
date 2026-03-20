@@ -79,6 +79,7 @@ import {
   describeSubscriptionTraceStep,
   errorCode,
   parseGroupIdFromUrl,
+  resolveAbortChatMuseError,
 } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
 import { StorageCoordinator } from './storage-coordinator.js';
@@ -656,20 +657,24 @@ export class OperationCoordinator {
     }
 
     let timeout: number | null = null;
+    let timeoutController: AbortController | null = null;
+    let controller: AbortController | null = null;
     let debugEnabled = false;
     try {
       const validated = await this.validateStart(tabId, payload);
       debugEnabled = validated.storage.settings.debugMode;
       const profiler = createOperationProfiler(debugEnabled);
-      const timeoutController = new AbortController();
+      const operationTimeoutController = new AbortController();
+      timeoutController = operationTimeoutController;
       timeout = globalThis.setTimeout(
-        () => timeoutController.abort(),
+        () => operationTimeoutController.abort(),
         resolveOperationTimeoutMs(payload.feature),
       ) as unknown as number;
-      const controller = new AbortController();
+      const operationController = new AbortController();
+      controller = operationController;
       const signal = AbortSignal.any([
-        controller.signal,
-        timeoutController.signal,
+        operationController.signal,
+        operationTimeoutController.signal,
       ]);
 
       const active: ActiveOperation = {
@@ -678,7 +683,7 @@ export class OperationCoordinator {
         feature: payload.feature,
         groupId: validated.urlGroupId,
         routeNonce: payload.routeNonce,
-        controller,
+        controller: operationController,
         rawText: '',
         flushBuffer: '',
         flushTimer: null,
@@ -1540,12 +1545,14 @@ export class OperationCoordinator {
       }
       active?.profiler.finalizeRunningStages('operation failed');
 
-      if (
-        error instanceof DOMException &&
-        error.name === 'AbortError'
-      ) {
+      const abortError = resolveAbortChatMuseError(error, {
+        active: Boolean(active),
+        timeoutSignal: timeoutController?.signal,
+        cancelSignal: controller?.signal,
+      });
+      if (abortError) {
         const code = active
-          ? new ChatMuseError('timed_out')
+          ? abortError
           : new ChatMuseError('chat_changed');
         const errorPayload: ErrorPayload = {
           type: 'operation:error',

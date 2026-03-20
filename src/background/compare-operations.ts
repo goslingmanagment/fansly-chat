@@ -54,6 +54,7 @@ import {
   describeSubscriptionTraceStep,
   errorCode,
   parseGroupIdFromUrl,
+  resolveAbortChatMuseError,
 } from './operation-utils.js';
 import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
@@ -388,20 +389,24 @@ export async function executeCompare(
   }
 
   let timeout: number | null = null;
+  let timeoutController: AbortController | null = null;
+  let controller: AbortController | null = null;
   let debugEnabled = false;
   try {
     const validated = await validateCompareStart(context, tabId, payload);
     debugEnabled = validated.storage.settings.debugMode;
     const profiler = createOperationProfiler(debugEnabled);
-    const timeoutController = new AbortController();
+    const compareTimeoutController = new AbortController();
+    timeoutController = compareTimeoutController;
     timeout = globalThis.setTimeout(
-      () => timeoutController.abort(),
+      () => compareTimeoutController.abort(),
       QUICK_OPERATION_TIMEOUT_MS,
     ) as unknown as number;
-    const controller = new AbortController();
+    const compareController = new AbortController();
+    controller = compareController;
     const signal = AbortSignal.any([
-      controller.signal,
-      timeoutController.signal,
+      compareController.signal,
+      compareTimeoutController.signal,
     ]);
 
     const active: ActiveCompareOperation = {
@@ -409,7 +414,7 @@ export async function executeCompare(
       tabId,
       groupId: validated.urlGroupId,
       routeNonce: payload.routeNonce,
-      controller,
+      controller: compareController,
       profiler,
       compareCards: new Map(),
     };
@@ -998,12 +1003,16 @@ export async function executeCompare(
         const isModelError = error instanceof ChatMuseError
           ? error.code === 'model_unavailable'
           : (error as { code?: string })?.code === 'model_unavailable';
+        const abortError = resolveAbortChatMuseError(error, {
+          active: Boolean(getActiveCompare(context, tabId)),
+          timeoutSignal: timeoutController?.signal,
+          cancelSignal: controller?.signal,
+        });
         if (isModelError && resolvedModel !== defaultModel) {
           rawText = await streamToCard(defaultModel);
-        } else if (
-          error instanceof DOMException &&
-          error.name === 'AbortError'
-        ) {
+        } else if (abortError?.code === 'timed_out') {
+          throw abortError;
+        } else if (abortError?.code === 'chat_changed') {
           return;
         } else {
           const profiling = buildCompareCardProfilingSnapshot(
@@ -1018,7 +1027,7 @@ export async function executeCompare(
               type: 'compare:cardError',
               operationId: payload.operationId,
               cardId: card.id,
-              error: toUserError(error),
+              error: toUserError(abortError ?? error),
               anthropicSpend:
                 cardSpend ?? createZeroAnthropicSpendSummary(),
             },
@@ -1095,21 +1104,19 @@ export async function executeCompare(
     }
     active?.profiler.finalizeRunningStages('compare failed');
 
-    if (
-      error instanceof DOMException &&
-      error.name === 'AbortError'
-    ) {
+    const abortError = resolveAbortChatMuseError(error, {
+      active: Boolean(active),
+      timeoutSignal: timeoutController?.signal,
+      cancelSignal: controller?.signal,
+    });
+    if (abortError) {
       sendCompareError(
         context,
         tabId,
         {
           type: 'compare:error',
           operationId,
-          error: toUserError(
-            active
-              ? new ChatMuseError('timed_out')
-              : new ChatMuseError('chat_changed'),
-          ),
+          error: toUserError(active ? abortError : new ChatMuseError('chat_changed')),
         },
         active?.profiler ?? NO_OP_PROFILER,
       );
