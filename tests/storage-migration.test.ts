@@ -96,6 +96,7 @@ describe('migrateState', () => {
     const result = migrateState(partial);
     expect(result.settings.claudeApiKey).toBe('key');
     expect(result.settings.quickMessageCount).toBe(createDefaultSettings().quickMessageCount);
+    expect(result.settings.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
     expect(result.settings.deepMessageCount).toBe(createDefaultSettings().deepMessageCount);
   });
 
@@ -177,6 +178,11 @@ describe('sanitizeSettings', () => {
     expect(result.deepMessageCount).toBe(100);
   });
 
+  it('clamps improveMessageCount within bounds', () => {
+    const result = storage.sanitizeSettings({ improveMessageCount: 999 });
+    expect(result.improveMessageCount).toBe(200);
+  });
+
   it('trims API key', () => {
     const result = storage.sanitizeSettings({ claudeApiKey: '  sk-test  ' });
     expect(result.claudeApiKey).toBe('sk-test');
@@ -186,6 +192,7 @@ describe('sanitizeSettings', () => {
     const result = storage.sanitizeSettings({});
     expect(result.claudeApiKey).toBe('');
     expect(result.debugMode).toBe(false);
+    expect(result.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
     expect(result.promptCachingEnabled).toBe(true);
   });
 

@@ -12,6 +12,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 30,
+      improveMessageCount: 45,
       deepMessageCount: 200,
       debugMode: false,
       promptCachingEnabled: true,
@@ -150,6 +151,18 @@ describe('Options page — AI Models section', () => {
     expect(checkbox?.checked).toBe(true);
   });
 
+  it('initializes the separate improve message count input from persisted settings', async () => {
+    await loadOptionsPage(makeState({ improveMessageCount: 77 }));
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const improveLabel = labels.find((label) =>
+      label.textContent?.includes('Improve message count'),
+    );
+    const input = improveLabel?.querySelector<HTMLInputElement>('input[type="number"]');
+
+    expect(input?.value).toBe('77');
+  });
+
   it('saves featureModels when a dropdown changes', async () => {
     await loadOptionsPage(makeState());
 
@@ -192,5 +205,28 @@ describe('Options page — AI Models section', () => {
 
     const saved = savedSettings as { promptCachingEnabled?: boolean };
     expect(saved.promptCachingEnabled).toBe(false);
+  });
+
+  it('saves improveMessageCount when the improve input changes', async () => {
+    await loadOptionsPage(makeState());
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const improveLabel = labels.find((label) =>
+      label.textContent?.includes('Improve message count'),
+    );
+    const input = improveLabel?.querySelector<HTMLInputElement>('input[type="number"]');
+    if (!input) {
+      throw new Error('Improve message count input not found');
+    }
+
+    input.value = '88';
+    input.dispatchEvent(new Event('input'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('not saved yet');
+    }, { timeout: 2000 });
+
+    const saved = savedSettings as { improveMessageCount?: number };
+    expect(saved.improveMessageCount).toBe(88);
   });
 });

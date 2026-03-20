@@ -70,6 +70,9 @@ export const FANSLY_RETRY_DELAYS_MS = [1000, 2000, 4000];
 export const QUICK_DEFAULT_MESSAGE_COUNT = 100;
 export const QUICK_MIN_MESSAGE_COUNT = 5;
 export const QUICK_MAX_MESSAGE_COUNT = 200;
+export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
+export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
+export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
 export const DEEP_DEFAULT_MESSAGE_COUNT = 500;
 export const DEEP_MIN_MESSAGE_COUNT = 100;
 export const DEEP_MAX_MESSAGE_COUNT = 1000;
@@ -121,6 +124,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
 export const DEFAULT_SETTINGS: Settings = {
   claudeApiKey: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
+  improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
   debugMode: false,
   promptCachingEnabled: true,

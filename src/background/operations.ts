@@ -45,6 +45,7 @@ import type {
   SubscriptionLookupMode,
   RouteChangedPayload,
   SessionTemplate,
+  Settings,
   TabStatePayload,
   TabUiState,
 } from '../shared/types.js';
@@ -105,6 +106,18 @@ interface ValidatedOperationStart {
 
 function isDeepFeature(feature: FeatureType): boolean {
   return feature === 'fan-summary' || feature === 'chat-review';
+}
+
+function resolveMessageCount(feature: FeatureType, settings: Settings): number {
+  if (isDeepFeature(feature)) {
+    return settings.deepMessageCount;
+  }
+
+  if (feature === 'improve-draft') {
+    return settings.improveMessageCount;
+  }
+
+  return settings.quickMessageCount;
 }
 
 function resolveModelFeature(feature: FeatureType): ModelSelectableFeatureType {
@@ -492,9 +505,7 @@ export class OperationCoordinator {
       storage,
       session,
       legacyAccountId,
-      messageCount: isDeepFeature(payload.feature)
-        ? storage.settings.deepMessageCount
-        : storage.settings.quickMessageCount,
+      messageCount: resolveMessageCount(payload.feature, storage.settings),
     };
   }
 

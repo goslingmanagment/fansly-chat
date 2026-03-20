@@ -36,6 +36,8 @@ function installDom() {
   vi.stubGlobal('MutationObserver', window.MutationObserver);
   vi.stubGlobal('requestAnimationFrame', window.requestAnimationFrame);
   vi.stubGlobal('cancelAnimationFrame', window.cancelAnimationFrame);
+  (window.document as Document & { execCommand?: ReturnType<typeof vi.fn> }).execCommand =
+    vi.fn(() => false);
   (globalThis as Record<string, unknown>).browser = {
     runtime: {
       openOptionsPage: vi.fn(async () => undefined),
@@ -171,6 +173,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 100,
+      improveMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
       promptCachingEnabled: true,
@@ -407,15 +410,17 @@ describe('ChatMuseContentApp', () => {
     }));
   });
 
-  it('does not cache completed improve-draft results', async () => {
+  it('auto-inserts and caches completed improve-draft results by draft text', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
+    const textarea = mountConversationComposer('hey babe how was your day');
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
     app.activeFeature = 'improve-draft';
     app.activeOperationId = 'improve-op';
     app.activeFanDisplayName = 'alice';
+    app.activeImproveDraftCacheKey = 'hey babe how was your day';
 
     app.handleComplete({
       type: 'operation:complete',
@@ -427,7 +432,61 @@ describe('ChatMuseContentApp', () => {
       },
     });
 
-    expect(app.completedOverlayCache.get('group-1', 'improve-draft')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(textarea.value).toBe('Improved message');
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatmuse-hidden')).toBe(true);
+    const cached = app.completedOverlayCache.get(
+      'group-1',
+      'improve-draft',
+      'hey babe how was your day',
+    );
+    expect(cached?.kind).toBe('reply');
+    if (!cached || cached.kind !== 'reply') {
+      throw new Error('Expected cached improve reply.');
+    }
+    expect(cached.parts[0]?.text).toBe('Improved message');
+    expect(cached.parts[0]?.insertedOnce).toBe(true);
+  });
+
+  it('reuses cached improve-draft results for the same draft text without another request', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+    const textarea = mountConversationComposer('hey babe how was your day');
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.completedOverlayCache.set(
+      'group-1',
+      'improve-draft',
+      {
+        kind: 'reply',
+        feature: 'improve-draft',
+        fanDisplayName: 'alice',
+        operationId: 'cached-improve-op',
+        parts: [
+          {
+            id: '0-improved',
+            sequenceIndex: 0,
+            text: 'Improved message',
+            insertedAt: null,
+            insertedOnce: false,
+          },
+        ],
+        rawText: 'Improved message',
+        rerunActionLabel: 'Regenerate',
+      },
+      'hey babe how was your day',
+    );
+
+    app.startFeature('improve-draft', false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('Improved message');
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatmuse-hidden')).toBe(true);
   });
 
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {

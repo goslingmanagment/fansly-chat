@@ -15,6 +15,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 30,
+      improveMessageCount: 45,
       deepMessageCount: 200,
       debugMode: false,
       promptCachingEnabled: true,
