@@ -7,6 +7,7 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: FEATURE_LABELS['fast-reply'] },
   { feature: 'improve-draft', label: FEATURE_LABELS['improve-draft'] },
   { feature: 'ping', label: FEATURE_LABELS['ping'] },
+  { feature: 'fan-summary', label: FEATURE_LABELS['fan-summary'] },
 ];
 
 const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> = [
@@ -87,15 +88,17 @@ export class ButtonBar {
     }
 
     const pingButton = this.buttons.get('ping')!;
+    const summaryButton = this.buttons.get('fan-summary')!;
 
     // Main actions first, secondary controls later so narrow layouts degrade gracefully.
-    // Help / Review / Summary / Compare stay implemented but are intentionally hidden from the toolbar for now.
+    // Help / Review / Compare stay implemented but are intentionally hidden from the toolbar for now.
     this.root.append(
       replyButton,
       this.replyModeToggle,
       improveButton,
       this.toneRow,
       pingButton,
+      summaryButton,
       this.personalityLabel,
     );
   }
