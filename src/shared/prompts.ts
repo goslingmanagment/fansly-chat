@@ -4,6 +4,8 @@ import helpMeTemplate from '../../prompts/help-me.md';
 import fanSummaryTemplate from '../../prompts/fan-summary.md';
 import chatReviewTemplate from '../../prompts/chat-review.md';
 import pingTemplate from '../../prompts/ping.md';
+import { featureUsesPingSegment, getFeaturePolicy } from './features.js';
+import { escapeForPrompt } from './prompt-injection.js';
 import type {
   FeatureType,
   PingSegment,
@@ -14,16 +16,6 @@ import type {
   ReplyMode,
   ReplyTone,
 } from './types.js';
-import { escapeForPrompt } from './prompt-injection.js';
-
-const TEMPLATES: Record<FeatureType, string> = {
-  'fast-reply': fastReplyTemplate,
-  'improve-draft': improveDraftTemplate,
-  'help-me': helpMeTemplate,
-  'fan-summary': fanSummaryTemplate,
-  'chat-review': chatReviewTemplate,
-  'ping': pingTemplate,
-};
 
 const PING_SEGMENT_INSTRUCTIONS: Record<PingSegment, string> = {
   'segment-a':
@@ -66,33 +58,52 @@ const USER_TASK_ANCHOR = '## Your Task';
 const PING_SEGMENT_ANCHOR = '## Fan Segment';
 const PING_RULES_ANCHOR = '## Rules';
 
-function isReplyFeature(
-  feature: FeatureType,
-): feature is 'fast-reply' | 'improve-draft' | 'ping' {
-  return (
-    feature === 'fast-reply' ||
-    feature === 'improve-draft' ||
-    feature === 'ping'
-  );
+type PromptSegmentKey =
+  | 'system-instructions'
+  | 'system-personality'
+  | 'user-static'
+  | 'user-dynamic'
+  | 'user-task';
+
+interface PromptSegmentPlan {
+  key: PromptSegmentKey;
+  template: string;
+  cacheControl?: PromptCacheControl;
 }
 
-function buildSafetyPreamble(feature: FeatureType): string {
-  return isReplyFeature(feature)
-    ? REPLY_SAFETY_PREAMBLE
-    : ANALYSIS_SAFETY_PREAMBLE;
-}
+type SegmentedUserTemplatePlan = {
+  kind: 'segmented';
+  segments: [PromptSegmentPlan, PromptSegmentPlan, PromptSegmentPlan];
+};
 
-function buildSplitReplyInstructions(feature: FeatureType, replyMode: ReplyMode | undefined): string {
-  if (feature !== 'fast-reply' || replyMode !== 'preferSplit') {
-    return '';
-  }
+type FallbackUserTemplatePlan = {
+  kind: 'fallback';
+  template: string;
+  warningAnchor: string;
+};
 
-  return `- Split mode is on for this reply.
-- Prefer short, text-like multi-message delivery over one long block when that feels more human.
-- Use [NEXT] only when the follow-up reads like a natural second thought or quick extra send.
-- Keep each part brief and casual.
-- If a split would feel forced, return one clean message instead.`;
-}
+type UserTemplatePlan = SegmentedUserTemplatePlan | FallbackUserTemplatePlan;
+
+const USER_TEMPLATE_PLANS: Record<FeatureType, UserTemplatePlan> = {
+  'fast-reply': createStandardUserTemplatePlan(
+    'fast-reply',
+    fastReplyTemplate,
+  ),
+  'improve-draft': createStandardUserTemplatePlan(
+    'improve-draft',
+    improveDraftTemplate,
+  ),
+  'help-me': createStandardUserTemplatePlan('help-me', helpMeTemplate),
+  'fan-summary': createStandardUserTemplatePlan(
+    'fan-summary',
+    fanSummaryTemplate,
+  ),
+  'chat-review': createStandardUserTemplatePlan(
+    'chat-review',
+    chatReviewTemplate,
+  ),
+  ping: createPingUserTemplatePlan(pingTemplate),
+};
 
 const TONE_INSTRUCTIONS: Record<Exclude<ReplyTone, 'none'>, string> = {
   casual: `**IMPORTANT — Tone override: CASUAL.**
@@ -114,8 +125,182 @@ Match the fan's energy and push it upward. Keep escalation believable — don't 
 const TONE_FOOTER =
   'The personality still controls voice, cadence, emoji habits, slang, and message length — only the intent and energy of this reply should shift.';
 
-function buildToneInstructions(feature: FeatureType, replyTone: ReplyTone | undefined): string {
-  if (feature !== 'fast-reply' || !replyTone || replyTone === 'none') {
+interface PromptTemplateReplacements {
+  personality: string;
+  transcript: string;
+  fanSpendingSection: string;
+  fanSubscriptionSection: string;
+  fanDisplayName: string;
+  draftSection: string;
+  splitReplyInstructions: string;
+  toneInstructions: string;
+  segmentInstructions: string;
+}
+
+interface PromptRequestBlocks {
+  prompt: PromptPayload;
+  systemBlocks: PromptTextBlock[];
+  userBlocks: PromptTextBlock[];
+}
+
+function createStandardUserTemplatePlan(
+  feature: FeatureType,
+  template: string,
+): UserTemplatePlan {
+  const contextAnchor = getFeaturePolicy(feature).requiresDraft
+    ? USER_DRAFT_ANCHOR
+    : USER_TRANSCRIPT_ANCHOR;
+  const contextIndex = template.indexOf(contextAnchor);
+  if (contextIndex < 0) {
+    return {
+      kind: 'fallback',
+      template,
+      warningAnchor: contextAnchor,
+    };
+  }
+
+  const taskIndex = template.lastIndexOf(USER_TASK_ANCHOR);
+  if (taskIndex < 0 || contextIndex >= taskIndex) {
+    return {
+      kind: 'fallback',
+      template,
+      warningAnchor: USER_TASK_ANCHOR,
+    };
+  }
+
+  return {
+    kind: 'segmented',
+    segments: [
+      {
+        key: 'user-static',
+        template: template.slice(0, contextIndex),
+        cacheControl: ONE_HOUR_CACHE_CONTROL,
+      },
+      {
+        key: 'user-dynamic',
+        template: template.slice(contextIndex, taskIndex),
+        cacheControl: EPHEMERAL_CACHE_CONTROL,
+      },
+      {
+        key: 'user-task',
+        template: template.slice(taskIndex),
+      },
+    ],
+  };
+}
+
+function createPingUserTemplatePlan(template: string): UserTemplatePlan {
+  const segmentIndex = template.indexOf(PING_SEGMENT_ANCHOR);
+  if (segmentIndex < 0) {
+    return {
+      kind: 'fallback',
+      template,
+      warningAnchor: PING_SEGMENT_ANCHOR,
+    };
+  }
+
+  const rulesIndex = template.indexOf(
+    PING_RULES_ANCHOR,
+    segmentIndex + PING_SEGMENT_ANCHOR.length,
+  );
+  if (rulesIndex < 0 || segmentIndex >= rulesIndex) {
+    return {
+      kind: 'fallback',
+      template,
+      warningAnchor: PING_RULES_ANCHOR,
+    };
+  }
+
+  const transcriptIndex = template.indexOf(
+    USER_TRANSCRIPT_ANCHOR,
+    rulesIndex + PING_RULES_ANCHOR.length,
+  );
+  if (transcriptIndex < 0 || rulesIndex >= transcriptIndex) {
+    return {
+      kind: 'fallback',
+      template,
+      warningAnchor: USER_TRANSCRIPT_ANCHOR,
+    };
+  }
+
+  const taskIndex = template.lastIndexOf(USER_TASK_ANCHOR);
+  if (taskIndex < 0 || transcriptIndex >= taskIndex) {
+    return {
+      kind: 'fallback',
+      template,
+      warningAnchor: USER_TASK_ANCHOR,
+    };
+  }
+
+  return {
+    kind: 'segmented',
+    segments: [
+      {
+        key: 'user-static',
+        template: template.slice(0, segmentIndex),
+        cacheControl: ONE_HOUR_CACHE_CONTROL,
+      },
+      {
+        key: 'user-dynamic',
+        template: template.slice(segmentIndex, taskIndex),
+        cacheControl: EPHEMERAL_CACHE_CONTROL,
+      },
+      {
+        key: 'user-task',
+        template: template.slice(taskIndex),
+      },
+    ],
+  };
+}
+
+function normalizePromptBuildInput(input: PromptBuildInput): PromptBuildInput {
+  const policy = getFeaturePolicy(input.feature);
+  return {
+    ...input,
+    draftText: policy.requiresDraft ? input.draftText?.trim() : undefined,
+    pingSegment: policy.usesPingSegment ? input.pingSegment : undefined,
+    replyMode: policy.supportsReplyMode
+      ? (input.replyMode ?? 'default')
+      : undefined,
+    replyTone: policy.supportsReplyTone
+      ? (input.replyTone ?? 'none')
+      : undefined,
+  };
+}
+
+function buildSafetyPreamble(feature: FeatureType): string {
+  return getFeaturePolicy(feature).promptMode === 'reply'
+    ? REPLY_SAFETY_PREAMBLE
+    : ANALYSIS_SAFETY_PREAMBLE;
+}
+
+function buildSplitReplyInstructions(
+  feature: FeatureType,
+  replyMode: ReplyMode | undefined,
+): string {
+  if (
+    !getFeaturePolicy(feature).supportsReplyMode ||
+    replyMode !== 'preferSplit'
+  ) {
+    return '';
+  }
+
+  return `- Split mode is on for this reply.
+- Prefer short, text-like multi-message delivery over one long block when that feels more human.
+- Use [NEXT] only when the follow-up reads like a natural second thought or quick extra send.
+- Keep each part brief and casual.
+- If a split would feel forced, return one clean message instead.`;
+}
+
+function buildToneInstructions(
+  feature: FeatureType,
+  replyTone: ReplyTone | undefined,
+): string {
+  if (
+    !getFeaturePolicy(feature).supportsReplyTone ||
+    !replyTone ||
+    replyTone === 'none'
+  ) {
     return '';
   }
   return TONE_INSTRUCTIONS[replyTone] + '\n' + TONE_FOOTER;
@@ -145,8 +330,15 @@ function buildDraftSection(draftText: string | undefined): string {
   return `## Current Draft\n\n<current_draft>\n${escapeForPrompt(trimmed)}\n</current_draft>`;
 }
 
-function applyTemplate(template: string, replacements: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => replacements[key] ?? match);
+function applyTemplate(
+  template: string,
+  replacements: PromptTemplateReplacements,
+): string {
+  return template.replace(
+    /\{(\w+)\}/g,
+    (match, key: string) =>
+      replacements[key as keyof PromptTemplateReplacements] ?? match,
+  );
 }
 
 function createTextBlock(
@@ -173,6 +365,22 @@ export function stripPromptCacheControl(
   }));
 }
 
+export function buildPromptRequest(
+  input: PromptBuildInput,
+  promptCachingEnabled: boolean,
+): PromptRequestBlocks {
+  const prompt = buildPrompt(input);
+  return {
+    prompt,
+    systemBlocks: promptCachingEnabled
+      ? prompt.systemBlocks
+      : stripPromptCacheControl(prompt.systemBlocks),
+    userBlocks: promptCachingEnabled
+      ? prompt.userBlocks
+      : stripPromptCacheControl(prompt.userBlocks),
+  };
+}
+
 function warnPromptCachingFallback(
   feature: FeatureType,
   anchor: string,
@@ -182,78 +390,72 @@ function warnPromptCachingFallback(
   );
 }
 
-function buildSystemBlocks(system: string): PromptTextBlock[] {
-  const personalityAnchorIndex = system.indexOf(SYSTEM_PERSONALITY_ANCHOR);
-  if (personalityAnchorIndex < 0) {
-    return [createTextBlock(system)];
-  }
-
-  const personalityStart = personalityAnchorIndex + SYSTEM_PERSONALITY_ANCHOR.length;
-  return [
-    createTextBlock(system.slice(0, personalityStart)),
-    createTextBlock(system.slice(personalityStart), ONE_HOUR_CACHE_CONTROL),
-  ];
-}
-
-function buildFallbackUserBlocks(user: string): PromptTextBlock[] {
-  return [createTextBlock(user)];
-}
-
-function buildStandardUserBlocks(
+function buildSystemBlocks(
   feature: FeatureType,
-  user: string,
+  personality: string,
 ): PromptTextBlock[] {
-  const contextAnchor =
-    feature === 'improve-draft' ? USER_DRAFT_ANCHOR : USER_TRANSCRIPT_ANCHOR;
-  const transcriptIndex = user.indexOf(contextAnchor);
-  if (transcriptIndex < 0) {
-    warnPromptCachingFallback(feature, contextAnchor);
-    return buildFallbackUserBlocks(user);
-  }
-
-  const taskIndex = user.lastIndexOf(USER_TASK_ANCHOR);
-  if (taskIndex < 0 || transcriptIndex >= taskIndex) {
-    warnPromptCachingFallback(feature, USER_TASK_ANCHOR);
-    return buildFallbackUserBlocks(user);
-  }
-
   return [
-    createTextBlock(user.slice(0, transcriptIndex), ONE_HOUR_CACHE_CONTROL),
-    createTextBlock(user.slice(transcriptIndex, taskIndex), EPHEMERAL_CACHE_CONTROL),
-    createTextBlock(user.slice(taskIndex)),
+    createTextBlock(
+      `${buildSafetyPreamble(feature)}${SYSTEM_PERSONALITY_ANCHOR}`,
+    ),
+    createTextBlock(personality, ONE_HOUR_CACHE_CONTROL),
   ];
 }
 
-function buildPingUserBlocks(user: string): PromptTextBlock[] {
-  const segmentIndex = user.indexOf(PING_SEGMENT_ANCHOR);
-  if (segmentIndex < 0) {
-    warnPromptCachingFallback('ping', PING_SEGMENT_ANCHOR);
-    return buildFallbackUserBlocks(user);
-  }
+function buildPromptReplacements(
+  input: PromptBuildInput,
+): PromptTemplateReplacements {
+  return {
+    personality: input.personality.content,
+    transcript: escapeForPrompt(input.transcript),
+    fanSpendingSection: buildFanSpendingSection(input.fanSpendingData),
+    fanSubscriptionSection: buildFanSubscriptionSection(
+      input.fanSubscriptionData,
+    ),
+    fanDisplayName: escapeForPrompt(input.fanDisplayName),
+    draftSection: buildDraftSection(input.draftText),
+    splitReplyInstructions: buildSplitReplyInstructions(
+      input.feature,
+      input.replyMode,
+    ),
+    toneInstructions: buildToneInstructions(input.feature, input.replyTone),
+    segmentInstructions:
+      featureUsesPingSegment(input.feature) && input.pingSegment
+        ? PING_SEGMENT_INSTRUCTIONS[input.pingSegment]
+        : '',
+  };
+}
 
-  const rulesIndex = user.indexOf(PING_RULES_ANCHOR, segmentIndex + PING_SEGMENT_ANCHOR.length);
-  if (rulesIndex < 0 || segmentIndex >= rulesIndex) {
-    warnPromptCachingFallback('ping', PING_RULES_ANCHOR);
-    return buildFallbackUserBlocks(user);
-  }
+function buildFallbackUserBlocks(
+  feature: FeatureType,
+  plan: FallbackUserTemplatePlan,
+  replacements: PromptTemplateReplacements,
+): PromptTextBlock[] {
+  warnPromptCachingFallback(feature, plan.warningAnchor);
+  return [createTextBlock(applyTemplate(plan.template, replacements))];
+}
 
-  const transcriptIndex = user.indexOf(USER_TRANSCRIPT_ANCHOR, rulesIndex + PING_RULES_ANCHOR.length);
-  if (transcriptIndex < 0 || rulesIndex >= transcriptIndex) {
-    warnPromptCachingFallback('ping', USER_TRANSCRIPT_ANCHOR);
-    return buildFallbackUserBlocks(user);
-  }
+function renderSegmentBlocks(
+  segments: ReadonlyArray<PromptSegmentPlan>,
+  replacements: PromptTemplateReplacements,
+): PromptTextBlock[] {
+  return segments.map((segment) =>
+    createTextBlock(
+      applyTemplate(segment.template, replacements),
+      segment.cacheControl,
+    ),
+  );
+}
 
-  const taskIndex = user.lastIndexOf(USER_TASK_ANCHOR);
-  if (taskIndex < 0 || transcriptIndex >= taskIndex) {
-    warnPromptCachingFallback('ping', USER_TASK_ANCHOR);
-    return buildFallbackUserBlocks(user);
+function buildUserBlocks(
+  feature: FeatureType,
+  replacements: PromptTemplateReplacements,
+): PromptTextBlock[] {
+  const plan = USER_TEMPLATE_PLANS[feature];
+  if (plan.kind === 'fallback') {
+    return buildFallbackUserBlocks(feature, plan, replacements);
   }
-
-  return [
-    createTextBlock(user.slice(0, segmentIndex), ONE_HOUR_CACHE_CONTROL),
-    createTextBlock(user.slice(segmentIndex, taskIndex), EPHEMERAL_CACHE_CONTROL),
-    createTextBlock(user.slice(taskIndex)),
-  ];
+  return renderSegmentBlocks(plan.segments, replacements);
 }
 
 /**
@@ -263,33 +465,17 @@ function buildPingUserBlocks(user: string): PromptTextBlock[] {
  * Transcript, draft text, earnings, subscriptions, and fan display name ARE escaped.
  */
 export function buildPrompt(input: PromptBuildInput): PromptPayload {
-  const template = TEMPLATES[input.feature];
-  const replacements: Record<string, string> = {
-    personality: input.personality.content, // NOT escaped — trusted
-    transcript: escapeForPrompt(input.transcript),
-    fanSpendingSection: buildFanSpendingSection(input.fanSpendingData),
-    fanSubscriptionSection: buildFanSubscriptionSection(input.fanSubscriptionData),
-    fanDisplayName: escapeForPrompt(input.fanDisplayName),
-    draftSection: buildDraftSection(input.draftText),
-    splitReplyInstructions: buildSplitReplyInstructions(input.feature, input.replyMode),
-    toneInstructions: buildToneInstructions(input.feature, input.replyTone),
-    segmentInstructions:
-      input.feature === 'ping' && input.pingSegment
-        ? PING_SEGMENT_INSTRUCTIONS[input.pingSegment]
-        : '',
-  };
-
-  const system = `${buildSafetyPreamble(input.feature)}${SYSTEM_PERSONALITY_ANCHOR}${input.personality.content}`;
-  const user = applyTemplate(template, replacements);
-  const systemBlocks = buildSystemBlocks(system);
-  const userBlocks =
-    input.feature === 'ping'
-      ? buildPingUserBlocks(user)
-      : buildStandardUserBlocks(input.feature, user);
+  const normalizedInput = normalizePromptBuildInput(input);
+  const replacements = buildPromptReplacements(normalizedInput);
+  const systemBlocks = buildSystemBlocks(
+    normalizedInput.feature,
+    normalizedInput.personality.content,
+  );
+  const userBlocks = buildUserBlocks(normalizedInput.feature, replacements);
 
   return {
-    system,
-    user,
+    system: flattenPromptBlocks(systemBlocks),
+    user: flattenPromptBlocks(userBlocks),
     systemBlocks,
     userBlocks,
   };

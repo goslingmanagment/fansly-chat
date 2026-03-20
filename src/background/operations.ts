@@ -17,8 +17,17 @@ import {
   resolveMappedPersonalityId,
 } from '../shared/compare-cards.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
+import {
+  featureRequiresDraft,
+  featureUsesPingSegment,
+  getFeaturePolicy,
+  isDeepFeature,
+  resolveFeatureMessageCount,
+  resolveFeatureModelFeature,
+} from '../shared/features.js';
 import { logDebug } from '../shared/log.js';
-import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
+import { buildPromptRequest } from '../shared/prompts.js';
+import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
@@ -35,17 +44,14 @@ import type {
   ErrorPayload,
   FeatureType,
   FeatureResult,
-  ModelSelectableFeatureType,
   OperationPhase,
   OperationProgressPayload,
   OperationStartPayload,
-  ReplyMode,
   PingSegment,
   PersistedState,
   SubscriptionLookupMode,
   RouteChangedPayload,
   SessionTemplate,
-  Settings,
   TabStatePayload,
   TabUiState,
 } from '../shared/types.js';
@@ -94,6 +100,10 @@ interface ActiveOperation {
 
 const NO_OP_PROFILER = createOperationProfiler(false);
 const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
+const FEATURE_TIMEOUT_MS_BY_BUCKET = {
+  quick: QUICK_OPERATION_TIMEOUT_MS,
+  deep: DEEP_OPERATION_TIMEOUT_MS,
+} as const;
 
 interface ValidatedOperationStart {
   tab: browser.tabs.Tab;
@@ -104,28 +114,82 @@ interface ValidatedOperationStart {
   messageCount: number;
 }
 
-function isDeepFeature(feature: FeatureType): boolean {
-  return feature === 'fan-summary' || feature === 'chat-review';
+interface OperationPromptRequestArgs {
+  feature: FeatureType;
+  personality: PersistedState['personalities'][number];
+  transcript: string;
+  fanSpendingData: string;
+  fanSubscriptionData: string;
+  fanDisplayName: string;
+  draftText?: string;
+  pingSegment?: PingSegment;
+  replyMode?: OperationStartPayload['replyMode'];
+  replyTone?: OperationStartPayload['replyTone'];
+  promptCachingEnabled: boolean;
 }
 
-function resolveMessageCount(feature: FeatureType, settings: Settings): number {
-  if (isDeepFeature(feature)) {
-    return settings.deepMessageCount;
+function resolveOperationTimeoutMs(feature: FeatureType): number {
+  return FEATURE_TIMEOUT_MS_BY_BUCKET[getFeaturePolicy(feature).timeoutBucket];
+}
+
+function buildOperationPromptRequest({
+  feature,
+  personality,
+  transcript,
+  fanSpendingData,
+  fanSubscriptionData,
+  fanDisplayName,
+  draftText,
+  pingSegment,
+  replyMode,
+  replyTone,
+  promptCachingEnabled,
+}: OperationPromptRequestArgs) {
+  return buildPromptRequest(
+    {
+      feature,
+      personality,
+      transcript,
+      fanSpendingData,
+      fanSubscriptionData,
+      fanDisplayName,
+      draftText,
+      pingSegment,
+      replyMode,
+      replyTone,
+    },
+    promptCachingEnabled,
+  );
+}
+
+function buildFeatureResult(
+  feature: FeatureType,
+  rawText: string,
+  replyMode?: OperationStartPayload['replyMode'],
+): FeatureResult {
+  switch (getFeaturePolicy(feature).resultKind) {
+    case 'help-me':
+      return { rawText, helpMe: parseHelpMeXml(rawText) };
+    case 'chat-review':
+      return { rawText, chatReview: parseChatReviewXml(rawText) };
+    case 'single-reply':
+      return {
+        rawText,
+        parts: [rawText.trim() || rawText],
+      };
+    case 'summary':
+      return { rawText };
+    case 'reply':
+      return {
+        rawText,
+        ...(getFeaturePolicy(feature).supportsReplyMode
+          ? {
+              splitModeRequested: replyMode === 'preferSplit',
+            }
+          : {}),
+        parts: splitByNext(rawText),
+      };
   }
-
-  if (feature === 'improve-draft') {
-    return settings.improveMessageCount;
-  }
-
-  return settings.quickMessageCount;
-}
-
-function resolveModelFeature(feature: FeatureType): ModelSelectableFeatureType {
-  return feature === 'improve-draft' ? 'fast-reply' : feature;
-}
-
-function resolveTimeout(feature: FeatureType): number {
-  return isDeepFeature(feature) ? DEEP_OPERATION_TIMEOUT_MS : QUICK_OPERATION_TIMEOUT_MS;
 }
 
 function formatAnthropicUsageLog(usage: AnthropicUsageMetrics): string {
@@ -505,7 +569,10 @@ export class OperationCoordinator {
       storage,
       session,
       legacyAccountId,
-      messageCount: resolveMessageCount(payload.feature, storage.settings),
+      messageCount: resolveFeatureMessageCount(
+        payload.feature,
+        storage.settings,
+      ),
     };
   }
 
@@ -597,7 +664,7 @@ export class OperationCoordinator {
       const timeoutController = new AbortController();
       timeout = globalThis.setTimeout(
         () => timeoutController.abort(),
-        resolveTimeout(payload.feature),
+        resolveOperationTimeoutMs(payload.feature),
       ) as unknown as number;
       const controller = new AbortController();
       const signal = AbortSignal.any([
@@ -629,7 +696,7 @@ export class OperationCoordinator {
 
       let progressPhase: OperationPhase = 'loading-messages';
       let progressMessage: string | undefined =
-        payload.feature === 'ping' ? 'Loading messages…' : undefined;
+        featureUsesPingSegment(payload.feature) ? 'Loading messages…' : undefined;
       let progressCurrentPage: number | undefined;
       let progressTargetPages: number | undefined;
 
@@ -747,10 +814,10 @@ export class OperationCoordinator {
         const failureCode = errorCode(error);
         failStage(
           'resolve-identity',
-          payload.feature === 'ping'
+          featureUsesPingSegment(payload.feature)
             ? 'Resolve account identity failed, using legacy account id'
             : `Resolve account identity failed: ${failureCode}`,
-          payload.feature === 'ping'
+          featureUsesPingSegment(payload.feature)
             ? 'failed, using legacy account id'
             : failureCode,
         );
@@ -758,7 +825,7 @@ export class OperationCoordinator {
           legacyAccountId: validated.legacyAccountId,
           code: failureCode,
         });
-        if (payload.feature !== 'ping') {
+        if (!featureUsesPingSegment(payload.feature)) {
           throw error;
         }
       }
@@ -799,14 +866,11 @@ export class OperationCoordinator {
         throw new ChatMuseError('no_mapping');
       }
 
-      if (
-        payload.feature === 'improve-draft' &&
-        !payload.draftText?.trim()
-      ) {
+      if (featureRequiresDraft(payload.feature) && !payload.draftText?.trim()) {
         throw new ChatMuseError('unknown_error');
       }
 
-      const modelFeature = resolveModelFeature(payload.feature);
+      const modelFeature = resolveFeatureModelFeature(payload.feature);
       const resolvedModel = validated.storage.settings.featureModels[modelFeature];
 
       let cachedSummary = null;
@@ -913,7 +977,7 @@ export class OperationCoordinator {
       }
 
       let pingSegment: PingSegment | undefined;
-      if (payload.feature === 'ping') {
+      if (featureUsesPingSegment(payload.feature)) {
         startStage('ping-analysis', 'Analyze ping segment');
         const pingAnalysis = analyzePingSegment(
           messageLoad.transcriptMessages,
@@ -1280,33 +1344,19 @@ export class OperationCoordinator {
       const formattedTranscript = formatTranscript(
         messageLoad.transcriptMessages,
       );
-      const prompt = buildPrompt({
+      const { prompt, systemBlocks, userBlocks } = buildOperationPromptRequest({
         feature: payload.feature,
         personality,
         transcript: formattedTranscript,
         fanSpendingData: spendingData,
         fanSubscriptionData: subscriptionData,
         fanDisplayName,
-        draftText:
-          payload.feature === 'improve-draft'
-            ? payload.draftText?.trim()
-            : undefined,
+        draftText: payload.draftText,
         pingSegment,
-        replyMode:
-          payload.feature === 'fast-reply'
-            ? (payload.replyMode ?? 'default')
-            : undefined,
-        replyTone:
-          payload.feature === 'fast-reply'
-            ? (payload.replyTone ?? 'none')
-            : undefined,
+        replyMode: payload.replyMode,
+        replyTone: payload.replyTone,
+        promptCachingEnabled: validated.storage.settings.promptCachingEnabled,
       });
-      const systemBlocks = validated.storage.settings.promptCachingEnabled
-        ? prompt.systemBlocks
-        : stripPromptCacheControl(prompt.systemBlocks);
-      const userBlocks = validated.storage.settings.promptCachingEnabled
-        ? prompt.userBlocks
-        : stripPromptCacheControl(prompt.userBlocks);
       completeStage(
         'prompt-build',
         `Built Claude prompt: ${messageLoad.transcriptMessages.length} transcript messages`,
@@ -1448,29 +1498,11 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
-      const result: FeatureResult =
-        payload.feature === 'help-me'
-          ? { rawText, helpMe: parseHelpMeXml(rawText) }
-          : payload.feature === 'chat-review'
-            ? { rawText, chatReview: parseChatReviewXml(rawText) }
-            : payload.feature === 'improve-draft'
-              ? {
-                  rawText,
-                  parts: [rawText.trim() || rawText],
-                }
-            : {
-                rawText,
-                ...(payload.feature === 'fast-reply'
-                  ? {
-                      splitModeRequested:
-                        payload.replyMode === 'preferSplit',
-                    }
-                  : {}),
-                parts: rawText
-                  .split('[NEXT]')
-                  .map((part) => part.trim())
-                  .filter(Boolean),
-              };
+      const result = buildFeatureResult(
+        payload.feature,
+        rawText,
+        payload.replyMode,
+      );
 
       if (payload.feature === 'fan-summary') {
         const generatedAt = Date.now();

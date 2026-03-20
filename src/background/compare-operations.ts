@@ -7,7 +7,8 @@ import {
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
 import { ChatMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
-import { buildPrompt, stripPromptCacheControl } from '../shared/prompts.js';
+import { buildPromptRequest } from '../shared/prompts.js';
+import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { formatTranscript } from '../shared/transcript.js';
 import type {
@@ -911,7 +912,7 @@ export async function executeCompare(
         return;
       }
 
-      const prompt = buildPrompt({
+      const { systemBlocks, userBlocks } = buildPromptRequest({
         feature: 'fast-reply',
         personality: {
           id: card.id,
@@ -925,13 +926,7 @@ export async function executeCompare(
         fanDisplayName: promptInputs.fanDisplayName,
         replyMode: promptInputs.replyMode,
         replyTone: promptInputs.replyTone,
-      });
-      const systemBlocks = validated.storage.settings.promptCachingEnabled
-        ? prompt.systemBlocks
-        : stripPromptCacheControl(prompt.systemBlocks);
-      const userBlocks = validated.storage.settings.promptCachingEnabled
-        ? prompt.userBlocks
-        : stripPromptCacheControl(prompt.userBlocks);
+      }, validated.storage.settings.promptCachingEnabled);
 
       let cardUsage: AnthropicUsageMetrics | undefined;
       let cardCost: AnthropicCostEstimate | undefined;
@@ -1053,10 +1048,7 @@ export async function executeCompare(
       const result: FeatureResult = {
         rawText,
         splitModeRequested: payload.replyMode === 'preferSplit',
-        parts: rawText
-          .split('[NEXT]')
-          .map((part) => part.trim())
-          .filter(Boolean),
+        parts: splitByNext(rawText),
       };
       sendCompareCardComplete(
         context,

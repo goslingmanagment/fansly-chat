@@ -265,6 +265,26 @@ describe('prompt caching blocks', () => {
       expect(breakpoints).toHaveLength(3);
     }
   });
+
+  it('keeps the improve-draft draft and transcript context in the middle ephemeral block', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'improve-draft',
+      draftText: '  hey babe how was your day  ',
+      transcript: 'Fan: hii\nModel: hey you',
+    }));
+
+    expect(result.userBlocks).toHaveLength(3);
+    expect(result.userBlocks[0]?.text).not.toContain('## Current Draft');
+    expect(result.userBlocks[1]?.text).toContain('## Current Draft');
+    expect(result.userBlocks[1]?.text).toContain('<current_draft>');
+    expect(result.userBlocks[1]?.text).toContain('hey babe how was your day');
+    expect(result.userBlocks[1]?.text).toContain('## Conversation Transcript');
+    expect(result.userBlocks[1]?.cache_control).toEqual({
+      type: 'ephemeral',
+    });
+    expect(result.userBlocks[2]?.text).toContain('## Your Task');
+    expect(result.userBlocks[2]?.text).not.toContain('## Current Draft');
+  });
 });
 
 // ─── Template variable substitution ─────────────────────────────────────
