@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MODEL_ID, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  COMPARE_TEMPERATURE,
+  DEFAULT_MODEL_ID,
+  DEFAULT_FEATURE_MODELS,
+  FEATURE_TEMPERATURES,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import { ChatMuseError } from '../src/shared/errors.js';
 import { flattenPromptBlocks } from '../src/shared/prompts.js';
 import type {
@@ -718,6 +724,51 @@ describe('OperationCoordinator', () => {
     expect(flattenUserBlocksFromStreamCall(anthropicClient, 1)).toContain('Tone override: SOFT UPSELL');
     expect(flattenUserBlocksFromStreamCall(anthropicClient, 0)).toContain(
       'intent and energy of this reply should shift',
+    );
+  });
+
+  it('uses the compare-specific lower temperature for compare cards', async () => {
+    mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
+        onText('Reply');
+        return 'Reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ temperature: COMPARE_TEMPERATURE }),
+    );
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ temperature: COMPARE_TEMPERATURE }),
     );
   });
 
@@ -1678,6 +1729,94 @@ describe('OperationCoordinator', () => {
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'claude-haiku-4-5' }),
     );
+  });
+
+  it('passes the configured temperature for each operation type', async () => {
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Result',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'improve-op',
+      feature: 'improve-draft',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      draftText: 'hey babe how was your day',
+      forceRegenerate: false,
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ temperature: FEATURE_TEMPERATURES['fast-reply'] }),
+    );
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ temperature: FEATURE_TEMPERATURES['chat-review'] }),
+    );
+    expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ temperature: FEATURE_TEMPERATURES['improve-draft'] }),
+    );
+  });
+
+  it('uses the fast-reply model for improve-draft and returns a single-part result', async () => {
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'claude-haiku-4-5',
+    };
+    const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
+      anthropicRawText: 'improved reply',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'improve-op',
+      feature: 'improve-draft',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      draftText: 'hey babe how was your day',
+      forceRegenerate: false,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'claude-haiku-4-5',
+        feature: 'improve-draft',
+      }),
+    );
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain('## Current Draft');
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain('hey babe how was your day');
+    expect(completeMessage?.result.parts).toEqual(['improved reply']);
+    expect(completeMessage?.result.splitModeRequested).toBeUndefined();
   });
 
   it('retries with default model on model_unavailable error', async () => {

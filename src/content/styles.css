@@ -132,13 +132,15 @@
   align-items: center;
   justify-content: flex-start;
   flex-wrap: nowrap;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   gap: 6px;
   padding: 8px 10px;
   border-radius: 14px;
   background: var(--chatmuse-panel);
   border-color: var(--chatmuse-border);
   box-shadow: var(--chatmuse-shadow);
+  scrollbar-width: thin;
 }
 
 .chatmuse-toolbar-actions {
@@ -170,6 +172,7 @@
 .chatmuse-toolbar-button {
   min-height: 30px;
   padding: 0 11px;
+  flex: 0 0 auto;
   border-color: var(--chatmuse-border);
   background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
@@ -219,6 +222,7 @@
 .chatmuse-toolbar-toggle {
   min-height: 28px;
   padding: 0 10px;
+  flex: 0 0 auto;
   border-color: var(--chatmuse-border);
   background: rgba(255, 255, 255, 0.03);
   border-radius: 999px;
@@ -255,12 +259,16 @@
 
 .chatmuse-toolbar-personality-end {
   margin-left: auto;
+  max-width: 100%;
+  flex: 0 0 auto;
 }
 
 .chatmuse-toolbar-tone-row {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 0 0 auto;
+  min-width: max-content;
 }
 
 .chatmuse-tone-pill {

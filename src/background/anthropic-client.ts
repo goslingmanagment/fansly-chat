@@ -10,6 +10,7 @@ import type {
 interface StreamArgs {
   apiKey: string;
   model: string;
+  temperature: number;
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
   feature: FeatureType;
@@ -114,6 +115,7 @@ export class AnthropicClient {
   async streamMessage({
     apiKey,
     model,
+    temperature,
     systemBlocks,
     userBlocks,
     feature,
@@ -134,6 +136,7 @@ export class AnthropicClient {
       signal,
       body: JSON.stringify({
         model,
+        temperature,
         stream: true,
         max_tokens: MAX_TOKENS[feature],
         system: systemBlocks,

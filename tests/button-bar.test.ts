@@ -30,7 +30,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
   };
 }
 
-describe('ButtonBar compare visibility', () => {
+describe('ButtonBar hidden controls', () => {
   beforeEach(() => {
     installDom();
   });
@@ -40,7 +40,7 @@ describe('ButtonBar compare visibility', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders Compare in the toolbar when compare cards are available', () => {
+  it('keeps Compare out of the toolbar even when compare cards are available', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -50,13 +50,34 @@ describe('ButtonBar compare visibility', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), null, 'default', 'none', false, false);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Compare');
 
-    expect(compare).toBeDefined();
-    expect(compare?.disabled).toBe(false);
+    expect(compare).toBeUndefined();
+  });
+
+  it('keeps hidden deep-feature buttons out of the toolbar', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .map((button) => button.textContent);
+
+    expect(labels).not.toContain('Help');
+    expect(labels).not.toContain('Review');
+    expect(labels).not.toContain('Summary');
+    expect(labels).not.toContain('Compare');
+    expect(labels).not.toContain('Reopen');
   });
 });
 
@@ -87,7 +108,7 @@ describe.skip('ButtonBar compare button', () => {
       mappedPersonalityName: null,
       compareCardCount: 2,
       compareDraftCount: 2,
-    }), null, 'default', 'none', false, false);
+    }), null, 'default', 'none', true, false, false);
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
     const reply = buttons.find((button) => button.textContent === 'Reply');
@@ -110,7 +131,7 @@ describe.skip('ButtonBar compare button', () => {
     bar.render(buildState({
       compareCardCount: 1,
       compareDraftCount: 1,
-    }), null, 'default', 'none', false, false);
+    }), null, 'default', 'none', true, false, false);
 
     const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Compare');
@@ -128,7 +149,7 @@ describe.skip('ButtonBar compare button', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), null, 'default', 'none', false, false);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const reopen = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Reopen');
@@ -150,7 +171,7 @@ describe.skip('ButtonBar compare button', () => {
     bar.render(buildState({
       connected: false,
       hasApiKey: false,
-    }), null, 'default', 'none', false, true);
+    }), null, 'default', 'none', true, false, true);
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
     const compare = buttons.find((button) => button.textContent === 'Compare');
@@ -185,7 +206,7 @@ describe('ButtonBar tone row', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), null, 'default', 'none', false, false);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     expect(pills).toHaveLength(4);
@@ -202,7 +223,7 @@ describe('ButtonBar tone row', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), null, 'default', 'flirty', false, false);
+    bar.render(buildState(), null, 'default', 'flirty', true, false, false);
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     const flirty = pills.find((p) => p.textContent === 'Flirty');
@@ -224,7 +245,7 @@ describe('ButtonBar tone row', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), 'fast-reply', 'default', 'none', true, false);
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     for (const pill of pills) {
@@ -242,7 +263,7 @@ describe('ButtonBar tone row', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState({ connected: false }), null, 'default', 'none', false, false);
+    bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
 
     const toneRow = bar.root.querySelector('.chatmuse-toolbar-tone-row');
     expect(toneRow?.classList.contains('chatmuse-hidden')).toBe(true);
@@ -262,7 +283,7 @@ describe('ButtonBar tone row', () => {
       mappedPersonalityId: null,
       mappedPersonalityName: null,
       compareCardCount: 2,
-    }), null, 'default', 'none', false, false);
+    }), null, 'default', 'none', true, false, false);
 
     const toneRow = bar.root.querySelector('.chatmuse-toolbar-tone-row');
     expect(toneRow?.classList.contains('chatmuse-hidden')).toBe(false);
@@ -279,12 +300,41 @@ describe('ButtonBar tone row', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState(), null, 'default', 'none', false, false);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     const flirty = pills.find((p) => p.textContent === 'Flirty');
     flirty?.click();
 
     expect(toneSpy).toHaveBeenCalledWith('flirty');
+  });
+});
+
+describe('ButtonBar improve draft state', () => {
+  beforeEach(() => {
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('disables Improve when the composer draft is empty', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', false, false, false);
+
+    const improve = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Improve');
+
+    expect(improve?.disabled).toBe(true);
   });
 });

@@ -73,7 +73,7 @@ export function migrateState(raw: unknown): PersistedState {
       ...current,
       settings:
         current.settings && typeof current.settings === 'object'
-          ? migrateSettingsRecord(current.settings as Record<string, unknown>)
+          ? migrateSettingsRecord(current.settings as unknown as Record<string, unknown>)
           : createDefaultSettings(),
       accountAliases: current.accountAliases && typeof current.accountAliases === 'object'
         ? current.accountAliases
@@ -107,7 +107,7 @@ export function migrateState(raw: unknown): PersistedState {
 
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    settings: settings as Settings,
+    settings,
     personalities: personalities as PersistedState['personalities'],
     accountMappings,
     accountAliases,

@@ -1,6 +1,6 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
-export type FeatureType = 'fast-reply' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping';
+export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers';
@@ -8,6 +8,7 @@ export type FanSubscriptionSource = '/api/v1/messaging/groups' | '/api/v1/subscr
 export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
 export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
+export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft'>;
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ export interface Settings {
   deepMessageCount: number;
   debugMode: boolean;
   promptCachingEnabled: boolean;
-  featureModels: Record<FeatureType, string>;
+  featureModels: Record<ModelSelectableFeatureType, string>;
 }
 
 export interface Personality {
@@ -101,6 +102,7 @@ export interface PromptBuildInput {
   fanSpendingData: string;
   fanSubscriptionData: string;
   fanDisplayName: string;
+  draftText?: string;
   pingSegment?: PingSegment;
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;
@@ -603,6 +605,7 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   groupId: string | null;
   routeNonce: number;
   domFanDisplayName: string | null;
+  draftText?: string;
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;

@@ -1,7 +1,7 @@
 import optionsStyles from './styles.css';
 import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
-import type { FeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
+import type { ModelSelectableFeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
 
@@ -227,7 +227,7 @@ async function render(): Promise<void> {
     'Pick which Claude model each feature uses. If you\'re not sure, leave everything on Claude Sonnet 4.6.',
   );
 
-  const FEATURE_ROWS: Array<{ feature: FeatureType; label: string; helper: string }> = [
+  const FEATURE_ROWS: Array<{ feature: ModelSelectableFeatureType; label: string; helper: string }> = [
     { feature: 'fast-reply', label: 'Fast Reply', helper: 'Quick replies you can insert into chat.' },
     { feature: 'ping', label: 'Ping', helper: 'Reactivation messages for inactive fans.' },
     { feature: 'help-me', label: 'Help Me', helper: 'Coaching and message ideas when you get stuck.' },
@@ -282,7 +282,7 @@ async function render(): Promise<void> {
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
-      featureModels: featureModels as Record<FeatureType, string>,
+      featureModels: featureModels as Record<ModelSelectableFeatureType, string>,
     });
   }, 350);
 

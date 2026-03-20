@@ -21,6 +21,10 @@ export function focusActiveConversationTextarea(): HTMLTextAreaElement | null {
   return textarea;
 }
 
+export function getActiveConversationDraftText(): string {
+  return findActiveConversationTextarea()?.value ?? '';
+}
+
 export async function insertIntoFanslyTextarea(text: string): Promise<void> {
   const textarea = findActiveConversationTextarea();
   if (!textarea) {
