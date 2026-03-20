@@ -858,6 +858,7 @@ export class ChatMuseContentApp {
       message.anthropicSpend &&
       this.activeFeature &&
       usesInlineFeatureSurface(this.activeFeature) &&
+      !featureRequiresDraft(this.activeFeature) &&
       this.quickSurfaceMode === 'inline' &&
       !this.quickInlineVisible
     ) {

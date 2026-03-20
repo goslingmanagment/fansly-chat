@@ -489,6 +489,44 @@ describe('ChatMuseContentApp', () => {
     expect((app.inlinePanel.root as HTMLElement).classList.contains('chatmuse-hidden')).toBe(true);
   });
 
+  it('keeps Fix loading hidden when progress only adds spend telemetry', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    mountConversationComposer('hey babe how was your day');
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'improve-draft';
+    app.activeOperationId = 'improve-op';
+    app.activeFanDisplayName = 'alice';
+    app.quickSurfaceMode = 'inline';
+    app.quickInlineVisible = false;
+
+    app.handleProgress({
+      type: 'operation:progress',
+      operationId: 'improve-op',
+      feature: 'improve-draft',
+      phase: 'generating',
+      anthropicSpend: {
+        totalTokens: 123,
+        inputTokens: 100,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 23,
+        totalUsd: 0.002,
+        uncachedUsd: 0.002,
+        cacheEffectUsd: 0,
+        cacheEffectKind: 'neutral',
+        cacheWriteUsd: 0,
+        cacheReadUsd: 0,
+        approximate: false,
+      },
+    });
+
+    expect(app.quickInlineVisible).toBe(false);
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatmuse-hidden')).toBe(true);
+  });
+
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;
