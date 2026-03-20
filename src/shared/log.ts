@@ -3,9 +3,30 @@ import type { SessionTemplate, Settings } from './types.js';
 const SENSITIVE_KEY_PATTERNS = ['authorization', 'claudeapikey', 'fanslyclient', 'fanslysession'];
 const API_KEY_REGEX = /sk-ant-[a-zA-Z0-9_-]+/g;
 
+function serializeError(error: Error): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {
+    name: error.name,
+    message: error.message,
+  };
+
+  if (error.stack) {
+    serialized.stack = error.stack;
+  }
+
+  for (const [key, entry] of Object.entries(error)) {
+    serialized[key] = entry;
+  }
+
+  return serialized;
+}
+
 function redactValue(value: unknown): unknown {
   if (typeof value === 'string') {
     return value.replace(API_KEY_REGEX, '[REDACTED]');
+  }
+
+  if (value instanceof Error) {
+    return redactValue(serializeError(value));
   }
 
   if (Array.isArray(value)) {
