@@ -30,7 +30,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
   };
 }
 
-describe('ButtonBar hidden controls', () => {
+describe('ButtonBar toolbar visibility', () => {
   beforeEach(() => {
     installDom();
   });
@@ -58,7 +58,25 @@ describe('ButtonBar hidden controls', () => {
     expect(compare).toBeUndefined();
   });
 
-  it('keeps hidden deep-feature buttons out of the toolbar', () => {
+  it('shows Summary in the toolbar', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .map((button) => button.textContent);
+
+    expect(labels).toContain('Summary');
+  });
+
+  it('keeps Help, Review, and Compare out of the toolbar', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -75,7 +93,6 @@ describe('ButtonBar hidden controls', () => {
 
     expect(labels).not.toContain('Help');
     expect(labels).not.toContain('Review');
-    expect(labels).not.toContain('Summary');
     expect(labels).not.toContain('Compare');
     expect(labels).not.toContain('Reopen');
   });
@@ -338,7 +355,7 @@ describe('ButtonBar improve draft state', () => {
     expect(improve?.disabled).toBe(true);
   });
 
-  it('renders Multi, then Fix, and keeps Ping as the last main action before the personality pill', () => {
+  it('renders Multi, then Fix, then Summary before the personality pill', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -354,6 +371,7 @@ describe('ButtonBar improve draft state', () => {
     const multiIndex = children.findIndex((child) => child.textContent === 'Multi');
     const fixIndex = children.findIndex((child) => child.textContent === 'Fix');
     const pingIndex = children.findIndex((child) => child.textContent === 'Ping');
+    const summaryIndex = children.findIndex((child) => child.textContent === 'Summary');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatmuse-toolbar-personality-end'),
     );
@@ -361,8 +379,10 @@ describe('ButtonBar improve draft state', () => {
     expect(multiIndex).toBeGreaterThan(-1);
     expect(fixIndex).toBeGreaterThan(-1);
     expect(pingIndex).toBeGreaterThan(-1);
+    expect(summaryIndex).toBeGreaterThan(-1);
     expect(personalityIndex).toBeGreaterThan(-1);
     expect(fixIndex).toBe(multiIndex + 1);
-    expect(pingIndex).toBe(personalityIndex - 1);
+    expect(summaryIndex).toBe(pingIndex + 1);
+    expect(summaryIndex).toBe(personalityIndex - 1);
   });
 });
