@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
@@ -8,6 +9,7 @@ vi.mock('../src/content/textarea.js', () => ({
 }));
 
 import { OverlayController } from '../src/content/overlay/overlay-controller.js';
+import { installContentStyles } from '../src/content/dom-anchor.js';
 import { copyToClipboard } from '../src/content/textarea.js';
 import type {
   AnthropicSpendSummary,
@@ -190,6 +192,11 @@ function createSpendSummary(
   };
 }
 
+const contentStyles = readFileSync(
+  new URL('../src/content/styles.css', import.meta.url),
+  'utf8',
+);
+
 function createPart(text: string, index = 0): OverlayInsertPart {
   return {
     id: `part-${index}`,
@@ -289,6 +296,28 @@ describe('OverlayController', () => {
 
     const body = requireElement<HTMLDivElement>('.chatmuse-overlay-body');
     expect(body.firstElementChild).toBe(requireElement<HTMLDivElement>('.chatmuse-grid'));
+  });
+
+  it('keeps overlay scroll ownership on the panel instead of the nested body', () => {
+    installContentStyles(contentStyles);
+
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createLoadingModel('scroll-owner-op', 'hello world'));
+
+    const panel = requireElement<HTMLDivElement>('.chatmuse-overlay-panel');
+    const body = requireElement<HTMLDivElement>('.chatmuse-overlay-body');
+    const panelStyle = window.getComputedStyle(panel);
+    const bodyStyle = window.getComputedStyle(body);
+
+    expect(panelStyle.overflowY).toBe('auto');
+    expect(bodyStyle.overflowY).not.toBe('auto');
+    expect(bodyStyle.overflowY).not.toBe('scroll');
   });
 
   it('renders a profiling log and live status in loading view when profiling is present', () => {
