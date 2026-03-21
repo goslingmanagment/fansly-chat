@@ -59,7 +59,7 @@ describe('ButtonBar toolbar visibility', () => {
     expect(compare).toBeUndefined();
   });
 
-  it('shows Summary in the toolbar', () => {
+  it('shows Scan in the toolbar', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -74,10 +74,10 @@ describe('ButtonBar toolbar visibility', () => {
     const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .map((button) => button.textContent);
 
-    expect(labels).toContain('Summary');
+    expect(labels).toContain('Scan');
   });
 
-  it('marks Summary when a ready summary is available', () => {
+  it('marks Scan when a ready summary is available', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -90,10 +90,10 @@ describe('ButtonBar toolbar visibility', () => {
     bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
 
     const summary = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Summary');
+      .find((button) => button.textContent === 'Scan');
 
     expect(summary?.classList.contains('chatmuse-toolbar-button-summary-ready')).toBe(true);
-    expect(summary?.title).toBe('Summary ready to open');
+    expect(summary?.title).toBe('Scan ready to open');
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
@@ -233,7 +233,7 @@ describe('ButtonBar tone row', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders five tone pills', () => {
+  it('renders three tone pills', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -246,8 +246,8 @@ describe('ButtonBar tone row', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
-    expect(pills).toHaveLength(4);
-    expect(pills.map((p) => p.textContent)).toEqual(['Casual', 'Flirty', 'Upsell', 'Spicy']);
+    expect(pills).toHaveLength(3);
+    expect(pills.map((p) => p.textContent)).toEqual(['Flirty', 'Upsell', 'Spicy']);
   });
 
   it('marks the active tone pill', () => {
@@ -264,12 +264,12 @@ describe('ButtonBar tone row', () => {
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     const flirty = pills.find((p) => p.textContent === 'Flirty');
-    const casual = pills.find((p) => p.textContent === 'Casual');
+    const spicy = pills.find((p) => p.textContent === 'Spicy');
 
     expect(flirty?.classList.contains('chatmuse-tone-pill-active')).toBe(true);
     expect(flirty?.getAttribute('aria-pressed')).toBe('true');
-    expect(casual?.classList.contains('chatmuse-tone-pill-active')).toBe(false);
-    expect(casual?.getAttribute('aria-pressed')).toBe('false');
+    expect(spicy?.classList.contains('chatmuse-tone-pill-active')).toBe(false);
+    expect(spicy?.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('disables tone pills during active operation', () => {
@@ -357,7 +357,7 @@ describe('ButtonBar improve draft state', () => {
     vi.restoreAllMocks();
   });
 
-  it('disables Fix when the composer draft is empty', () => {
+  it('disables Polish when the composer draft is empty', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -370,12 +370,12 @@ describe('ButtonBar improve draft state', () => {
     bar.render(buildState(), null, 'default', 'none', false, false, false);
 
     const improve = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Fix');
+      .find((button) => button.textContent === 'Polish');
 
     expect(improve?.disabled).toBe(true);
   });
 
-  it('renders Multi, then Fix, then Summary before the personality pill', () => {
+  it('renders Multi, then Polish, then Scan before the personality pill', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -389,19 +389,19 @@ describe('ButtonBar improve draft state', () => {
 
     const children = Array.from(bar.root.children);
     const multiIndex = children.findIndex((child) => child.textContent === 'Multi');
-    const fixIndex = children.findIndex((child) => child.textContent === 'Fix');
+    const polishIndex = children.findIndex((child) => child.textContent === 'Polish');
     const pingIndex = children.findIndex((child) => child.textContent === 'Ping');
-    const summaryIndex = children.findIndex((child) => child.textContent === 'Summary');
+    const summaryIndex = children.findIndex((child) => child.textContent === 'Scan');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatmuse-toolbar-personality-end'),
     );
 
     expect(multiIndex).toBeGreaterThan(-1);
-    expect(fixIndex).toBeGreaterThan(-1);
+    expect(polishIndex).toBeGreaterThan(-1);
     expect(pingIndex).toBeGreaterThan(-1);
     expect(summaryIndex).toBeGreaterThan(-1);
     expect(personalityIndex).toBeGreaterThan(-1);
-    expect(fixIndex).toBe(multiIndex + 1);
+    expect(polishIndex).toBe(multiIndex + 1);
     expect(summaryIndex).toBe(pingIndex + 1);
     expect(summaryIndex).toBe(personalityIndex - 1);
   });
