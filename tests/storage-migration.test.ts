@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { FeatureType, Personality, SummaryCacheEntry } from '../src/shared/types.js';
+import { normalizeAgencyHubSummarySyncMetadata } from '../src/shared/agency-hub.js';
 import { DEFAULT_MODEL_ID, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { migrateState, createDefaultSettings, createSeedState } from '../src/shared/migrations.js';
 
@@ -178,6 +179,38 @@ describe('migrateState', () => {
         baseUrl: 'http://localhost:3000',
         pageLabel: 'creator-fs',
       },
+    });
+  });
+
+  it('interprets legacy success-only agency hub metadata as saved', () => {
+    const legacy = {
+      schemaVersion: 0,
+      'summary:group1': {
+        summary: 'cached',
+        personalityId: 'p1',
+        personalityUpdatedAt: 100,
+        generatedAt: 200,
+        agencyHubSync: {
+          baseUrl: 'http://localhost:3000',
+          pageLabel: 'creator-fs',
+          generatedAt: 200,
+          syncedAt: 300,
+        },
+      },
+    };
+
+    const result = migrateState(legacy);
+    const entry = (result as unknown as Record<string, SummaryCacheEntry>)['summary:group1'];
+    expect(entry).toBeDefined();
+    if (!entry) {
+      throw new Error('Expected migrated summary cache entry');
+    }
+    expect(normalizeAgencyHubSummarySyncMetadata(entry.agencyHubSync)).toMatchObject({
+      state: 'saved',
+      baseUrl: 'http://localhost:3000',
+      pageLabel: 'creator-fs',
+      generatedAt: 200,
+      syncedAt: 300,
     });
   });
 

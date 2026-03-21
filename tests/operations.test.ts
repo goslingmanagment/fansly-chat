@@ -2289,15 +2289,29 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
 
-    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: false });
+    expect(completeMessage?.result.summaryMeta).toMatchObject({
+      cached: false,
+      syncStatus: { state: 'saving' },
+    });
     expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const cacheEntry = mockStorage['summary:group-1'] as SummaryCacheEntry | undefined;
+      const syncMessage = postedMessages(port).find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'summary:syncStatus' }> =>
+          message.type === 'summary:syncStatus' &&
+          message.generatedAt === completeMessage?.result.summaryMeta?.generatedAt,
+      );
       expect(cacheEntry).toBeDefined();
       expect(cacheEntry?.fanAccountId).toBe('fan-1');
       expect(cacheEntry?.agencyHubSync).toMatchObject({
+        state: 'saved',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      expect(syncMessage?.syncStatus).toMatchObject({
+        state: 'saved',
         baseUrl: 'http://localhost:3000',
         pageLabel: 'creator-fs',
       });
@@ -2359,7 +2373,10 @@ describe('OperationCoordinator', () => {
           message.type === 'operation:complete' &&
           message.operationId === 'summary-op-1',
       );
-      expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
+      expect(completeMessage?.result.summaryMeta).toMatchObject({
+        cached: true,
+        syncStatus: { state: 'saving' },
+      });
     });
 
     await coordinator.startOperation(1, {
@@ -2377,6 +2394,69 @@ describe('OperationCoordinator', () => {
         String(url).includes('/api/v1/pages/creator-fs/fans/fan-1/profile'),
       );
       expect(putCalls).toHaveLength(1);
+      const completeMessage = postedMessages(port).find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+          message.type === 'operation:complete' &&
+          message.operationId === 'summary-op-2',
+      );
+      expect(completeMessage?.result.summaryMeta).toMatchObject({
+        cached: true,
+        syncStatus: { state: 'saved' },
+      });
+    });
+  });
+
+  it('marks summary sync as not set up when Agency Hub sync is skipped', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+    };
+    (browser as Record<string, unknown>).permissions = {
+      contains: vi.fn(async () => false),
+    } as never;
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Fresh summary',
+      agencyHubClient,
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(completeMessage?.result.summaryMeta).toMatchObject({
+      syncStatus: { state: 'saving' },
+    });
+
+    await vi.waitFor(() => {
+      const syncMessage = postedMessages(port).find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'summary:syncStatus' }> =>
+          message.type === 'summary:syncStatus',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(syncMessage?.syncStatus).toMatchObject({ state: 'not-set-up' });
+      expect((mockStorage['summary:group-1'] as SummaryCacheEntry | undefined)?.agencyHubSync).toMatchObject({
+        state: 'not-set-up',
+      });
     });
   });
 
@@ -2416,12 +2496,17 @@ describe('OperationCoordinator', () => {
     );
 
     expect(completeMessage?.result.rawText).toBe('Fresh summary');
+    expect(completeMessage?.result.summaryMeta).toMatchObject({
+      syncStatus: { state: 'saving' },
+    });
     expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalled();
     });
-    expect((mockStorage['summary:group-1'] as SummaryCacheEntry | undefined)?.agencyHubSync).toBeUndefined();
+    expect((mockStorage['summary:group-1'] as SummaryCacheEntry | undefined)?.agencyHubSync).toMatchObject({
+      state: 'failed',
+    });
   });
 
   it('treats a changed Agency Hub base URL as a new backfill target for cached summaries', async () => {
@@ -2465,7 +2550,7 @@ describe('OperationCoordinator', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
     const agencyHubClient = new AgencyHubClient(fetch);
-    const { coordinator } = await createCoordinatorHarness({
+    const { coordinator, port } = await createCoordinatorHarness({
       agencyHubClient,
     });
 
@@ -2484,6 +2569,15 @@ describe('OperationCoordinator', () => {
         String(url).includes('/pages/creator-fs/fans/fan-1/profile'),
       );
       expect(putCalls).toHaveLength(0);
+      const completeMessage = postedMessages(port).find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+          message.type === 'operation:complete' &&
+          message.operationId === 'summary-op-1',
+      );
+      expect(completeMessage?.result.summaryMeta).toMatchObject({
+        cached: true,
+        syncStatus: { state: 'saved' },
+      });
     });
 
     mockStorage.settings = {
@@ -2491,7 +2585,7 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://hub-b.test',
     };
 
-    const { coordinator: secondCoordinator } = await createCoordinatorHarness({
+    const { coordinator: secondCoordinator, port: secondPort } = await createCoordinatorHarness({
       agencyHubClient,
     });
 
@@ -2504,6 +2598,15 @@ describe('OperationCoordinator', () => {
       domFanDisplayName: 'alice',
       forceRegenerate: false,
     });
+    const secondCompleteMessage = postedMessages(secondPort).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete' &&
+        message.operationId === 'summary-op-2',
+    );
+    expect(secondCompleteMessage?.result.summaryMeta).toMatchObject({
+      cached: true,
+      syncStatus: { state: 'saving' },
+    });
 
     await vi.waitFor(() => {
       const putCalls = fetchMock.mock.calls.filter(([url]) =>
@@ -2511,6 +2614,7 @@ describe('OperationCoordinator', () => {
       );
       expect(putCalls).toHaveLength(1);
       expect((mockStorage['summary:group-1'] as SummaryCacheEntry).agencyHubSync).toMatchObject({
+        state: 'saved',
         baseUrl: 'http://hub-b.test',
         pageLabel: 'creator-fs',
       });

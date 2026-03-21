@@ -870,6 +870,12 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.chatmuse-overlay-action-status {
+  font-size: 12px;
+  color: var(--chatmuse-muted);
 }
 
 /* ─── Rating ─────────────────────────────────────────────────── */

@@ -125,8 +125,12 @@ function createReadOnlyModel(
 }
 
 function createSummaryReadOnlyModel(
-  options?: { debugPrompt?: PromptDebugSnapshot },
+  options?: {
+    debugPrompt?: PromptDebugSnapshot;
+    syncState?: 'not-set-up' | 'saving' | 'saved' | 'failed';
+  },
 ): Extract<OverlayViewModel, { kind: 'readOnly' }> {
+  const generatedAt = Date.now();
   return {
     kind: 'readOnly',
     feature: 'fan-summary',
@@ -134,9 +138,14 @@ function createSummaryReadOnlyModel(
     operationId: 'summary-op',
     rawText: 'Fan summary text',
     summaryMeta: {
-      generatedAt: Date.now(),
+      generatedAt,
       stale: false,
       cached: false,
+      syncStatus: {
+        state: options?.syncState ?? 'saved',
+        generatedAt,
+        updatedAt: Date.now(),
+      },
     },
     debugPrompt: options?.debugPrompt,
     profiling: undefined,
@@ -675,13 +684,39 @@ describe('OverlayController', () => {
     const buttons = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'),
     );
+    const syncStatus = document.querySelector('.chatmuse-overlay-action-status');
 
     expect(buttons.map((button) => button.textContent)).toEqual(['Refresh', 'Copy']);
+    expect(syncStatus?.textContent).toBe('Server sync · saved');
     buttons[1]!.click();
 
     await vi.waitFor(() => {
       expect(mockCopy).toHaveBeenCalledWith('Fan summary text');
     });
+  });
+
+  it('renders the exact Fan Summary server sync status labels', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createSummaryReadOnlyModel({ syncState: 'saving' }));
+    expect(document.querySelector('.chatmuse-overlay-action-status')?.textContent).toBe(
+      'Server sync · saving...',
+    );
+
+    controller.render(createSummaryReadOnlyModel({ syncState: 'not-set-up' }));
+    expect(document.querySelector('.chatmuse-overlay-action-status')?.textContent).toBe(
+      'Server sync · not set up',
+    );
+
+    controller.render(createSummaryReadOnlyModel({ syncState: 'failed' }));
+    expect(document.querySelector('.chatmuse-overlay-action-status')?.textContent).toBe(
+      'Server sync · failed',
+    );
   });
 
   it('renders profiling summary below the error block when profiling is present', () => {
