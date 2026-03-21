@@ -35,6 +35,7 @@ initializeSessionCapture(sessionStore, async (tabId, accountId) => {
 });
 
 registerRuntimeApi({
+  agencyHubClient,
   fanslyClient,
   sessionStore,
   tabContexts,

@@ -1001,8 +1001,8 @@ export async function executeCompare(
       } catch (error) {
         const defaultModel = DEFAULT_FEATURE_MODELS['fast-reply'];
         const isModelError = error instanceof ChatMuseError
-          ? error.code === 'model_unavailable'
-          : (error as { code?: string })?.code === 'model_unavailable';
+          ? error.key === 'model_unavailable'
+          : (error as { key?: string })?.key === 'model_unavailable';
         const abortError = resolveAbortChatMuseError(error, {
           active: Boolean(getActiveCompare(context, tabId)),
           timeoutSignal: timeoutController?.signal,
@@ -1010,9 +1010,9 @@ export async function executeCompare(
         });
         if (isModelError && resolvedModel !== defaultModel) {
           rawText = await streamToCard(defaultModel);
-        } else if (abortError?.code === 'timed_out') {
+        } else if (abortError?.key === 'timed_out') {
           throw abortError;
-        } else if (abortError?.code === 'chat_changed') {
+        } else if (abortError?.key === 'chat_changed') {
           return;
         } else {
           const profiling = buildCompareCardProfilingSnapshot(

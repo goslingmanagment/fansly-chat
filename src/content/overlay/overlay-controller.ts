@@ -1,9 +1,14 @@
-import { toUserError } from '../../shared/errors.js';
+import {
+  formatUserFacingError,
+  getUserErrorDescription,
+  toUserError,
+} from '../../shared/errors.js';
 import type {
   AnthropicSpendSummary,
   AnthropicUsageMetrics,
   FanSummarySyncStatus,
   FeatureType,
+  OperationProgressPayload,
   OverlayInsertPart,
   OverlayRerunActionLabel,
   OverlayViewModel,
@@ -127,7 +132,9 @@ function formatFanSummarySyncStatus(
     case 'saved':
       return 'Server sync · saved';
     case 'failed':
-      return 'Server sync · failed';
+      return syncStatus.error
+        ? `Server sync · failed (${syncStatus.error.code})`
+        : 'Server sync · failed';
     default:
       return null;
   }
@@ -142,6 +149,42 @@ function formatProfilingElapsed(ms: number): string {
 
 function formatAnthropicUsageSummary(usage: AnthropicUsageMetrics): string {
   return `input ${usage.input_tokens} • cache create ${usage.cache_creation_input_tokens} • cache read ${usage.cache_read_input_tokens} • output ${usage.output_tokens}`;
+}
+
+function formatRetryCountdown(retryAtMs: number): string {
+  const remainingSeconds = Math.max(1, Math.ceil((retryAtMs - Date.now()) / 1000));
+  return `${remainingSeconds}s`;
+}
+
+function formatLoadingStatus(progress: OperationProgressPayload | null | undefined): string {
+  if (progress?.statusCode) {
+    const countdown = typeof progress.retryAtMs === 'number'
+      ? ` (${formatRetryCountdown(progress.retryAtMs)})`
+      : '';
+    return `${progress.statusCode} • ${progress.message ?? 'Waiting to retry…'}${countdown}`;
+  }
+
+  return progress?.message ?? 'Generating…';
+}
+
+function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
+  const block = document.createElement('div');
+  block.className = 'chatmuse-inline-error';
+
+  const primary = document.createElement('div');
+  primary.className = 'chatmuse-error-primary';
+  primary.textContent = formatUserFacingError(error);
+  block.append(primary);
+
+  const description = getUserErrorDescription(error);
+  if (description) {
+    const secondary = document.createElement('div');
+    secondary.className = 'chatmuse-error-secondary';
+    secondary.textContent = description;
+    block.append(secondary);
+  }
+
+  return block;
 }
 
 
@@ -487,15 +530,14 @@ export class OverlayController {
     }
 
     if (model.kind !== 'error' && this.inlineError) {
-      if (this.inlineErrorEl.textContent !== this.inlineError.message) {
-        this.inlineErrorEl.textContent = this.inlineError.message;
-      }
+      const content = createUserErrorBlock(this.inlineError);
+      this.inlineErrorEl.replaceChildren(...Array.from(content.childNodes));
       this.inlineErrorEl.classList.remove('chatmuse-hidden');
       return;
     }
 
-    if (this.inlineErrorEl.textContent) {
-      this.inlineErrorEl.textContent = '';
+    if (this.inlineErrorEl.childNodes.length > 0) {
+      this.inlineErrorEl.replaceChildren();
     }
     this.inlineErrorEl.classList.add('chatmuse-hidden');
   }
@@ -610,6 +652,7 @@ export class OverlayController {
     this.syncLoadingSpend(view, model);
     this.syncLoadingProfiling(view, model);
     this.refreshLoadingStatus(view, model);
+    this.syncLoadingStatusTimer(view, model);
     if (view.streamText.data !== streamText) {
       view.streamText.data = streamText;
     }
@@ -653,14 +696,17 @@ export class OverlayController {
     view: LoadingViewState,
     model: Extract<OverlayViewModel, { kind: 'loading' }>,
   ): string {
+    const baseStatus = formatLoadingStatus(model.progress);
     if (!model.profiling) {
-      return model.progress?.message ?? 'Generating\u2026';
+      return baseStatus;
     }
 
-    const label =
-      model.profiling.activeLabel ??
-      model.progress?.message ??
-      'Generating\u2026';
+    const label = model.progress?.statusCode
+      ? baseStatus
+      : (
+          model.profiling.activeLabel ??
+          baseStatus
+        );
     const elapsedMs =
       view.liveElapsedBaseMs !== null &&
       view.liveElapsedStartedAt !== null
@@ -688,7 +734,6 @@ export class OverlayController {
       view.profilingLogEl = null;
       view.profilingLogEntries = [];
       view.profilingLogScrollHeight = null;
-      this.clearLoadingElapsedTimer();
       return;
     }
 
@@ -711,19 +756,6 @@ export class OverlayController {
 
     view.liveElapsedBaseMs = snapshot.elapsedMs;
     view.liveElapsedStartedAt = Date.now();
-
-    if (this.loadingElapsedTimer === null) {
-      this.loadingElapsedTimer = window.setInterval(() => {
-        if (
-          this.currentView?.kind !== 'loading' ||
-          this.model.kind !== 'loading'
-        ) {
-          this.clearLoadingElapsedTimer();
-          return;
-        }
-        this.refreshLoadingStatus(this.currentView, this.model);
-      }, 100);
-    }
   }
 
   private createLoadingProfilingView(
@@ -888,6 +920,31 @@ export class OverlayController {
       view.debugHost.replaceChildren(this.renderDebugPrompt(snapshot));
       view.debugSnapshot = snapshot;
     }
+  }
+
+  private syncLoadingStatusTimer(
+    _view: LoadingViewState,
+    model: Extract<OverlayViewModel, { kind: 'loading' }>,
+  ): void {
+    if (!model.profiling && typeof model.progress?.retryAtMs !== 'number') {
+      this.clearLoadingElapsedTimer();
+      return;
+    }
+
+    if (this.loadingElapsedTimer !== null) {
+      return;
+    }
+
+    this.loadingElapsedTimer = window.setInterval(() => {
+      if (
+        this.currentView?.kind !== 'loading' ||
+        this.model.kind !== 'loading'
+      ) {
+        this.clearLoadingElapsedTimer();
+        return;
+      }
+      this.refreshLoadingStatus(this.currentView, this.model);
+    }, 100);
   }
 
   private isRenderTraceEnabled(): boolean {
@@ -1294,10 +1351,7 @@ export class OverlayController {
       section.append(this.renderSpendStrip(model.anthropicSpend));
     }
 
-    const block = document.createElement('div');
-    block.className = 'chatmuse-inline-error';
-    block.textContent = model.error.message;
-    section.append(block);
+    section.append(createUserErrorBlock(model.error));
 
     if (model.profiling) {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));

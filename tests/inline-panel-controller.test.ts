@@ -67,7 +67,8 @@ function createErrorModel(): Extract<OverlayViewModel, { kind: 'error' }> {
     operationId: 'error-op',
     profiling: undefined,
     error: {
-      code: 'unknown_error',
+      key: 'unknown_error',
+      code: 'CM-APP-01',
       message: 'Something broke',
     },
   };
@@ -309,7 +310,8 @@ describe('InlinePanelController', () => {
 
     controller.render(createErrorModel());
 
-    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toBe('Something broke');
+    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('CM-APP-01');
+    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('Something broke');
     expect(requireElement<HTMLButtonElement>(controller.root, '.chatmuse-card-actions .chatmuse-button').textContent).toBe('Regenerate');
   });
 
@@ -702,14 +704,16 @@ describe('InlinePanelController', () => {
           rawText: '',
           parts: [],
           error: {
-            code: 'unknown_error',
+            key: 'unknown_error',
+            code: 'CM-APP-01',
             message: 'Draft failed',
           },
         },
       ],
     }));
 
-    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toBe('Draft failed');
+    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('CM-APP-01');
+    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('Draft failed');
   });
 
   // ─── Enter-to-insert ─────────────────────────────────────────

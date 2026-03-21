@@ -669,6 +669,30 @@
   animation: chatmuse-fade-in 0.15s ease;
 }
 
+.chatmuse-toast-primary {
+  font-weight: 700;
+}
+
+.chatmuse-toast-secondary {
+  color: var(--chatmuse-muted);
+  line-height: 1.45;
+}
+
+.chatmuse-toast-error {
+  border-color: rgba(248, 113, 113, 0.24);
+  background: rgba(34, 17, 21, 0.96);
+}
+
+.chatmuse-toast-success {
+  border-color: rgba(52, 211, 153, 0.24);
+  background: rgba(14, 28, 24, 0.96);
+}
+
+.chatmuse-toast-warning {
+  border-color: rgba(251, 191, 36, 0.24);
+  background: rgba(35, 28, 12, 0.96);
+}
+
 .chatmuse-toast button {
   font-family: inherit;
 }
@@ -960,6 +984,17 @@
   padding: 10px 12px;
   font-size: 13px;
   color: #fca5a5;
+  display: grid;
+  gap: 4px;
+}
+
+.chatmuse-error-primary {
+  font-weight: 700;
+}
+
+.chatmuse-error-secondary {
+  color: rgba(252, 165, 165, 0.86);
+  line-height: 1.45;
 }
 
 .chatmuse-inline-note {

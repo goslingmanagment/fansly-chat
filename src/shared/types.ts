@@ -56,6 +56,7 @@ export interface FanSummarySyncStatus {
   pageLabel?: string;
   syncedAt?: number;
   updatedAt?: number;
+  error?: UserFacingError;
 }
 
 export interface LegacyAgencyHubSummarySyncMetadata {
@@ -467,18 +468,22 @@ export interface FeatureResult {
 
 // ─── Errors ──────────────────────────────────────────────────────────────
 
-export interface FanslyApiErrorDetails {
+export interface ChatMuseErrorDetails {
   status?: number;
   responseSnippet?: string;
+  retryAfterMs?: number;
+  retryAtMs?: number;
+  providerMessage?: string;
 }
 
-export type UserErrorCode =
+export type UserErrorKey =
   | 'not_connected'
   | 'session_expired'
   | 'fansly_server_error'
   | 'missing_api_key'
   | 'invalid_api_key'
-  | 'claude_overloaded'
+  | 'rate_limited'
+  | 'insufficient_balance'
   | 'no_personalities'
   | 'not_enough_history'
   | 'another_operation'
@@ -489,14 +494,28 @@ export type UserErrorCode =
   | 'chat_changed'
   | 'extension_reloaded'
   | 'model_unavailable'
+  | 'context_too_long'
+  | 'service_unavailable'
+  | 'hub_invalid_url'
+  | 'hub_missing_api_key'
+  | 'hub_invalid_api_key'
+  | 'hub_missing_permission'
+  | 'hub_page_match_failed'
+  | 'hub_timeout'
+  | 'hub_request_failed'
+  | 'hub_sync_failed'
   | 'compare_cards_unavailable'
   | 'insertion_failed'
   | 'unknown_error';
 
 export interface UserFacingError {
-  code: UserErrorCode;
+  key: UserErrorKey;
+  code: string;
   message: string;
+  description?: string;
   settingsLink?: boolean;
+  retryAtMs?: number;
+  retryAfterMs?: number;
 }
 
 // ─── Operation Profiling ─────────────────────────────────────────────────
@@ -553,6 +572,8 @@ export interface OperationProgressPayload {
   currentPage?: number;
   targetPages?: number;
   message?: string;
+  statusCode?: string;
+  retryAtMs?: number;
   anthropicSpend?: AnthropicSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
@@ -591,11 +612,22 @@ export interface SessionSnapshotEntry {
 export interface RuntimeRequestMap {
   getPopupStatus: undefined;
   getSessionsSnapshot: undefined;
+  testAgencyHubConnection: AgencyHubConnectionTestRequest;
 }
 
 export interface RuntimeResponseMap {
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
+  testAgencyHubConnection: AgencyHubConnectionTestResponse;
+}
+
+export interface AgencyHubConnectionTestRequest {
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>;
+}
+
+export interface AgencyHubConnectionTestResponse {
+  ok: boolean;
+  error?: UserFacingError;
 }
 
 // ─── Port Messages (Discriminated Unions) ────────────────────────────────

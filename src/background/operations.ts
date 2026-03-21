@@ -28,7 +28,12 @@ import {
   getCompareDraftCount,
   resolveMappedPersonalityId,
 } from '../shared/compare-cards.js';
-import { ChatMuseError, toUserError } from '../shared/errors.js';
+import {
+  ChatMuseError,
+  createUserError,
+  toDebugErrorPayload,
+  toUserError,
+} from '../shared/errors.js';
 import {
   featureRequiresDraft,
   featureUsesPingSegment,
@@ -132,6 +137,8 @@ const DEEP_OPERATION_TIMEOUTS = {
   claudeIdle: DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
   claudeMaxStream: DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
 } as const;
+const AUTO_RETRY_RATE_LIMIT_MAX_MS = 60_000;
+const AUTO_RETRY_SERVICE_UNAVAILABLE_MS = 5_000;
 type OperationTimeoutKey =
   | 'quick-total'
   | 'deep-prep'
@@ -182,6 +189,31 @@ interface AgencyHubSummaryPrefetchResult {
   fanAccountId: string | null;
 }
 
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function createFanSummarySyncStatus(
   state: FanSummarySyncState,
   generatedAt: number,
@@ -190,6 +222,7 @@ function createFanSummarySyncStatus(
     pageLabel?: string | null;
     syncedAt?: number;
     updatedAt?: number;
+    error?: FanSummarySyncStatus['error'];
   },
 ): FanSummarySyncStatus {
   const updatedAt = options?.updatedAt ?? Date.now();
@@ -201,6 +234,7 @@ function createFanSummarySyncStatus(
     ...(normalizedBaseUrl ? { baseUrl: normalizedBaseUrl } : {}),
     ...(trimmedPageLabel ? { pageLabel: trimmedPageLabel } : {}),
     ...(typeof options?.syncedAt === 'number' ? { syncedAt: options.syncedAt } : {}),
+    ...(options?.error ? { error: options.error } : {}),
     updatedAt,
   };
 }
@@ -232,16 +266,27 @@ function resolveSummarySyncStatusFromResult(
         updatedAt,
       });
     case 'skipped':
-      return createFanSummarySyncStatus('not-set-up', generatedAt, {
-        baseUrl: result.baseUrl,
-        pageLabel: result.pageLabel ?? null,
-        updatedAt,
-      });
+      return createFanSummarySyncStatus(
+        result.reason === 'missing_base_url' ||
+          result.reason === 'missing_api_key' ||
+          result.reason === 'missing_host_permission' ||
+          result.reason === 'disabled'
+          ? 'not-set-up'
+          : 'failed',
+        generatedAt,
+        {
+          baseUrl: result.baseUrl,
+          pageLabel: result.pageLabel ?? null,
+          updatedAt,
+          error: result.error,
+        },
+      );
     case 'failed':
       return createFanSummarySyncStatus('failed', generatedAt, {
         baseUrl: result.baseUrl,
         pageLabel: result.pageLabel ?? null,
         updatedAt,
+        error: result.error,
       });
   }
 }
@@ -979,6 +1024,7 @@ export class OperationCoordinator {
         baseUrl: result.baseUrl,
         pageLabel: result.pageLabel,
         fanAccountId: result.fanAccountId,
+        error: result.error,
       });
 
       if (result.status !== 'fetched' || !result.body) {
@@ -997,7 +1043,7 @@ export class OperationCoordinator {
         throw error;
       }
 
-      logDebug(debugEnabled, 'agency hub summary prefetch failed', error);
+      logDebug(debugEnabled, 'agency hub summary prefetch failed', toDebugErrorPayload(error));
       return null;
     } finally {
       clearTimeout(timeoutHandle);
@@ -1038,12 +1084,14 @@ export class OperationCoordinator {
         reason: result.reason,
         baseUrl: result.baseUrl,
         pageLabel: result.pageLabel,
+        error: result.error,
       });
       syncStatus = resolveSummarySyncStatusFromResult(result, task.generatedAt);
     } catch (error) {
-      logDebug(task.debugEnabled, 'agency hub summary sync failed', error);
+      logDebug(task.debugEnabled, 'agency hub summary sync failed', toDebugErrorPayload(error));
       syncStatus = createFanSummarySyncStatus('failed', task.generatedAt, {
         baseUrl: task.settings.agencyHubBaseUrl,
+        error: createUserError('hub_timeout'),
       });
     } finally {
       clearTimeout(timeoutHandle);
@@ -1191,12 +1239,16 @@ export class OperationCoordinator {
         featureUsesPingSegment(payload.feature) ? 'Loading messages…' : undefined;
       let progressCurrentPage: number | undefined;
       let progressTargetPages: number | undefined;
+      let progressStatusCode: string | undefined;
+      let progressRetryAtMs: number | undefined;
 
       type OperationProgressUpdate = {
         phase?: OperationPhase;
         message?: string | undefined;
         currentPage?: number | undefined;
         targetPages?: number | undefined;
+        statusCode?: string | undefined;
+        retryAtMs?: number | undefined;
       };
 
       const sendOperationProgress = (updates?: OperationProgressUpdate): void => {
@@ -1213,6 +1265,12 @@ export class OperationCoordinator {
           if ('targetPages' in updates) {
             progressTargetPages = updates.targetPages;
           }
+          if ('statusCode' in updates) {
+            progressStatusCode = updates.statusCode;
+          }
+          if ('retryAtMs' in updates) {
+            progressRetryAtMs = updates.retryAtMs;
+          }
         }
 
         this.sendProgress(
@@ -1224,6 +1282,8 @@ export class OperationCoordinator {
             message: progressMessage,
             currentPage: progressCurrentPage,
             targetPages: progressTargetPages,
+            statusCode: progressStatusCode,
+            retryAtMs: progressRetryAtMs,
           },
           active.anthropicSpend ?? undefined,
           profiler,
@@ -1954,14 +2014,18 @@ export class OperationCoordinator {
         `${messageLoad.transcriptMessages.length} transcript messages`,
       );
 
-      if (profiler.enabled) {
+      const sendDebugPromptSnapshot = (modelId: string): void => {
+        if (!profiler.enabled) {
+          return;
+        }
+
         this.send(tabId, {
           type: 'operation:debugPrompt',
           operationId: payload.operationId,
           feature: payload.feature,
           snapshot: {
             feature: payload.feature,
-            modelId: resolvedModel,
+            modelId,
             system: prompt.system,
             transcript: formattedTranscript,
             fanSpendingData: spendingData,
@@ -1969,7 +2033,9 @@ export class OperationCoordinator {
             user: prompt.user,
           },
         });
-      }
+      };
+
+      sendDebugPromptSnapshot(resolvedModel);
 
       let sawFirstChunk = false;
       startStage('claude-ttfb', 'Wait for Claude TTFB');
@@ -2039,35 +2105,97 @@ export class OperationCoordinator {
         },
       } as const;
 
+      const defaultModel = DEFAULT_FEATURE_MODELS[modelFeature];
+      let rateLimitRetried = false;
+      let serviceUnavailableRetried = false;
       let rawText: string;
-      try {
-        rawText = await this.anthropicClient.streamMessage(streamArgs);
-      } catch (err) {
-        const defaultModel = DEFAULT_FEATURE_MODELS[modelFeature];
-        const isModelError = err instanceof ChatMuseError
-          ? err.code === 'model_unavailable'
-          : (err as { code?: string })?.code === 'model_unavailable';
-        if (isModelError && resolvedModel !== defaultModel) {
-          actualModel = defaultModel;
-          profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
-          if (profiler.enabled) {
-            this.send(tabId, {
-              type: 'operation:debugPrompt',
-              operationId: payload.operationId,
-              feature: payload.feature,
-              snapshot: {
-                feature: payload.feature,
-                modelId: defaultModel,
-                system: prompt.system,
-                transcript: formattedTranscript,
-                fanSpendingData: spendingData,
-                fanSubscriptionData: subscriptionData,
-                user: prompt.user,
-              },
+      while (true) {
+        try {
+          rawText = await this.anthropicClient.streamMessage({
+            ...streamArgs,
+            model: actualModel,
+          });
+          break;
+        } catch (err) {
+          const errorKey = err instanceof ChatMuseError
+            ? err.key
+            : (err as { key?: string })?.key;
+          const retryAfterMs = typeof (err as { retryAfterMs?: unknown })?.retryAfterMs === 'number'
+            ? (err as { retryAfterMs: number }).retryAfterMs
+            : undefined;
+          const retryAtMs = typeof (err as { retryAtMs?: unknown })?.retryAtMs === 'number'
+            ? (err as { retryAtMs: number }).retryAtMs
+            : undefined;
+          const canRetryRateLimit =
+            !sawFirstChunk &&
+            !rateLimitRetried &&
+            errorKey === 'rate_limited' &&
+            typeof retryAfterMs === 'number' &&
+            retryAfterMs <= AUTO_RETRY_RATE_LIMIT_MAX_MS;
+          const canRetryServiceUnavailable =
+            !sawFirstChunk &&
+            !serviceUnavailableRetried &&
+            errorKey === 'service_unavailable';
+
+          if (canRetryRateLimit || canRetryServiceUnavailable) {
+            const fallbackRetryKey = canRetryServiceUnavailable
+              ? 'service_unavailable'
+              : 'rate_limited';
+            const errorCode = err instanceof ChatMuseError
+              ? err.code
+              : (typeof (err as { code?: unknown })?.code === 'string'
+                  ? (err as { code: string }).code
+                  : createUserError(fallbackRetryKey).code);
+            if (canRetryRateLimit) {
+              rateLimitRetried = true;
+            } else {
+              serviceUnavailableRetried = true;
+            }
+            clearClaudeTimeouts();
+            const retryDelayMs = canRetryRateLimit
+              ? (retryAfterMs ?? 0)
+              : AUTO_RETRY_SERVICE_UNAVAILABLE_MS;
+            const nextRetryAtMs = canRetryRateLimit
+              ? (retryAtMs ?? (Date.now() + retryDelayMs))
+              : (Date.now() + retryDelayMs);
+            const retryMessage = canRetryRateLimit
+              ? 'Rate limited. Waiting to retry…'
+              : 'Claude unavailable. Retrying…';
+            profiler.log(
+              canRetryRateLimit
+                ? `Anthropic rate limited, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`
+                : `Anthropic service unavailable, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`,
+            );
+            sendOperationProgress({
+              phase: 'generating',
+              message: retryMessage,
+              currentPage: undefined,
+              targetPages: undefined,
+              statusCode: errorCode,
+              retryAtMs: nextRetryAtMs,
             });
+            await delay(retryDelayMs, signal);
+            sendOperationProgress({
+              phase: 'generating',
+              message: 'Generating…',
+              currentPage: undefined,
+              targetPages: undefined,
+              statusCode: undefined,
+              retryAtMs: undefined,
+            });
+            if (!sawFirstChunk) {
+              startClaudeTtfbTimeout();
+            }
+            continue;
           }
-          rawText = await this.anthropicClient.streamMessage({ ...streamArgs, model: defaultModel });
-        } else {
+
+          if (errorKey === 'model_unavailable' && actualModel !== defaultModel) {
+            actualModel = defaultModel;
+            profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
+            sendDebugPromptSnapshot(defaultModel);
+            continue;
+          }
+
           throw err;
         }
       }

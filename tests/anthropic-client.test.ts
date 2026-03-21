@@ -80,7 +80,7 @@ describe('AnthropicClient error mapping', () => {
     mockFetchResponse(401);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'invalid_api_key' }),
+      expect.objectContaining({ key: 'invalid_api_key', code: 'CM-AUTH-02' }),
     );
   });
 
@@ -88,23 +88,23 @@ describe('AnthropicClient error mapping', () => {
     mockFetchResponse(403);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'invalid_api_key' }),
+      expect.objectContaining({ key: 'invalid_api_key', code: 'CM-AUTH-02' }),
     );
   });
 
-  it('maps 429 to claude_overloaded', async () => {
+  it('maps 429 to rate_limited', async () => {
     mockFetchResponse(429);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'claude_overloaded' }),
+      expect.objectContaining({ key: 'rate_limited', code: 'CM-API-01' }),
     );
   });
 
-  it('maps 500 to claude_overloaded', async () => {
+  it('maps 500 to service_unavailable', async () => {
     mockFetchResponse(500);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'claude_overloaded' }),
+      expect.objectContaining({ key: 'service_unavailable', code: 'CM-API-05' }),
     );
   });
 
@@ -114,7 +114,7 @@ describe('AnthropicClient error mapping', () => {
     });
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'model_unavailable' }),
+      expect.objectContaining({ key: 'model_unavailable', code: 'CM-API-03' }),
     );
   });
 
@@ -124,7 +124,7 @@ describe('AnthropicClient error mapping', () => {
     });
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'unknown_error' }),
+      expect.objectContaining({ key: 'unknown_error', code: 'CM-APP-01' }),
     );
   });
 
@@ -138,12 +138,12 @@ describe('AnthropicClient error mapping', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response));
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'unknown_error' }),
+      expect.objectContaining({ key: 'unknown_error', code: 'CM-APP-01' }),
     );
   });
 
   it('maps non-ok response with no body to network_error', async () => {
-    // 502 hits the >= 500 check first (claude_overloaded). Use 418 to test the !response.ok fallback.
+    // 502 hits the >= 500 check first (service_unavailable). Use 418 to test the !response.ok fallback.
     const response: Partial<Response> = {
       status: 418,
       ok: false,
@@ -152,7 +152,7 @@ describe('AnthropicClient error mapping', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response));
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ code: 'network_error' }),
+      expect.objectContaining({ key: 'network_error', code: 'CM-NET-01' }),
     );
   });
 });

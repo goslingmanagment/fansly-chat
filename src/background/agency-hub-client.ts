@@ -7,7 +7,17 @@ import {
   normalizeAgencyHubBaseUrl,
   normalizeAgencyHubUsername,
 } from '../shared/agency-hub.js';
-import type { AgencyHubSummarySyncMetadata, Settings } from '../shared/types.js';
+import {
+  ChatMuseError,
+  createUserError,
+  toUserError,
+} from '../shared/errors.js';
+import type {
+  AgencyHubConnectionTestResponse,
+  AgencyHubSummarySyncMetadata,
+  Settings,
+  UserFacingError,
+} from '../shared/types.js';
 
 interface AgencyHubPageSummary {
   label: string;
@@ -36,6 +46,13 @@ interface AgencyHubConversationProfileResponse {
 
 type FetchLike = typeof fetch;
 
+interface AgencyHubResultBase {
+  reason: string;
+  baseUrl: string | null;
+  pageLabel?: string;
+  error?: UserFacingError;
+}
+
 export interface AgencyHubPushFanProfileInput {
   settings: Settings;
   pageUsername: string | null;
@@ -46,11 +63,8 @@ export interface AgencyHubPushFanProfileInput {
   generatedAt?: number;
 }
 
-export interface AgencyHubPushFanProfileResult {
+export interface AgencyHubPushFanProfileResult extends AgencyHubResultBase {
   status: 'pushed' | 'already-synced' | 'skipped' | 'failed';
-  reason: string;
-  baseUrl: string | null;
-  pageLabel?: string;
 }
 
 export interface AgencyHubFetchFanProfileInput {
@@ -60,11 +74,8 @@ export interface AgencyHubFetchFanProfileInput {
   signal: AbortSignal;
 }
 
-export interface AgencyHubFetchFanProfileResult {
+export interface AgencyHubFetchFanProfileResult extends AgencyHubResultBase {
   status: 'fetched' | 'not-found' | 'skipped' | 'failed';
-  reason: string;
-  baseUrl: string | null;
-  pageLabel?: string;
   body?: string;
   createdAtMs?: number;
   fanAccountId?: string;
@@ -76,6 +87,13 @@ async function readResponseSnippet(response: Response): Promise<string> {
   } catch {
     return '';
   }
+}
+
+function hubError(
+  key: Parameters<typeof createUserError>[0],
+  overrides?: Partial<Pick<UserFacingError, 'description'>>,
+): UserFacingError {
+  return createUserError(key, overrides);
 }
 
 export class AgencyHubClient {
@@ -109,6 +127,22 @@ export class AgencyHubClient {
     }
   }
 
+  private async createHubResponseError(
+    response: Response,
+    fallbackKey: 'hub_request_failed' | 'hub_invalid_api_key' = 'hub_request_failed',
+  ): Promise<ChatMuseError> {
+    const snippet = await readResponseSnippet(response);
+    const key = response.status === 401 || response.status === 403
+      ? 'hub_invalid_api_key'
+      : fallbackKey;
+    return new ChatMuseError(key, {
+      details: {
+        status: response.status,
+        responseSnippet: snippet,
+      },
+    });
+  }
+
   private async listVisiblePages(
     baseUrl: string,
     apiKey: string,
@@ -123,8 +157,7 @@ export class AgencyHubClient {
     });
 
     if (!response.ok) {
-      const snippet = await readResponseSnippet(response);
-      throw new Error(`GET /api/v1/pages failed (${response.status}) ${snippet}`.trim());
+      throw await this.createHubResponseError(response);
     }
 
     return await response.json() as AgencyHubPageSummary[];
@@ -178,8 +211,7 @@ export class AgencyHubClient {
     }
 
     if (!response.ok) {
-      const snippet = await readResponseSnippet(response);
-      throw new Error(`GET /conversations/profile failed (${response.status}) ${snippet}`.trim());
+      throw await this.createHubResponseError(response);
     }
 
     return await response.json() as AgencyHubConversationProfileResponse;
@@ -210,8 +242,41 @@ export class AgencyHubClient {
     );
 
     if (!response.ok) {
-      const snippet = await readResponseSnippet(response);
-      throw new Error(`PUT /profile failed (${response.status}) ${snippet}`.trim());
+      throw await this.createHubResponseError(response);
+    }
+  }
+
+  async testConnection(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>,
+    signal: AbortSignal,
+  ): Promise<AgencyHubConnectionTestResponse> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const apiKey = settings.agencyHubApiKey.trim();
+
+    if (!settings.agencyHubBaseUrl.trim() || !baseUrl) {
+      return { ok: false, error: hubError('hub_invalid_url') };
+    }
+    if (!apiKey) {
+      return { ok: false, error: hubError('hub_missing_api_key') };
+    }
+    if (!await this.hasHostPermission(baseUrl)) {
+      return { ok: false, error: hubError('hub_missing_permission') };
+    }
+
+    try {
+      await this.listVisiblePages(baseUrl, apiKey, signal);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return { ok: false, error: hubError('hub_timeout') };
+      }
+
+      return {
+        ok: false,
+        error: error instanceof ChatMuseError
+          ? toUserError(error)
+          : hubError('hub_request_failed'),
+      };
     }
   }
 
@@ -228,36 +293,75 @@ export class AgencyHubClient {
     const apiKey = settings.agencyHubApiKey.trim();
 
     if (!baseUrl) {
-      return { status: 'skipped', reason: 'missing_base_url', baseUrl: null };
+      return {
+        status: 'skipped',
+        reason: 'missing_base_url',
+        baseUrl: null,
+        error: hubError('hub_invalid_url'),
+      };
     }
     if (!apiKey) {
-      return { status: 'skipped', reason: 'missing_api_key', baseUrl };
+      return {
+        status: 'skipped',
+        reason: 'missing_api_key',
+        baseUrl,
+        error: hubError('hub_missing_api_key'),
+      };
     }
     if (!await this.hasHostPermission(baseUrl)) {
-      return { status: 'skipped', reason: 'missing_host_permission', baseUrl };
+      return {
+        status: 'skipped',
+        reason: 'missing_host_permission',
+        baseUrl,
+        error: hubError('hub_missing_permission'),
+      };
     }
     if (!body.length) {
       return { status: 'skipped', reason: 'empty_body', baseUrl };
     }
     if (measureUtf8Bytes(body) > AGENCY_HUB_PROFILE_MAX_BYTES) {
-      return { status: 'skipped', reason: 'body_too_large', baseUrl };
+      return {
+        status: 'skipped',
+        reason: 'body_too_large',
+        baseUrl,
+        error: hubError('hub_request_failed', {
+          description: 'The generated summary is too large to store in Agency Hub.',
+        }),
+      };
     }
 
     const normalizedPageUsername = normalizeAgencyHubUsername(pageUsername);
     if (!normalizedPageUsername) {
-      return { status: 'skipped', reason: 'missing_page_username', baseUrl };
+      return {
+        status: 'failed',
+        reason: 'missing_page_username',
+        baseUrl,
+        error: hubError('hub_page_match_failed'),
+      };
     }
 
     const trimmedPlatformUserId = platformUserId?.trim() ?? '';
     if (!trimmedPlatformUserId) {
-      return { status: 'skipped', reason: 'missing_platform_user_id', baseUrl };
+      return {
+        status: 'failed',
+        reason: 'missing_platform_user_id',
+        baseUrl,
+        error: hubError('hub_request_failed', {
+          description: 'ChatMuse could not resolve the fan account id for Agency Hub sync.',
+        }),
+      };
     }
 
     try {
       const pages = await this.listVisiblePages(baseUrl, apiKey, signal);
       const pageLabel = this.resolvePageLabel(pages, normalizedPageUsername);
       if (!pageLabel) {
-        return { status: 'skipped', reason: 'page_match_failed', baseUrl };
+        return {
+          status: 'failed',
+          reason: 'page_match_failed',
+          baseUrl,
+          error: hubError('hub_page_match_failed'),
+        };
       }
 
       if (
@@ -288,13 +392,21 @@ export class AgencyHubClient {
       };
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        return { status: 'failed', reason: 'aborted', baseUrl };
+        return {
+          status: 'failed',
+          reason: 'aborted',
+          baseUrl,
+          error: hubError('hub_timeout'),
+        };
       }
 
       return {
         status: 'failed',
         reason: error instanceof Error ? error.message : 'unknown_error',
         baseUrl,
+        error: error instanceof ChatMuseError
+          ? toUserError(error)
+          : hubError('hub_request_failed'),
       };
     }
   }
@@ -309,30 +421,62 @@ export class AgencyHubClient {
     const apiKey = settings.agencyHubApiKey.trim();
 
     if (!baseUrl) {
-      return { status: 'skipped', reason: 'missing_base_url', baseUrl: null };
+      return {
+        status: 'skipped',
+        reason: 'missing_base_url',
+        baseUrl: null,
+        error: hubError('hub_invalid_url'),
+      };
     }
     if (!apiKey) {
-      return { status: 'skipped', reason: 'missing_api_key', baseUrl };
+      return {
+        status: 'skipped',
+        reason: 'missing_api_key',
+        baseUrl,
+        error: hubError('hub_missing_api_key'),
+      };
     }
     if (!await this.hasHostPermission(baseUrl)) {
-      return { status: 'skipped', reason: 'missing_host_permission', baseUrl };
+      return {
+        status: 'skipped',
+        reason: 'missing_host_permission',
+        baseUrl,
+        error: hubError('hub_missing_permission'),
+      };
     }
 
     const normalizedPageUsername = normalizeAgencyHubUsername(pageUsername);
     if (!normalizedPageUsername) {
-      return { status: 'skipped', reason: 'missing_page_username', baseUrl };
+      return {
+        status: 'failed',
+        reason: 'missing_page_username',
+        baseUrl,
+        error: hubError('hub_page_match_failed'),
+      };
     }
 
     const trimmedConversationId = conversationId?.trim() ?? '';
     if (!trimmedConversationId) {
-      return { status: 'skipped', reason: 'missing_conversation_id', baseUrl };
+      return {
+        status: 'failed',
+        reason: 'missing_conversation_id',
+        baseUrl,
+        error: hubError('hub_request_failed', {
+          description: 'ChatMuse could not resolve the current conversation id for Agency Hub lookup.',
+        }),
+      };
     }
 
     try {
       const pages = await this.listVisiblePages(baseUrl, apiKey, signal);
       const pageLabel = this.resolvePageLabel(pages, normalizedPageUsername);
       if (!pageLabel) {
-        return { status: 'skipped', reason: 'page_match_failed', baseUrl };
+        return {
+          status: 'failed',
+          reason: 'page_match_failed',
+          baseUrl,
+          error: hubError('hub_page_match_failed'),
+        };
       }
 
       const profileResponse = await this.getConversationProfile(
@@ -363,10 +507,13 @@ export class AgencyHubClient {
 
       if (measureUtf8Bytes(body) > AGENCY_HUB_PROFILE_MAX_BYTES) {
         return {
-          status: 'skipped',
+          status: 'failed',
           reason: 'body_too_large',
           baseUrl,
           pageLabel,
+          error: hubError('hub_request_failed', {
+            description: 'The stored Agency Hub profile is too large for ChatMuse to use.',
+          }),
         };
       }
 
@@ -384,13 +531,21 @@ export class AgencyHubClient {
       };
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        return { status: 'failed', reason: 'aborted', baseUrl };
+        return {
+          status: 'failed',
+          reason: 'aborted',
+          baseUrl,
+          error: hubError('hub_timeout'),
+        };
       }
 
       return {
         status: 'failed',
         reason: error instanceof Error ? error.message : 'unknown_error',
         baseUrl,
+        error: error instanceof ChatMuseError
+          ? toUserError(error)
+          : hubError('hub_request_failed'),
       };
     }
   }

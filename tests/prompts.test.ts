@@ -99,9 +99,9 @@ Tease a little — hint and dangle instead of giving everything away. The power 
   upsell: `**IMPORTANT — Tone override: SOFT UPSELL.**
 Weave a natural, low-pressure monetization nudge into this reply. Mention content, perks, or a next paid step when it fits.
 Keep it organic — sharing, not pitching. Do not sound transactional or scripted.`,
-  spicy: `**IMPORTANT — Tone override: SPICY.**
-Make this reply noticeably hot and sexually confident. Be bold, direct, and physically charged.
-Do not settle for cute, merely flirty, or complimentary. Lead with desire, temptation, and body-focused subtext.
+  spicy: `**IMPORTANT — Tone override: HORNY.**
+Make this reply noticeably hot and sexually charged. Be bold, direct, and physically arousing.
+Do not settle for cute, merely flirty, or complimentary. Lead with desire, temptation, and body-focused language.
 Match the fan's energy and push it upward. Keep escalation believable — don't snap from neutral to extreme with no runway.`,
 };
 
@@ -336,8 +336,8 @@ describe('template variable substitution', () => {
       draftText: 'скажи грубо что пусть покупает сейчас',
     }));
 
-    expect(result.user).toContain('If the draft is awkward, weak, too blunt, badly phrased, unnatural, or strategically poor');
-    expect(result.user).toContain('Keep the underlying meaning, but rewrite it aggressively into the version that would work better for the fan.');
+    expect(result.user).toContain('If the draft is awkward, badly phrased, or unnatural, rewrite proportionally: fix what\'s broken without flattening what\'s intentional.');
+    expect(result.user).toContain('Keep the underlying meaning and emotional charge, but phrase it in the way the model would naturally say it.');
   });
 
   it('leaves no unresolved placeholders for any feature', () => {
@@ -457,7 +457,7 @@ describe('tone instructions', () => {
     ['casual', 'Tone override: CASUAL'],
     ['flirty', 'Tone override: FLIRTY'],
     ['upsell', 'Tone override: SOFT UPSELL'],
-    ['spicy', 'Tone override: SPICY'],
+    ['spicy', 'Tone override: HORNY'],
   ] as const)('includes %s tone instructions for fast-reply', (tone, expected) => {
     const result = buildPrompt(buildTestInput({
       feature: 'fast-reply',
@@ -509,8 +509,8 @@ describe('tone instructions', () => {
       replyTone: 'spicy',
     }));
     expect(result.user).toContain('Do not settle for cute, merely flirty, or complimentary.');
-    expect(result.user).toContain('noticeably hot and sexually confident');
-    expect(result.user).toContain('desire, temptation, and body-focused subtext');
+    expect(result.user).toContain('noticeably hot and sexually charged');
+    expect(result.user).toContain('desire, temptation, and body-focused language');
   });
 });
 

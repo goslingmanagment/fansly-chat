@@ -65,6 +65,7 @@ export function normalizeAgencyHubSummarySyncMetadata(
     ...(metadata.pageLabel ? { pageLabel: metadata.pageLabel } : {}),
     ...(typeof metadata.syncedAt === 'number' ? { syncedAt: metadata.syncedAt } : {}),
     ...(typeof metadata.updatedAt === 'number' ? { updatedAt: metadata.updatedAt } : {}),
+    ...('error' in metadata && metadata.error ? { error: metadata.error } : {}),
   };
 }
 

@@ -247,7 +247,7 @@ describe('ButtonBar tone row', () => {
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     expect(pills).toHaveLength(3);
-    expect(pills.map((p) => p.textContent)).toEqual(['Flirty', 'Upsell', 'Spicy']);
+    expect(pills.map((p) => p.textContent)).toEqual(['Flirty', 'Upsell', 'Horny']);
   });
 
   it('marks the active tone pill', () => {
@@ -264,12 +264,12 @@ describe('ButtonBar tone row', () => {
 
     const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatmuse-tone-pill'));
     const flirty = pills.find((p) => p.textContent === 'Flirty');
-    const spicy = pills.find((p) => p.textContent === 'Spicy');
+    const horny = pills.find((p) => p.textContent === 'Horny');
 
     expect(flirty?.classList.contains('chatmuse-tone-pill-active')).toBe(true);
     expect(flirty?.getAttribute('aria-pressed')).toBe('true');
-    expect(spicy?.classList.contains('chatmuse-tone-pill-active')).toBe(false);
-    expect(spicy?.getAttribute('aria-pressed')).toBe('false');
+    expect(horny?.classList.contains('chatmuse-tone-pill-active')).toBe(false);
+    expect(horny?.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('disables tone pills during active operation', () => {

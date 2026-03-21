@@ -4,7 +4,8 @@ import { ChatMuseError, toUserError, getErrorMessage } from '../src/shared/error
 describe('ChatMuseError', () => {
   it('constructs with code and default message', () => {
     const err = new ChatMuseError('not_connected');
-    expect(err.code).toBe('not_connected');
+    expect(err.key).toBe('not_connected');
+    expect(err.code).toBe('CM-FAN-01');
     expect(err.message).toBe('not_connected');
     expect(err.isOptional).toBe(false);
   });
@@ -34,18 +35,21 @@ describe('toUserError', () => {
   it('maps ChatMuseError to user-facing message', () => {
     const err = new ChatMuseError('missing_api_key');
     const result = toUserError(err);
-    expect(result.code).toBe('missing_api_key');
+    expect(result.key).toBe('missing_api_key');
+    expect(result.code).toBe('CM-AUTH-01');
     expect(result.settingsLink).toBe(true);
     expect(result.message).toContain('API key');
   });
 
   it('returns unknown_error for non-ChatMuseError', () => {
     const result = toUserError(new Error('random'));
-    expect(result.code).toBe('unknown_error');
+    expect(result.key).toBe('unknown_error');
+    expect(result.code).toBe('CM-APP-01');
   });
 
   it('returns unknown_error for null', () => {
-    expect(toUserError(null).code).toBe('unknown_error');
+    expect(toUserError(null).key).toBe('unknown_error');
+    expect(toUserError(null).code).toBe('CM-APP-01');
   });
 });
 

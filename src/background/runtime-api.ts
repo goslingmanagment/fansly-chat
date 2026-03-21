@@ -1,6 +1,9 @@
+import { AGENCY_HUB_PREFETCH_TIMEOUT_MS } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
+import { createUserError } from '../shared/errors.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
-import type { PopupStatus } from '../shared/types.js';
+import type { AgencyHubConnectionTestRequest, PopupStatus } from '../shared/types.js';
+import type { AgencyHubClient } from './agency-hub-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
@@ -10,6 +13,7 @@ import { TabContextStore } from './tab-context.js';
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 
 export interface RuntimeApiDeps {
+  agencyHubClient: AgencyHubClient;
   fanslyClient: FanslyClient;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
@@ -17,13 +21,14 @@ export interface RuntimeApiDeps {
 }
 
 export function registerRuntimeApi({
+  agencyHubClient,
   fanslyClient,
   sessionStore,
   tabContexts,
   storageCoordinator,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
-    async (message: { type: string; tabId?: number }) => {
+    async (message: { type: string; tabId?: number; settings?: AgencyHubConnectionTestRequest['settings'] }) => {
       if (message.type === 'getPopupStatus') {
         let tabId: number | undefined;
         let tabUrl: string | undefined;
@@ -152,6 +157,25 @@ export function registerRuntimeApi({
         );
 
         return snapshot;
+      }
+
+      if (message.type === 'testAgencyHubConnection') {
+        if (!message.settings) {
+          return {
+            ok: false,
+            error: createUserError('hub_request_failed'),
+          };
+        }
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+        );
+        try {
+          return await agencyHubClient.testConnection(message.settings, controller.signal);
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
       }
 
       return undefined;
