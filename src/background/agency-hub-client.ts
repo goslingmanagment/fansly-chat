@@ -15,6 +15,8 @@ interface AgencyHubPageSummary {
   username: string | null;
 }
 
+type FetchLike = typeof fetch;
+
 export interface AgencyHubPushFanProfileInput {
   settings: Settings;
   pageUsername: string | null;
@@ -41,7 +43,11 @@ async function readResponseSnippet(response: Response): Promise<string> {
 }
 
 export class AgencyHubClient {
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  private readonly fetchImpl: FetchLike;
+
+  constructor(fetchImpl: FetchLike = (...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) {
+    this.fetchImpl = (input, init) => fetchImpl.call(globalThis, input, init);
+  }
 
   isConfigured(settings: Settings): boolean {
     return Boolean(
