@@ -4,7 +4,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 3;
+export const STORAGE_SCHEMA_VERSION = 4;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -104,6 +104,7 @@ export const PING_MIN_FAN_MESSAGES = 3;
 // ─── Earnings ────────────────────────────────────────────────────────────
 
 export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
 
 // ─── UI ──────────────────────────────────────────────────────────────────
 
@@ -136,6 +137,8 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
 
 export const DEFAULT_SETTINGS: Settings = {
   claudeApiKey: '',
+  agencyHubBaseUrl: '',
+  agencyHubApiKey: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,

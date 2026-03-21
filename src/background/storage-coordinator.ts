@@ -242,6 +242,26 @@ export class StorageCoordinator {
     });
   }
 
+  async updateSummaryCache(
+    groupId: string,
+    updater: (entry: SummaryCacheEntry) => SummaryCacheEntry,
+  ): Promise<SummaryCacheEntry | null> {
+    const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
+
+    return this.enqueueWrite(async () => {
+      const state = await this.getState();
+      const currentEntry = ((state as unknown as Record<string, unknown>)[key] as SummaryCacheEntry | undefined) ?? null;
+      if (!currentEntry) {
+        return null;
+      }
+
+      const nextEntry = updater(currentEntry);
+      await browser.storage.local.set({ [key]: nextEntry });
+      this.commitLocalWrite({ [key]: nextEntry });
+      return nextEntry;
+    });
+  }
+
   async removeSummaryCache(groupId: string): Promise<void> {
     const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
 

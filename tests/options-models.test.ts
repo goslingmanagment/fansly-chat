@@ -11,6 +11,8 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      agencyHubBaseUrl: '',
+      agencyHubApiKey: '',
       quickMessageCount: 30,
       improveMessageCount: 45,
       deepMessageCount: 200,
@@ -63,6 +65,10 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
     runtime: {
       sendMessage: vi.fn(async () => []),
       openOptionsPage: vi.fn(async () => undefined),
+    },
+    permissions: {
+      contains: vi.fn(async () => false),
+      request: vi.fn(async () => false),
     },
   };
 

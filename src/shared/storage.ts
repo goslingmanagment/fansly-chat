@@ -14,6 +14,7 @@ import {
   collectAliasKeysForCanonical,
   resolveCanonicalAccountId,
 } from './account-aliases.js';
+import { normalizeAgencyHubBaseUrl } from './agency-hub.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
 import type {
   ModelSelectableFeatureType,
@@ -65,6 +66,10 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
 
   return {
     claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
+    agencyHubBaseUrl: normalizeAgencyHubBaseUrl(
+      String(input.agencyHubBaseUrl ?? defaults.agencyHubBaseUrl),
+    ),
+    agencyHubApiKey: String(input.agencyHubApiKey ?? defaults.agencyHubApiKey).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     improveMessageCount: Math.min(
       IMPROVE_MAX_MESSAGE_COUNT,
