@@ -1153,25 +1153,28 @@ export class OverlayController {
   }
 
   private getReadOnlyCopyText(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): string | null {
-    if (model.feature !== 'chat-review') {
-      return null;
+    if (model.feature === 'chat-review') {
+      const sections: string[] = [];
+
+      if (model.reviewMeta?.rating !== null && model.reviewMeta?.rating !== undefined) {
+        sections.push(`Rating: ${model.reviewMeta.rating}/10`);
+      }
+
+      if (model.reviewMeta?.evaluation) {
+        sections.push(`Evaluation:\n${model.reviewMeta.evaluation}`);
+      }
+
+      if (model.reviewMeta?.recommendations) {
+        sections.push(`Recommendations:\n${model.reviewMeta.recommendations}`);
+      }
+
+      const formattedReview = sections.join('\n\n').trim();
+      if (formattedReview) {
+        return formattedReview;
+      }
     }
 
-    const sections: string[] = [];
-
-    if (model.reviewMeta?.rating !== null && model.reviewMeta?.rating !== undefined) {
-      sections.push(`Rating: ${model.reviewMeta.rating}/10`);
-    }
-
-    if (model.reviewMeta?.evaluation) {
-      sections.push(`Evaluation:\n${model.reviewMeta.evaluation}`);
-    }
-
-    if (model.reviewMeta?.recommendations) {
-      sections.push(`Recommendations:\n${model.reviewMeta.recommendations}`);
-    }
-
-    return sections.join('\n\n').trim() || model.rawText;
+    return model.rawText.trim() || null;
   }
 
   private renderCompletedActions(
@@ -1184,6 +1187,15 @@ export class OverlayController {
 
     if (!rerunActionLabel && !copyText) {
       return actions;
+    }
+
+    if (rerunActionLabel) {
+      const rerun = document.createElement('button');
+      rerun.type = 'button';
+      rerun.className = 'chatmuse-button';
+      rerun.textContent = rerunActionLabel;
+      rerun.addEventListener('click', () => this.callbacks.onRerun(feature));
+      actions.append(rerun);
     }
 
     if (copyText) {
@@ -1204,16 +1216,6 @@ export class OverlayController {
       actions.append(copy);
     }
 
-    if (!rerunActionLabel) {
-      return actions;
-    }
-
-    const rerun = document.createElement('button');
-    rerun.type = 'button';
-    rerun.className = 'chatmuse-button';
-    rerun.textContent = rerunActionLabel;
-    rerun.addEventListener('click', () => this.callbacks.onRerun(feature));
-    actions.append(rerun);
     return actions;
   }
 
