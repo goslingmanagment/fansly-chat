@@ -20,6 +20,18 @@ interface StreamArgs {
   onProgress?: () => void;
 }
 
+interface AnthropicApiErrorBody {
+  error?: {
+    type?: string;
+    message?: string;
+  };
+}
+
+interface AnthropicApiErrorInfo {
+  type?: string;
+  message?: string;
+}
+
 function parseSseBlock(block: string): { event: string; data: string } | null {
   const lines = block.split('\n').map((line) => line.trim());
   let event = 'message';
@@ -112,6 +124,153 @@ function usageEquals(
   );
 }
 
+function getHeader(response: Response, name: string): string | null {
+  if (!response.headers || typeof response.headers.get !== 'function') {
+    return null;
+  }
+  return response.headers.get(name);
+}
+
+async function readAnthropicError(response: Response): Promise<AnthropicApiErrorInfo | null> {
+  if (typeof response.json !== 'function') {
+    return null;
+  }
+
+  try {
+    const body = await response.json() as AnthropicApiErrorBody;
+    return body.error
+      ? {
+          type: body.error.type,
+          message: body.error.message,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+
+  const timestamp = Date.parse(trimmed);
+  if (!Number.isFinite(timestamp)) {
+    return undefined;
+  }
+
+  return Math.max(0, timestamp - Date.now());
+}
+
+function matchesMessage(message: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => message.includes(pattern));
+}
+
+function isInsufficientBalanceError(type: string, message: string): boolean {
+  return (
+    type === 'insufficient_balance_error' ||
+    type === 'payment_required_error' ||
+    matchesMessage(message, [
+      'insufficient balance',
+      'insufficient credits',
+      'credit balance is too low',
+      'billing',
+      'payment required',
+    ])
+  );
+}
+
+function isModelUnavailableError(type: string, message: string): boolean {
+  return (
+    type === 'not_found_error' ||
+    matchesMessage(message, [
+      'model not found',
+      'does not exist',
+      'is unavailable',
+      'deprecated',
+      'not found',
+    ])
+  );
+}
+
+function isContextTooLongError(type: string, message: string): boolean {
+  return (
+    type === 'context_window_exceeded_error' ||
+    matchesMessage(message, [
+      'prompt is too long',
+      'context length',
+      'maximum context length',
+      'too many tokens',
+      'request is too large',
+      'input is too long',
+    ])
+  );
+}
+
+function buildAnthropicError(
+  status: number,
+  info: AnthropicApiErrorInfo | null,
+  retryAfterMs?: number,
+): ChatMuseError {
+  const type = info?.type?.trim().toLowerCase() ?? '';
+  const message = info?.message?.trim() ?? '';
+  const normalizedMessage = message.toLowerCase();
+  const details = {
+    ...(status > 0 ? { status } : {}),
+    ...(message ? { providerMessage: message } : {}),
+    ...(typeof retryAfterMs === 'number' ? { retryAfterMs } : {}),
+    ...(typeof retryAfterMs === 'number' ? { retryAtMs: Date.now() + retryAfterMs } : {}),
+  };
+
+  if (status === 429 || type === 'rate_limit_error' || normalizedMessage.includes('rate limit')) {
+    return new ChatMuseError('rate_limited', {
+      details,
+      retryAfterMs,
+      retryAtMs: details.retryAtMs,
+    });
+  }
+
+  if (isInsufficientBalanceError(type, normalizedMessage)) {
+    return new ChatMuseError('insufficient_balance', { details });
+  }
+
+  if (status === 401 || status === 403) {
+    return new ChatMuseError('invalid_api_key', { details });
+  }
+
+  if (isModelUnavailableError(type, normalizedMessage)) {
+    return new ChatMuseError('model_unavailable', { details });
+  }
+
+  if (status === 413 || isContextTooLongError(type, normalizedMessage)) {
+    return new ChatMuseError('context_too_long', { details });
+  }
+
+  if (status === 529 || status >= 500 || type === 'overloaded_error') {
+    return new ChatMuseError('service_unavailable', { details });
+  }
+
+  if (status === 400) {
+    return new ChatMuseError('unknown_error', { details });
+  }
+
+  if (status === 0) {
+    return new ChatMuseError('service_unavailable', { details });
+  }
+
+  return new ChatMuseError('network_error', { details });
+}
+
 export class AnthropicClient {
   async streamMessage({
     apiKey,
@@ -146,31 +305,13 @@ export class AnthropicClient {
       }),
     });
 
-    if (response.status === 401 || response.status === 403) {
-      throw new ChatMuseError('invalid_api_key');
+    if (!response.ok) {
+      const errorInfo = await readAnthropicError(response);
+      const retryAfterMs = parseRetryAfterMs(getHeader(response, 'retry-after'));
+      throw buildAnthropicError(response.status, errorInfo, retryAfterMs);
     }
-    if (response.status === 429 || response.status >= 500) {
-      throw new ChatMuseError('claude_overloaded');
-    }
-    if (response.status === 400) {
-      try {
-        const body = await response.json() as { error?: { type?: string; message?: string } };
-        const errType = body?.error?.type ?? '';
-        const errMsg = body?.error?.message?.toLowerCase() ?? '';
-        if (
-          errType === 'not_found_error' ||
-          errMsg.includes('not found') ||
-          errMsg.includes('does not exist') ||
-          errMsg.includes('deprecated')
-        ) {
-          throw new ChatMuseError('model_unavailable');
-        }
-      } catch (e) {
-        if (e instanceof ChatMuseError) throw e;
-      }
-      throw new ChatMuseError('unknown_error');
-    }
-    if (!response.ok || !response.body) {
+
+    if (!response.body) {
       throw new ChatMuseError('network_error');
     }
 
@@ -191,13 +332,12 @@ export class AnthropicClient {
           continue;
         }
 
-        // Protect against malformed SSE data
         let payload: {
           type?: string;
           message?: { usage?: Partial<AnthropicUsageMetrics> };
           usage?: Partial<AnthropicUsageMetrics>;
           delta?: { type?: string; text?: string };
-          error?: { type?: string };
+          error?: { type?: string; message?: string };
         };
         try {
           payload = JSON.parse(parsed.data) as typeof payload;
@@ -208,7 +348,7 @@ export class AnthropicClient {
         onProgress?.();
 
         if (parsed.event === 'error' || payload.type === 'error') {
-          throw new ChatMuseError('claude_overloaded');
+          throw buildAnthropicError(0, payload.error ?? null);
         }
 
         if (parsed.event === 'message_start') {

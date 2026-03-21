@@ -519,12 +519,12 @@ export class FanslyClient {
       if (error instanceof DOMException && error.name === 'AbortError') {
         throw error;
       }
-      if (error instanceof ChatMuseError && error.code === 'session_expired') {
+      if (error instanceof ChatMuseError && error.key === 'session_expired') {
         throw error;
       }
       onTrace?.({
         type: 'groups-error',
-        code: error instanceof ChatMuseError ? error.code : 'unknown_error',
+        code: error instanceof ChatMuseError ? error.key : 'unknown_error',
       });
     }
 

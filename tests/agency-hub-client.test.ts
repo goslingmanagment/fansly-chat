@@ -130,6 +130,96 @@ describe('AgencyHubClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('tests the Agency Hub connection by listing visible pages', async () => {
+    const permissionsContains = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      expect(String(url)).toBe('http://localhost:3000/api/v1/pages');
+      expect(init?.method).toBe('GET');
+      expect(init?.headers).toMatchObject({
+        authorization: 'Bearer hub-key',
+      });
+      return jsonResponse([
+        { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+      ]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: permissionsContains,
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.testConnection(
+      {
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(permissionsContains).toHaveBeenCalledWith({
+      origins: ['http://localhost/*'],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a coded missing-permission error when live connection testing cannot access the Hub origin', async () => {
+    const permissionsContains = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: permissionsContains,
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.testConnection(
+      {
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        key: 'hub_missing_permission',
+        code: 'CM-HUB-04',
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('maps unauthorized live connection tests to the invalid Hub key code', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.testConnection(
+      {
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        key: 'hub_invalid_api_key',
+        code: 'CM-HUB-03',
+      },
+    });
+  });
+
   it('returns a failed result on non-ok or network failures without throwing', async () => {
     const fetchMock = vi.fn(async (url: URL | string) => {
       const href = String(url);
@@ -155,7 +245,11 @@ describe('AgencyHubClient', () => {
     });
 
     expect(result.status).toBe('failed');
-    expect(result.reason).toContain('503');
+    expect(result.reason).toBe('hub_request_failed');
+    expect(result.error).toMatchObject({
+      key: 'hub_request_failed',
+      code: 'CM-HUB-07',
+    });
   });
 
   it('binds native-like fetch implementations to globalThis instead of the client instance', async () => {

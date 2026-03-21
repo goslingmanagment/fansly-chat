@@ -890,6 +890,61 @@ describe('ChatMuseContentApp', () => {
     expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saved');
   });
 
+  it('shows a coded toast when Fan Summary Hub sync fails after completion', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+
+    app.port.send = vi.fn();
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fan-summary';
+    app.activeOperationId = 'summary-op';
+    app.activeFanDisplayName = 'alice';
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'summary-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Fan summary text',
+        summaryMeta: {
+          generatedAt: 2000,
+          stale: false,
+          cached: false,
+          syncStatus: {
+            state: 'saving',
+            generatedAt: 2000,
+            updatedAt: 2000,
+          },
+        },
+      },
+    });
+
+    app.handlePortMessage({
+      type: 'summary:syncStatus',
+      groupId: 'group-1',
+      generatedAt: 2000,
+      syncStatus: {
+        state: 'failed',
+        generatedAt: 2000,
+        updatedAt: 2100,
+        error: {
+          key: 'hub_request_failed',
+          code: 'CM-HUB-07',
+          message: 'Agency Hub request failed.',
+        },
+      },
+    });
+
+    expect(document.querySelector('.chatmuse-toast')?.textContent).toContain('CM-HUB-08');
+    expect(document.querySelector('.chatmuse-toast')?.textContent).toContain(
+      'Hub sync failed, summary remains available locally.',
+    );
+    expect(document.querySelector('.chatmuse-toast')?.textContent).toContain(
+      'Latest Hub error: CM-HUB-07: Agency Hub request failed.',
+    );
+  });
+
   it('starts a fresh compare run instead of reopening completed cached compare results', async () => {
     const ChatMuseContentApp = await loadAppClass();
     const app = new ChatMuseContentApp() as any;

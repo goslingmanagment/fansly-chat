@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
-import type { PersistedState } from '../src/shared/types.js';
+import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
 
 let dom: InstanceType<typeof JSDOM>;
 let savedSettings: Record<string, unknown> | null;
@@ -18,6 +18,12 @@ interface MockPermissionsEvent {
 interface LoadOptionsPageOptions {
   permissionsContainsImpl?: () => Promise<boolean>;
   permissionsRequestImpl?: () => Promise<boolean>;
+  runtimeSendMessageImpl?: (
+    message: {
+      type: string;
+      settings?: AgencyHubConnectionTestRequest['settings'];
+    },
+  ) => Promise<unknown>;
   storageSetImpl?: (data: Record<string, unknown>) => Promise<void>;
 }
 
@@ -108,6 +114,16 @@ function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
   return button;
 }
 
+function getTestConnectionButton(section: HTMLElement): HTMLButtonElement {
+  const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
+    (candidate) => candidate.textContent?.includes('Test Connection'),
+  );
+  if (!button) {
+    throw new Error('Missing Agency Hub test connection button');
+  }
+  return button;
+}
+
 async function loadOptionsPage(
   state: PersistedState,
   options: LoadOptionsPageOptions = {},
@@ -137,7 +153,22 @@ async function loadOptionsPage(
       },
     },
     runtime: {
-      sendMessage: vi.fn(async () => []),
+      sendMessage: vi.fn(options.runtimeSendMessageImpl ?? (async (message: { type: string }) => {
+        if (message.type === 'getSessionsSnapshot') {
+          return [];
+        }
+        if (message.type === 'testAgencyHubConnection') {
+          return {
+            ok: false,
+            error: {
+              key: 'hub_request_failed',
+              code: 'CM-HUB-07',
+              message: 'Agency Hub request failed.',
+            },
+          };
+        }
+        return undefined;
+      })),
       openOptionsPage: vi.fn(async () => undefined),
     },
     permissions: {
@@ -289,5 +320,157 @@ describe('Options page - Agency Hub section', () => {
       'Agency Hub permission request failed',
       expect.any(Error),
     );
+  });
+
+  it('auto-tests the Hub connection on load and shows the live success status', async () => {
+    const runtimeSendMessage = vi.fn(async (message: {
+      type: string;
+      settings?: AgencyHubConnectionTestRequest['settings'];
+    }) => {
+      if (message.type === 'getSessionsSnapshot') {
+        return [];
+      }
+      if (message.type === 'testAgencyHubConnection') {
+        return { ok: true };
+      }
+      return undefined;
+    });
+
+    await loadOptionsPage(makeState(), {
+      permissionsContainsImpl: async () => true,
+      runtimeSendMessageImpl: runtimeSendMessage,
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    await vi.waitFor(() => {
+      expect(section.textContent).toContain('Connected ✓');
+      expect(section.textContent).toContain(
+        'Live connection test succeeded for http://localhost:3000.',
+      );
+    }, { timeout: 2000 });
+
+    expect(runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'testAgencyHubConnection',
+      settings: {
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+      },
+    });
+  });
+
+  it('falls back to the registry-backed Hub request error when the runtime result omits error details', async () => {
+    const runtimeSendMessage = vi.fn(async (message: {
+      type: string;
+      settings?: AgencyHubConnectionTestRequest['settings'];
+    }) => {
+      if (message.type === 'getSessionsSnapshot') {
+        return [];
+      }
+      if (message.type === 'testAgencyHubConnection') {
+        return { ok: false };
+      }
+      return undefined;
+    });
+
+    await loadOptionsPage(makeState(), {
+      permissionsContainsImpl: async () => true,
+      runtimeSendMessageImpl: runtimeSendMessage,
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    await vi.waitFor(() => {
+      expect(section.textContent).toContain('Connection failed: CM-HUB-07');
+      expect(section.textContent).toContain('Agency Hub request failed.');
+      expect(section.textContent).toContain('The Hub returned an error or could not be reached.');
+    }, { timeout: 2000 });
+  });
+
+  it('uses the custom catch-path description when the Hub connection test throws', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const runtimeError = new Error('background disconnected');
+
+    await loadOptionsPage(makeState(), {
+      permissionsContainsImpl: async () => true,
+      runtimeSendMessageImpl: async (message) => {
+        if (message.type === 'getSessionsSnapshot') {
+          return [];
+        }
+        if (message.type === 'testAgencyHubConnection') {
+          throw runtimeError;
+        }
+        return undefined;
+      },
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    await vi.waitFor(() => {
+      expect(section.textContent).toContain('Connection failed: CM-HUB-07');
+      expect(section.textContent).toContain('Agency Hub request failed.');
+      expect(section.textContent).toContain('The connection test could not be completed.');
+    }, { timeout: 2000 });
+    expect(consoleError).toHaveBeenCalledWith(
+      'Agency Hub connection test failed',
+      runtimeError,
+    );
+  });
+
+  it('saves normalized Hub settings before a manual retest and shows coded failure feedback', async () => {
+    const runtimeSendMessage = vi.fn(async (message: {
+      type: string;
+      settings?: AgencyHubConnectionTestRequest['settings'];
+    }) => {
+      if (message.type === 'getSessionsSnapshot') {
+        return [];
+      }
+      if (message.type === 'testAgencyHubConnection') {
+        return {
+          ok: false,
+          error: {
+            key: 'hub_invalid_api_key',
+            code: 'CM-HUB-03',
+            message: 'Agency Hub API key is invalid.',
+            description: 'Check the key in Agency Hub settings and try again.',
+          },
+        };
+      }
+      return undefined;
+    });
+
+    await loadOptionsPage(makeState({
+      agencyHubBaseUrl: '',
+      agencyHubApiKey: '',
+    }), {
+      permissionsContainsImpl: async () => true,
+      runtimeSendMessageImpl: runtimeSendMessage,
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
+    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const button = getTestConnectionButton(section);
+
+    urlInput.value = ' http://localhost:3000/ ';
+    urlInput.dispatchEvent(new Event('input'));
+    keyInput.value = ' invalid-key ';
+    keyInput.dispatchEvent(new Event('input'));
+    button.click();
+
+    await vi.waitFor(() => {
+      expect(savedSettings).toMatchObject({
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'invalid-key',
+      });
+      expect(section.textContent).toContain('Connection failed: CM-HUB-03');
+      expect(section.textContent).toContain('Agency Hub API key is invalid.');
+      expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
+    }, { timeout: 2000 });
+
+    expect(runtimeSendMessage).toHaveBeenLastCalledWith({
+      type: 'testAgencyHubConnection',
+      settings: {
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'invalid-key',
+      },
+    });
   });
 });

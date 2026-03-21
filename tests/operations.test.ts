@@ -164,6 +164,13 @@ function postedMessages(port: { postMessage: ReturnType<typeof vi.fn> }): Backgr
   return port.postMessage.mock.calls.map(([message]) => message as BackgroundPortMessage);
 }
 
+function expectUserErrorIdentity(
+  error: { key?: string; code?: string } | undefined,
+  expected: { key: string; code: string },
+): void {
+  expect(error).toMatchObject(expected);
+}
+
 function flattenUserBlocksFromStreamCall(
   anthropicClient: { streamMessage: ReturnType<typeof vi.fn> },
   callIndex = 0,
@@ -738,7 +745,10 @@ describe('OperationCoordinator', () => {
         message.type === 'compare:error',
     );
 
-    expect(errorMessage?.error.code).toBe('compare_cards_unavailable');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'compare_cards_unavailable',
+      code: 'CM-FLOW-08',
+    });
     expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
   });
 
@@ -1127,7 +1137,10 @@ describe('OperationCoordinator', () => {
     );
 
     expect(cardError?.cardId).toBe('current:personality-1');
-    expect(cardError?.error.code).toBe('network_error');
+    expectUserErrorIdentity(cardError?.error, {
+      key: 'network_error',
+      code: 'CM-NET-01',
+    });
     expect(cardError?.anthropicSpend).toEqual({
       totalTokens: 56,
       inputTokens: 50,
@@ -1207,7 +1220,10 @@ describe('OperationCoordinator', () => {
     );
 
     expect(cardError?.cardId).toBe('current:personality-1');
-    expect(cardError?.error.code).toBe('network_error');
+    expectUserErrorIdentity(cardError?.error, {
+      key: 'network_error',
+      code: 'CM-NET-01',
+    });
     expect(messages.some((message) => message.type === 'compare:cardComplete')).toBe(true);
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
@@ -1266,7 +1282,10 @@ describe('OperationCoordinator', () => {
         message.type === 'compare:discarded',
     );
 
-    expect(discardedMessage?.error.code).toBe('chat_changed');
+    expectUserErrorIdentity(discardedMessage?.error, {
+      key: 'chat_changed',
+      code: 'CM-FLOW-06',
+    });
   });
 
   it('sends compare:error when compare generation hits the shared timeout', async () => {
@@ -1326,7 +1345,10 @@ describe('OperationCoordinator', () => {
         message.type === 'compare:error',
     );
 
-    expect(errorMessage?.error.code).toBe('timed_out');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CM-NET-02',
+    });
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(false);
   });
 
@@ -1493,7 +1515,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('ping_blocked');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'ping_blocked',
+      code: 'CM-FLOW-05',
+    });
     expect(errorMessage).not.toHaveProperty('profiling');
   });
 
@@ -1618,7 +1643,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:discarded',
     );
 
-    expect(discardedMessage?.error.code).toBe('chat_changed');
+    expectUserErrorIdentity(discardedMessage?.error, {
+      key: 'chat_changed',
+      code: 'CM-FLOW-06',
+    });
     expect(discardedMessage).not.toHaveProperty('profiling');
     expect(messages.some((message) => message.type === 'operation:error')).toBe(false);
   });
@@ -1877,7 +1905,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('network_error');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'network_error',
+      code: 'CM-NET-01',
+    });
     expect(errorMessage?.profiling).toBeDefined();
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'failed',
@@ -1931,7 +1962,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('timed_out');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CM-NET-02',
+    });
     expect(errorMessage?.profiling).toBeDefined();
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'failed',
@@ -2069,7 +2103,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('timed_out');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CM-NET-02',
+    });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'load-messages')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
@@ -2119,7 +2156,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('timed_out');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CM-NET-02',
+    });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
@@ -2174,7 +2214,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('timed_out');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CM-NET-02',
+    });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'completed',
       detail: 'first chunk received',
@@ -2239,7 +2282,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('timed_out');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CM-NET-02',
+    });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
@@ -2299,7 +2345,10 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:error',
     );
 
-    expect(errorMessage?.error.code).toBe('ping_blocked');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'ping_blocked',
+      code: 'CM-FLOW-05',
+    });
     expect(errorMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',
@@ -3335,7 +3384,243 @@ describe('OperationCoordinator', () => {
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
         message.type === 'operation:error',
     );
-    expect(errorMessage?.error.code).toBe('model_unavailable');
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'model_unavailable',
+      code: 'CM-API-03',
+    });
+  });
+
+  it('retries Anthropic rate limits once when Retry-After is 60 seconds or less', async () => {
+    vi.useFakeTimers();
+
+    const retryAtMs = currentNow + 30_000;
+    let callCount = 0;
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new ChatMuseError('rate_limited', {
+            retryAfterMs: 30_000,
+            retryAtMs,
+          });
+        }
+        return 'Retried reply';
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const waitingMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress' &&
+        message.statusCode === 'CM-API-01',
+    );
+    expect(waitingMessage).toMatchObject({
+      phase: 'generating',
+      statusCode: 'CM-API-01',
+      message: 'Rate limited. Waiting to retry…',
+      retryAtMs,
+    });
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await startPromise;
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.rawText).toBe('Retried reply');
+  });
+
+  it('uses the registry rate-limit code when retrying a plain rate-limited error object without code', async () => {
+    vi.useFakeTimers();
+
+    const retryAtMs = currentNow + 30_000;
+    let callCount = 0;
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          throw {
+            key: 'rate_limited',
+            retryAfterMs: 30_000,
+            retryAtMs,
+          };
+        }
+        return 'Retried reply';
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const waitingMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress' &&
+        message.statusCode === 'CM-API-01',
+    );
+    expect(waitingMessage).toMatchObject({
+      phase: 'generating',
+      statusCode: 'CM-API-01',
+      message: 'Rate limited. Waiting to retry…',
+      retryAtMs,
+    });
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await startPromise;
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not auto-retry Anthropic rate limits when Retry-After is longer than 60 seconds', async () => {
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        throw new ChatMuseError('rate_limited', {
+          retryAfterMs: 61_000,
+          retryAtMs: currentNow + 61_000,
+        });
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'rate_limited',
+      code: 'CM-API-01',
+    });
+  });
+
+  it('retries Anthropic service_unavailable once before failing the operation', async () => {
+    vi.useFakeTimers();
+
+    let callCount = 0;
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new ChatMuseError('service_unavailable');
+        }
+        return 'Recovered reply';
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const waitingMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress' &&
+        message.statusCode === 'CM-API-05',
+    );
+    expect(waitingMessage).toMatchObject({
+      phase: 'generating',
+      statusCode: 'CM-API-05',
+      message: 'Claude unavailable. Retrying…',
+    });
+    expect(typeof waitingMessage?.retryAtMs).toBe('number');
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await startPromise;
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.rawText).toBe('Recovered reply');
+  });
+
+  it('does not retry Anthropic service_unavailable more than once', async () => {
+    vi.useFakeTimers();
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        throw new ChatMuseError('service_unavailable');
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await startPromise;
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'service_unavailable',
+      code: 'CM-API-05',
+    });
   });
 
   it('invalidates summary cache when model changes', async () => {

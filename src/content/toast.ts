@@ -1,21 +1,55 @@
+import {
+  formatUserFacingError,
+  getUserErrorDescription,
+  isUserFacingError,
+} from '../shared/errors.js';
+import type { UserFacingError } from '../shared/types.js';
 import { ensureToastRoot } from './dom-anchor.js';
 
 interface ToastOptions {
   actionLabel?: string;
   onAction?: () => void;
   durationMs?: number;
+  description?: string;
+  dedupeKey?: string;
+  tone?: 'info' | 'success' | 'warning' | 'error';
 }
 
 export class ToastController {
   private readonly root = ensureToastRoot();
+  private readonly activeToasts = new Map<string, { node: HTMLDivElement; timeout: number }>();
 
-  show(message: string, options: ToastOptions = {}): void {
+  show(message: string | UserFacingError, options: ToastOptions = {}): void {
+    const primaryText = isUserFacingError(message)
+      ? formatUserFacingError(message)
+      : message;
+    const description = options.description ?? (
+      isUserFacingError(message)
+        ? getUserErrorDescription(message) ?? undefined
+        : undefined
+    );
+    const dedupeKey = options.dedupeKey ?? `${primaryText}|${description ?? ''}`;
+    const existing = this.activeToasts.get(dedupeKey);
+    if (existing) {
+      window.clearTimeout(existing.timeout);
+      existing.node.remove();
+      this.activeToasts.delete(dedupeKey);
+    }
+
     const toast = document.createElement('div');
-    toast.className = 'chatmuse-toast';
+    toast.className = `chatmuse-toast chatmuse-toast-${options.tone ?? 'info'}`;
 
     const text = document.createElement('div');
-    text.textContent = message;
+    text.className = 'chatmuse-toast-primary';
+    text.textContent = primaryText;
     toast.append(text);
+
+    if (description) {
+      const secondary = document.createElement('div');
+      secondary.className = 'chatmuse-toast-secondary';
+      secondary.textContent = description;
+      toast.append(secondary);
+    }
 
     if (options.actionLabel && options.onAction) {
       const actions = document.createElement('div');
@@ -26,15 +60,27 @@ export class ToastController {
       action.textContent = options.actionLabel;
       action.addEventListener('click', () => {
         options.onAction?.();
-        toast.remove();
+        this.removeToast(dedupeKey);
       });
       actions.append(action);
       toast.append(actions);
     }
 
     this.root.append(toast);
-    window.setTimeout(() => {
-      toast.remove();
+    const timeout = window.setTimeout(() => {
+      this.removeToast(dedupeKey);
     }, options.durationMs ?? 4500);
+    this.activeToasts.set(dedupeKey, { node: toast, timeout });
+  }
+
+  private removeToast(key: string): void {
+    const active = this.activeToasts.get(key);
+    if (!active) {
+      return;
+    }
+
+    window.clearTimeout(active.timeout);
+    active.node.remove();
+    this.activeToasts.delete(key);
   }
 }

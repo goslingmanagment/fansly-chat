@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import type { SessionTemplate } from '../src/shared/types.js';
+import type { AgencyHubConnectionTestRequest, SessionTemplate } from '../src/shared/types.js';
 
 let mockStorage: Record<string, unknown> = {};
 let onMessageListener:
-  | ((message: { type: string; tabId?: number }) => Promise<unknown>)
+  | ((message: { type: string; tabId?: number; settings?: AgencyHubConnectionTestRequest['settings'] }) => Promise<unknown>)
   | undefined;
 
 function makeCapture(accountId: string) {
@@ -34,6 +35,10 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
 
 async function installRuntimeApiHarness(fanslyClient: {
   getAuthenticatedAccount: (session: SessionTemplate, signal: AbortSignal) => Promise<unknown>;
+}, options?: {
+  agencyHubClient?: {
+    testConnection: ReturnType<typeof vi.fn>;
+  };
 }) {
   vi.resetModules();
   onMessageListener = undefined;
@@ -72,7 +77,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     },
     runtime: {
       onMessage: {
-        addListener: vi.fn((listener: (message: { type: string; tabId?: number }) => Promise<unknown>) => {
+        addListener: vi.fn((listener: (message: { type: string; tabId?: number; settings?: AgencyHubConnectionTestRequest['settings'] }) => Promise<unknown>) => {
           onMessageListener = listener;
         }),
       },
@@ -92,7 +97,11 @@ async function installRuntimeApiHarness(fanslyClient: {
 
   const sessionStore = new SessionStore();
   const storageCoordinator = new StorageCoordinator();
+  const agencyHubClient = options?.agencyHubClient ?? {
+    testConnection: vi.fn(async () => ({ ok: true })),
+  };
   registerRuntimeApi({
+    agencyHubClient: agencyHubClient as never,
     fanslyClient: fanslyClient as never,
     sessionStore,
     tabContexts: new TabContextStore(),
@@ -103,7 +112,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     throw new Error('Runtime listener was not registered');
   }
 
-  return { sessionStore, tabsQuery, tabsGet };
+  return { sessionStore, tabsQuery, tabsGet, agencyHubClient };
 }
 
 describe('runtime-api getSessionsSnapshot', () => {
@@ -243,5 +252,72 @@ describe('runtime-api getPopupStatus', () => {
     );
     expect(tabsGet).toHaveBeenCalledWith(2);
     expect(tabsQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe('runtime-api testAgencyHubConnection', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('passes Agency Hub settings through to the background client and returns its result', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({
+        ok: false,
+        error: {
+          key: 'hub_missing_permission',
+          code: 'CM-HUB-04',
+          message: 'Agency Hub host permission is missing.',
+        },
+      })),
+    };
+
+    await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+
+    const settings = {
+      agencyHubBaseUrl: 'http://hub.test',
+      agencyHubApiKey: 'hub-key',
+    };
+    const result = await onMessageListener?.({
+      type: 'testAgencyHubConnection',
+      settings,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        key: 'hub_missing_permission',
+        code: 'CM-HUB-04',
+      },
+    });
+    expect(agencyHubClient.testConnection).toHaveBeenCalledWith(
+      settings,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('returns a coded fallback error when the testAgencyHubConnection request is malformed', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+
+    await installRuntimeApiHarness(fanslyClient);
+
+    const result = await onMessageListener?.({
+      type: 'testAgencyHubConnection',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: createUserError('hub_request_failed'),
+    });
   });
 });

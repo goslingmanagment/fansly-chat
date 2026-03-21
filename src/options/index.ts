@@ -4,8 +4,18 @@ import {
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
 import { CLAUDE_MODELS } from '../shared/constants.js';
+import {
+  createUserError,
+  getUserErrorDescription,
+} from '../shared/errors.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
-import type { ModelSelectableFeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
+import type {
+  AgencyHubConnectionTestResponse,
+  ModelSelectableFeatureType,
+  Personality,
+  SessionSnapshotEntry,
+  UserFacingError,
+} from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
 
@@ -149,8 +159,16 @@ type AgencyHubPermissionFeedback =
   | { kind: 'request_error'; originPattern: string; errorMessage: string }
   | { kind: 'unsupported'; originPattern: string };
 
+type AgencyHubConnectionFeedback =
+  | { kind: 'idle' }
+  | { kind: 'pending' }
+  | { kind: 'testing' }
+  | { kind: 'connected'; baseUrl: string }
+  | { kind: 'failed'; error: UserFacingError };
+
 let renderCleanup: (() => void) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
+let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
 
 function formatAgencyHubError(error: unknown): string {
   if (error instanceof Error) {
@@ -182,6 +200,14 @@ function buildAgencyHubPermissionScopeNote(baseUrl: string | null | undefined): 
   }
 
   return `Firefox grants host access per host rather than per port, so ${originPattern} covers the configured URL ${normalized}.`;
+}
+
+function buildAgencyHubConnectionSignature(baseUrl: string, apiKey: string): string {
+  return `${normalizeAgencyHubBaseUrl(baseUrl)}|${apiKey.trim()}`;
+}
+
+function hasAgencyHubConnectionInputs(baseUrl: string, apiKey: string): boolean {
+  return Boolean(baseUrl.trim() || apiKey.trim());
 }
 
 async function getAgencyHubPermissionCheck(originPattern: string | null): Promise<AgencyHubPermissionCheckResult> {
@@ -341,6 +367,154 @@ async function render(): Promise<void> {
   agencyHubPermissionMeta.style.fontSize = '13px';
 
   const agencyHubPermissionButton = createButton('Grant Access', true);
+  const agencyHubConnectionStatus = document.createElement('div');
+  agencyHubConnectionStatus.style.fontWeight = '700';
+  agencyHubConnectionStatus.style.fontSize = '14px';
+
+  const agencyHubConnectionMeta = document.createElement('div');
+  agencyHubConnectionMeta.style.color = 'var(--chatmuse-muted)';
+  agencyHubConnectionMeta.style.fontSize = '13px';
+
+  const agencyHubConnectionButton = createButton('Test Connection', true);
+  const agencyHubActionRow = document.createElement('div');
+  agencyHubActionRow.style.display = 'flex';
+  agencyHubActionRow.style.gap = '8px';
+  agencyHubActionRow.style.flexWrap = 'wrap';
+  agencyHubActionRow.append(agencyHubPermissionButton, agencyHubConnectionButton);
+
+  let agencyHubConnectionVersion = 0;
+  let lastAgencyHubConnectionSignature: string | null = null;
+
+  const renderAgencyHubConnectionState = (): void => {
+    const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
+    const hasInputs = hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value);
+
+    agencyHubConnectionButton.disabled =
+      agencyHubConnectionFeedback.kind === 'testing' || !hasInputs;
+
+    switch (agencyHubConnectionFeedback.kind) {
+      case 'idle':
+        agencyHubConnectionStatus.textContent = 'Not tested yet.';
+        agencyHubConnectionStatus.style.color = 'var(--chatmuse-text)';
+        agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
+        return;
+      case 'pending':
+        agencyHubConnectionStatus.textContent = 'Connection status updating…';
+        agencyHubConnectionStatus.style.color = 'var(--chatmuse-text)';
+        agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
+        return;
+      case 'testing':
+        agencyHubConnectionStatus.textContent = 'Testing connection…';
+        agencyHubConnectionStatus.style.color = 'var(--chatmuse-text)';
+        agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
+        return;
+      case 'connected':
+        agencyHubConnectionStatus.textContent = 'Connected ✓';
+        agencyHubConnectionStatus.style.color = 'var(--chatmuse-success)';
+        agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
+        return;
+      case 'failed': {
+        const description = getUserErrorDescription(agencyHubConnectionFeedback.error);
+        agencyHubConnectionStatus.textContent = `Connection failed: ${agencyHubConnectionFeedback.error.code}`;
+        agencyHubConnectionStatus.style.color = 'var(--chatmuse-danger)';
+        agencyHubConnectionMeta.textContent = description
+          ? `${agencyHubConnectionFeedback.error.message} ${description}`
+          : agencyHubConnectionFeedback.error.message;
+        return;
+      }
+    }
+  };
+
+  const markAgencyHubConnectionPending = (): void => {
+    agencyHubConnectionVersion += 1;
+    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value)) {
+      agencyHubConnectionFeedback = { kind: 'idle' };
+      lastAgencyHubConnectionSignature = null;
+    } else {
+      agencyHubConnectionFeedback = { kind: 'pending' };
+      lastAgencyHubConnectionSignature = null;
+    }
+    renderAgencyHubConnectionState();
+  };
+
+  const persistAgencyHubSettings = async (): Promise<void> => {
+    const savedSettings = await saveSettings({
+      agencyHubBaseUrl: agencyHubUrlInput.value,
+      agencyHubApiKey: agencyHubKeyInput.value,
+    });
+    agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
+    agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
+  };
+
+  const runAgencyHubConnectionTest = async (options?: {
+    force?: boolean;
+    saveFirst?: boolean;
+  }): Promise<void> => {
+    const signature = buildAgencyHubConnectionSignature(
+      agencyHubUrlInput.value,
+      agencyHubKeyInput.value,
+    );
+
+    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value)) {
+      agencyHubConnectionFeedback = { kind: 'idle' };
+      lastAgencyHubConnectionSignature = null;
+      renderAgencyHubConnectionState();
+      return;
+    }
+
+    if (!options?.force && signature === lastAgencyHubConnectionSignature) {
+      renderAgencyHubConnectionState();
+      return;
+    }
+
+    const version = ++agencyHubConnectionVersion;
+    agencyHubConnectionFeedback = { kind: 'testing' };
+    renderAgencyHubConnectionState();
+
+    try {
+      if (options?.saveFirst) {
+        await persistAgencyHubSettings();
+      }
+
+      const response = await browser.runtime.sendMessage({
+        type: 'testAgencyHubConnection',
+        settings: {
+          agencyHubBaseUrl: agencyHubUrlInput.value,
+          agencyHubApiKey: agencyHubKeyInput.value.trim(),
+        },
+      }) as AgencyHubConnectionTestResponse;
+
+      if (version !== agencyHubConnectionVersion) {
+        return;
+      }
+
+      const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
+      agencyHubConnectionFeedback = response.ok
+        ? { kind: 'connected', baseUrl: normalizedBaseUrl }
+        : {
+            kind: 'failed',
+            error: response.error ?? createUserError('hub_request_failed'),
+          };
+      lastAgencyHubConnectionSignature = buildAgencyHubConnectionSignature(
+        agencyHubUrlInput.value,
+        agencyHubKeyInput.value,
+      );
+    } catch (error) {
+      console.error('Agency Hub connection test failed', error);
+      if (version !== agencyHubConnectionVersion) {
+        return;
+      }
+      agencyHubConnectionFeedback = {
+        kind: 'failed',
+        error: createUserError('hub_request_failed', {
+          description: 'The connection test could not be completed.',
+        }),
+      };
+      lastAgencyHubConnectionSignature = null;
+    }
+
+    renderAgencyHubConnectionState();
+  };
 
   let agencyHubPermissionRefreshVersion = 0;
   const refreshAgencyHubPermissionState = async (): Promise<void> => {
@@ -506,7 +680,20 @@ async function render(): Promise<void> {
         }
       } finally {
         await refreshAgencyHubPermissionState();
+        await runAgencyHubConnectionTest({ force: true });
       }
+    })();
+  });
+
+  agencyHubConnectionButton.addEventListener('click', () => {
+    void (async () => {
+      try {
+        await persistAgencyHubSettings();
+      } catch (error) {
+        console.error('Failed to save Agency Hub settings', error);
+      }
+      await refreshAgencyHubPermissionState();
+      await runAgencyHubConnectionTest({ force: true });
     })();
   });
 
@@ -515,7 +702,9 @@ async function render(): Promise<void> {
     labeledField('Agency Hub API key', agencyHubKeyRow),
     agencyHubPermissionStatus,
     agencyHubPermissionMeta,
-    agencyHubPermissionButton,
+    agencyHubConnectionStatus,
+    agencyHubConnectionMeta,
+    agencyHubActionRow,
   );
 
   // ─── AI Models ───────────────────────────────────────────
@@ -573,7 +762,7 @@ async function render(): Promise<void> {
       featureModels[sel.dataset.feature!] = sel.value;
     }
 
-    await saveSettings({
+    const savedSettings = await saveSettings({
       claudeApiKey: keyInput.value,
       agencyHubBaseUrl: agencyHubUrlInput.value,
       agencyHubApiKey: agencyHubKeyInput.value,
@@ -584,6 +773,19 @@ async function render(): Promise<void> {
       promptCachingEnabled: promptCachingInput.checked,
       featureModels: featureModels as Record<ModelSelectableFeatureType, string>,
     });
+
+    keyInput.value = savedSettings.claudeApiKey;
+    agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
+    agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
+
+    const hubSignature = buildAgencyHubConnectionSignature(
+      savedSettings.agencyHubBaseUrl,
+      savedSettings.agencyHubApiKey,
+    );
+    if (hubSignature !== lastAgencyHubConnectionSignature) {
+      await refreshAgencyHubPermissionState();
+      await runAgencyHubConnectionTest({ force: true });
+    }
   }, 350);
 
   [
@@ -600,15 +802,19 @@ async function render(): Promise<void> {
     element.addEventListener('change', saveSettingsDebounced);
   });
   agencyHubUrlInput.addEventListener('input', () => {
+    markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
   });
   agencyHubUrlInput.addEventListener('change', () => {
+    markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
   });
   agencyHubKeyInput.addEventListener('input', () => {
+    markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
   });
   agencyHubKeyInput.addEventListener('change', () => {
+    markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
   });
   if (
@@ -619,7 +825,10 @@ async function render(): Promise<void> {
   ) {
     const handlePermissionChanged = () => {
       agencyHubPermissionFeedback = null;
-      void refreshAgencyHubPermissionState();
+      void (async () => {
+        await refreshAgencyHubPermissionState();
+        await runAgencyHubConnectionTest({ force: true });
+      })();
     };
 
     browser.permissions.onAdded.addListener(handlePermissionChanged);
@@ -845,6 +1054,7 @@ async function render(): Promise<void> {
   };
 
   await refreshAgencyHubPermissionState();
+  await runAgencyHubConnectionTest({ force: true });
 }
 
 injectStyles();

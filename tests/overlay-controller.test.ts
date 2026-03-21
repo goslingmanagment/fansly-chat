@@ -17,6 +17,7 @@ import type {
   OverlayInsertPart,
   OverlayViewModel,
   PromptDebugSnapshot,
+  UserFacingError,
 } from '../src/shared/types.js';
 
 function createLoadingModel(
@@ -24,6 +25,8 @@ function createLoadingModel(
   rawText: string,
   options?: {
     progressMessage?: string;
+    statusCode?: string;
+    retryAtMs?: number;
     profiling?: OperationProfilingSnapshot;
     anthropicSpend?: AnthropicSpendSummary;
   },
@@ -32,12 +35,14 @@ function createLoadingModel(
     kind: 'loading',
     feature: 'fast-reply',
     fanDisplayName: 'fan',
-    progress: options?.progressMessage
+    progress: options?.progressMessage || options?.statusCode
       ? {
           operationId,
           feature: 'fast-reply',
           phase: 'generating',
           message: options.progressMessage,
+          ...(options?.statusCode ? { statusCode: options.statusCode } : {}),
+          ...(typeof options?.retryAtMs === 'number' ? { retryAtMs: options.retryAtMs } : {}),
         }
       : null,
     rawText,
@@ -128,6 +133,7 @@ function createSummaryReadOnlyModel(
   options?: {
     debugPrompt?: PromptDebugSnapshot;
     syncState?: 'not-set-up' | 'saving' | 'saved' | 'failed';
+    syncError?: UserFacingError;
   },
 ): Extract<OverlayViewModel, { kind: 'readOnly' }> {
   const generatedAt = Date.now();
@@ -144,6 +150,7 @@ function createSummaryReadOnlyModel(
       syncStatus: {
         state: options?.syncState ?? 'saved',
         generatedAt,
+        ...(options?.syncError ? { error: options.syncError } : {}),
         updatedAt: Date.now(),
       },
     },
@@ -275,6 +282,7 @@ describe('OverlayController', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     Reflect.deleteProperty(globalThis, '__CHATMUSE_OVERLAY_DEBUG__');
@@ -528,6 +536,34 @@ describe('OverlayController', () => {
     expect(setIntervalSpy).not.toHaveBeenCalled();
   });
 
+  it('renders rate-limit status codes with a live retry countdown in loading view', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-21T12:00:00.000Z'));
+
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(
+      createLoadingModel('rate-limit-op', '', {
+        progressMessage: 'Rate limited. Waiting to retry…',
+        statusCode: 'CM-API-01',
+        retryAtMs: Date.now() + 30_000,
+      }),
+    );
+
+    const status = requireElement<HTMLDivElement>('.chatmuse-overlay-status');
+    expect(status.textContent).toContain('CM-API-01');
+    expect(status.textContent).toContain('Rate limited. Waiting to retry…');
+    expect(status.textContent).toContain('(30s)');
+
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(status.textContent).toContain('(29s)');
+  });
+
   it('emits render diagnostics for repeated loading renders when debug tracing is enabled', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
@@ -719,6 +755,28 @@ describe('OverlayController', () => {
     );
   });
 
+  it('renders the Fan Summary failed sync code when available', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createSummaryReadOnlyModel({
+      syncState: 'failed',
+      syncError: {
+        key: 'hub_request_failed',
+        code: 'CM-HUB-07',
+        message: 'Agency Hub request failed.',
+      },
+    }));
+
+    expect(document.querySelector('.chatmuse-overlay-action-status')?.textContent).toBe(
+      'Server sync · failed (CM-HUB-07)',
+    );
+  });
+
   it('renders profiling summary below the error block when profiling is present', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
@@ -734,13 +792,15 @@ describe('OverlayController', () => {
       operationId: 'error-op',
       profiling: createProfilingSnapshot(),
       error: {
-        code: 'unknown_error',
+        key: 'unknown_error',
+        code: 'CM-APP-01',
         message: 'Something broke',
       },
     });
 
     const grid = requireElement<HTMLDivElement>('.chatmuse-grid');
-    expect(grid.firstElementChild?.textContent).toBe('Something broke');
+    expect(grid.firstElementChild?.textContent).toContain('CM-APP-01');
+    expect(grid.firstElementChild?.textContent).toContain('Something broke');
     expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
   });
 

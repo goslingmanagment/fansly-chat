@@ -1,11 +1,16 @@
 import { FEATURE_LABELS } from '../../shared/constants.js';
-import { toUserError } from '../../shared/errors.js';
+import {
+  formatUserFacingError,
+  getUserErrorDescription,
+  toUserError,
+} from '../../shared/errors.js';
 import type {
   AnthropicSpendSummary,
   CompareInlineTabState,
   CompareInlineViewModel,
   FeatureType,
   InlinePanelViewModel,
+  OperationProgressPayload,
   OverlayInsertPart,
   OverlayViewModel,
   UserFacingError,
@@ -79,6 +84,42 @@ function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
   return null;
 }
 
+function formatRetryCountdown(retryAtMs: number): string {
+  const remainingSeconds = Math.max(1, Math.ceil((retryAtMs - Date.now()) / 1000));
+  return `${remainingSeconds}s`;
+}
+
+function formatLoadingStatus(progress: OperationProgressPayload | null | undefined): string {
+  if (progress?.statusCode) {
+    const countdown = typeof progress.retryAtMs === 'number'
+      ? ` (${formatRetryCountdown(progress.retryAtMs)})`
+      : '';
+    return `${progress.statusCode} • ${progress.message ?? 'Waiting to retry…'}${countdown}`;
+  }
+
+  return progress?.message ?? 'Generating…';
+}
+
+function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
+  const block = document.createElement('div');
+  block.className = 'chatmuse-inline-error';
+
+  const primary = document.createElement('div');
+  primary.className = 'chatmuse-error-primary';
+  primary.textContent = formatUserFacingError(error);
+  block.append(primary);
+
+  const description = getUserErrorDescription(error);
+  if (description) {
+    const secondary = document.createElement('div');
+    secondary.className = 'chatmuse-error-secondary';
+    secondary.textContent = description;
+    block.append(secondary);
+  }
+
+  return block;
+}
+
 
 export class InlinePanelController {
   readonly root: HTMLDivElement;
@@ -92,6 +133,7 @@ export class InlinePanelController {
   private model: InlinePanelViewModel = { kind: 'hidden' };
   private inlineError: UserFacingError | null = null;
   private lastFocusedReplyOpId: string | null = null;
+  private loadingStatusTimer: number | null = null;
 
   constructor(private readonly callbacks: InlinePanelCallbacks) {
     this.root = document.createElement('div');
@@ -176,6 +218,10 @@ export class InlinePanelController {
       return;
     }
 
+    if (model.kind !== 'loading') {
+      this.clearLoadingStatusTimer();
+    }
+
     this.model = model;
 
     if (model.kind === 'error') {
@@ -208,6 +254,7 @@ export class InlinePanelController {
     this.currentView = null;
     this.inlineError = null;
     this.lastFocusedReplyOpId = null;
+    this.clearLoadingStatusTimer();
     this.bodyEl.replaceChildren();
     this.root.classList.add('chatmuse-hidden');
   }
@@ -399,13 +446,33 @@ export class InlinePanelController {
     view: LoadingViewState,
     model: Extract<OverlayViewModel, { kind: 'loading' }>,
   ): void {
-    const statusText = model.progress?.message ?? 'Generating\u2026';
+    const statusText = formatLoadingStatus(model.progress);
     const streamText = model.rawText || 'Waiting for Claude\u2026';
     if (view.statusText.data !== statusText) {
       view.statusText.data = statusText;
     }
     if (view.streamText.data !== streamText) {
       view.streamText.data = streamText;
+    }
+
+    if (typeof model.progress?.retryAtMs === 'number') {
+      if (this.loadingStatusTimer === null) {
+        this.loadingStatusTimer = window.setInterval(() => {
+          if (
+            this.currentView?.kind !== 'loading' ||
+            this.model.kind !== 'loading'
+          ) {
+            this.clearLoadingStatusTimer();
+            return;
+          }
+          const nextStatusText = formatLoadingStatus(this.model.progress);
+          if (this.currentView.statusText.data !== nextStatusText) {
+            this.currentView.statusText.data = nextStatusText;
+          }
+        }, 250);
+      }
+    } else {
+      this.clearLoadingStatusTimer();
     }
   }
 
@@ -417,10 +484,7 @@ export class InlinePanelController {
 
     // Inline error banner (from insert/copy failures)
     if (this.inlineError) {
-      const errorBanner = document.createElement('div');
-      errorBanner.className = 'chatmuse-inline-error';
-      errorBanner.textContent = this.inlineError.message;
-      section.append(errorBanner);
+      section.append(createUserErrorBlock(this.inlineError));
     }
 
     if (model.parts.length > 0) {
@@ -563,10 +627,7 @@ export class InlinePanelController {
     section.className = 'chatmuse-grid';
 
     if (this.inlineError) {
-      const errorBanner = document.createElement('div');
-      errorBanner.className = 'chatmuse-inline-error';
-      errorBanner.textContent = this.inlineError.message;
-      section.append(errorBanner);
+      section.append(createUserErrorBlock(this.inlineError));
     }
 
     if (tab.status === 'loading') {
@@ -585,10 +646,7 @@ export class InlinePanelController {
       if (tab.anthropicSpend) {
         section.append(this.createSpendStrip(tab.anthropicSpend));
       }
-      const error = document.createElement('div');
-      error.className = 'chatmuse-inline-error';
-      error.textContent = tab.error?.message ?? 'Something went wrong.';
-      section.append(error);
+      section.append(createUserErrorBlock(tab.error ?? toUserError(null)));
       return section;
     }
 
@@ -747,16 +805,21 @@ export class InlinePanelController {
     });
   }
 
+  private clearLoadingStatusTimer(): void {
+    if (this.loadingStatusTimer === null) {
+      return;
+    }
+    window.clearInterval(this.loadingStatusTimer);
+    this.loadingStatusTimer = null;
+  }
+
   // ─── Error ───────────────────────────────────────────────────────────
 
   private renderErrorBody(model: Extract<OverlayViewModel, { kind: 'error' }>): HTMLElement {
     const section = document.createElement('div');
     section.className = 'chatmuse-grid';
 
-    const block = document.createElement('div');
-    block.className = 'chatmuse-inline-error';
-    block.textContent = model.error.message;
-    section.append(block);
+    section.append(createUserErrorBlock(model.error));
 
     const actions = document.createElement('div');
     actions.className = 'chatmuse-card-actions';

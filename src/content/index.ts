@@ -17,7 +17,12 @@ import { ToastController } from './toast.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
-import { toUserError } from '../shared/errors.js';
+import {
+  formatUserFacingError,
+  getErrorMessage,
+  isUserFacingError,
+  toUserError,
+} from '../shared/errors.js';
 import {
   featureRequiresDraft,
   featureSupportsReplyMode,
@@ -132,7 +137,7 @@ export class ChatMuseContentApp {
   private readonly port = new PortClient({
     onMessage: (message) => this.handlePortMessage(message),
     onDisconnected: () => {
-      this.toast.show('Extension reloaded. Please try again.');
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.completedOverlayCache.clearAll();
       this.completedCompareCache.clearAll();
       this.quickInlineVisible = false;
@@ -256,6 +261,30 @@ export class ChatMuseContentApp {
     this.root.id = 'chatmuse-root';
     this.root.append(this.inlinePanel.root, this.buttonBar.root, this.mappingBanner.root);
     this.mountController = new ConversationMountController(this.root);
+  }
+
+  private showUserErrorToast(
+    error: unknown,
+    options?: {
+      dedupeKey?: string;
+      description?: string;
+      tone?: 'info' | 'success' | 'warning' | 'error';
+      durationMs?: number;
+    },
+  ): void {
+    const userError = isUserFacingError(error) ? error : toUserError(error);
+    this.toast.show(userError, {
+      tone: options?.tone ?? 'error',
+      dedupeKey: options?.dedupeKey,
+      description: options?.description,
+      durationMs: options?.durationMs,
+      ...(userError.settingsLink
+        ? {
+            actionLabel: 'Settings',
+            onAction: () => { void browser.runtime.openOptionsPage(); },
+          }
+        : {}),
+    });
   }
 
   init(): void {
@@ -466,32 +495,25 @@ export class ChatMuseContentApp {
     }
 
     if (!this.tabState.hasApiKey) {
-      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
+      this.showUserErrorToast(getErrorMessage('missing_api_key'));
       return false;
     }
     if (!this.tabState.hasPersonalities) {
-      this.toast.show('No model personalities configured. Go to Settings to create one.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
+      this.showUserErrorToast(getErrorMessage('no_personalities'));
       return false;
     }
     if (!this.tabState.mappedPersonalityId) {
-      this.toast.show('No model personality assigned for this account. Select one to continue.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
+      this.showUserErrorToast(getErrorMessage('no_mapping'));
       return false;
     }
     if (!this.tabState.connected) {
-      this.toast.show('Not connected to Fansly. Browse Fansly to establish a connection.');
+      this.showUserErrorToast(getErrorMessage('not_connected'));
       return false;
     }
     if (featureRequiresDraft(feature) && !this.computeHasDraftText()) {
-      this.toast.show('Write a draft in the composer first, then use Fix.');
+      this.toast.show('Write a draft in the composer first, then use Fix.', {
+        tone: 'warning',
+      });
       this.renderButtonBar();
       return false;
     }
@@ -582,7 +604,7 @@ export class ChatMuseContentApp {
   private presentOperationError(
     feature: FeatureType,
     errorModel: OverlayViewModel,
-    messageText: string,
+    error: unknown,
   ): void {
     if (usesInlineFeatureSurface(feature)) {
       this.cancelScheduledLoadingRender();
@@ -591,7 +613,7 @@ export class ChatMuseContentApp {
       } else if (this.quickInlineVisible) {
         this.inlinePanel.render(errorModel);
       } else {
-        this.toast.show(messageText);
+        this.showUserErrorToast(error);
       }
       this.clearOperationState(false);
       this.renderButtonBar();
@@ -617,7 +639,7 @@ export class ChatMuseContentApp {
     }
 
     if (this.activeFeature || this.activeCompareModel?.operationId) {
-      this.toast.show('Another operation is already in progress.');
+      this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
 
@@ -685,7 +707,7 @@ export class ChatMuseContentApp {
     }
 
     if (this.activeFeature) {
-      this.toast.show('Another operation is already in progress.');
+      this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
 
@@ -693,18 +715,15 @@ export class ChatMuseContentApp {
       return;
     }
     if (!this.tabState.hasApiKey) {
-      this.toast.show('Claude API key not configured. Go to Settings to add it.', {
-        actionLabel: 'Settings',
-        onAction: () => { void browser.runtime.openOptionsPage(); },
-      });
+      this.showUserErrorToast(getErrorMessage('missing_api_key'));
       return;
     }
     if (!this.tabState.connected) {
-      this.toast.show('Not connected to Fansly. Browse Fansly to establish a connection.');
+      this.showUserErrorToast(getErrorMessage('not_connected'));
       return;
     }
     if (this.tabState.compareCardCount < 2) {
-      this.toast.show('Compare needs at least two model cards. Add files in prompts/drafts or map a personality.');
+      this.showUserErrorToast(getErrorMessage('compare_cards_unavailable'));
       return;
     }
 
@@ -899,6 +918,17 @@ export class ChatMuseContentApp {
     if (updatedCachedModel || updatedVisibleModel) {
       this.renderAll();
     }
+
+    if (message.syncStatus.state === 'failed') {
+      this.showUserErrorToast(getErrorMessage('hub_sync_failed'), {
+        dedupeKey: `hub-sync-failed:${message.groupId}:${message.generatedAt}`,
+        description: message.syncStatus.error
+          ? `Latest Hub error: ${formatUserFacingError(message.syncStatus.error)}`
+          : undefined,
+        tone: 'warning',
+        durationMs: 6500,
+      });
+    }
   }
 
   private handleProgress(message: Extract<BackgroundPortMessage, { type: 'operation:progress' }>): void {
@@ -1082,7 +1112,7 @@ export class ChatMuseContentApp {
     }
 
     if (message.type === 'compare:error') {
-      this.toast.show(message.error.message);
+      this.showUserErrorToast(message.error);
     }
   }
 
@@ -1191,17 +1221,14 @@ export class ChatMuseContentApp {
         anthropicSpend:
           message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
         profiling: message.profiling ?? this.activeProfiling ?? undefined,
-        error: {
-          code: 'unknown_error',
-          message: message.error.message,
-        },
+        error: message.error,
       };
 
-      this.presentOperationError(feature, errorModel, message.error.message);
+      this.presentOperationError(feature, errorModel, message.error);
       return;
     }
 
-    this.toast.show(message.error.message);
+    this.showUserErrorToast(message.error);
   }
 
   // ─── State Helpers ──────────────────────────────────────────────────
@@ -1251,7 +1278,7 @@ export class ChatMuseContentApp {
     } catch (error) {
       this.quickInlineVisible = true;
       this.quickSurfaceMode = 'inline';
-      this.toast.show(toUserError(error).message);
+      this.showUserErrorToast(toUserError(error));
       this.overlay.render({ kind: 'hidden' });
       this.inlinePanel.render(model);
       this.renderButtonBar();
@@ -1322,7 +1349,9 @@ export class ChatMuseContentApp {
       this.comparePanelVisible = false;
       this.renderAll();
       if (notifyOnStale) {
-        this.toast.show('Saved compare is outdated. Run Compare again.');
+        this.toast.show('Saved compare is outdated. Run Compare again.', {
+          tone: 'warning',
+        });
       }
       return false;
     }

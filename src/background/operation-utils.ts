@@ -20,10 +20,10 @@ export function parseGroupIdFromUrl(url: string | undefined): string | null {
 
 export function errorCode(error: unknown): string {
   if (error instanceof ChatMuseError) {
-    return error.code;
+    return error.key;
   }
-  const code = (error as { code?: string })?.code;
-  return typeof code === 'string' ? code : 'unknown_error';
+  const key = (error as { key?: string })?.key;
+  return typeof key === 'string' ? key : 'unknown_error';
 }
 
 export function resolveAbortChatMuseError(
