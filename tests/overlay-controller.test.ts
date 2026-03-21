@@ -124,6 +124,26 @@ function createReadOnlyModel(
   };
 }
 
+function createSummaryReadOnlyModel(
+  options?: { debugPrompt?: PromptDebugSnapshot },
+): Extract<OverlayViewModel, { kind: 'readOnly' }> {
+  return {
+    kind: 'readOnly',
+    feature: 'fan-summary',
+    fanDisplayName: 'fan',
+    operationId: 'summary-op',
+    rawText: 'Fan summary text',
+    summaryMeta: {
+      generatedAt: Date.now(),
+      stale: false,
+      cached: false,
+    },
+    debugPrompt: options?.debugPrompt,
+    profiling: undefined,
+    rerunActionLabel: 'Refresh',
+  };
+}
+
 function createProfilingSnapshot(): OperationProfilingSnapshot {
   return {
     elapsedMs: 1850,
@@ -590,6 +610,29 @@ describe('OverlayController', () => {
 
     await vi.waitFor(() => {
       expect(mockCopy).toHaveBeenCalledWith('Rating: 7/10\n\nEvaluation:\nSolid\n\nRecommendations:\nKeep pace');
+    });
+  });
+
+  it('renders Fan Summary copy action next to Refresh and copies the summary text', async () => {
+    const mockCopy = vi.mocked(copyToClipboard);
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createSummaryReadOnlyModel());
+
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'),
+    );
+
+    expect(buttons.map((button) => button.textContent)).toEqual(['Refresh', 'Copy']);
+    buttons[1]!.click();
+
+    await vi.waitFor(() => {
+      expect(mockCopy).toHaveBeenCalledWith('Fan summary text');
     });
   });
 
