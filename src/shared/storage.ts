@@ -5,6 +5,8 @@ import {
   IMPROVE_MAX_MESSAGE_COUNT,
   IMPROVE_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
+  PING_MAX_MESSAGE_COUNT,
+  PING_MIN_MESSAGE_COUNT,
   QUICK_MAX_MESSAGE_COUNT,
   QUICK_MIN_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
@@ -59,9 +61,11 @@ export async function loadStorageState(): Promise<PersistedState> {
 export function sanitizeSettings(input: Partial<Settings>): Settings {
   const defaults = createDefaultSettings();
   const rawQuick = Number(input.quickMessageCount ?? defaults.quickMessageCount);
+  const rawPing = Number(input.pingMessageCount ?? defaults.pingMessageCount);
   const rawImprove = Number(input.improveMessageCount ?? defaults.improveMessageCount);
   const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
   const quick = Number.isFinite(rawQuick) ? rawQuick : defaults.quickMessageCount;
+  const ping = Number.isFinite(rawPing) ? rawPing : defaults.pingMessageCount;
   const improve = Number.isFinite(rawImprove) ? rawImprove : defaults.improveMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
 
@@ -83,6 +87,7 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     ),
     agencyHubApiKey: String(input.agencyHubApiKey ?? defaults.agencyHubApiKey).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
+    pingMessageCount: Math.min(PING_MAX_MESSAGE_COUNT, Math.max(PING_MIN_MESSAGE_COUNT, ping)),
     improveMessageCount: Math.min(
       IMPROVE_MAX_MESSAGE_COUNT,
       Math.max(IMPROVE_MIN_MESSAGE_COUNT, improve),

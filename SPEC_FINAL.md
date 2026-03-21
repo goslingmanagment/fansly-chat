@@ -192,7 +192,7 @@ The output is read-only — there are no Insert buttons (this is analysis, not a
    - **Segment B — Never really chatted:** The fan has fewer than 3 messages. Strategy: warm first impression, low-pressure opener, spark curiosity based on the model's personality.
    - **Still active:** The fan has 3 or more messages AND the last message from the fan is within the last 5 days. Ping is blocked — show message: "This fan is still active. Use Reply instead."
 
-   Segmentation uses only the loaded messages (quick message count). If the fan's messages are older than the loaded window, the conversation is treated as Segment B. This is intentional — the AI's reactivation strategy should be based on the context it can actually reference. Segment B copy must avoid absolute history claims ("we've never talked") — use neutral openers that work regardless of prior history.
+   Segmentation uses only the loaded messages (Ping message count). If the fan's messages are older than the loaded window, the conversation is treated as Segment B. This is intentional — the AI's reactivation strategy should be based on the context it can actually reference. Segment B copy must avoid absolute history claims ("we've never talked") — use neutral openers that work regardless of prior history.
 
 3. The AI generates a reactivation message (streamed in real-time).
 4. The message appears in the read-only preview overlay (same as Fast Reply).
@@ -201,7 +201,7 @@ The output is read-only — there are no Insert buttons (this is analysis, not a
 
 **No cooldown or limits:** Whether to ping a fan again is the chatter's judgment call.
 
-**Context:** Uses the "quick" message count setting (default 100, range 5–200).
+**Context:** Uses the dedicated Ping message count setting (default 100, range 5–200).
 
 **Additional context:** Ping includes a supplemental `FAN SPENDING DATA` block sourced from the earnings stats endpoint (see §2.6 and §8.6.1).
 
@@ -455,7 +455,8 @@ Accessible from the toolbar popup. Contains:
 - **Claude API key** — password input field with show/hide toggle.
 
 **Message Counts:**
-- **Quick features** (Fast Reply, Help Me, Ping) — numeric input, default 100, range 5–200.
+- **Reply + Help** — numeric input, default 100, range 5–200.
+- **Ping** — numeric input, default 100, range 5–200.
 - **Deep features** (Fan Summary, Chat Review) — numeric input, default 500, range 100–1000.
 
 **Model Personalities:**
@@ -483,7 +484,8 @@ Accessible from the toolbar popup. Contains:
 | Setting | Default |
 |---------|---------|
 | Claude API key | Empty (must be set before extension works) |
-| Quick feature message count | 100 |
+| Reply + Help message count | 100 |
+| Ping message count | 100 |
 | Deep feature message count | 500 |
 | Claude model | Hardcoded to Claude Sonnet (not configurable) |
 | Debug mode | Off |
@@ -498,6 +500,7 @@ All persistent data is stored in `browser.storage.local` under the following sch
   "settings": {
     "claudeApiKey": "sk-ant-...",
     "quickMessageCount": 100,
+    "pingMessageCount": 100,
     "deepMessageCount": 500,
     "debugMode": false
   },

@@ -4,7 +4,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 4;
+export const STORAGE_SCHEMA_VERSION = 5;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -72,6 +72,9 @@ export const FANSLY_RETRY_DELAYS_MS = [1000, 2000, 4000];
 export const QUICK_DEFAULT_MESSAGE_COUNT = 100;
 export const QUICK_MIN_MESSAGE_COUNT = 5;
 export const QUICK_MAX_MESSAGE_COUNT = 200;
+export const PING_DEFAULT_MESSAGE_COUNT = QUICK_DEFAULT_MESSAGE_COUNT;
+export const PING_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
+export const PING_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
 export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
 export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
@@ -122,7 +125,7 @@ export const DEEP_FEATURES: FeatureType[] = (
 export const QUICK_FEATURES: FeatureType[] = (
   Object.entries(FEATURE_POLICIES) as Array<[FeatureType, FeaturePolicy]>
 )
-  .filter(([, policy]) => policy.messageCountBucket !== 'deep')
+  .filter(([, policy]) => policy.messageCountBucket === 'quick')
   .map(([feature]) => feature);
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
@@ -141,6 +144,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agencyHubBaseUrl: '',
   agencyHubApiKey: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
+  pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
   improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
   debugMode: false,

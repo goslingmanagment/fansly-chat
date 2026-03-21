@@ -91,6 +91,7 @@ describe('migrateState', () => {
     expect(result.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
     expect(result.settings.claudeApiKey).toBe('sk-test');
     expect(result.settings.debugMode).toBe(true);
+    expect(result.settings.pingMessageCount).toBe(50);
     expect(result.personalities).toHaveLength(1);
     expect(result.personalities[0]!.name).toBe('Legacy');
     expect(result.accountMappings.acc1).toBe('p1');
@@ -102,8 +103,25 @@ describe('migrateState', () => {
     const result = migrateState(partial);
     expect(result.settings.claudeApiKey).toBe('key');
     expect(result.settings.quickMessageCount).toBe(createDefaultSettings().quickMessageCount);
+    expect(result.settings.pingMessageCount).toBe(createDefaultSettings().pingMessageCount);
     expect(result.settings.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
     expect(result.settings.deepMessageCount).toBe(createDefaultSettings().deepMessageCount);
+  });
+
+  it('seeds pingMessageCount from quickMessageCount when migrating legacy settings', () => {
+    const result = migrateState({
+      schemaVersion: 4,
+      settings: {
+        claudeApiKey: 'sk-test',
+        quickMessageCount: 73,
+      },
+      personalities: [],
+      accountMappings: {},
+      knownAccounts: [],
+    });
+
+    expect(result.settings.quickMessageCount).toBe(73);
+    expect(result.settings.pingMessageCount).toBe(73);
   });
 
   it('backfills claudeApiKey from anthropicApiKey when needed', () => {
@@ -238,6 +256,11 @@ describe('sanitizeSettings', () => {
     expect(result.quickMessageCount).toBe(200);
   });
 
+  it('clamps pingMessageCount within bounds', () => {
+    const result = storage.sanitizeSettings({ pingMessageCount: 999 });
+    expect(result.pingMessageCount).toBe(200);
+  });
+
   it('clamps deepMessageCount within bounds', () => {
     const result = storage.sanitizeSettings({ deepMessageCount: 1 });
     expect(result.deepMessageCount).toBe(100);
@@ -265,6 +288,7 @@ describe('sanitizeSettings', () => {
   it('fills defaults for missing fields', () => {
     const result = storage.sanitizeSettings({});
     expect(result.claudeApiKey).toBe('');
+    expect(result.pingMessageCount).toBe(createDefaultSettings().pingMessageCount);
     expect(result.debugMode).toBe(false);
     expect(result.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
     expect(result.promptCachingEnabled).toBe(true);
@@ -337,6 +361,13 @@ describe('sanitizeSettings', () => {
     const defaults = createDefaultSettings();
     expect(result.quickMessageCount).toBe(defaults.quickMessageCount);
     expect(Number.isFinite(result.quickMessageCount)).toBe(true);
+  });
+
+  it('falls back to default when pingMessageCount is NaN-producing string', () => {
+    const result = storage.sanitizeSettings({ pingMessageCount: 'abc' as unknown as number });
+    const defaults = createDefaultSettings();
+    expect(result.pingMessageCount).toBe(defaults.pingMessageCount);
+    expect(Number.isFinite(result.pingMessageCount)).toBe(true);
   });
 
   it('falls back to default when deepMessageCount is NaN-producing string', () => {

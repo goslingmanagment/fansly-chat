@@ -4,7 +4,7 @@ import type {
   Settings,
 } from './types.js';
 
-export type FeatureMessageCountBucket = 'quick' | 'improve' | 'deep';
+export type FeatureMessageCountBucket = 'quick' | 'ping' | 'improve' | 'deep';
 export type FeatureTimeoutBucket = 'quick' | 'deep';
 export type FeatureSurfaceKind = 'inline-reply' | 'overlay';
 export type FeaturePromptMode = 'reply' | 'analysis';
@@ -90,7 +90,7 @@ export const FEATURE_POLICIES = {
     usesPingSegment: false,
   },
   ping: {
-    messageCountBucket: 'quick',
+    messageCountBucket: 'ping',
     timeoutBucket: 'quick',
     modelFeature: 'ping',
     surfaceKind: 'inline-reply',
@@ -142,6 +142,8 @@ export function resolveFeatureMessageCount(
   switch (getFeaturePolicy(feature).messageCountBucket) {
     case 'deep':
       return settings.deepMessageCount;
+    case 'ping':
+      return settings.pingMessageCount;
     case 'improve':
       return settings.improveMessageCount;
     case 'quick':

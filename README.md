@@ -43,7 +43,7 @@ Generates a reactivation message for fans who've gone quiet. Analyzes the fan's 
 - **Segment A** (was active, went silent): references past topics to re-engage
 - **Segment B** (never really chatted): warm first-impression opener
 
-If the fan has been active in the last 5 days, the ping is blocked — they don't need reactivation. Quick feature — 60-second timeout.
+If the fan has been active in the last 5 days, the ping is blocked — they don't need reactivation. Uses the last ~100 messages (configurable via a dedicated Ping message count setting). Quick feature — 60-second timeout.
 
 ## How It Works
 
@@ -130,7 +130,8 @@ If you're logged into a new account and the extension detects it via intercepted
 
 | Setting | Default | Range | Description |
 |---------|---------|-------|-------------|
-| Quick message count | 100 | 5–200 | Messages loaded for Reply, Help Me, Ping |
+| Reply + Help message count | 100 | 5–200 | Messages loaded for Reply and Help Me |
+| Ping message count | 100 | 5–200 | Messages loaded for Ping |
 | Deep message count | 500 | 100–1000 | Messages loaded for Summary, Chat Review |
 | Debug mode | Off | — | Enables verbose logging and prompt inspector in error overlays |
 

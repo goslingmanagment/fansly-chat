@@ -275,6 +275,7 @@ describe('OperationCoordinator', () => {
         agencyHubBaseUrl: '',
         agencyHubApiKey: '',
         quickMessageCount: 100,
+        pingMessageCount: 100,
         improveMessageCount: 100,
         deepMessageCount: 500,
         debugMode: false,
@@ -3310,6 +3311,53 @@ describe('OperationCoordinator', () => {
       fanslyClient.loadMessages.mock.calls[0] as unknown as [string, number, ...unknown[]];
     expect(groupId).toBe('group-1');
     expect(messageCount).toBe(17);
+  });
+
+  it('uses the dedicated ping message count for ping history', async () => {
+    (mockStorage.settings as Record<string, unknown>).quickMessageCount = 100;
+    (mockStorage.settings as Record<string, unknown>).pingMessageCount = 17;
+    const fanslyClient = buildFanslyClientMock();
+    const { coordinator } = await createCoordinatorHarness({ fanslyClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'ping-op',
+      feature: 'ping',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    const [groupId, messageCount] =
+      fanslyClient.loadMessages.mock.calls[0] as unknown as [string, number, ...unknown[]];
+    expect(groupId).toBe('group-1');
+    expect(messageCount).toBe(17);
+  });
+
+  it('keeps using quickMessageCount for fast-reply history', async () => {
+    (mockStorage.settings as Record<string, unknown>).quickMessageCount = 13;
+    (mockStorage.settings as Record<string, unknown>).pingMessageCount = 99;
+    const fanslyClient = buildFanslyClientMock();
+    const { coordinator } = await createCoordinatorHarness({ fanslyClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    const [groupId, messageCount] =
+      fanslyClient.loadMessages.mock.calls[0] as unknown as [string, number, ...unknown[]];
+    expect(groupId).toBe('group-1');
+    expect(messageCount).toBe(13);
   });
 
   it('retries with default model on model_unavailable error', async () => {

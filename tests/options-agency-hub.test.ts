@@ -37,6 +37,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       quickMessageCount: 30,
+      pingMessageCount: 30,
       improveMessageCount: 45,
       deepMessageCount: 200,
       debugMode: false,

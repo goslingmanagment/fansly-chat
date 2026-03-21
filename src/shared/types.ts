@@ -17,6 +17,7 @@ export interface Settings {
   agencyHubBaseUrl: string;
   agencyHubApiKey: string;
   quickMessageCount: number;
+  pingMessageCount: number;
   improveMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
