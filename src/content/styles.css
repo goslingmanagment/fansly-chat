@@ -709,9 +709,9 @@
     0 0 0 1px rgba(255, 255, 255, 0.03),
     0 8px 24px rgba(0, 0, 0, 0.35);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 14px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: var(--chatmuse-font);
   animation: chatmuse-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -724,19 +724,18 @@
 }
 
 .chatmuse-overlay-body {
-  min-height: 0;
-  overflow-y: auto;
+  display: block;
 }
 
-.chatmuse-overlay-body::-webkit-scrollbar {
+.chatmuse-overlay-panel::-webkit-scrollbar {
   width: 5px;
 }
 
-.chatmuse-overlay-body::-webkit-scrollbar-track {
+.chatmuse-overlay-panel::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.chatmuse-overlay-body::-webkit-scrollbar-thumb {
+.chatmuse-overlay-panel::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
