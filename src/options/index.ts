@@ -207,7 +207,7 @@ function buildAgencyHubConnectionSignature(baseUrl: string, apiKey: string): str
 }
 
 function hasAgencyHubConnectionInputs(baseUrl: string, apiKey: string): boolean {
-  return Boolean(baseUrl.trim() || apiKey.trim());
+  return Boolean(baseUrl.trim() && apiKey.trim());
 }
 
 async function getAgencyHubPermissionCheck(originPattern: string | null): Promise<AgencyHubPermissionCheckResult> {
