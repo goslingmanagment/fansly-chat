@@ -16,6 +16,10 @@ import {
 } from './account-aliases.js';
 import { normalizeAgencyHubBaseUrl } from './agency-hub.js';
 import { createDefaultSettings, migrateState } from './migrations.js';
+import {
+  normalizeSavedPersonality,
+  reconcileBundledPersonalities,
+} from './personalities.js';
 import type {
   ModelSelectableFeatureType,
   PersistedState,
@@ -36,8 +40,16 @@ export async function loadStorageState(): Promise<PersistedState> {
   const raw = await browser.storage.local.get(null);
   const state = migrateState(raw);
   state.settings = sanitizeSettings(state.settings);
+  const {
+    personalities,
+    changed: personalitiesChanged,
+  } = reconcileBundledPersonalities(state.personalities);
+  state.personalities = personalities;
 
-  if ((raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION) {
+  if (
+    (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION ||
+    personalitiesChanged
+  ) {
     await browser.storage.local.set(state);
   }
 
@@ -90,15 +102,11 @@ export async function saveSettings(settingsPatch: Partial<Settings>): Promise<Se
 }
 
 export async function savePersonalities(personalities: Personality[]): Promise<Personality[]> {
-  const normalized = personalities.map((personality) => ({
-    ...personality,
-    name: personality.name.trim() || 'Unnamed',
-    content: personality.content,
-    updatedAt: personality.updatedAt || Date.now(),
-  }));
+  const normalized = personalities.map(normalizeSavedPersonality);
+  const { personalities: reconciled } = reconcileBundledPersonalities(normalized);
 
-  await browser.storage.local.set({ personalities: normalized });
-  return normalized;
+  await browser.storage.local.set({ personalities: reconciled });
+  return reconciled;
 }
 
 export async function deletePersonality(personalityId: string): Promise<void> {

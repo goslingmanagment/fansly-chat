@@ -3,6 +3,11 @@ import type { FeatureType, Personality, SummaryCacheEntry } from '../src/shared/
 import { normalizeAgencyHubSummarySyncMetadata } from '../src/shared/agency-hub.js';
 import { DEFAULT_MODEL_ID, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { migrateState, createDefaultSettings, createSeedState } from '../src/shared/migrations.js';
+import {
+  BUNDLED_LORA_PERSONALITY_ID,
+  BUNDLED_LORA_PERSONALITY_VERSION,
+  createBundledPersonalities,
+} from '../src/shared/personalities.js';
 
 // ─── Mock browser.storage.local ─────────────────────────────────────────
 
@@ -370,6 +375,78 @@ describe('loadStorageState', () => {
     expect(setBrowser.storage.local.set).toHaveBeenCalled();
   });
 
+  it('seeds bundled Lora when storage has no personalities', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+
+    const result = await storage.loadStorageState();
+    const [bundledLora] = createBundledPersonalities();
+
+    expect(result.personalities).toEqual([bundledLora]);
+    expect(mockStorage.personalities).toEqual([bundledLora]);
+  });
+
+  it('preserves modified bundled personalities until the bundled version changes', async () => {
+    const [bundledLora] = createBundledPersonalities();
+    if (!bundledLora) {
+      throw new Error('Expected bundled Lora personality');
+    }
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [
+        {
+          ...bundledLora,
+          content: 'customized by user',
+          updatedAt: bundledLora.updatedAt + 123,
+        },
+      ],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+
+    const result = await storage.loadStorageState();
+
+    expect(result.personalities[0]).toMatchObject({
+      id: BUNDLED_LORA_PERSONALITY_ID,
+      builtin: true,
+      builtinVersion: BUNDLED_LORA_PERSONALITY_VERSION,
+      content: 'customized by user',
+    });
+  });
+
+  it('overwrites modified bundled personalities when the bundled version changes', async () => {
+    const [bundledLora] = createBundledPersonalities();
+    if (!bundledLora) {
+      throw new Error('Expected bundled Lora personality');
+    }
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [
+        {
+          ...bundledLora,
+          name: 'User Edited Lora',
+          content: 'customized by user',
+          updatedAt: bundledLora.updatedAt + 123,
+          builtinVersion: bundledLora.builtinVersion! - 1,
+        },
+      ],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+
+    const result = await storage.loadStorageState();
+
+    expect(result.personalities).toEqual([bundledLora]);
+    expect(mockStorage.personalities).toEqual([bundledLora]);
+  });
+
   it('deep-merges featureModels on load even when schema matches', async () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -399,6 +476,13 @@ describe('savePersonalities', () => {
     const result = await storage.savePersonalities(personalities);
     expect(result[0]!.name).toBe('Unnamed');
     expect(result[1]!.name).toBe('Trimmed');
+  });
+
+  it('seeds bundled Lora when saving an empty personalities list', async () => {
+    const result = await storage.savePersonalities([]);
+
+    expect(result).toEqual(createBundledPersonalities());
+    expect(mockStorage.personalities).toEqual(createBundledPersonalities());
   });
 });
 
