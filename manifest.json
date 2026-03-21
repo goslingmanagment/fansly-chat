@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatMuse",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AI-powered chat assistant for Fansly.com",
   "permissions": [
     "storage",
@@ -47,7 +47,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "chatmuse@extension",
-      "strict_min_version": "140.0",
+      "strict_min_version": "142.0",
       "data_collection_permissions": {
         "required": [
           "authenticationInfo",
