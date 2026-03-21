@@ -157,4 +157,38 @@ describe('AgencyHubClient', () => {
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('503');
   });
+
+  it('binds native-like fetch implementations to globalThis instead of the client instance', async () => {
+    const fetchMock = vi.fn(async function (this: typeof globalThis, url: URL | string) {
+      expect(this).toBe(globalThis);
+
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
+        return jsonResponse({ version: 1 });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+    const result = await client.pushFanProfile({
+      settings: makeSettings(),
+      pageUsername: 'creator',
+      platformUserId: 'fan-1',
+      body: 'summary',
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe('pushed');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
