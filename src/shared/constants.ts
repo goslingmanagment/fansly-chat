@@ -104,6 +104,7 @@ export const PING_MIN_FAN_MESSAGES = 3;
 // ─── Earnings ────────────────────────────────────────────────────────────
 
 export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+export const AGENCY_HUB_PREFETCH_TIMEOUT_MS = 5_000;
 export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
 
 // ─── UI ──────────────────────────────────────────────────────────────────

@@ -191,4 +191,262 @@ describe('AgencyHubClient', () => {
     expect(result.status).toBe('pushed');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('fetches a cached fan profile by conversation id', async () => {
+    const permissionsContains = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/conversations/group-1/profile') {
+        expect(init?.method).toBe('GET');
+        expect(init?.headers).toMatchObject({
+          authorization: 'Bearer hub-key',
+        });
+        return jsonResponse({
+          fan: {
+            platform: 'fansly',
+            platformUserId: 'fan-1',
+            username: 'alice',
+            displayName: 'Alice',
+            createdAtExternal: null,
+          },
+          profile: {
+            version: 4,
+            body: '# stored fan summary',
+            source: 'chatmuse',
+            createdAt: '2026-03-20T12:00:00.000Z',
+            createdByUserId: 42,
+          },
+        });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: permissionsContains,
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.fetchFanProfileByConversation({
+      settings: makeSettings(),
+      pageUsername: ' creator ',
+      conversationId: 'group-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'fetched',
+      reason: 'fetched',
+      baseUrl: 'http://localhost:3000',
+      pageLabel: 'creator-fs',
+      body: '# stored fan summary',
+      createdAtMs: Date.parse('2026-03-20T12:00:00.000Z'),
+      fanAccountId: 'fan-1',
+    });
+    expect(permissionsContains).toHaveBeenCalledWith({
+      origins: ['http://localhost/*'],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns not-found when the conversation has no stored profile', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/conversations/group-1/profile') {
+        return jsonResponse({
+          fan: {
+            platform: 'fansly',
+            platformUserId: 'fan-1',
+            username: 'alice',
+            displayName: 'Alice',
+            createdAtExternal: null,
+          },
+          profile: null,
+        });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.fetchFanProfileByConversation({
+      settings: makeSettings(),
+      pageUsername: 'creator',
+      conversationId: 'group-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'not-found',
+      reason: 'profile_missing',
+      baseUrl: 'http://localhost:3000',
+      pageLabel: 'creator-fs',
+    });
+  });
+
+  it('returns not-found when the conversation lookup responds with 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/conversations/group-1/profile') {
+        return jsonResponse({ error: 'not found' }, 404);
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.fetchFanProfileByConversation({
+      settings: makeSettings(),
+      pageUsername: 'creator',
+      conversationId: 'group-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'not-found',
+      reason: 'profile_missing',
+      baseUrl: 'http://localhost:3000',
+      pageLabel: 'creator-fs',
+    });
+  });
+
+  it('skips conversation profile fetch when the Hub is not configured', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.fetchFanProfileByConversation({
+      settings: makeSettings({ agencyHubBaseUrl: '' }),
+      pageUsername: 'creator',
+      conversationId: 'group-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'skipped',
+      reason: 'missing_base_url',
+      baseUrl: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips conversation profile fetch when host permission is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => false),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.fetchFanProfileByConversation({
+      settings: makeSettings(),
+      pageUsername: 'creator',
+      conversationId: 'group-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'skipped',
+      reason: 'missing_host_permission',
+      baseUrl: 'http://localhost:3000',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns failed on conversation profile network errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        throw new Error('socket hang up');
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.fetchFanProfileByConversation({
+      settings: makeSettings(),
+      pageUsername: 'creator',
+      conversationId: 'group-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('socket hang up');
+  });
+
+  it('returns failed on conversation profile aborts', async () => {
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) =>
+      await new Promise<Response>((_resolve, reject) => {
+        if (init?.signal?.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const controller = new AbortController();
+    const client = new AgencyHubClient(fetch);
+    const promise = client.fetchFanProfileByConversation({
+      settings: makeSettings(),
+      pageUsername: 'creator',
+      conversationId: 'group-1',
+      signal: controller.signal,
+    });
+
+    controller.abort();
+    const result = await promise;
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: 'aborted',
+      baseUrl: 'http://localhost:3000',
+    });
+  });
 });

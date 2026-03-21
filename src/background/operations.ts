@@ -6,6 +6,7 @@ import {
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
 import {
+  AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   AGENCY_HUB_SYNC_TIMEOUT_MS,
   DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
   DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
@@ -72,6 +73,7 @@ import type {
 } from '../shared/types.js';
 import {
   AgencyHubClient,
+  type AgencyHubFetchFanProfileResult,
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
 import { AnthropicClient } from './anthropic-client.js';
@@ -169,6 +171,13 @@ interface AgencyHubSummarySyncTask {
   debugEnabled: boolean;
 }
 
+interface AgencyHubSummaryPrefetchResult {
+  summary: string;
+  generatedAt: number;
+  syncStatus: FanSummarySyncStatus;
+  fanAccountId: string | null;
+}
+
 function createFanSummarySyncStatus(
   state: FanSummarySyncState,
   generatedAt: number,
@@ -231,6 +240,19 @@ function resolveSummarySyncStatusFromResult(
         updatedAt,
       });
   }
+}
+
+function resolveSummarySyncStatusFromHubFetch(
+  result: AgencyHubFetchFanProfileResult,
+  generatedAt: number,
+): FanSummarySyncStatus {
+  const updatedAt = Date.now();
+  return createFanSummarySyncStatus('saved', generatedAt, {
+    baseUrl: result.baseUrl,
+    pageLabel: result.pageLabel ?? null,
+    syncedAt: updatedAt,
+    updatedAt,
+  });
 }
 
 function usesDeepOperationTimeouts(feature: FeatureType): boolean {
@@ -801,6 +823,68 @@ export class OperationCoordinator {
     )?.userId ?? null;
   }
 
+  private async prefetchAgencyHubSummary(
+    groupId: string,
+    settings: Settings,
+    session: SessionTemplate,
+    signal: AbortSignal,
+    debugEnabled: boolean,
+  ): Promise<AgencyHubSummaryPrefetchResult | null> {
+    if (!this.agencyHubClient.isConfigured(settings)) {
+      return null;
+    }
+
+    const timeoutController = new AbortController();
+    const timeoutHandle = globalThis.setTimeout(
+      () => timeoutController.abort(),
+      AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+    );
+    const prefetchSignal = AbortSignal.any([signal, timeoutController.signal]);
+
+    try {
+      const pageUsername = await this.resolveCreatorUsername(session, prefetchSignal);
+      const result = await this.agencyHubClient.fetchFanProfileByConversation({
+        settings,
+        pageUsername,
+        conversationId: groupId,
+        signal: prefetchSignal,
+      });
+
+      if (signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      logDebug(debugEnabled, 'agency hub summary prefetch', {
+        status: result.status,
+        reason: result.reason,
+        baseUrl: result.baseUrl,
+        pageLabel: result.pageLabel,
+        fanAccountId: result.fanAccountId,
+      });
+
+      if (result.status !== 'fetched' || !result.body) {
+        return null;
+      }
+
+      const generatedAt = result.createdAtMs ?? Date.now();
+      return {
+        summary: result.body,
+        generatedAt,
+        syncStatus: resolveSummarySyncStatusFromHubFetch(result, generatedAt),
+        fanAccountId: result.fanAccountId?.trim() || null,
+      };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError' && signal.aborted) {
+        throw error;
+      }
+
+      logDebug(debugEnabled, 'agency hub summary prefetch failed', error);
+      return null;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
   private async syncAgencyHubSummary(task: AgencyHubSummarySyncTask): Promise<void> {
     const timeoutController = new AbortController();
     const timeoutHandle = globalThis.setTimeout(
@@ -1163,6 +1247,7 @@ export class OperationCoordinator {
       const resolvedModel = validated.storage.settings.featureModels[modelFeature];
 
       let cachedSummary = null;
+      let hasValidCachedSummary = false;
       if (payload.feature === 'fan-summary') {
         startStage('summary-cache-check', 'Check summary cache');
         if (payload.forceRegenerate) {
@@ -1172,17 +1257,17 @@ export class OperationCoordinator {
         cachedSummary = payload.forceRegenerate
           ? null
           : await this.storageCoordinator.getSummaryCache(validated.urlGroupId);
+        hasValidCachedSummary = Boolean(
+          cachedSummary &&
+          cachedSummary.personalityId === personality.id &&
+          cachedSummary.personalityUpdatedAt === personality.updatedAt &&
+          cachedSummary.modelId === resolvedModel &&
+          cachedSummary.spendingDataVerified === true &&
+          cachedSummary.subscriptionLookupVerified === true
+        );
       }
 
-      if (
-        payload.feature === 'fan-summary' &&
-        cachedSummary &&
-        cachedSummary.personalityId === personality.id &&
-        cachedSummary.personalityUpdatedAt === personality.updatedAt &&
-        cachedSummary.modelId === resolvedModel &&
-        cachedSummary.spendingDataVerified === true &&
-        cachedSummary.subscriptionLookupVerified === true
-      ) {
+      if (payload.feature === 'fan-summary' && cachedSummary && hasValidCachedSummary) {
         const normalizedCachedSync = normalizeAgencyHubSummarySyncMetadata(
           cachedSummary.agencyHubSync,
         );
@@ -1264,6 +1349,55 @@ export class OperationCoordinator {
       }
 
       if (payload.feature === 'fan-summary') {
+        if (!payload.forceRegenerate) {
+          const prefetchedSummary = await this.prefetchAgencyHubSummary(
+            validated.urlGroupId,
+            validated.storage.settings,
+            validated.session,
+            signal,
+            debugEnabled,
+          );
+
+          if (prefetchedSummary) {
+            await this.storageCoordinator.saveSummaryCache(validated.urlGroupId, {
+              summary: prefetchedSummary.summary,
+              personalityId: personality.id,
+              personalityUpdatedAt: personality.updatedAt,
+              generatedAt: prefetchedSummary.generatedAt,
+              spendingDataVerified: true,
+              subscriptionLookupVerified: true,
+              modelId: resolvedModel,
+              fanAccountId: prefetchedSummary.fanAccountId,
+              agencyHubSync: prefetchedSummary.syncStatus,
+            });
+
+            const result: FeatureResult = {
+              rawText: prefetchedSummary.summary,
+              summaryMeta: {
+                generatedAt: prefetchedSummary.generatedAt,
+                stale: false,
+                cached: true,
+                syncStatus: prefetchedSummary.syncStatus,
+              },
+            };
+
+            this.assertActive(tabId, payload.operationId);
+            completeStage(
+              'summary-cache-check',
+              'Summary loaded from Agency Hub',
+              'hub hit',
+            );
+            this.sendComplete(tabId, {
+              type: 'operation:complete',
+              operationId: payload.operationId,
+              result,
+              fanDisplayName: payload.domFanDisplayName ?? 'fan',
+            }, createZeroAnthropicSpendSummary(), profiler);
+            this.clearCompletedOperation(tabId);
+            return;
+          }
+        }
+
         completeStage(
           'summary-cache-check',
           `Summary cache miss${
