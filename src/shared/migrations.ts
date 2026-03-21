@@ -2,6 +2,7 @@ import {
   DEEP_DEFAULT_MESSAGE_COUNT,
   DEFAULT_FEATURE_MODELS,
   IMPROVE_DEFAULT_MESSAGE_COUNT,
+  PING_DEFAULT_MESSAGE_COUNT,
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
@@ -13,6 +14,7 @@ export function createDefaultSettings(): Settings {
     agencyHubBaseUrl: '',
     agencyHubApiKey: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
+    pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
     improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
@@ -48,6 +50,7 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
     agencyHubApiKey:
       typeof raw?.agencyHubApiKey === 'string' ? raw.agencyHubApiKey : defaults.agencyHubApiKey,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
+    pingMessageCount: Number(raw?.pingMessageCount ?? raw?.quickMessageCount ?? defaults.pingMessageCount),
     improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),
     deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),
     debugMode: Boolean(raw?.debugMode ?? defaults.debugMode),

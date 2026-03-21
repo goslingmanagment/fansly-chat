@@ -19,6 +19,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       quickMessageCount: 30,
+      pingMessageCount: 60,
       improveMessageCount: 45,
       deepMessageCount: 200,
       debugMode: false,
@@ -180,6 +181,18 @@ describe('Options page — AI Models section', () => {
     expect(input?.value).toBe('77');
   });
 
+  it('initializes the separate ping message count input from persisted settings', async () => {
+    await loadOptionsPage(makeState({ pingMessageCount: 66 }));
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const pingLabel = labels.find((label) =>
+      label.textContent?.includes('Ping message count'),
+    );
+    const input = pingLabel?.querySelector<HTMLInputElement>('input[type="number"]');
+
+    expect(input?.value).toBe('66');
+  });
+
   it('saves featureModels when a dropdown changes', async () => {
     await loadOptionsPage(makeState());
 
@@ -245,6 +258,29 @@ describe('Options page — AI Models section', () => {
 
     const saved = savedSettings as { improveMessageCount?: number };
     expect(saved.improveMessageCount).toBe(88);
+  });
+
+  it('saves pingMessageCount when the ping input changes', async () => {
+    await loadOptionsPage(makeState());
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const pingLabel = labels.find((label) =>
+      label.textContent?.includes('Ping message count'),
+    );
+    const input = pingLabel?.querySelector<HTMLInputElement>('input[type="number"]');
+    if (!input) {
+      throw new Error('Ping message count input not found');
+    }
+
+    input.value = '91';
+    input.dispatchEvent(new Event('input'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('not saved yet');
+    }, { timeout: 2000 });
+
+    const saved = savedSettings as { pingMessageCount?: number };
+    expect(saved.pingMessageCount).toBe(91);
   });
 
   it('preserves builtin personality metadata when editing the bundled Lora entry', async () => {

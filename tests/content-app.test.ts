@@ -175,6 +175,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
     settings: {
       claudeApiKey: 'sk-test',
       quickMessageCount: 100,
+      pingMessageCount: 100,
       improveMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,

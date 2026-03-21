@@ -10,6 +10,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       quickMessageCount: 100,
+      pingMessageCount: 100,
       improveMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,

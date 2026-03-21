@@ -283,6 +283,13 @@ async function render(): Promise<void> {
   quickInput.max = '200';
   quickInput.value = String(state.settings.quickMessageCount);
 
+  const pingInput = document.createElement('input');
+  pingInput.type = 'number';
+  pingInput.className = 'chatmuse-input';
+  pingInput.min = '5';
+  pingInput.max = '200';
+  pingInput.value = String(state.settings.pingMessageCount);
+
   const improveInput = document.createElement('input');
   improveInput.type = 'number';
   improveInput.className = 'chatmuse-input';
@@ -323,7 +330,8 @@ async function render(): Promise<void> {
   );
 
   apiSection.append(
-    labeledField('Quick feature message count', quickInput),
+    labeledField('Reply + Help message count', quickInput),
+    labeledField('Ping message count', pingInput),
     labeledField('Fix message count', improveInput),
     labeledField('Deep feature message count', deepInput),
     debugLabel,
@@ -767,6 +775,7 @@ async function render(): Promise<void> {
       agencyHubBaseUrl: agencyHubUrlInput.value,
       agencyHubApiKey: agencyHubKeyInput.value,
       quickMessageCount: Number(quickInput.value),
+      pingMessageCount: Number(pingInput.value),
       improveMessageCount: Number(improveInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
@@ -793,6 +802,7 @@ async function render(): Promise<void> {
     agencyHubUrlInput,
     agencyHubKeyInput,
     quickInput,
+    pingInput,
     improveInput,
     deepInput,
     debugInput,
