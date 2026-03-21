@@ -58,6 +58,9 @@ interface LoadingViewState {
   streamText: Text;
   spendHost: HTMLDivElement;
   profilingHost: HTMLDivElement | null;
+  profilingHeaderText: Text | null;
+  profilingLogEl: HTMLDivElement | null;
+  profilingLogEntries: OperationProfilingSnapshot['logEntries'];
   debugHost: HTMLDivElement;
   actions: HTMLDivElement;
   debugSnapshot: PromptDebugSnapshot | null;
@@ -565,6 +568,9 @@ export class OverlayController {
       streamText,
       spendHost,
       profilingHost: null,
+      profilingHeaderText: null,
+      profilingLogEl: null,
+      profilingLogEntries: [],
       debugHost,
       actions,
       debugSnapshot: null,
@@ -658,25 +664,31 @@ export class OverlayController {
         view.profilingHost.remove();
         view.profilingHost = null;
       }
+      view.profilingHeaderText = null;
+      view.profilingLogEl = null;
+      view.profilingLogEntries = [];
       this.clearLoadingElapsedTimer();
       return;
     }
 
-    if (!view.profilingHost) {
-      view.profilingHost = document.createElement('div');
+    if (!view.profilingHost || !view.profilingHeaderText || !view.profilingLogEl) {
+      const profilingView = this.createLoadingProfilingView(snapshot);
+      view.profilingHost = profilingView.host;
+      view.profilingHeaderText = profilingView.headerText;
+      view.profilingLogEl = profilingView.log;
+      view.profilingLogEntries = snapshot.logEntries.map((entry) => ({ ...entry }));
       const stream = view.streamText.parentElement;
       if (stream) {
         view.root.insertBefore(view.profilingHost, stream);
       } else {
         view.root.insertBefore(view.profilingHost, view.actions);
       }
+    } else {
+      this.updateLoadingProfilingView(view, snapshot);
     }
 
     view.liveElapsedBaseMs = snapshot.elapsedMs;
     view.liveElapsedStartedAt = Date.now();
-    view.profilingHost.replaceChildren(
-      this.renderProfilingCard(snapshot, 'loading'),
-    );
 
     if (this.loadingElapsedTimer === null) {
       this.loadingElapsedTimer = window.setInterval(() => {
@@ -690,6 +702,121 @@ export class OverlayController {
         this.refreshLoadingStatus(this.currentView, this.model);
       }, 100);
     }
+  }
+
+  private createLoadingProfilingView(
+    snapshot: OperationProfilingSnapshot,
+  ): { host: HTMLDivElement; headerText: Text; log: HTMLDivElement } {
+    const host = document.createElement('div');
+    const card = document.createElement('div');
+    card.className = 'chatmuse-profiling';
+
+    const header = document.createElement('div');
+    header.className = 'chatmuse-debug-summary';
+    const headerText = document.createTextNode('');
+    header.append(headerText);
+
+    const log = document.createElement('div');
+    log.className = 'chatmuse-profiling-log';
+
+    card.append(header, log);
+    host.append(card);
+
+    this.updateLoadingProfilingHeaderText(headerText, snapshot);
+    this.replaceLoadingProfilingLogEntries(log, snapshot.logEntries);
+
+    return { host, headerText, log };
+  }
+
+  private updateLoadingProfilingView(
+    view: LoadingViewState,
+    snapshot: OperationProfilingSnapshot,
+  ): void {
+    if (!view.profilingHeaderText || !view.profilingLogEl) {
+      return;
+    }
+
+    this.updateLoadingProfilingHeaderText(view.profilingHeaderText, snapshot);
+    this.syncLoadingProfilingLogEntries(view, snapshot.logEntries);
+  }
+
+  private updateLoadingProfilingHeaderText(
+    headerText: Text,
+    snapshot: OperationProfilingSnapshot,
+  ): void {
+    const nextText =
+      `Pipeline Profiling • ${formatProfilingElapsed(snapshot.elapsedMs)}`;
+    if (headerText.data !== nextText) {
+      headerText.data = nextText;
+    }
+  }
+
+  private syncLoadingProfilingLogEntries(
+    view: LoadingViewState,
+    nextEntries: OperationProfilingSnapshot['logEntries'],
+  ): void {
+    const log = view.profilingLogEl;
+    if (!log) {
+      return;
+    }
+
+    const previousScrollTop = log.scrollTop;
+    const previousEntries = view.profilingLogEntries;
+    const isAppendOnly =
+      nextEntries.length >= previousEntries.length &&
+      previousEntries.every((entry, index) =>
+        this.isSameProfilingLogEntry(entry, nextEntries[index]),
+      );
+
+    if (isAppendOnly && nextEntries.length > previousEntries.length) {
+      for (const entry of nextEntries.slice(previousEntries.length)) {
+        log.append(this.createProfilingLogRow(entry));
+      }
+      log.scrollTop = previousScrollTop;
+    } else if (!isAppendOnly) {
+      this.replaceLoadingProfilingLogEntries(log, nextEntries);
+      log.scrollTop = previousScrollTop;
+    }
+
+    view.profilingLogEntries = nextEntries.map((entry) => ({ ...entry }));
+  }
+
+  private replaceLoadingProfilingLogEntries(
+    container: HTMLDivElement,
+    entries: OperationProfilingSnapshot['logEntries'],
+  ): void {
+    container.replaceChildren(
+      ...entries.map((entry) => this.createProfilingLogRow(entry)),
+    );
+  }
+
+  private createProfilingLogRow(
+    entry: OperationProfilingSnapshot['logEntries'][number],
+  ): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'chatmuse-profiling-entry';
+
+    const elapsed = document.createElement('div');
+    elapsed.className = 'chatmuse-profiling-elapsed';
+    elapsed.textContent = `+${formatProfilingElapsed(entry.elapsedMs)}`;
+
+    const message = document.createElement('div');
+    message.className = 'chatmuse-profiling-message';
+    message.textContent = entry.message;
+
+    row.append(elapsed, message);
+    return row;
+  }
+
+  private isSameProfilingLogEntry(
+    left: OperationProfilingSnapshot['logEntries'][number],
+    right: OperationProfilingSnapshot['logEntries'][number] | undefined,
+  ): boolean {
+    return Boolean(
+      right &&
+      left.elapsedMs === right.elapsedMs &&
+      left.message === right.message,
+    );
   }
 
   private syncLoadingDebugPrompt(
@@ -1145,19 +1272,7 @@ export class OverlayController {
     container.className = 'chatmuse-profiling-log';
 
     for (const entry of snapshot.logEntries) {
-      const row = document.createElement('div');
-      row.className = 'chatmuse-profiling-entry';
-
-      const elapsed = document.createElement('div');
-      elapsed.className = 'chatmuse-profiling-elapsed';
-      elapsed.textContent = `+${formatProfilingElapsed(entry.elapsedMs)}`;
-
-      const message = document.createElement('div');
-      message.className = 'chatmuse-profiling-message';
-      message.textContent = entry.message;
-
-      row.append(elapsed, message);
-      container.append(row);
+      container.append(this.createProfilingLogRow(entry));
     }
 
     return container;
