@@ -571,6 +571,28 @@ describe('OverlayController', () => {
     expect(onRerun).toHaveBeenCalledWith('chat-review');
   });
 
+  it('renders Chat Review copy action and copies the formatted review text', async () => {
+    const mockCopy = vi.mocked(copyToClipboard);
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReadOnlyModel());
+
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'))
+      .find((element) => element.textContent === 'Copy');
+
+    expect(button).toBeDefined();
+    button!.click();
+
+    await vi.waitFor(() => {
+      expect(mockCopy).toHaveBeenCalledWith('Rating: 7/10\n\nEvaluation:\nSolid\n\nRecommendations:\nKeep pace');
+    });
+  });
+
   it('renders profiling summary below the error block when profiling is present', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
@@ -830,6 +852,31 @@ describe('OverlayController', () => {
 
     const copyButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button'),
+    ).find((button) => button.textContent === 'Copy');
+    expect(copyButton).toBeDefined();
+
+    copyButton!.click();
+    await vi.waitFor(() => {
+      const errorEl = document.querySelector('.chatmuse-inline-error');
+      expect(errorEl).not.toBeNull();
+    });
+  });
+
+  it('shows inline error when Chat Review copy to clipboard fails', async () => {
+    const mockCopy = vi.mocked(copyToClipboard);
+    mockCopy.mockRejectedValueOnce(new DOMException('Not allowed', 'NotAllowedError'));
+
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReadOnlyModel());
+
+    const copyButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatmuse-overlay-actions .chatmuse-button'),
     ).find((button) => button.textContent === 'Copy');
     expect(copyButton).toBeDefined();
 
