@@ -1146,16 +1146,63 @@ export class OverlayController {
       section.append(this.renderDebugPrompt(model.debugPrompt));
     }
 
-    section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
+    section.append(
+      this.renderCompletedActions(model.feature, model.rerunActionLabel, this.getReadOnlyCopyText(model)),
+    );
     return section;
+  }
+
+  private getReadOnlyCopyText(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): string | null {
+    if (model.feature !== 'chat-review') {
+      return null;
+    }
+
+    const sections: string[] = [];
+
+    if (model.reviewMeta?.rating !== null && model.reviewMeta?.rating !== undefined) {
+      sections.push(`Rating: ${model.reviewMeta.rating}/10`);
+    }
+
+    if (model.reviewMeta?.evaluation) {
+      sections.push(`Evaluation:\n${model.reviewMeta.evaluation}`);
+    }
+
+    if (model.reviewMeta?.recommendations) {
+      sections.push(`Recommendations:\n${model.reviewMeta.recommendations}`);
+    }
+
+    return sections.join('\n\n').trim() || model.rawText;
   }
 
   private renderCompletedActions(
     feature: FeatureType,
     rerunActionLabel: OverlayRerunActionLabel | undefined,
+    copyText?: string | null,
   ): HTMLElement {
     const actions = document.createElement('div');
     actions.className = 'chatmuse-overlay-actions';
+
+    if (!rerunActionLabel && !copyText) {
+      return actions;
+    }
+
+    if (copyText) {
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'chatmuse-button chatmuse-button-secondary';
+      copy.textContent = 'Copy';
+      copy.addEventListener('click', async () => {
+        try {
+          await copyToClipboard(copyText);
+          this.inlineError = null;
+          this.render(this.model);
+        } catch (error) {
+          this.inlineError = toUserError(error);
+          this.render(this.model, true);
+        }
+      });
+      actions.append(copy);
+    }
 
     if (!rerunActionLabel) {
       return actions;
