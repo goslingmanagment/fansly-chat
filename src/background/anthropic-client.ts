@@ -17,6 +17,7 @@ interface StreamArgs {
   signal: AbortSignal;
   onText: (text: string) => void;
   onUsage?: (usage: AnthropicUsageMetrics) => void;
+  onProgress?: () => void;
 }
 
 function parseSseBlock(block: string): { event: string; data: string } | null {
@@ -122,6 +123,7 @@ export class AnthropicClient {
     signal,
     onText,
     onUsage,
+    onProgress,
   }: StreamArgs): Promise<string> {
     let rawText = '';
     let usage: AnthropicUsageMetrics | null = null;
@@ -202,6 +204,8 @@ export class AnthropicClient {
         } catch {
           continue;
         }
+
+        onProgress?.();
 
         if (parsed.event === 'error' || payload.type === 'error') {
           throw new ChatMuseError('claude_overloaded');

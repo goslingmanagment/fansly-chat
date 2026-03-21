@@ -1,6 +1,9 @@
 import {
+  DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
+  DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
+  DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
+  DEEP_OPERATION_PREP_TIMEOUT_MS,
   FEATURE_TEMPERATURES,
-  DEEP_OPERATION_TIMEOUT_MS,
   DEFAULT_FEATURE_MODELS,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
@@ -101,10 +104,18 @@ interface ActiveOperation {
 
 const NO_OP_PROFILER = createOperationProfiler(false);
 const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
-const FEATURE_TIMEOUT_MS_BY_BUCKET = {
-  quick: QUICK_OPERATION_TIMEOUT_MS,
-  deep: DEEP_OPERATION_TIMEOUT_MS,
+const DEEP_OPERATION_TIMEOUTS = {
+  prep: DEEP_OPERATION_PREP_TIMEOUT_MS,
+  claudeTtfb: DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
+  claudeIdle: DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
+  claudeMaxStream: DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
 } as const;
+type OperationTimeoutKey =
+  | 'quick-total'
+  | 'deep-prep'
+  | 'claude-ttfb'
+  | 'claude-idle'
+  | 'claude-max-stream';
 
 interface ValidatedOperationStart {
   tab: browser.tabs.Tab;
@@ -129,8 +140,8 @@ interface OperationPromptRequestArgs {
   promptCachingEnabled: boolean;
 }
 
-function resolveOperationTimeoutMs(feature: FeatureType): number {
-  return FEATURE_TIMEOUT_MS_BY_BUCKET[getFeaturePolicy(feature).timeoutBucket];
+function usesDeepOperationTimeouts(feature: FeatureType): boolean {
+  return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
 
 function buildOperationPromptRequest({
@@ -656,7 +667,7 @@ export class OperationCoordinator {
       return;
     }
 
-    let timeout: number | null = null;
+    const timeoutHandles = new Map<OperationTimeoutKey, number>();
     let timeoutController: AbortController | null = null;
     let controller: AbortController | null = null;
     let debugEnabled = false;
@@ -666,10 +677,59 @@ export class OperationCoordinator {
       const profiler = createOperationProfiler(debugEnabled);
       const operationTimeoutController = new AbortController();
       timeoutController = operationTimeoutController;
-      timeout = globalThis.setTimeout(
-        () => operationTimeoutController.abort(),
-        resolveOperationTimeoutMs(payload.feature),
-      ) as unknown as number;
+      const clearTimeoutHandle = (key: OperationTimeoutKey): void => {
+        const handle = timeoutHandles.get(key);
+        if (handle === undefined) {
+          return;
+        }
+        clearTimeout(handle);
+        timeoutHandles.delete(key);
+      };
+      const armTimeoutHandle = (
+        key: OperationTimeoutKey,
+        ms: number,
+      ): void => {
+        clearTimeoutHandle(key);
+        const handle = globalThis.setTimeout(
+          () => operationTimeoutController.abort(),
+          ms,
+        ) as unknown as number;
+        timeoutHandles.set(key, handle);
+      };
+      const startClaudeTtfbTimeout = (): void => {
+        if (!usesDeepOperationTimeouts(payload.feature)) {
+          return;
+        }
+        clearTimeoutHandle('deep-prep');
+        armTimeoutHandle('claude-ttfb', DEEP_OPERATION_TIMEOUTS.claudeTtfb);
+      };
+      const startClaudeStreamTimeouts = (): void => {
+        if (!usesDeepOperationTimeouts(payload.feature)) {
+          return;
+        }
+        clearTimeoutHandle('claude-ttfb');
+        armTimeoutHandle('claude-idle', DEEP_OPERATION_TIMEOUTS.claudeIdle);
+        armTimeoutHandle(
+          'claude-max-stream',
+          DEEP_OPERATION_TIMEOUTS.claudeMaxStream,
+        );
+      };
+      const resetClaudeIdleTimeout = (): void => {
+        if (!usesDeepOperationTimeouts(payload.feature)) {
+          return;
+        }
+        armTimeoutHandle('claude-idle', DEEP_OPERATION_TIMEOUTS.claudeIdle);
+      };
+      const clearClaudeTimeouts = (): void => {
+        clearTimeoutHandle('claude-ttfb');
+        clearTimeoutHandle('claude-idle');
+        clearTimeoutHandle('claude-max-stream');
+      };
+      if (usesDeepOperationTimeouts(payload.feature)) {
+        armTimeoutHandle('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
+      } else {
+        armTimeoutHandle('quick-total', QUICK_OPERATION_TIMEOUT_MS);
+      }
       const operationController = new AbortController();
       controller = operationController;
       const signal = AbortSignal.any([
@@ -1389,6 +1449,7 @@ export class OperationCoordinator {
       startStage('claude-ttfb', 'Wait for Claude TTFB');
       profiler.log('Waiting for Claude');
       sendDebugProgress();
+      startClaudeTtfbTimeout();
 
       let actualModel = resolvedModel;
       let latestAnthropicSpend: AnthropicSpendSummary | null = null;
@@ -1430,6 +1491,7 @@ export class OperationCoordinator {
           }
           if (!sawFirstChunk) {
             sawFirstChunk = true;
+            startClaudeStreamTimeouts();
             profiler.completeStage('claude-ttfb', 'first chunk received');
             profiler.log('Claude first token');
             profiler.startStage('claude-stream', 'Stream Claude response');
@@ -1439,6 +1501,12 @@ export class OperationCoordinator {
           current.rawText += chunk;
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
+        },
+        onProgress: () => {
+          if (!sawFirstChunk) {
+            return;
+          }
+          resetClaudeIdleTimeout();
         },
         onUsage: (usage: AnthropicUsageMetrics) => {
           handleAnthropicUsage(usage);
@@ -1477,6 +1545,7 @@ export class OperationCoordinator {
           throw err;
         }
       }
+      clearClaudeTimeouts();
 
       if (sawFirstChunk) {
         completeStage(
@@ -1582,9 +1651,10 @@ export class OperationCoordinator {
       logDebug(debugEnabled, 'operation error', error);
       await this.cancelOperation(tabId);
     } finally {
-      if (timeout !== null) {
-        clearTimeout(timeout);
+      for (const handle of timeoutHandles.values()) {
+        clearTimeout(handle);
       }
+      timeoutHandles.clear();
     }
   }
 
