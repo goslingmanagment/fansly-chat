@@ -219,13 +219,15 @@ describe('AnthropicClient streaming requests', () => {
     const client = new AnthropicClient();
     const onText = vi.fn();
     const onUsage = vi.fn();
+    const onProgress = vi.fn();
 
-    const rawText = await client.streamMessage(streamArgs({ onText, onUsage }));
+    const rawText = await client.streamMessage(streamArgs({ onText, onUsage, onProgress }));
 
     expect(rawText).toBe('Hello there');
     expect(onText).toHaveBeenNthCalledWith(1, 'Hello');
     expect(onText).toHaveBeenNthCalledWith(2, ' there');
     expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenCalledTimes(4);
     expect(onUsage).toHaveBeenNthCalledWith(1, {
       input_tokens: 120,
       cache_creation_input_tokens: 40,

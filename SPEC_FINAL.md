@@ -135,7 +135,7 @@ The exact sections and formatting are controlled by the AI prompt. The prompt ca
 
 **Minimum message requirement:** The conversation must have at least 30 total messages (from either side). If fewer, show an error: "Not enough conversation history for a fan summary."
 
-**Timeout:** 120 seconds (deep features load more data and take longer).
+**Timeout:** Staged timeout guards: 180 seconds for pre-Claude work, 45 seconds for Claude TTFB, 45 seconds for Claude idle gaps after streaming starts, and 300 seconds max for active Claude streaming.
 
 ---
 
@@ -177,7 +177,7 @@ The output is read-only — there are no Insert buttons (this is analysis, not a
 
 **Limitation:** Chat Review results are stored locally in the browser. Manager oversight is only possible on the same machine/browser profile where the review was run. There is no cross-device sharing.
 
-**Timeout:** 120 seconds.
+**Timeout:** Staged timeout guards: 180 seconds for pre-Claude work, 45 seconds for Claude TTFB, 45 seconds for Claude idle gaps after streaming starts, and 300 seconds max for active Claude streaming.
 
 ---
 
@@ -239,7 +239,10 @@ If the earnings request fails, returns empty, or times out, the feature continue
 **Timeouts:**
 - Per Fansly API request: 30 seconds
 - Total quick operation (message loading + AI generation): 60 seconds
-- Total deep operation (message loading + AI generation): 120 seconds
+- Deep pre-Claude work (message loading + enrichment + prompt build): 180 seconds
+- Claude TTFB for deep operations: 45 seconds
+- Claude idle gap after deep streaming starts: 45 seconds
+- Claude max active stream for deep operations: 300 seconds
 
 ---
 

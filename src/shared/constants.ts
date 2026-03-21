@@ -82,7 +82,10 @@ export const DEEP_MAX_MESSAGE_COUNT = 1000;
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
 export const QUICK_OPERATION_TIMEOUT_MS = 60_000;
-export const DEEP_OPERATION_TIMEOUT_MS = 120_000;
+export const DEEP_OPERATION_PREP_TIMEOUT_MS = 180_000;
+export const DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS = 45_000;
+export const DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS = 45_000;
+export const DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS = 300_000;
 
 // ─── Intervals & Throttles ──────────────────────────────────────────────
 

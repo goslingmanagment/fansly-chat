@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COMPARE_TEMPERATURE,
+  DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
+  DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
+  DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
+  DEEP_OPERATION_PREP_TIMEOUT_MS,
   DEFAULT_MODEL_ID,
   DEFAULT_FEATURE_MODELS,
   FEATURE_TEMPERATURES,
@@ -1775,6 +1779,312 @@ describe('OperationCoordinator', () => {
       detail: 'operation failed',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+  });
+
+  it('lets deep fan summary complete after more than 120 seconds when progress continues', async () => {
+    vi.useFakeTimers();
+
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockImplementation(
+      async () => new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            transcriptMessages: buildTranscriptMessages(30),
+            windowStartMs: 0,
+            pagesLoaded: 2,
+            targetPages: 2,
+          });
+        }, 100_000);
+      }),
+    );
+
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({
+          signal,
+          onText,
+          onProgress,
+        }: {
+          signal: AbortSignal;
+          onText: (text: string) => void;
+          onProgress?: () => void;
+        }) => new Promise<string>((resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+
+          setTimeout(() => {
+            onText('Long');
+          }, 10_000);
+          setTimeout(() => {
+            onProgress?.();
+          }, 40_000);
+          setTimeout(() => {
+            onProgress?.();
+          }, 70_000);
+          setTimeout(() => {
+            onProgress?.();
+          }, 100_000);
+          setTimeout(() => {
+            onProgress?.();
+          }, 130_000);
+          setTimeout(() => {
+            onText(' summary');
+            resolve('Long summary');
+          }, 170_000);
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      fanslyClient,
+      anthropicClient,
+    });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(300_000);
+    await startPromise;
+
+    const messages = postedMessages(port);
+    const completeMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(messages.find((message) => message.type === 'operation:error')).toBeUndefined();
+    expect(completeMessage?.result.rawText).toBe('Long summary');
+  });
+
+  it('times out deep prep when message loading exceeds the prep budget', async () => {
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    let resolveLoadStarted: (() => void) | null = null;
+    const loadStarted = new Promise<void>((resolve) => {
+      resolveLoadStarted = resolve;
+    });
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockImplementation(
+      async (
+        _groupId: string,
+        _messageCount: number,
+        _session: unknown,
+        _accountId: string,
+        signal: AbortSignal,
+      ) => new Promise((_, reject) => {
+        resolveLoadStarted?.();
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      }),
+    );
+    const { coordinator, port } = await createCoordinatorHarness({ fanslyClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await loadStarted;
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_PREP_TIMEOUT_MS);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('timed_out');
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'load-messages')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toBeUndefined();
+  });
+
+  it('times out deep operations when Claude TTFB exceeds the stage budget', async () => {
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({ signal }: { signal: AbortSignal }) => new Promise<string>((_resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await streamStarted;
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('timed_out');
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+  });
+
+  it('times out deep operations when Claude stream goes idle after the first chunk', async () => {
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({
+          signal,
+          onText,
+        }: {
+          signal: AbortSignal;
+          onText: (text: string) => void;
+        }) => new Promise<string>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+
+          setTimeout(() => {
+            onText('Hello');
+          }, 1_000);
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('timed_out');
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+      status: 'completed',
+      detail: 'first chunk received',
+    });
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
+  });
+
+  it('times out deep operations when Claude stream exceeds the max stream budget', async () => {
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({
+          signal,
+          onText,
+          onProgress,
+        }: {
+          signal: AbortSignal;
+          onText: (text: string) => void;
+          onProgress?: () => void;
+        }) => new Promise<string>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+
+          setTimeout(() => {
+            onText('Hello');
+          }, 1_000);
+          for (let offset = 31_000; offset < DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS; offset += 30_000) {
+            setTimeout(() => {
+              onProgress?.();
+            }, offset);
+          }
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error.code).toBe('timed_out');
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
+      status: 'failed',
+      detail: 'operation failed',
+    });
   });
 
   it('returns profiling data for ping_blocked before Claude work starts', async () => {

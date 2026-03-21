@@ -28,13 +28,13 @@ Each suggestion has its own Insert button. Quick feature — 60-second timeout.
 
 Generates a profile of the fan covering interests, communication style, spending behavior, conversation patterns, and red flags. Uses deep message history (~500 messages, configurable) for a thorough read.
 
-Results are cached per conversation. If the personality hasn't changed since the last summary, the cached version is returned instantly. Deep feature — 120-second timeout.
+Results are cached per conversation. If the personality hasn't changed since the last summary, the cached version is returned instantly. Deep feature — staged timeout guards (180s prep, 45s Claude TTFB/idle, 300s max stream).
 
 ### Chat Review
 
 Quality review of the chatter's performance with a 1–10 rating. Evaluates persona adherence, conversation quality, specific mistakes, monetization awareness, and fan handling. Returns a rating, evaluation, and recommendations.
 
-Uses deep message history. Deep feature — 120-second timeout.
+Uses deep message history. Deep feature — staged timeout guards (180s prep, 45s Claude TTFB/idle, 300s max stream).
 
 ### Ping
 
