@@ -401,6 +401,54 @@ describe('OverlayController', () => {
     expect(log.textContent).toContain('Loaded messages page 3/40 (25 msgs, 75 collected)');
   });
 
+  it('keeps the loading profiling log pinned to the bottom when new entries append', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const initialProfiling = createProfilingSnapshot();
+
+    controller.render(
+      createLoadingModel('profile-bottom-op', '', {
+        profiling: initialProfiling,
+      }),
+    );
+
+    const log = requireElement<HTMLDivElement>('.chatmuse-profiling-log');
+    let scrollHeight = 180;
+    Object.defineProperty(log, 'clientHeight', {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(log, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    log.scrollTop = 80;
+
+    scrollHeight = 220;
+    controller.render(
+      createLoadingModel('profile-bottom-op', '', {
+        profiling: {
+          ...initialProfiling,
+          elapsedMs: 9300,
+          logEntries: [
+            ...initialProfiling.logEntries,
+            {
+              elapsedMs: 1200,
+              message: 'Loaded messages page 3/40 (25 msgs, 75 collected)',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-log')).toBe(log);
+    expect(log.scrollTop).toBe(120);
+  });
+
   it('updates the loading profiling header text in place when elapsed time changes', () => {
     const controller = new OverlayController({
       onClose: () => undefined,

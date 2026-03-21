@@ -761,6 +761,7 @@ export class OverlayController {
     }
 
     const previousScrollTop = log.scrollTop;
+    const wasPinnedToBottom = this.isScrolledToBottom(log);
     const previousEntries = view.profilingLogEntries;
     const isAppendOnly =
       nextEntries.length >= previousEntries.length &&
@@ -772,13 +773,22 @@ export class OverlayController {
       for (const entry of nextEntries.slice(previousEntries.length)) {
         log.append(this.createProfilingLogRow(entry));
       }
-      log.scrollTop = previousScrollTop;
+      log.scrollTop = wasPinnedToBottom
+        ? Math.max(0, log.scrollHeight - log.clientHeight)
+        : previousScrollTop;
     } else if (!isAppendOnly) {
       this.replaceLoadingProfilingLogEntries(log, nextEntries);
-      log.scrollTop = previousScrollTop;
+      log.scrollTop = wasPinnedToBottom
+        ? Math.max(0, log.scrollHeight - log.clientHeight)
+        : previousScrollTop;
     }
 
     view.profilingLogEntries = nextEntries.map((entry) => ({ ...entry }));
+  }
+
+  private isScrolledToBottom(log: HTMLDivElement): boolean {
+    const maxScrollTop = Math.max(0, log.scrollHeight - log.clientHeight);
+    return maxScrollTop - log.scrollTop <= 4;
   }
 
   private replaceLoadingProfilingLogEntries(
