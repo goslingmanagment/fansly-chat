@@ -1,4 +1,5 @@
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
+import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import type { PopupStatus } from '../shared/types.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
@@ -45,6 +46,7 @@ export function registerRuntimeApi({
             tabId: -1,
             accountId: null,
             groupId: null,
+            hasAvailableSummary: false,
             connected: false,
             hasApiKey: false,
             hasPersonalities: false,
@@ -80,6 +82,11 @@ export function registerRuntimeApi({
           tabId,
           accountId,
           groupId: context.groupId,
+          hasAvailableSummary: hasAvailableFanSummary(
+            state,
+            context.groupId,
+            mappedPersonalityId,
+          ),
           connected,
           hasApiKey: Boolean(state.settings.claudeApiKey),
           hasPersonalities: state.personalities.length > 0,

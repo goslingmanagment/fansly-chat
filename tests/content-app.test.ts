@@ -74,11 +74,12 @@ function installDom() {
   return dom;
 }
 
-function readyState(): TabUiState {
+function readyState(overrides: Partial<TabUiState> = {}): TabUiState {
   return {
     tabId: 1,
     accountId: 'account-1',
     groupId: 'group-1',
+    hasAvailableSummary: false,
     connected: true,
     hasApiKey: true,
     hasPersonalities: true,
@@ -86,6 +87,7 @@ function readyState(): TabUiState {
     mappedPersonalityName: 'Closer',
     compareCardCount: 2,
     compareDraftCount: 1,
+    ...overrides,
   };
 }
 
@@ -244,7 +246,7 @@ describe('ChatMuseContentApp', () => {
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
-    app.tabState = readyState();
+    app.tabState = readyState({ hasAvailableSummary: false });
     app.currentGroupId = 'group-1';
     app.activeFeature = 'fast-reply';
     app.activeOperationId = 'reply-op';
@@ -846,6 +848,7 @@ describe('ChatMuseContentApp', () => {
     });
 
     expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saving');
+    expect(app.tabState.hasAvailableSummary).toBe(true);
 
     app.handlePortMessage({
       type: 'summary:syncStatus',

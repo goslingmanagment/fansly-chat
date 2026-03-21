@@ -1145,6 +1145,12 @@ export class ChatMuseContentApp {
       message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
+    if (feature === 'fan-summary' && this.tabState) {
+      this.tabState = {
+        ...this.tabState,
+        hasAvailableSummary: true,
+      };
+    }
     const improveDraftCacheKey = this.activeImproveDraftCacheKey;
     if (featureRequiresDraft(feature)) {
       this.completedOverlayCache.set(

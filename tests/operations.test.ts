@@ -360,6 +360,89 @@ describe('OperationCoordinator', () => {
     expect((globalThis as any).browser.storage.local.remove).toHaveBeenCalledWith('summary:group-1');
   });
 
+  it('marks tab state when a valid summary is already available locally', async () => {
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.handlePortMessage(1, {
+      type: 'tab:init',
+      groupId: 'group-1',
+      routeNonce: 1,
+    });
+
+    expect(postedMessages(port)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tab:state',
+          state: expect.objectContaining({
+            groupId: 'group-1',
+            hasAvailableSummary: true,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('prefetches an Agency Hub summary for tab state availability and marks it ready', async () => {
+    delete mockStorage['summary:group-1'];
+
+    const { coordinator, port, agencyHubClient } = await createCoordinatorHarness({
+      agencyHubClient: {
+        isConfigured: vi.fn(() => true),
+        fetchFanProfileByConversation: vi.fn(async () => ({
+          status: 'fetched',
+          reason: 'fetched',
+          baseUrl: 'http://hub.test',
+          pageLabel: 'creator-fs',
+          body: 'Hub summary',
+          createdAtMs: 1234,
+          fanAccountId: 'fan-1',
+        })),
+        pushFanProfile: vi.fn(async () => ({
+          status: 'skipped',
+          reason: 'disabled',
+          baseUrl: null,
+        })),
+      },
+    });
+
+    await coordinator.handlePortMessage(1, {
+      type: 'tab:init',
+      groupId: 'group-1',
+      routeNonce: 1,
+    });
+
+    await vi.waitFor(() => {
+      const availabilityMessages = postedMessages(port).filter(
+        (message) => message.type === 'tab:state',
+      );
+      expect(availabilityMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            state: expect.objectContaining({
+              groupId: 'group-1',
+              hasAvailableSummary: false,
+            }),
+          }),
+          expect.objectContaining({
+            state: expect.objectContaining({
+              groupId: 'group-1',
+              hasAvailableSummary: true,
+            }),
+          }),
+        ]),
+      );
+    });
+
+    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
+    expect(mockStorage['summary:group-1']).toMatchObject({
+      summary: 'Hub summary',
+      personalityId: 'personality-1',
+      generatedAt: 1234,
+      modelId: DEFAULT_MODEL_ID,
+      fanAccountId: 'fan-1',
+    });
+  });
+
   it('auto-recovers a mapped personality when a new legacy alias is captured for the same account', async () => {
     mockStorage = {
       ...mockStorage,

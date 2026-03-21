@@ -1,17 +1,15 @@
-import { FEATURE_LABELS } from '../shared/constants.js';
 import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/types.js';
 
 type ToolbarAction = FeatureType | 'compare';
 
 const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
-  { feature: 'fast-reply', label: FEATURE_LABELS['fast-reply'] },
-  { feature: 'improve-draft', label: FEATURE_LABELS['improve-draft'] },
-  { feature: 'ping', label: FEATURE_LABELS['ping'] },
-  { feature: 'fan-summary', label: FEATURE_LABELS['fan-summary'] },
+  { feature: 'fast-reply', label: 'Reply' },
+  { feature: 'improve-draft', label: 'Polish' },
+  { feature: 'ping', label: 'Ping' },
+  { feature: 'fan-summary', label: 'Scan' },
 ];
 
 const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> = [
-  { tone: 'casual', label: 'Casual' },
   { tone: 'flirty', label: 'Flirty' },
   { tone: 'upsell', label: 'Upsell' },
   { tone: 'spicy', label: 'Spicy' },
@@ -89,6 +87,7 @@ export class ButtonBar {
 
     const pingButton = this.buttons.get('ping')!;
     const summaryButton = this.buttons.get('fan-summary')!;
+    summaryButton.classList.add('chatmuse-toolbar-button-summary');
 
     // Main actions first, secondary controls later so narrow layouts degrade gracefully.
     // Help / Review / Compare stay implemented but are intentionally hidden from the toolbar for now.
@@ -144,6 +143,15 @@ export class ButtonBar {
         button.textContent = isActive ? entry.label : entry.label;
       }
     }
+
+    const summaryButton = this.buttons.get('fan-summary')!;
+    summaryButton.classList.toggle(
+      'chatmuse-toolbar-button-summary-ready',
+      state.hasAvailableSummary,
+    );
+    summaryButton.title = state.hasAvailableSummary
+      ? 'Scan ready to open'
+      : '';
 
     const compareButton = this.buttons.get('compare')!;
     const compareActive = activeAction === 'compare';

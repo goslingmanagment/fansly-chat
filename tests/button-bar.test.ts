@@ -19,6 +19,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
     tabId: 1,
     accountId: 'account-1',
     groupId: 'group-1',
+    hasAvailableSummary: false,
     connected: true,
     hasApiKey: true,
     hasPersonalities: true,
@@ -74,6 +75,25 @@ describe('ButtonBar toolbar visibility', () => {
       .map((button) => button.textContent);
 
     expect(labels).toContain('Summary');
+  });
+
+  it('marks Summary when a ready summary is available', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
+
+    const summary = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Summary');
+
+    expect(summary?.classList.contains('chatmuse-toolbar-button-summary-ready')).toBe(true);
+    expect(summary?.title).toBe('Summary ready to open');
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
