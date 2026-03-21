@@ -111,6 +111,10 @@ export async function savePersonalities(personalities: Personality[]): Promise<P
 
 export async function deletePersonality(personalityId: string): Promise<void> {
   const state = await loadStorageState();
+  const target = state.personalities.find((personality) => personality.id === personalityId);
+  if (target?.builtin) {
+    return;
+  }
   const personalities = state.personalities.filter((p) => p.id !== personalityId);
   const accountMappings = Object.fromEntries(
     Object.entries(state.accountMappings).filter(([, mapped]) => mapped !== personalityId),

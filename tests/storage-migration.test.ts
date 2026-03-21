@@ -420,6 +420,33 @@ describe('loadStorageState', () => {
     });
   });
 
+  it('re-adds bundled Lora when other personalities exist but the bundled entry is missing', async () => {
+    const [bundledLora] = createBundledPersonalities();
+    if (!bundledLora) {
+      throw new Error('Expected bundled Lora personality');
+    }
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [
+        { id: 'custom-1', name: 'Custom', content: 'custom', updatedAt: 1000 },
+      ],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+
+    const result = await storage.loadStorageState();
+
+    expect(result.personalities).toEqual([
+      { id: 'custom-1', name: 'Custom', content: 'custom', updatedAt: 1000 },
+      bundledLora,
+    ]);
+    expect(mockStorage.personalities).toEqual([
+      { id: 'custom-1', name: 'Custom', content: 'custom', updatedAt: 1000 },
+      bundledLora,
+    ]);
+  });
+
   it('overwrites modified bundled personalities when the bundled version changes', async () => {
     const [bundledLora] = createBundledPersonalities();
     if (!bundledLora) {
@@ -484,12 +511,36 @@ describe('savePersonalities', () => {
     expect(result).toEqual(createBundledPersonalities());
     expect(mockStorage.personalities).toEqual(createBundledPersonalities());
   });
+
+  it('re-adds bundled Lora when saving a custom-only personality list', async () => {
+    const [bundledLora] = createBundledPersonalities();
+    if (!bundledLora) {
+      throw new Error('Expected bundled Lora personality');
+    }
+
+    const result = await storage.savePersonalities([
+      { id: 'p1', name: 'Custom', content: 'test', updatedAt: 1000 },
+    ]);
+
+    expect(result).toEqual([
+      { id: 'p1', name: 'Custom', content: 'test', updatedAt: 1000 },
+      bundledLora,
+    ]);
+    expect(mockStorage.personalities).toEqual([
+      { id: 'p1', name: 'Custom', content: 'test', updatedAt: 1000 },
+      bundledLora,
+    ]);
+  });
 });
 
 // ─── deletePersonality (cascade) ────────────────────────────────────────
 
 describe('deletePersonality', () => {
   it('removes personality, related mappings, and related summaries', async () => {
+    const [bundledLora] = createBundledPersonalities();
+    if (!bundledLora) {
+      throw new Error('Expected bundled Lora personality');
+    }
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: createDefaultSettings(),
@@ -506,13 +557,43 @@ describe('deletePersonality', () => {
 
     await storage.deletePersonality('p1');
 
-    expect((mockStorage.personalities as Personality[]).map((p) => p.id)).toEqual(['p2']);
+    expect(mockStorage.personalities).toEqual([
+      { id: 'p2', name: 'Keep', content: 'y', updatedAt: 1000 },
+      bundledLora,
+    ]);
     expect((mockStorage.accountMappings as Record<string, string>).acc1).toBeUndefined();
     expect((mockStorage.accountMappings as Record<string, string>).acc2).toBeUndefined();
     expect((mockStorage.accountMappings as Record<string, string>).acc3).toBe('p2');
     expect(mockStorage['summary:group1']).toBeUndefined();
     expect(mockStorage['summary:group3']).toBeUndefined();
     expect(mockStorage['summary:group2']).toBeDefined();
+  });
+
+  it('does not delete bundled personalities or their related state', async () => {
+    const [bundledLora] = createBundledPersonalities();
+    if (!bundledLora) {
+      throw new Error('Expected bundled Lora personality');
+    }
+
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [bundledLora],
+      accountMappings: { acc1: bundledLora.id },
+      knownAccounts: [],
+      'summary:group1': {
+        summary: 'sum1',
+        personalityId: bundledLora.id,
+        personalityUpdatedAt: bundledLora.updatedAt,
+        generatedAt: 2000,
+      } as SummaryCacheEntry,
+    };
+
+    await storage.deletePersonality(bundledLora.id);
+
+    expect(mockStorage.personalities).toEqual([bundledLora]);
+    expect(mockStorage.accountMappings).toEqual({ acc1: bundledLora.id });
+    expect(mockStorage['summary:group1']).toBeDefined();
   });
 });
 

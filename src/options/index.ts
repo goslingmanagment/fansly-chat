@@ -894,16 +894,18 @@ async function render(): Promise<void> {
 
     const actions = document.createElement('div');
     actions.className = 'chatmuse-card-actions';
-    const deleteButton = createButton('Delete', false, true);
-    deleteButton.addEventListener('click', async () => {
-      const confirmed = window.confirm(`Delete personality "${nameInput.value || personality.name}"?`);
-      if (!confirmed) {
-        return;
-      }
-      await deletePersonality(personality.id);
-      await render();
-    });
-    actions.append(deleteButton);
+    if (!personality.builtin) {
+      const deleteButton = createButton('Delete', false, true);
+      deleteButton.addEventListener('click', async () => {
+        const confirmed = window.confirm(`Delete personality "${nameInput.value || personality.name}"?`);
+        if (!confirmed) {
+          return;
+        }
+        await deletePersonality(personality.id);
+        await render();
+      });
+      actions.append(deleteButton);
+    }
 
     nameInput.addEventListener('input', savePersonalitiesDebounced);
     contentInput.addEventListener('input', savePersonalitiesDebounced);

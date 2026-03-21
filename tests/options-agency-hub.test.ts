@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { createBundledPersonalities } from '../src/shared/personalities.js';
 import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
 
 let dom: InstanceType<typeof JSDOM>;
@@ -28,6 +29,7 @@ interface LoadOptionsPageOptions {
 }
 
 function makeState(overrides?: Partial<PersistedState['settings']>): PersistedState {
+  const [bundledLora] = createBundledPersonalities();
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
@@ -42,7 +44,10 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       featureModels: { ...DEFAULT_FEATURE_MODELS },
       ...overrides,
     },
-    personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
+    personalities: [
+      { id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 },
+      ...(bundledLora ? [bundledLora] : []),
+    ],
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],
