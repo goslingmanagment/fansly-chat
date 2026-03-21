@@ -342,6 +342,76 @@ describe('OverlayController', () => {
     );
   });
 
+  it('preserves loading profiling log scrollTop across appended progress entries', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const initialProfiling = createProfilingSnapshot();
+
+    controller.render(
+      createLoadingModel('profile-scroll-op', '', {
+        profiling: initialProfiling,
+      }),
+    );
+
+    const log = requireElement<HTMLDivElement>('.chatmuse-profiling-log');
+    log.scrollTop = 72;
+
+    controller.render(
+      createLoadingModel('profile-scroll-op', '', {
+        profiling: {
+          ...initialProfiling,
+          elapsedMs: 9300,
+          logEntries: [
+            ...initialProfiling.logEntries,
+            {
+              elapsedMs: 1200,
+              message: 'Loaded messages page 3/40 (25 msgs, 75 collected)',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling-log')).toBe(log);
+    expect(log.scrollTop).toBe(72);
+    expect(log.textContent).toContain('Loaded messages page 3/40 (25 msgs, 75 collected)');
+  });
+
+  it('updates the loading profiling header text in place when elapsed time changes', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const initialProfiling = createProfilingSnapshot();
+
+    controller.render(
+      createLoadingModel('profile-header-op', '', {
+        profiling: initialProfiling,
+      }),
+    );
+
+    const header = requireElement<HTMLDivElement>('.chatmuse-profiling .chatmuse-debug-summary');
+    expect(header.textContent).toBe('Pipeline Profiling • 1.9s');
+
+    controller.render(
+      createLoadingModel('profile-header-op', '', {
+        profiling: {
+          ...initialProfiling,
+          elapsedMs: 9300,
+        },
+      }),
+    );
+
+    expect(requireElement<HTMLDivElement>('.chatmuse-profiling .chatmuse-debug-summary')).toBe(header);
+    expect(header.textContent).toBe('Pipeline Profiling • 9.3s');
+  });
+
   it('renders a spend placeholder in loading view before usage arrives', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
