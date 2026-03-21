@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { MAX_TOKENS } from '../src/shared/constants.js';
 import { ChatMuseError } from '../src/shared/errors.js';
 
 // ─── Mock fetch ──────────────────────────────────────────────────────────
@@ -194,6 +195,44 @@ describe('AnthropicClient streaming requests', () => {
         content: streamArgs().userBlocks,
       },
     ]);
+  });
+
+  it('uses the raised 8192 max_tokens cap for fan-summary requests', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_start',
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    await client.streamMessage(
+      streamArgs({
+        feature: 'fan-summary',
+      }),
+    );
+
+    const fetchMock = vi.mocked(fetch);
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as { max_tokens: number };
+
+    expect(body.max_tokens).toBe(8192);
+    expect(body.max_tokens).toBe(MAX_TOKENS['fan-summary']);
+  });
+
+  it('keeps max_tokens for other features unchanged', () => {
+    expect(MAX_TOKENS).toEqual({
+      'fast-reply': 800,
+      'improve-draft': 800,
+      'help-me': 1200,
+      'fan-summary': 8192,
+      'chat-review': 1600,
+      'ping': 800,
+    });
   });
 
   it('streams text deltas and reports cumulative usage metrics', async () => {

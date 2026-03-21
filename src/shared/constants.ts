@@ -43,7 +43,7 @@ export const MAX_TOKENS: Record<FeatureType, number> = {
   'fast-reply': 800,
   'improve-draft': 800,
   'help-me': 1200,
-  'fan-summary': 4096,
+  'fan-summary': 8192,
   'chat-review': 1600,
   'ping': 800,
 };
