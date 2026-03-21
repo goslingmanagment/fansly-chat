@@ -39,6 +39,10 @@ import {
 } from '../shared/features.js';
 import { logDebug } from '../shared/log.js';
 import { buildPromptRequest } from '../shared/prompts.js';
+import {
+  hasAvailableFanSummary,
+  isValidSummaryCacheEntry,
+} from '../shared/summary-cache.js';
 import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
@@ -329,6 +333,7 @@ export class OperationCoordinator {
   private readonly activeCompareByTabId = new Map<number, ActiveCompareOperation>();
   private readonly cancelledOperationIds = new Set<string>();
   private readonly cancelledCompareOperationIds = new Set<string>();
+  private readonly pendingSummaryAvailabilityByKey = new Map<string, Promise<void>>();
   private readonly pendingIdentityResolutionByLegacyAccountId = new Map<
     string,
     {
@@ -372,10 +377,14 @@ export class OperationCoordinator {
     if (!port) {
       return;
     }
+    const state = await this.buildTabUiState(tabId);
     port.postMessage({
       type: messageType,
-      state: await this.buildTabUiState(tabId),
+      state,
     } satisfies TabStatePayload);
+    if (!state.hasAvailableSummary) {
+      void this.prefetchAvailableSummary(tabId);
+    }
   }
 
   async refreshAllTabs(
@@ -558,6 +567,11 @@ export class OperationCoordinator {
       tabId,
       accountId,
       groupId: context.groupId,
+      hasAvailableSummary: hasAvailableFanSummary(
+        storage,
+        context.groupId,
+        mappedPersonalityId,
+      ),
       connected: Boolean(session?.connected),
       hasApiKey: Boolean(storage.settings.claudeApiKey),
       hasPersonalities: storage.personalities.length > 0,
@@ -566,6 +580,111 @@ export class OperationCoordinator {
       compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
       compareDraftCount,
     };
+  }
+
+  private async cachePrefetchedSummary(
+    groupId: string,
+    personality: PersistedState['personalities'][number],
+    modelId: string,
+    prefetchedSummary: AgencyHubSummaryPrefetchResult,
+  ): Promise<void> {
+    await this.storageCoordinator.saveSummaryCache(groupId, {
+      summary: prefetchedSummary.summary,
+      personalityId: personality.id,
+      personalityUpdatedAt: personality.updatedAt,
+      generatedAt: prefetchedSummary.generatedAt,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId,
+      fanAccountId: prefetchedSummary.fanAccountId,
+      agencyHubSync: prefetchedSummary.syncStatus,
+    });
+  }
+
+  private async prefetchAvailableSummary(tabId: number): Promise<void> {
+    const storage = await this.storageCoordinator.getState();
+    const context = this.tabContexts.getOrCreate(tabId);
+    const groupId = context.groupId?.trim() ?? '';
+    if (!groupId) {
+      return;
+    }
+
+    const session = this.sessionStore.getSessionForTab(tabId);
+    if (!session?.connected) {
+      return;
+    }
+
+    const legacyAccountId =
+      this.sessionStore.getAccountIdForTab(tabId) ?? context.accountId;
+    const accountId = session.resolvedAccountId ?? legacyAccountId;
+    const mappedPersonalityId = resolveMappedPersonalityId(
+      storage.accountMappings,
+      accountId,
+      legacyAccountId,
+      storage.accountAliases,
+    );
+
+    if (hasAvailableFanSummary(storage, groupId, mappedPersonalityId)) {
+      return;
+    }
+
+    const personality = storage.personalities.find(
+      (entry) => entry.id === mappedPersonalityId,
+    );
+    if (!personality) {
+      return;
+    }
+
+    const modelId = storage.settings.featureModels['fan-summary'];
+    const key = [
+      tabId,
+      groupId,
+      personality.id,
+      personality.updatedAt,
+      modelId,
+    ].join('|');
+
+    const pending = this.pendingSummaryAvailabilityByKey.get(key);
+    if (pending) {
+      await pending;
+      return;
+    }
+
+    const task = (async () => {
+      const prefetchedSummary = await this.prefetchAgencyHubSummary(
+        groupId,
+        storage.settings,
+        session,
+        new AbortController().signal,
+        storage.settings.debugMode,
+      );
+      if (!prefetchedSummary) {
+        return;
+      }
+
+      const active = this.activeByTabId.get(tabId);
+      if (active?.feature === 'fan-summary' && active.groupId === groupId) {
+        return;
+      }
+
+      await this.cachePrefetchedSummary(
+        groupId,
+        personality,
+        modelId,
+        prefetchedSummary,
+      );
+
+      if (this.tabContexts.getOrCreate(tabId).groupId === groupId) {
+        await this.refreshTabState(tabId, 'tab:state');
+      }
+    })().finally(() => {
+      if (this.pendingSummaryAvailabilityByKey.get(key) === task) {
+        this.pendingSummaryAvailabilityByKey.delete(key);
+      }
+    });
+
+    this.pendingSummaryAvailabilityByKey.set(key, task);
+    await task;
   }
 
   private send(tabId: number, message: BackgroundPortMessage): void {
@@ -1257,13 +1376,11 @@ export class OperationCoordinator {
         cachedSummary = payload.forceRegenerate
           ? null
           : await this.storageCoordinator.getSummaryCache(validated.urlGroupId);
-        hasValidCachedSummary = Boolean(
-          cachedSummary &&
-          cachedSummary.personalityId === personality.id &&
-          cachedSummary.personalityUpdatedAt === personality.updatedAt &&
-          cachedSummary.modelId === resolvedModel &&
-          cachedSummary.spendingDataVerified === true &&
-          cachedSummary.subscriptionLookupVerified === true
+        hasValidCachedSummary = isValidSummaryCacheEntry(
+          cachedSummary,
+          personality.id,
+          personality.updatedAt,
+          resolvedModel,
         );
       }
 
@@ -1359,17 +1476,12 @@ export class OperationCoordinator {
           );
 
           if (prefetchedSummary) {
-            await this.storageCoordinator.saveSummaryCache(validated.urlGroupId, {
-              summary: prefetchedSummary.summary,
-              personalityId: personality.id,
-              personalityUpdatedAt: personality.updatedAt,
-              generatedAt: prefetchedSummary.generatedAt,
-              spendingDataVerified: true,
-              subscriptionLookupVerified: true,
-              modelId: resolvedModel,
-              fanAccountId: prefetchedSummary.fanAccountId,
-              agencyHubSync: prefetchedSummary.syncStatus,
-            });
+            await this.cachePrefetchedSummary(
+              validated.urlGroupId,
+              personality,
+              resolvedModel,
+              prefetchedSummary,
+            );
 
             const result: FeatureResult = {
               rawText: prefetchedSummary.summary,

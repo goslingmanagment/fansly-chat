@@ -561,6 +561,7 @@ export interface TabUiState {
   tabId: number;
   accountId: string | null;
   groupId: string | null;
+  hasAvailableSummary: boolean;
   connected: boolean;
   hasApiKey: boolean;
   hasPersonalities: boolean;
