@@ -41,11 +41,39 @@ export interface CompareModelCard extends CompareDraftCard {
   source: 'draft' | 'current';
 }
 
-export interface AgencyHubSummarySyncMetadata {
+export type FanSummarySyncState =
+  | 'not-set-up'
+  | 'saving'
+  | 'saved'
+  | 'failed';
+
+export interface FanSummarySyncStatus {
+  state: FanSummarySyncState;
+  generatedAt: number;
+  baseUrl?: string;
+  pageLabel?: string;
+  syncedAt?: number;
+  updatedAt?: number;
+}
+
+export interface LegacyAgencyHubSummarySyncMetadata {
+  generatedAt: number;
   baseUrl: string;
   pageLabel: string;
-  generatedAt: number;
   syncedAt: number;
+  updatedAt?: number;
+  state?: undefined;
+}
+
+export type AgencyHubSummarySyncMetadata =
+  | FanSummarySyncStatus
+  | LegacyAgencyHubSummarySyncMetadata;
+
+export interface FanSummaryMeta {
+  generatedAt: number;
+  stale: boolean;
+  cached: boolean;
+  syncStatus?: FanSummarySyncStatus;
 }
 
 export interface SummaryCacheEntry {
@@ -432,7 +460,7 @@ export interface FeatureResult {
   splitModeRequested?: boolean;
   helpMe?: HelpMeParsed;
   chatReview?: ChatReviewParsed;
-  summaryMeta?: { generatedAt: number; stale: boolean; cached: boolean };
+  summaryMeta?: FanSummaryMeta;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────
@@ -593,7 +621,8 @@ export interface PortEnvelopeBase {
     | 'compare:complete'
     | 'compare:discarded'
     | 'settings:changed'
-    | 'mapping:changed';
+    | 'mapping:changed'
+    | 'summary:syncStatus';
 }
 
 // Content → Background
@@ -751,6 +780,13 @@ export interface TabStatePayload extends PortEnvelopeBase {
   state: TabUiState;
 }
 
+export interface SummarySyncStatusPayload extends PortEnvelopeBase {
+  type: 'summary:syncStatus';
+  groupId: string;
+  generatedAt: number;
+  syncStatus: FanSummarySyncStatus;
+}
+
 export interface ProgressEnvelope extends PortEnvelopeBase, OperationProgressPayload {
   type: 'operation:progress';
 }
@@ -783,6 +819,7 @@ export type BackgroundPortMessage =
   | CompareCompletePayload
   | CompareDiscardedPayload
   | TabStatePayload
+  | SummarySyncStatusPayload
   | ProgressEnvelope
   | CompareProgressEnvelope;
 
@@ -872,7 +909,7 @@ export type OverlayViewModel =
       fanDisplayName: string;
       operationId: string;
       rawText: string;
-      summaryMeta?: { generatedAt: number; stale: boolean; cached: boolean };
+      summaryMeta?: FanSummaryMeta;
       reviewMeta?: {
         rating: number | null;
         evaluation: string | null;

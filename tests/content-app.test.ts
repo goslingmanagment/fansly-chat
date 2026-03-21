@@ -233,6 +233,7 @@ describe('ChatMuseContentApp', () => {
   });
 
   afterEach(() => {
+    (globalThis.window as Window | undefined)?.close?.();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -811,6 +812,79 @@ describe('ChatMuseContentApp', () => {
     expect(app.deepOverlayModel.kind).toBe('readOnly');
     // Inline panel still hidden
     expect(inlineRoot.classList.contains('chatmuse-hidden')).toBe(true);
+  });
+
+  it('updates and preserves Fan Summary sync status from background sync messages', async () => {
+    const ChatMuseContentApp = await loadAppClass();
+    const app = new ChatMuseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fan-summary';
+    app.activeOperationId = 'summary-op';
+    app.activeFanDisplayName = 'alice';
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'summary-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Fan summary text',
+        summaryMeta: {
+          generatedAt: 2000,
+          stale: false,
+          cached: false,
+          syncStatus: {
+            state: 'saving',
+            generatedAt: 2000,
+            updatedAt: 2000,
+          },
+        },
+      },
+    });
+
+    expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saving');
+
+    app.handlePortMessage({
+      type: 'summary:syncStatus',
+      groupId: 'group-1',
+      generatedAt: 9999,
+      syncStatus: {
+        state: 'failed',
+        generatedAt: 9999,
+        updatedAt: 9999,
+      },
+    });
+
+    expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saving');
+
+    app.handlePortMessage({
+      type: 'summary:syncStatus',
+      groupId: 'group-1',
+      generatedAt: 2000,
+      syncStatus: {
+        state: 'saved',
+        generatedAt: 2000,
+        baseUrl: 'http://hub.test',
+        pageLabel: 'creator-fs',
+        syncedAt: 2100,
+        updatedAt: 2100,
+      },
+    });
+
+    expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saved');
+    expect(
+      app.completedOverlayCache.get('group-1', 'fan-summary').summaryMeta.syncStatus.state,
+    ).toBe('saved');
+
+    app.deepOverlayModel = null;
+    sendSpy.mockClear();
+    app.startFeature('fan-summary', false);
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saved');
   });
 
   it('starts a fresh compare run instead of reopening completed cached compare results', async () => {

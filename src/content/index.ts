@@ -34,6 +34,7 @@ import type {
   CompareInlineTabState,
   CompareInlineViewModel,
   CompletedOverlayViewModel,
+  FanSummarySyncStatus,
   FeatureType,
   FeatureResult,
   OverlayInsertPart,
@@ -63,6 +64,27 @@ function isEditableElement(el: Element | null): boolean {
   if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
   if ((el as HTMLElement).isContentEditable) return true;
   return false;
+}
+
+function applyFanSummarySyncStatus(
+  model: OverlayViewModel | CompletedOverlayViewModel | null,
+  generatedAt: number,
+  syncStatus: FanSummarySyncStatus,
+): boolean {
+  if (
+    !model ||
+    model.kind !== 'readOnly' ||
+    model.feature !== 'fan-summary' ||
+    model.summaryMeta?.generatedAt !== generatedAt
+  ) {
+    return false;
+  }
+
+  model.summaryMeta = {
+    ...model.summaryMeta,
+    syncStatus,
+  };
+  return true;
 }
 
 export class ChatMuseContentApp {
@@ -806,6 +828,9 @@ export class ChatMuseContentApp {
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
         this.renderButtonBar();
         break;
+      case 'summary:syncStatus':
+        this.handleSummarySyncStatus(message);
+        break;
       case 'operation:progress':
         this.handleProgress(message);
         break;
@@ -846,6 +871,33 @@ export class ChatMuseContentApp {
         break;
       default:
         break;
+    }
+  }
+
+  private handleSummarySyncStatus(
+    message: Extract<BackgroundPortMessage, { type: 'summary:syncStatus' }>,
+  ): void {
+    if (message.groupId !== this.currentGroupId) {
+      return;
+    }
+
+    const cachedModel = this.completedOverlayCache.get(
+      this.currentGroupId,
+      'fan-summary',
+    );
+    const updatedCachedModel = applyFanSummarySyncStatus(
+      cachedModel,
+      message.generatedAt,
+      message.syncStatus,
+    );
+    const updatedVisibleModel = applyFanSummarySyncStatus(
+      this.deepOverlayModel,
+      message.generatedAt,
+      message.syncStatus,
+    );
+
+    if (updatedCachedModel || updatedVisibleModel) {
+      this.renderAll();
     }
   }
 

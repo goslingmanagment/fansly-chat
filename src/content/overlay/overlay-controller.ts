@@ -2,6 +2,7 @@ import { toUserError } from '../../shared/errors.js';
 import type {
   AnthropicSpendSummary,
   AnthropicUsageMetrics,
+  FanSummarySyncStatus,
   FeatureType,
   OverlayInsertPart,
   OverlayRerunActionLabel,
@@ -61,6 +62,7 @@ interface LoadingViewState {
   profilingHeaderText: Text | null;
   profilingLogEl: HTMLDivElement | null;
   profilingLogEntries: OperationProfilingSnapshot['logEntries'];
+  profilingLogScrollHeight: number | null;
   debugHost: HTMLDivElement;
   actions: HTMLDivElement;
   debugSnapshot: PromptDebugSnapshot | null;
@@ -112,6 +114,23 @@ function ratingClass(rating: number): string {
   if (rating >= 5) return 'chatmuse-rating-average';
   if (rating >= 3) return 'chatmuse-rating-below';
   return 'chatmuse-rating-poor';
+}
+
+function formatFanSummarySyncStatus(
+  syncStatus: FanSummarySyncStatus | undefined,
+): string | null {
+  switch (syncStatus?.state) {
+    case 'not-set-up':
+      return 'Server sync · not set up';
+    case 'saving':
+      return 'Server sync · saving...';
+    case 'saved':
+      return 'Server sync · saved';
+    case 'failed':
+      return 'Server sync · failed';
+    default:
+      return null;
+  }
 }
 
 function formatProfilingElapsed(ms: number): string {
@@ -571,6 +590,7 @@ export class OverlayController {
       profilingHeaderText: null,
       profilingLogEl: null,
       profilingLogEntries: [],
+      profilingLogScrollHeight: null,
       debugHost,
       actions,
       debugSnapshot: null,
@@ -667,6 +687,7 @@ export class OverlayController {
       view.profilingHeaderText = null;
       view.profilingLogEl = null;
       view.profilingLogEntries = [];
+      view.profilingLogScrollHeight = null;
       this.clearLoadingElapsedTimer();
       return;
     }
@@ -677,6 +698,7 @@ export class OverlayController {
       view.profilingHeaderText = profilingView.headerText;
       view.profilingLogEl = profilingView.log;
       view.profilingLogEntries = snapshot.logEntries.map((entry) => ({ ...entry }));
+      view.profilingLogScrollHeight = profilingView.log.scrollHeight;
       const stream = view.streamText.parentElement;
       if (stream) {
         view.root.insertBefore(view.profilingHost, stream);
@@ -761,7 +783,17 @@ export class OverlayController {
     }
 
     const previousScrollTop = log.scrollTop;
-    const wasPinnedToBottom = this.isScrolledToBottom(log);
+    const previousScrollHeight =
+      typeof view.profilingLogScrollHeight === 'number' &&
+      view.profilingLogScrollHeight > 0
+        ? view.profilingLogScrollHeight
+        : log.clientHeight > 0
+          ? Math.max(0, previousScrollTop + log.clientHeight)
+          : log.scrollHeight;
+    const wasPinnedToBottom = this.isScrolledToBottom(
+      log,
+      previousScrollHeight,
+    );
     const previousEntries = view.profilingLogEntries;
     const isAppendOnly =
       nextEntries.length >= previousEntries.length &&
@@ -784,10 +816,17 @@ export class OverlayController {
     }
 
     view.profilingLogEntries = nextEntries.map((entry) => ({ ...entry }));
+    view.profilingLogScrollHeight = log.scrollHeight;
   }
 
-  private isScrolledToBottom(log: HTMLDivElement): boolean {
-    const maxScrollTop = Math.max(0, log.scrollHeight - log.clientHeight);
+  private isScrolledToBottom(
+    log: HTMLDivElement,
+    scrollHeight = log.scrollHeight,
+  ): boolean {
+    const maxScrollTop = Math.max(0, scrollHeight - log.clientHeight);
+    if (maxScrollTop === 0) {
+      return log.scrollTop <= 0;
+    }
     return maxScrollTop - log.scrollTop <= 4;
   }
 
@@ -1157,7 +1196,14 @@ export class OverlayController {
     }
 
     section.append(
-      this.renderCompletedActions(model.feature, model.rerunActionLabel, this.getReadOnlyCopyText(model)),
+      this.renderCompletedActions(
+        model.feature,
+        model.rerunActionLabel,
+        this.getReadOnlyCopyText(model),
+        model.feature === 'fan-summary'
+          ? model.summaryMeta?.syncStatus
+          : undefined,
+      ),
     );
     return section;
   }
@@ -1191,11 +1237,12 @@ export class OverlayController {
     feature: FeatureType,
     rerunActionLabel: OverlayRerunActionLabel | undefined,
     copyText?: string | null,
+    syncStatus?: FanSummarySyncStatus,
   ): HTMLElement {
     const actions = document.createElement('div');
     actions.className = 'chatmuse-overlay-actions';
 
-    if (!rerunActionLabel && !copyText) {
+    if (!rerunActionLabel && !copyText && !syncStatus) {
       return actions;
     }
 
@@ -1224,6 +1271,14 @@ export class OverlayController {
         }
       });
       actions.append(copy);
+    }
+
+    const syncStatusText = formatFanSummarySyncStatus(syncStatus);
+    if (syncStatusText) {
+      const status = document.createElement('span');
+      status.className = 'chatmuse-overlay-action-status';
+      status.textContent = syncStatusText;
+      actions.append(status);
     }
 
     return actions;

@@ -1,4 +1,8 @@
-import type { AgencyHubSummarySyncMetadata } from './types.js';
+import type {
+  AgencyHubSummarySyncMetadata,
+  FanSummarySyncStatus,
+  FanSummarySyncState,
+} from './types.js';
 
 export const AGENCY_HUB_PROFILE_MAX_BYTES = 50_000;
 
@@ -46,16 +50,52 @@ export function measureUtf8Bytes(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
 
+export function normalizeAgencyHubSummarySyncMetadata(
+  metadata: AgencyHubSummarySyncMetadata | undefined,
+): FanSummarySyncStatus | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+
+  const state: FanSummarySyncState = metadata.state ?? 'saved';
+  return {
+    state,
+    generatedAt: metadata.generatedAt,
+    ...(metadata.baseUrl ? { baseUrl: normalizeAgencyHubBaseUrl(metadata.baseUrl) } : {}),
+    ...(metadata.pageLabel ? { pageLabel: metadata.pageLabel } : {}),
+    ...(typeof metadata.syncedAt === 'number' ? { syncedAt: metadata.syncedAt } : {}),
+    ...(typeof metadata.updatedAt === 'number' ? { updatedAt: metadata.updatedAt } : {}),
+  };
+}
+
+export function isAgencyHubSummarySavedForBaseUrl(
+  metadata: AgencyHubSummarySyncMetadata | undefined,
+  baseUrl: string | null | undefined,
+  generatedAt: number,
+): boolean {
+  const normalizedMetadata = normalizeAgencyHubSummarySyncMetadata(metadata);
+  const normalizedBaseUrl = normalizeAgencyHubBaseUrl(baseUrl);
+  return Boolean(
+    normalizedMetadata &&
+    normalizedMetadata.state === 'saved' &&
+    normalizedMetadata.generatedAt === generatedAt &&
+    normalizedMetadata.baseUrl === normalizedBaseUrl &&
+    normalizedMetadata.pageLabel,
+  );
+}
+
 export function hasAgencyHubSyncMetadata(
   metadata: AgencyHubSummarySyncMetadata | undefined,
   baseUrl: string,
   pageLabel: string,
   generatedAt: number,
 ): boolean {
+  const normalizedMetadata = normalizeAgencyHubSummarySyncMetadata(metadata);
   return Boolean(
-    metadata &&
-    metadata.baseUrl === baseUrl &&
-    metadata.pageLabel === pageLabel &&
-    metadata.generatedAt === generatedAt,
+    normalizedMetadata &&
+    normalizedMetadata.state === 'saved' &&
+    normalizedMetadata.baseUrl === baseUrl &&
+    normalizedMetadata.pageLabel === pageLabel &&
+    normalizedMetadata.generatedAt === generatedAt,
   );
 }
