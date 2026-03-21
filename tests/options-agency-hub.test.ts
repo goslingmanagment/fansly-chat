@@ -391,6 +391,43 @@ describe('Options page - Agency Hub section', () => {
     }, { timeout: 2000 });
   });
 
+  it('keeps the live connection test idle until both Hub fields are present', async () => {
+    const runtimeSendMessage = vi.fn(async (message: {
+      type: string;
+      settings?: AgencyHubConnectionTestRequest['settings'];
+    }) => {
+      if (message.type === 'getSessionsSnapshot') {
+        return [];
+      }
+      if (message.type === 'testAgencyHubConnection') {
+        return { ok: true };
+      }
+      return undefined;
+    });
+
+    await loadOptionsPage(makeState({
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: '',
+    }), {
+      permissionsContainsImpl: async () => true,
+      runtimeSendMessageImpl: runtimeSendMessage,
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    const button = getTestConnectionButton(section);
+
+    expect(button.disabled).toBe(true);
+    expect(section.textContent).toContain('Not tested yet.');
+    expect(section.textContent).toContain(
+      'Save a Hub URL and API key to run a live connection test.',
+    );
+    expect(runtimeSendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'testAgencyHubConnection',
+      }),
+    );
+  });
+
   it('uses the custom catch-path description when the Hub connection test throws', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const runtimeError = new Error('background disconnected');
