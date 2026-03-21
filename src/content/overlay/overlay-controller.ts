@@ -401,6 +401,7 @@ export class OverlayController {
     inlineError.className = 'chatmuse-inline-error chatmuse-hidden';
 
     const body = document.createElement('div');
+    body.className = 'chatmuse-overlay-body';
 
     panel.append(header, inlineError, body);
     shell.append(backdrop, panel);

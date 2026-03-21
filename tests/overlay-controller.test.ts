@@ -277,6 +277,20 @@ describe('OverlayController', () => {
     expect(records).toHaveLength(0);
   });
 
+  it('wraps rendered content in a dedicated overlay body container', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createLoadingModel('body-op', 'hello world'));
+
+    const body = requireElement<HTMLDivElement>('.chatmuse-overlay-body');
+    expect(body.firstElementChild).toBe(requireElement<HTMLDivElement>('.chatmuse-grid'));
+  });
+
   it('renders a profiling log and live status in loading view when profiling is present', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
