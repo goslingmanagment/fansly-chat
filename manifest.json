@@ -46,7 +46,17 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "chatmuse@extension"
+      "id": "chatmuse@extension",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "authenticationInfo",
+          "personallyIdentifyingInfo",
+          "personalCommunications",
+          "financialAndPaymentInfo",
+          "websiteContent"
+        ]
+      }
     }
   }
 }
