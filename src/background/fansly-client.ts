@@ -40,15 +40,25 @@ function withNgswBypass(url: URL): URL {
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timeout = globalThis.setTimeout(resolve, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
+    let timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const onAbort = () => {
+      if (timeout !== null) {
         clearTimeout(timeout);
-        reject(new DOMException('Aborted', 'AbortError'));
-      },
-      { once: true },
-    );
+      }
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    timeout = globalThis.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 

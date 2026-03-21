@@ -60,6 +60,7 @@ function createClientHarness() {
 
 describe('FanslyClient subscription lookup modes', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -179,10 +180,37 @@ describe('FanslyClient subscription lookup modes', () => {
     expect(cachedResult).toEqual(fullResult);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('aborts immediately when retry backoff starts with an already-aborted signal', async () => {
+    vi.useFakeTimers();
+    const { client, session } = createClientHarness();
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort();
+      return new Response('retry later', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    let settledError: unknown;
+    void client
+      .getMessagePage('group-1', null, session, controller.signal)
+      .catch((error) => {
+        settledError = error;
+      });
+
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(settledError).toBeInstanceOf(DOMException);
+    expect((settledError as DOMException | undefined)?.name).toBe('AbortError');
+  });
 });
 
 describe('FanslyClient getMonthlyEarnings', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });

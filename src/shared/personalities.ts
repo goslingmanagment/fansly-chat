@@ -232,6 +232,12 @@ export function reconcileBundledPersonalities(personalities: Personality[]): {
   for (const bundled of bundledPersonalities) {
     const existingIndex = next.findIndex((personality) => personality.id === bundled.id);
     if (existingIndex === -1) {
+      if (!changed) {
+        next = [...next];
+        changed = true;
+      }
+
+      next.push(bundled);
       continue;
     }
 

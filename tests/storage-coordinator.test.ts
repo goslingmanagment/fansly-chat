@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
+import { createBundledPersonalities } from '../src/shared/personalities.js';
 
 let mockStorage: Record<string, unknown> = {};
 
 function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
+  const [bundledLora] = createBundledPersonalities();
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: createDefaultSettings(),
-    personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
+    personalities: [
+      { id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 },
+      ...(bundledLora ? [bundledLora] : []),
+    ],
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],

@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { CLAUDE_MODELS, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
-import { BUNDLED_LORA_PERSONALITY_VERSION } from '../src/shared/personalities.js';
+import {
+  BUNDLED_LORA_PERSONALITY_VERSION,
+  createBundledPersonalities,
+} from '../src/shared/personalities.js';
 import type { FeatureType, PersistedState } from '../src/shared/types.js';
 
 const EXPECTED_LABELS = ['Fast Reply', 'Ping', 'Help Me', 'Chat Review', 'Fan Summary'];
 const EXPECTED_FEATURES: FeatureType[] = ['fast-reply', 'ping', 'help-me', 'chat-review', 'fan-summary'];
 
 function makeState(overrides?: Partial<PersistedState['settings']>): PersistedState {
+  const [bundledLora] = createBundledPersonalities();
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
@@ -22,7 +26,10 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       featureModels: { ...DEFAULT_FEATURE_MODELS },
       ...overrides,
     },
-    personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
+    personalities: [
+      { id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 },
+      ...(bundledLora ? [bundledLora] : []),
+    ],
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],
