@@ -1,3 +1,4 @@
+import { AgencyHubClient } from './agency-hub-client.js';
 import { AnthropicClient } from './anthropic-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { OperationCoordinator } from './operations.js';
@@ -14,12 +15,14 @@ const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const fanslyClient = new FanslyClient(sessionStore);
 const anthropicClient = new AnthropicClient();
+const agencyHubClient = new AgencyHubClient();
 const coordinator = new OperationCoordinator(
   sessionStore,
   tabContexts,
   fanslyClient,
   anthropicClient,
   storageCoordinator,
+  agencyHubClient,
 );
 
 browser.runtime.onConnect.addListener((port) => {

@@ -1,4 +1,5 @@
 import {
+  AGENCY_HUB_SYNC_TIMEOUT_MS,
   DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
   DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
   DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
@@ -9,6 +10,7 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
+import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
   aggregateMonthlyEarnings,
@@ -52,12 +54,15 @@ import type {
   OperationStartPayload,
   PingSegment,
   PersistedState,
+  Settings,
   SubscriptionLookupMode,
   RouteChangedPayload,
   SessionTemplate,
+  SummaryCacheEntry,
   TabStatePayload,
   TabUiState,
 } from '../shared/types.js';
+import { AgencyHubClient } from './agency-hub-client.js';
 import { AnthropicClient } from './anthropic-client.js';
 import {
   buildAnthropicSpendSummary,
@@ -138,6 +143,18 @@ interface OperationPromptRequestArgs {
   replyMode?: OperationStartPayload['replyMode'];
   replyTone?: OperationStartPayload['replyTone'];
   promptCachingEnabled: boolean;
+}
+
+interface AgencyHubSummarySyncTask {
+  groupId: string;
+  settings: Settings;
+  summary: string;
+  generatedAt: number;
+  existingSync?: SummaryCacheEntry['agencyHubSync'];
+  fanAccountId: string | null;
+  session: SessionTemplate;
+  resolvedAccountId: string;
+  debugEnabled: boolean;
 }
 
 function usesDeepOperationTimeouts(feature: FeatureType): boolean {
@@ -228,6 +245,7 @@ export class OperationCoordinator {
     private readonly fanslyClient: FanslyClient,
     private readonly anthropicClient: AnthropicClient,
     private readonly storageCoordinator: StorageCoordinator,
+    private readonly agencyHubClient: AgencyHubClient,
   ) {}
 
   registerPort(port: browser.runtime.Port): void {
@@ -635,6 +653,111 @@ export class OperationCoordinator {
     return this.activeByTabId.get(tabId) ?? null;
   }
 
+  private enqueueAgencyHubSummarySync(task: AgencyHubSummarySyncTask): void {
+    if (!this.agencyHubClient.isConfigured(task.settings)) {
+      return;
+    }
+
+    void this.syncAgencyHubSummary(task);
+  }
+
+  private async resolveCreatorUsername(
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    if (session.resolvedUsername?.trim()) {
+      return session.resolvedUsername.trim();
+    }
+
+    const account = await this.fanslyClient.getAuthenticatedAccount(session, signal);
+    return account.username?.trim() || null;
+  }
+
+  private async resolveFanAccountIdForSync(
+    groupId: string,
+    session: SessionTemplate,
+    resolvedAccountId: string,
+    fanAccountId: string | null,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    if (fanAccountId?.trim()) {
+      return fanAccountId.trim();
+    }
+
+    const group = await this.fanslyClient.getGroup(groupId, session, signal);
+    return (group.users ?? []).find(
+      (user): user is { userId: string } =>
+        typeof user.userId === 'string' &&
+        user.userId.length > 0 &&
+        user.userId !== resolvedAccountId,
+    )?.userId ?? null;
+  }
+
+  private async syncAgencyHubSummary(task: AgencyHubSummarySyncTask): Promise<void> {
+    const timeoutController = new AbortController();
+    const timeoutHandle = globalThis.setTimeout(
+      () => timeoutController.abort(),
+      AGENCY_HUB_SYNC_TIMEOUT_MS,
+    );
+
+    try {
+      const pageUsername = await this.resolveCreatorUsername(task.session, timeoutController.signal);
+      const fanAccountId = await this.resolveFanAccountIdForSync(
+        task.groupId,
+        task.session,
+        task.resolvedAccountId,
+        task.fanAccountId,
+        timeoutController.signal,
+      );
+
+      const result = await this.agencyHubClient.pushFanProfile({
+        settings: task.settings,
+        pageUsername,
+        platformUserId: fanAccountId,
+        body: task.summary,
+        signal: timeoutController.signal,
+        existingSync: task.existingSync,
+        generatedAt: task.generatedAt,
+      });
+
+      logDebug(task.debugEnabled, 'agency hub summary sync', {
+        status: result.status,
+        reason: result.reason,
+        baseUrl: result.baseUrl,
+        pageLabel: result.pageLabel,
+      });
+
+      if (
+        result.status !== 'pushed' ||
+        !result.baseUrl ||
+        !result.pageLabel
+      ) {
+        return;
+      }
+
+      await this.storageCoordinator.updateSummaryCache(task.groupId, (entry) => {
+        if (entry.generatedAt !== task.generatedAt) {
+          return entry;
+        }
+
+        return {
+          ...entry,
+          ...(fanAccountId ? { fanAccountId } : {}),
+          agencyHubSync: {
+            baseUrl: result.baseUrl!,
+            pageLabel: result.pageLabel!,
+            generatedAt: task.generatedAt,
+            syncedAt: Date.now(),
+          },
+        };
+      });
+    } catch (error) {
+      logDebug(task.debugEnabled, 'agency hub summary sync failed', error);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
   private assertActive(
     tabId: number,
     operationId: string,
@@ -980,6 +1103,17 @@ export class OperationCoordinator {
           fanDisplayName: payload.domFanDisplayName ?? 'fan',
         }, createZeroAnthropicSpendSummary(), profiler);
         this.clearCompletedOperation(tabId);
+        this.enqueueAgencyHubSummarySync({
+          groupId: validated.urlGroupId,
+          settings: validated.storage.settings,
+          summary: cachedSummary.summary,
+          generatedAt: cachedSummary.generatedAt,
+          existingSync: cachedSummary.agencyHubSync,
+          fanAccountId: cachedSummary.fanAccountId ?? null,
+          session: validated.session,
+          resolvedAccountId,
+          debugEnabled,
+        });
         return;
       }
 
@@ -1594,6 +1728,7 @@ export class OperationCoordinator {
             spendingDataVerified: true,
             subscriptionLookupVerified: true,
             modelId: resolvedModel,
+            fanAccountId,
           });
         }
       }
@@ -1606,6 +1741,18 @@ export class OperationCoordinator {
       }, latestAnthropicSpend ?? createZeroAnthropicSpendSummary(), profiler);
 
       this.clearCompletedOperation(tabId);
+      if (payload.feature === 'fan-summary' && result.summaryMeta) {
+        this.enqueueAgencyHubSummarySync({
+          groupId: validated.urlGroupId,
+          settings: validated.storage.settings,
+          summary: rawText,
+          generatedAt: result.summaryMeta.generatedAt,
+          fanAccountId,
+          session: validated.session,
+          resolvedAccountId,
+          debugEnabled,
+        });
+      }
     } catch (error) {
       const active = this.getActive(tabId);
       const operationId = active?.operationId ?? payload.operationId;

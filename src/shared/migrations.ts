@@ -10,6 +10,8 @@ import type { PersistedState, Settings } from './types.js';
 export function createDefaultSettings(): Settings {
   return {
     claudeApiKey: '',
+    agencyHubBaseUrl: '',
+    agencyHubApiKey: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
@@ -41,6 +43,10 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
 
   return {
     claudeApiKey: legacyClaudeApiKey,
+    agencyHubBaseUrl:
+      typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
+    agencyHubApiKey:
+      typeof raw?.agencyHubApiKey === 'string' ? raw.agencyHubApiKey : defaults.agencyHubApiKey,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
     improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),
     deepMessageCount: Number(raw?.deepMessageCount ?? defaults.deepMessageCount),

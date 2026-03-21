@@ -1,0 +1,293 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
+import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import type { PersistedState } from '../src/shared/types.js';
+
+let dom: InstanceType<typeof JSDOM>;
+let savedSettings: Record<string, unknown> | null;
+let permissionGranted = false;
+let permissionsContains: ReturnType<typeof vi.fn>;
+let permissionsRequest: ReturnType<typeof vi.fn>;
+
+interface MockPermissionsEvent {
+  addListener: ReturnType<typeof vi.fn>;
+  removeListener: ReturnType<typeof vi.fn>;
+  emit: () => void;
+}
+
+interface LoadOptionsPageOptions {
+  permissionsContainsImpl?: () => Promise<boolean>;
+  permissionsRequestImpl?: () => Promise<boolean>;
+  storageSetImpl?: (data: Record<string, unknown>) => Promise<void>;
+}
+
+function makeState(overrides?: Partial<PersistedState['settings']>): PersistedState {
+  return {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    settings: {
+      claudeApiKey: 'sk-test',
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      quickMessageCount: 30,
+      improveMessageCount: 45,
+      deepMessageCount: 200,
+      debugMode: false,
+      promptCachingEnabled: true,
+      featureModels: { ...DEFAULT_FEATURE_MODELS },
+      ...overrides,
+    },
+    personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
+    accountMappings: {},
+    accountAliases: {},
+    knownAccounts: [],
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
+function createPermissionsEvent(): MockPermissionsEvent {
+  const listeners = new Set<() => void>();
+
+  return {
+    addListener: vi.fn((listener: () => void) => {
+      listeners.add(listener);
+    }),
+    removeListener: vi.fn((listener: () => void) => {
+      listeners.delete(listener);
+    }),
+    emit: () => {
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+function installDom() {
+  dom = new JSDOM(
+    '<!doctype html><html><head></head><body><div id="chatmuse-options-root"></div></body></html>',
+    { url: 'https://example.test/options.html' },
+  );
+  const { window } = dom;
+
+  vi.stubGlobal('window', window);
+  vi.stubGlobal('document', window.document);
+  vi.stubGlobal('navigator', window.navigator);
+  vi.stubGlobal('HTMLElement', window.HTMLElement);
+  vi.stubGlobal('HTMLInputElement', window.HTMLInputElement);
+  vi.stubGlobal('HTMLButtonElement', window.HTMLButtonElement);
+  vi.stubGlobal('HTMLSelectElement', window.HTMLSelectElement);
+  vi.stubGlobal('Node', window.Node);
+  vi.stubGlobal('Event', window.Event);
+}
+
+function getSectionByTitle(title: string): HTMLElement {
+  const section = Array.from(document.querySelectorAll<HTMLElement>('section')).find(
+    (candidate) => candidate.querySelector('h2')?.textContent === title,
+  );
+  if (!section) {
+    throw new Error(`Missing section: ${title}`);
+  }
+  return section;
+}
+
+function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
+  const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
+    (candidate) => candidate.textContent?.includes('Grant Access'),
+  );
+  if (!button) {
+    throw new Error('Missing Agency Hub access button');
+  }
+  return button;
+}
+
+async function loadOptionsPage(
+  state: PersistedState,
+  options: LoadOptionsPageOptions = {},
+): Promise<{ permissionsOnAdded: MockPermissionsEvent; permissionsOnRemoved: MockPermissionsEvent }> {
+  savedSettings = null;
+  permissionGranted = false;
+  permissionsContains = vi.fn(options.permissionsContainsImpl ?? (async () => permissionGranted));
+  permissionsRequest = vi.fn(options.permissionsRequestImpl ?? (async () => {
+    permissionGranted = true;
+    return true;
+  }));
+
+  const permissionsOnAdded = createPermissionsEvent();
+  const permissionsOnRemoved = createPermissionsEvent();
+
+  (globalThis as Record<string, unknown>).browser = {
+    storage: {
+      local: {
+        get: vi.fn(async () => state),
+        set: vi.fn(async (data: Record<string, unknown>) => {
+          if (data.settings) {
+            savedSettings = data.settings as Record<string, unknown>;
+          }
+          await options.storageSetImpl?.(data);
+        }),
+        remove: vi.fn(async () => undefined),
+      },
+    },
+    runtime: {
+      sendMessage: vi.fn(async () => []),
+      openOptionsPage: vi.fn(async () => undefined),
+    },
+    permissions: {
+      contains: permissionsContains,
+      request: permissionsRequest,
+      onAdded: permissionsOnAdded,
+      onRemoved: permissionsOnRemoved,
+    },
+  };
+
+  await import('../src/options/index.js');
+  await vi.waitFor(() => {
+    getSectionByTitle('Agency Hub');
+  }, { timeout: 2000 });
+
+  return { permissionsOnAdded, permissionsOnRemoved };
+}
+
+describe('Options page - Agency Hub section', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('renders the Agency Hub fields and permission status', async () => {
+    await loadOptionsPage(makeState());
+
+    const section = getSectionByTitle('Agency Hub');
+    const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]');
+    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"]');
+
+    expect(urlInput?.value).toBe('http://localhost:3000');
+    expect(keyInput?.value).toBe('hub-key');
+    expect(section.textContent).toContain('Sync disabled: host access not granted.');
+    expect(section.textContent).toContain('http://localhost/*');
+    expect(permissionsContains).toHaveBeenCalled();
+  });
+
+  it('saves the Agency Hub URL and API key through the shared settings path', async () => {
+    await loadOptionsPage(makeState({
+      agencyHubBaseUrl: '',
+      agencyHubApiKey: '',
+    }));
+
+    const section = getSectionByTitle('Agency Hub');
+    const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
+    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"]')!;
+
+    urlInput.value = ' http://localhost:3000/ ';
+    urlInput.dispatchEvent(new Event('input'));
+    keyInput.value = ' hub-key ';
+    keyInput.dispatchEvent(new Event('input'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) {
+        throw new Error('Settings have not been saved yet');
+      }
+    }, { timeout: 2000 });
+
+    expect(savedSettings).toMatchObject({
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+    });
+  });
+
+  it('requests host access before storage writes and refreshes the status', async () => {
+    const requestDeferred = createDeferred<boolean>();
+    const storageDeferred = createDeferred<void>();
+    const callOrder: string[] = [];
+
+    await loadOptionsPage(makeState(), {
+      permissionsRequestImpl: () => {
+        callOrder.push('permissions.request');
+        return requestDeferred.promise;
+      },
+      storageSetImpl: async (data) => {
+        if (data.settings) {
+          callOrder.push('storage.set');
+          await storageDeferred.promise;
+        }
+      },
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    const button = getGrantAccessButton(section);
+
+    callOrder.length = 0;
+    button.click();
+
+    expect(permissionsRequest).toHaveBeenCalledWith({
+      origins: ['http://localhost/*'],
+    });
+    expect(callOrder).toEqual(['permissions.request']);
+
+    permissionGranted = true;
+    requestDeferred.resolve(true);
+
+    await vi.waitFor(() => {
+      expect(callOrder).toContain('storage.set');
+    }, { timeout: 2000 });
+
+    storageDeferred.resolve();
+
+    await vi.waitFor(() => {
+      expect(section.textContent).toContain('Sync ready: ChatMuse can push fan summaries.');
+    }, { timeout: 2000 });
+  });
+
+  it('surfaces a denied permission request in the status line', async () => {
+    await loadOptionsPage(makeState(), {
+      permissionsRequestImpl: async () => false,
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    const button = getGrantAccessButton(section);
+
+    button.click();
+
+    await vi.waitFor(() => {
+      expect(section.textContent).toContain('Sync disabled: host access not granted.');
+      expect(section.textContent).toContain('Firefox did not grant access for http://localhost/*.');
+    }, { timeout: 2000 });
+  });
+
+  it('logs and surfaces permission request errors in the status line', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await loadOptionsPage(makeState(), {
+      permissionsRequestImpl: async () => {
+        throw new Error('May only request permissions from a user input handler');
+      },
+    });
+
+    const section = getSectionByTitle('Agency Hub');
+    const button = getGrantAccessButton(section);
+
+    button.click();
+
+    await vi.waitFor(() => {
+      expect(section.textContent).toContain('Sync disabled: failed to request host access.');
+      expect(section.textContent).toContain('May only request permissions from a user input handler');
+    }, { timeout: 2000 });
+    expect(consoleError).toHaveBeenCalledWith(
+      'Agency Hub permission request failed',
+      expect.any(Error),
+    );
+  });
+});

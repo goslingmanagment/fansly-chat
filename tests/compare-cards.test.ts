@@ -7,6 +7,8 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      agencyHubBaseUrl: '',
+      agencyHubApiKey: '',
       quickMessageCount: 100,
       improveMessageCount: 100,
       deepMessageCount: 500,

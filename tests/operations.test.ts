@@ -20,6 +20,7 @@ import type {
   FanSubscriptionContext,
   MonthlyEarningsRow,
   NormalizedTranscriptMessage,
+  SummaryCacheEntry,
 } from '../src/shared/types.js';
 
 let mockStorage: Record<string, unknown> = {};
@@ -73,12 +74,46 @@ function buildSubscriptionContext(): FanSubscriptionContext {
   };
 }
 
+function buildAggregatedEarnings(): AggregatedEarnings {
+  return {
+    correlationAccountId: 'fan-1',
+    windowStartIso: '2026-01-01T00:00:00.000Z',
+    windowEndIso: '2026-03-01T00:00:00.000Z',
+    totalGross: 125_000,
+    totalNet: 100_000,
+    breakdown: [],
+    monthlyTotals: [],
+  };
+}
+
 function buildFanslyClientMock() {
   return {
+    getAuthenticatedAccount: vi.fn(async (session?: {
+      resolvedAccountId?: string | null;
+      resolvedUsername?: string | null;
+      resolvedDisplayName?: string | null;
+    }) => {
+      if (session) {
+        session.resolvedAccountId = 'account-1';
+        session.resolvedUsername = 'creator';
+        session.resolvedDisplayName = 'Creator';
+      }
+      return {
+        id: 'account-1',
+        username: 'creator',
+        displayName: 'Creator',
+      };
+    }),
     getAuthenticatedAccountId: vi.fn(
       async (_session?: unknown, _signal?: AbortSignal) => 'account-1',
     ),
-    loadMessages: vi.fn(async () => ({
+    loadMessages: vi.fn(async (
+      _groupId: string,
+      _messageCount: number,
+      _session: unknown,
+      _accountId: string,
+      _signal?: AbortSignal,
+    ) => ({
       transcriptMessages: buildTranscriptMessages(30),
       windowStartMs: 0,
       pagesLoaded: 2,
@@ -107,6 +142,13 @@ function advanceNow(ms: number): number {
   return currentNow;
 }
 
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function postedMessages(port: { postMessage: ReturnType<typeof vi.fn> }): BackgroundPortMessage[] {
   return port.postMessage.mock.calls.map(([message]) => message as BackgroundPortMessage);
 }
@@ -133,6 +175,10 @@ async function createCoordinatorHarness(options?: {
   anthropicRawText?: string;
   fanslyClient?: ReturnType<typeof buildFanslyClientMock>;
   anthropicClient?: { streamMessage: ReturnType<typeof vi.fn> };
+  agencyHubClient?: {
+    isConfigured: (...args: any[]) => boolean;
+    pushFanProfile: (...args: any[]) => Promise<any>;
+  };
 }) {
   const [{ OperationCoordinator }, { SessionStore }, { StorageCoordinator }, { TabContextStore }] =
     await Promise.all([
@@ -149,6 +195,14 @@ async function createCoordinatorHarness(options?: {
   const anthropicClient = options?.anthropicClient ?? {
     streamMessage: vi.fn(async () => options?.anthropicRawText ?? 'Result'),
   };
+  const agencyHubClient = options?.agencyHubClient ?? {
+    isConfigured: vi.fn(() => false),
+    pushFanProfile: vi.fn(async () => ({
+      status: 'skipped',
+      reason: 'disabled',
+      baseUrl: null,
+    })),
+  };
   const storageCoordinator = new StorageCoordinator();
 
   const coordinator = new OperationCoordinator(
@@ -157,6 +211,7 @@ async function createCoordinatorHarness(options?: {
     fanslyClient as never,
     anthropicClient as never,
     storageCoordinator,
+    agencyHubClient as never,
   ) as any;
   const port = {
     postMessage: vi.fn(),
@@ -169,6 +224,7 @@ async function createCoordinatorHarness(options?: {
     coordinator,
     fanslyClient,
     anthropicClient,
+    agencyHubClient,
     port,
     sessionStore,
     storageCoordinator,
@@ -192,6 +248,8 @@ describe('OperationCoordinator', () => {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: {
         claudeApiKey: 'sk-test',
+        agencyHubBaseUrl: '',
+        agencyHubApiKey: '',
         quickMessageCount: 100,
         improveMessageCount: 100,
         deepMessageCount: 500,
@@ -264,6 +322,7 @@ describe('OperationCoordinator', () => {
     vi.doUnmock('../src/shared/compare-cards.js');
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('removes the durable summary cache before a forced fan-summary refresh', async () => {
@@ -1881,10 +1940,10 @@ describe('OperationCoordinator', () => {
         _messageCount: number,
         _session: unknown,
         _accountId: string,
-        signal: AbortSignal,
+        signal?: AbortSignal,
       ) => new Promise((_, reject) => {
         resolveLoadStarted?.();
-        signal.addEventListener('abort', () => {
+        signal?.addEventListener('abort', () => {
           reject(new DOMException('Aborted', 'AbortError'));
         }, { once: true });
       }),
@@ -2183,6 +2242,279 @@ describe('OperationCoordinator', () => {
     });
     expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
     expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('pushes fresh fan summaries to Agency Hub after completion and marks the cache entry as synced', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+    };
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
+        return jsonResponse({ version: 1 });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Fresh summary',
+      agencyHubClient,
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: false });
+    expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const cacheEntry = mockStorage['summary:group-1'] as SummaryCacheEntry | undefined;
+      expect(cacheEntry).toBeDefined();
+      expect(cacheEntry?.fanAccountId).toBe('fan-1');
+      expect(cacheEntry?.agencyHubSync).toMatchObject({
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+    });
+  });
+
+  it('backfills cached summaries only once for the same Hub configuration', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+    };
+    (mockStorage as Record<string, unknown>)['summary:group-1'] = {
+      summary: 'Cached summary',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      generatedAt: 2000,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: DEFAULT_MODEL_ID,
+    };
+
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
+        return jsonResponse({ version: 1 });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    const { coordinator, port } = await createCoordinatorHarness({
+      agencyHubClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-1',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await vi.waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('/api/v1/pages/creator-fs/fans/fan-1/profile'),
+      );
+      expect(putCalls).toHaveLength(1);
+      const completeMessage = postedMessages(port).find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+          message.type === 'operation:complete' &&
+          message.operationId === 'summary-op-1',
+      );
+      expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-2',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await vi.waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('/api/v1/pages/creator-fs/fans/fan-1/profile'),
+      );
+      expect(putCalls).toHaveLength(1);
+    });
+  });
+
+  it('does not block summary completion when Agency Hub sync fails', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+    };
+
+    const fetchMock = vi.fn(async () => jsonResponse({ error: 'bad gateway' }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Fresh summary',
+      agencyHubClient,
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(completeMessage?.result.rawText).toBe('Fresh summary');
+    expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    expect((mockStorage['summary:group-1'] as SummaryCacheEntry | undefined)?.agencyHubSync).toBeUndefined();
+  });
+
+  it('treats a changed Agency Hub base URL as a new backfill target for cached summaries', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://hub-a.test',
+      agencyHubApiKey: 'hub-key',
+    };
+    (mockStorage as Record<string, unknown>)['summary:group-1'] = {
+      summary: 'Cached summary',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      generatedAt: 2000,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: DEFAULT_MODEL_ID,
+      fanAccountId: 'fan-1',
+      agencyHubSync: {
+        baseUrl: 'http://hub-a.test',
+        pageLabel: 'creator-fs',
+        generatedAt: 2000,
+        syncedAt: 2100,
+      },
+    };
+
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (
+        href === 'http://hub-a.test/api/v1/pages' ||
+        href === 'http://hub-b.test/api/v1/pages'
+      ) {
+        return jsonResponse([
+          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
+        ]);
+      }
+      if (href === 'http://hub-b.test/api/v1/pages/creator-fs/fans/fan-1/profile') {
+        return jsonResponse({ version: 2 });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    const { coordinator } = await createCoordinatorHarness({
+      agencyHubClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-1',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await vi.waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('/pages/creator-fs/fans/fan-1/profile'),
+      );
+      expect(putCalls).toHaveLength(0);
+    });
+
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://hub-b.test',
+    };
+
+    const { coordinator: secondCoordinator } = await createCoordinatorHarness({
+      agencyHubClient,
+    });
+
+    await secondCoordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-2',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await vi.waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('http://hub-b.test/api/v1/pages/creator-fs/fans/fan-1/profile'),
+      );
+      expect(putCalls).toHaveLength(1);
+      expect((mockStorage['summary:group-1'] as SummaryCacheEntry).agencyHubSync).toMatchObject({
+        baseUrl: 'http://hub-b.test',
+        pageLabel: 'creator-fs',
+      });
+    });
   });
 
   it('passes the per-feature model to streamMessage', async () => {

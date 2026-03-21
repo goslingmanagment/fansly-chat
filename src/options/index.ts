@@ -1,4 +1,8 @@
 import optionsStyles from './styles.css';
+import {
+  buildAgencyHubOriginPattern,
+  normalizeAgencyHubBaseUrl,
+} from '../shared/agency-hub.js';
 import { CLAUDE_MODELS } from '../shared/constants.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type { ModelSelectableFeatureType, Personality, SessionSnapshotEntry } from '../shared/types.js';
@@ -135,7 +139,78 @@ function buildConnectionRows(
   }));
 }
 
+interface AgencyHubPermissionCheckResult {
+  granted: boolean;
+  errorMessage: string | null;
+}
+
+type AgencyHubPermissionFeedback =
+  | { kind: 'denied'; originPattern: string }
+  | { kind: 'request_error'; originPattern: string; errorMessage: string }
+  | { kind: 'unsupported'; originPattern: string };
+
+let renderCleanup: (() => void) | null = null;
+let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
+
+function formatAgencyHubError(error: unknown): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message ? `${error.name}: ${message}` : error.name;
+  }
+
+  return String(error);
+}
+
+function appendAgencyHubMeta(baseText: string, note: string | null): string {
+  return note ? `${baseText} ${note}` : baseText;
+}
+
+function buildAgencyHubPermissionScopeNote(baseUrl: string | null | undefined): string | null {
+  const normalized = normalizeAgencyHubBaseUrl(baseUrl);
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = new URL(normalized);
+  if (!parsed.port) {
+    return null;
+  }
+
+  const originPattern = buildAgencyHubOriginPattern(normalized);
+  if (!originPattern) {
+    return null;
+  }
+
+  return `Firefox grants host access per host rather than per port, so ${originPattern} covers the configured URL ${normalized}.`;
+}
+
+async function getAgencyHubPermissionCheck(originPattern: string | null): Promise<AgencyHubPermissionCheckResult> {
+  if (!originPattern) {
+    return { granted: false, errorMessage: null };
+  }
+
+  if (typeof browser.permissions?.contains !== 'function') {
+    return { granted: true, errorMessage: null };
+  }
+
+  try {
+    return {
+      granted: await browser.permissions.contains({ origins: [originPattern] }),
+      errorMessage: null,
+    };
+  } catch (error) {
+    return {
+      granted: false,
+      errorMessage: formatAgencyHubError(error),
+    };
+  }
+}
+
 async function render(): Promise<void> {
+  renderCleanup?.();
+  renderCleanup = null;
+
+  const cleanupTasks: Array<() => void> = [];
   const sessions = (await browser.runtime.sendMessage({ type: 'getSessionsSnapshot' })) as SessionSnapshotEntry[];
   const state = await loadStorageState();
   const sessionsByAccountId = buildSessionLookup(sessions);
@@ -229,6 +304,220 @@ async function render(): Promise<void> {
     promptCachingLabel,
   );
 
+  // ─── Agency Hub ───────────────────────────────────────────
+  const agencyHubSection = createSection(
+    'Agency Hub',
+    'Push Fan Summary results to Agency Hub for durable storage and version history.',
+  );
+  const agencyHubUrlInput = document.createElement('input');
+  agencyHubUrlInput.type = 'url';
+  agencyHubUrlInput.className = 'chatmuse-input';
+  agencyHubUrlInput.placeholder = 'http://localhost:3000';
+  agencyHubUrlInput.value = state.settings.agencyHubBaseUrl;
+
+  const agencyHubKeyInput = document.createElement('input');
+  agencyHubKeyInput.type = 'password';
+  agencyHubKeyInput.className = 'chatmuse-input';
+  agencyHubKeyInput.value = state.settings.agencyHubApiKey;
+
+  const agencyHubToggle = createButton('Show', true);
+  agencyHubToggle.addEventListener('click', () => {
+    agencyHubKeyInput.type = agencyHubKeyInput.type === 'password' ? 'text' : 'password';
+    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password' ? 'Show' : 'Hide';
+  });
+
+  const agencyHubKeyRow = document.createElement('div');
+  agencyHubKeyRow.style.display = 'grid';
+  agencyHubKeyRow.style.gridTemplateColumns = '1fr auto';
+  agencyHubKeyRow.style.gap = '8px';
+  agencyHubKeyRow.append(agencyHubKeyInput, agencyHubToggle);
+
+  const agencyHubPermissionStatus = document.createElement('div');
+  agencyHubPermissionStatus.style.fontWeight = '700';
+  agencyHubPermissionStatus.style.fontSize = '14px';
+
+  const agencyHubPermissionMeta = document.createElement('div');
+  agencyHubPermissionMeta.style.color = 'var(--chatmuse-muted)';
+  agencyHubPermissionMeta.style.fontSize = '13px';
+
+  const agencyHubPermissionButton = createButton('Grant Access', true);
+
+  let agencyHubPermissionRefreshVersion = 0;
+  const refreshAgencyHubPermissionState = async (): Promise<void> => {
+    const refreshVersion = ++agencyHubPermissionRefreshVersion;
+    const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
+    const originPattern = buildAgencyHubOriginPattern(normalizedBaseUrl);
+    const permissionScopeNote = buildAgencyHubPermissionScopeNote(normalizedBaseUrl);
+    const hasApiKey = agencyHubKeyInput.value.trim().length > 0;
+    const permissionCheck = await getAgencyHubPermissionCheck(originPattern);
+    const permissionGranted = permissionCheck.granted;
+
+    if (refreshVersion !== agencyHubPermissionRefreshVersion) {
+      return;
+    }
+
+    if (permissionGranted) {
+      agencyHubPermissionFeedback = null;
+    }
+
+    agencyHubPermissionButton.textContent = permissionGranted ? 'Reconnect' : 'Grant Access';
+    agencyHubPermissionButton.disabled = !originPattern;
+
+    if (!agencyHubUrlInput.value.trim()) {
+      agencyHubPermissionStatus.textContent = 'Sync disabled: add an Agency Hub URL.';
+      agencyHubPermissionMeta.textContent = 'Enter the Hub base URL, then grant host access for that origin.';
+      return;
+    }
+
+    if (!normalizedBaseUrl) {
+      agencyHubPermissionStatus.textContent = 'Sync disabled: invalid Agency Hub URL.';
+      agencyHubPermissionMeta.textContent = 'Use a full http:// or https:// base URL.';
+      return;
+    }
+
+    if (!permissionGranted) {
+      const permissionFeedback =
+        agencyHubPermissionFeedback?.originPattern === originPattern
+          ? agencyHubPermissionFeedback
+          : null;
+
+      if (permissionCheck.errorMessage) {
+        agencyHubPermissionStatus.textContent = 'Sync disabled: host access could not be verified.';
+        agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+          `Firefox returned an error while checking ${originPattern}: ${permissionCheck.errorMessage}.`,
+          permissionScopeNote,
+        );
+        return;
+      }
+
+      if (permissionFeedback) {
+        switch (permissionFeedback.kind) {
+          case 'denied':
+            agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
+            agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+              `Firefox did not grant access for ${originPattern}. Click Grant Access to try again.`,
+              permissionScopeNote,
+            );
+            return;
+          case 'request_error':
+            agencyHubPermissionStatus.textContent = 'Sync disabled: failed to request host access.';
+            agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+              `Firefox returned an error while requesting ${originPattern}: ${permissionFeedback.errorMessage}.`,
+              permissionScopeNote,
+            );
+            return;
+          case 'unsupported':
+            agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
+            agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+              'This browser build does not expose browser.permissions.request for Agency Hub access.',
+              permissionScopeNote,
+            );
+            return;
+        }
+      }
+
+      if (typeof browser.permissions?.request !== 'function') {
+        agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
+        agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+          'This browser build does not expose browser.permissions.request for Agency Hub access.',
+          permissionScopeNote,
+        );
+        return;
+      }
+
+      agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
+      agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+        `Grant access for ${originPattern} before ChatMuse can push summaries.`,
+        permissionScopeNote,
+      );
+      return;
+    }
+
+    if (!hasApiKey) {
+      agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub API key missing.';
+      agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+        `Host access is granted for ${originPattern}, but ChatMuse still needs an Agency Hub API key.`,
+        permissionScopeNote,
+      );
+      return;
+    }
+
+    agencyHubPermissionStatus.textContent = 'Sync ready: ChatMuse can push fan summaries.';
+    agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
+      `Host access granted for ${originPattern}.`,
+      permissionScopeNote,
+    );
+  };
+
+  agencyHubPermissionButton.addEventListener('click', () => {
+    const settingsPatch = {
+      agencyHubBaseUrl: normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
+      agencyHubApiKey: agencyHubKeyInput.value.trim(),
+    };
+    const originPattern = buildAgencyHubOriginPattern(settingsPatch.agencyHubBaseUrl);
+
+    agencyHubPermissionButton.disabled = true;
+
+    if (!originPattern) {
+      void refreshAgencyHubPermissionState();
+      return;
+    }
+
+    let permissionRequestPromise: Promise<boolean> | null = null;
+    if (typeof browser.permissions?.request === 'function') {
+      try {
+        permissionRequestPromise = browser.permissions.request({ origins: [originPattern] });
+      } catch (error) {
+        console.error('Agency Hub permission request failed', error);
+        agencyHubPermissionFeedback = {
+          kind: 'request_error',
+          originPattern,
+          errorMessage: formatAgencyHubError(error),
+        };
+      }
+    } else {
+      agencyHubPermissionFeedback = { kind: 'unsupported', originPattern };
+    }
+
+    void (async () => {
+      try {
+        if (permissionRequestPromise) {
+          try {
+            const permissionGranted = await permissionRequestPromise;
+            agencyHubPermissionFeedback = permissionGranted
+              ? null
+              : { kind: 'denied', originPattern };
+          } catch (error) {
+            console.error('Agency Hub permission request failed', error);
+            agencyHubPermissionFeedback = {
+              kind: 'request_error',
+              originPattern,
+              errorMessage: formatAgencyHubError(error),
+            };
+          }
+        }
+
+        try {
+          const savedSettings = await saveSettings(settingsPatch);
+          agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
+          agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
+        } catch (error) {
+          console.error('Failed to save Agency Hub settings', error);
+        }
+      } finally {
+        await refreshAgencyHubPermissionState();
+      }
+    })();
+  });
+
+  agencyHubSection.append(
+    labeledField('Agency Hub base URL', agencyHubUrlInput),
+    labeledField('Agency Hub API key', agencyHubKeyRow),
+    agencyHubPermissionStatus,
+    agencyHubPermissionMeta,
+    agencyHubPermissionButton,
+  );
+
   // ─── AI Models ───────────────────────────────────────────
   const modelSection = createSection(
     'AI Models',
@@ -286,6 +575,8 @@ async function render(): Promise<void> {
 
     await saveSettings({
       claudeApiKey: keyInput.value,
+      agencyHubBaseUrl: agencyHubUrlInput.value,
+      agencyHubApiKey: agencyHubKeyInput.value,
       quickMessageCount: Number(quickInput.value),
       improveMessageCount: Number(improveInput.value),
       deepMessageCount: Number(deepInput.value),
@@ -295,15 +586,55 @@ async function render(): Promise<void> {
     });
   }, 350);
 
-  [keyInput, quickInput, improveInput, deepInput, debugInput, promptCachingInput].forEach((element) => {
+  [
+    keyInput,
+    agencyHubUrlInput,
+    agencyHubKeyInput,
+    quickInput,
+    improveInput,
+    deepInput,
+    debugInput,
+    promptCachingInput,
+  ].forEach((element) => {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
+  agencyHubUrlInput.addEventListener('input', () => {
+    void refreshAgencyHubPermissionState();
+  });
+  agencyHubUrlInput.addEventListener('change', () => {
+    void refreshAgencyHubPermissionState();
+  });
+  agencyHubKeyInput.addEventListener('input', () => {
+    void refreshAgencyHubPermissionState();
+  });
+  agencyHubKeyInput.addEventListener('change', () => {
+    void refreshAgencyHubPermissionState();
+  });
+  if (
+    typeof browser.permissions?.onAdded?.addListener === 'function' &&
+    typeof browser.permissions?.onAdded?.removeListener === 'function' &&
+    typeof browser.permissions?.onRemoved?.addListener === 'function' &&
+    typeof browser.permissions?.onRemoved?.removeListener === 'function'
+  ) {
+    const handlePermissionChanged = () => {
+      agencyHubPermissionFeedback = null;
+      void refreshAgencyHubPermissionState();
+    };
+
+    browser.permissions.onAdded.addListener(handlePermissionChanged);
+    browser.permissions.onRemoved.addListener(handlePermissionChanged);
+    cleanupTasks.push(() => {
+      browser.permissions.onAdded.removeListener(handlePermissionChanged);
+      browser.permissions.onRemoved.removeListener(handlePermissionChanged);
+    });
+  }
   modelSelects.forEach((select) => {
     select.addEventListener('change', saveSettingsDebounced);
   });
 
   root.append(apiSection);
+  root.append(agencyHubSection);
   root.append(modelSection);
 
   // ─── Personalities ─────────────────────────────────────────
@@ -499,6 +830,13 @@ async function render(): Promise<void> {
 
   connectionsSection.append(sessionsGrid);
   root.append(connectionsSection);
+
+  renderCleanup = () => {
+    cleanupTasks.forEach((cleanup) => cleanup());
+    renderCleanup = null;
+  };
+
+  await refreshAgencyHubPermissionState();
 }
 
 injectStyles();

@@ -14,8 +14,9 @@
     "*://apiv3.fansly.com/*",
     "*://api.anthropic.com/*"
   ],
-  "optional_permissions": [
-    "*://*/*"
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "scripts": ["background.js"]

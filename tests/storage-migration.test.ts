@@ -154,6 +154,33 @@ describe('migrateState', () => {
     expect((result as unknown as Record<string, unknown>)['summary:group1']).toBeDefined();
   });
 
+  it('preserves agency hub sync metadata in legacy summary cache entries', () => {
+    const legacy = {
+      schemaVersion: 0,
+      'summary:group1': {
+        summary: 'cached',
+        personalityId: 'p1',
+        personalityUpdatedAt: 100,
+        generatedAt: 200,
+        fanAccountId: 'fan-1',
+        agencyHubSync: {
+          baseUrl: 'http://localhost:3000',
+          pageLabel: 'creator-fs',
+          generatedAt: 200,
+          syncedAt: 300,
+        },
+      },
+    };
+    const result = migrateState(legacy);
+    expect((result as unknown as Record<string, SummaryCacheEntry>)['summary:group1']).toMatchObject({
+      fanAccountId: 'fan-1',
+      agencyHubSync: {
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      },
+    });
+  });
+
   it('defaults knownAccounts to empty array when missing or non-array', () => {
     const result1 = migrateState({ schemaVersion: STORAGE_SCHEMA_VERSION, settings: createDefaultSettings(), personalities: [], accountMappings: {} });
     expect(result1.accountAliases).toEqual({});
@@ -186,6 +213,15 @@ describe('sanitizeSettings', () => {
   it('trims API key', () => {
     const result = storage.sanitizeSettings({ claudeApiKey: '  sk-test  ' });
     expect(result.claudeApiKey).toBe('sk-test');
+  });
+
+  it('canonicalizes the Agency Hub base URL and trims its API key', () => {
+    const result = storage.sanitizeSettings({
+      agencyHubBaseUrl: ' https://hub.example.com/base/ ',
+      agencyHubApiKey: '  hub-key  ',
+    });
+    expect(result.agencyHubBaseUrl).toBe('https://hub.example.com/base');
+    expect(result.agencyHubApiKey).toBe('hub-key');
   });
 
   it('fills defaults for missing fields', () => {
@@ -546,11 +582,20 @@ describe('summary cache', () => {
       personalityId: 'p1',
       personalityUpdatedAt: 1000,
       generatedAt: 5000,
+      fanAccountId: 'fan-1',
+      agencyHubSync: {
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+        generatedAt: 5000,
+        syncedAt: 6000,
+      },
     };
     await storage.saveSummaryCache('group-abc', entry);
     const result = await storage.getSummaryCache('group-abc');
     expect(result).not.toBeNull();
     expect(result!.summary).toBe('Fan is engaged');
+    expect(result!.fanAccountId).toBe('fan-1');
+    expect(result!.agencyHubSync?.pageLabel).toBe('creator-fs');
   });
 
   it('removes summary cache entry', async () => {

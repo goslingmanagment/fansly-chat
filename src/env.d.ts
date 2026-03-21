@@ -9,3 +9,10 @@ declare module '*.css' {
   const value: string;
   export default value;
 }
+
+declare module 'node:fs' {
+  export function readFileSync(
+    path: string | URL,
+    encoding: string,
+  ): string;
+}

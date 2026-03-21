@@ -14,6 +14,8 @@ export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft'>;
 
 export interface Settings {
   claudeApiKey: string;
+  agencyHubBaseUrl: string;
+  agencyHubApiKey: string;
   quickMessageCount: number;
   improveMessageCount: number;
   deepMessageCount: number;
@@ -39,6 +41,13 @@ export interface CompareModelCard extends CompareDraftCard {
   source: 'draft' | 'current';
 }
 
+export interface AgencyHubSummarySyncMetadata {
+  baseUrl: string;
+  pageLabel: string;
+  generatedAt: number;
+  syncedAt: number;
+}
+
 export interface SummaryCacheEntry {
   summary: string;
   personalityId: string;
@@ -47,6 +56,8 @@ export interface SummaryCacheEntry {
   spendingDataVerified?: boolean;
   subscriptionLookupVerified?: boolean;
   modelId?: string;
+  fanAccountId?: string | null;
+  agencyHubSync?: AgencyHubSummarySyncMetadata;
 }
 
 export interface PersistedState {
