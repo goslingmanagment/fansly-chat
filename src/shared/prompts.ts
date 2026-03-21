@@ -116,9 +116,9 @@ Tease a little — hint and dangle instead of giving everything away. The power 
   upsell: `**IMPORTANT — Tone override: SOFT UPSELL.**
 Weave a natural, low-pressure monetization nudge into this reply. Mention content, perks, or a next paid step when it fits.
 Keep it organic — sharing, not pitching. Do not sound transactional or scripted.`,
-  spicy: `**IMPORTANT — Tone override: SPICY.**
-Make this reply noticeably hot and sexually confident. Be bold, direct, and physically charged.
-Do not settle for cute, merely flirty, or complimentary. Lead with desire, temptation, and body-focused subtext.
+  spicy: `**IMPORTANT — Tone override: HORNY.**
+Make this reply noticeably hot and sexually charged. Be bold, direct, and physically arousing.
+Do not settle for cute, merely flirty, or complimentary. Lead with desire, temptation, and body-focused language.
 Match the fan's energy and push it upward. Keep escalation believable — don't snap from neutral to extreme with no runway.`,
 };
 

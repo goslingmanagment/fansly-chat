@@ -12,7 +12,7 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
 const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> = [
   { tone: 'flirty', label: 'Flirty' },
   { tone: 'upsell', label: 'Upsell' },
-  { tone: 'spicy', label: 'Spicy' },
+  { tone: 'spicy', label: 'Horny' },
 ];
 
 interface ButtonBarCallbacks {
