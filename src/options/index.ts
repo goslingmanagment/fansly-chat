@@ -648,11 +648,15 @@ async function render(): Promise<void> {
       const id = card.dataset.personalityId!;
       const nameVal = card.querySelector<HTMLInputElement>('input[data-role="name"]')!.value;
       const contentVal = card.querySelector<HTMLTextAreaElement>('textarea[data-role="content"]')!.value;
+      const builtin = card.dataset.personalityBuiltin === 'true';
+      const builtinVersion = Number(card.dataset.personalityBuiltinVersion);
       return {
         id,
         name: nameVal,
         content: contentVal,
         updatedAt: Date.now(),
+        ...(builtin ? { builtin: true } : {}),
+        ...(builtin && Number.isFinite(builtinVersion) ? { builtinVersion } : {}),
       } satisfies Personality;
     });
     await savePersonalities(entries);
@@ -662,6 +666,10 @@ async function render(): Promise<void> {
   const makeCard = (personality: Personality): HTMLElement => {
     const card = document.createElement('div');
     card.dataset.personalityId = personality.id;
+    card.dataset.personalityBuiltin = personality.builtin ? 'true' : 'false';
+    if (personality.builtinVersion !== undefined) {
+      card.dataset.personalityBuiltinVersion = String(personality.builtinVersion);
+    }
     card.className = 'chatmuse-card';
 
     const nameInput = document.createElement('input');

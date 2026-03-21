@@ -8,7 +8,7 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: createDefaultSettings(),
-    personalities: [],
+    personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],

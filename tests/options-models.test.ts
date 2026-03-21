@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { CLAUDE_MODELS, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { BUNDLED_LORA_PERSONALITY_VERSION } from '../src/shared/personalities.js';
 import type { FeatureType, PersistedState } from '../src/shared/types.js';
 
 const EXPECTED_LABELS = ['Fast Reply', 'Ping', 'Help Me', 'Chat Review', 'Fan Summary'];
@@ -30,6 +31,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
 
 let dom: InstanceType<typeof JSDOM>;
 let savedSettings: Record<string, unknown> | null;
+let lastStorageSet: Record<string, unknown> | null;
 
 function installDom() {
   dom = new JSDOM(
@@ -49,12 +51,14 @@ function installDom() {
 
 async function loadOptionsPage(state: PersistedState): Promise<void> {
   savedSettings = null;
+  lastStorageSet = null;
 
   (globalThis as Record<string, unknown>).browser = {
     storage: {
       local: {
         get: vi.fn(async () => state),
         set: vi.fn(async (data: Record<string, unknown>) => {
+          lastStorageSet = data;
           if (data.settings) {
             savedSettings = data.settings as Record<string, unknown>;
           }
@@ -234,5 +238,43 @@ describe('Options page — AI Models section', () => {
 
     const saved = savedSettings as { improveMessageCount?: number };
     expect(saved.improveMessageCount).toBe(88);
+  });
+
+  it('preserves builtin personality metadata when editing the bundled Lora entry', async () => {
+    await loadOptionsPage({
+      ...makeState(),
+      personalities: [
+        {
+          id: 'builtin:lora',
+          name: 'Lora',
+          content: 'original bundled content',
+          updatedAt: 1,
+          builtin: true,
+          builtinVersion: BUNDLED_LORA_PERSONALITY_VERSION,
+        },
+      ],
+    });
+
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-role="content"]');
+    if (!textarea) {
+      throw new Error('Personality content textarea not found');
+    }
+
+    textarea.value = 'edited bundled content';
+    textarea.dispatchEvent(new Event('input'));
+
+    await vi.waitFor(() => {
+      if (!lastStorageSet?.personalities) {
+        throw new Error('personalities were not saved yet');
+      }
+    }, { timeout: 2000 });
+
+    const saved = lastStorageSet as { personalities: Array<Record<string, unknown>> };
+    expect(saved.personalities[0]).toMatchObject({
+      id: 'builtin:lora',
+      builtin: true,
+      builtinVersion: BUNDLED_LORA_PERSONALITY_VERSION,
+      content: 'edited bundled content',
+    });
   });
 });

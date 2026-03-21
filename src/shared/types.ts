@@ -29,6 +29,8 @@ export interface Personality {
   name: string;
   content: string;
   updatedAt: number;
+  builtin?: boolean;
+  builtinVersion?: number;
 }
 
 export interface CompareDraftCard {
