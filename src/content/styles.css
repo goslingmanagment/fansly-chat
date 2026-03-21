@@ -676,9 +676,11 @@
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .chatmuse-overlay-backdrop {
@@ -698,7 +700,6 @@
   position: relative;
   width: min(720px, 100%);
   max-height: min(84vh, 860px);
-  overflow: auto;
   pointer-events: auto;
   padding: 20px;
   border-radius: 14px;
@@ -708,7 +709,9 @@
     0 0 0 1px rgba(255, 255, 255, 0.03),
     0 8px 24px rgba(0, 0, 0, 0.35);
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 14px;
+  overflow: hidden;
   font-family: var(--chatmuse-font);
   animation: chatmuse-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -720,15 +723,20 @@
   font-family: inherit;
 }
 
-.chatmuse-overlay-panel::-webkit-scrollbar {
+.chatmuse-overlay-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chatmuse-overlay-body::-webkit-scrollbar {
   width: 5px;
 }
 
-.chatmuse-overlay-panel::-webkit-scrollbar-track {
+.chatmuse-overlay-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.chatmuse-overlay-panel::-webkit-scrollbar-thumb {
+.chatmuse-overlay-body::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
