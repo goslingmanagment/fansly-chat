@@ -159,6 +159,7 @@ async function loadOptionsPage(
       },
     },
     runtime: {
+      getManifest: vi.fn(() => ({ version: '1.0.0' })),
       sendMessage: vi.fn(options.runtimeSendMessageImpl ?? (async (message: { type: string }) => {
         if (message.type === 'getSessionsSnapshot') {
           return [];

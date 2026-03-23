@@ -75,6 +75,7 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
       },
     },
     runtime: {
+      getManifest: vi.fn(() => ({ version: '1.0.0' })),
       sendMessage: vi.fn(async () => []),
       openOptionsPage: vi.fn(async () => undefined),
     },

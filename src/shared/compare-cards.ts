@@ -2,6 +2,17 @@ import modelCardDrafts from 'virtual:model-card-drafts';
 import { buildAccountLookupOrder } from './account-aliases.js';
 import type { CompareModelCard, PersistedState } from './types.js';
 
+type CompareDraftOverrideGlobal = typeof globalThis & {
+  __GOOSEMUSE_COMPARE_DRAFTS__?: Record<string, string>;
+};
+
+function getCompareDraftSource(): Record<string, string> {
+  return (
+    (globalThis as CompareDraftOverrideGlobal).__GOOSEMUSE_COMPARE_DRAFTS__ ??
+    modelCardDrafts
+  );
+}
+
 export function resolveMappedPersonalityId(
   accountMappings: Record<string, string>,
   resolvedAccountId: string | null,
@@ -24,7 +35,7 @@ export function resolveMappedPersonalityId(
 }
 
 export function getCompareDraftCount(): number {
-  return Object.keys(modelCardDrafts).length;
+  return Object.keys(getCompareDraftSource()).length;
 }
 
 function normalizeLabel(label: string): string {
@@ -52,7 +63,7 @@ export function resolveCompareDraftCards(
 }
 
 function getDraftCards(): CompareModelCard[] {
-  return resolveCompareDraftCards(modelCardDrafts);
+  return resolveCompareDraftCards(getCompareDraftSource());
 }
 
 export function resolveCompareModelCardsForPersonality(
@@ -62,7 +73,7 @@ export function resolveCompareModelCardsForPersonality(
   return resolveCompareModelCardsForDrafts(
     storage,
     personalityId,
-    modelCardDrafts,
+    getCompareDraftSource(),
   );
 }
 
