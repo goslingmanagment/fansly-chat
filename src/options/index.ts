@@ -18,6 +18,7 @@ import type {
 } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-options-root');
+const extensionVersion = browser.runtime.getManifest().version;
 
 if (!(rootElement instanceof HTMLElement)) {
   throw new Error('Missing options root');
@@ -79,6 +80,13 @@ function createButton(label: string, secondary = false, danger = false): HTMLBut
   button.className = `chatmuse-button${secondary ? ' chatmuse-button-secondary' : ''}${danger ? ' chatmuse-button-danger' : ''}`;
   button.textContent = label;
   return button;
+}
+
+function createVersionTag(): HTMLDivElement {
+  const tag = document.createElement('div');
+  tag.className = 'chatmuse-version-tag';
+  tag.textContent = `v ${extensionVersion}`;
+  return tag;
 }
 
 function debounce<T extends (...args: never[]) => void>(callback: T, waitMs: number): T {
@@ -249,13 +257,14 @@ async function render(): Promise<void> {
   hero.style.padding = '28px 20px 4px';
   hero.style.display = 'grid';
   hero.style.gap = '8px';
+  hero.style.position = 'relative';
   const title = document.createElement('h1');
   title.textContent = 'ChatMuse Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
   subtitle.textContent = 'Configure Claude, personalities, mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatmuse-muted)';
-  hero.append(title, subtitle);
+  hero.append(createVersionTag(), title, subtitle);
   root.append(hero);
 
   // ─── API Configuration ─────────────────────────────────────
