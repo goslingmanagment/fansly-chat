@@ -2,6 +2,7 @@ import popupStyles from './styles.css';
 import type { PopupStatus } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatmuse-popup-root');
+const extensionVersion = browser.runtime.getManifest().version;
 
 if (!(rootElement instanceof HTMLElement)) {
   throw new Error('Missing popup root');
@@ -23,6 +24,13 @@ function createButton(label: string): HTMLButtonElement {
   return button;
 }
 
+function createVersionTag(): HTMLDivElement {
+  const tag = document.createElement('div');
+  tag.className = 'chatmuse-version-tag';
+  tag.textContent = `v ${extensionVersion}`;
+  return tag;
+}
+
 async function render(): Promise<void> {
   const status = (await browser.runtime.sendMessage({ type: 'getPopupStatus' })) as PopupStatus;
 
@@ -30,6 +38,7 @@ async function render(): Promise<void> {
   root.style.padding = '18px';
   root.style.display = 'grid';
   root.style.gap = '14px';
+  root.style.position = 'relative';
 
   const title = document.createElement('div');
   title.style.display = 'grid';
@@ -69,7 +78,7 @@ async function render(): Promise<void> {
     void browser.runtime.openOptionsPage();
   });
 
-  root.append(title, panel, button);
+  root.append(createVersionTag(), title, panel, button);
 }
 
 injectStyles();
