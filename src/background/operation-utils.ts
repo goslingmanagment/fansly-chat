@@ -1,4 +1,4 @@
-import { ChatMuseError } from '../shared/errors.js';
+import { GooseMuseError } from '../shared/errors.js';
 import type {
   MessageLoadProgress,
   SubscriptionLookupTraceEvent,
@@ -19,30 +19,30 @@ export function parseGroupIdFromUrl(url: string | undefined): string | null {
 }
 
 export function errorCode(error: unknown): string {
-  if (error instanceof ChatMuseError) {
+  if (error instanceof GooseMuseError) {
     return error.key;
   }
   const key = (error as { key?: string })?.key;
   return typeof key === 'string' ? key : 'unknown_error';
 }
 
-export function resolveAbortChatMuseError(
+export function resolveAbortGooseMuseError(
   error: unknown,
   options: ResolveAbortErrorOptions,
-): ChatMuseError | null {
+): GooseMuseError | null {
   if (!(error instanceof DOMException) || error.name !== 'AbortError') {
     return null;
   }
 
   if (options.timeoutSignal?.aborted) {
-    return new ChatMuseError('timed_out');
+    return new GooseMuseError('timed_out');
   }
 
   if (!options.active || options.cancelSignal?.aborted) {
-    return new ChatMuseError('chat_changed');
+    return new GooseMuseError('chat_changed');
   }
 
-  return new ChatMuseError('network_error');
+  return new GooseMuseError('network_error');
 }
 
 export function describeMessageLoadProgress(

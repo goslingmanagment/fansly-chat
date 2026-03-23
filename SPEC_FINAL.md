@@ -1,6 +1,6 @@
-# ChatMuse — Requirements Specification
+# GooseMuse — Requirements Specification
 
-**Product:** ChatMuse — AI-powered chat assistant browser extension for Fansly.com
+**Product:** GooseMuse — AI-powered chat assistant browser extension for Fansly.com
 **Version:** 1.3
 **Date:** 2026-03-01
 
@@ -10,7 +10,7 @@
 
 ### 1.1 What Is This
 
-ChatMuse is a browser extension that helps agency chatters communicate with fans on Fansly.com. It injects AI-powered tools directly into the Fansly chat interface — generating replies, coaching chatters, profiling fans, reviewing conversation quality, and reactivating silent subscribers.
+GooseMuse is a browser extension that helps agency chatters communicate with fans on Fansly.com. It injects AI-powered tools directly into the Fansly chat interface — generating replies, coaching chatters, profiling fans, reviewing conversation quality, and reactivating silent subscribers.
 
 ### 1.2 Who Uses It
 
@@ -252,7 +252,7 @@ If the earnings request fails, returns empty, or times out, the feature continue
 
 All extension UI is injected directly into the Fansly page. There is no sidebar. The extension appears only on the Fansly messages page (not on profile pages, the feed, or other sections).
 
-**Overlay stacking (required):** ChatMuse overlays must render in a dedicated mount root attached directly to `document.body`, outside Fansly component subtrees (prevents Angular re-render destruction). Use `position: fixed` with full-viewport bounds. Create a new stacking context (`isolation: isolate`) with a z-index above all site and third-party extension UI (e.g., `2147483646`). The mount root must be created idempotently (create-if-missing, reuse-if-present) and use the `chatmuse-` namespace prefix. A full-viewport semi-transparent backdrop must block pointer interaction with the underlying page while an overlay is open. **Exception:** After clicking Insert in a multi-message reply (§3.3), the backdrop switches to `pointer-events: none` so the chatter can send the inserted part manually via the Fansly input, then return to the overlay for remaining parts. The backdrop reverts to blocking when the chatter interacts with the overlay again. While open, page scrolling must be disabled and restored on close.
+**Overlay stacking (required):** GooseMuse overlays must render in a dedicated mount root attached directly to `document.body`, outside Fansly component subtrees (prevents Angular re-render destruction). Use `position: fixed` with full-viewport bounds. Create a new stacking context (`isolation: isolate`) with a z-index above all site and third-party extension UI (e.g., `2147483646`). The mount root must be created idempotently (create-if-missing, reuse-if-present) and use the `goosemuse-` namespace prefix. A full-viewport semi-transparent backdrop must block pointer interaction with the underlying page while an overlay is open. **Exception:** After clicking Insert in a multi-message reply (§3.3), the backdrop switches to `pointer-events: none` so the chatter can send the inserted part manually via the Fansly input, then return to the overlay for remaining parts. The backdrop reverts to blocking when the chatter interacts with the overlay again. While open, page scrolling must be disabled and restored on close.
 
 ### 3.2 In-Chat Button Bar
 
@@ -359,11 +359,11 @@ Fansly is an Angular single-page application — the DOM changes without full pa
 1. **Group ID source (required):** The active conversation `groupId` must be extracted from the current page URL path by matching `/messages/{groupId}` (path segment; ignore query/hash). This `groupId` is the authoritative identifier for all conversation-scoped Fansly API calls and is stored in tab context. On route change, implementations must re-extract it; if extraction fails, conversation API calls are skipped (fail-open) until a valid `groupId` is available.
 2. The button bar must persist across SPA re-renders — if Angular removes and re-creates the chat area, the button bar must be re-injected.
 3. Overlays must not be affected by chat area re-renders — they must be independent of the chat subtree.
-4. All injected elements must use the `chatmuse-` prefix for IDs and classes to avoid collisions with Fansly's own elements and other extensions.
+4. All injected elements must use the `goosemuse-` prefix for IDs and classes to avoid collisions with Fansly's own elements and other extensions.
 
 ### 3.12 Third-Party Extension Compatibility
 
-**Third-party extension compatibility (required):** The fbuddy extension (`fb-*`, `fbuddy-*`) is commonly present and may inject into the same Fansly regions as ChatMuse. ChatMuse must use its own isolated mount root and namespace (`chatmuse-*`) and must not read, modify, or depend on DOM structure inside `fb-*`/`fbuddy-*` elements (including pre-existing nodes like `#fansly-ai-buttons`). ChatMuse UI must be injected as a sibling mount, idempotently (create-if-missing, reuse-if-present), without replacing existing nodes. MutationObservers must be narrowly scoped and must ignore mutations originating from `fb-*`/`fbuddy-*` subtrees.
+**Third-party extension compatibility (required):** The fbuddy extension (`fb-*`, `fbuddy-*`) is commonly present and may inject into the same Fansly regions as GooseMuse. GooseMuse must use its own isolated mount root and namespace (`goosemuse-*`) and must not read, modify, or depend on DOM structure inside `fb-*`/`fbuddy-*` elements (including pre-existing nodes like `#fansly-ai-buttons`). GooseMuse UI must be injected as a sibling mount, idempotently (create-if-missing, reuse-if-present), without replacing existing nodes. MutationObservers must be narrowly scoped and must ignore mutations originating from `fb-*`/`fbuddy-*` subtrees.
 
 ---
 
@@ -860,7 +860,7 @@ Technical choices resolved before development. 41 normalized decisions covering 
 | 2 | UI framework | vanilla TS | Small UI surface, zero dependencies |
 | 3 | TypeScript strict mode | yes | Catches null/undefined in message-passing code |
 | 4 | Test runner | Vitest | Native ESM, works with esbuild output |
-| 5 | CSS approach | Injected stylesheet | Namespaced `chatmuse-` per §3.11; no Shadow DOM |
+| 5 | CSS approach | Injected stylesheet | Namespaced `goosemuse-` per §3.11; no Shadow DOM |
 
 ### Project Structure
 

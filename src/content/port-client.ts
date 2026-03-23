@@ -19,7 +19,7 @@ export class PortClient {
       return;
     }
 
-    this.port = browser.runtime.connect({ name: 'chatmuse-content' });
+    this.port = browser.runtime.connect({ name: 'goosemuse-content' });
     this.port.onMessage.addListener((message) => {
       this.callbacks.onMessage(message as BackgroundPortMessage);
     });

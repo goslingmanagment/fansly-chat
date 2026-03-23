@@ -1,5 +1,5 @@
 import { ANTHROPIC_VERSION, CLAUDE_API_URL, MAX_TOKENS } from '../shared/constants.js';
-import { ChatMuseError } from '../shared/errors.js';
+import { GooseMuseError } from '../shared/errors.js';
 import type {
   AnthropicCacheCreationUsage,
   AnthropicUsageMetrics,
@@ -221,7 +221,7 @@ function buildAnthropicError(
   status: number,
   info: AnthropicApiErrorInfo | null,
   retryAfterMs?: number,
-): ChatMuseError {
+): GooseMuseError {
   const type = info?.type?.trim().toLowerCase() ?? '';
   const message = info?.message?.trim() ?? '';
   const normalizedMessage = message.toLowerCase();
@@ -233,7 +233,7 @@ function buildAnthropicError(
   };
 
   if (status === 429 || type === 'rate_limit_error' || normalizedMessage.includes('rate limit')) {
-    return new ChatMuseError('rate_limited', {
+    return new GooseMuseError('rate_limited', {
       details,
       retryAfterMs,
       retryAtMs: details.retryAtMs,
@@ -241,34 +241,34 @@ function buildAnthropicError(
   }
 
   if (isInsufficientBalanceError(type, normalizedMessage)) {
-    return new ChatMuseError('insufficient_balance', { details });
+    return new GooseMuseError('insufficient_balance', { details });
   }
 
   if (status === 401 || status === 403) {
-    return new ChatMuseError('invalid_api_key', { details });
+    return new GooseMuseError('invalid_api_key', { details });
   }
 
   if (isModelUnavailableError(type, normalizedMessage)) {
-    return new ChatMuseError('model_unavailable', { details });
+    return new GooseMuseError('model_unavailable', { details });
   }
 
   if (status === 413 || isContextTooLongError(type, normalizedMessage)) {
-    return new ChatMuseError('context_too_long', { details });
+    return new GooseMuseError('context_too_long', { details });
   }
 
   if (status === 529 || status >= 500 || type === 'overloaded_error') {
-    return new ChatMuseError('service_unavailable', { details });
+    return new GooseMuseError('service_unavailable', { details });
   }
 
   if (status === 400) {
-    return new ChatMuseError('unknown_error', { details });
+    return new GooseMuseError('unknown_error', { details });
   }
 
   if (status === 0) {
-    return new ChatMuseError('service_unavailable', { details });
+    return new GooseMuseError('service_unavailable', { details });
   }
 
-  return new ChatMuseError('network_error', { details });
+  return new GooseMuseError('network_error', { details });
 }
 
 export class AnthropicClient {
@@ -312,7 +312,7 @@ export class AnthropicClient {
     }
 
     if (!response.body) {
-      throw new ChatMuseError('network_error');
+      throw new GooseMuseError('network_error');
     }
 
     const decoder = new TextDecoder();

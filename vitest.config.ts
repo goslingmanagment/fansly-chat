@@ -29,11 +29,11 @@ function loadDrafts(): Record<string, string> {
 
 export default defineConfig({
   define: {
-    __CHATMUSE_BUILD_TIME__: JSON.stringify('test-build'),
+    __GOOSEMUSE_BUILD_TIME__: JSON.stringify('test-build'),
   },
   plugins: [
     {
-      name: 'chatmuse-raw-text-assets',
+      name: 'goosemuse-raw-text-assets',
       transform(code, id) {
         if (id.endsWith('.md') || id.endsWith('.css')) {
           return `export default ${JSON.stringify(code)};`;
@@ -42,7 +42,7 @@ export default defineConfig({
       },
     },
     {
-      name: 'chatmuse-virtual-drafts',
+      name: 'goosemuse-virtual-drafts',
       resolveId(id) {
         if (id === 'virtual:model-card-drafts') {
           return '\0virtual:model-card-drafts';

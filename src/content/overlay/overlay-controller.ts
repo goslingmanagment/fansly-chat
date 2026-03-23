@@ -114,11 +114,11 @@ function relativeTime(timestamp: number): string {
 }
 
 function ratingClass(rating: number): string {
-  if (rating >= 9) return 'chatmuse-rating-excellent';
-  if (rating >= 7) return 'chatmuse-rating-good';
-  if (rating >= 5) return 'chatmuse-rating-average';
-  if (rating >= 3) return 'chatmuse-rating-below';
-  return 'chatmuse-rating-poor';
+  if (rating >= 9) return 'goosemuse-rating-excellent';
+  if (rating >= 7) return 'goosemuse-rating-good';
+  if (rating >= 5) return 'goosemuse-rating-average';
+  if (rating >= 3) return 'goosemuse-rating-below';
+  return 'goosemuse-rating-poor';
 }
 
 function formatFanSummarySyncStatus(
@@ -169,17 +169,17 @@ function formatLoadingStatus(progress: OperationProgressPayload | null | undefin
 
 function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
   const block = document.createElement('div');
-  block.className = 'chatmuse-inline-error';
+  block.className = 'goosemuse-inline-error';
 
   const primary = document.createElement('div');
-  primary.className = 'chatmuse-error-primary';
+  primary.className = 'goosemuse-error-primary';
   primary.textContent = formatUserFacingError(error);
   block.append(primary);
 
   const description = getUserErrorDescription(error);
   if (description) {
     const secondary = document.createElement('div');
-    secondary.className = 'chatmuse-error-secondary';
+    secondary.className = 'goosemuse-error-secondary';
     secondary.textContent = description;
     block.append(secondary);
   }
@@ -300,7 +300,7 @@ export class OverlayController {
     } else {
       this.dismissMode = 'close';
     }
-    document.body.classList.toggle('chatmuse-scroll-lock', model.kind !== 'hidden');
+    document.body.classList.toggle('goosemuse-scroll-lock', model.kind !== 'hidden');
     this.root.style.pointerEvents = model.kind === 'hidden' ? 'none' : 'auto';
 
     if (model.kind === 'hidden') {
@@ -338,7 +338,7 @@ export class OverlayController {
   }
 
   private syncBackdropPassThrough(): void {
-    this.backdropEl?.classList.toggle('chatmuse-pass-through', this.passThrough);
+    this.backdropEl?.classList.toggle('goosemuse-pass-through', this.passThrough);
   }
 
   private queueComposerFocus(): void {
@@ -419,10 +419,10 @@ export class OverlayController {
     }
 
     const shell = document.createElement('div');
-    shell.className = 'chatmuse-overlay-shell';
+    shell.className = 'goosemuse-overlay-shell';
 
     const backdrop = document.createElement('div');
-    backdrop.className = 'chatmuse-overlay-backdrop';
+    backdrop.className = 'goosemuse-overlay-backdrop';
     backdrop.addEventListener('click', () => {
       if (this.passThrough) {
         return;
@@ -431,7 +431,7 @@ export class OverlayController {
     });
 
     const panel = document.createElement('div');
-    panel.className = 'chatmuse-overlay-panel';
+    panel.className = 'goosemuse-overlay-panel';
     panel.addEventListener('pointerdown', () => {
       if (!this.passThrough) {
         return;
@@ -441,21 +441,21 @@ export class OverlayController {
     });
 
     const header = document.createElement('div');
-    header.className = 'chatmuse-overlay-header';
+    header.className = 'goosemuse-overlay-header';
 
     const title = document.createElement('div');
-    title.className = 'chatmuse-overlay-title';
+    title.className = 'goosemuse-overlay-title';
     const eyebrow = document.createElement('div');
-    eyebrow.className = 'chatmuse-eyebrow';
+    eyebrow.className = 'goosemuse-eyebrow';
     const h1 = document.createElement('div');
-    h1.className = 'chatmuse-title';
+    h1.className = 'goosemuse-title';
     const subtitle = document.createElement('div');
-    subtitle.className = 'chatmuse-subtitle';
+    subtitle.className = 'goosemuse-subtitle';
     title.append(eyebrow, h1, subtitle);
 
     const close = document.createElement('button');
     close.type = 'button';
-    close.className = 'chatmuse-close';
+    close.className = 'goosemuse-close';
     close.textContent = '\u00d7';
     close.addEventListener('click', () => {
       this.handleDismiss();
@@ -463,10 +463,10 @@ export class OverlayController {
 
     header.append(title, close);
     const inlineError = document.createElement('div');
-    inlineError.className = 'chatmuse-inline-error chatmuse-hidden';
+    inlineError.className = 'goosemuse-inline-error goosemuse-hidden';
 
     const body = document.createElement('div');
-    body.className = 'chatmuse-overlay-body';
+    body.className = 'goosemuse-overlay-body';
 
     panel.append(header, inlineError, body);
     shell.append(backdrop, panel);
@@ -507,9 +507,9 @@ export class OverlayController {
     const feature =
       model.kind === 'loading' || model.kind === 'reply' || model.kind === 'helpMe' || model.kind === 'readOnly'
         ? titleForFeature(model.feature)
-        : 'ChatMuse';
+        : 'GooseMuse';
     const titleText =
-      model.kind === 'error' ? 'ChatMuse' : `${feature} — @${model.fanDisplayName || 'fan'}`;
+      model.kind === 'error' ? 'GooseMuse' : `${feature} — @${model.fanDisplayName || 'fan'}`;
     const subtitleText =
       model.kind === 'error' ? 'Something went wrong' : 'Preview only. You send messages manually.';
 
@@ -532,14 +532,14 @@ export class OverlayController {
     if (model.kind !== 'error' && this.inlineError) {
       const content = createUserErrorBlock(this.inlineError);
       this.inlineErrorEl.replaceChildren(...Array.from(content.childNodes));
-      this.inlineErrorEl.classList.remove('chatmuse-hidden');
+      this.inlineErrorEl.classList.remove('goosemuse-hidden');
       return;
     }
 
     if (this.inlineErrorEl.childNodes.length > 0) {
       this.inlineErrorEl.replaceChildren();
     }
-    this.inlineErrorEl.classList.add('chatmuse-hidden');
+    this.inlineErrorEl.classList.add('goosemuse-hidden');
   }
 
   private renderBody(model: VisibleOverlayModel): 'rebuild-body' | 'update-loading' {
@@ -579,7 +579,7 @@ export class OverlayController {
     ) {
       this.lastFocusedReplyOpId = operationIdForModel(model);
       queueMicrotask(() => {
-        const btn = nextView.root.querySelector<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+        const btn = nextView.root.querySelector<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button');
         btn?.focus();
       });
     }
@@ -589,28 +589,28 @@ export class OverlayController {
 
   private createLoadingView(model: Extract<OverlayViewModel, { kind: 'loading' }>): LoadingViewState {
     const section = document.createElement('div');
-    section.className = 'chatmuse-grid';
+    section.className = 'goosemuse-grid';
 
     const status = document.createElement('div');
-    status.className = 'chatmuse-overlay-status';
+    status.className = 'goosemuse-overlay-status';
     const statusText = document.createTextNode('');
     status.append(statusText);
 
     const stream = document.createElement('div');
-    stream.className = 'chatmuse-stream';
+    stream.className = 'goosemuse-stream';
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
     const spendHost = document.createElement('div');
-    spendHost.className = 'chatmuse-loading-spend-host';
+    spendHost.className = 'goosemuse-loading-spend-host';
 
     const debugHost = document.createElement('div');
 
     const actions = document.createElement('div');
-    actions.className = 'chatmuse-overlay-actions';
+    actions.className = 'goosemuse-overlay-actions';
     const cancel = document.createElement('button');
     cancel.type = 'button';
-    cancel.className = 'chatmuse-button chatmuse-button-danger';
+    cancel.className = 'goosemuse-button goosemuse-button-danger';
     cancel.textContent = 'Cancel';
     cancel.addEventListener('click', () => {
       if (this.model.kind === 'loading') {
@@ -763,15 +763,15 @@ export class OverlayController {
   ): { host: HTMLDivElement; headerText: Text; log: HTMLDivElement } {
     const host = document.createElement('div');
     const card = document.createElement('div');
-    card.className = 'chatmuse-profiling';
+    card.className = 'goosemuse-profiling';
 
     const header = document.createElement('div');
-    header.className = 'chatmuse-debug-summary';
+    header.className = 'goosemuse-debug-summary';
     const headerText = document.createTextNode('');
     header.append(headerText);
 
     const log = document.createElement('div');
-    log.className = 'chatmuse-profiling-log';
+    log.className = 'goosemuse-profiling-log';
 
     card.append(header, log);
     host.append(card);
@@ -875,14 +875,14 @@ export class OverlayController {
     entry: OperationProfilingSnapshot['logEntries'][number],
   ): HTMLDivElement {
     const row = document.createElement('div');
-    row.className = 'chatmuse-profiling-entry';
+    row.className = 'goosemuse-profiling-entry';
 
     const elapsed = document.createElement('div');
-    elapsed.className = 'chatmuse-profiling-elapsed';
+    elapsed.className = 'goosemuse-profiling-elapsed';
     elapsed.textContent = `+${formatProfilingElapsed(entry.elapsedMs)}`;
 
     const message = document.createElement('div');
-    message.className = 'chatmuse-profiling-message';
+    message.className = 'goosemuse-profiling-message';
     message.textContent = entry.message;
 
     row.append(elapsed, message);
@@ -948,7 +948,7 @@ export class OverlayController {
   }
 
   private isRenderTraceEnabled(): boolean {
-    if ((globalThis as { __CHATMUSE_OVERLAY_DEBUG__?: unknown }).__CHATMUSE_OVERLAY_DEBUG__ === true) {
+    if ((globalThis as { __GOOSEMUSE_OVERLAY_DEBUG__?: unknown }).__GOOSEMUSE_OVERLAY_DEBUG__ === true) {
       return true;
     }
 
@@ -957,7 +957,7 @@ export class OverlayController {
     }
 
     try {
-      this.renderTraceEnabledFromStorage = window.localStorage.getItem('chatmuse:overlay-debug') === '1';
+      this.renderTraceEnabledFromStorage = window.localStorage.getItem('goosemuse:overlay-debug') === '1';
     } catch {
       this.renderTraceEnabledFromStorage = false;
     }
@@ -978,7 +978,7 @@ export class OverlayController {
     const sameOperationIdAsPrevious = this.renderTraceState.lastOperationId === operationId;
 
     if (this.isRenderTraceEnabled()) {
-      console.debug('[ChatMuse overlay render]', {
+      console.debug('[GooseMuse overlay render]', {
         count,
         timestamp: new Date().toISOString(),
         kind: model.kind,
@@ -1000,39 +1000,39 @@ export class OverlayController {
 
   private createPartCard(title: string, part: OverlayInsertPart, options: PartCardOptions = {}): HTMLElement {
     const card = document.createElement('div');
-    card.className = 'chatmuse-card';
+    card.className = 'goosemuse-card';
     if (options.emphasis === 'recommended') {
-      card.classList.add('chatmuse-card-recommended');
+      card.classList.add('goosemuse-card-recommended');
     } else if (options.emphasis === 'followup') {
-      card.classList.add('chatmuse-card-followup');
+      card.classList.add('goosemuse-card-followup');
     }
 
     const label = document.createElement('div');
-    label.className = 'chatmuse-card-title';
+    label.className = 'goosemuse-card-title';
     label.textContent = title;
 
     const hint = options.hint ? document.createElement('div') : null;
     if (hint) {
-      hint.className = 'chatmuse-card-hint';
+      hint.className = 'goosemuse-card-hint';
       hint.textContent = options.hint ?? null;
     }
 
     const statusEl = options.status ? document.createElement('div') : null;
     if (statusEl) {
-      statusEl.className = 'chatmuse-card-status';
+      statusEl.className = 'goosemuse-card-status';
       statusEl.textContent = options.status ?? null;
     }
 
     const text = document.createElement('div');
-    text.className = 'chatmuse-card-text';
+    text.className = 'goosemuse-card-text';
     text.textContent = part.text;
 
     const actions = document.createElement('div');
-    actions.className = 'chatmuse-card-actions';
+    actions.className = 'goosemuse-card-actions';
 
     const insert = document.createElement('button');
     insert.type = 'button';
-    insert.className = 'chatmuse-button';
+    insert.className = 'goosemuse-button';
     insert.textContent = part.insertedAt ? 'Inserted \u2713' : part.insertedOnce ? 'Insert again' : 'Insert';
     insert.disabled = Boolean(part.insertedAt && Date.now() - part.insertedAt < 2000);
     insert.addEventListener('click', () => {
@@ -1041,7 +1041,7 @@ export class OverlayController {
 
     const copy = document.createElement('button');
     copy.type = 'button';
-    copy.className = 'chatmuse-button chatmuse-button-secondary';
+    copy.className = 'goosemuse-button goosemuse-button-secondary';
     copy.textContent = 'Copy';
     copy.addEventListener('click', async () => {
       try {
@@ -1070,7 +1070,7 @@ export class OverlayController {
 
   private renderReply(model: Extract<OverlayViewModel, { kind: 'reply' }>): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'chatmuse-grid';
+    section.className = 'goosemuse-grid';
 
     if (model.anthropicSpend) {
       section.append(this.renderSpendStrip(model.anthropicSpend));
@@ -1082,7 +1082,7 @@ export class OverlayController {
 
     if (model.splitModeRequested) {
       const helper = document.createElement('div');
-      helper.className = 'chatmuse-inline-note';
+      helper.className = 'goosemuse-inline-note';
       helper.textContent =
         model.parts.length > 1
           ? 'Split mode was on. Start with message 1, send it manually in Fansly, then use the follow-up if it still feels right.'
@@ -1092,7 +1092,7 @@ export class OverlayController {
 
     if (model.parts.length > 0) {
       const parts = document.createElement('div');
-      parts.className = 'chatmuse-parts';
+      parts.className = 'goosemuse-parts';
       model.parts.forEach((part) => {
         const isSplit = model.splitModeRequested && model.parts.length > 1;
         parts.append(
@@ -1111,7 +1111,7 @@ export class OverlayController {
       section.append(parts);
     } else {
       const raw = document.createElement('div');
-      raw.className = 'chatmuse-stream';
+      raw.className = 'goosemuse-stream';
       raw.textContent = model.rawText;
       section.append(raw);
     }
@@ -1128,7 +1128,7 @@ export class OverlayController {
 
   private renderHelpMe(model: Extract<OverlayViewModel, { kind: 'helpMe' }>): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'chatmuse-grid';
+    section.className = 'goosemuse-grid';
 
     if (model.anthropicSpend) {
       section.append(this.renderSpendStrip(model.anthropicSpend));
@@ -1139,18 +1139,18 @@ export class OverlayController {
     }
 
     const coaching = document.createElement('div');
-    coaching.className = 'chatmuse-card';
+    coaching.className = 'goosemuse-card';
     const coachingTitle = document.createElement('div');
-    coachingTitle.className = 'chatmuse-card-title';
+    coachingTitle.className = 'goosemuse-card-title';
     coachingTitle.textContent = 'Coaching';
     const coachingText = document.createElement('div');
-    coachingText.className = 'chatmuse-card-text';
+    coachingText.className = 'goosemuse-card-text';
     coachingText.textContent = model.coaching ?? model.rawText;
     coaching.append(coachingTitle, coachingText);
     section.append(coaching);
 
     const suggestions = document.createElement('div');
-    suggestions.className = 'chatmuse-parts';
+    suggestions.className = 'goosemuse-parts';
     model.engagingParts.forEach((part, index) =>
       suggestions.append(this.createPartCard(`Engaging ${index + 1}`, part, { autoPassThrough: true })),
     );
@@ -1163,7 +1163,7 @@ export class OverlayController {
 
     if (model.parseFallback) {
       const fallback = document.createElement('div');
-      fallback.className = 'chatmuse-stream';
+      fallback.className = 'goosemuse-stream';
       fallback.textContent = model.rawText;
       section.append(fallback);
     }
@@ -1180,7 +1180,7 @@ export class OverlayController {
 
   private renderReadOnly(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'chatmuse-grid';
+    section.className = 'goosemuse-grid';
 
     if (model.anthropicSpend) {
       section.append(this.renderSpendStrip(model.anthropicSpend));
@@ -1192,14 +1192,14 @@ export class OverlayController {
 
     if (model.reviewMeta?.rating) {
       const ratingSection = document.createElement('div');
-      ratingSection.className = 'chatmuse-rating-section';
+      ratingSection.className = 'goosemuse-rating-section';
 
       const badge = document.createElement('div');
-      badge.className = `chatmuse-rating-badge ${ratingClass(model.reviewMeta.rating)}`;
+      badge.className = `goosemuse-rating-badge ${ratingClass(model.reviewMeta.rating)}`;
       badge.textContent = String(model.reviewMeta.rating);
 
       const ratingLabel = document.createElement('div');
-      ratingLabel.className = 'chatmuse-rating-label';
+      ratingLabel.className = 'goosemuse-rating-label';
       ratingLabel.textContent = `${model.reviewMeta.rating}/10`;
 
       ratingSection.append(badge, ratingLabel);
@@ -1208,7 +1208,7 @@ export class OverlayController {
 
     if (model.summaryMeta) {
       const meta = document.createElement('div');
-      meta.className = 'chatmuse-overlay-status';
+      meta.className = 'goosemuse-overlay-status';
       meta.textContent = model.summaryMeta.cached
         ? `Cached ${relativeTime(model.summaryMeta.generatedAt)}`
         : `Generated ${relativeTime(model.summaryMeta.generatedAt)}`;
@@ -1218,12 +1218,12 @@ export class OverlayController {
     if (model.reviewMeta && !model.reviewMeta.parseFallback) {
       if (model.reviewMeta.evaluation) {
         const evalSection = document.createElement('div');
-        evalSection.className = 'chatmuse-card';
+        evalSection.className = 'goosemuse-card';
         const evalTitle = document.createElement('div');
-        evalTitle.className = 'chatmuse-card-title';
+        evalTitle.className = 'goosemuse-card-title';
         evalTitle.textContent = 'Evaluation';
         const evalText = document.createElement('div');
-        evalText.className = 'chatmuse-card-text';
+        evalText.className = 'goosemuse-card-text';
         evalText.textContent = model.reviewMeta.evaluation;
         evalSection.append(evalTitle, evalText);
         section.append(evalSection);
@@ -1231,19 +1231,19 @@ export class OverlayController {
 
       if (model.reviewMeta.recommendations) {
         const recSection = document.createElement('div');
-        recSection.className = 'chatmuse-card';
+        recSection.className = 'goosemuse-card';
         const recTitle = document.createElement('div');
-        recTitle.className = 'chatmuse-card-title';
+        recTitle.className = 'goosemuse-card-title';
         recTitle.textContent = 'Recommendations';
         const recText = document.createElement('div');
-        recText.className = 'chatmuse-card-text';
+        recText.className = 'goosemuse-card-text';
         recText.textContent = model.reviewMeta.recommendations;
         recSection.append(recTitle, recText);
         section.append(recSection);
       }
     } else {
       const body = document.createElement('div');
-      body.className = 'chatmuse-stream';
+      body.className = 'goosemuse-stream';
       body.textContent = model.rawText;
       section.append(body);
     }
@@ -1297,7 +1297,7 @@ export class OverlayController {
     syncStatus?: FanSummarySyncStatus,
   ): HTMLElement {
     const actions = document.createElement('div');
-    actions.className = 'chatmuse-overlay-actions';
+    actions.className = 'goosemuse-overlay-actions';
 
     if (!rerunActionLabel && !copyText && !syncStatus) {
       return actions;
@@ -1306,7 +1306,7 @@ export class OverlayController {
     if (rerunActionLabel) {
       const rerun = document.createElement('button');
       rerun.type = 'button';
-      rerun.className = 'chatmuse-button';
+      rerun.className = 'goosemuse-button';
       rerun.textContent = rerunActionLabel;
       rerun.addEventListener('click', () => this.callbacks.onRerun(feature));
       actions.append(rerun);
@@ -1315,7 +1315,7 @@ export class OverlayController {
     if (copyText) {
       const copy = document.createElement('button');
       copy.type = 'button';
-      copy.className = 'chatmuse-button chatmuse-button-secondary';
+      copy.className = 'goosemuse-button goosemuse-button-secondary';
       copy.textContent = 'Copy';
       copy.addEventListener('click', async () => {
         try {
@@ -1333,7 +1333,7 @@ export class OverlayController {
     const syncStatusText = formatFanSummarySyncStatus(syncStatus);
     if (syncStatusText) {
       const status = document.createElement('span');
-      status.className = 'chatmuse-overlay-action-status';
+      status.className = 'goosemuse-overlay-action-status';
       status.textContent = syncStatusText;
       actions.append(status);
     }
@@ -1345,7 +1345,7 @@ export class OverlayController {
 
   private renderError(model: Extract<OverlayViewModel, { kind: 'error' }>): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'chatmuse-grid';
+    section.className = 'goosemuse-grid';
 
     if (model.anthropicSpend) {
       section.append(this.renderSpendStrip(model.anthropicSpend));
@@ -1369,16 +1369,16 @@ export class OverlayController {
     options?: { placeholder?: boolean },
   ): HTMLElement {
     const strip = document.createElement('div');
-    strip.className = 'chatmuse-spend-strip';
+    strip.className = 'goosemuse-spend-strip';
 
     const primary = document.createElement('div');
-    primary.className = 'chatmuse-spend-strip-primary';
+    primary.className = 'goosemuse-spend-strip-primary';
 
     const secondary = document.createElement('div');
-    secondary.className = 'chatmuse-spend-strip-secondary';
+    secondary.className = 'goosemuse-spend-strip-secondary';
 
     if (!spend && options?.placeholder) {
-      strip.classList.add('chatmuse-spend-strip-pending');
+      strip.classList.add('goosemuse-spend-strip-pending');
       primary.textContent = 'Cost pending · Tokens pending';
       secondary.textContent = 'in — · write — · read — · out —';
       strip.append(primary, secondary);
@@ -1396,7 +1396,7 @@ export class OverlayController {
         document.createTextNode(' · '),
         (() => {
           const span = document.createElement('span');
-          span.className = `chatmuse-spend-cache-${cacheEffect.kind}`;
+          span.className = `goosemuse-spend-cache-${cacheEffect.kind}`;
           span.textContent = cacheEffect.text;
           return span;
         })(),
@@ -1414,7 +1414,7 @@ export class OverlayController {
     mode: 'loading' | 'summary',
   ): HTMLElement {
     const card = document.createElement('div');
-    card.className = 'chatmuse-profiling';
+    card.className = 'goosemuse-profiling';
     card.append(
       this.createProfilingHeader(snapshot),
       mode === 'loading'
@@ -1428,7 +1428,7 @@ export class OverlayController {
     snapshot: OperationProfilingSnapshot,
   ): HTMLElement {
     const header = document.createElement('div');
-    header.className = 'chatmuse-debug-summary';
+    header.className = 'goosemuse-debug-summary';
     header.textContent = `Pipeline Profiling • ${formatProfilingElapsed(snapshot.elapsedMs)}`;
     return header;
   }
@@ -1437,7 +1437,7 @@ export class OverlayController {
     snapshot: OperationProfilingSnapshot,
   ): HTMLElement {
     const container = document.createElement('div');
-    container.className = 'chatmuse-profiling-log';
+    container.className = 'goosemuse-profiling-log';
 
     for (const entry of snapshot.logEntries) {
       container.append(this.createProfilingLogRow(entry));
@@ -1450,17 +1450,17 @@ export class OverlayController {
     snapshot: OperationProfilingSnapshot,
   ): HTMLElement {
     const container = document.createElement('div');
-    container.className = 'chatmuse-profiling-summary';
+    container.className = 'goosemuse-profiling-summary';
 
     const total = document.createElement('div');
-    total.className = 'chatmuse-profiling-stage';
+    total.className = 'goosemuse-profiling-stage';
 
     const totalLabel = document.createElement('div');
-    totalLabel.className = 'chatmuse-profiling-stage-label';
+    totalLabel.className = 'goosemuse-profiling-stage-label';
     totalLabel.textContent = 'Total';
 
     const totalDuration = document.createElement('div');
-    totalDuration.className = 'chatmuse-profiling-stage-duration';
+    totalDuration.className = 'goosemuse-profiling-stage-duration';
     totalDuration.textContent = formatProfilingElapsed(snapshot.elapsedMs);
 
     total.append(totalLabel, totalDuration);
@@ -1468,18 +1468,18 @@ export class OverlayController {
 
     if (snapshot.anthropicUsage) {
       const usageRow = document.createElement('div');
-      usageRow.className = 'chatmuse-profiling-stage';
+      usageRow.className = 'goosemuse-profiling-stage';
 
       const usageLabel = document.createElement('div');
-      usageLabel.className = 'chatmuse-profiling-stage-label';
+      usageLabel.className = 'goosemuse-profiling-stage-label';
       usageLabel.textContent = 'Claude usage';
 
       const usageDuration = document.createElement('div');
-      usageDuration.className = 'chatmuse-profiling-stage-duration';
+      usageDuration.className = 'goosemuse-profiling-stage-duration';
       usageDuration.textContent = 'tokens';
 
       const usageDetail = document.createElement('div');
-      usageDetail.className = 'chatmuse-profiling-stage-detail';
+      usageDetail.className = 'goosemuse-profiling-stage-detail';
       usageDetail.textContent = formatAnthropicUsageSummary(
         snapshot.anthropicUsage,
       );
@@ -1490,21 +1490,21 @@ export class OverlayController {
 
     if (snapshot.anthropicCost) {
       const costRow = document.createElement('div');
-      costRow.className = 'chatmuse-profiling-stage';
+      costRow.className = 'goosemuse-profiling-stage';
 
       const costLabel = document.createElement('div');
-      costLabel.className = 'chatmuse-profiling-stage-label';
+      costLabel.className = 'goosemuse-profiling-stage-label';
       costLabel.textContent = 'Claude cost';
 
       const costDuration = document.createElement('div');
-      costDuration.className = 'chatmuse-profiling-stage-duration';
+      costDuration.className = 'goosemuse-profiling-stage-duration';
       costDuration.textContent = formatUsd(
         snapshot.anthropicCost.totalUsd,
         snapshot.anthropicCost.approximate,
       );
 
       const costDetail = document.createElement('div');
-      costDetail.className = 'chatmuse-profiling-stage-detail';
+      costDetail.className = 'goosemuse-profiling-stage-detail';
       costDetail.textContent = formatAnthropicCostSummary(snapshot.anthropicCost);
 
       costRow.append(costLabel, costDuration, costDetail);
@@ -1513,14 +1513,14 @@ export class OverlayController {
 
     for (const stage of snapshot.stages) {
       const row = document.createElement('div');
-      row.className = 'chatmuse-profiling-stage';
+      row.className = 'goosemuse-profiling-stage';
 
       const label = document.createElement('div');
-      label.className = 'chatmuse-profiling-stage-label';
+      label.className = 'goosemuse-profiling-stage-label';
       label.textContent = stage.label;
 
       const duration = document.createElement('div');
-      duration.className = 'chatmuse-profiling-stage-duration';
+      duration.className = 'goosemuse-profiling-stage-duration';
       duration.textContent =
         stage.status === 'skipped'
           ? 'skipped'
@@ -1534,7 +1534,7 @@ export class OverlayController {
 
       if (stage.detail) {
         const detail = document.createElement('div');
-        detail.className = 'chatmuse-profiling-stage-detail';
+        detail.className = 'goosemuse-profiling-stage-detail';
         detail.textContent = stage.detail;
         row.append(detail);
       }
@@ -1549,19 +1549,19 @@ export class OverlayController {
 
   private renderDebugPrompt(snapshot: PromptDebugSnapshot): HTMLElement {
     const details = document.createElement('details');
-    details.className = 'chatmuse-debug-inspector';
+    details.className = 'goosemuse-debug-inspector';
     details.open = this.debugPromptOpen;
     details.addEventListener('toggle', () => {
       this.debugPromptOpen = details.open;
     });
 
     const summary = document.createElement('summary');
-    summary.className = 'chatmuse-debug-summary';
+    summary.className = 'goosemuse-debug-summary';
     summary.textContent = 'Claude Input';
     details.append(summary);
 
     const content = document.createElement('div');
-    content.className = 'chatmuse-debug-content';
+    content.className = 'goosemuse-debug-content';
     content.append(
       this.createDebugSection('System Prompt', snapshot.system),
       this.createDebugSection('Transcript Sent to Claude', snapshot.transcript),
@@ -1575,14 +1575,14 @@ export class OverlayController {
 
   private createDebugSection(title: string, content: string): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'chatmuse-debug-section';
+    section.className = 'goosemuse-debug-section';
 
     const label = document.createElement('div');
-    label.className = 'chatmuse-debug-label';
+    label.className = 'goosemuse-debug-label';
     label.textContent = title;
 
     const text = document.createElement('div');
-    text.className = 'chatmuse-debug-text';
+    text.className = 'goosemuse-debug-text';
     text.textContent = content;
 
     section.append(label, text);

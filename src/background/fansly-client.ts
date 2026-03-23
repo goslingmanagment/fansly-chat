@@ -4,7 +4,7 @@ import {
   FANSLY_RETRY_DELAYS_MS,
 } from '../shared/constants.js';
 import { aggregateEarnings } from '../shared/earnings.js';
-import { ChatMuseError } from '../shared/errors.js';
+import { GooseMuseError } from '../shared/errors.js';
 import {
   buildTranscriptWindowStart,
   estimateTargetPages,
@@ -209,7 +209,7 @@ export class FanslyClient {
 
       if (response.status === 401 || response.status === 403) {
         this.sessionStore.markDisconnected(session.accountId);
-        throw new ChatMuseError('session_expired', undefined, { status: response.status });
+        throw new GooseMuseError('session_expired', undefined, { status: response.status });
       }
 
       if ((response.status === 429 || response.status >= 500) && attempt < FANSLY_RETRY_DELAYS_MS.length) {
@@ -219,7 +219,7 @@ export class FanslyClient {
 
       if (!response.ok) {
         const snippet = await readResponseSnippet(response);
-        throw new ChatMuseError(optional ? 'unknown_error' : 'fansly_server_error', undefined, {
+        throw new GooseMuseError(optional ? 'unknown_error' : 'fansly_server_error', undefined, {
           status: response.status,
           responseSnippet: snippet,
         });
@@ -227,18 +227,18 @@ export class FanslyClient {
 
       const data = (await response.json()) as { success: boolean; response?: T; error?: string };
       if (!data.success || data.response === undefined) {
-        throw new ChatMuseError(optional ? 'unknown_error' : 'fansly_server_error');
+        throw new GooseMuseError(optional ? 'unknown_error' : 'fansly_server_error');
       }
 
       return data.response;
     } catch (error) {
-      if (error instanceof ChatMuseError) {
+      if (error instanceof GooseMuseError) {
         throw error;
       }
       if (error instanceof DOMException && error.name === 'AbortError') {
         throw error;
       }
-      throw new ChatMuseError(optional ? 'unknown_error' : 'network_error');
+      throw new GooseMuseError(optional ? 'unknown_error' : 'network_error');
     } finally {
       clearTimeout(timeout);
     }
@@ -287,7 +287,7 @@ export class FanslyClient {
     const accountId = response.account?.id?.trim();
 
     if (!accountId) {
-      throw new ChatMuseError('unknown_error');
+      throw new GooseMuseError('unknown_error');
     }
 
     session.resolvedAccountId = accountId;
@@ -529,12 +529,12 @@ export class FanslyClient {
       if (error instanceof DOMException && error.name === 'AbortError') {
         throw error;
       }
-      if (error instanceof ChatMuseError && error.key === 'session_expired') {
+      if (error instanceof GooseMuseError && error.key === 'session_expired') {
         throw error;
       }
       onTrace?.({
         type: 'groups-error',
-        code: error instanceof ChatMuseError ? error.key : 'unknown_error',
+        code: error instanceof GooseMuseError ? error.key : 'unknown_error',
       });
     }
 

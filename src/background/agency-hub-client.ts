@@ -8,7 +8,7 @@ import {
   normalizeAgencyHubUsername,
 } from '../shared/agency-hub.js';
 import {
-  ChatMuseError,
+  GooseMuseError,
   createUserError,
   toUserError,
 } from '../shared/errors.js';
@@ -28,7 +28,7 @@ interface AgencyHubPageSummary {
 interface AgencyHubProfileRecord {
   version: number;
   body: string;
-  source: 'chatmuse';
+  source: 'goosemuse';
   createdAt: string;
   createdByUserId: number | null;
 }
@@ -130,12 +130,12 @@ export class AgencyHubClient {
   private async createHubResponseError(
     response: Response,
     fallbackKey: 'hub_request_failed' | 'hub_invalid_api_key' = 'hub_request_failed',
-  ): Promise<ChatMuseError> {
+  ): Promise<GooseMuseError> {
     const snippet = await readResponseSnippet(response);
     const key = response.status === 401 || response.status === 403
       ? 'hub_invalid_api_key'
       : fallbackKey;
-    return new ChatMuseError(key, {
+    return new GooseMuseError(key, {
       details: {
         status: response.status,
         responseSnippet: snippet,
@@ -273,7 +273,7 @@ export class AgencyHubClient {
 
       return {
         ok: false,
-        error: error instanceof ChatMuseError
+        error: error instanceof GooseMuseError
           ? toUserError(error)
           : hubError('hub_request_failed'),
       };
@@ -347,7 +347,7 @@ export class AgencyHubClient {
         reason: 'missing_platform_user_id',
         baseUrl,
         error: hubError('hub_request_failed', {
-          description: 'ChatMuse could not resolve the fan account id for Agency Hub sync.',
+          description: 'GooseMuse could not resolve the fan account id for Agency Hub sync.',
         }),
       };
     }
@@ -404,7 +404,7 @@ export class AgencyHubClient {
         status: 'failed',
         reason: error instanceof Error ? error.message : 'unknown_error',
         baseUrl,
-        error: error instanceof ChatMuseError
+        error: error instanceof GooseMuseError
           ? toUserError(error)
           : hubError('hub_request_failed'),
       };
@@ -462,7 +462,7 @@ export class AgencyHubClient {
         reason: 'missing_conversation_id',
         baseUrl,
         error: hubError('hub_request_failed', {
-          description: 'ChatMuse could not resolve the current conversation id for Agency Hub lookup.',
+          description: 'GooseMuse could not resolve the current conversation id for Agency Hub lookup.',
         }),
       };
     }
@@ -512,7 +512,7 @@ export class AgencyHubClient {
           baseUrl,
           pageLabel,
           error: hubError('hub_request_failed', {
-            description: 'The stored Agency Hub profile is too large for ChatMuse to use.',
+            description: 'The stored Agency Hub profile is too large for GooseMuse to use.',
           }),
         };
       }
@@ -543,7 +543,7 @@ export class AgencyHubClient {
         status: 'failed',
         reason: error instanceof Error ? error.message : 'unknown_error',
         baseUrl,
-        error: error instanceof ChatMuseError
+        error: error instanceof GooseMuseError
           ? toUserError(error)
           : hubError('hub_request_failed'),
       };
