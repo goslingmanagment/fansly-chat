@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GooseMuse",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered chat assistant for Fansly.com",
   "permissions": [
     "storage",
@@ -49,7 +49,7 @@
     "gecko": {
       "id": "goosemuse@gosling.agency",
       "strict_min_version": "142.0",
-      "update_url": "https://gosling-agency.ru/ext/updates.json",
+      "update_url": "https://ext.gosling-agency.ru/updates.json",
       "data_collection_permissions": {
         "required": [
           "authenticationInfo",
