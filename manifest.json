@@ -49,6 +49,7 @@
     "gecko": {
       "id": "goosemuse@gosling.agency",
       "strict_min_version": "142.0",
+      "update_url": "https://gosling-agency.ru/ext/updates.json",
       "data_collection_permissions": {
         "required": [
           "authenticationInfo",
