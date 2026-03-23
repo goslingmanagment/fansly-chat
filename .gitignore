@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.env.deploy
 .DS_Store
 TODO.md
 TOMO.md

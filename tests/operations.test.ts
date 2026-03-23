@@ -255,12 +255,34 @@ async function createCoordinatorHarness(options?: {
   };
 }
 
-function mockCompareCards(cards: CompareModelCard[]) {
-  vi.doMock('../src/shared/compare-cards.js', () => ({
-    getCompareDraftCount: () => cards.filter((card) => card.source === 'draft').length,
-    resolveMappedPersonalityId: () => null,
-    resolveCompareModelCards: () => cards,
-  }));
+async function mockCompareCards(cards: CompareModelCard[]): Promise<void> {
+  const compareDrafts = Object.fromEntries(
+    cards
+      .filter((card) => card.source === 'draft')
+      .map((card) => [card.label, card.content]),
+  );
+  (globalThis as typeof globalThis & {
+    __GOOSEMUSE_COMPARE_DRAFTS__?: Record<string, string>;
+  }).__GOOSEMUSE_COMPARE_DRAFTS__ = compareDrafts;
+
+  const currentCard = cards.find((card) => card.source === 'current') ?? null;
+  if (currentCard) {
+    const personalityId = currentCard.id.replace(/^current:/, '');
+    mockStorage.personalities = [
+      {
+        id: personalityId,
+        name: currentCard.label,
+        content: currentCard.content,
+        updatedAt: 1000,
+      },
+    ];
+    mockStorage.accountMappings = {
+      'account-1': personalityId,
+    };
+  } else {
+    mockStorage.personalities = [];
+    mockStorage.accountMappings = {};
+  }
 }
 
 describe('OperationCoordinator', () => {
@@ -344,6 +366,10 @@ describe('OperationCoordinator', () => {
   });
 
   afterEach(() => {
+    delete (globalThis as typeof globalThis & {
+      __GOOSEMUSE_COMPARE_DRAFTS__?: Record<string, string>;
+    }).__GOOSEMUSE_COMPARE_DRAFTS__;
+    vi.doUnmock('virtual:model-card-drafts');
     vi.doUnmock('../src/shared/compare-cards.js');
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -718,7 +744,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('returns compare_cards_unavailable when compare has fewer than two cards', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'draft-only',
         label: 'draft-only',
@@ -754,7 +780,8 @@ describe('OperationCoordinator', () => {
   });
 
   it('runs compare cards with one shared prep pass and the fast-reply model for each card', async () => {
-    mockCompareCards([
+    delete mockStorage['summary:group-1'];
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -863,7 +890,8 @@ describe('OperationCoordinator', () => {
   });
 
   it('includes the selected tone in compare reply prompts', async () => {
-    mockCompareCards([
+    delete mockStorage['summary:group-1'];
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -905,7 +933,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('uses the compare-specific lower temperature for compare cards', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -954,7 +982,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       debugMode: true,
     };
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -1069,7 +1097,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('allows mixed compare outcomes and still completes the overall compare session', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -1175,7 +1203,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('treats unexpected compare card aborts as connection errors and still completes', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -1199,6 +1227,7 @@ describe('OperationCoordinator', () => {
         if (system.includes('Current baseline personality')) {
           throw new DOMException('Aborted', 'AbortError');
         }
+        await Promise.resolve();
         return 'Draft reply';
       }),
     };
@@ -1230,7 +1259,7 @@ describe('OperationCoordinator', () => {
   });
 
   it('sends compare:discarded when an active compare session is cancelled', async () => {
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',
@@ -1244,14 +1273,9 @@ describe('OperationCoordinator', () => {
         source: 'draft',
       },
     ]);
-    let resolveStreamStarted: (() => void) | null = null;
-    const streamStarted = new Promise<void>((resolve) => {
-      resolveStreamStarted = resolve;
-    });
     const anthropicClient = {
       streamMessage: vi.fn(
         ({ signal }: { signal: AbortSignal }) => new Promise<string>((_resolve, reject) => {
-          resolveStreamStarted?.();
           signal.addEventListener('abort', () => {
             reject(new DOMException('Aborted', 'AbortError'));
           }, { once: true });
@@ -1270,7 +1294,11 @@ describe('OperationCoordinator', () => {
       replyMode: 'default',
     });
 
-    await streamStarted;
+    await vi.waitFor(() => {
+      if (coordinator.activeCompareByTabId.get(1)?.operationId !== 'compare-op') {
+        throw new Error('Compare session is not active yet');
+      }
+    }, { timeout: 2000 });
     expect(coordinator.activeByTabId.has(1)).toBe(false);
     expect(coordinator.activeCompareByTabId.get(1)?.operationId).toBe('compare-op');
     expect(coordinator.tabContexts.get(1)?.activeOperationId).toBeNull();
@@ -1291,7 +1319,7 @@ describe('OperationCoordinator', () => {
 
   it('sends compare:error when compare generation hits the shared timeout', async () => {
     vi.useFakeTimers();
-    mockCompareCards([
+    await mockCompareCards([
       {
         id: 'current:personality-1',
         label: 'Closer (current)',

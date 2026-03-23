@@ -4,6 +4,7 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
+import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
 import { GooseMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
@@ -573,7 +574,6 @@ export async function executeCompare(
       resolvedAccountId,
     );
     const storage = rekeyResult.state;
-    const { resolveCompareModelCards } = await import('../shared/compare-cards.js');
     const compareCards = resolveCompareModelCards(
       storage,
       resolvedAccountId,

@@ -90,6 +90,7 @@ async function loadOptionsPage(options: {
       },
     },
     runtime: {
+      getManifest: vi.fn(() => ({ version: '1.0.0' })),
       sendMessage: vi.fn(async () => {
         callOrder.push('snapshot');
         onSnapshotRequest?.();
