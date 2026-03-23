@@ -601,7 +601,7 @@ describe('prompt caching fallback', () => {
     ]);
     expect(mockedFlattenPromptBlocks(result.userBlocks)).toBe(result.user);
     expect(warnSpy).toHaveBeenCalledWith(
-      '[ChatMuse] Prompt caching disabled for fast-reply: missing or invalid anchor "## Conversation Transcript"',
+      '[GooseMuse] Prompt caching disabled for fast-reply: missing or invalid anchor "## Conversation Transcript"',
     );
   });
 });

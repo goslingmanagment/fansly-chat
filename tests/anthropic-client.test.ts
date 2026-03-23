@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MAX_TOKENS } from '../src/shared/constants.js';
-import { ChatMuseError } from '../src/shared/errors.js';
+import { GooseMuseError } from '../src/shared/errors.js';
 
 // ─── Mock fetch ──────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ describe('AnthropicClient error mapping', () => {
     mockFetchResponse(401);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'invalid_api_key', code: 'CM-AUTH-02' }),
+      expect.objectContaining({ key: 'invalid_api_key', code: 'GM-AUTH-02' }),
     );
   });
 
@@ -88,7 +88,7 @@ describe('AnthropicClient error mapping', () => {
     mockFetchResponse(403);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'invalid_api_key', code: 'CM-AUTH-02' }),
+      expect.objectContaining({ key: 'invalid_api_key', code: 'GM-AUTH-02' }),
     );
   });
 
@@ -96,7 +96,7 @@ describe('AnthropicClient error mapping', () => {
     mockFetchResponse(429);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'rate_limited', code: 'CM-API-01' }),
+      expect.objectContaining({ key: 'rate_limited', code: 'GM-API-01' }),
     );
   });
 
@@ -104,7 +104,7 @@ describe('AnthropicClient error mapping', () => {
     mockFetchResponse(500);
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'service_unavailable', code: 'CM-API-05' }),
+      expect.objectContaining({ key: 'service_unavailable', code: 'GM-API-05' }),
     );
   });
 
@@ -114,7 +114,7 @@ describe('AnthropicClient error mapping', () => {
     });
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'model_unavailable', code: 'CM-API-03' }),
+      expect.objectContaining({ key: 'model_unavailable', code: 'GM-API-03' }),
     );
   });
 
@@ -124,7 +124,7 @@ describe('AnthropicClient error mapping', () => {
     });
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'unknown_error', code: 'CM-APP-01' }),
+      expect.objectContaining({ key: 'unknown_error', code: 'GM-APP-01' }),
     );
   });
 
@@ -138,7 +138,7 @@ describe('AnthropicClient error mapping', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response));
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'unknown_error', code: 'CM-APP-01' }),
+      expect.objectContaining({ key: 'unknown_error', code: 'GM-APP-01' }),
     );
   });
 
@@ -152,7 +152,7 @@ describe('AnthropicClient error mapping', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response));
     const client = new AnthropicClient();
     await expect(client.streamMessage(streamArgs())).rejects.toThrow(
-      expect.objectContaining({ key: 'network_error', code: 'CM-NET-01' }),
+      expect.objectContaining({ key: 'network_error', code: 'GM-NET-01' }),
     );
   });
 });

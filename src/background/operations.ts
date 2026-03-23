@@ -29,7 +29,7 @@ import {
   resolveMappedPersonalityId,
 } from '../shared/compare-cards.js';
 import {
-  ChatMuseError,
+  GooseMuseError,
   createUserError,
   toDebugErrorPayload,
   toUserError,
@@ -109,7 +109,7 @@ import {
   describeSubscriptionTraceStep,
   errorCode,
   parseGroupIdFromUrl,
-  resolveAbortChatMuseError,
+  resolveAbortGooseMuseError,
 } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
 import { StorageCoordinator } from './storage-coordinator.js';
@@ -578,12 +578,12 @@ export class OperationCoordinator {
     if (changed && previous.activeOperationId) {
       await this.cancelOperation(
         tabId,
-        new ChatMuseError('chat_changed'),
+        new GooseMuseError('chat_changed'),
         true,
       );
     }
     if (changed && this.activeCompareByTabId.has(tabId)) {
-      this.cancelCompare(tabId, new ChatMuseError('chat_changed'), true);
+      this.cancelCompare(tabId, new GooseMuseError('chat_changed'), true);
     }
     await this.refreshTabState(tabId, 'tab:state');
   }
@@ -849,23 +849,23 @@ export class OperationCoordinator {
       !urlGroupId ||
       urlGroupId !== payload.groupId
     ) {
-      throw new ChatMuseError('chat_changed');
+      throw new GooseMuseError('chat_changed');
     }
 
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
 
     if (!storage.settings.claudeApiKey) {
-      throw new ChatMuseError('missing_api_key');
+      throw new GooseMuseError('missing_api_key');
     }
     if (storage.personalities.length === 0) {
-      throw new ChatMuseError('no_personalities');
+      throw new GooseMuseError('no_personalities');
     }
     if (!legacyAccountId || !session) {
-      throw new ChatMuseError('not_connected');
+      throw new GooseMuseError('not_connected');
     }
     if (!session.connected) {
-      throw new ChatMuseError('session_expired');
+      throw new GooseMuseError('session_expired');
     }
 
     return {
@@ -883,7 +883,7 @@ export class OperationCoordinator {
 
   private async cancelOperation(
     tabId: number,
-    error?: ChatMuseError,
+    error?: GooseMuseError,
     notifyDiscard = false,
   ): Promise<void> {
     const active = this.activeByTabId.get(tabId);
@@ -904,7 +904,7 @@ export class OperationCoordinator {
       this.sendDiscarded(tabId, {
         type: 'operation:discarded',
         operationId: active.operationId,
-        error: toUserError(error ?? new ChatMuseError('chat_changed')),
+        error: toUserError(error ?? new GooseMuseError('chat_changed')),
       }, active.anthropicSpend ?? createZeroAnthropicSpendSummary(), active.profiler);
     }
   }
@@ -1116,7 +1116,7 @@ export class OperationCoordinator {
   ): ActiveOperation {
     const active = this.activeByTabId.get(tabId);
     if (!active || active.operationId !== operationId) {
-      throw new ChatMuseError('chat_changed');
+      throw new GooseMuseError('chat_changed');
     }
     return active;
   }
@@ -1132,7 +1132,7 @@ export class OperationCoordinator {
       this.sendError(tabId, {
         type: 'operation:error',
         operationId: payload.operationId,
-        error: toUserError(new ChatMuseError('another_operation')),
+        error: toUserError(new GooseMuseError('another_operation')),
       });
       return;
     }
@@ -1408,18 +1408,18 @@ export class OperationCoordinator {
         storage.accountAliases,
       );
       if (!personalityId) {
-        throw new ChatMuseError('no_mapping');
+        throw new GooseMuseError('no_mapping');
       }
 
       const personality = storage.personalities.find(
         (entry) => entry.id === personalityId,
       );
       if (!personality) {
-        throw new ChatMuseError('no_mapping');
+        throw new GooseMuseError('no_mapping');
       }
 
       if (featureRequiresDraft(payload.feature) && !payload.draftText?.trim()) {
-        throw new ChatMuseError('unknown_error');
+        throw new GooseMuseError('unknown_error');
       }
 
       const modelFeature = resolveFeatureModelFeature(payload.feature);
@@ -1624,7 +1624,7 @@ export class OperationCoordinator {
         isDeepFeature(payload.feature) &&
         messageLoad.transcriptMessages.length < MIN_MESSAGES_FOR_DEEP
       ) {
-        throw new ChatMuseError('not_enough_history');
+        throw new GooseMuseError('not_enough_history');
       }
 
       let pingSegment: PingSegment | undefined;
@@ -1651,7 +1651,7 @@ export class OperationCoordinator {
           this.sendError(tabId, {
             type: 'operation:error',
             operationId: payload.operationId,
-            error: toUserError(new ChatMuseError('ping_blocked')),
+            error: toUserError(new GooseMuseError('ping_blocked')),
           }, createZeroAnthropicSpendSummary(), profiler);
           this.clearCompletedOperation(tabId);
           return;
@@ -2117,7 +2117,7 @@ export class OperationCoordinator {
           });
           break;
         } catch (err) {
-          const errorKey = err instanceof ChatMuseError
+          const errorKey = err instanceof GooseMuseError
             ? err.key
             : (err as { key?: string })?.key;
           const retryAfterMs = typeof (err as { retryAfterMs?: unknown })?.retryAfterMs === 'number'
@@ -2141,7 +2141,7 @@ export class OperationCoordinator {
             const fallbackRetryKey = canRetryServiceUnavailable
               ? 'service_unavailable'
               : 'rate_limited';
-            const errorCode = err instanceof ChatMuseError
+            const errorCode = err instanceof GooseMuseError
               ? err.code
               : (typeof (err as { code?: unknown })?.code === 'string'
                   ? (err as { code: string }).code
@@ -2297,7 +2297,7 @@ export class OperationCoordinator {
       }
       active?.profiler.finalizeRunningStages('operation failed');
 
-      const abortError = resolveAbortChatMuseError(error, {
+      const abortError = resolveAbortGooseMuseError(error, {
         active: Boolean(active),
         timeoutSignal: timeoutController?.signal,
         cancelSignal: controller?.signal,
@@ -2305,7 +2305,7 @@ export class OperationCoordinator {
       if (abortError) {
         const code = active
           ? abortError
-          : new ChatMuseError('chat_changed');
+          : new GooseMuseError('chat_changed');
         const errorPayload: ErrorPayload = {
           type: 'operation:error',
           operationId,
@@ -2358,7 +2358,7 @@ export class OperationCoordinator {
 
   private cancelCompare(
     tabId: number,
-    error?: ChatMuseError,
+    error?: GooseMuseError,
     notifyDiscard = false,
   ): void {
     cancelCompareOperation(this.getCompareContext(), tabId, error, notifyDiscard);

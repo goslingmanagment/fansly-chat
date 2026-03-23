@@ -34,7 +34,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
 
 function installDom() {
   dom = new JSDOM(
-    '<!doctype html><html><head></head><body><div id="chatmuse-options-root"></div></body></html>',
+    '<!doctype html><html><head></head><body><div id="goosemuse-options-root"></div></body></html>',
     { url: 'https://example.test/options.html' },
   );
   const { window } = dom;
@@ -179,7 +179,7 @@ describe('Options page account sections', () => {
     });
 
     const connectionSection = getSectionByTitle('Connection Status');
-    const cards = connectionSection.querySelectorAll('.chatmuse-card');
+    const cards = connectionSection.querySelectorAll('.goosemuse-card');
 
     expect(cards).toHaveLength(1);
     expect(connectionSection.textContent).toContain('Newer');

@@ -43,7 +43,7 @@ let lastStorageSet: Record<string, unknown> | null;
 
 function installDom() {
   dom = new JSDOM(
-    '<!doctype html><html><head></head><body><div id="chatmuse-options-root"></div></body></html>',
+    '<!doctype html><html><head></head><body><div id="goosemuse-options-root"></div></body></html>',
     { url: 'https://example.test/options.html' },
   );
   const { window } = dom;
@@ -87,8 +87,8 @@ async function loadOptionsPage(state: PersistedState): Promise<void> {
   await import('../src/options/index.js');
   // render() is fire-and-forget (void render()), wait for it
   await vi.waitFor(() => {
-    const root = document.getElementById('chatmuse-options-root')!;
-    if (!root.querySelector('select.chatmuse-select')) {
+    const root = document.getElementById('goosemuse-options-root')!;
+    if (!root.querySelector('select.goosemuse-select')) {
       throw new Error('selects not rendered yet');
     }
   }, { timeout: 2000 });
@@ -108,8 +108,8 @@ describe('Options page — AI Models section', () => {
   it('renders 5 model dropdowns with correct feature labels and order', async () => {
     await loadOptionsPage(makeState());
 
-    const root = document.getElementById('chatmuse-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select');
+    const root = document.getElementById('goosemuse-options-root')!;
+    const selects = root.querySelectorAll<HTMLSelectElement>('select.goosemuse-select');
     expect(selects.length).toBe(5);
 
     const features = Array.from(selects).map((s) => s.dataset.feature);
@@ -125,8 +125,8 @@ describe('Options page — AI Models section', () => {
   it('each dropdown contains all CLAUDE_MODELS in registry order', async () => {
     await loadOptionsPage(makeState());
 
-    const root = document.getElementById('chatmuse-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select');
+    const root = document.getElementById('goosemuse-options-root')!;
+    const selects = root.querySelectorAll<HTMLSelectElement>('select.goosemuse-select');
 
     for (const select of selects) {
       const options = Array.from(select.options);
@@ -145,8 +145,8 @@ describe('Options page — AI Models section', () => {
     };
     await loadOptionsPage(makeState({ featureModels: customModels }));
 
-    const root = document.getElementById('chatmuse-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatmuse-select');
+    const root = document.getElementById('goosemuse-options-root')!;
+    const selects = root.querySelectorAll<HTMLSelectElement>('select.goosemuse-select');
 
     const values: Record<string, string> = {};
     for (const select of selects) {
@@ -196,9 +196,9 @@ describe('Options page — AI Models section', () => {
   it('saves featureModels when a dropdown changes', async () => {
     await loadOptionsPage(makeState());
 
-    const root = document.getElementById('chatmuse-options-root')!;
+    const root = document.getElementById('goosemuse-options-root')!;
     const summarySelect = root.querySelector<HTMLSelectElement>(
-      'select.chatmuse-select[data-feature="fan-summary"]',
+      'select.goosemuse-select[data-feature="fan-summary"]',
     )!;
 
     summarySelect.value = 'claude-opus-4-6';

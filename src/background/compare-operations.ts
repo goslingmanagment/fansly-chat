@@ -5,7 +5,7 @@ import {
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
-import { ChatMuseError, toUserError } from '../shared/errors.js';
+import { GooseMuseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import { buildPromptRequest } from '../shared/prompts.js';
 import { splitByNext } from '../shared/split.js';
@@ -54,7 +54,7 @@ import {
   describeSubscriptionTraceStep,
   errorCode,
   parseGroupIdFromUrl,
-  resolveAbortChatMuseError,
+  resolveAbortGooseMuseError,
 } from './operation-utils.js';
 import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
@@ -283,20 +283,20 @@ async function validateCompareStart(
     !urlGroupId ||
     urlGroupId !== payload.groupId
   ) {
-    throw new ChatMuseError('chat_changed');
+    throw new GooseMuseError('chat_changed');
   }
 
   const session = context.sessionStore.getSessionForTab(tabId);
   const legacyAccountId = context.sessionStore.getAccountIdForTab(tabId);
 
   if (!storage.settings.claudeApiKey) {
-    throw new ChatMuseError('missing_api_key');
+    throw new GooseMuseError('missing_api_key');
   }
   if (!legacyAccountId || !session) {
-    throw new ChatMuseError('not_connected');
+    throw new GooseMuseError('not_connected');
   }
   if (!session.connected) {
-    throw new ChatMuseError('session_expired');
+    throw new GooseMuseError('session_expired');
   }
 
   return {
@@ -338,7 +338,7 @@ export function hasActiveCompare(
 export function cancelCompareOperation(
   context: CompareOperationsContext,
   tabId: number,
-  error?: ChatMuseError,
+  error?: GooseMuseError,
   notifyDiscard = false,
 ): void {
   const active = getActiveCompare(context, tabId);
@@ -363,7 +363,7 @@ export function cancelCompareOperation(
       {
         type: 'compare:discarded',
         operationId: active.operationId,
-        error: toUserError(error ?? new ChatMuseError('chat_changed')),
+        error: toUserError(error ?? new GooseMuseError('chat_changed')),
       },
       active.profiler,
     );
@@ -379,7 +379,7 @@ export async function executeCompare(
     sendCompareError(context, tabId, {
       type: 'compare:error',
       operationId: payload.operationId,
-      error: toUserError(new ChatMuseError('another_operation')),
+      error: toUserError(new GooseMuseError('another_operation')),
     });
     return;
   }
@@ -580,7 +580,7 @@ export async function executeCompare(
       validated.legacyAccountId,
     );
     if (compareCards.length < 2) {
-      throw new ChatMuseError('compare_cards_unavailable');
+      throw new GooseMuseError('compare_cards_unavailable');
     }
 
     for (const card of compareCards) {
@@ -1000,10 +1000,10 @@ export async function executeCompare(
         rawText = await streamToCard(resolvedModel);
       } catch (error) {
         const defaultModel = DEFAULT_FEATURE_MODELS['fast-reply'];
-        const isModelError = error instanceof ChatMuseError
+        const isModelError = error instanceof GooseMuseError
           ? error.key === 'model_unavailable'
           : (error as { key?: string })?.key === 'model_unavailable';
-        const abortError = resolveAbortChatMuseError(error, {
+        const abortError = resolveAbortGooseMuseError(error, {
           active: Boolean(getActiveCompare(context, tabId)),
           timeoutSignal: timeoutController?.signal,
           cancelSignal: controller?.signal,
@@ -1104,7 +1104,7 @@ export async function executeCompare(
     }
     active?.profiler.finalizeRunningStages('compare failed');
 
-    const abortError = resolveAbortChatMuseError(error, {
+    const abortError = resolveAbortGooseMuseError(error, {
       active: Boolean(active),
       timeoutSignal: timeoutController?.signal,
       cancelSignal: controller?.signal,
@@ -1116,7 +1116,7 @@ export async function executeCompare(
         {
           type: 'compare:error',
           operationId,
-          error: toUserError(active ? abortError : new ChatMuseError('chat_changed')),
+          error: toUserError(active ? abortError : new GooseMuseError('chat_changed')),
         },
         active?.profiler ?? NO_OP_PROFILER,
       );

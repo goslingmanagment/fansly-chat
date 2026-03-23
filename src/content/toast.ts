@@ -37,26 +37,26 @@ export class ToastController {
     }
 
     const toast = document.createElement('div');
-    toast.className = `chatmuse-toast chatmuse-toast-${options.tone ?? 'info'}`;
+    toast.className = `goosemuse-toast goosemuse-toast-${options.tone ?? 'info'}`;
 
     const text = document.createElement('div');
-    text.className = 'chatmuse-toast-primary';
+    text.className = 'goosemuse-toast-primary';
     text.textContent = primaryText;
     toast.append(text);
 
     if (description) {
       const secondary = document.createElement('div');
-      secondary.className = 'chatmuse-toast-secondary';
+      secondary.className = 'goosemuse-toast-secondary';
       secondary.textContent = description;
       toast.append(secondary);
     }
 
     if (options.actionLabel && options.onAction) {
       const actions = document.createElement('div');
-      actions.className = 'chatmuse-toast-actions';
+      actions.className = 'goosemuse-toast-actions';
       const action = document.createElement('button');
       action.type = 'button';
-      action.className = 'chatmuse-button';
+      action.className = 'goosemuse-button';
       action.textContent = options.actionLabel;
       action.addEventListener('click', () => {
         options.onAction?.();

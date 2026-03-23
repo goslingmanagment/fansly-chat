@@ -272,7 +272,7 @@ describe('runtime-api testAgencyHubConnection', () => {
         ok: false,
         error: {
           key: 'hub_missing_permission',
-          code: 'CM-HUB-04',
+          code: 'GM-HUB-04',
           message: 'Agency Hub host permission is missing.',
         },
       })),
@@ -293,7 +293,7 @@ describe('runtime-api testAgencyHubConnection', () => {
       ok: false,
       error: {
         key: 'hub_missing_permission',
-        code: 'CM-HUB-04',
+        code: 'GM-HUB-04',
       },
     });
     expect(agencyHubClient.testConnection).toHaveBeenCalledWith(

@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 48 48" role="img" aria-label="ChatMuse icon">
-  <rect width="48" height="48" rx="12" fill="#101828"/>
-  <path d="M12 17c0-3.314 2.686-6 6-6h12c3.314 0 6 2.686 6 6v7c0 3.314-2.686 6-6 6h-6.177l-4.696 4.109A1 1 0 0 1 17 33.355V30h-1c-2.209 0-4-1.791-4-4V17Z" fill="#F79009"/>
-  <path d="M18.75 19.75h10.5M18.75 24h7.5" stroke="#101828" stroke-width="2.5" stroke-linecap="round"/>
-</svg>

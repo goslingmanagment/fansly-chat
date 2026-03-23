@@ -1,5 +1,5 @@
 import type {
-  ChatMuseErrorDetails,
+  GooseMuseErrorDetails,
   UserErrorKey,
   UserFacingError,
 } from './types.js';
@@ -15,191 +15,191 @@ interface ErrorRegistryEntry {
 const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   not_connected: {
     key: 'not_connected',
-    code: 'CM-FAN-01',
+    code: 'GM-FAN-01',
     message: 'Fansly connection not found.',
-    description: 'Open Fansly and browse messages so ChatMuse can reconnect.',
+    description: 'Open Fansly and browse messages so GooseMuse can reconnect.',
   },
   session_expired: {
     key: 'session_expired',
-    code: 'CM-FAN-02',
+    code: 'GM-FAN-02',
     message: 'Fansly session expired.',
     description: 'Keep browsing Fansly to reconnect automatically, then try again.',
   },
   fansly_server_error: {
     key: 'fansly_server_error',
-    code: 'CM-FAN-03',
+    code: 'GM-FAN-03',
     message: 'Fansly request failed.',
     description: 'Fansly returned an error. Wait a moment and try again.',
   },
   missing_api_key: {
     key: 'missing_api_key',
-    code: 'CM-AUTH-01',
+    code: 'GM-AUTH-01',
     message: 'Claude API key not configured.',
     description: 'Open Settings and add a valid Claude API key.',
     settingsLink: true,
   },
   invalid_api_key: {
     key: 'invalid_api_key',
-    code: 'CM-AUTH-02',
+    code: 'GM-AUTH-02',
     message: 'Claude API key is invalid.',
     description: 'Check the key in Settings and try again.',
     settingsLink: true,
   },
   rate_limited: {
     key: 'rate_limited',
-    code: 'CM-API-01',
+    code: 'GM-API-01',
     message: 'Anthropic rate limit reached.',
-    description: 'ChatMuse will retry if the wait is short; otherwise run it again later.',
+    description: 'GooseMuse will retry if the wait is short; otherwise run it again later.',
   },
   insufficient_balance: {
     key: 'insufficient_balance',
-    code: 'CM-API-02',
+    code: 'GM-API-02',
     message: 'Anthropic balance is insufficient.',
     description: 'Add credits or update billing before trying again.',
   },
   no_personalities: {
     key: 'no_personalities',
-    code: 'CM-FLOW-01',
+    code: 'GM-FLOW-01',
     message: 'No model personalities are configured.',
     description: 'Open Settings and create at least one personality.',
     settingsLink: true,
   },
   no_mapping: {
     key: 'no_mapping',
-    code: 'CM-FLOW-02',
+    code: 'GM-FLOW-02',
     message: 'No model personality is assigned for this account.',
     description: 'Open Settings and map this Fansly account to a personality.',
     settingsLink: true,
   },
   not_enough_history: {
     key: 'not_enough_history',
-    code: 'CM-FLOW-03',
+    code: 'GM-FLOW-03',
     message: 'Not enough conversation history.',
     description: 'This feature needs at least 30 messages in the chat history.',
   },
   another_operation: {
     key: 'another_operation',
-    code: 'CM-FLOW-04',
+    code: 'GM-FLOW-04',
     message: 'Another operation is already running.',
     description: 'Wait for the current job to finish or cancel it first.',
   },
   ping_blocked: {
     key: 'ping_blocked',
-    code: 'CM-FLOW-05',
+    code: 'GM-FLOW-05',
     message: 'This fan is still active.',
     description: 'Use Reply instead of Ping for an active conversation.',
   },
   chat_changed: {
     key: 'chat_changed',
-    code: 'CM-FLOW-06',
+    code: 'GM-FLOW-06',
     message: 'Conversation changed.',
     description: 'The result was discarded because you switched chats.',
   },
   extension_reloaded: {
     key: 'extension_reloaded',
-    code: 'CM-FLOW-07',
+    code: 'GM-FLOW-07',
     message: 'Extension reloaded.',
-    description: 'Run the action again after ChatMuse reconnects.',
+    description: 'Run the action again after GooseMuse reconnects.',
   },
   compare_cards_unavailable: {
     key: 'compare_cards_unavailable',
-    code: 'CM-FLOW-08',
+    code: 'GM-FLOW-08',
     message: 'Compare needs at least two model cards.',
     description: 'Add draft cards or map the current personality before running Compare.',
   },
   network_error: {
     key: 'network_error',
-    code: 'CM-NET-01',
+    code: 'GM-NET-01',
     message: 'Network request failed.',
     description: 'Check your connection and try again.',
   },
   timed_out: {
     key: 'timed_out',
-    code: 'CM-NET-02',
+    code: 'GM-NET-02',
     message: 'Operation timed out.',
     description: 'The request took too long. Try again.',
   },
   model_unavailable: {
     key: 'model_unavailable',
-    code: 'CM-API-03',
+    code: 'GM-API-03',
     message: 'Selected Claude model is unavailable.',
     description: 'Pick another model in Settings or wait until the model is available again.',
     settingsLink: true,
   },
   context_too_long: {
     key: 'context_too_long',
-    code: 'CM-API-04',
+    code: 'GM-API-04',
     message: 'Prompt is too large for this model.',
     description: 'Reduce the context or use a shorter conversation window.',
   },
   service_unavailable: {
     key: 'service_unavailable',
-    code: 'CM-API-05',
+    code: 'GM-API-05',
     message: 'Anthropic service is unavailable.',
     description: 'Wait a moment and try again.',
   },
   hub_invalid_url: {
     key: 'hub_invalid_url',
-    code: 'CM-HUB-01',
+    code: 'GM-HUB-01',
     message: 'Agency Hub URL is invalid.',
     description: 'Use a full http:// or https:// Agency Hub base URL.',
     settingsLink: true,
   },
   hub_missing_api_key: {
     key: 'hub_missing_api_key',
-    code: 'CM-HUB-02',
+    code: 'GM-HUB-02',
     message: 'Agency Hub API key is missing.',
     description: 'Add the Hub API key in Settings before testing or syncing.',
     settingsLink: true,
   },
   hub_invalid_api_key: {
     key: 'hub_invalid_api_key',
-    code: 'CM-HUB-03',
+    code: 'GM-HUB-03',
     message: 'Agency Hub API key is invalid.',
     description: 'Check the Hub API key in Settings and test the connection again.',
     settingsLink: true,
   },
   hub_missing_permission: {
     key: 'hub_missing_permission',
-    code: 'CM-HUB-04',
+    code: 'GM-HUB-04',
     message: 'Agency Hub host access is not granted.',
     description: 'Grant host access for the configured Hub origin in Settings.',
     settingsLink: true,
   },
   hub_page_match_failed: {
     key: 'hub_page_match_failed',
-    code: 'CM-HUB-05',
+    code: 'GM-HUB-05',
     message: 'Agency Hub page mapping failed.',
-    description: 'ChatMuse could not match the current creator to a Hub page.',
+    description: 'GooseMuse could not match the current creator to a Hub page.',
     settingsLink: true,
   },
   hub_timeout: {
     key: 'hub_timeout',
-    code: 'CM-HUB-06',
+    code: 'GM-HUB-06',
     message: 'Agency Hub request timed out.',
     description: 'The Hub did not respond in time. Try the connection test again.',
   },
   hub_request_failed: {
     key: 'hub_request_failed',
-    code: 'CM-HUB-07',
+    code: 'GM-HUB-07',
     message: 'Agency Hub request failed.',
     description: 'The Hub returned an error or could not be reached.',
   },
   hub_sync_failed: {
     key: 'hub_sync_failed',
-    code: 'CM-HUB-08',
+    code: 'GM-HUB-08',
     message: 'Hub sync failed, summary remains available locally.',
-    description: 'ChatMuse kept the local result so the workflow can continue.',
+    description: 'GooseMuse kept the local result so the workflow can continue.',
   },
   insertion_failed: {
     key: 'insertion_failed',
-    code: 'CM-UI-01',
+    code: 'GM-UI-01',
     message: 'Could not insert into the Fansly message box.',
     description: 'Copy the result manually instead.',
   },
   unknown_error: {
     key: 'unknown_error',
-    code: 'CM-APP-01',
+    code: 'GM-APP-01',
     message: 'Something went wrong.',
     description: 'Try again. If it keeps failing, report the error code.',
   },
@@ -207,18 +207,18 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
 
 const ERROR_KEYS = new Set<UserErrorKey>(Object.keys(ERROR_REGISTRY) as UserErrorKey[]);
 
-type ChatMuseErrorOptions = {
+type GooseMuseErrorOptions = {
   message?: string;
-  details?: ChatMuseErrorDetails;
+  details?: GooseMuseErrorDetails;
   isOptional?: boolean;
   retryAtMs?: number;
   retryAfterMs?: number;
 };
 
-export class ChatMuseError extends Error {
+export class GooseMuseError extends Error {
   readonly key: UserErrorKey;
   readonly code: string;
-  readonly details?: ChatMuseErrorDetails;
+  readonly details?: GooseMuseErrorDetails;
   readonly isOptional: boolean;
   readonly retryAtMs?: number;
   readonly retryAfterMs?: number;
@@ -226,14 +226,14 @@ export class ChatMuseError extends Error {
   constructor(
     key: UserErrorKey,
     message?: string,
-    details?: ChatMuseErrorDetails,
+    details?: GooseMuseErrorDetails,
     isOptional?: boolean,
   );
-  constructor(key: UserErrorKey, options?: ChatMuseErrorOptions);
+  constructor(key: UserErrorKey, options?: GooseMuseErrorOptions);
   constructor(
     key: UserErrorKey,
-    messageOrOptions?: string | ChatMuseErrorOptions,
-    details?: ChatMuseErrorDetails,
+    messageOrOptions?: string | GooseMuseErrorOptions,
+    details?: GooseMuseErrorDetails,
     isOptional = false,
   ) {
     const options = typeof messageOrOptions === 'string' || arguments.length > 2
@@ -245,7 +245,7 @@ export class ChatMuseError extends Error {
       : (messageOrOptions ?? {});
     const definition = ERROR_REGISTRY[key];
     super(options.message ?? key);
-    this.name = 'ChatMuseError';
+    this.name = 'GooseMuseError';
     this.key = key;
     this.code = definition.code;
     this.details = options.details;
@@ -294,7 +294,7 @@ export function createUserError(
 }
 
 export function toUserError(error: unknown): UserFacingError {
-  if (error instanceof ChatMuseError) {
+  if (error instanceof GooseMuseError) {
     return createUserError(error.key, {
       retryAtMs: error.retryAtMs,
       retryAfterMs: error.retryAfterMs,
@@ -327,7 +327,7 @@ export function getUserErrorDescription(error: UserFacingError): string | null {
 }
 
 export function toDebugErrorPayload(error: unknown): unknown {
-  if (error instanceof ChatMuseError) {
+  if (error instanceof GooseMuseError) {
     return {
       key: error.key,
       code: error.code,

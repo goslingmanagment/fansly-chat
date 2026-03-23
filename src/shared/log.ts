@@ -61,11 +61,11 @@ export function logDebug(enabled: boolean, label: string, payload?: unknown): vo
   }
 
   if (payload === undefined) {
-    console.debug(`[ChatMuse] ${label}`);
+    console.debug(`[GooseMuse] ${label}`);
     return;
   }
 
-  console.debug(`[ChatMuse] ${label}`, redactValue(payload));
+  console.debug(`[GooseMuse] ${label}`, redactValue(payload));
 }
 
 export function isDebugEnabled(settings: Settings | null | undefined): boolean {

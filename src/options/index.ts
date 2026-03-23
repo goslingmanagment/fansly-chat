@@ -17,7 +17,7 @@ import type {
   UserFacingError,
 } from '../shared/types.js';
 
-const rootElement = document.getElementById('chatmuse-options-root');
+const rootElement = document.getElementById('goosemuse-options-root');
 const extensionVersion = browser.runtime.getManifest().version;
 
 if (!(rootElement instanceof HTMLElement)) {
@@ -54,7 +54,7 @@ function createSection(title: string, description?: string): HTMLElement {
   if (description) {
     const copy = document.createElement('div');
     copy.textContent = description;
-    copy.style.color = 'var(--chatmuse-muted)';
+    copy.style.color = 'var(--goosemuse-muted)';
     copy.style.fontSize = '14px';
     heading.append(copy);
   }
@@ -77,14 +77,14 @@ function labeledField(labelText: string, input: HTMLElement): HTMLElement {
 function createButton(label: string, secondary = false, danger = false): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = `chatmuse-button${secondary ? ' chatmuse-button-secondary' : ''}${danger ? ' chatmuse-button-danger' : ''}`;
+  button.className = `goosemuse-button${secondary ? ' goosemuse-button-secondary' : ''}${danger ? ' goosemuse-button-danger' : ''}`;
   button.textContent = label;
   return button;
 }
 
 function createVersionTag(): HTMLDivElement {
   const tag = document.createElement('div');
-  tag.className = 'chatmuse-version-tag';
+  tag.className = 'goosemuse-version-tag';
   tag.textContent = `v ${extensionVersion}`;
   return tag;
 }
@@ -259,11 +259,11 @@ async function render(): Promise<void> {
   hero.style.gap = '8px';
   hero.style.position = 'relative';
   const title = document.createElement('h1');
-  title.textContent = 'ChatMuse Settings';
+  title.textContent = 'GooseMuse Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
   subtitle.textContent = 'Configure Claude, personalities, mappings, and live Fansly connections.';
-  subtitle.style.color = 'var(--chatmuse-muted)';
+  subtitle.style.color = 'var(--goosemuse-muted)';
   hero.append(createVersionTag(), title, subtitle);
   root.append(hero);
 
@@ -271,7 +271,7 @@ async function render(): Promise<void> {
   const apiSection = createSection('API Configuration');
   const keyInput = document.createElement('input');
   keyInput.type = 'password';
-  keyInput.className = 'chatmuse-input';
+  keyInput.className = 'goosemuse-input';
   keyInput.value = state.settings.claudeApiKey;
   const toggle = createButton('Show', true);
   toggle.addEventListener('click', () => {
@@ -287,28 +287,28 @@ async function render(): Promise<void> {
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
-  quickInput.className = 'chatmuse-input';
+  quickInput.className = 'goosemuse-input';
   quickInput.min = '5';
   quickInput.max = '200';
   quickInput.value = String(state.settings.quickMessageCount);
 
   const pingInput = document.createElement('input');
   pingInput.type = 'number';
-  pingInput.className = 'chatmuse-input';
+  pingInput.className = 'goosemuse-input';
   pingInput.min = '5';
   pingInput.max = '200';
   pingInput.value = String(state.settings.pingMessageCount);
 
   const improveInput = document.createElement('input');
   improveInput.type = 'number';
-  improveInput.className = 'chatmuse-input';
+  improveInput.className = 'goosemuse-input';
   improveInput.min = '5';
   improveInput.max = '200';
   improveInput.value = String(state.settings.improveMessageCount);
 
   const deepInput = document.createElement('input');
   deepInput.type = 'number';
-  deepInput.className = 'chatmuse-input';
+  deepInput.className = 'goosemuse-input';
   deepInput.min = '100';
   deepInput.max = '1000';
   deepInput.value = String(state.settings.deepMessageCount);
@@ -354,13 +354,13 @@ async function render(): Promise<void> {
   );
   const agencyHubUrlInput = document.createElement('input');
   agencyHubUrlInput.type = 'url';
-  agencyHubUrlInput.className = 'chatmuse-input';
+  agencyHubUrlInput.className = 'goosemuse-input';
   agencyHubUrlInput.placeholder = 'http://localhost:3000';
   agencyHubUrlInput.value = state.settings.agencyHubBaseUrl;
 
   const agencyHubKeyInput = document.createElement('input');
   agencyHubKeyInput.type = 'password';
-  agencyHubKeyInput.className = 'chatmuse-input';
+  agencyHubKeyInput.className = 'goosemuse-input';
   agencyHubKeyInput.value = state.settings.agencyHubApiKey;
 
   const agencyHubToggle = createButton('Show', true);
@@ -380,7 +380,7 @@ async function render(): Promise<void> {
   agencyHubPermissionStatus.style.fontSize = '14px';
 
   const agencyHubPermissionMeta = document.createElement('div');
-  agencyHubPermissionMeta.style.color = 'var(--chatmuse-muted)';
+  agencyHubPermissionMeta.style.color = 'var(--goosemuse-muted)';
   agencyHubPermissionMeta.style.fontSize = '13px';
 
   const agencyHubPermissionButton = createButton('Grant Access', true);
@@ -389,7 +389,7 @@ async function render(): Promise<void> {
   agencyHubConnectionStatus.style.fontSize = '14px';
 
   const agencyHubConnectionMeta = document.createElement('div');
-  agencyHubConnectionMeta.style.color = 'var(--chatmuse-muted)';
+  agencyHubConnectionMeta.style.color = 'var(--goosemuse-muted)';
   agencyHubConnectionMeta.style.fontSize = '13px';
 
   const agencyHubConnectionButton = createButton('Test Connection', true);
@@ -412,28 +412,28 @@ async function render(): Promise<void> {
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
         agencyHubConnectionStatus.textContent = 'Not tested yet.';
-        agencyHubConnectionStatus.style.color = 'var(--chatmuse-text)';
+        agencyHubConnectionStatus.style.color = 'var(--goosemuse-text)';
         agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
         return;
       case 'pending':
         agencyHubConnectionStatus.textContent = 'Connection status updating…';
-        agencyHubConnectionStatus.style.color = 'var(--chatmuse-text)';
+        agencyHubConnectionStatus.style.color = 'var(--goosemuse-text)';
         agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
         return;
       case 'testing':
         agencyHubConnectionStatus.textContent = 'Testing connection…';
-        agencyHubConnectionStatus.style.color = 'var(--chatmuse-text)';
+        agencyHubConnectionStatus.style.color = 'var(--goosemuse-text)';
         agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
         return;
       case 'connected':
         agencyHubConnectionStatus.textContent = 'Connected ✓';
-        agencyHubConnectionStatus.style.color = 'var(--chatmuse-success)';
+        agencyHubConnectionStatus.style.color = 'var(--goosemuse-success)';
         agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const description = getUserErrorDescription(agencyHubConnectionFeedback.error);
         agencyHubConnectionStatus.textContent = `Connection failed: ${agencyHubConnectionFeedback.error.code}`;
-        agencyHubConnectionStatus.style.color = 'var(--chatmuse-danger)';
+        agencyHubConnectionStatus.style.color = 'var(--goosemuse-danger)';
         agencyHubConnectionMeta.textContent = description
           ? `${agencyHubConnectionFeedback.error.message} ${description}`
           : agencyHubConnectionFeedback.error.message;
@@ -618,7 +618,7 @@ async function render(): Promise<void> {
 
       agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Grant access for ${originPattern} before ChatMuse can push summaries.`,
+        `Grant access for ${originPattern} before GooseMuse can push summaries.`,
         permissionScopeNote,
       );
       return;
@@ -627,13 +627,13 @@ async function render(): Promise<void> {
     if (!hasApiKey) {
       agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub API key missing.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Host access is granted for ${originPattern}, but ChatMuse still needs an Agency Hub API key.`,
+        `Host access is granted for ${originPattern}, but GooseMuse still needs an Agency Hub API key.`,
         permissionScopeNote,
       );
       return;
     }
 
-    agencyHubPermissionStatus.textContent = 'Sync ready: ChatMuse can push fan summaries.';
+    agencyHubPermissionStatus.textContent = 'Sync ready: GooseMuse can push fan summaries.';
     agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
       `Host access granted for ${originPattern}.`,
       permissionScopeNote,
@@ -742,7 +742,7 @@ async function render(): Promise<void> {
 
   for (const { feature, label, helper } of FEATURE_ROWS) {
     const select = document.createElement('select');
-    select.className = 'chatmuse-select';
+    select.className = 'goosemuse-select';
     select.dataset.feature = feature;
 
     for (const model of CLAUDE_MODELS) {
@@ -765,7 +765,7 @@ async function render(): Promise<void> {
 
     const helperText = document.createElement('div');
     helperText.textContent = helper;
-    helperText.style.color = 'var(--chatmuse-muted)';
+    helperText.style.color = 'var(--goosemuse-muted)';
     helperText.style.fontSize = '13px';
     helperText.style.marginBottom = '4px';
 
@@ -898,21 +898,21 @@ async function render(): Promise<void> {
     if (personality.builtinVersion !== undefined) {
       card.dataset.personalityBuiltinVersion = String(personality.builtinVersion);
     }
-    card.className = 'chatmuse-card';
+    card.className = 'goosemuse-card';
 
     const nameInput = document.createElement('input');
-    nameInput.className = 'chatmuse-input';
+    nameInput.className = 'goosemuse-input';
     nameInput.dataset.role = 'name';
     nameInput.value = personality.name;
 
     const contentInput = document.createElement('textarea');
-    contentInput.className = 'chatmuse-textarea';
+    contentInput.className = 'goosemuse-textarea';
     contentInput.dataset.role = 'content';
     contentInput.value = personality.content;
     contentInput.rows = 12;
 
     const actions = document.createElement('div');
-    actions.className = 'chatmuse-card-actions';
+    actions.className = 'goosemuse-card-actions';
     if (!personality.builtin) {
       const deleteButton = createButton('Delete', false, true);
       deleteButton.addEventListener('click', async () => {
@@ -983,12 +983,12 @@ async function render(): Promise<void> {
     const labelMeta = document.createElement('div');
     labelMeta.textContent = formatAccountMeta(accountId, session);
     labelMeta.style.fontSize = '12px';
-    labelMeta.style.color = 'var(--chatmuse-muted)';
+    labelMeta.style.color = 'var(--goosemuse-muted)';
 
     label.append(labelTitle, labelMeta);
 
     const select = document.createElement('select');
-    select.className = 'chatmuse-select';
+    select.className = 'goosemuse-select';
     const unmapped = document.createElement('option');
     unmapped.value = '';
     unmapped.textContent = 'Unmapped';
@@ -1007,7 +1007,7 @@ async function render(): Promise<void> {
 
     const info = document.createElement('div');
     info.style.fontSize = '12px';
-    info.style.color = 'var(--chatmuse-muted)';
+    info.style.color = 'var(--goosemuse-muted)';
     const mapped = personalitiesById.get(state.accountMappings[accountId] ?? '');
     info.textContent = `${mapped ? mapped.name : 'Unmapped'} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
 
@@ -1018,7 +1018,7 @@ async function render(): Promise<void> {
   if (state.knownAccounts.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No Fansly accounts detected yet.';
-    empty.style.color = 'var(--chatmuse-muted)';
+    empty.style.color = 'var(--goosemuse-muted)';
     mappingsTable.append(empty);
   }
 
@@ -1037,7 +1037,7 @@ async function render(): Promise<void> {
     .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
     .forEach(({ accountId, session }) => {
       const card = document.createElement('div');
-      card.className = 'chatmuse-card';
+      card.className = 'goosemuse-card';
       card.style.display = 'grid';
       card.style.gap = '6px';
       const heading = document.createElement('div');
@@ -1049,12 +1049,12 @@ async function render(): Promise<void> {
       left.style.fontWeight = '700';
       const right = document.createElement('div');
       right.textContent = session?.connected ? 'Connected' : 'Disconnected';
-      right.style.color = session?.connected ? 'var(--chatmuse-success)' : 'var(--chatmuse-danger)';
+      right.style.color = session?.connected ? 'var(--goosemuse-success)' : 'var(--goosemuse-danger)';
       heading.append(left, right);
       const meta = document.createElement('div');
       meta.textContent = formatAccountMeta(accountId, session);
       meta.style.fontSize = '12px';
-      meta.style.color = 'var(--chatmuse-muted)';
+      meta.style.color = 'var(--goosemuse-muted)';
       card.append(heading, meta);
       sessionsGrid.append(card);
     });
@@ -1062,7 +1062,7 @@ async function render(): Promise<void> {
   if (connectionRows.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No active sessions captured yet.';
-    empty.style.color = 'var(--chatmuse-muted)';
+    empty.style.color = 'var(--goosemuse-muted)';
     sessionsGrid.append(empty);
   }
 

@@ -68,7 +68,7 @@ function createErrorModel(): Extract<OverlayViewModel, { kind: 'error' }> {
     profiling: undefined,
     error: {
       key: 'unknown_error',
-      code: 'CM-APP-01',
+      code: 'GM-APP-01',
       message: 'Something broke',
     },
   };
@@ -212,7 +212,7 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('stream-op', ''));
-    const stream = requireElement<HTMLDivElement>(controller.root, '.chatmuse-stream');
+    const stream = requireElement<HTMLDivElement>(controller.root, '.goosemuse-stream');
     const records: MutationRecord[] = [];
     const observer = new MutationObserver((mutations) => {
       records.push(...mutations);
@@ -234,8 +234,8 @@ describe('InlinePanelController', () => {
 
     controller.render(createLoadingModel('op', ''));
 
-    expect(requireElement(controller.root, '.chatmuse-overlay-status').textContent).toBe('Generating\u2026');
-    expect(requireElement(controller.root, '.chatmuse-stream').textContent).toBe('Waiting for Claude\u2026');
+    expect(requireElement(controller.root, '.goosemuse-overlay-status').textContent).toBe('Generating\u2026');
+    expect(requireElement(controller.root, '.goosemuse-stream').textContent).toBe('Waiting for Claude\u2026');
   });
 
   it('hides header meta while loading before usage arrives', () => {
@@ -244,8 +244,8 @@ describe('InlinePanelController', () => {
 
     controller.render(createLoadingModel('op', ''));
 
-    const meta = requireElement(controller.root, '.chatmuse-inline-panel-meta');
-    expect(meta.classList.contains('chatmuse-hidden')).toBe(true);
+    const meta = requireElement(controller.root, '.goosemuse-inline-panel-meta');
+    expect(meta.classList.contains('goosemuse-hidden')).toBe(true);
   });
 
   it('shows header meta once spend arrives during loading', () => {
@@ -256,9 +256,9 @@ describe('InlinePanelController', () => {
       anthropicSpend: createSpendSummary(),
     }));
 
-    const meta = requireElement(controller.root, '.chatmuse-inline-panel-meta');
-    expect(meta.classList.contains('chatmuse-hidden')).toBe(false);
-    expect(requireElement(controller.root, '.chatmuse-inline-panel-meta-primary').textContent).toContain('$0.002982');
+    const meta = requireElement(controller.root, '.goosemuse-inline-panel-meta');
+    expect(meta.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(requireElement(controller.root, '.goosemuse-inline-panel-meta-primary').textContent).toContain('$0.002982');
   });
 
   it('updates stream text with incoming chunks', () => {
@@ -266,10 +266,10 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op', 'Hello'));
-    expect(requireElement(controller.root, '.chatmuse-stream').textContent).toBe('Hello');
+    expect(requireElement(controller.root, '.goosemuse-stream').textContent).toBe('Hello');
 
     controller.render(createLoadingModel('op', 'Hello there'));
-    expect(requireElement(controller.root, '.chatmuse-stream').textContent).toBe('Hello there');
+    expect(requireElement(controller.root, '.goosemuse-stream').textContent).toBe('Hello there');
   });
 
   it('renders reply with Insert and Copy buttons', () => {
@@ -279,9 +279,9 @@ describe('InlinePanelController', () => {
     const part = createPart('Hey there!');
     controller.render(createReplyModel([part]));
 
-    expect(controller.root.classList.contains('chatmuse-hidden')).toBe(false);
-    expect(requireElement(controller.root, '.chatmuse-card-text').textContent).toBe('Hey there!');
-    const buttons = controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+    expect(controller.root.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(requireElement(controller.root, '.goosemuse-card-text').textContent).toBe('Hey there!');
+    const buttons = controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button');
     expect(buttons[0]?.textContent).toBe('Insert');
     expect(buttons[1]?.textContent).toBe('Copy');
   });
@@ -296,7 +296,7 @@ describe('InlinePanelController', () => {
       }),
     );
 
-    const primary = requireElement<HTMLElement>(controller.root, '.chatmuse-inline-panel-meta-primary');
+    const primary = requireElement<HTMLElement>(controller.root, '.goosemuse-inline-panel-meta-primary');
     expect(primary.textContent).toContain('$0.002982');
     expect(primary.textContent).toContain('saved');
     // Secondary info moved to tooltip
@@ -310,9 +310,9 @@ describe('InlinePanelController', () => {
 
     controller.render(createErrorModel());
 
-    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('CM-APP-01');
-    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('Something broke');
-    expect(requireElement<HTMLButtonElement>(controller.root, '.chatmuse-card-actions .chatmuse-button').textContent).toBe('Regenerate');
+    expect(requireElement(controller.root, '.goosemuse-inline-error').textContent).toContain('GM-APP-01');
+    expect(requireElement(controller.root, '.goosemuse-inline-error').textContent).toContain('Something broke');
+    expect(requireElement<HTMLButtonElement>(controller.root, '.goosemuse-card-actions .goosemuse-button').textContent).toBe('Regenerate');
   });
 
   it('error Regenerate button calls onRerun', () => {
@@ -321,23 +321,23 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createErrorModel());
-    requireElement<HTMLButtonElement>(controller.root, '.chatmuse-card-actions .chatmuse-button').click();
+    requireElement<HTMLButtonElement>(controller.root, '.goosemuse-card-actions .goosemuse-button').click();
 
     expect(onRerun).toHaveBeenCalledWith('fast-reply');
   });
 
-  it('hide() removes body content and adds chatmuse-hidden', () => {
+  it('hide() removes body content and adds goosemuse-hidden', () => {
     const controller = createController();
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op', 'text'));
-    expect(controller.root.classList.contains('chatmuse-hidden')).toBe(false);
-    expect(controller.root.querySelector('.chatmuse-inline-panel-body')?.childElementCount).toBeGreaterThan(0);
+    expect(controller.root.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(controller.root.querySelector('.goosemuse-inline-panel-body')?.childElementCount).toBeGreaterThan(0);
 
     controller.hide();
 
-    expect(controller.root.classList.contains('chatmuse-hidden')).toBe(true);
-    expect(controller.root.querySelector('.chatmuse-inline-panel-body')?.childElementCount).toBe(0);
+    expect(controller.root.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(controller.root.querySelector('.goosemuse-inline-panel-body')?.childElementCount).toBe(0);
   });
 
   it('expand button calls onExpand', () => {
@@ -346,7 +346,7 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op', ''));
-    const expandButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-inline-panel-action'))
+    const expandButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-inline-panel-action'))
       .find((btn) => btn.title === 'Expand');
     expandButton!.click();
 
@@ -359,7 +359,7 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op', ''));
-    const closeButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-inline-panel-action'))
+    const closeButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-inline-panel-action'))
       .find((btn) => btn.title === 'Close');
     closeButton!.click();
 
@@ -424,7 +424,7 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('cancel-op', ''));
-    const cancelButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-button'))
+    const cancelButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-button'))
       .find((btn) => btn.textContent === 'Cancel');
     cancelButton!.click();
 
@@ -437,8 +437,8 @@ describe('InlinePanelController', () => {
 
     controller.render(createLoadingModel('op', ''));
 
-    expect(requireElement(controller.root, '.chatmuse-inline-panel-title').textContent).toContain('Reply');
-    expect(requireElement(controller.root, '.chatmuse-inline-panel-title').textContent).toContain('@fan');
+    expect(requireElement(controller.root, '.goosemuse-inline-panel-title').textContent).toContain('Reply');
+    expect(requireElement(controller.root, '.goosemuse-inline-panel-title').textContent).toContain('@fan');
   });
 
   it('rebuilds body when loading operationId changes', () => {
@@ -446,10 +446,10 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op-1', 'first'));
-    const stream1 = requireElement(controller.root, '.chatmuse-stream');
+    const stream1 = requireElement(controller.root, '.goosemuse-stream');
 
     controller.render(createLoadingModel('op-2', 'second'));
-    const stream2 = requireElement(controller.root, '.chatmuse-stream');
+    const stream2 = requireElement(controller.root, '.goosemuse-stream');
 
     // Different operationId → body rebuilt, new stream element
     expect(stream2).not.toBe(stream1);
@@ -464,24 +464,24 @@ describe('InlinePanelController', () => {
     part.insertedOnce = true;
     controller.render(createReplyModel([part]));
 
-    expect(requireElement(controller.root, '.chatmuse-card-status').textContent).toBe('Inserted earlier.');
+    expect(requireElement(controller.root, '.goosemuse-card-status').textContent).toBe('Inserted earlier.');
   });
 
   // ─── Header Row Structure ────────────────────────────────────
 
-  it('card has chatmuse-card-header-row as direct child containing title and actions', () => {
+  it('card has goosemuse-card-header-row as direct child containing title and actions', () => {
     const controller = createController();
     document.body.append(controller.root);
 
     controller.render(createReplyModel([createPart('Hello')]));
 
-    const card = requireElement(controller.root, '.chatmuse-card');
-    const headerRow = requireElement(card, ':scope > .chatmuse-card-header-row');
+    const card = requireElement(controller.root, '.goosemuse-card');
+    const headerRow = requireElement(card, ':scope > .goosemuse-card-header-row');
     expect(headerRow).toBeTruthy();
-    expect(requireElement(headerRow, '.chatmuse-card-title').textContent).toBe('Message 1');
-    expect(requireElement(headerRow, '.chatmuse-card-actions')).toBeTruthy();
+    expect(requireElement(headerRow, '.goosemuse-card-title').textContent).toBe('Message 1');
+    expect(requireElement(headerRow, '.goosemuse-card-actions')).toBeTruthy();
     // Actions should NOT be a sibling of card-text
-    expect(card.querySelector(':scope > .chatmuse-card-actions')).toBeNull();
+    expect(card.querySelector(':scope > .goosemuse-card-actions')).toBeNull();
   });
 
   it('status renders inside header row when insertedOnce is true', () => {
@@ -492,8 +492,8 @@ describe('InlinePanelController', () => {
     part.insertedOnce = true;
     controller.render(createReplyModel([part]));
 
-    const headerRow = requireElement(controller.root, '.chatmuse-card-header-row');
-    expect(requireElement(headerRow, '.chatmuse-card-status').textContent).toBe('Inserted earlier.');
+    const headerRow = requireElement(controller.root, '.goosemuse-card-header-row');
+    expect(requireElement(headerRow, '.goosemuse-card-status').textContent).toBe('Inserted earlier.');
   });
 
   it('hint renders inside header row in split mode', () => {
@@ -504,10 +504,10 @@ describe('InlinePanelController', () => {
     model.splitModeRequested = true;
     controller.render(model);
 
-    const cards = controller.root.querySelectorAll('.chatmuse-card');
+    const cards = controller.root.querySelectorAll('.goosemuse-card');
     expect(cards).toHaveLength(2);
-    const firstHeaderRow = requireElement(cards[0] as HTMLElement, '.chatmuse-card-header-row');
-    expect(requireElement(firstHeaderRow, '.chatmuse-card-hint').textContent).toBe('Suggested first send.');
+    const firstHeaderRow = requireElement(cards[0] as HTMLElement, '.goosemuse-card-header-row');
+    expect(requireElement(firstHeaderRow, '.goosemuse-card-hint').textContent).toBe('Suggested first send.');
   });
 
   it('reply Regenerate button calls onRerun', () => {
@@ -516,7 +516,7 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createReplyModel([createPart('Hello')]));
-    const regenButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-button'))
+    const regenButton = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-button'))
       .find((btn) => btn.textContent === 'Regenerate');
     regenButton!.click();
 
@@ -530,12 +530,12 @@ describe('InlinePanelController', () => {
 
     controller.render(createCompareModel());
 
-    expect(requireElement(controller.root, '.chatmuse-compare-summary').textContent).toBe('Comparing current + 1 draft');
-    const tabs = controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-compare-tab');
+    expect(requireElement(controller.root, '.goosemuse-compare-summary').textContent).toBe('Comparing current + 1 draft');
+    const tabs = controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-compare-tab');
     expect(tabs).toHaveLength(2);
     expect(tabs[0]?.textContent).toContain('Current');
     expect(tabs[1]?.textContent).toContain('Draft');
-    expect(tabs[1]?.querySelector('.chatmuse-spinner')).not.toBeNull();
+    expect(tabs[1]?.querySelector('.goosemuse-spinner')).not.toBeNull();
     expect(tabs[0]?.getAttribute('aria-pressed')).toBe('true');
     expect(tabs[1]?.getAttribute('aria-pressed')).toBe('false');
 
@@ -554,8 +554,8 @@ describe('InlinePanelController', () => {
       canRegenerate: true,
     }));
 
-    expect(requireElement(controller.root, '.chatmuse-card-text').textContent).toBe('Current reply');
-    const buttons = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button'));
+    expect(requireElement(controller.root, '.goosemuse-card-text').textContent).toBe('Current reply');
+    const buttons = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button'));
     expect(buttons.some((button) => button.textContent === 'Insert')).toBe(true);
     expect(buttons.some((button) => button.textContent === 'Copy')).toBe(true);
 
@@ -595,12 +595,12 @@ describe('InlinePanelController', () => {
       }),
     );
 
-    expect(requireElement(controller.root, '.chatmuse-spend-strip-primary').textContent).toContain(
+    expect(requireElement(controller.root, '.goosemuse-spend-strip-primary').textContent).toContain(
       '$0.001111',
     );
 
     const draftTab = Array.from(
-      controller.root.querySelectorAll<HTMLButtonElement>('.chatmuse-compare-tab'),
+      controller.root.querySelectorAll<HTMLButtonElement>('.goosemuse-compare-tab'),
     ).find((button) => button.textContent?.includes('Draft'));
     draftTab?.click();
     expect(onCompareTabSelect).toHaveBeenCalledWith('draft');
@@ -631,7 +631,7 @@ describe('InlinePanelController', () => {
       }),
     );
 
-    expect(requireElement(controller.root, '.chatmuse-spend-strip-primary').textContent).toContain(
+    expect(requireElement(controller.root, '.goosemuse-spend-strip-primary').textContent).toContain(
       '$0.002222',
     );
   });
@@ -677,8 +677,8 @@ describe('InlinePanelController', () => {
       ],
     }));
 
-    expect(requireElement(controller.root, '.chatmuse-compare-summary').textContent).toBe('Comparing current + 3 drafts');
-    expect(controller.root.querySelectorAll('.chatmuse-compare-tab')).toHaveLength(4);
+    expect(requireElement(controller.root, '.goosemuse-compare-summary').textContent).toBe('Comparing current + 3 drafts');
+    expect(controller.root.querySelectorAll('.goosemuse-compare-tab')).toHaveLength(4);
   });
 
   it('renders compare error state for the active tab', () => {
@@ -705,15 +705,15 @@ describe('InlinePanelController', () => {
           parts: [],
           error: {
             key: 'unknown_error',
-            code: 'CM-APP-01',
+            code: 'GM-APP-01',
             message: 'Draft failed',
           },
         },
       ],
     }));
 
-    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('CM-APP-01');
-    expect(requireElement(controller.root, '.chatmuse-inline-error').textContent).toContain('Draft failed');
+    expect(requireElement(controller.root, '.goosemuse-inline-error').textContent).toContain('GM-APP-01');
+    expect(requireElement(controller.root, '.goosemuse-inline-error').textContent).toContain('Draft failed');
   });
 
   // ─── Enter-to-insert ─────────────────────────────────────────
@@ -823,7 +823,7 @@ describe('InlinePanelController', () => {
 
     controller.render(createReplyModel([createPart('Hello')]));
     await vi.waitFor(() => {
-      const btn = controller.root.querySelector<HTMLButtonElement>('.chatmuse-card-actions .chatmuse-button');
+      const btn = controller.root.querySelector<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button');
       expect(document.activeElement).toBe(btn);
     });
   });
@@ -837,13 +837,13 @@ describe('InlinePanelController', () => {
     controller.render(createReplyModel([createPart('Hello')]));
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(
-        controller.root.querySelector('.chatmuse-card-actions .chatmuse-button'),
+        controller.root.querySelector('.goosemuse-card-actions .goosemuse-button'),
       );
     });
 
     const insertButton = requireElement<HTMLButtonElement>(
       controller.root,
-      '.chatmuse-card-actions .chatmuse-button',
+      '.goosemuse-card-actions .goosemuse-button',
     );
     insertButton.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Enter',

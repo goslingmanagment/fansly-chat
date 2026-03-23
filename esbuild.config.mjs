@@ -25,15 +25,15 @@ function compareDraftNames(left, right) {
 
 function modelCardDraftsPlugin() {
   return /** @type {esbuild.Plugin} */ ({
-    name: 'chatmuse-virtual-drafts',
+    name: 'goosemuse-virtual-drafts',
     setup(build) {
       build.onResolve({ filter: /^virtual:model-card-drafts$/ }, () => ({
         path: 'virtual:model-card-drafts',
-        namespace: 'chatmuse-virtual-drafts',
+        namespace: 'goosemuse-virtual-drafts',
       }));
 
       build.onLoad(
-        { filter: /.*/, namespace: 'chatmuse-virtual-drafts' },
+        { filter: /.*/, namespace: 'goosemuse-virtual-drafts' },
         async () => {
           let files;
           try {
@@ -94,7 +94,7 @@ async function buildOnce() {
       '.css': 'text',
     },
     define: {
-      __CHATMUSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+      __GOOSEMUSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
     plugins: [modelCardDraftsPlugin()],
   });
@@ -119,12 +119,12 @@ if (!watchMode) {
       '.css': 'text',
     },
     define: {
-      __CHATMUSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+      __GOOSEMUSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
     plugins: [
       modelCardDraftsPlugin(),
       {
-        name: 'chatmuse-static-copy',
+        name: 'goosemuse-static-copy',
         setup(build) {
           build.onEnd(async () => {
             await ensureStaticFiles();
@@ -166,5 +166,5 @@ if (!watchMode) {
   process.on('exit', () => {
     watchers.forEach((watcher) => watcher.close());
   });
-  console.log('Watching ChatMuse...');
+  console.log('Watching GooseMuse...');
 }

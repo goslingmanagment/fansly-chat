@@ -1,75 +1,75 @@
 /* ============================================================
-   ChatMuse — Fansly-native theme
+   GooseMuse — Fansly-native theme
    Dark navy UI that blends with Fansly's design language.
-   All classes prefixed with chatmuse- to avoid collisions.
+   All classes prefixed with goosemuse- to avoid collisions.
    ============================================================ */
 
 :root {
-  --chatmuse-bg: rgba(27, 30, 46, 0.97);
-  --chatmuse-panel: #1f2236;
-  --chatmuse-panel-soft: #252840;
-  --chatmuse-panel-elevated: #2a2d4a;
-  --chatmuse-text: #e8e8f0;
-  --chatmuse-muted: #7a7d95;
-  --chatmuse-accent: #5b8af5;
-  --chatmuse-accent-hover: #4a7ae3;
-  --chatmuse-accent-soft: #8bb0ff;
-  --chatmuse-danger: #f87171;
-  --chatmuse-success: #34d399;
-  --chatmuse-warning: #fbbf24;
-  --chatmuse-border: rgba(255, 255, 255, 0.05);
-  --chatmuse-border-accent: rgba(91, 138, 245, 0.18);
-  --chatmuse-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  --chatmuse-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --goosemuse-bg: rgba(27, 30, 46, 0.97);
+  --goosemuse-panel: #1f2236;
+  --goosemuse-panel-soft: #252840;
+  --goosemuse-panel-elevated: #2a2d4a;
+  --goosemuse-text: #e8e8f0;
+  --goosemuse-muted: #7a7d95;
+  --goosemuse-accent: #5b8af5;
+  --goosemuse-accent-hover: #4a7ae3;
+  --goosemuse-accent-soft: #8bb0ff;
+  --goosemuse-danger: #f87171;
+  --goosemuse-success: #34d399;
+  --goosemuse-warning: #fbbf24;
+  --goosemuse-border: rgba(255, 255, 255, 0.05);
+  --goosemuse-border-accent: rgba(91, 138, 245, 0.18);
+  --goosemuse-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --goosemuse-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   color-scheme: dark;
 }
 
 /* ─── Root Container ─────────────────────────────────────────── */
 
-#chatmuse-root {
+#goosemuse-root {
   margin: 10px 0 8px;
   display: grid;
   gap: 8px;
-  font-family: var(--chatmuse-font);
+  font-family: var(--goosemuse-font);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-#chatmuse-root button,
-#chatmuse-root select,
-#chatmuse-root input,
-#chatmuse-root textarea {
+#goosemuse-root button,
+#goosemuse-root select,
+#goosemuse-root input,
+#goosemuse-root textarea {
   font-family: inherit;
 }
 
-.chatmuse-hidden {
+.goosemuse-hidden {
   display: none !important;
 }
 
 /* ─── Button Bar (Toolbar) ───────────────────────────────────── */
 
-.chatmuse-bar {
+.goosemuse-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   border-radius: 14px;
-  background: var(--chatmuse-panel);
-  box-shadow: var(--chatmuse-shadow);
+  background: var(--goosemuse-panel);
+  box-shadow: var(--goosemuse-shadow);
 }
 
-.chatmuse-actions {
+.goosemuse-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   flex: 1;
 }
 
-.chatmuse-pill {
-  border: 1px solid var(--chatmuse-border);
+.goosemuse-pill {
+  border: 1px solid var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.03);
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   display: inline-flex;
   align-items: center;
   padding: 5px 10px;
@@ -82,10 +82,10 @@
 
 /* ─── Base Button ────────────────────────────────────────────── */
 
-.chatmuse-button {
-  border: 1px solid var(--chatmuse-border);
+.goosemuse-button {
+  border: 1px solid var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.04);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   padding: 7px 12px;
   border-radius: 10px;
   font-size: 13px;
@@ -94,26 +94,26 @@
   transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease;
 }
 
-.chatmuse-button:hover:not(:disabled) {
+.goosemuse-button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
-.chatmuse-button:active:not(:disabled) {
+.goosemuse-button:active:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.chatmuse-button:disabled {
+.goosemuse-button:disabled {
   cursor: not-allowed;
   opacity: 0.35;
 }
 
-.chatmuse-button-secondary {
+.goosemuse-button-secondary {
   background: rgba(255, 255, 255, 0.03);
-  border-color: var(--chatmuse-border);
+  border-color: var(--goosemuse-border);
 }
 
-.chatmuse-button-danger {
+.goosemuse-button-danger {
   background: rgba(248, 113, 113, 0.1);
   border-color: rgba(248, 113, 113, 0.2);
   color: #fca5a5;
@@ -121,14 +121,14 @@
 
 /* ─── Personality Pill ───────────────────────────────────────── */
 
-.chatmuse-personality {
+.goosemuse-personality {
   align-self: center;
-  color: var(--chatmuse-accent-soft);
+  color: var(--goosemuse-accent-soft);
 }
 
 /* ─── Toolbar Layout ─────────────────────────────────────────── */
 
-.chatmuse-toolbar {
+.goosemuse-toolbar {
   align-items: center;
   justify-content: flex-start;
   flex-wrap: nowrap;
@@ -137,46 +137,46 @@
   gap: 6px;
   padding: 8px 10px;
   border-radius: 14px;
-  background: var(--chatmuse-panel);
-  border-color: var(--chatmuse-border);
-  box-shadow: var(--chatmuse-shadow);
+  background: var(--goosemuse-panel);
+  border-color: var(--goosemuse-border);
+  box-shadow: var(--goosemuse-shadow);
   scrollbar-width: thin;
 }
 
-.chatmuse-toolbar-actions {
+.goosemuse-toolbar-actions {
   align-items: center;
   gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
 }
 
-.chatmuse-toolbar-group {
+.goosemuse-toolbar-group {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.chatmuse-toolbar-pill {
+.goosemuse-toolbar-pill {
   min-height: 30px;
   padding: 0 12px;
   border-radius: 8px;
-  border-color: var(--chatmuse-border);
+  border-color: var(--goosemuse-border);
   background: rgba(91, 138, 245, 0.08);
-  color: var(--chatmuse-accent-soft);
+  color: var(--goosemuse-accent-soft);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
-.chatmuse-toolbar-button {
+.goosemuse-toolbar-button {
   min-height: 30px;
   padding: 0 11px;
   flex: 0 0 auto;
-  border-color: var(--chatmuse-border);
+  border-color: var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -187,12 +187,12 @@
   box-shadow: none;
 }
 
-.chatmuse-toolbar-button-summary {
+.goosemuse-toolbar-button-summary {
   position: relative;
   padding-right: 20px;
 }
 
-.chatmuse-toolbar-button-summary-ready::after {
+.goosemuse-toolbar-button-summary-ready::after {
   content: '';
   position: absolute;
   top: 6px;
@@ -204,46 +204,46 @@
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
 }
 
-.chatmuse-toolbar-button:hover:not(:disabled) {
+.goosemuse-toolbar-button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
-.chatmuse-toolbar-button-secondary {
+.goosemuse-toolbar-button-secondary {
   background: rgba(255, 255, 255, 0.03);
-  border-color: var(--chatmuse-border);
-  color: var(--chatmuse-muted);
+  border-color: var(--goosemuse-border);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-toolbar-button-secondary:hover:not(:disabled) {
+.goosemuse-toolbar-button-secondary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.1);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-toolbar-button:disabled {
+.goosemuse-toolbar-button:disabled {
   opacity: 0.35;
 }
 
-.chatmuse-toolbar-button-primary {
+.goosemuse-toolbar-button-primary {
   background: rgba(91, 138, 245, 0.14);
-  border-color: var(--chatmuse-border-accent);
-  color: var(--chatmuse-accent-soft);
+  border-color: var(--goosemuse-border-accent);
+  color: var(--goosemuse-accent-soft);
 }
 
-.chatmuse-toolbar-button-primary:hover:not(:disabled) {
+.goosemuse-toolbar-button-primary:hover:not(:disabled) {
   background: rgba(91, 138, 245, 0.22);
   border-color: rgba(91, 138, 245, 0.28);
 }
 
-.chatmuse-toolbar-toggle {
+.goosemuse-toolbar-toggle {
   min-height: 28px;
   padding: 0 10px;
   flex: 0 0 auto;
-  border-color: var(--chatmuse-border);
+  border-color: var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.03);
   border-radius: 999px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
@@ -252,7 +252,7 @@
   transition: all 150ms ease;
 }
 
-.chatmuse-toolbar-button .chatmuse-spinner {
+.goosemuse-toolbar-button .goosemuse-spinner {
   width: 10px;
   height: 10px;
   border-width: 1.5px;
@@ -260,13 +260,13 @@
   vertical-align: middle;
 }
 
-.chatmuse-toolbar-toggle:hover:not(:disabled) {
+.goosemuse-toolbar-toggle:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.1);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-toolbar-toggle-active {
+.goosemuse-toolbar-toggle-active {
   background: rgba(52, 211, 153, 0.12);
   border-color: rgba(52, 211, 153, 0.24);
   color: #6ee7b7;
@@ -274,13 +274,13 @@
 
 /* ─── Personality (pinned right) ─────────────────────────── */
 
-.chatmuse-toolbar-personality-end {
+.goosemuse-toolbar-personality-end {
   margin-left: auto;
   max-width: 100%;
   flex: 0 0 auto;
 }
 
-.chatmuse-toolbar-tone-row {
+.goosemuse-toolbar-tone-row {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -288,7 +288,7 @@
   min-width: max-content;
 }
 
-.chatmuse-tone-pill {
+.goosemuse-tone-pill {
   min-height: 26px;
   padding: 0 9px;
   font-size: 12px;
@@ -296,94 +296,94 @@
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   cursor: pointer;
   transition: all 150ms ease;
 }
 
-.chatmuse-tone-pill:hover:not(:disabled) {
+.goosemuse-tone-pill:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.05);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-tone-pill-active {
+.goosemuse-tone-pill-active {
   background: rgba(91, 138, 245, 0.14);
   border-color: rgba(91, 138, 245, 0.24);
-  color: var(--chatmuse-accent-soft);
+  color: var(--goosemuse-accent-soft);
 }
 
-.chatmuse-tone-pill:disabled {
+.goosemuse-tone-pill:disabled {
   opacity: 0.3;
   cursor: default;
 }
 
 /* ─── Inline Panel ──────────────────────────────────────────── */
 
-.chatmuse-inline-panel {
+.goosemuse-inline-panel {
   display: grid;
   gap: 0;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   border-radius: 14px;
-  background: var(--chatmuse-panel);
-  box-shadow: var(--chatmuse-shadow);
+  background: var(--goosemuse-panel);
+  box-shadow: var(--goosemuse-shadow);
   contain: layout style;
   overflow: hidden;
 }
 
-.chatmuse-inline-panel-header {
+.goosemuse-inline-panel-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--chatmuse-border);
+  border-bottom: 1px solid var(--goosemuse-border);
   min-height: 36px;
 }
 
-.chatmuse-inline-panel-header-info {
+.goosemuse-inline-panel-header-info {
   min-width: 0;
   flex: 1;
   display: grid;
   gap: 3px;
 }
 
-.chatmuse-inline-panel-title {
+.goosemuse-inline-panel-title {
   font-size: 12px;
   font-weight: 700;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.chatmuse-inline-panel-meta {
+.goosemuse-inline-panel-meta {
   text-align: right;
   white-space: nowrap;
 }
 
-.chatmuse-inline-panel-meta-primary {
+.goosemuse-inline-panel-meta-primary {
   font-size: 10px;
   font-weight: 700;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-inline-panel-meta-primary[title] {
+.goosemuse-inline-panel-meta-primary[title] {
   cursor: help;
 }
 
-.chatmuse-inline-panel-actions {
+.goosemuse-inline-panel-actions {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
 }
 
-.chatmuse-inline-panel-action {
+.goosemuse-inline-panel-action {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.03);
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   font-size: 13px;
   cursor: pointer;
   display: inline-flex;
@@ -392,12 +392,12 @@
   transition: all 150ms ease;
 }
 
-.chatmuse-inline-panel-action:hover {
+.goosemuse-inline-panel-action:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-inline-panel-body {
+.goosemuse-inline-panel-body {
   max-height: 300px;
   overflow-y: auto;
   overflow-anchor: none;
@@ -408,52 +408,52 @@
 
 /* ─── Inline Panel — Compact Overrides ──────────────────────── */
 
-.chatmuse-inline-panel {
+.goosemuse-inline-panel {
   border-radius: 12px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-panel-header {
+.goosemuse-inline-panel .goosemuse-inline-panel-header {
   padding: 6px 10px;
   min-height: 30px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-panel-header-info {
+.goosemuse-inline-panel .goosemuse-inline-panel-header-info {
   gap: 2px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-panel-title {
+.goosemuse-inline-panel .goosemuse-inline-panel-title {
   font-size: 12px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-panel-meta-primary {
+.goosemuse-inline-panel .goosemuse-inline-panel-meta-primary {
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-panel-action {
+.goosemuse-inline-panel .goosemuse-inline-panel-action {
   width: 22px;
   height: 22px;
   border-radius: 6px;
   font-size: 12px;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-panel-body {
+.goosemuse-inline-panel .goosemuse-inline-panel-body {
   padding: 8px 10px;
   max-height: 260px;
   gap: 8px;
 }
 
-.chatmuse-inline-panel .chatmuse-grid {
+.goosemuse-inline-panel .goosemuse-grid {
   gap: 8px;
 }
 
-.chatmuse-inline-panel .chatmuse-compare-summary {
-  color: var(--chatmuse-text);
+.goosemuse-inline-panel .goosemuse-compare-summary {
+  color: var(--goosemuse-text);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tabs {
+.goosemuse-inline-panel .goosemuse-compare-tabs {
   display: flex;
   gap: 4px;
   flex-wrap: nowrap;
@@ -461,43 +461,43 @@
   scrollbar-width: thin;
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab {
+.goosemuse-inline-panel .goosemuse-compare-tab {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.03);
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 150ms ease;
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab:hover:not(.chatmuse-compare-tab-active) {
+.goosemuse-inline-panel .goosemuse-compare-tab:hover:not(.goosemuse-compare-tab-active) {
   background: rgba(255, 255, 255, 0.06);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab:focus-visible {
+.goosemuse-inline-panel .goosemuse-compare-tab:focus-visible {
   outline: 2px solid rgba(91, 138, 245, 0.6);
   outline-offset: 2px;
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab:active {
+.goosemuse-inline-panel .goosemuse-compare-tab:active {
   transform: scale(0.98);
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab-active {
+.goosemuse-inline-panel .goosemuse-compare-tab-active {
   border-color: rgba(91, 138, 245, 0.3);
   background: rgba(91, 138, 245, 0.12);
-  color: var(--chatmuse-accent-soft);
+  color: var(--goosemuse-accent-soft);
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab-badge {
+.goosemuse-inline-panel .goosemuse-compare-tab-badge {
   padding: 1px 5px;
   border-radius: 999px;
   background: rgba(52, 211, 153, 0.14);
@@ -506,23 +506,23 @@
   font-weight: 700;
 }
 
-.chatmuse-inline-panel .chatmuse-compare-tab .chatmuse-spinner {
+.goosemuse-inline-panel .goosemuse-compare-tab .goosemuse-spinner {
   width: 10px;
   height: 10px;
   border-width: 1.5px;
 }
 
-.chatmuse-inline-panel .chatmuse-parts {
+.goosemuse-inline-panel .goosemuse-parts {
   gap: 6px;
 }
 
-.chatmuse-inline-panel .chatmuse-card {
+.goosemuse-inline-panel .goosemuse-card {
   padding: 8px 10px;
   gap: 6px;
   border-radius: 10px;
 }
 
-.chatmuse-inline-panel .chatmuse-card-header-row {
+.goosemuse-inline-panel .goosemuse-card-header-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -530,91 +530,91 @@
   min-width: 0;
 }
 
-.chatmuse-inline-panel .chatmuse-card-header-row .chatmuse-card-title {
+.goosemuse-inline-panel .goosemuse-card-header-row .goosemuse-card-title {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
 
-.chatmuse-inline-panel .chatmuse-card-header-row .chatmuse-card-actions {
+.goosemuse-inline-panel .goosemuse-card-header-row .goosemuse-card-actions {
   margin-left: auto;
 }
 
-.chatmuse-inline-panel .chatmuse-card-title {
+.goosemuse-inline-panel .goosemuse-card-title {
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-card-hint,
-.chatmuse-inline-panel .chatmuse-card-status {
+.goosemuse-inline-panel .goosemuse-card-hint,
+.goosemuse-inline-panel .goosemuse-card-status {
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-card-text {
+.goosemuse-inline-panel .goosemuse-card-text {
   font-size: 13px;
   line-height: 1.5;
 }
 
-.chatmuse-inline-panel .chatmuse-card-actions {
+.goosemuse-inline-panel .goosemuse-card-actions {
   gap: 4px;
 }
 
-.chatmuse-inline-panel .chatmuse-button {
+.goosemuse-inline-panel .goosemuse-button {
   padding: 4px 9px;
   font-size: 12px;
   border-radius: 7px;
 }
 
-.chatmuse-inline-panel .chatmuse-stream {
+.goosemuse-inline-panel .goosemuse-stream {
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.5;
 }
 
-.chatmuse-inline-panel .chatmuse-inline-error {
+.goosemuse-inline-panel .goosemuse-inline-error {
   padding: 6px 10px;
   border-radius: 8px;
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-spend-strip-primary {
+.goosemuse-inline-panel .goosemuse-spend-strip-primary {
   font-size: 11px;
 }
 
-.chatmuse-inline-panel .chatmuse-spend-strip-secondary {
+.goosemuse-inline-panel .goosemuse-spend-strip-secondary {
   font-size: 10px;
 }
 
 /* ─── Mapping Banner ─────────────────────────────────────────── */
 
-.chatmuse-banner {
+.goosemuse-banner {
   display: grid;
   gap: 8px;
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(251, 191, 36, 0.2);
-  background: var(--chatmuse-panel);
-  box-shadow: var(--chatmuse-shadow);
+  background: var(--goosemuse-panel);
+  box-shadow: var(--goosemuse-shadow);
 }
 
-.chatmuse-banner-copy {
+.goosemuse-banner-copy {
   display: grid;
   gap: 3px;
 }
 
-.chatmuse-banner-title {
+.goosemuse-banner-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-banner-text {
+.goosemuse-banner-text {
   font-size: 12px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-banner-actions {
+.goosemuse-banner-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -622,82 +622,82 @@
 
 /* ─── Form Elements ──────────────────────────────────────────── */
 
-.chatmuse-select,
-.chatmuse-input,
-.chatmuse-textarea {
+.goosemuse-select,
+.goosemuse-input,
+.goosemuse-textarea {
   width: 100%;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   background: rgba(0, 0, 0, 0.2);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   padding: 9px 12px;
   border-radius: 10px;
   font-size: 13px;
   transition: border-color 150ms ease;
 }
 
-.chatmuse-select:focus,
-.chatmuse-input:focus,
-.chatmuse-textarea:focus {
+.goosemuse-select:focus,
+.goosemuse-input:focus,
+.goosemuse-textarea:focus {
   outline: none;
-  border-color: var(--chatmuse-border-accent);
+  border-color: var(--goosemuse-border-accent);
 }
 
 /* ─── Toast ──────────────────────────────────────────────────── */
 
-#chatmuse-toast-root {
+#goosemuse-toast-root {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 2147483645;
   display: grid;
   gap: 8px;
-  font-family: var(--chatmuse-font);
+  font-family: var(--goosemuse-font);
 }
 
-.chatmuse-toast {
+.goosemuse-toast {
   min-width: 240px;
   max-width: 320px;
-  background: var(--chatmuse-panel);
-  border: 1px solid var(--chatmuse-border);
-  color: var(--chatmuse-text);
+  background: var(--goosemuse-panel);
+  border: 1px solid var(--goosemuse-border);
+  color: var(--goosemuse-text);
   padding: 10px 12px;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   display: grid;
   gap: 8px;
   font-size: 13px;
-  animation: chatmuse-fade-in 0.15s ease;
+  animation: goosemuse-fade-in 0.15s ease;
 }
 
-.chatmuse-toast-primary {
+.goosemuse-toast-primary {
   font-weight: 700;
 }
 
-.chatmuse-toast-secondary {
-  color: var(--chatmuse-muted);
+.goosemuse-toast-secondary {
+  color: var(--goosemuse-muted);
   line-height: 1.45;
 }
 
-.chatmuse-toast-error {
+.goosemuse-toast-error {
   border-color: rgba(248, 113, 113, 0.24);
   background: rgba(34, 17, 21, 0.96);
 }
 
-.chatmuse-toast-success {
+.goosemuse-toast-success {
   border-color: rgba(52, 211, 153, 0.24);
   background: rgba(14, 28, 24, 0.96);
 }
 
-.chatmuse-toast-warning {
+.goosemuse-toast-warning {
   border-color: rgba(251, 191, 36, 0.24);
   background: rgba(35, 28, 12, 0.96);
 }
 
-.chatmuse-toast button {
+.goosemuse-toast button {
   font-family: inherit;
 }
 
-.chatmuse-toast-actions {
+.goosemuse-toast-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -705,7 +705,7 @@
 
 /* ─── Overlay ────────────────────────────────────────────────── */
 
-#chatmuse-overlay-root {
+#goosemuse-overlay-root {
   position: fixed;
   inset: 0;
   z-index: 2147483646;
@@ -713,7 +713,7 @@
   pointer-events: none;
 }
 
-.chatmuse-overlay-shell {
+.goosemuse-overlay-shell {
   position: absolute;
   inset: 0;
   display: flex;
@@ -724,7 +724,7 @@
   overscroll-behavior: contain;
 }
 
-.chatmuse-overlay-backdrop {
+.goosemuse-overlay-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
@@ -733,19 +733,19 @@
   pointer-events: auto;
 }
 
-.chatmuse-overlay-backdrop.chatmuse-pass-through {
+.goosemuse-overlay-backdrop.goosemuse-pass-through {
   pointer-events: none;
 }
 
-.chatmuse-overlay-panel {
+.goosemuse-overlay-panel {
   position: relative;
   width: min(720px, 100%);
   max-height: min(84vh, 860px);
   pointer-events: auto;
   padding: 20px;
   border-radius: 14px;
-  border: 1px solid var(--chatmuse-border);
-  background: var(--chatmuse-panel);
+  border: 1px solid var(--goosemuse-border);
+  background: var(--goosemuse-panel);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.03),
     0 8px 24px rgba(0, 0, 0, 0.35);
@@ -753,185 +753,185 @@
   gap: 14px;
   overflow-x: hidden;
   overflow-y: auto;
-  font-family: var(--chatmuse-font);
-  animation: chatmuse-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: var(--goosemuse-font);
+  animation: goosemuse-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.chatmuse-overlay-panel button,
-.chatmuse-overlay-panel select,
-.chatmuse-overlay-panel input,
-.chatmuse-overlay-panel textarea {
+.goosemuse-overlay-panel button,
+.goosemuse-overlay-panel select,
+.goosemuse-overlay-panel input,
+.goosemuse-overlay-panel textarea {
   font-family: inherit;
 }
 
-.chatmuse-overlay-body {
+.goosemuse-overlay-body {
   display: block;
 }
 
-.chatmuse-overlay-panel::-webkit-scrollbar {
+.goosemuse-overlay-panel::-webkit-scrollbar {
   width: 5px;
 }
 
-.chatmuse-overlay-panel::-webkit-scrollbar-track {
+.goosemuse-overlay-panel::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.chatmuse-overlay-panel::-webkit-scrollbar-thumb {
+.goosemuse-overlay-panel::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
 
 /* ─── Overlay Header ─────────────────────────────────────────── */
 
-.chatmuse-overlay-header {
+.goosemuse-overlay-header {
   display: flex;
   gap: 12px;
   justify-content: space-between;
   align-items: flex-start;
 }
 
-.chatmuse-overlay-title {
+.goosemuse-overlay-title {
   display: grid;
   gap: 3px;
 }
 
-.chatmuse-eyebrow {
+.goosemuse-eyebrow {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-title {
+.goosemuse-title {
   font-size: 20px;
   font-weight: 700;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   letter-spacing: -0.01em;
 }
 
-.chatmuse-subtitle {
+.goosemuse-subtitle {
   font-size: 13px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-close {
+.goosemuse-close {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.03);
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   font-size: 16px;
   cursor: pointer;
   transition: all 150ms ease;
   flex-shrink: 0;
 }
 
-.chatmuse-close:hover {
+.goosemuse-close:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
 /* ─── Status ─────────────────────────────────────────────────── */
 
-.chatmuse-overlay-status {
+.goosemuse-overlay-status {
   font-size: 13px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
 /* ─── Stream Text ────────────────────────────────────────────── */
 
-.chatmuse-stream {
+.goosemuse-stream {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
   font-size: 14px;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   border-radius: 12px;
   padding: 14px;
 }
 
 /* ─── Cards & Parts ──────────────────────────────────────────── */
 
-.chatmuse-parts {
+.goosemuse-parts {
   display: grid;
   gap: 10px;
 }
 
-.chatmuse-card {
+.goosemuse-card {
   display: grid;
   gap: 10px;
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   background: rgba(255, 255, 255, 0.02);
 }
 
-.chatmuse-card-recommended {
+.goosemuse-card-recommended {
   border-color: rgba(52, 211, 153, 0.2);
   background: rgba(52, 211, 153, 0.04);
 }
 
-.chatmuse-card-followup {
+.goosemuse-card-followup {
   border-color: rgba(91, 138, 245, 0.15);
   background: rgba(91, 138, 245, 0.04);
 }
 
-.chatmuse-card-title {
+.goosemuse-card-title {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-card-hint {
+.goosemuse-card-hint {
   font-size: 12px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-card-status {
+.goosemuse-card-status {
   font-size: 12px;
-  color: var(--chatmuse-accent-soft);
+  color: var(--goosemuse-accent-soft);
 }
 
-.chatmuse-card-text {
+.goosemuse-card-text {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
   font-size: 14px;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-card-actions,
-.chatmuse-overlay-actions {
+.goosemuse-card-actions,
+.goosemuse-overlay-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.chatmuse-overlay-action-status {
+.goosemuse-overlay-action-status {
   font-size: 12px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
 /* ─── Rating ─────────────────────────────────────────────────── */
 
-.chatmuse-rating-section {
+.goosemuse-rating-section {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 14px;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 14px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
 }
 
-.chatmuse-rating-badge {
+.goosemuse-rating-badge {
   font-size: 24px;
   font-weight: 700;
   width: 48px;
@@ -944,40 +944,40 @@
   color: #fff;
 }
 
-.chatmuse-rating-excellent {
+.goosemuse-rating-excellent {
   background: rgba(52, 211, 153, 0.2);
   color: #34d399;
 }
 
-.chatmuse-rating-good {
+.goosemuse-rating-good {
   background: rgba(110, 231, 183, 0.2);
   color: #6ee7b7;
 }
 
-.chatmuse-rating-average {
+.goosemuse-rating-average {
   background: rgba(251, 191, 36, 0.2);
   color: #fbbf24;
 }
 
-.chatmuse-rating-below {
+.goosemuse-rating-below {
   background: rgba(251, 146, 60, 0.2);
   color: #fb923c;
 }
 
-.chatmuse-rating-poor {
+.goosemuse-rating-poor {
   background: rgba(248, 113, 113, 0.2);
   color: #f87171;
 }
 
-.chatmuse-rating-label {
+.goosemuse-rating-label {
   font-size: 14px;
   font-weight: 500;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
 /* ─── Errors ─────────────────────────────────────────────────── */
 
-.chatmuse-inline-error {
+.goosemuse-inline-error {
   border: 1px solid rgba(248, 113, 113, 0.2);
   background: rgba(248, 113, 113, 0.06);
   border-radius: 10px;
@@ -988,16 +988,16 @@
   gap: 4px;
 }
 
-.chatmuse-error-primary {
+.goosemuse-error-primary {
   font-weight: 700;
 }
 
-.chatmuse-error-secondary {
+.goosemuse-error-secondary {
   color: rgba(252, 165, 165, 0.86);
   line-height: 1.45;
 }
 
-.chatmuse-inline-note {
+.goosemuse-inline-note {
   border: 1px solid rgba(52, 211, 153, 0.18);
   background: rgba(52, 211, 153, 0.06);
   border-radius: 10px;
@@ -1008,60 +1008,60 @@
 
 /* ─── Layout Helpers ─────────────────────────────────────────── */
 
-.chatmuse-grid {
+.goosemuse-grid {
   display: grid;
   gap: 12px;
 }
 
 /* ─── Spend Strip ────────────────────────────────────────────── */
 
-.chatmuse-spend-strip {
+.goosemuse-spend-strip {
   display: grid;
   gap: 1px;
 }
 
-.chatmuse-spend-strip-pending {
+.goosemuse-spend-strip-pending {
   opacity: 0.5;
 }
 
-.chatmuse-spend-strip-primary {
+.goosemuse-spend-strip-primary {
   font-size: 11px;
   font-weight: 600;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   line-height: 1.3;
 }
 
-.chatmuse-spend-strip-secondary {
+.goosemuse-spend-strip-secondary {
   font-size: 10px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   line-height: 1.3;
 }
 
-.chatmuse-spend-cache-saved { color: #34d399; }
-.chatmuse-spend-cache-overhead { color: #fbbf24; }
+.goosemuse-spend-cache-saved { color: #34d399; }
+.goosemuse-spend-cache-overhead { color: #fbbf24; }
 
 /* ─── Profiling ───────────────────────────────────────────────── */
 
-.chatmuse-profiling {
-  border: 1px solid var(--chatmuse-border);
+.goosemuse-profiling {
+  border: 1px solid var(--goosemuse-border);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
 }
 
-.chatmuse-profiling-log,
-.chatmuse-profiling-summary {
+.goosemuse-profiling-log,
+.goosemuse-profiling-summary {
   display: grid;
   gap: 8px;
   padding: 0 14px 14px;
 }
 
-.chatmuse-profiling-log {
+.goosemuse-profiling-log {
   max-height: 200px;
   overflow-y: auto;
 }
 
-.chatmuse-profiling-entry {
+.goosemuse-profiling-entry {
   display: grid;
   grid-template-columns: minmax(68px, auto) 1fr;
   gap: 10px;
@@ -1070,52 +1070,52 @@
   line-height: 1.5;
 }
 
-.chatmuse-profiling-elapsed {
-  color: var(--chatmuse-accent-soft);
+.goosemuse-profiling-elapsed {
+  color: var(--goosemuse-accent-soft);
   font-weight: 600;
 }
 
-.chatmuse-profiling-message {
-  color: var(--chatmuse-muted);
+.goosemuse-profiling-message {
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-profiling-stage {
+.goosemuse-profiling-stage {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 4px 10px;
   align-items: baseline;
 }
 
-.chatmuse-profiling-stage-label {
+.goosemuse-profiling-stage-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-profiling-stage-duration {
+.goosemuse-profiling-stage-duration {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   font-size: 11px;
-  color: var(--chatmuse-accent-soft);
+  color: var(--goosemuse-accent-soft);
   white-space: nowrap;
 }
 
-.chatmuse-profiling-stage-detail {
+.goosemuse-profiling-stage-detail {
   grid-column: 1 / -1;
   font-size: 11px;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   word-break: break-word;
 }
 
 /* ─── Debug Inspector ────────────────────────────────────────── */
 
-.chatmuse-debug-inspector {
-  border: 1px solid var(--chatmuse-border);
+.goosemuse-debug-inspector {
+  border: 1px solid var(--goosemuse-border);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
 }
 
-.chatmuse-debug-summary {
+.goosemuse-debug-summary {
   cursor: pointer;
   list-style: none;
   padding: 12px 14px;
@@ -1123,91 +1123,91 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
   transition: color 150ms ease;
 }
 
-.chatmuse-debug-summary:hover {
-  color: var(--chatmuse-text);
+.goosemuse-debug-summary:hover {
+  color: var(--goosemuse-text);
 }
 
-.chatmuse-debug-summary::-webkit-details-marker {
+.goosemuse-debug-summary::-webkit-details-marker {
   display: none;
 }
 
-.chatmuse-debug-content {
+.goosemuse-debug-content {
   display: grid;
   gap: 10px;
   padding: 0 14px 14px;
 }
 
-.chatmuse-debug-section {
+.goosemuse-debug-section {
   display: grid;
   gap: 6px;
 }
 
-.chatmuse-debug-label {
+.goosemuse-debug-label {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--chatmuse-muted);
+  color: var(--goosemuse-muted);
 }
 
-.chatmuse-debug-text {
+.goosemuse-debug-text {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
   font-size: 12px;
-  color: var(--chatmuse-text);
+  color: var(--goosemuse-text);
   padding: 10px;
   border-radius: 10px;
-  border: 1px solid var(--chatmuse-border);
+  border: 1px solid var(--goosemuse-border);
   background: rgba(0, 0, 0, 0.2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   max-height: 280px;
   overflow-y: auto;
 }
 
-.chatmuse-debug-text::-webkit-scrollbar {
+.goosemuse-debug-text::-webkit-scrollbar {
   width: 5px;
 }
 
-.chatmuse-debug-text::-webkit-scrollbar-track {
+.goosemuse-debug-text::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.chatmuse-debug-text::-webkit-scrollbar-thumb {
+.goosemuse-debug-text::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
 
 /* ─── Scroll Lock ────────────────────────────────────────────── */
 
-body.chatmuse-scroll-lock {
+body.goosemuse-scroll-lock {
   overflow: hidden !important;
 }
 
 /* ─── Spinner ────────────────────────────────────────────────── */
 
-.chatmuse-spinner {
+.goosemuse-spinner {
   display: inline-block;
   width: 12px;
   height: 12px;
   border: 1.5px solid rgba(255, 255, 255, 0.1);
-  border-top-color: var(--chatmuse-accent);
+  border-top-color: var(--goosemuse-accent);
   border-radius: 50%;
-  animation: chatmuse-spin 0.7s linear infinite;
+  animation: goosemuse-spin 0.7s linear infinite;
 }
 
 /* ─── Animations ─────────────────────────────────────────────── */
 
-@keyframes chatmuse-fade-in {
+@keyframes goosemuse-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-@keyframes chatmuse-slide-up {
+@keyframes goosemuse-slide-up {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -1218,7 +1218,7 @@ body.chatmuse-scroll-lock {
   }
 }
 
-@keyframes chatmuse-slide-down {
+@keyframes goosemuse-slide-down {
   from {
     opacity: 0;
     transform: translateY(-6px);
@@ -1229,36 +1229,36 @@ body.chatmuse-scroll-lock {
   }
 }
 
-@keyframes chatmuse-spin {
+@keyframes goosemuse-spin {
   to { transform: rotate(360deg); }
 }
 
 /* ─── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 720px) {
-  .chatmuse-inline-panel .chatmuse-inline-panel-body {
+  .goosemuse-inline-panel .goosemuse-inline-panel-body {
     max-height: 45vh;
   }
 
-  .chatmuse-inline-panel-header {
+  .goosemuse-inline-panel-header {
     flex-wrap: wrap;
   }
 
-  .chatmuse-inline-panel-meta {
+  .goosemuse-inline-panel-meta {
     text-align: left;
   }
 
-  .chatmuse-overlay-shell {
+  .goosemuse-overlay-shell {
     padding: 8px;
   }
 
-  .chatmuse-overlay-panel {
+  .goosemuse-overlay-panel {
     padding: 14px;
     max-height: 92vh;
     border-radius: 12px;
   }
 
-  .chatmuse-title {
+  .goosemuse-title {
     font-size: 17px;
   }
 }
