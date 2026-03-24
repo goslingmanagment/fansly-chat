@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GooseMuse — Руководство</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #F9F5EF;
+      --bg-warm: #F5EDE3;
+      --bg-card: #FFFFFF;
+      --bg-code: #F0EBE3;
+      --bg-aside: #FFF8F0;
+      --text: #2D2015;
+      --text-secondary: #6B5B4E;
+      --text-muted: #9A8B7C;
+      --accent: #C4704B;
+      --accent-hover: #A85D3B;
+      --accent-soft: #E8A882;
+      --accent-bg: rgba(196, 112, 75, 0.08);
+      --accent-bg-hover: rgba(196, 112, 75, 0.12);
+      --border: rgba(45, 32, 21, 0.08);
+      --border-strong: rgba(45, 32, 21, 0.15);
+      --shadow-sm: 0 1px 3px rgba(45, 32, 21, 0.04);
+      --shadow-md: 0 4px 16px rgba(45, 32, 21, 0.06);
+      --shadow-lg: 0 8px 32px rgba(45, 32, 21, 0.08);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --blue: #4A7AE3;
+      --blue-bg: rgba(74, 122, 227, 0.08);
+      --green: #2D8A5E;
+      --green-bg: rgba(45, 138, 94, 0.08);
+      --amber: #B8860B;
+      --amber-bg: rgba(184, 134, 11, 0.08);
+      --red: #C0392B;
+      --red-bg: rgba(192, 57, 43, 0.08);
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 80px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ─── Navigation ─────────────────────────────────────────────── */
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(249, 245, 239, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+    }
+
+    .nav-inner {
+      max-width: 1080px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      height: 56px;
+      gap: 32px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+
+    .nav-brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+    }
+
+    .nav-brand span {
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    .nav-links::-webkit-scrollbar { display: none; }
+
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 999px;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+      background: var(--accent-bg);
+    }
+
+    .nav-install {
+      margin-left: auto;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--accent);
+      padding: 5px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(196, 112, 75, 0.2);
+      background: rgba(196, 112, 75, 0.05);
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .nav-install:hover {
+      background: rgba(196, 112, 75, 0.1);
+      border-color: rgba(196, 112, 75, 0.3);
+    }
+
+    .nav-version {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--accent-bg);
+      padding: 3px 10px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+
+    /* ─── Hero ───────────────────────────────────────────────────── */
+
+    .hero {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 80px 24px 60px;
+      text-align: center;
+    }
+
+    .hero-mascot {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      object-fit: cover;
+      filter: drop-shadow(0 8px 24px rgba(196, 112, 75, 0.15));
+      margin-bottom: 28px;
+    }
+
+    .hero h1 {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .hero h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .hero-sub {
+      font-size: 17px;
+      color: var(--text-secondary);
+      max-width: 540px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+
+    .hero-badges {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+    }
+
+    .badge-accent {
+      background: var(--accent-bg);
+      border-color: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    /* ─── Main Layout ────────────────────────────────────────────── */
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    .section {
+      margin-bottom: 64px;
+    }
+
+    .section-header {
+      margin-bottom: 32px;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      background: var(--accent-bg);
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    h3 {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    h4 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .section-desc {
+      font-size: 15px;
+      color: var(--text-secondary);
+      max-width: 640px;
+      line-height: 1.6;
+    }
+
+    /* ─── Feature Cards ──────────────────────────────────────────── */
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      transition: box-shadow 0.2s, border-color 0.2s;
+    }
+
+    .feature-card:hover {
+      box-shadow: var(--shadow-md);
+      border-color: var(--border-strong);
+    }
+
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      margin-bottom: 16px;
+    }
+
+    .feature-icon.reply { background: var(--blue-bg); color: var(--blue); }
+    .feature-icon.polish { background: var(--green-bg); color: var(--green); }
+    .feature-icon.ping { background: var(--amber-bg); color: var(--amber); }
+    .feature-icon.summary { background: var(--accent-bg); color: var(--accent); }
+    .feature-icon.help { background: rgba(139, 92, 246, 0.08); color: #7C3AED; }
+    .feature-icon.review { background: var(--red-bg); color: var(--red); }
+    .feature-icon.compare { background: rgba(20, 184, 166, 0.08); color: #0D9488; }
+
+    .feature-card h3 {
+      font-size: 17px;
+      margin-bottom: 6px;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+
+    .feature-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--bg-warm);
+      color: var(--text-secondary);
+    }
+
+    .tag-blue { background: var(--blue-bg); color: var(--blue); }
+    .tag-green { background: var(--green-bg); color: var(--green); }
+    .tag-amber { background: var(--amber-bg); color: var(--amber); }
+
+    /* ─── Feature Details ────────────────────────────────────────── */
+
+    .feature-detail {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      margin-bottom: 20px;
+    }
+
+    .feature-detail-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .feature-detail-header .feature-icon {
+      margin-bottom: 0;
+      flex-shrink: 0;
+    }
+
+    .feature-detail-header h3 {
+      margin-bottom: 2px;
+      font-size: 19px;
+    }
+
+    .feature-detail-header .subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .feature-detail p {
+      margin-bottom: 12px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    .feature-detail p strong {
+      color: var(--text);
+    }
+
+    .feature-detail ul,
+    .feature-detail ol {
+      margin: 0 0 16px 20px;
+      color: var(--text-secondary);
+    }
+
+    .feature-detail li {
+      margin-bottom: 6px;
+      line-height: 1.6;
+    }
+
+    .feature-detail li strong {
+      color: var(--text);
+    }
+
+    /* ─── Info Boxes ─────────────────────────────────────────────── */
+
+    .info-box {
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      margin: 16px 0;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .info-box strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .info-box.note {
+      background: var(--blue-bg);
+      border-left: 3px solid var(--blue);
+      color: #2C5282;
+    }
+
+    .info-box.tip {
+      background: var(--green-bg);
+      border-left: 3px solid var(--green);
+      color: #22543D;
+    }
+
+    .info-box.warning {
+      background: var(--amber-bg);
+      border-left: 3px solid var(--amber);
+      color: #744210;
+    }
+
+    .info-box.important {
+      background: var(--accent-bg);
+      border-left: 3px solid var(--accent);
+      color: #7B341E;
+    }
+
+    /* ─── Steps ──────────────────────────────────────────────────── */
+
+    .steps-list {
+      list-style: none;
+      counter-reset: step;
+    }
+
+    .steps-list li {
+      counter-increment: step;
+      position: relative;
+      padding-left: 48px;
+      margin-bottom: 24px;
+      min-height: 36px;
+    }
+
+    .steps-list li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 32px;
+      height: 32px;
+      background: var(--accent);
+      color: white;
+      border-radius: 50%;
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .steps-list li h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .steps-list li p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ─── Settings Table ─────────────────────────────────────────── */
+
+    .settings-group {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .settings-group-title {
+      font-size: 14px;
+      font-weight: 600;
+      padding: 14px 20px;
+      background: var(--bg-warm);
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .setting-row {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 16px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+
+    .setting-row:last-child {
+      border-bottom: none;
+    }
+
+    .setting-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      padding-top: 1px;
+    }
+
+    .setting-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .setting-desc code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent);
+    }
+
+    /* ─── Model Table ────────────────────────────────────────────── */
+
+    .model-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .model-table th {
+      text-align: left;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      padding: 10px 16px;
+      border-bottom: 2px solid var(--border-strong);
+    }
+
+    .model-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    .model-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .model-table td:first-child {
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .model-table code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent);
+    }
+
+    .model-rec {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--green-bg);
+      color: var(--green);
+      padding: 2px 7px;
+      border-radius: 999px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* ─── Flow Diagram ───────────────────────────────────────────── */
+
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 20px;
+      background: var(--bg-warm);
+      border-radius: var(--radius-md);
+      margin: 16px 0;
+    }
+
+    .flow-step {
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .flow-arrow {
+      color: var(--text-muted);
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    /* ─── Keyboard Shortcuts ─────────────────────────────────────── */
+
+    kbd {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      padding: 2px 7px;
+      border-radius: 5px;
+      color: var(--text);
+    }
+
+    /* ─── Divider ────────────────────────────────────────────────── */
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 48px 0;
+    }
+
+    /* ─── Tone Pills ─────────────────────────────────────────────── */
+
+    .tone-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .tone-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+    }
+
+    .tone-pill .emoji {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .tone-pill .name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .tone-pill .desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    /* ─── Comparison Table ───────────────────────────────────────── */
+
+    .cmp-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .cmp-card {
+      border-radius: var(--radius-md);
+      padding: 20px;
+      border: 1px solid var(--border);
+    }
+
+    .cmp-card.quick {
+      background: var(--blue-bg);
+      border-color: rgba(74, 122, 227, 0.15);
+    }
+
+    .cmp-card.deep {
+      background: var(--accent-bg);
+      border-color: rgba(196, 112, 75, 0.15);
+    }
+
+    .cmp-card h4 {
+      margin-bottom: 8px;
+    }
+
+    .cmp-card ul {
+      list-style: none;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .cmp-card li {
+      padding: 3px 0;
+    }
+
+    .cmp-card li::before {
+      content: '  ';
+      margin-right: 4px;
+    }
+
+    .cmp-card.quick li::before { content: '\2022 '; color: var(--blue); }
+    .cmp-card.deep li::before { content: '\2022 '; color: var(--accent); }
+
+    /* ─── Security Section ───────────────────────────────────────── */
+
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+    }
+
+    .security-item {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+
+    .security-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      background: var(--green-bg);
+      color: var(--green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .security-item h4 {
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+
+    .security-item p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* ─── FAQ ────────────────────────────────────────────────────── */
+
+    .faq-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+
+    .faq-q {
+      padding: 16px 20px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+      transition: background 0.15s;
+    }
+
+    .faq-q:hover {
+      background: var(--accent-bg);
+    }
+
+    .faq-q::after {
+      content: '+';
+      font-size: 18px;
+      font-weight: 300;
+      color: var(--text-muted);
+      transition: transform 0.2s;
+    }
+
+    .faq-item.open .faq-q::after {
+      content: '\2212';
+    }
+
+    .faq-a {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .faq-item.open .faq-a {
+      max-height: 600px;
+    }
+
+    .faq-a-inner {
+      padding: 0 20px 16px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────── */
+
+    .footer {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 24px 24px 48px;
+      text-align: center;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .footer-brand img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+    }
+
+    .footer-brand span {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .footer p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Responsive ─────────────────────────────────────────────── */
+
+    @media (max-width: 768px) {
+      .hero { padding: 48px 20px 40px; }
+      .hero h1 { font-size: 28px; }
+      .hero-sub { font-size: 15px; }
+      h2 { font-size: 24px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .setting-row { grid-template-columns: 1fr; gap: 4px; }
+      .cmp-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .feature-detail { padding: 20px; }
+      .flow { flex-direction: column; align-items: flex-start; }
+      .flow-arrow { transform: rotate(90deg); align-self: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Navigation ──────────────────────────────────────────────────── -->
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">
+      <img src="mascot.png" alt="GooseMuse">
+      <span>GooseMuse</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Функции</a>
+      <a href="#features-detail">Подробно</a>
+      <a href="#workflow">Как работает</a>
+      <a href="#install">Установка</a>
+      <a href="#settings">Настройки</a>
+      <a href="#models">Модели</a>
+      <a href="#security">Безопасность</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <a href="/" class="nav-install">Установить</a>
+    <span class="nav-version">v1.0.1</span>
+  </div>
+</nav>
+
+<!-- ─── Hero ─────────────────────────────────────────────────────────── -->
+
+<section class="hero">
+  <img src="mascot.png" alt="GooseMuse" class="hero-mascot">
+  <h1>Руководство по <em>GooseMuse</em></h1>
+  <p class="hero-sub">
+    AI-ассистент для чаттеров на Fansly. Генерирует ответы, анализирует фанов,
+    оценивает качество чатов и помогает вести диалоги быстрее и интереснее.
+  </p>
+  <div class="hero-badges">
+    <span class="badge badge-accent">Firefox Extension</span>
+    <span class="badge">Claude AI</span>
+    <span class="badge">Fansly.com</span>
+    <span class="badge">Gosling Agency</span>
+  </div>
+</section>
+
+<!-- ─── Features Overview ────────────────────────────────────────────── -->
+
+<div class="container">
+
+<section id="features" class="section">
+  <div class="section-header">
+    <span class="section-label">Обзор</span>
+    <h2>Функции</h2>
+    <p class="section-desc">Семь инструментов для работы с чатами. Ничего не отправляется автоматически — вы всегда контролируете финальное сообщение.</p>
+  </div>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon reply">&#9889;</div>
+      <h3>Reply</h3>
+      <p>Генерация ответа на основе последних сообщений и личности модели. Текст стримится в реальном времени и вставляется в поле ввода по нажатию.</p>
+      <div class="feature-meta">
+        <span class="tag tag-blue">~100 сообщений</span>
+        <span class="tag">Insert</span>
+        <span class="tag">Multi</span>
+        <span class="tag">Regenerate</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon polish">&#9999;&#65039;</div>
+      <h3>Polish (Fix)</h3>
+      <p>Улучшает ваш черновик, сохраняя намерение и эмоциональный тон. Подтягивает формулировки, ритм и стиль под контекст разговора.</p>
+      <div class="feature-meta">
+        <span class="tag tag-green">~25 сообщений</span>
+        <span class="tag">Insert</span>
+        <span class="tag">Draft required</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon ping">&#128276;</div>
+      <h3>Ping</h3>
+      <p>Сообщение-реактивация для молчащих фанов. Учитывает сегмент: был активный — ушёл, или вообще не общался.</p>
+      <div class="feature-meta">
+        <span class="tag tag-amber">Сегментация</span>
+        <span class="tag">Insert</span>
+        <span class="tag">Regenerate</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon summary">&#128203;</div>
+      <h3>Fan Summary (Scan)</h3>
+      <p>Подробное досье на фана: факты, психологический портрет, стадия, финансы, открытые петли, стратегия. На русском.</p>
+      <div class="feature-meta">
+        <span class="tag tag-amber">~1000 сообщений</span>
+        <span class="tag">Кэш</span>
+        <span class="tag">Hub Sync</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon help">&#127891;</div>
+      <h3>Help Me</h3>
+      <p>Режим коучинга: анализ ситуации, что идёт хорошо, ошибки, и два варианта ответа — engaging и flirty.</p>
+      <div class="feature-meta">
+        <span class="tag">Coaching</span>
+        <span class="tag">2 варианта</span>
+        <span class="tag">Insert</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon review">&#11088;</div>
+      <h3>Chat Review</h3>
+      <p>Оценка качества чата от 1 до 10. Проверка персоны, вовлечённости, ошибок, монетизации и работы с фаном.</p>
+      <div class="feature-meta">
+        <span class="tag tag-amber">~1000 сообщений</span>
+        <span class="tag">Рейтинг</span>
+        <span class="tag">Read-only</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon compare">&#128256;</div>
+      <h3>Compare</h3>
+      <p>Генерация нескольких вариантов ответа одновременно. Сравнивайте варианты от разных личностей или моделей бок о бок.</p>
+      <div class="feature-meta">
+        <span class="tag">Side-by-side</span>
+        <span class="tag">Multi-card</span>
+        <span class="tag">Insert</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Detailed Features ────────────────────────────────────────────── -->
+
+<section id="features-detail" class="section">
+  <div class="section-header">
+    <span class="section-label">Подробно</span>
+    <h2>Описание каждой функции</h2>
+    <p class="section-desc">Детальное описание всех возможностей, режимов и ограничений каждого инструмента.</p>
+  </div>
+
+  <!-- Reply -->
+  <div class="feature-detail" id="detail-reply">
+    <div class="feature-detail-header">
+      <div class="feature-icon reply">&#9889;</div>
+      <div>
+        <h3>Reply</h3>
+        <div class="subtitle">Быстрый ответ на основе контекста</div>
+      </div>
+    </div>
+
+    <p>Загружает последние ~100 сообщений из чата, данные о тратах фана и подписке, строит промпт с личностью модели и отправляет в Claude. Ответ стримится в реальном времени — вы видите текст по мере генерации.</p>
+
+    <p><strong>Мульти-режим:</strong> если включён переключатель <strong>Multi</strong>, Claude может разбить ответ на несколько сообщений маркером <code>[NEXT]</code>. Каждая часть получает свою кнопку Insert, можно вставлять в любом порядке.</p>
+
+    <p><strong>Тоны:</strong> перед генерацией можно выбрать тональность ответа — это модифицирует инструкции для Claude.</p>
+
+    <div class="tone-grid">
+      <div class="tone-pill">
+        <div class="emoji">&#128536;</div>
+        <div>
+          <div class="name">Flirty</div>
+          <div class="desc">Игривый, романтичный тон</div>
+        </div>
+      </div>
+      <div class="tone-pill">
+        <div class="emoji">&#128176;</div>
+        <div>
+          <div class="name">Upsell</div>
+          <div class="desc">Мягкий подвод к покупке</div>
+        </div>
+      </div>
+      <div class="tone-pill">
+        <div class="emoji">&#128293;</div>
+        <div>
+          <div class="name">Spicy</div>
+          <div class="desc">Откровенный, горячий</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-box tip">
+      <strong>Совет</strong>
+      Кнопка Regenerate позволяет получить альтернативный вариант без перезагрузки сообщений. Таймаут: 60 секунд.
+    </div>
+  </div>
+
+  <!-- Polish -->
+  <div class="feature-detail" id="detail-polish">
+    <div class="feature-detail-header">
+      <div class="feature-icon polish">&#9999;&#65039;</div>
+      <div>
+        <h3>Polish (Fix)</h3>
+        <div class="subtitle">Улучшение вашего черновика</div>
+      </div>
+    </div>
+
+    <p>Вы пишете черновик сообщения в поле ввода Fansly, нажимаете кнопку <strong>Fix</strong>, и Claude переписывает его, сохраняя:</p>
+    <ul>
+      <li><strong>Намерение</strong> — если вы обещали что-то или согласились, это останется</li>
+      <li><strong>Эмоциональный тон</strong> — тёплый черновик станет тёплым ответом, не холодным</li>
+      <li><strong>Факты</strong> — даты, имена, детали не будут выдуманы или изменены</li>
+    </ul>
+
+    <p>При этом улучшаются формулировки, ритм, естественность и психологическая точность — ответ адаптируется под конкретного фана на основе последних ~25 сообщений.</p>
+
+    <div class="info-box note">
+      <strong>Заметка</strong>
+      Черновик можно писать на любом языке (например, на русском) — Claude адаптирует его под язык фана. Разбиение [NEXT] для Polish не поддерживается.
+    </div>
+  </div>
+
+  <!-- Ping -->
+  <div class="feature-detail" id="detail-ping">
+    <div class="feature-detail-header">
+      <div class="feature-icon ping">&#128276;</div>
+      <div>
+        <h3>Ping</h3>
+        <div class="subtitle">Реактивация неактивных фанов</div>
+      </div>
+    </div>
+
+    <p>Автоматически определяет сегмент фана и генерирует соответствующее сообщение:</p>
+
+    <div class="cmp-grid">
+      <div class="cmp-card quick">
+        <h4>Сегмент A: Был активный &rarr; ушёл</h4>
+        <ul>
+          <li>3+ сообщений от фана</li>
+          <li>Последнее сообщение &gt; 5 дней назад</li>
+          <li>Ссылки на прошлые темы</li>
+          <li>Показывает, что вы помните его</li>
+        </ul>
+      </div>
+      <div class="cmp-card deep">
+        <h4>Сегмент B: Никогда не общался</h4>
+        <ul>
+          <li>&lt; 3 сообщений от фана</li>
+          <li>Тёплое первое впечатление</li>
+          <li>Без давления</li>
+          <li>Лёгкий открывающий вопрос</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="info-box warning">
+      <strong>Блокировка</strong>
+      Если фан активен (3+ сообщений и последнее &lt; 5 дней назад), Ping заблокирован — расширение предложит использовать Reply.
+    </div>
+  </div>
+
+  <!-- Fan Summary -->
+  <div class="feature-detail" id="detail-summary">
+    <div class="feature-detail-header">
+      <div class="feature-icon summary">&#128203;</div>
+      <div>
+        <h3>Fan Summary (Scan)</h3>
+        <div class="subtitle">Полное досье на фана</div>
+      </div>
+    </div>
+
+    <p>Загружает до ~1000 сообщений и генерирует подробный профиль фана на <strong>русском языке</strong>. Результат включает:</p>
+
+    <ul>
+      <li><strong>Досье</strong> — имя, возраст, локация, работа, интересы, хобби, предпочтения</li>
+      <li><strong>Психологический портрет</strong> — стиль привязанности, эмоциональные потребности, восприятие отношений</li>
+      <li><strong>Стадия и траектория</strong> — new &rarr; warming up &rarr; loyal &rarr; cooling off &rarr; churning</li>
+      <li><strong>Динамика коммуникации</strong> — стиль, паттерны, триггеры, реакция на молчание и апселлы</li>
+      <li><strong>Финансовый профиль</strong> — классификация трат, тренды, что триггерит покупки, риск оттока</li>
+      <li><strong>Открытые петли</strong> — невыполненные обещания, неотвеченные просьбы, будущие планы</li>
+      <li><strong>Стратегия</strong> — лучшие крючки, ошибки которых стоит избегать, рекомендованный подход</li>
+    </ul>
+
+    <div class="info-box tip">
+      <strong>Кэширование</strong>
+      Результат кэшируется для каждого чата. При повторном запуске, если личность не изменилась, возвращается кэшированная версия мгновенно. Минимум: 30 сообщений в чате.
+    </div>
+
+    <div class="info-box note">
+      <strong>Agency Hub</strong>
+      Если настроен Agency Hub, сгенерированное досье автоматически синхронизируется с внешней системой.
+    </div>
+  </div>
+
+  <!-- Help Me -->
+  <div class="feature-detail" id="detail-help">
+    <div class="feature-detail-header">
+      <div class="feature-icon help">&#127891;</div>
+      <div>
+        <h3>Help Me</h3>
+        <div class="subtitle">Режим коучинга</div>
+      </div>
+    </div>
+
+    <p>Анализирует последние ~100 сообщений и выдаёт три блока:</p>
+
+    <ol>
+      <li><strong>Coaching</strong> — анализ ситуации: что идёт хорошо, какие ошибки допущены, какой следующий ход лучше всего</li>
+      <li><strong>Engaging</strong> — вариант сообщения для построения раппорта, вовлечения в разговор (с кнопкой Insert)</li>
+      <li><strong>Flirty</strong> — более соблазнительный вариант сообщения (с кнопкой Insert)</li>
+    </ol>
+
+    <p>Оба варианта сообщений поддерживают мульти-сплит и имеют свои кнопки Insert.</p>
+
+    <div class="info-box important">
+      <strong>Важно</strong>
+      Help Me не имеет кнопки Regenerate. Чтобы получить новый анализ, закройте оверлей и запустите заново.
+    </div>
+  </div>
+
+  <!-- Chat Review -->
+  <div class="feature-detail" id="detail-review">
+    <div class="feature-detail-header">
+      <div class="feature-icon review">&#11088;</div>
+      <div>
+        <h3>Chat Review</h3>
+        <div class="subtitle">Оценка качества чата</div>
+      </div>
+    </div>
+
+    <p>Загружает до ~1000 сообщений и оценивает работу чаттера по шкале от 1 до 10:</p>
+
+    <ul>
+      <li><strong>1–2:</strong> Плохо — грубые ошибки, потеря персоны</li>
+      <li><strong>3–4:</strong> Ниже среднего — заметные проблемы</li>
+      <li><strong>5–6:</strong> Среднее — базовое выполнение работы</li>
+      <li><strong>7–8:</strong> Хорошо — уверенная работа с минимумом ошибок</li>
+      <li><strong>9–10:</strong> Отлично — превосходная работа</li>
+    </ul>
+
+    <p>Оценка покрывает: <strong>соответствие персоне</strong>, <strong>качество диалога</strong>, <strong>конкретные ошибки</strong>, <strong>осведомлённость о монетизации</strong> и <strong>работу с фаном</strong>.</p>
+
+    <div class="info-box note">
+      <strong>Только чтение</strong>
+      Chat Review — аналитический инструмент. Кнопки Insert нет — это оценка и рекомендации, а не генерация ответа. Минимум: 30 сообщений.
+    </div>
+  </div>
+
+  <!-- Compare -->
+  <div class="feature-detail" id="detail-compare">
+    <div class="feature-detail-header">
+      <div class="feature-icon compare">&#128256;</div>
+      <div>
+        <h3>Compare</h3>
+        <div class="subtitle">Несколько вариантов бок о бок</div>
+      </div>
+    </div>
+
+    <p>Генерирует несколько карточек ответов одновременно. Каждая карточка стримится независимо в свою вкладку. Вы видите варианты бок о бок и можете вставить любой из них.</p>
+
+    <p>Полезен когда хочется сравнить разные подходы к ответу или посмотреть как разные личности отвечают на одну ситуацию.</p>
+
+    <div class="info-box tip">
+      <strong>Совет</strong>
+      Каждая карточка показывает статус: загрузка, завершено или ошибка. Можно вставить ответ из любой карточки.
+    </div>
+  </div>
+</section>
+
+<!-- ─── How It Works ─────────────────────────────────────────────────── -->
+
+<section id="workflow" class="section">
+  <div class="section-header">
+    <span class="section-label">Архитектура</span>
+    <h2>Как это работает</h2>
+    <p class="section-desc">Расширение перехватывает сессию Fansly, загружает сообщения через API, отправляет в Claude и стримит ответ в оверлей.</p>
+  </div>
+
+  <div class="flow">
+    <div class="flow-step">&#128073; Нажатие кнопки</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step">&#128228; Загрузка сообщений</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step">&#128176; Данные о тратах</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step">&#128221; Сборка промпта</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step">&#129302; Claude API</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step">&#128172; Стриминг ответа</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step">&#10004;&#65039; Insert в поле ввода</div>
+  </div>
+
+  <div class="feature-detail" style="margin-top: 24px;">
+    <h4>Ключевые принципы</h4>
+    <ul>
+      <li><strong>Ничего не отправляется автоматически.</strong> Расширение вставляет текст в поле ввода, но отправляете вы сами через кнопку Fansly.</li>
+      <li><strong>Перехват сессии.</strong> Расширение захватывает заголовки авторизации из запросов к Fansly API. Заголовки хранятся только в памяти — при перезагрузке расширения или браузера они теряются.</li>
+      <li><strong>Контекст на вкладку.</strong> Каждая вкладка браузера отслеживается отдельно: аккаунт, чат, активная операция. Если переключились на другой чат — старые результаты не применяются.</li>
+      <li><strong>Стриминг через SSE.</strong> Текст от Claude приходит чанками через Server-Sent Events, буферизуется каждые 50 мс и рендерится в оверлее без мерцания.</li>
+      <li><strong>Кэширование промптов.</strong> Системные промпты кэшируются в API Anthropic на 1 час, что значительно снижает стоимость повторных запросов.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ─── Installation ─────────────────────────────────────────────────── -->
+
+<section id="install" class="section">
+  <div class="section-header">
+    <span class="section-label">Начало работы</span>
+    <h2>Установка и настройка</h2>
+    <p class="section-desc">От установки до первого сгенерированного ответа — пять шагов.</p>
+  </div>
+
+  <div class="feature-detail">
+    <ol class="steps-list">
+      <li>
+        <h4>Установите расширение</h4>
+        <p>Откройте страницу установки в Firefox и нажмите «Установить GooseMuse». Разрешите установку во всплывающем окне. Обновления будут приходить автоматически.</p>
+      </li>
+      <li>
+        <h4>Откройте настройки</h4>
+        <p>Нажмите на иконку GooseMuse в панели Firefox &rarr; «Open Settings». Или правый клик на иконку &rarr; «Manage Extension» &rarr; «Preferences».</p>
+      </li>
+      <li>
+        <h4>Введите Claude API Key</h4>
+        <p>Получите ключ на <strong>console.anthropic.com</strong> и вставьте в поле «Claude API Key». Ключ хранится локально и отправляется только в API Anthropic.</p>
+      </li>
+      <li>
+        <h4>Создайте личность</h4>
+        <p>В разделе «Personalities» создайте профиль модели — имя и инструкции по тону, стилю, границам. Например: <em>«Luna: игривая, флиртует, пишет короткими сообщениями, использует эмодзи»</em>.</p>
+      </li>
+      <li>
+        <h4>Привяжите аккаунт</h4>
+        <p>Перейдите на Fansly и откройте любой чат. Расширение обнаружит аккаунт и покажет баннер-маппинг — выберите личность для этого аккаунта. Готово!</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ─── Settings ──────────────────────────────────────────────────────── -->
+
+<section id="settings" class="section">
+  <div class="section-header">
+    <span class="section-label">Конфигурация</span>
+    <h2>Настройки</h2>
+    <p class="section-desc">Все настройки хранятся локально в browser.storage. Полное описание каждого параметра.</p>
+  </div>
+
+  <!-- API -->
+  <div class="settings-group">
+    <div class="settings-group-title">&#128273; API</div>
+    <div class="setting-row">
+      <div class="setting-name">Claude API Key</div>
+      <div class="setting-desc">Ключ доступа к Anthropic API. Обязательное поле. Хранится локально, отправляется только на <code>api.anthropic.com</code>. Никогда не логируется.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Agency Hub URL</div>
+      <div class="setting-desc">Базовый URL внешнего хаба для синхронизации досье фанов. Опционально. Пример: <code>https://hub.example.com</code></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Agency Hub API Key</div>
+      <div class="setting-desc">Ключ аутентификации для Agency Hub. Требуется только если указан Hub URL.</div>
+    </div>
+  </div>
+
+  <!-- Message Counts -->
+  <div class="settings-group">
+    <div class="settings-group-title">&#128172; Количество сообщений</div>
+    <div class="setting-row">
+      <div class="setting-name">Quick Features</div>
+      <div class="setting-desc">Reply, Help Me. По умолчанию: <code>100</code>. Диапазон: 5–200. Больше сообщений = больше контекста, но дороже.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Polish (Fix)</div>
+      <div class="setting-desc">Improve Draft. По умолчанию: <code>25</code>. Диапазон: 5–200. Хватает малого контекста, чтобы понять стиль диалога.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Ping</div>
+      <div class="setting-desc">Отдельная настройка для пинга. По умолчанию: <code>100</code>. Диапазон: 5–200.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Deep Features</div>
+      <div class="setting-desc">Summary, Chat Review. По умолчанию: <code>1000</code>. Диапазон: 100–1000. Для полного анализа нужна глубокая история.</div>
+    </div>
+  </div>
+
+  <!-- Personalities -->
+  <div class="settings-group">
+    <div class="settings-group-title">&#128131; Личности</div>
+    <div class="setting-row">
+      <div class="setting-name">Имя</div>
+      <div class="setting-desc">Название личности модели. Отображается в popup и на кнопке в чате. Например: Luna, Lora, Mia.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Инструкции</div>
+      <div class="setting-desc">Свободное текстовое поле с описанием тона, стиля, границ, поведения. Это ядро промпта — от качества инструкций напрямую зависит качество ответов.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Маппинг аккаунтов</div>
+      <div class="setting-desc">Привязка Fansly-аккаунта к личности. Один аккаунт = одна личность. Без маппинга кнопки функций показывают ошибку.</div>
+    </div>
+  </div>
+
+  <!-- Advanced -->
+  <div class="settings-group">
+    <div class="settings-group-title">&#9881;&#65039; Дополнительно</div>
+    <div class="setting-row">
+      <div class="setting-name">Prompt Caching</div>
+      <div class="setting-desc">Включено по умолчанию. Кэширует системные блоки промпта на 1 час, снижая стоимость API на повторных запросах. Рекомендуется не отключать.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Debug Mode</div>
+      <div class="setting-desc">Включает подробное логирование и инспектор промптов в оверлеях ошибок. Полезно для диагностики проблем.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Account Aliases</div>
+      <div class="setting-desc">Дружественные имена для Fansly-аккаунтов вместо числовых ID. Отображаются в popup и настройках.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Models ────────────────────────────────────────────────────────── -->
+
+<section id="models" class="section">
+  <div class="section-header">
+    <span class="section-label">AI-модели</span>
+    <h2>Выбор модели Claude</h2>
+    <p class="section-desc">Каждую функцию можно настроить на свою модель. Баланс качества, скорости и цены.</p>
+  </div>
+
+  <div class="feature-detail">
+    <table class="model-table">
+      <thead>
+        <tr>
+          <th>Модель</th>
+          <th>ID</th>
+          <th>Характеристика</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Claude Sonnet 4.6 <span class="model-rec">default</span></td>
+          <td><code>claude-sonnet-4-6</code></td>
+          <td>Рекомендуемая. Оптимальный баланс качества, скорости и стоимости</td>
+        </tr>
+        <tr>
+          <td>Claude Sonnet 4.5</td>
+          <td><code>claude-sonnet-4-5</code></td>
+          <td>Сбалансированная. Предыдущая версия Sonnet</td>
+        </tr>
+        <tr>
+          <td>Claude Opus 4.6</td>
+          <td><code>claude-opus-4-6</code></td>
+          <td>Лучшее качество. Самая мощная, но дороже и медленнее</td>
+        </tr>
+        <tr>
+          <td>Claude Opus 4.5</td>
+          <td><code>claude-opus-4-5</code></td>
+          <td>Лучшее качество (старше). Предыдущая версия Opus</td>
+        </tr>
+        <tr>
+          <td>Claude Haiku 4.5</td>
+          <td><code>claude-haiku-4-5</code></td>
+          <td>Самая быстрая и дешёвая. Для простых задач и высокого объёма</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="info-box tip">
+    <strong>Рекомендация</strong>
+    Используйте Sonnet для Reply и Help Me (скорость важна), Opus для Summary и Chat Review (качество важнее), Haiku для Polish (простая задача). Настроить можно в разделе «Feature Models» в настройках.
+  </div>
+
+  <div class="feature-detail" style="margin-top: 20px;">
+    <h4>Какая модель используется для чего</h4>
+    <p>По умолчанию все функции используют <strong>Claude Sonnet 4.6</strong>, но вы можете назначить отдельную модель для каждой из пяти функций: Reply, Help Me, Summary, Chat Review и Ping. Polish (Fix) использует ту же модель, что и Reply.</p>
+
+    <div class="cmp-grid" style="margin-top: 16px;">
+      <div class="cmp-card quick">
+        <h4>Быстрые функции</h4>
+        <ul>
+          <li>Reply — генерация ответов</li>
+          <li>Polish — улучшение черновика</li>
+          <li>Help Me — коучинг</li>
+          <li>Ping — реактивация</li>
+        </ul>
+        <p style="font-size: 12px; color: var(--blue); margin-top: 8px;">Таймаут: 60 секунд</p>
+      </div>
+      <div class="cmp-card deep">
+        <h4>Глубокие функции</h4>
+        <ul>
+          <li>Fan Summary — полное досье</li>
+          <li>Chat Review — оценка чата</li>
+        </ul>
+        <p style="font-size: 12px; color: var(--accent); margin-top: 8px;">Таймаут: до 300 секунд</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Security ──────────────────────────────────────────────────────── -->
+
+<section id="security" class="section">
+  <div class="section-header">
+    <span class="section-label">Приватность</span>
+    <h2>Безопасность</h2>
+    <p class="section-desc">Как расширение обращается с вашими данными.</p>
+  </div>
+
+  <div class="security-grid">
+    <div class="security-item">
+      <div class="security-icon">&#128274;</div>
+      <div>
+        <h4>API-ключ</h4>
+        <p>Хранится в browser.storage.local. Отправляется только на api.anthropic.com. Никогда не логируется, не передаётся третьим сторонам.</p>
+      </div>
+    </div>
+    <div class="security-item">
+      <div class="security-icon">&#128736;&#65039;</div>
+      <div>
+        <h4>Сессия Fansly</h4>
+        <p>Заголовки авторизации хранятся только в оперативной памяти. При перезагрузке расширения или браузера — теряются. На диск не пишутся.</p>
+      </div>
+    </div>
+    <div class="security-item">
+      <div class="security-icon">&#128230;</div>
+      <div>
+        <h4>Локальное хранение</h4>
+        <p>Настройки, личности, маппинги и кэш досье хранятся в browser.storage.local. Кэш ограничен 1000 записями с FIFO-вытеснением.</p>
+      </div>
+    </div>
+    <div class="security-item">
+      <div class="security-icon">&#128737;&#65039;</div>
+      <div>
+        <h4>Защита от инъекций</h4>
+        <p>Все пользовательские данные экранируются перед вставкой в промпты. Рендеринг ответов не использует innerHTML для непроверенного контента.</p>
+      </div>
+    </div>
+    <div class="security-item">
+      <div class="security-icon">&#127760;</div>
+      <div>
+        <h4>Минимум разрешений</h4>
+        <p>Расширение запрашивает доступ только к fansly.com, apiv3.fansly.com и api.anthropic.com. Никаких лишних хостов.</p>
+      </div>
+    </div>
+    <div class="security-item">
+      <div class="security-icon">&#128260;</div>
+      <div>
+        <h4>Автообновления</h4>
+        <p>Обновления загружаются с ext.gosling-agency.ru и подписаны для проверки целостности Firefox. Устанавливаются автоматически.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FAQ ────────────────────────────────────────────────────────────── -->
+
+<section id="faq" class="section">
+  <div class="section-header">
+    <span class="section-label">Вопросы</span>
+    <h2>FAQ</h2>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Расширение не видит аккаунт Fansly</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Расширение перехватывает заголовки из запросов к apiv3.fansly.com. Если вы только что установили его — обновите страницу Fansly (F5). Расширению нужно «увидеть» хотя бы один запрос к API, чтобы захватить сессию. Если страница была открыта до установки, сессии ещё нет.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Кнопки показывают ошибку «No personality assigned»</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Необходимо привязать аккаунт к личности. Откройте настройки &rarr; раздел «Account Mappings» &rarr; выберите личность для обнаруженного аккаунта. Или нажмите на баннер маппинга, который появляется в чате.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Summary и Chat Review требуют минимум 30 сообщений</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Это ограничение по дизайну. Для качественного анализа нужна достаточная история переписки. Если в чате меньше 30 сообщений — используйте Reply или Help Me, они работают с любым количеством.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Ответ обрывается на середине</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Возможные причины: таймаут операции (60 сек для быстрых функций), превышение лимита токенов модели, или проблема с сетью. Попробуйте Regenerate. Для глубоких функций (Summary, Review) таймауты значительно выше — до 5 минут на стриминг.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Что такое «Prompt Caching» и стоит ли его отключать?</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Prompt Caching кэширует системные части промпта на стороне Anthropic на 1 час. При повторных запросах с тем же контекстом это значительно снижает стоимость (кэшированные токены дешевле). Отключать не рекомендуется, если нет специфических причин.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Можно ли использовать одну личность для нескольких аккаунтов?</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Да. Одна личность может быть привязана к нескольким Fansly-аккаунтам. Но один аккаунт может быть привязан только к одной личности.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Безопасно ли вводить API-ключ?</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        API-ключ хранится в локальном хранилище браузера и отправляется исключительно на api.anthropic.com в заголовке авторизации. Он не передаётся ни на какие другие серверы, не логируется и не включается в промпты. Но помните: любой, кто имеет доступ к вашему профилю Firefox, теоретически может прочитать хранилище расширения.
+      </div>
+    </div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q">Сколько стоит использование?</div>
+    <div class="faq-a">
+      <div class="faq-a-inner">
+        Расширение само по себе бесплатно. Оплачивается только использование Claude API по тарифам Anthropic. Стоимость зависит от выбранной модели и объёма текста. В оверлее после генерации показывается стоимость каждого запроса. Prompt Caching помогает снизить расходы при повторных запросах.
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- ─── Footer ────────────────────────────────────────────────────────── -->
+
+<footer class="footer">
+  <div class="footer-brand">
+    <img src="mascot.png" alt="GooseMuse">
+    <span>GooseMuse</span>
+  </div>
+  <p>v1.0.1 &middot; Gosling Agency &middot; Powered by Claude</p>
+</footer>
+
+<!-- ─── FAQ Toggle Script ────────────────────────────────────────────── -->
+
+<script>
+  document.querySelectorAll('.faq-q').forEach(function (el) {
+    el.addEventListener('click', function () {
+      this.parentElement.classList.toggle('open');
+    });
+  });
+</script>
+
+</body>
+</html>

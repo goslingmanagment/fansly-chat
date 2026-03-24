@@ -8,11 +8,13 @@ readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"
 readonly EXTENSION_ID="goosemuse@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
+readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
 readonly INSTALL_PAGE_ASSET="$ROOT_DIR/mascot.png"
 readonly LATEST_XPI_NAME="goosemuse-latest.xpi"
 readonly REMOTE_UPDATES_PATH="$REMOTE_DIR/updates.json"
 readonly REMOTE_INDEX_PATH="$REMOTE_DIR/index.html"
 readonly REMOTE_MASCOT_PATH="$REMOTE_DIR/mascot.png"
+readonly REMOTE_GUIDE_PATH="$REMOTE_DIR/guide.html"
 readonly REMOTE_LATEST_XPI_PATH="$REMOTE_DIR/$LATEST_XPI_NAME"
 readonly VERIFY_ATTEMPTS=30
 readonly VERIFY_DELAY_SECONDS=10
@@ -118,6 +120,7 @@ main() {
   require_command shasum
 
   require_file "$INSTALL_PAGE_FILE"
+  require_file "$GUIDE_PAGE_FILE"
   require_file "$INSTALL_PAGE_ASSET"
 
   load_env
@@ -182,6 +185,8 @@ EOF
   remote_tmp_updates="$REMOTE_DIR/.updates.json.upload.$$"
   remote_tmp_index="$REMOTE_DIR/.index.html.upload.$$"
   remote_tmp_mascot="$REMOTE_DIR/.mascot.png.upload.$$"
+  local remote_tmp_guide
+  remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
 
   log "Uploading signed package to ${VPS_HOST}:${REMOTE_DIR}"
   ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR'"
@@ -189,10 +194,11 @@ EOF
   scp "$updates_file" "${VPS_HOST}:${remote_tmp_updates}"
   scp "$INSTALL_PAGE_FILE" "${VPS_HOST}:${remote_tmp_index}"
   scp "$INSTALL_PAGE_ASSET" "${VPS_HOST}:${remote_tmp_mascot}"
+  scp "$GUIDE_PAGE_FILE" "${VPS_HOST}:${remote_tmp_guide}"
 
   ssh "$VPS_HOST" "
     set -euo pipefail
-    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot'
+    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide'
     mv '$remote_tmp_xpi' '$REMOTE_DIR/$xpi_name'
     cp '$REMOTE_DIR/$xpi_name' '$remote_tmp_latest_xpi'
     chmod 644 '$remote_tmp_latest_xpi'
@@ -200,6 +206,7 @@ EOF
     mv '$remote_tmp_updates' '$REMOTE_UPDATES_PATH'
     mv '$remote_tmp_index' '$REMOTE_INDEX_PATH'
     mv '$remote_tmp_mascot' '$REMOTE_MASCOT_PATH'
+    mv '$remote_tmp_guide' '$REMOTE_GUIDE_PATH'
   "
 
   log "Verifying public URLs"
