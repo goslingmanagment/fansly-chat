@@ -4,7 +4,7 @@ import type {
   Settings,
 } from './types.js';
 
-export type FeatureMessageCountBucket = 'quick' | 'ping' | 'improve' | 'deep';
+export type FeatureMessageCountBucket = 'quick' | 'ping' | 'improve' | 'deep' | 'hi';
 export type FeatureTimeoutBucket = 'quick' | 'deep';
 export type FeatureSurfaceKind = 'inline-reply' | 'overlay';
 export type FeaturePromptMode = 'reply' | 'analysis';
@@ -26,6 +26,7 @@ export interface FeaturePolicy {
   supportsReplyTone: boolean;
   requiresDraft: boolean;
   usesPingSegment: boolean;
+  includesEarnings?: boolean;
 }
 
 export const FEATURE_POLICIES = {
@@ -101,6 +102,19 @@ export const FEATURE_POLICIES = {
     requiresDraft: false,
     usesPingSegment: true,
   },
+  'hi-greeting': {
+    messageCountBucket: 'hi',
+    timeoutBucket: 'quick',
+    modelFeature: 'fast-reply',
+    surfaceKind: 'inline-reply',
+    promptMode: 'reply',
+    resultKind: 'reply',
+    supportsReplyMode: false,
+    supportsReplyTone: false,
+    requiresDraft: false,
+    usesPingSegment: false,
+    includesEarnings: false,
+  },
 } as const satisfies Record<FeatureType, FeaturePolicy>;
 
 export function getFeaturePolicy(feature: FeatureType): FeaturePolicy {
@@ -148,6 +162,8 @@ export function resolveFeatureMessageCount(
       return settings.improveMessageCount;
     case 'quick':
       return settings.quickMessageCount;
+    case 'hi':
+      return 25; // fixed: 1 Fansly API page, no user setting
   }
 }
 

@@ -1,6 +1,6 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
-export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping';
+export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers';
@@ -8,7 +8,7 @@ export type FanSubscriptionSource = '/api/v1/messaging/groups' | '/api/v1/subscr
 export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
 export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
-export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft'>;
+export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft' | 'hi-greeting'>;
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
@@ -146,6 +146,7 @@ export interface PromptBuildInput {
   fanSpendingData: string;
   fanSubscriptionData: string;
   fanDisplayName: string;
+  fanBio?: string;
   draftText?: string;
   pingSegment?: PingSegment;
   replyMode?: ReplyMode;
@@ -290,6 +291,7 @@ export interface FanslyAccountResponse {
   id: string;
   username?: string | null;
   displayName?: string | null;
+  about?: string | null;
 }
 
 // ─── Earnings ────────────────────────────────────────────────────────────
@@ -506,6 +508,7 @@ export type UserErrorKey =
   | 'hub_request_failed'
   | 'hub_sync_failed'
   | 'compare_cards_unavailable'
+  | 'hi_too_many_messages'
   | 'insertion_failed'
   | 'unknown_error';
 

@@ -9,3 +9,14 @@ export function splitByNext(text: string): string[] {
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
 }
+
+/**
+ * Splits AI-generated text by [VARIANT] markers into alternative greeting options.
+ * Each variant is a standalone message the chatter can choose from.
+ */
+export function splitByVariant(text: string): string[] {
+  return text
+    .split('[VARIANT]')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}

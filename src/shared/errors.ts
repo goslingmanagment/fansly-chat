@@ -191,6 +191,12 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Hub sync failed, summary remains available locally.',
     description: 'GooseMuse kept the local result so the workflow can continue.',
   },
+  hi_too_many_messages: {
+    key: 'hi_too_many_messages',
+    code: 'GM-FLOW-09',
+    message: 'This conversation has too many messages for a greeting.',
+    description: 'Hi works best for new conversations (10 messages or fewer). Use Reply instead.',
+  },
   insertion_failed: {
     key: 'insertion_failed',
     code: 'GM-UI-01',

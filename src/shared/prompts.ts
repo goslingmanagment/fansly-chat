@@ -4,6 +4,7 @@ import helpMeTemplate from '../../prompts/help-me.md';
 import fanSummaryTemplate from '../../prompts/fan-summary.md';
 import chatReviewTemplate from '../../prompts/chat-review.md';
 import pingTemplate from '../../prompts/ping.md';
+import hiGreetingTemplate from '../../prompts/hi-greeting.md';
 import { featureUsesPingSegment, getFeaturePolicy } from './features.js';
 import { escapeForPrompt } from './prompt-injection.js';
 import type {
@@ -103,6 +104,7 @@ const USER_TEMPLATE_PLANS: Record<FeatureType, UserTemplatePlan> = {
     chatReviewTemplate,
   ),
   ping: createPingUserTemplatePlan(pingTemplate),
+  'hi-greeting': createStandardUserTemplatePlan('hi-greeting', hiGreetingTemplate),
 };
 
 const TONE_INSTRUCTIONS: Record<Exclude<ReplyTone, 'none'>, string> = {
@@ -131,6 +133,7 @@ interface PromptTemplateReplacements {
   fanSpendingSection: string;
   fanSubscriptionSection: string;
   fanDisplayName: string;
+  fanBioSection: string;
   draftSection: string;
   splitReplyInstructions: string;
   toneInstructions: string;
@@ -322,6 +325,14 @@ function buildFanSubscriptionSection(fanSubscriptionData: string): string {
   return `## Fan Subscription Data\n\n<fan_subscription_data>\n${escapeForPrompt(trimmed)}\n</fan_subscription_data>`;
 }
 
+function buildFanBioSection(fanBio: string | undefined): string {
+  const trimmed = fanBio?.trim() ?? '';
+  if (!trimmed) {
+    return '';
+  }
+  return `Fan bio: ${escapeForPrompt(trimmed)}`;
+}
+
 function buildDraftSection(draftText: string | undefined): string {
   const trimmed = draftText?.trim() ?? '';
   if (!trimmed) {
@@ -413,6 +424,7 @@ function buildPromptReplacements(
       input.fanSubscriptionData,
     ),
     fanDisplayName: escapeForPrompt(input.fanDisplayName),
+    fanBioSection: buildFanBioSection(input.fanBio),
     draftSection: buildDraftSection(input.draftText),
     splitReplyInstructions: buildSplitReplyInstructions(
       input.feature,

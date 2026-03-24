@@ -46,6 +46,7 @@ export const MAX_TOKENS: Record<FeatureType, number> = {
   'fan-summary': 8192,
   'chat-review': 1600,
   'ping': 800,
+  'hi-greeting': 800,
 };
 
 export const FEATURE_TEMPERATURES: Record<FeatureType, number> = {
@@ -55,6 +56,7 @@ export const FEATURE_TEMPERATURES: Record<FeatureType, number> = {
   'fan-summary': 0.4,
   'chat-review': 0.25,
   'ping': 0.65,
+  'hi-greeting': 0.7,
 };
 
 export const COMPARE_TEMPERATURE = 0.35;
@@ -101,6 +103,7 @@ export const PORT_RECONNECT_DELAYS_MS = [100, 200, 400];
 // ─── Feature Thresholds ─────────────────────────────────────────────────
 
 export const MIN_MESSAGES_FOR_DEEP = 30;
+export const HI_GREETING_MAX_TRANSCRIPT = 10;
 export const PING_ACTIVE_DAYS = 5;
 export const PING_MIN_FAN_MESSAGES = 3;
 
@@ -135,6 +138,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   'fan-summary': 'Summary',
   'chat-review': 'Review',
   'ping': 'Ping',
+  'hi-greeting': 'Hi',
 };
 
 // ─── Default Settings ───────────────────────────────────────────────────
