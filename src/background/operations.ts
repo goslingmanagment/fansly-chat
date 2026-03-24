@@ -14,6 +14,7 @@ import {
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   FEATURE_TEMPERATURES,
   DEFAULT_FEATURE_MODELS,
+  HI_GREETING_MAX_TRANSCRIPT,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
@@ -48,7 +49,7 @@ import {
   hasAvailableFanSummary,
   isValidSummaryCacheEntry,
 } from '../shared/summary-cache.js';
-import { splitByNext } from '../shared/split.js';
+import { splitByNext, splitByVariant } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
@@ -162,6 +163,7 @@ interface OperationPromptRequestArgs {
   fanSpendingData: string;
   fanSubscriptionData: string;
   fanDisplayName: string;
+  fanBio?: string;
   draftText?: string;
   pingSegment?: PingSegment;
   replyMode?: OperationStartPayload['replyMode'];
@@ -315,6 +317,7 @@ function buildOperationPromptRequest({
   fanSpendingData,
   fanSubscriptionData,
   fanDisplayName,
+  fanBio,
   draftText,
   pingSegment,
   replyMode,
@@ -329,6 +332,7 @@ function buildOperationPromptRequest({
       fanSpendingData,
       fanSubscriptionData,
       fanDisplayName,
+      fanBio,
       draftText,
       pingSegment,
       replyMode,
@@ -355,7 +359,10 @@ function buildFeatureResult(
       };
     case 'summary':
       return { rawText };
-    case 'reply':
+    case 'reply': {
+      const parts = feature === 'hi-greeting'
+        ? splitByVariant(rawText)
+        : splitByNext(rawText);
       return {
         rawText,
         ...(getFeaturePolicy(feature).supportsReplyMode
@@ -363,8 +370,9 @@ function buildFeatureResult(
               splitModeRequested: replyMode === 'preferSplit',
             }
           : {}),
-        parts: splitByNext(rawText),
+        parts,
       };
+    }
   }
 }
 
@@ -1627,6 +1635,13 @@ export class OperationCoordinator {
         throw new GooseMuseError('not_enough_history');
       }
 
+      if (
+        payload.feature === 'hi-greeting' &&
+        messageLoad.transcriptMessages.length > HI_GREETING_MAX_TRANSCRIPT
+      ) {
+        throw new GooseMuseError('hi_too_many_messages');
+      }
+
       let pingSegment: PingSegment | undefined;
       if (featureUsesPingSegment(payload.feature)) {
         startStage('ping-analysis', 'Analyze ping segment');
@@ -1698,6 +1713,7 @@ export class OperationCoordinator {
 
       let fanAccountId: string | null = null;
       let fanDisplayName = payload.domFanDisplayName ?? 'fan';
+      let fanBio: string | undefined;
       fanAccountId =
         groupUsers?.find(
           (user) => user.userId !== resolvedAccountId,
@@ -1717,6 +1733,9 @@ export class OperationCoordinator {
             account?.displayName?.trim() ||
             payload.domFanDisplayName ||
             'fan';
+          if (payload.feature === 'hi-greeting' && account?.about?.trim()) {
+            fanBio = account.about.trim();
+          }
           completeStage(
             'account-name-lookup',
             `Resolved fan display name: ${fanDisplayName}`,
@@ -1755,8 +1774,9 @@ export class OperationCoordinator {
       let subscriptionData = '';
       let subscriptionLookupVerified = false;
       const subscriptionLookupMode: SubscriptionLookupMode = 'full';
+      const shouldLoadEarnings = getFeaturePolicy(payload.feature).includesEarnings !== false;
 
-      if (fanAccountId) {
+      if (shouldLoadEarnings && fanAccountId) {
         startStage('earnings', 'Fetch earnings');
         startStage('subscription-lookup', 'Lookup subscription');
         const subscriptionTraceSteps: string[] = [];
@@ -1983,11 +2003,14 @@ export class OperationCoordinator {
         }
         sendDebugProgress();
       } else {
-        skipStage('earnings', 'Fetch earnings', 'fan account unavailable');
+        const skipReason = !shouldLoadEarnings
+          ? 'not included for this feature'
+          : 'fan account unavailable';
+        skipStage('earnings', 'Fetch earnings', skipReason);
         skipStage(
           'subscription-lookup',
           'Lookup subscription',
-          'fan account unavailable',
+          skipReason,
         );
       }
 
@@ -2002,6 +2025,7 @@ export class OperationCoordinator {
         fanSpendingData: spendingData,
         fanSubscriptionData: subscriptionData,
         fanDisplayName,
+        fanBio,
         draftText: payload.draftText,
         pingSegment,
         replyMode: payload.replyMode,

@@ -232,6 +232,7 @@ describe('AnthropicClient streaming requests', () => {
       'fan-summary': 8192,
       'chat-review': 1600,
       'ping': 800,
+      'hi-greeting': 800,
     });
   });
 

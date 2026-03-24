@@ -5,6 +5,7 @@ type ToolbarAction = FeatureType | 'compare';
 const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: 'Reply' },
   { feature: 'improve-draft', label: 'Polish' },
+  { feature: 'hi-greeting', label: 'Hi' },
   { feature: 'ping', label: 'Ping' },
   { feature: 'fan-summary', label: 'Scan' },
 ];
@@ -85,6 +86,7 @@ export class ButtonBar {
       this.toneRow.append(pill);
     }
 
+    const hiButton = this.buttons.get('hi-greeting')!;
     const pingButton = this.buttons.get('ping')!;
     const summaryButton = this.buttons.get('fan-summary')!;
     summaryButton.classList.add('goosemuse-toolbar-button-summary');
@@ -96,6 +98,7 @@ export class ButtonBar {
       this.replyModeToggle,
       improveButton,
       this.toneRow,
+      hiButton,
       pingButton,
       summaryButton,
       this.personalityLabel,
