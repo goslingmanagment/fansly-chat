@@ -230,7 +230,9 @@ main() {
     --artifacts-dir "$artifacts_dir" \
     --no-config-discovery \
     --api-key "$WEB_EXT_API_KEY" \
-    --api-secret "$WEB_EXT_API_SECRET"
+    --api-secret "$WEB_EXT_API_SECRET" \
+    --timeout 600000 \
+    --approval-timeout 600000
 
   local signed_xpi
   signed_xpi="$(find "$artifacts_dir" -maxdepth 1 -type f -name '*.xpi' -print -quit)"
