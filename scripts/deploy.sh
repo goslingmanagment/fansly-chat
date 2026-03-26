@@ -21,14 +21,23 @@ readonly VERIFY_DELAY_SECONDS=10
 
 artifacts_dir=""
 updates_file=""
+install_page_backup=""
+guide_page_backup=""
 
 cleanup() {
+  local exit_code=$?
+  trap - EXIT
+
+  restore_release_pages
+
   if [[ -n "$artifacts_dir" && -d "$artifacts_dir" ]]; then
     rm -rf "$artifacts_dir"
   fi
   if [[ -n "$updates_file" && -f "$updates_file" ]]; then
     rm -f "$updates_file"
   fi
+
+  exit "$exit_code"
 }
 
 trap cleanup EXIT
@@ -69,14 +78,93 @@ load_env() {
 }
 
 read_manifest_version() {
+  local manifest_file="$1"
+
   node --input-type=module -e '
     import { readFileSync } from "node:fs";
-    const manifest = JSON.parse(readFileSync("dist/manifest.json", "utf8"));
+    const manifestPath = process.argv[1];
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     if (typeof manifest.version !== "string" || manifest.version.length === 0) {
-      throw new Error("dist/manifest.json is missing version");
+      throw new Error(`${manifestPath} is missing version`);
     }
     process.stdout.write(manifest.version);
-  '
+  ' "$manifest_file"
+}
+
+restore_release_pages() {
+  if [[ -n "$install_page_backup" && -f "$install_page_backup" ]]; then
+    cp "$install_page_backup" "$INSTALL_PAGE_FILE"
+    rm -f "$install_page_backup"
+    install_page_backup=""
+  fi
+
+  if [[ -n "$guide_page_backup" && -f "$guide_page_backup" ]]; then
+    cp "$guide_page_backup" "$GUIDE_PAGE_FILE"
+    rm -f "$guide_page_backup"
+    guide_page_backup=""
+  fi
+}
+
+stamp_install_page_version() {
+  local version="$1"
+
+  node --input-type=module -e '
+    import { readFileSync, writeFileSync } from "node:fs";
+
+    const [filePath, version] = process.argv.slice(1);
+    const pattern = /(<p class="footer">ChatGoose )v[^<]+( &middot; Gosling Agency<\/p>)/;
+    const source = readFileSync(filePath, "utf8");
+
+    if (!pattern.test(source)) {
+      throw new Error(`Could not find install page version slot in ${filePath}`);
+    }
+
+    writeFileSync(filePath, source.replace(pattern, `$1v${version}$2`));
+  ' "$INSTALL_PAGE_FILE" "$version"
+}
+
+stamp_guide_page_version() {
+  local version="$1"
+
+  node --input-type=module -e '
+    import { readFileSync, writeFileSync } from "node:fs";
+
+    const [filePath, version] = process.argv.slice(1);
+    const replacements = [
+      {
+        description: "guide nav version",
+        pattern: /(<span class="nav-version">)v[^<]+(<\/span>)/,
+      },
+      {
+        description: "guide footer version",
+        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by Claude<\/p>)/,
+      },
+    ];
+
+    let source = readFileSync(filePath, "utf8");
+
+    for (const { description, pattern } of replacements) {
+      if (!pattern.test(source)) {
+        throw new Error(`Could not find ${description} in ${filePath}`);
+      }
+      source = source.replace(pattern, `$1v${version}$2`);
+    }
+
+    writeFileSync(filePath, source);
+  ' "$GUIDE_PAGE_FILE" "$version"
+}
+
+stamp_release_pages() {
+  local version="$1"
+
+  install_page_backup="$(mktemp "${TMPDIR:-/tmp}/install.html.XXXXXX")"
+  guide_page_backup="$(mktemp "${TMPDIR:-/tmp}/guide.html.XXXXXX")"
+
+  cp "$INSTALL_PAGE_FILE" "$install_page_backup"
+  cp "$GUIDE_PAGE_FILE" "$guide_page_backup"
+
+  stamp_install_page_version "$version"
+  stamp_guide_page_version "$version"
 }
 
 verify_http_200_with_retry() {
@@ -130,7 +218,7 @@ main() {
   npm run build
 
   local version
-  version="$(read_manifest_version)"
+  version="$(read_manifest_version "$ROOT_DIR/manifest.json")"
 
   artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/chatgoose-web-ext.XXXXXX")"
   updates_file="$(mktemp "${TMPDIR:-/tmp}/chatgoose-updates.XXXXXX.json")"
@@ -188,6 +276,9 @@ EOF
   local remote_tmp_guide
   remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
 
+  log "Stamping release pages with version ${version}"
+  stamp_release_pages "$version"
+
   log "Uploading signed package to ${VPS_HOST}:${REMOTE_DIR}"
   ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR'"
   scp "$signed_xpi" "${VPS_HOST}:${remote_tmp_xpi}"
@@ -195,6 +286,7 @@ EOF
   scp "$INSTALL_PAGE_FILE" "${VPS_HOST}:${remote_tmp_index}"
   scp "$INSTALL_PAGE_ASSET" "${VPS_HOST}:${remote_tmp_mascot}"
   scp "$GUIDE_PAGE_FILE" "${VPS_HOST}:${remote_tmp_guide}"
+  restore_release_pages
 
   ssh "$VPS_HOST" "
     set -euo pipefail
