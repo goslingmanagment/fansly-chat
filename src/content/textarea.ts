@@ -1,4 +1,4 @@
-import { GooseMuseError } from '../shared/errors.js';
+import { ChatGooseError } from '../shared/errors.js';
 import { findActiveConversationTextarea } from './conversation-dom.js';
 
 export async function copyToClipboard(text: string): Promise<void> {
@@ -28,7 +28,7 @@ export function getActiveConversationDraftText(): string {
 export async function insertIntoFanslyTextarea(text: string): Promise<void> {
   const textarea = findActiveConversationTextarea();
   if (!textarea) {
-    throw new GooseMuseError('insertion_failed');
+    throw new ChatGooseError('insertion_failed');
   }
 
   textarea.focus();
@@ -44,6 +44,6 @@ export async function insertIntoFanslyTextarea(text: string): Promise<void> {
   textarea.dispatchEvent(new Event('change', { bubbles: true }));
 
   if (textarea.value !== text) {
-    throw new GooseMuseError('insertion_failed');
+    throw new ChatGooseError('insertion_failed');
   }
 }

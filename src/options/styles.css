@@ -1,21 +1,21 @@
 :root {
-  --goosemuse-bg: #1b1e2e;
-  --goosemuse-panel: #1f2236;
-  --goosemuse-text: #e8e8f0;
-  --goosemuse-muted: #7a7d95;
-  --goosemuse-accent: #5b8af5;
-  --goosemuse-accent-soft: #8bb0ff;
-  --goosemuse-success: #34d399;
-  --goosemuse-danger: #f87171;
-  --goosemuse-border: rgba(255, 255, 255, 0.05);
-  --goosemuse-border-accent: rgba(91, 138, 245, 0.18);
+  --chatgoose-bg: #1b1e2e;
+  --chatgoose-panel: #1f2236;
+  --chatgoose-text: #e8e8f0;
+  --chatgoose-muted: #7a7d95;
+  --chatgoose-accent: #5b8af5;
+  --chatgoose-accent-soft: #8bb0ff;
+  --chatgoose-success: #34d399;
+  --chatgoose-danger: #f87171;
+  --chatgoose-border: rgba(255, 255, 255, 0.05);
+  --chatgoose-border-accent: rgba(91, 138, 245, 0.18);
   color-scheme: dark;
 }
 
 body {
   margin: 0;
-  background: var(--goosemuse-bg);
-  color: var(--goosemuse-text);
+  background: var(--chatgoose-bg);
+  color: var(--chatgoose-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
   max-width: 900px;
@@ -36,10 +36,10 @@ h2 {
   letter-spacing: -0.01em;
 }
 
-.goosemuse-button {
-  border: 1px solid var(--goosemuse-border);
+.chatgoose-button {
+  border: 1px solid var(--chatgoose-border);
   background: rgba(255, 255, 255, 0.04);
-  color: var(--goosemuse-text);
+  color: var(--chatgoose-text);
   padding: 7px 12px;
   border-radius: 10px;
   font-family: inherit;
@@ -49,34 +49,34 @@ h2 {
   transition: background 150ms ease, border-color 150ms ease;
 }
 
-.goosemuse-button:hover {
+.chatgoose-button:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
-.goosemuse-button-secondary {
+.chatgoose-button-secondary {
   background: rgba(255, 255, 255, 0.03);
-  border-color: var(--goosemuse-border);
+  border-color: var(--chatgoose-border);
 }
 
-.goosemuse-button-danger {
+.chatgoose-button-danger {
   background: rgba(248, 113, 113, 0.1);
   border-color: rgba(248, 113, 113, 0.2);
   color: #fca5a5;
 }
 
-.goosemuse-button-danger:hover {
+.chatgoose-button-danger:hover {
   background: rgba(248, 113, 113, 0.16);
 }
 
-.goosemuse-input,
-.goosemuse-select,
-.goosemuse-textarea {
+.chatgoose-input,
+.chatgoose-select,
+.chatgoose-textarea {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--goosemuse-border);
+  border: 1px solid var(--chatgoose-border);
   background: rgba(0, 0, 0, 0.2);
-  color: var(--goosemuse-text);
+  color: var(--chatgoose-text);
   padding: 9px 12px;
   border-radius: 10px;
   font-family: inherit;
@@ -84,35 +84,35 @@ h2 {
   transition: border-color 150ms ease;
 }
 
-.goosemuse-input:focus,
-.goosemuse-select:focus,
-.goosemuse-textarea:focus {
+.chatgoose-input:focus,
+.chatgoose-select:focus,
+.chatgoose-textarea:focus {
   outline: none;
-  border-color: var(--goosemuse-border-accent);
+  border-color: var(--chatgoose-border-accent);
 }
 
-.goosemuse-textarea {
+.chatgoose-textarea {
   resize: vertical;
   min-height: 120px;
   line-height: 1.6;
 }
 
-.goosemuse-card {
+.chatgoose-card {
   display: grid;
   gap: 10px;
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid var(--goosemuse-border);
+  border: 1px solid var(--chatgoose-border);
   background: rgba(255, 255, 255, 0.02);
 }
 
-.goosemuse-card-actions {
+.chatgoose-card-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.goosemuse-version-tag {
+.chatgoose-version-tag {
   position: absolute;
   top: 28px;
   right: 20px;
@@ -120,7 +120,7 @@ h2 {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.03);
-  color: var(--goosemuse-muted);
+  color: var(--chatgoose-muted);
   font-size: 11px;
   line-height: 1;
   letter-spacing: 0.04em;

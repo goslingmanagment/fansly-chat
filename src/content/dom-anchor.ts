@@ -1,10 +1,10 @@
 function ensureStyles(stylesText: string): void {
-  if (document.getElementById('goosemuse-style')) {
+  if (document.getElementById('chatgoose-style')) {
     return;
   }
 
   const style = document.createElement('style');
-  style.id = 'goosemuse-style';
+  style.id = 'chatgoose-style';
   style.textContent = stylesText;
   document.head.append(style);
 }
@@ -14,20 +14,20 @@ export function installContentStyles(stylesText: string): void {
 }
 
 export function ensureOverlayRoot(): HTMLElement {
-  let root = document.getElementById('goosemuse-overlay-root');
+  let root = document.getElementById('chatgoose-overlay-root');
   if (!(root instanceof HTMLElement)) {
     root = document.createElement('div');
-    root.id = 'goosemuse-overlay-root';
+    root.id = 'chatgoose-overlay-root';
     document.body.append(root);
   }
   return root;
 }
 
 export function ensureToastRoot(): HTMLElement {
-  let root = document.getElementById('goosemuse-toast-root');
+  let root = document.getElementById('chatgoose-toast-root');
   if (!(root instanceof HTMLElement)) {
     root = document.createElement('div');
-    root.id = 'goosemuse-toast-root';
+    root.id = 'chatgoose-toast-root';
     document.body.append(root);
   }
   return root;

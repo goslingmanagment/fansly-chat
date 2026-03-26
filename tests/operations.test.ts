@@ -11,7 +11,7 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
-import { GooseMuseError } from '../src/shared/errors.js';
+import { ChatGooseError } from '../src/shared/errors.js';
 import { flattenPromptBlocks } from '../src/shared/prompts.js';
 import type {
   AggregatedEarnings,
@@ -262,8 +262,8 @@ async function mockCompareCards(cards: CompareModelCard[]): Promise<void> {
       .map((card) => [card.label, card.content]),
   );
   (globalThis as typeof globalThis & {
-    __GOOSEMUSE_COMPARE_DRAFTS__?: Record<string, string>;
-  }).__GOOSEMUSE_COMPARE_DRAFTS__ = compareDrafts;
+    __CHATGOOSE_COMPARE_DRAFTS__?: Record<string, string>;
+  }).__CHATGOOSE_COMPARE_DRAFTS__ = compareDrafts;
 
   const currentCard = cards.find((card) => card.source === 'current') ?? null;
   if (currentCard) {
@@ -367,8 +367,8 @@ describe('OperationCoordinator', () => {
 
   afterEach(() => {
     delete (globalThis as typeof globalThis & {
-      __GOOSEMUSE_COMPARE_DRAFTS__?: Record<string, string>;
-    }).__GOOSEMUSE_COMPARE_DRAFTS__;
+      __CHATGOOSE_COMPARE_DRAFTS__?: Record<string, string>;
+    }).__CHATGOOSE_COMPARE_DRAFTS__;
     vi.doUnmock('virtual:model-card-drafts');
     vi.doUnmock('../src/shared/compare-cards.js');
     vi.useRealTimers();
@@ -774,7 +774,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'compare_cards_unavailable',
-      code: 'GM-FLOW-08',
+      code: 'CG-FLOW-08',
     });
     expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
   });
@@ -1132,7 +1132,7 @@ describe('OperationCoordinator', () => {
             cache_read_input_tokens: 2,
             output_tokens: 0,
           });
-          throw new GooseMuseError('network_error');
+          throw new ChatGooseError('network_error');
         }
         onUsage?.({
           input_tokens: 75,
@@ -1168,7 +1168,7 @@ describe('OperationCoordinator', () => {
     expect(cardError?.cardId).toBe('current:personality-1');
     expectUserErrorIdentity(cardError?.error, {
       key: 'network_error',
-      code: 'GM-NET-01',
+      code: 'CG-NET-01',
     });
     expect(cardError?.anthropicSpend).toEqual({
       totalTokens: 56,
@@ -1252,7 +1252,7 @@ describe('OperationCoordinator', () => {
     expect(cardError?.cardId).toBe('current:personality-1');
     expectUserErrorIdentity(cardError?.error, {
       key: 'network_error',
-      code: 'GM-NET-01',
+      code: 'CG-NET-01',
     });
     expect(messages.some((message) => message.type === 'compare:cardComplete')).toBe(true);
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
@@ -1313,7 +1313,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(discardedMessage?.error, {
       key: 'chat_changed',
-      code: 'GM-FLOW-06',
+      code: 'CG-FLOW-06',
     });
   });
 
@@ -1376,7 +1376,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'timed_out',
-      code: 'GM-NET-02',
+      code: 'CG-NET-02',
     });
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(false);
   });
@@ -1546,7 +1546,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'ping_blocked',
-      code: 'GM-FLOW-05',
+      code: 'CG-FLOW-05',
     });
     expect(errorMessage).not.toHaveProperty('profiling');
   });
@@ -1674,7 +1674,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(discardedMessage?.error, {
       key: 'chat_changed',
-      code: 'GM-FLOW-06',
+      code: 'CG-FLOW-06',
     });
     expect(discardedMessage).not.toHaveProperty('profiling');
     expect(messages.some((message) => message.type === 'operation:error')).toBe(false);
@@ -1871,7 +1871,7 @@ describe('OperationCoordinator', () => {
     const anthropicClient = {
       streamMessage: vi.fn(async () => {
         advanceNow(300);
-        throw new GooseMuseError('network_error');
+        throw new ChatGooseError('network_error');
       }),
     };
     const { coordinator, port } = await createCoordinatorHarness({
@@ -1936,7 +1936,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'network_error',
-      code: 'GM-NET-01',
+      code: 'CG-NET-01',
     });
     expect(errorMessage?.profiling).toBeDefined();
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
@@ -1993,7 +1993,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'timed_out',
-      code: 'GM-NET-02',
+      code: 'CG-NET-02',
     });
     expect(errorMessage?.profiling).toBeDefined();
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
@@ -2134,7 +2134,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'timed_out',
-      code: 'GM-NET-02',
+      code: 'CG-NET-02',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'load-messages')).toMatchObject({
       status: 'failed',
@@ -2187,7 +2187,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'timed_out',
-      code: 'GM-NET-02',
+      code: 'CG-NET-02',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'failed',
@@ -2245,7 +2245,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'timed_out',
-      code: 'GM-NET-02',
+      code: 'CG-NET-02',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
       status: 'completed',
@@ -2313,7 +2313,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'timed_out',
-      code: 'GM-NET-02',
+      code: 'CG-NET-02',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
       status: 'failed',
@@ -2376,7 +2376,7 @@ describe('OperationCoordinator', () => {
 
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'ping_blocked',
-      code: 'GM-FLOW-05',
+      code: 'CG-FLOW-05',
     });
     expect(errorMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
@@ -3399,7 +3399,7 @@ describe('OperationCoordinator', () => {
       streamMessage: vi.fn(async ({ model }: { model: string }) => {
         callCount++;
         if (callCount === 1 && model === 'claude-opus-4-5') {
-          throw new GooseMuseError('model_unavailable');
+          throw new ChatGooseError('model_unavailable');
         }
         return 'Fallback result';
       }),
@@ -3438,7 +3438,7 @@ describe('OperationCoordinator', () => {
   it('does not retry when default model itself is unavailable', async () => {
     const anthropicClient = {
       streamMessage: vi.fn(async () => {
-        throw new GooseMuseError('model_unavailable');
+        throw new ChatGooseError('model_unavailable');
       }),
     };
 
@@ -3462,7 +3462,7 @@ describe('OperationCoordinator', () => {
     );
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'model_unavailable',
-      code: 'GM-API-03',
+      code: 'CG-API-03',
     });
   });
 
@@ -3475,7 +3475,7 @@ describe('OperationCoordinator', () => {
       streamMessage: vi.fn(async () => {
         callCount += 1;
         if (callCount === 1) {
-          throw new GooseMuseError('rate_limited', {
+          throw new ChatGooseError('rate_limited', {
             retryAfterMs: 30_000,
             retryAtMs,
           });
@@ -3502,11 +3502,11 @@ describe('OperationCoordinator', () => {
     const waitingMessage = postedMessages(port).find(
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
         message.type === 'operation:progress' &&
-        message.statusCode === 'GM-API-01',
+        message.statusCode === 'CG-API-01',
     );
     expect(waitingMessage).toMatchObject({
       phase: 'generating',
-      statusCode: 'GM-API-01',
+      statusCode: 'CG-API-01',
       message: 'Rate limited. Waiting to retry…',
       retryAtMs,
     });
@@ -3560,11 +3560,11 @@ describe('OperationCoordinator', () => {
     const waitingMessage = postedMessages(port).find(
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
         message.type === 'operation:progress' &&
-        message.statusCode === 'GM-API-01',
+        message.statusCode === 'CG-API-01',
     );
     expect(waitingMessage).toMatchObject({
       phase: 'generating',
-      statusCode: 'GM-API-01',
+      statusCode: 'CG-API-01',
       message: 'Rate limited. Waiting to retry…',
       retryAtMs,
     });
@@ -3579,7 +3579,7 @@ describe('OperationCoordinator', () => {
   it('does not auto-retry Anthropic rate limits when Retry-After is longer than 60 seconds', async () => {
     const anthropicClient = {
       streamMessage: vi.fn(async () => {
-        throw new GooseMuseError('rate_limited', {
+        throw new ChatGooseError('rate_limited', {
           retryAfterMs: 61_000,
           retryAtMs: currentNow + 61_000,
         });
@@ -3606,7 +3606,7 @@ describe('OperationCoordinator', () => {
     );
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'rate_limited',
-      code: 'GM-API-01',
+      code: 'CG-API-01',
     });
   });
 
@@ -3618,7 +3618,7 @@ describe('OperationCoordinator', () => {
       streamMessage: vi.fn(async () => {
         callCount += 1;
         if (callCount === 1) {
-          throw new GooseMuseError('service_unavailable');
+          throw new ChatGooseError('service_unavailable');
         }
         return 'Recovered reply';
       }),
@@ -3642,11 +3642,11 @@ describe('OperationCoordinator', () => {
     const waitingMessage = postedMessages(port).find(
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
         message.type === 'operation:progress' &&
-        message.statusCode === 'GM-API-05',
+        message.statusCode === 'CG-API-05',
     );
     expect(waitingMessage).toMatchObject({
       phase: 'generating',
-      statusCode: 'GM-API-05',
+      statusCode: 'CG-API-05',
       message: 'Claude unavailable. Retrying…',
     });
     expect(typeof waitingMessage?.retryAtMs).toBe('number');
@@ -3668,7 +3668,7 @@ describe('OperationCoordinator', () => {
 
     const anthropicClient = {
       streamMessage: vi.fn(async () => {
-        throw new GooseMuseError('service_unavailable');
+        throw new ChatGooseError('service_unavailable');
       }),
     };
 
@@ -3695,7 +3695,7 @@ describe('OperationCoordinator', () => {
     );
     expectUserErrorIdentity(errorMessage?.error, {
       key: 'service_unavailable',
-      code: 'GM-API-05',
+      code: 'CG-API-05',
     });
   });
 

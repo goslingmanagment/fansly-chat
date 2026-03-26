@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "GooseMuse",
+  "name": "ChatGoose",
   "version": "1.1.0",
   "description": "AI-powered chat assistant for Fansly.com",
   "permissions": [
@@ -30,7 +30,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "GooseMuse",
+    "default_title": "ChatGoose",
     "default_icon": {
       "48": "icons/icon-48.png",
       "96": "icons/icon-96.png"
@@ -47,7 +47,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "goosemuse@gosling.agency",
+      "id": "chatgoose@gosling.agency",
       "strict_min_version": "142.0",
       "update_url": "https://ext.gosling-agency.ru/updates.json",
       "data_collection_permissions": {

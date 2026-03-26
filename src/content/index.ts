@@ -92,7 +92,7 @@ function applyFanSummarySyncStatus(
   return true;
 }
 
-export class GooseMuseContentApp {
+export class ChatGooseContentApp {
   private routeNonce = 0;
   private currentGroupId: string | null = null;
   private tabState: TabUiState | null = null;
@@ -258,7 +258,7 @@ export class GooseMuseContentApp {
   });
 
   constructor() {
-    this.root.id = 'goosemuse-root';
+    this.root.id = 'chatgoose-root';
     this.root.append(this.inlinePanel.root, this.buttonBar.root, this.mappingBanner.root);
     this.mountController = new ConversationMountController(this.root);
   }
@@ -1446,5 +1446,5 @@ export class GooseMuseContentApp {
 }
 
 if (window.location.hostname.endsWith('fansly.com')) {
-  new GooseMuseContentApp().init();
+  new ChatGooseContentApp().init();
 }

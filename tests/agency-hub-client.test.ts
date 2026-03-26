@@ -188,7 +188,7 @@ describe('AgencyHubClient', () => {
       ok: false,
       error: {
         key: 'hub_missing_permission',
-        code: 'GM-HUB-04',
+        code: 'CG-HUB-04',
       },
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ describe('AgencyHubClient', () => {
       ok: false,
       error: {
         key: 'hub_invalid_api_key',
-        code: 'GM-HUB-03',
+        code: 'CG-HUB-03',
       },
     });
   });
@@ -248,7 +248,7 @@ describe('AgencyHubClient', () => {
     expect(result.reason).toBe('hub_request_failed');
     expect(result.error).toMatchObject({
       key: 'hub_request_failed',
-      code: 'GM-HUB-07',
+      code: 'CG-HUB-07',
     });
   });
 
@@ -311,7 +311,7 @@ describe('AgencyHubClient', () => {
           profile: {
             version: 4,
             body: '# stored fan summary',
-            source: 'goosemuse',
+            source: 'chatgoose',
             createdAt: '2026-03-20T12:00:00.000Z',
             createdByUserId: 42,
           },

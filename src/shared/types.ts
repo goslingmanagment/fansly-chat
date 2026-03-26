@@ -471,7 +471,7 @@ export interface FeatureResult {
 
 // ─── Errors ──────────────────────────────────────────────────────────────
 
-export interface GooseMuseErrorDetails {
+export interface ChatGooseErrorDetails {
   status?: number;
   responseSnippet?: string;
   retryAfterMs?: number;

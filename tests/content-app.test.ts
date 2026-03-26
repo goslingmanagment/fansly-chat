@@ -226,10 +226,10 @@ function mountConversationComposer(initialValue = ''): HTMLTextAreaElement {
 async function loadAppClass() {
   vi.resetModules();
   const module = await import('../src/content/index.js');
-  return module.GooseMuseContentApp;
+  return module.ChatGooseContentApp;
 }
 
-describe('GooseMuseContentApp', () => {
+describe('ChatGooseContentApp', () => {
   beforeEach(() => {
     mockStorageState = createStorageState();
     installDom();
@@ -242,8 +242,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('reopens the cached completed reply in the inline panel and preserves insert state', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -268,7 +268,7 @@ describe('GooseMuseContentApp', () => {
 
     // Inline panel should be visible with the completed result
     const inlineRoot = app.inlinePanel.root as HTMLElement;
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
 
     // Modify the cached part to simulate previous insert
     const cached = app.completedOverlayCache.get('group-1', 'fast-reply');
@@ -284,13 +284,13 @@ describe('GooseMuseContentApp', () => {
     app.startFeature('fast-reply', false);
 
     expect(sendSpy).not.toHaveBeenCalled();
-    expect(inlineRoot.querySelector('.goosemuse-card-status')?.textContent).toBe('Inserted earlier.');
-    expect(inlineRoot.querySelector('.goosemuse-card-actions .goosemuse-button')?.textContent).toBe('Insert again');
+    expect(inlineRoot.querySelector('.chatgoose-card-status')?.textContent).toBe('Inserted earlier.');
+    expect(inlineRoot.querySelector('.chatgoose-card-actions .chatgoose-button')?.textContent).toBe('Insert again');
   });
 
   it('clears the completed-result session cache on conversation change and hides the inline panel', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -314,11 +314,11 @@ describe('GooseMuseContentApp', () => {
     });
 
     const inlineRoot = app.inlinePanel.root as HTMLElement;
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
 
     app.handleRouteChange('group-2');
 
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
     expect(app.completedOverlayCache.get('group-2', 'fast-reply')).toBeNull();
 
     sendSpy.mockClear();
@@ -332,8 +332,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('clears the cached result before rerunning Chat Review from the overlay', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -358,7 +358,7 @@ describe('GooseMuseContentApp', () => {
       },
     });
 
-    const refreshButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'))
+    const refreshButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'))
       .find((element) => element.textContent === 'Refresh');
 
     expect(app.completedOverlayCache.get('group-1', 'chat-review')).not.toBeNull();
@@ -374,8 +374,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('sends the selected reply tone with fast-reply operations and resets it after dispatch', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -395,8 +395,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('sends the current composer draft with improve-draft operations', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     mountConversationComposer('hey babe how was your day');
@@ -415,8 +415,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('auto-inserts and caches completed improve-draft results by draft text', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const textarea = mountConversationComposer('hey babe how was your day');
 
     app.tabState = readyState();
@@ -439,7 +439,7 @@ describe('GooseMuseContentApp', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(textarea.value).toBe('Improved message');
-    expect((app.inlinePanel.root as HTMLElement).classList.contains('goosemuse-hidden')).toBe(true);
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatgoose-hidden')).toBe(true);
     const cached = app.completedOverlayCache.get(
       'group-1',
       'improve-draft',
@@ -454,8 +454,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('reuses cached improve-draft results for the same draft text without another request', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
     const textarea = mountConversationComposer('hey babe how was your day');
 
@@ -490,12 +490,12 @@ describe('GooseMuseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(textarea.value).toBe('Improved message');
-    expect((app.inlinePanel.root as HTMLElement).classList.contains('goosemuse-hidden')).toBe(true);
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatgoose-hidden')).toBe(true);
   });
 
   it('keeps Fix loading hidden when progress only adds spend telemetry', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     mountConversationComposer('hey babe how was your day');
     app.tabState = readyState();
@@ -528,12 +528,12 @@ describe('GooseMuseContentApp', () => {
     });
 
     expect(app.quickInlineVisible).toBe(false);
-    expect((app.inlinePanel.root as HTMLElement).classList.contains('goosemuse-hidden')).toBe(true);
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatgoose-hidden')).toBe(true);
   });
 
   it('preserves profiling from progress through debug prompt, chunks, and completion', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const profiling = createProfilingSnapshot();
 
     app.tabState = readyState();
@@ -578,8 +578,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('preserves profiling into the error overlay for overlay-only features', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const profiling = createProfilingSnapshot();
 
     app.tabState = readyState();
@@ -605,13 +605,13 @@ describe('GooseMuseContentApp', () => {
       },
     });
 
-    expect(document.querySelector('.goosemuse-grid .goosemuse-inline-error')?.textContent).toContain('Network failed');
-    expect(document.querySelector('.goosemuse-profiling-summary')?.textContent).toContain('Load messages');
+    expect(document.querySelector('.chatgoose-grid .chatgoose-inline-error')?.textContent).toContain('Network failed');
+    expect(document.querySelector('.chatgoose-profiling-summary')?.textContent).toContain('Load messages');
   });
 
   it('discards suppressed completion after route change instead of caching under new group', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -649,8 +649,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('dismisses quick-feature error overlay cleanly without getting stuck', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -683,14 +683,14 @@ describe('GooseMuseContentApp', () => {
 
     // Both surfaces should be hidden, not stuck
     const inlineRoot = app.inlinePanel.root as HTMLElement;
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
     // quickSurfaceMode should be reset to 'inline'
     expect(app.quickSurfaceMode).toBe('inline');
   });
 
   it('opens inline panel on first chunk and shows streamed text', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -702,7 +702,7 @@ describe('GooseMuseContentApp', () => {
     const inlineRoot = app.inlinePanel.root as HTMLElement;
     // Panel should be hidden before first chunk
     expect(app.quickInlineVisible).toBe(false);
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
 
     // First chunk opens the panel
     app.handleChunk('stream-op', 'Hello ');
@@ -712,13 +712,13 @@ describe('GooseMuseContentApp', () => {
     // Flush rAF-coalesced render
     app.renderSurfaces();
 
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(false);
-    expect(inlineRoot.querySelector('.goosemuse-stream')?.textContent).toContain('Hello ');
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(inlineRoot.querySelector('.chatgoose-stream')?.textContent).toContain('Hello ');
   });
 
   it('opens inline panel on zero-chunk completion', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -738,13 +738,13 @@ describe('GooseMuseContentApp', () => {
     });
 
     const inlineRoot = app.inlinePanel.root as HTMLElement;
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(false);
-    expect(inlineRoot.querySelector('.goosemuse-card-text')?.textContent).toBe('Instant reply');
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(inlineRoot.querySelector('.chatgoose-card-text')?.textContent).toBe('Instant reply');
   });
 
   it('expand during loading shows overlay with collapse-to-inline, collapse returns to inline', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -760,24 +760,24 @@ describe('GooseMuseContentApp', () => {
 
     // Render inline first
     app.renderSurfaces();
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
 
     // Expand to overlay
     app.quickSurfaceMode = 'overlay';
     app.renderSurfaces();
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
 
     // Collapse back to inline
     app.quickSurfaceMode = 'inline';
     app.quickInlineVisible = true;
     app.renderSurfaces();
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(false);
-    expect(inlineRoot.querySelector('.goosemuse-stream')?.textContent).toContain('Streamed text');
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(inlineRoot.querySelector('.chatgoose-stream')?.textContent).toContain('Streamed text');
   });
 
   it('deep features (chat-review) use overlay only, never inline panel', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -789,7 +789,7 @@ describe('GooseMuseContentApp', () => {
     app.renderSurfaces();
 
     const inlineRoot = app.inlinePanel.root as HTMLElement;
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
     // Overlay should have been called with loading model
     expect(app.activeFeature).toBe('chat-review');
 
@@ -814,12 +814,12 @@ describe('GooseMuseContentApp', () => {
     expect(app.deepOverlayModel).not.toBeNull();
     expect(app.deepOverlayModel.kind).toBe('readOnly');
     // Inline panel still hidden
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
   });
 
   it('updates and preserves Fan Summary sync status from background sync messages', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -892,8 +892,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('shows a coded toast when Fan Summary Hub sync fails after completion', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.port.send = vi.fn();
     app.tabState = readyState();
@@ -931,24 +931,24 @@ describe('GooseMuseContentApp', () => {
         updatedAt: 2100,
         error: {
           key: 'hub_request_failed',
-          code: 'GM-HUB-07',
+          code: 'CG-HUB-07',
           message: 'Agency Hub request failed.',
         },
       },
     });
 
-    expect(document.querySelector('.goosemuse-toast')?.textContent).toContain('GM-HUB-08');
-    expect(document.querySelector('.goosemuse-toast')?.textContent).toContain(
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-HUB-08');
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
       'Hub sync failed, summary remains available locally.',
     );
-    expect(document.querySelector('.goosemuse-toast')?.textContent).toContain(
-      'Latest Hub error: GM-HUB-07: Agency Hub request failed.',
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
+      'Latest Hub error: CG-HUB-07: Agency Hub request failed.',
     );
   });
 
   it('starts a fresh compare run instead of reopening completed cached compare results', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -972,8 +972,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('sends the selected reply tone with compare operations and resets it after dispatch', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -992,8 +992,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('reopens an active compare session when the panel was closed', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -1018,8 +1018,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('clears cached compare results on conversation change and starts a new compare request', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
@@ -1045,8 +1045,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('restores the closed completed compare panel when the fingerprint still matches', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -1072,7 +1072,7 @@ describe('GooseMuseContentApp', () => {
     const inlineRoot = app.inlinePanel.root as HTMLElement;
     const buttonBarRoot = app.buttonBar.root as HTMLElement;
     const closeButton = (Array.from(
-      inlineRoot.querySelectorAll('.goosemuse-inline-panel-action'),
+      inlineRoot.querySelectorAll('.chatgoose-inline-panel-action'),
     ) as HTMLButtonElement[]).find((button) => button.textContent === '\u00d7');
     closeButton?.click();
 
@@ -1087,12 +1087,12 @@ describe('GooseMuseContentApp', () => {
     await app.reopenCompletedCompare();
 
     expect(app.comparePanelVisible).toBe(true);
-    expect(app.inlinePanel.root.querySelector('.goosemuse-compare-tab')?.textContent).toContain('Closer (current)');
+    expect(app.inlinePanel.root.querySelector('.chatgoose-compare-tab')?.textContent).toContain('Closer (current)');
   });
 
   it('invalidates closed completed compare cache when the fingerprint changes', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -1121,12 +1121,12 @@ describe('GooseMuseContentApp', () => {
 
     expect(app.comparePanelVisible).toBe(false);
     expect(app.completedCompareCache.get('group-1')).toBeNull();
-    expect(document.querySelector('.goosemuse-toast')?.textContent).toContain('Saved compare is outdated. Run Compare again.');
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('Saved compare is outdated. Run Compare again.');
   });
 
   it('closing a completed compare hides the panel and preserves the cache while compare stays hidden', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -1151,7 +1151,7 @@ describe('GooseMuseContentApp', () => {
     const inlineRoot = app.inlinePanel.root as HTMLElement;
     const buttonBarRoot = app.buttonBar.root as HTMLElement;
     const closeButton = (Array.from(
-      inlineRoot.querySelectorAll('.goosemuse-inline-panel-action'),
+      inlineRoot.querySelectorAll('.chatgoose-inline-panel-action'),
     ) as HTMLButtonElement[]).find((button) => button.textContent === '\u00d7');
     closeButton?.click();
 
@@ -1165,8 +1165,8 @@ describe('GooseMuseContentApp', () => {
   });
 
   it('port disconnect resets all surfaces and state', async () => {
-    const GooseMuseContentApp = await loadAppClass();
-    const app = new GooseMuseContentApp() as any;
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
@@ -1187,7 +1187,7 @@ describe('GooseMuseContentApp', () => {
     app.renderAll();
 
     const inlineRoot = app.inlinePanel.root as HTMLElement;
-    expect(inlineRoot.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
     expect(app.activeFeature).toBeNull();
     expect(app.activeOperationId).toBeNull();
     expect(app.quickSurfaceMode).toBe('inline');

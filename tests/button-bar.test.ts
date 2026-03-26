@@ -92,7 +92,7 @@ describe('ButtonBar toolbar visibility', () => {
     const summary = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Scan');
 
-    expect(summary?.classList.contains('goosemuse-toolbar-button-summary-ready')).toBe(true);
+    expect(summary?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
     expect(summary?.title).toBe('Scan ready to open');
   });
 
@@ -191,7 +191,7 @@ describe.skip('ButtonBar compare button', () => {
     const reopen = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Reopen');
 
-    expect(reopen?.classList.contains('goosemuse-hidden')).toBe(true);
+    expect(reopen?.classList.contains('chatgoose-hidden')).toBe(true);
   });
 
   it('shows enabled Reopen when a completed compare can be restored even without connection or API key', () => {
@@ -215,7 +215,7 @@ describe.skip('ButtonBar compare button', () => {
     const reopen = buttons.find((button) => button.textContent === 'Reopen');
 
     expect(compare?.disabled).toBe(true);
-    expect(reopen?.classList.contains('goosemuse-hidden')).toBe(false);
+    expect(reopen?.classList.contains('chatgoose-hidden')).toBe(false);
     expect(reopen?.disabled).toBe(false);
 
     reopen?.click();
@@ -245,7 +245,7 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.goosemuse-tone-pill'));
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
     expect(pills).toHaveLength(3);
     expect(pills.map((p) => p.textContent)).toEqual(['Flirty', 'Upsell', 'Horny']);
   });
@@ -262,13 +262,13 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), null, 'default', 'flirty', true, false, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.goosemuse-tone-pill'));
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
     const flirty = pills.find((p) => p.textContent === 'Flirty');
     const horny = pills.find((p) => p.textContent === 'Horny');
 
-    expect(flirty?.classList.contains('goosemuse-tone-pill-active')).toBe(true);
+    expect(flirty?.classList.contains('chatgoose-tone-pill-active')).toBe(true);
     expect(flirty?.getAttribute('aria-pressed')).toBe('true');
-    expect(horny?.classList.contains('goosemuse-tone-pill-active')).toBe(false);
+    expect(horny?.classList.contains('chatgoose-tone-pill-active')).toBe(false);
     expect(horny?.getAttribute('aria-pressed')).toBe('false');
   });
 
@@ -284,7 +284,7 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.goosemuse-tone-pill'));
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
     for (const pill of pills) {
       expect(pill.disabled).toBe(true);
     }
@@ -302,8 +302,8 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
 
-    const toneRow = bar.root.querySelector('.goosemuse-toolbar-tone-row');
-    expect(toneRow?.classList.contains('goosemuse-hidden')).toBe(true);
+    const toneRow = bar.root.querySelector('.chatgoose-toolbar-tone-row');
+    expect(toneRow?.classList.contains('chatgoose-hidden')).toBe(true);
   });
 
   it('shows tone row without mapped personality when connected with API key', () => {
@@ -322,8 +322,8 @@ describe('ButtonBar tone row', () => {
       compareCardCount: 2,
     }), null, 'default', 'none', true, false, false);
 
-    const toneRow = bar.root.querySelector('.goosemuse-toolbar-tone-row');
-    expect(toneRow?.classList.contains('goosemuse-hidden')).toBe(false);
+    const toneRow = bar.root.querySelector('.chatgoose-toolbar-tone-row');
+    expect(toneRow?.classList.contains('chatgoose-hidden')).toBe(false);
   });
 
   it('calls onToneSelect when a pill is clicked', () => {
@@ -339,7 +339,7 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.goosemuse-tone-pill'));
+    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
     const flirty = pills.find((p) => p.textContent === 'Flirty');
     flirty?.click();
 
@@ -393,7 +393,7 @@ describe('ButtonBar improve draft state', () => {
     const pingIndex = children.findIndex((child) => child.textContent === 'Ping');
     const summaryIndex = children.findIndex((child) => child.textContent === 'Scan');
     const personalityIndex = children.findIndex((child) =>
-      child.classList.contains('goosemuse-toolbar-personality-end'),
+      child.classList.contains('chatgoose-toolbar-personality-end'),
     );
 
     expect(multiIndex).toBeGreaterThan(-1);

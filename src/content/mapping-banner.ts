@@ -12,39 +12,39 @@ export class MappingBanner {
 
   constructor(private readonly callbacks: MappingBannerCallbacks) {
     this.root = document.createElement('div');
-    this.root.className = 'goosemuse-banner goosemuse-hidden';
+    this.root.className = 'chatgoose-banner chatgoose-hidden';
 
     const copy = document.createElement('div');
-    copy.className = 'goosemuse-banner-copy';
+    copy.className = 'chatgoose-banner-copy';
     this.title = document.createElement('div');
-    this.title.className = 'goosemuse-banner-title';
+    this.title.className = 'chatgoose-banner-title';
     this.title.textContent = 'Which model is this account?';
     this.body = document.createElement('div');
-    this.body.className = 'goosemuse-banner-text';
+    this.body.className = 'chatgoose-banner-text';
     copy.append(this.title, this.body);
 
     this.actions = document.createElement('div');
-    this.actions.className = 'goosemuse-banner-actions';
+    this.actions.className = 'chatgoose-banner-actions';
 
     this.root.append(copy, this.actions);
   }
 
   async render(accountId: string | null, mapped: boolean): Promise<void> {
     if (!accountId || mapped) {
-      this.root.classList.add('goosemuse-hidden');
+      this.root.classList.add('chatgoose-hidden');
       this.actions.replaceChildren();
       return;
     }
 
     const state = await loadStorageState();
-    this.root.classList.remove('goosemuse-hidden');
+    this.root.classList.remove('chatgoose-hidden');
     this.actions.replaceChildren();
 
     if (state.personalities.length === 0) {
-      this.body.textContent = 'Create a personality in Settings before GooseMuse can generate replies for this account.';
+      this.body.textContent = 'Create a personality in Settings before ChatGoose can generate replies for this account.';
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'goosemuse-button';
+      button.className = 'chatgoose-button';
       button.textContent = 'Open Settings';
       button.addEventListener('click', () => this.callbacks.onOpenSettings());
       this.actions.append(button);
@@ -54,7 +54,7 @@ export class MappingBanner {
     this.body.textContent = `Assign Fansly account ${accountId} to a model personality.`;
 
     const select = document.createElement('select');
-    select.className = 'goosemuse-select';
+    select.className = 'chatgoose-select';
     const placeholder = document.createElement('option');
     placeholder.value = '';
     placeholder.textContent = 'Choose a personality';
@@ -68,13 +68,13 @@ export class MappingBanner {
 
     const save = document.createElement('button');
     save.type = 'button';
-    save.className = 'goosemuse-button';
+    save.className = 'chatgoose-button';
     save.textContent = 'Save Mapping';
     save.disabled = true;
 
     const settings = document.createElement('button');
     settings.type = 'button';
-    settings.className = 'goosemuse-button goosemuse-button-secondary';
+    settings.className = 'chatgoose-button chatgoose-button-secondary';
     settings.textContent = 'Settings';
     settings.addEventListener('click', () => this.callbacks.onOpenSettings());
 
@@ -87,7 +87,7 @@ export class MappingBanner {
         return;
       }
       await saveAccountMapping(accountId, select.value);
-      this.root.classList.add('goosemuse-hidden');
+      this.root.classList.add('chatgoose-hidden');
     });
 
     this.actions.append(select, save, settings);

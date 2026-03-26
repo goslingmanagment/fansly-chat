@@ -397,7 +397,7 @@ function warnPromptCachingFallback(
   anchor: string,
 ): void {
   console.warn(
-    `[GooseMuse] Prompt caching disabled for ${feature}: missing or invalid anchor "${anchor}"`,
+    `[ChatGoose] Prompt caching disabled for ${feature}: missing or invalid anchor "${anchor}"`,
   );
 }
 

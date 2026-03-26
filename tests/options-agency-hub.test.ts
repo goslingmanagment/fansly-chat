@@ -84,7 +84,7 @@ function createPermissionsEvent(): MockPermissionsEvent {
 
 function installDom() {
   dom = new JSDOM(
-    '<!doctype html><html><head></head><body><div id="goosemuse-options-root"></div></body></html>',
+    '<!doctype html><html><head></head><body><div id="chatgoose-options-root"></div></body></html>',
     { url: 'https://example.test/options.html' },
   );
   const { window } = dom;
@@ -169,7 +169,7 @@ async function loadOptionsPage(
             ok: false,
             error: {
               key: 'hub_request_failed',
-              code: 'GM-HUB-07',
+              code: 'CG-HUB-07',
               message: 'Agency Hub request failed.',
             },
           };
@@ -285,7 +285,7 @@ describe('Options page - Agency Hub section', () => {
     storageDeferred.resolve();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Sync ready: GooseMuse can push fan summaries.');
+      expect(section.textContent).toContain('Sync ready: ChatGoose can push fan summaries.');
     }, { timeout: 2000 });
   });
 
@@ -386,7 +386,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connection failed: GM-HUB-07');
+      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
       expect(section.textContent).toContain('Agency Hub request failed.');
       expect(section.textContent).toContain('The Hub returned an error or could not be reached.');
     }, { timeout: 2000 });
@@ -448,7 +448,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connection failed: GM-HUB-07');
+      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
       expect(section.textContent).toContain('Agency Hub request failed.');
       expect(section.textContent).toContain('The connection test could not be completed.');
     }, { timeout: 2000 });
@@ -471,7 +471,7 @@ describe('Options page - Agency Hub section', () => {
           ok: false,
           error: {
             key: 'hub_invalid_api_key',
-            code: 'GM-HUB-03',
+            code: 'CG-HUB-03',
             message: 'Agency Hub API key is invalid.',
             description: 'Check the key in Agency Hub settings and try again.',
           },
@@ -504,7 +504,7 @@ describe('Options page - Agency Hub section', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'invalid-key',
       });
-      expect(section.textContent).toContain('Connection failed: GM-HUB-03');
+      expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
       expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
     }, { timeout: 2000 });
