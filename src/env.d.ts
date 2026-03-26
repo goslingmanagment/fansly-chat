@@ -1,4 +1,4 @@
-declare const __GOOSEMUSE_BUILD_TIME__: string;
+declare const __CHATGOOSE_BUILD_TIME__: string;
 
 declare module '*.md' {
   const value: string;

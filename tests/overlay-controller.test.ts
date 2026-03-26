@@ -285,7 +285,7 @@ describe('OverlayController', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    Reflect.deleteProperty(globalThis, '__GOOSEMUSE_OVERLAY_DEBUG__');
+    Reflect.deleteProperty(globalThis, '__CHATGOOSE_OVERLAY_DEBUG__');
   });
 
   it('reuses the mounted overlay shell for same-operation loading updates', async () => {
@@ -298,11 +298,11 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('stream-op', ''));
 
-    const root = requireElement<HTMLDivElement>('#goosemuse-overlay-root');
-    const shell = requireElement<HTMLDivElement>('.goosemuse-overlay-shell');
-    const backdrop = requireElement<HTMLDivElement>('.goosemuse-overlay-backdrop');
-    const panel = requireElement<HTMLDivElement>('.goosemuse-overlay-panel');
-    const stream = requireElement<HTMLDivElement>('.goosemuse-stream');
+    const root = requireElement<HTMLDivElement>('#chatgoose-overlay-root');
+    const shell = requireElement<HTMLDivElement>('.chatgoose-overlay-shell');
+    const backdrop = requireElement<HTMLDivElement>('.chatgoose-overlay-backdrop');
+    const panel = requireElement<HTMLDivElement>('.chatgoose-overlay-panel');
+    const stream = requireElement<HTMLDivElement>('.chatgoose-stream');
     const records: MutationRecord[] = [];
     const observer = new MutationObserver((mutations) => {
       records.push(...mutations);
@@ -313,10 +313,10 @@ describe('OverlayController', () => {
     await Promise.resolve();
     observer.disconnect();
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-overlay-shell')).toBe(shell);
-    expect(requireElement<HTMLDivElement>('.goosemuse-overlay-backdrop')).toBe(backdrop);
-    expect(requireElement<HTMLDivElement>('.goosemuse-overlay-panel')).toBe(panel);
-    expect(requireElement<HTMLDivElement>('.goosemuse-stream')).toBe(stream);
+    expect(requireElement<HTMLDivElement>('.chatgoose-overlay-shell')).toBe(shell);
+    expect(requireElement<HTMLDivElement>('.chatgoose-overlay-backdrop')).toBe(backdrop);
+    expect(requireElement<HTMLDivElement>('.chatgoose-overlay-panel')).toBe(panel);
+    expect(requireElement<HTMLDivElement>('.chatgoose-stream')).toBe(stream);
     expect(stream.textContent).toBe('hello world');
     expect(records).toHaveLength(0);
   });
@@ -331,8 +331,8 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('body-op', 'hello world'));
 
-    const body = requireElement<HTMLDivElement>('.goosemuse-overlay-body');
-    expect(body.firstElementChild).toBe(requireElement<HTMLDivElement>('.goosemuse-grid'));
+    const body = requireElement<HTMLDivElement>('.chatgoose-overlay-body');
+    expect(body.firstElementChild).toBe(requireElement<HTMLDivElement>('.chatgoose-grid'));
   });
 
   it('keeps overlay scroll ownership on the panel instead of the nested body', () => {
@@ -347,8 +347,8 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('scroll-owner-op', 'hello world'));
 
-    const panel = requireElement<HTMLDivElement>('.goosemuse-overlay-panel');
-    const body = requireElement<HTMLDivElement>('.goosemuse-overlay-body');
+    const panel = requireElement<HTMLDivElement>('.chatgoose-overlay-panel');
+    const body = requireElement<HTMLDivElement>('.chatgoose-overlay-body');
     const panelStyle = window.getComputedStyle(panel);
     const bodyStyle = window.getComputedStyle(body);
 
@@ -372,9 +372,9 @@ describe('OverlayController', () => {
       }),
     );
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-overlay-status').textContent).toContain('Load messages');
-    expect(document.querySelector('.goosemuse-profiling')).not.toBeNull();
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-log').textContent).toContain(
+    expect(requireElement<HTMLDivElement>('.chatgoose-overlay-status').textContent).toContain('Load messages');
+    expect(document.querySelector('.chatgoose-profiling')).not.toBeNull();
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-log').textContent).toContain(
       'Loaded messages page 1/2 (25 msgs, 25 collected)',
     );
   });
@@ -394,7 +394,7 @@ describe('OverlayController', () => {
       }),
     );
 
-    const log = requireElement<HTMLDivElement>('.goosemuse-profiling-log');
+    const log = requireElement<HTMLDivElement>('.chatgoose-profiling-log');
     log.scrollTop = 72;
 
     controller.render(
@@ -413,7 +413,7 @@ describe('OverlayController', () => {
       }),
     );
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-log')).toBe(log);
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-log')).toBe(log);
     expect(log.scrollTop).toBe(72);
     expect(log.textContent).toContain('Loaded messages page 3/40 (25 msgs, 75 collected)');
   });
@@ -433,7 +433,7 @@ describe('OverlayController', () => {
       }),
     );
 
-    const log = requireElement<HTMLDivElement>('.goosemuse-profiling-log');
+    const log = requireElement<HTMLDivElement>('.chatgoose-profiling-log');
     let scrollHeight = 180;
     Object.defineProperty(log, 'clientHeight', {
       configurable: true,
@@ -462,7 +462,7 @@ describe('OverlayController', () => {
       }),
     );
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-log')).toBe(log);
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-log')).toBe(log);
     expect(log.scrollTop).toBe(120);
   });
 
@@ -481,7 +481,7 @@ describe('OverlayController', () => {
       }),
     );
 
-    const header = requireElement<HTMLDivElement>('.goosemuse-profiling .goosemuse-debug-summary');
+    const header = requireElement<HTMLDivElement>('.chatgoose-profiling .chatgoose-debug-summary');
     expect(header.textContent).toBe('Pipeline Profiling • 1.9s');
 
     controller.render(
@@ -493,7 +493,7 @@ describe('OverlayController', () => {
       }),
     );
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling .goosemuse-debug-summary')).toBe(header);
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling .chatgoose-debug-summary')).toBe(header);
     expect(header.textContent).toBe('Pipeline Profiling • 9.3s');
   });
 
@@ -507,7 +507,7 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('pending-op', ''));
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-spend-strip').textContent).toContain(
+    expect(requireElement<HTMLDivElement>('.chatgoose-spend-strip').textContent).toContain(
       'pending',
     );
   });
@@ -523,15 +523,15 @@ describe('OverlayController', () => {
 
     controller.render(createLoadingModel('plain-op', ''));
 
-    const grid = requireElement<HTMLDivElement>('.goosemuse-grid');
-    expect(requireElement<HTMLDivElement>('.goosemuse-overlay-status').textContent).toBe('Generating…');
-    expect(requireElement<HTMLDivElement>('.goosemuse-stream').textContent).toBe('Waiting for Claude…');
-    expect(document.querySelector('.goosemuse-profiling')).toBeNull();
+    const grid = requireElement<HTMLDivElement>('.chatgoose-grid');
+    expect(requireElement<HTMLDivElement>('.chatgoose-overlay-status').textContent).toBe('Generating…');
+    expect(requireElement<HTMLDivElement>('.chatgoose-stream').textContent).toBe('Waiting for Claude…');
+    expect(document.querySelector('.chatgoose-profiling')).toBeNull();
     expect(Array.from(grid.children).map((element) => element.className)).toEqual([
-      'goosemuse-loading-spend-host',
-      'goosemuse-overlay-status',
-      'goosemuse-stream',
-      'goosemuse-overlay-actions',
+      'chatgoose-loading-spend-host',
+      'chatgoose-overlay-status',
+      'chatgoose-stream',
+      'chatgoose-overlay-actions',
     ]);
     expect(setIntervalSpy).not.toHaveBeenCalled();
   });
@@ -550,13 +550,13 @@ describe('OverlayController', () => {
     controller.render(
       createLoadingModel('rate-limit-op', '', {
         progressMessage: 'Rate limited. Waiting to retry…',
-        statusCode: 'GM-API-01',
+        statusCode: 'CG-API-01',
         retryAtMs: Date.now() + 30_000,
       }),
     );
 
-    const status = requireElement<HTMLDivElement>('.goosemuse-overlay-status');
-    expect(status.textContent).toContain('GM-API-01');
+    const status = requireElement<HTMLDivElement>('.chatgoose-overlay-status');
+    expect(status.textContent).toContain('CG-API-01');
     expect(status.textContent).toContain('Rate limited. Waiting to retry…');
     expect(status.textContent).toContain('(30s)');
 
@@ -573,12 +573,12 @@ describe('OverlayController', () => {
     });
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
 
-    Reflect.set(globalThis, '__GOOSEMUSE_OVERLAY_DEBUG__', true);
+    Reflect.set(globalThis, '__CHATGOOSE_OVERLAY_DEBUG__', true);
     controller.render(createLoadingModel('trace-op', ''));
     controller.render(createLoadingModel('trace-op', 'next chunk'));
 
     expect(debugSpy).toHaveBeenCalledTimes(2);
-    expect(debugSpy.mock.calls[1]?.[0]).toBe('[GooseMuse overlay render]');
+    expect(debugSpy.mock.calls[1]?.[0]).toBe('[ChatGoose overlay render]');
     expect(debugSpy.mock.calls[1]?.[1]).toMatchObject({
       count: 2,
       kind: 'loading',
@@ -607,15 +607,15 @@ describe('OverlayController', () => {
     };
 
     controller.render(createReplyModel(part));
-    const panel = requireElement<HTMLDivElement>('.goosemuse-overlay-panel');
-    expect(requireElement<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button').textContent).toBe('Insert');
+    const panel = requireElement<HTMLDivElement>('.chatgoose-overlay-panel');
+    expect(requireElement<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button').textContent).toBe('Insert');
 
     part.insertedOnce = true;
     controller.render(createReplyModel(part));
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-overlay-panel')).toBe(panel);
-    expect(requireElement<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button').textContent).toBe('Insert again');
-    expect(requireElement<HTMLDivElement>('.goosemuse-card-status').textContent).toBe('Inserted earlier.');
+    expect(requireElement<HTMLDivElement>('.chatgoose-overlay-panel')).toBe(panel);
+    expect(requireElement<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button').textContent).toBe('Insert again');
+    expect(requireElement<HTMLDivElement>('.chatgoose-card-status').textContent).toBe('Inserted earlier.');
   });
 
   it('renders a profiling summary in completed views when profiling is present', () => {
@@ -638,12 +638,12 @@ describe('OverlayController', () => {
       profiling: createProfilingSnapshot(),
     });
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain('Total');
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain('Claude usage');
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain('cache read 90');
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain('input 420');
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain('Load messages');
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain('2 pages, 30 transcript messages');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Total');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Claude usage');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('cache read 90');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('input 420');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Load messages');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('2 pages, 30 transcript messages');
   });
 
   it('renders Help Me regenerate action through the generic rerun callback', () => {
@@ -657,7 +657,7 @@ describe('OverlayController', () => {
 
     controller.render(createHelpMeModel());
 
-    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'))
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'))
       .find((element) => element.textContent === 'Regenerate');
 
     expect(button).toBeDefined();
@@ -676,7 +676,7 @@ describe('OverlayController', () => {
 
     controller.render(createReadOnlyModel());
 
-    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'))
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'))
       .find((element) => element.textContent === 'Refresh');
 
     expect(button).toBeDefined();
@@ -695,7 +695,7 @@ describe('OverlayController', () => {
 
     controller.render(createReadOnlyModel());
 
-    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'))
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'))
       .find((element) => element.textContent === 'Copy');
 
     expect(button).toBeDefined();
@@ -718,9 +718,9 @@ describe('OverlayController', () => {
     controller.render(createSummaryReadOnlyModel());
 
     const buttons = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'),
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'),
     );
-    const syncStatus = document.querySelector('.goosemuse-overlay-action-status');
+    const syncStatus = document.querySelector('.chatgoose-overlay-action-status');
 
     expect(buttons.map((button) => button.textContent)).toEqual(['Refresh', 'Copy']);
     expect(syncStatus?.textContent).toBe('Server sync · saved');
@@ -740,17 +740,17 @@ describe('OverlayController', () => {
     });
 
     controller.render(createSummaryReadOnlyModel({ syncState: 'saving' }));
-    expect(document.querySelector('.goosemuse-overlay-action-status')?.textContent).toBe(
+    expect(document.querySelector('.chatgoose-overlay-action-status')?.textContent).toBe(
       'Server sync · saving...',
     );
 
     controller.render(createSummaryReadOnlyModel({ syncState: 'not-set-up' }));
-    expect(document.querySelector('.goosemuse-overlay-action-status')?.textContent).toBe(
+    expect(document.querySelector('.chatgoose-overlay-action-status')?.textContent).toBe(
       'Server sync · not set up',
     );
 
     controller.render(createSummaryReadOnlyModel({ syncState: 'failed' }));
-    expect(document.querySelector('.goosemuse-overlay-action-status')?.textContent).toBe(
+    expect(document.querySelector('.chatgoose-overlay-action-status')?.textContent).toBe(
       'Server sync · failed',
     );
   });
@@ -767,13 +767,13 @@ describe('OverlayController', () => {
       syncState: 'failed',
       syncError: {
         key: 'hub_request_failed',
-        code: 'GM-HUB-07',
+        code: 'CG-HUB-07',
         message: 'Agency Hub request failed.',
       },
     }));
 
-    expect(document.querySelector('.goosemuse-overlay-action-status')?.textContent).toBe(
-      'Server sync · failed (GM-HUB-07)',
+    expect(document.querySelector('.chatgoose-overlay-action-status')?.textContent).toBe(
+      'Server sync · failed (CG-HUB-07)',
     );
   });
 
@@ -793,13 +793,13 @@ describe('OverlayController', () => {
       profiling: createProfilingSnapshot(),
       error: {
         key: 'unknown_error',
-        code: 'GM-APP-01',
+        code: 'CG-APP-01',
         message: 'Something broke',
       },
     });
 
-    const grid = requireElement<HTMLDivElement>('.goosemuse-grid');
-    expect(grid.firstElementChild?.textContent).toContain('GM-APP-01');
+    const grid = requireElement<HTMLDivElement>('.chatgoose-grid');
+    expect(grid.firstElementChild?.textContent).toContain('CG-APP-01');
     expect(grid.firstElementChild?.textContent).toContain('Something broke');
     expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
   });
@@ -822,13 +822,13 @@ describe('OverlayController', () => {
       }),
     );
 
-    expect(requireElement<HTMLDivElement>('.goosemuse-spend-strip').textContent).toContain(
+    expect(requireElement<HTMLDivElement>('.chatgoose-spend-strip').textContent).toContain(
       '$0.002982',
     );
-    expect(requireElement<HTMLDivElement>('.goosemuse-spend-strip').textContent).toContain(
+    expect(requireElement<HTMLDivElement>('.chatgoose-spend-strip').textContent).toContain(
       'saved',
     );
-    expect(requireElement<HTMLDivElement>('.goosemuse-profiling-summary').textContent).toContain(
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain(
       'Claude cost',
     );
   });
@@ -869,7 +869,7 @@ describe('OverlayController', () => {
     controller.render(createLoadingModel('collapse-op', 'text'), {
       dismissMode: 'collapse-to-inline',
     });
-    const backdrop = document.querySelector('.goosemuse-overlay-backdrop') as HTMLElement;
+    const backdrop = document.querySelector('.chatgoose-overlay-backdrop') as HTMLElement;
     backdrop.click();
 
     expect(onCollapse).toHaveBeenCalledOnce();
@@ -889,7 +889,7 @@ describe('OverlayController', () => {
     controller.render(createLoadingModel('collapse-op', 'text'), {
       dismissMode: 'collapse-to-inline',
     });
-    const closeBtn = document.querySelector('.goosemuse-close') as HTMLButtonElement;
+    const closeBtn = document.querySelector('.chatgoose-close') as HTMLButtonElement;
     closeBtn.click();
 
     expect(onCollapse).toHaveBeenCalledOnce();
@@ -953,7 +953,7 @@ describe('OverlayController', () => {
       dismissMode: 'collapse-to-inline',
     });
     const cancelButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'),
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'),
     ).find((element) => element.textContent === 'Cancel');
 
     expect(cancelButton).toBeDefined();
@@ -995,9 +995,9 @@ describe('OverlayController', () => {
 
     controller.render(createHelpMeModel({ debugPrompt: createDebugSnapshot() }));
 
-    const inspector = document.querySelector('.goosemuse-debug-inspector');
+    const inspector = document.querySelector('.chatgoose-debug-inspector');
     expect(inspector).not.toBeNull();
-    expect(inspector?.querySelector('.goosemuse-debug-summary')?.textContent).toBe('Claude Input');
+    expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('Claude Input');
   });
 
   it('renders debug prompt inspector in Read Only view when debugPrompt is present', () => {
@@ -1010,9 +1010,9 @@ describe('OverlayController', () => {
 
     controller.render(createReadOnlyModel({ debugPrompt: createDebugSnapshot() }));
 
-    const inspector = document.querySelector('.goosemuse-debug-inspector');
+    const inspector = document.querySelector('.chatgoose-debug-inspector');
     expect(inspector).not.toBeNull();
-    expect(inspector?.querySelector('.goosemuse-debug-summary')?.textContent).toBe('Claude Input');
+    expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('Claude Input');
   });
 
   it('shows inline error when copy to clipboard fails (Bug 6)', async () => {
@@ -1037,13 +1037,13 @@ describe('OverlayController', () => {
     controller.render(createReplyModel(part));
 
     const copyButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button'),
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button'),
     ).find((button) => button.textContent === 'Copy');
     expect(copyButton).toBeDefined();
 
     copyButton!.click();
     await vi.waitFor(() => {
-      const errorEl = document.querySelector('.goosemuse-inline-error');
+      const errorEl = document.querySelector('.chatgoose-inline-error');
       expect(errorEl).not.toBeNull();
     });
   });
@@ -1062,13 +1062,13 @@ describe('OverlayController', () => {
     controller.render(createReadOnlyModel());
 
     const copyButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.goosemuse-overlay-actions .goosemuse-button'),
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'),
     ).find((button) => button.textContent === 'Copy');
     expect(copyButton).toBeDefined();
 
     copyButton!.click();
     await vi.waitFor(() => {
-      const errorEl = document.querySelector('.goosemuse-inline-error');
+      const errorEl = document.querySelector('.chatgoose-inline-error');
       expect(errorEl).not.toBeNull();
     });
   });
@@ -1188,7 +1188,7 @@ describe('OverlayController', () => {
 
     controller.render(createReplyModel(createPart('Hello')));
     await vi.waitFor(() => {
-      const btn = document.querySelector<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button');
+      const btn = document.querySelector<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button');
       expect(document.activeElement).toBe(btn);
     });
   });
@@ -1206,11 +1206,11 @@ describe('OverlayController', () => {
     controller.render(createReplyModel(createPart('Hello')));
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(
-        document.querySelector('.goosemuse-card-actions .goosemuse-button'),
+        document.querySelector('.chatgoose-card-actions .chatgoose-button'),
       );
     });
 
-    const insertButton = requireElement<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button');
+    const insertButton = requireElement<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button');
     insertButton.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Enter',
       bubbles: true,

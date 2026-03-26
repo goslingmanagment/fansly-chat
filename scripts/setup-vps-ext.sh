@@ -27,8 +27,8 @@ readonly AGENCY_HUB_SITE="/etc/nginx/sites-available/agency-hub"
 readonly EXT_SITE_AVAILABLE="/etc/nginx/sites-available/${DOMAIN}"
 readonly EXT_SITE_ENABLED="/etc/nginx/sites-enabled/${DOMAIN}"
 readonly CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
-readonly LEGACY_BACKUP_ENABLED="/etc/nginx/sites-enabled/agency-hub.bak-goosemuse-ext"
-readonly LEGACY_BACKUP_DISABLED="/etc/nginx/sites-available/agency-hub.bak-goosemuse-ext"
+readonly LEGACY_BACKUP_ENABLED="/etc/nginx/sites-enabled/agency-hub.bak-chatgoose-ext"
+readonly LEGACY_BACKUP_DISABLED="/etc/nginx/sites-available/agency-hub.bak-chatgoose-ext"
 readonly DNS_WAIT_ATTEMPTS=30
 readonly DNS_WAIT_SECONDS=10
 
@@ -58,10 +58,10 @@ from pathlib import Path
 import re
 
 site_path = Path("/etc/nginx/sites-available/agency-hub")
-begin_marker = "# BEGIN GOOSEMUSE EXTENSION"
-end_marker = "# END GOOSEMUSE EXTENSION"
-blocker_begin = "# BEGIN GOOSEMUSE EXTENSION HARD CUTOFF"
-blocker_end = "# END GOOSEMUSE EXTENSION HARD CUTOFF"
+begin_marker = "# BEGIN CHATGOOSE EXTENSION"
+end_marker = "# END CHATGOOSE EXTENSION"
+blocker_begin = "# BEGIN CHATGOOSE EXTENSION HARD CUTOFF"
+blocker_end = "# END CHATGOOSE EXTENSION HARD CUTOFF"
 text = site_path.read_text()
 start = text.find(begin_marker)
 end = text.find(end_marker)

@@ -102,17 +102,17 @@ function formatLoadingStatus(progress: OperationProgressPayload | null | undefin
 
 function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
   const block = document.createElement('div');
-  block.className = 'goosemuse-inline-error';
+  block.className = 'chatgoose-inline-error';
 
   const primary = document.createElement('div');
-  primary.className = 'goosemuse-error-primary';
+  primary.className = 'chatgoose-error-primary';
   primary.textContent = formatUserFacingError(error);
   block.append(primary);
 
   const description = getUserErrorDescription(error);
   if (description) {
     const secondary = document.createElement('div');
-    secondary.className = 'goosemuse-error-secondary';
+    secondary.className = 'chatgoose-error-secondary';
     secondary.textContent = description;
     block.append(secondary);
   }
@@ -137,34 +137,34 @@ export class InlinePanelController {
 
   constructor(private readonly callbacks: InlinePanelCallbacks) {
     this.root = document.createElement('div');
-    this.root.className = 'goosemuse-inline-panel goosemuse-hidden';
+    this.root.className = 'chatgoose-inline-panel chatgoose-hidden';
 
     // Header
     this.headerEl = document.createElement('div');
-    this.headerEl.className = 'goosemuse-inline-panel-header';
+    this.headerEl.className = 'chatgoose-inline-panel-header';
 
     this.headerInfoEl = document.createElement('div');
-    this.headerInfoEl.className = 'goosemuse-inline-panel-header-info';
+    this.headerInfoEl.className = 'chatgoose-inline-panel-header-info';
 
     this.titleEl = document.createElement('div');
-    this.titleEl.className = 'goosemuse-inline-panel-title';
+    this.titleEl.className = 'chatgoose-inline-panel-title';
 
     this.metaEl = document.createElement('div');
-    this.metaEl.className = 'goosemuse-inline-panel-meta goosemuse-hidden';
+    this.metaEl.className = 'chatgoose-inline-panel-meta chatgoose-hidden';
 
     const actions = document.createElement('div');
-    actions.className = 'goosemuse-inline-panel-actions';
+    actions.className = 'chatgoose-inline-panel-actions';
 
     this.expandButton = document.createElement('button');
     this.expandButton.type = 'button';
-    this.expandButton.className = 'goosemuse-inline-panel-action';
+    this.expandButton.className = 'chatgoose-inline-panel-action';
     this.expandButton.textContent = '\u2197';
     this.expandButton.title = 'Expand';
     this.expandButton.addEventListener('click', () => this.callbacks.onExpand());
 
     const close = document.createElement('button');
     close.type = 'button';
-    close.className = 'goosemuse-inline-panel-action';
+    close.className = 'chatgoose-inline-panel-action';
     close.textContent = '\u00d7';
     close.title = 'Close';
     close.addEventListener('click', () => this.callbacks.onClose());
@@ -175,13 +175,13 @@ export class InlinePanelController {
 
     // Body
     this.bodyEl = document.createElement('div');
-    this.bodyEl.className = 'goosemuse-inline-panel-body';
+    this.bodyEl.className = 'chatgoose-inline-panel-body';
 
     this.root.append(this.headerEl, this.bodyEl);
 
     // Escape handler with scope guard
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && this.model.kind !== 'hidden' && !this.root.classList.contains('goosemuse-hidden')) {
+      if (event.key === 'Escape' && this.model.kind !== 'hidden' && !this.root.classList.contains('chatgoose-hidden')) {
         if (isEditableElement(document.activeElement)) return;
         this.callbacks.onClose();
       }
@@ -195,7 +195,7 @@ export class InlinePanelController {
         event.repeat || event.isComposing
       ) return;
       if (this.model.kind !== 'reply') return;
-      if (this.root.classList.contains('goosemuse-hidden')) return;
+      if (this.root.classList.contains('chatgoose-hidden')) return;
       if ('feature' in this.model && this.model.feature !== 'fast-reply') return;
       if (isEditableElement(document.activeElement)) return;
       if (isInteractiveElement(document.activeElement)) return;
@@ -233,7 +233,7 @@ export class InlinePanelController {
     // Update header
     const featureLabel = model.kind === 'compare'
       ? 'Compare'
-      : ('feature' in model ? FEATURE_LABELS[model.feature] ?? model.feature : 'GooseMuse');
+      : ('feature' in model ? FEATURE_LABELS[model.feature] ?? model.feature : 'ChatGoose');
     const fanDisplayName = 'fanDisplayName' in model ? model.fanDisplayName : 'fan';
     const titleText = `${featureLabel} — @${fanDisplayName || 'fan'}`;
     if (this.titleEl.textContent !== titleText) {
@@ -243,7 +243,7 @@ export class InlinePanelController {
     this.renderHeaderMeta(model);
 
     // Show panel
-    this.root.classList.remove('goosemuse-hidden');
+    this.root.classList.remove('chatgoose-hidden');
 
     // Render body
     this.renderBody(model);
@@ -256,7 +256,7 @@ export class InlinePanelController {
     this.lastFocusedReplyOpId = null;
     this.clearLoadingStatusTimer();
     this.bodyEl.replaceChildren();
-    this.root.classList.add('goosemuse-hidden');
+    this.root.classList.add('chatgoose-hidden');
   }
 
   private renderBody(model: Exclude<InlinePanelViewModel, { kind: 'hidden' }>): void {
@@ -307,7 +307,7 @@ export class InlinePanelController {
     ) {
       this.lastFocusedReplyOpId = model.operationId;
       queueMicrotask(() => {
-        const btn = view.root.querySelector<HTMLButtonElement>('.goosemuse-card-actions .goosemuse-button');
+        const btn = view.root.querySelector<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button');
         btn?.focus();
       });
     }
@@ -318,24 +318,24 @@ export class InlinePanelController {
   ): void {
     if (model.kind === 'compare') {
       this.metaEl.replaceChildren();
-      this.metaEl.classList.add('goosemuse-hidden');
+      this.metaEl.classList.add('chatgoose-hidden');
       return;
     }
 
     const spend = model.anthropicSpend;
     if (!spend) {
       this.metaEl.replaceChildren();
-      this.metaEl.classList.add('goosemuse-hidden');
+      this.metaEl.classList.add('chatgoose-hidden');
       return;
     }
 
     this.setHeaderMetaContent(spend);
-    this.metaEl.classList.remove('goosemuse-hidden');
+    this.metaEl.classList.remove('chatgoose-hidden');
   }
 
   private setHeaderMetaContent(spend: AnthropicSpendSummary): void {
     const primary = document.createElement('div');
-    primary.className = 'goosemuse-inline-panel-meta-primary';
+    primary.className = 'chatgoose-inline-panel-meta-primary';
     primary.textContent = formatSpendPrimary(spend);
 
     const cacheEffect = formatCacheEffectInline(spend);
@@ -344,7 +344,7 @@ export class InlinePanelController {
         document.createTextNode(' · '),
         (() => {
           const span = document.createElement('span');
-          span.className = `goosemuse-spend-cache-${cacheEffect.kind}`;
+          span.className = `chatgoose-spend-cache-${cacheEffect.kind}`;
           span.textContent = cacheEffect.text;
           return span;
         })(),
@@ -360,16 +360,16 @@ export class InlinePanelController {
     placeholder = false,
   ): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'goosemuse-spend-strip goosemuse-spend-strip-inline';
+    section.className = 'chatgoose-spend-strip chatgoose-spend-strip-inline';
 
     const primary = document.createElement('div');
-    primary.className = 'goosemuse-spend-strip-primary';
+    primary.className = 'chatgoose-spend-strip-primary';
 
     const secondary = document.createElement('div');
-    secondary.className = 'goosemuse-spend-strip-secondary';
+    secondary.className = 'chatgoose-spend-strip-secondary';
 
     if (!spend && placeholder) {
-      section.classList.add('goosemuse-spend-strip-pending');
+      section.classList.add('chatgoose-spend-strip-pending');
       primary.textContent = 'Cost pending · Tokens pending';
       secondary.textContent = 'in — · write — · read — · out —';
       section.append(primary, secondary);
@@ -387,7 +387,7 @@ export class InlinePanelController {
         document.createTextNode(' · '),
         (() => {
           const span = document.createElement('span');
-          span.className = `goosemuse-spend-cache-${cacheEffect.kind}`;
+          span.className = `chatgoose-spend-cache-${cacheEffect.kind}`;
           span.textContent = cacheEffect.text;
           return span;
         })(),
@@ -404,23 +404,23 @@ export class InlinePanelController {
 
   private createLoadingView(model: Extract<OverlayViewModel, { kind: 'loading' }>): LoadingViewState {
     const section = document.createElement('div');
-    section.className = 'goosemuse-grid';
+    section.className = 'chatgoose-grid';
 
     const status = document.createElement('div');
-    status.className = 'goosemuse-overlay-status';
+    status.className = 'chatgoose-overlay-status';
     const statusText = document.createTextNode('');
     status.append(statusText);
 
     const stream = document.createElement('div');
-    stream.className = 'goosemuse-stream';
+    stream.className = 'chatgoose-stream';
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
     const actions = document.createElement('div');
-    actions.className = 'goosemuse-card-actions';
+    actions.className = 'chatgoose-card-actions';
     const cancel = document.createElement('button');
     cancel.type = 'button';
-    cancel.className = 'goosemuse-button goosemuse-button-danger';
+    cancel.className = 'chatgoose-button chatgoose-button-danger';
     cancel.textContent = 'Cancel';
     cancel.addEventListener('click', () => {
       if (this.model.kind === 'loading') {
@@ -480,7 +480,7 @@ export class InlinePanelController {
 
   private renderReplyBody(model: Extract<OverlayViewModel, { kind: 'reply' }>): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'goosemuse-grid';
+    section.className = 'chatgoose-grid';
 
     // Inline error banner (from insert/copy failures)
     if (this.inlineError) {
@@ -489,7 +489,7 @@ export class InlinePanelController {
 
     if (model.parts.length > 0) {
       const parts = document.createElement('div');
-      parts.className = 'goosemuse-parts';
+      parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {
         const isSplit = model.splitModeRequested && model.parts.length > 1;
         parts.append(
@@ -511,18 +511,18 @@ export class InlinePanelController {
       section.append(parts);
     } else {
       const raw = document.createElement('div');
-      raw.className = 'goosemuse-stream';
+      raw.className = 'chatgoose-stream';
       raw.textContent = model.rawText;
       section.append(raw);
     }
 
     // Regenerate
     const actions = document.createElement('div');
-    actions.className = 'goosemuse-card-actions';
+    actions.className = 'chatgoose-card-actions';
     if (model.rerunActionLabel) {
       const rerun = document.createElement('button');
       rerun.type = 'button';
-      rerun.className = 'goosemuse-button';
+      rerun.className = 'chatgoose-button';
       rerun.textContent = model.rerunActionLabel;
       rerun.addEventListener('click', () => this.callbacks.onRerun(model.feature));
       actions.append(rerun);
@@ -534,11 +534,11 @@ export class InlinePanelController {
 
   private renderCompareBody(model: CompareInlineViewModel): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'goosemuse-grid';
+    section.className = 'chatgoose-grid';
 
     if (model.tabs.length === 0) {
       const waiting = document.createElement('div');
-      waiting.className = 'goosemuse-stream';
+      waiting.className = 'chatgoose-stream';
       waiting.textContent = model.progress?.message ?? 'Preparing compare…';
       section.append(waiting);
       return section;
@@ -547,21 +547,21 @@ export class InlinePanelController {
     const summaryText = formatCompareSummary(model.tabs);
     if (summaryText) {
       const summary = document.createElement('div');
-      summary.className = 'goosemuse-compare-summary';
+      summary.className = 'chatgoose-compare-summary';
       summary.textContent = summaryText;
       section.append(summary);
     }
 
     const tabs = document.createElement('div');
-    tabs.className = 'goosemuse-compare-tabs';
+    tabs.className = 'chatgoose-compare-tabs';
     model.tabs.forEach((tab) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'goosemuse-compare-tab';
+      button.className = 'chatgoose-compare-tab';
       const isActive = tab.cardId === model.activeCardId;
       button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
       if (isActive) {
-        button.classList.add('goosemuse-compare-tab-active');
+        button.classList.add('chatgoose-compare-tab-active');
       }
       button.addEventListener('click', () => this.callbacks.onCompareTabSelect(tab.cardId));
 
@@ -571,14 +571,14 @@ export class InlinePanelController {
 
       if (tab.source === 'current') {
         const badge = document.createElement('span');
-        badge.className = 'goosemuse-compare-tab-badge';
+        badge.className = 'chatgoose-compare-tab-badge';
         badge.textContent = 'Current';
         button.append(badge);
       }
 
       if (tab.status === 'loading') {
         const spinner = document.createElement('span');
-        spinner.className = 'goosemuse-spinner';
+        spinner.className = 'chatgoose-spinner';
         button.append(spinner);
       }
 
@@ -595,11 +595,11 @@ export class InlinePanelController {
     }
 
     const actions = document.createElement('div');
-    actions.className = 'goosemuse-card-actions';
+    actions.className = 'chatgoose-card-actions';
     if (model.canCancel && model.operationId) {
       const cancel = document.createElement('button');
       cancel.type = 'button';
-      cancel.className = 'goosemuse-button goosemuse-button-danger';
+      cancel.className = 'chatgoose-button chatgoose-button-danger';
       cancel.textContent = 'Cancel all';
       cancel.addEventListener('click', () => this.callbacks.onCancel(model.operationId!));
       actions.append(cancel);
@@ -607,7 +607,7 @@ export class InlinePanelController {
     if (model.canRegenerate) {
       const rerun = document.createElement('button');
       rerun.type = 'button';
-      rerun.className = 'goosemuse-button';
+      rerun.className = 'chatgoose-button';
       rerun.textContent = 'Regenerate all';
       rerun.addEventListener('click', () => this.callbacks.onCompareRerun());
       actions.append(rerun);
@@ -624,7 +624,7 @@ export class InlinePanelController {
     tab: CompareInlineTabState,
   ): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'goosemuse-grid';
+    section.className = 'chatgoose-grid';
 
     if (this.inlineError) {
       section.append(createUserErrorBlock(this.inlineError));
@@ -633,10 +633,10 @@ export class InlinePanelController {
     if (tab.status === 'loading') {
       section.append(this.createSpendStrip(undefined, true));
       const status = document.createElement('div');
-      status.className = 'goosemuse-overlay-status';
+      status.className = 'chatgoose-overlay-status';
       status.textContent = model.progress?.message ?? 'Generating…';
       const stream = document.createElement('div');
-      stream.className = 'goosemuse-stream';
+      stream.className = 'chatgoose-stream';
       stream.textContent = tab.rawText || 'Waiting for Claude…';
       section.append(status, stream);
       return section;
@@ -656,7 +656,7 @@ export class InlinePanelController {
 
     if (tab.parts.length > 0) {
       const parts = document.createElement('div');
-      parts.className = 'goosemuse-parts';
+      parts.className = 'chatgoose-parts';
       tab.parts.forEach((part) => {
         const isSplit = tab.splitModeRequested && tab.parts.length > 1;
         parts.append(
@@ -680,7 +680,7 @@ export class InlinePanelController {
     }
 
     const raw = document.createElement('div');
-    raw.className = 'goosemuse-stream';
+    raw.className = 'chatgoose-stream';
     raw.textContent = tab.rawText;
     section.append(raw);
     return section;
@@ -697,42 +697,42 @@ export class InlinePanelController {
     options: { hint?: string; emphasis?: 'recommended' | 'followup'; status?: string } = {},
   ): HTMLElement {
     const card = document.createElement('div');
-    card.className = 'goosemuse-card';
+    card.className = 'chatgoose-card';
     if (options.emphasis === 'recommended') {
-      card.classList.add('goosemuse-card-recommended');
+      card.classList.add('chatgoose-card-recommended');
     } else if (options.emphasis === 'followup') {
-      card.classList.add('goosemuse-card-followup');
+      card.classList.add('chatgoose-card-followup');
     }
 
     // Header row: title + hint + status + actions on one line
     const headerRow = document.createElement('div');
-    headerRow.className = 'goosemuse-card-header-row';
+    headerRow.className = 'chatgoose-card-header-row';
 
     const label = document.createElement('span');
-    label.className = 'goosemuse-card-title';
+    label.className = 'chatgoose-card-title';
     label.textContent = title;
     headerRow.append(label);
 
     if (options.hint) {
       const hint = document.createElement('span');
-      hint.className = 'goosemuse-card-hint';
+      hint.className = 'chatgoose-card-hint';
       hint.textContent = options.hint;
       headerRow.append(hint);
     }
 
     if (options.status) {
       const statusEl = document.createElement('span');
-      statusEl.className = 'goosemuse-card-status';
+      statusEl.className = 'chatgoose-card-status';
       statusEl.textContent = options.status;
       headerRow.append(statusEl);
     }
 
     const actions = document.createElement('div');
-    actions.className = 'goosemuse-card-actions';
+    actions.className = 'chatgoose-card-actions';
 
     const insert = document.createElement('button');
     insert.type = 'button';
-    insert.className = 'goosemuse-button';
+    insert.className = 'chatgoose-button';
     insert.textContent = part.insertedAt ? 'Inserted \u2713' : part.insertedOnce ? 'Insert again' : 'Insert';
     insert.disabled = Boolean(part.insertedAt && Date.now() - part.insertedAt < 2000);
     insert.addEventListener('click', () => {
@@ -741,7 +741,7 @@ export class InlinePanelController {
 
     const copy = document.createElement('button');
     copy.type = 'button';
-    copy.className = 'goosemuse-button goosemuse-button-secondary';
+    copy.className = 'chatgoose-button chatgoose-button-secondary';
     copy.textContent = 'Copy';
     copy.addEventListener('click', async () => {
       try {
@@ -758,7 +758,7 @@ export class InlinePanelController {
     headerRow.append(actions);
 
     const text = document.createElement('div');
-    text.className = 'goosemuse-card-text';
+    text.className = 'chatgoose-card-text';
     text.textContent = part.text;
 
     card.append(headerRow, text);
@@ -817,15 +817,15 @@ export class InlinePanelController {
 
   private renderErrorBody(model: Extract<OverlayViewModel, { kind: 'error' }>): HTMLElement {
     const section = document.createElement('div');
-    section.className = 'goosemuse-grid';
+    section.className = 'chatgoose-grid';
 
     section.append(createUserErrorBlock(model.error));
 
     const actions = document.createElement('div');
-    actions.className = 'goosemuse-card-actions';
+    actions.className = 'chatgoose-card-actions';
     const rerun = document.createElement('button');
     rerun.type = 'button';
-    rerun.className = 'goosemuse-button';
+    rerun.className = 'chatgoose-button';
     rerun.textContent = 'Regenerate';
     rerun.addEventListener('click', () => this.callbacks.onRerun(model.feature));
     actions.append(rerun);

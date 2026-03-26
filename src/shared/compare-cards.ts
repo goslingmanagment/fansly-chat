@@ -3,12 +3,12 @@ import { buildAccountLookupOrder } from './account-aliases.js';
 import type { CompareModelCard, PersistedState } from './types.js';
 
 type CompareDraftOverrideGlobal = typeof globalThis & {
-  __GOOSEMUSE_COMPARE_DRAFTS__?: Record<string, string>;
+  __CHATGOOSE_COMPARE_DRAFTS__?: Record<string, string>;
 };
 
 function getCompareDraftSource(): Record<string, string> {
   return (
-    (globalThis as CompareDraftOverrideGlobal).__GOOSEMUSE_COMPARE_DRAFTS__ ??
+    (globalThis as CompareDraftOverrideGlobal).__CHATGOOSE_COMPARE_DRAFTS__ ??
     modelCardDrafts
   );
 }

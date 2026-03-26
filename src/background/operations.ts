@@ -30,7 +30,7 @@ import {
   resolveMappedPersonalityId,
 } from '../shared/compare-cards.js';
 import {
-  GooseMuseError,
+  ChatGooseError,
   createUserError,
   toDebugErrorPayload,
   toUserError,
@@ -110,7 +110,7 @@ import {
   describeSubscriptionTraceStep,
   errorCode,
   parseGroupIdFromUrl,
-  resolveAbortGooseMuseError,
+  resolveAbortChatGooseError,
 } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
 import { StorageCoordinator } from './storage-coordinator.js';
@@ -586,12 +586,12 @@ export class OperationCoordinator {
     if (changed && previous.activeOperationId) {
       await this.cancelOperation(
         tabId,
-        new GooseMuseError('chat_changed'),
+        new ChatGooseError('chat_changed'),
         true,
       );
     }
     if (changed && this.activeCompareByTabId.has(tabId)) {
-      this.cancelCompare(tabId, new GooseMuseError('chat_changed'), true);
+      this.cancelCompare(tabId, new ChatGooseError('chat_changed'), true);
     }
     await this.refreshTabState(tabId, 'tab:state');
   }
@@ -857,23 +857,23 @@ export class OperationCoordinator {
       !urlGroupId ||
       urlGroupId !== payload.groupId
     ) {
-      throw new GooseMuseError('chat_changed');
+      throw new ChatGooseError('chat_changed');
     }
 
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
 
     if (!storage.settings.claudeApiKey) {
-      throw new GooseMuseError('missing_api_key');
+      throw new ChatGooseError('missing_api_key');
     }
     if (storage.personalities.length === 0) {
-      throw new GooseMuseError('no_personalities');
+      throw new ChatGooseError('no_personalities');
     }
     if (!legacyAccountId || !session) {
-      throw new GooseMuseError('not_connected');
+      throw new ChatGooseError('not_connected');
     }
     if (!session.connected) {
-      throw new GooseMuseError('session_expired');
+      throw new ChatGooseError('session_expired');
     }
 
     return {
@@ -891,7 +891,7 @@ export class OperationCoordinator {
 
   private async cancelOperation(
     tabId: number,
-    error?: GooseMuseError,
+    error?: ChatGooseError,
     notifyDiscard = false,
   ): Promise<void> {
     const active = this.activeByTabId.get(tabId);
@@ -912,7 +912,7 @@ export class OperationCoordinator {
       this.sendDiscarded(tabId, {
         type: 'operation:discarded',
         operationId: active.operationId,
-        error: toUserError(error ?? new GooseMuseError('chat_changed')),
+        error: toUserError(error ?? new ChatGooseError('chat_changed')),
       }, active.anthropicSpend ?? createZeroAnthropicSpendSummary(), active.profiler);
     }
   }
@@ -1124,7 +1124,7 @@ export class OperationCoordinator {
   ): ActiveOperation {
     const active = this.activeByTabId.get(tabId);
     if (!active || active.operationId !== operationId) {
-      throw new GooseMuseError('chat_changed');
+      throw new ChatGooseError('chat_changed');
     }
     return active;
   }
@@ -1140,7 +1140,7 @@ export class OperationCoordinator {
       this.sendError(tabId, {
         type: 'operation:error',
         operationId: payload.operationId,
-        error: toUserError(new GooseMuseError('another_operation')),
+        error: toUserError(new ChatGooseError('another_operation')),
       });
       return;
     }
@@ -1416,18 +1416,18 @@ export class OperationCoordinator {
         storage.accountAliases,
       );
       if (!personalityId) {
-        throw new GooseMuseError('no_mapping');
+        throw new ChatGooseError('no_mapping');
       }
 
       const personality = storage.personalities.find(
         (entry) => entry.id === personalityId,
       );
       if (!personality) {
-        throw new GooseMuseError('no_mapping');
+        throw new ChatGooseError('no_mapping');
       }
 
       if (featureRequiresDraft(payload.feature) && !payload.draftText?.trim()) {
-        throw new GooseMuseError('unknown_error');
+        throw new ChatGooseError('unknown_error');
       }
 
       const modelFeature = resolveFeatureModelFeature(payload.feature);
@@ -1632,14 +1632,14 @@ export class OperationCoordinator {
         isDeepFeature(payload.feature) &&
         messageLoad.transcriptMessages.length < MIN_MESSAGES_FOR_DEEP
       ) {
-        throw new GooseMuseError('not_enough_history');
+        throw new ChatGooseError('not_enough_history');
       }
 
       if (
         payload.feature === 'hi-greeting' &&
         messageLoad.transcriptMessages.length > HI_GREETING_MAX_TRANSCRIPT
       ) {
-        throw new GooseMuseError('hi_too_many_messages');
+        throw new ChatGooseError('hi_too_many_messages');
       }
 
       let pingSegment: PingSegment | undefined;
@@ -1666,7 +1666,7 @@ export class OperationCoordinator {
           this.sendError(tabId, {
             type: 'operation:error',
             operationId: payload.operationId,
-            error: toUserError(new GooseMuseError('ping_blocked')),
+            error: toUserError(new ChatGooseError('ping_blocked')),
           }, createZeroAnthropicSpendSummary(), profiler);
           this.clearCompletedOperation(tabId);
           return;
@@ -2141,7 +2141,7 @@ export class OperationCoordinator {
           });
           break;
         } catch (err) {
-          const errorKey = err instanceof GooseMuseError
+          const errorKey = err instanceof ChatGooseError
             ? err.key
             : (err as { key?: string })?.key;
           const retryAfterMs = typeof (err as { retryAfterMs?: unknown })?.retryAfterMs === 'number'
@@ -2165,7 +2165,7 @@ export class OperationCoordinator {
             const fallbackRetryKey = canRetryServiceUnavailable
               ? 'service_unavailable'
               : 'rate_limited';
-            const errorCode = err instanceof GooseMuseError
+            const errorCode = err instanceof ChatGooseError
               ? err.code
               : (typeof (err as { code?: unknown })?.code === 'string'
                   ? (err as { code: string }).code
@@ -2321,7 +2321,7 @@ export class OperationCoordinator {
       }
       active?.profiler.finalizeRunningStages('operation failed');
 
-      const abortError = resolveAbortGooseMuseError(error, {
+      const abortError = resolveAbortChatGooseError(error, {
         active: Boolean(active),
         timeoutSignal: timeoutController?.signal,
         cancelSignal: controller?.signal,
@@ -2329,7 +2329,7 @@ export class OperationCoordinator {
       if (abortError) {
         const code = active
           ? abortError
-          : new GooseMuseError('chat_changed');
+          : new ChatGooseError('chat_changed');
         const errorPayload: ErrorPayload = {
           type: 'operation:error',
           operationId,
@@ -2382,7 +2382,7 @@ export class OperationCoordinator {
 
   private cancelCompare(
     tabId: number,
-    error?: GooseMuseError,
+    error?: ChatGooseError,
     notifyDiscard = false,
   ): void {
     cancelCompareOperation(this.getCompareContext(), tabId, error, notifyDiscard);

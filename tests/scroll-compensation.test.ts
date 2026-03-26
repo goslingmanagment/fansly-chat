@@ -235,7 +235,7 @@ describe('scroll-compensation', () => {
   });
 
   it('finds scroll container that is a direct sibling of root', () => {
-    // Fansly layout where #goosemuse-root is inserted as a sibling of the
+    // Fansly layout where #chatgoose-root is inserted as a sibling of the
     // message scroll pane inside the same parent:
     //   parent
     //     ├── messageScroll (overflow-y: auto, scrollable)

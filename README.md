@@ -1,10 +1,10 @@
-# GooseMuse
+# ChatGoose
 
 A Firefox extension that gives Fansly chatters AI-powered tools for managing DM conversations on behalf of content creators. It intercepts Fansly session data, sends conversation context to Claude, and renders results in an overlay directly on the page.
 
 ## Who This Is For
 
-Chatters working at adult content creator agencies who manage multiple Fansly accounts. You sit in DMs all day, replying as the creator, keeping fans engaged, and driving revenue. GooseMuse gives you AI assistance without leaving the Fansly tab.
+Chatters working at adult content creator agencies who manage multiple Fansly accounts. You sit in DMs all day, replying as the creator, keeping fans engaged, and driving revenue. ChatGoose gives you AI assistance without leaving the Fansly tab.
 
 ## Features
 
@@ -96,11 +96,11 @@ Output goes to `dist/`.
 2. Click **Load Temporary Add-on**
 3. Select `dist/manifest.json`
 
-The extension icon appears in the toolbar. Navigate to [fansly.com](https://fansly.com) and open a DM conversation — the GooseMuse button bar should appear.
+The extension icon appears in the toolbar. Navigate to [fansly.com](https://fansly.com) and open a DM conversation — the ChatGoose button bar should appear.
 
 ### Enter Your API Key
 
-1. Click the GooseMuse toolbar icon and choose **Open Settings** (or right-click the icon → Extension Options)
+1. Click the ChatGoose toolbar icon and choose **Open Settings** (or right-click the icon → Extension Options)
 2. Paste your Claude API key in the **API Configuration** section
 3. The key is stored in `browser.storage.local` and never leaves the extension except in direct calls to `api.anthropic.com`
 
@@ -161,7 +161,7 @@ src/
 │   ├── session-store.ts      # In-memory session tracking
 │   └── tab-context.ts        # Per-tab state (groupId, fan, operation)
 ├── content/             # Content script — injected into fansly.com
-│   ├── index.ts         # GooseMuseContentApp — entry point
+│   ├── index.ts         # ChatGooseContentApp — entry point
 │   ├── button-bar.ts    # Feature button toolbar
 │   ├── conversation-dom.ts         # DOM queries for Fansly's Angular UI
 │   ├── conversation-mount-controller.ts  # MutationObserver re-attachment
@@ -179,7 +179,7 @@ src/
 └── shared/              # Modules used by both background and content
     ├── constants.ts     # All config values
     ├── earnings.ts      # Earnings aggregation and formatting
-    ├── errors.ts        # GooseMuseError + user-facing messages
+    ├── errors.ts        # ChatGooseError + user-facing messages
     ├── log.ts           # Debug logging with sensitive data redaction
     ├── migrations.ts    # Storage schema versioning
     ├── prompt-injection.ts   # HTML entity escaping for prompt safety

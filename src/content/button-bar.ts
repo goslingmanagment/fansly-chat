@@ -35,25 +35,25 @@ export class ButtonBar {
 
   constructor(private readonly callbacks: ButtonBarCallbacks) {
     this.root = document.createElement('div');
-    this.root.className = 'goosemuse-bar goosemuse-toolbar';
+    this.root.className = 'chatgoose-bar chatgoose-toolbar';
 
     // Create all feature buttons (render() reads from this map)
     for (const entry of TOOLBAR_FEATURES) {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'goosemuse-button goosemuse-toolbar-button';
+      button.className = 'chatgoose-button chatgoose-toolbar-button';
       button.textContent = entry.label;
       button.addEventListener('click', () => this.callbacks.onFeatureClick(entry.feature));
       this.buttons.set(entry.feature, button);
     }
 
     const replyButton = this.buttons.get('fast-reply')!;
-    replyButton.classList.add('goosemuse-toolbar-button-primary');
+    replyButton.classList.add('chatgoose-toolbar-button-primary');
     const improveButton = this.buttons.get('improve-draft')!;
 
     const compareButton = document.createElement('button');
     compareButton.type = 'button';
-    compareButton.className = 'goosemuse-button goosemuse-toolbar-button';
+    compareButton.className = 'chatgoose-button chatgoose-toolbar-button';
     compareButton.textContent = 'Compare';
     compareButton.addEventListener('click', () => this.callbacks.onCompareClick());
     this.buttons.set('compare', compareButton);
@@ -61,25 +61,25 @@ export class ButtonBar {
     this.compareRestoreButton = document.createElement('button');
     this.compareRestoreButton.type = 'button';
     this.compareRestoreButton.className =
-      'goosemuse-button goosemuse-toolbar-button goosemuse-button-secondary goosemuse-toolbar-button-secondary goosemuse-hidden';
+      'chatgoose-button chatgoose-toolbar-button chatgoose-button-secondary chatgoose-toolbar-button-secondary chatgoose-hidden';
     this.compareRestoreButton.textContent = 'Reopen';
     this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
 
     this.replyModeToggle = document.createElement('button');
     this.replyModeToggle.type = 'button';
-    this.replyModeToggle.className = 'goosemuse-button goosemuse-toolbar-toggle';
+    this.replyModeToggle.className = 'chatgoose-button chatgoose-toolbar-toggle';
     this.replyModeToggle.textContent = 'Multi';
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
     this.personalityLabel = document.createElement('div');
-    this.personalityLabel.className = 'goosemuse-pill goosemuse-personality goosemuse-toolbar-pill goosemuse-toolbar-personality-end';
+    this.personalityLabel.className = 'chatgoose-pill chatgoose-personality chatgoose-toolbar-pill chatgoose-toolbar-personality-end';
 
     this.toneRow = document.createElement('div');
-    this.toneRow.className = 'goosemuse-toolbar-tone-row';
+    this.toneRow.className = 'chatgoose-toolbar-tone-row';
     for (const entry of TONE_OPTIONS) {
       const pill = document.createElement('button');
       pill.type = 'button';
-      pill.className = 'goosemuse-tone-pill';
+      pill.className = 'chatgoose-tone-pill';
       pill.textContent = entry.label;
       pill.addEventListener('click', () => this.callbacks.onToneSelect(entry.tone));
       this.tonePills.set(entry.tone, pill);
@@ -89,7 +89,7 @@ export class ButtonBar {
     const hiButton = this.buttons.get('hi-greeting')!;
     const pingButton = this.buttons.get('ping')!;
     const summaryButton = this.buttons.get('fan-summary')!;
-    summaryButton.classList.add('goosemuse-toolbar-button-summary');
+    summaryButton.classList.add('chatgoose-toolbar-button-summary');
 
     // Main actions first, secondary controls later so narrow layouts degrade gracefully.
     // Help / Review / Compare stay implemented but are intentionally hidden from the toolbar for now.
@@ -115,7 +115,7 @@ export class ButtonBar {
     showCompareRestore = false,
   ): void {
     const hasState = Boolean(state?.groupId);
-    this.root.classList.toggle('goosemuse-hidden', !hasState);
+    this.root.classList.toggle('chatgoose-hidden', !hasState);
     if (!state) {
       return;
     }
@@ -140,7 +140,7 @@ export class ButtonBar {
         button.innerHTML = '';
         button.append(
           document.createTextNode(entry.label),
-          (() => { const s = document.createElement('span'); s.className = 'goosemuse-spinner'; return s; })(),
+          (() => { const s = document.createElement('span'); s.className = 'chatgoose-spinner'; return s; })(),
         );
       } else {
         button.textContent = isActive ? entry.label : entry.label;
@@ -149,7 +149,7 @@ export class ButtonBar {
 
     const summaryButton = this.buttons.get('fan-summary')!;
     summaryButton.classList.toggle(
-      'goosemuse-toolbar-button-summary-ready',
+      'chatgoose-toolbar-button-summary-ready',
       state.hasAvailableSummary,
     );
     summaryButton.title = state.hasAvailableSummary
@@ -160,21 +160,21 @@ export class ButtonBar {
     const compareActive = activeAction === 'compare';
     compareButton.disabled =
       Boolean(activeAction && !compareActive) || disableCompareForPrereqs;
-    this.compareRestoreButton.classList.add('goosemuse-hidden');
+    this.compareRestoreButton.classList.add('chatgoose-hidden');
     this.compareRestoreButton.disabled = true;
 
     this.replyModeToggle.disabled = Boolean(activeAction) || (!state.connected || !state.hasApiKey);
     this.replyModeToggle.setAttribute('aria-pressed', nextReplyMode === 'preferSplit' ? 'true' : 'false');
-    this.replyModeToggle.classList.toggle('goosemuse-toolbar-toggle-active', nextReplyMode === 'preferSplit');
+    this.replyModeToggle.classList.toggle('chatgoose-toolbar-toggle-active', nextReplyMode === 'preferSplit');
 
     const hideToneRow = !state.connected || !state.hasApiKey;
-    this.toneRow.classList.toggle('goosemuse-hidden', hideToneRow);
+    this.toneRow.classList.toggle('chatgoose-hidden', hideToneRow);
     for (const entry of TONE_OPTIONS) {
       const pill = this.tonePills.get(entry.tone)!;
       const isActive = nextReplyTone === entry.tone;
       pill.disabled = Boolean(activeAction);
       pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      pill.classList.toggle('goosemuse-tone-pill-active', isActive);
+      pill.classList.toggle('chatgoose-tone-pill-active', isActive);
     }
   }
 }

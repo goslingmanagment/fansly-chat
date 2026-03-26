@@ -6,11 +6,11 @@ readonly ENV_FILE="$ROOT_DIR/.env.deploy"
 readonly VPS_HOST="root@45.8.230.111"
 readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"
-readonly EXTENSION_ID="goosemuse@gosling.agency"
+readonly EXTENSION_ID="chatgoose@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
 readonly INSTALL_PAGE_ASSET="$ROOT_DIR/mascot.png"
-readonly LATEST_XPI_NAME="goosemuse-latest.xpi"
+readonly LATEST_XPI_NAME="chatgoose-latest.xpi"
 readonly REMOTE_UPDATES_PATH="$REMOTE_DIR/updates.json"
 readonly REMOTE_INDEX_PATH="$REMOTE_DIR/index.html"
 readonly REMOTE_MASCOT_PATH="$REMOTE_DIR/mascot.png"
@@ -132,10 +132,10 @@ main() {
   local version
   version="$(read_manifest_version)"
 
-  artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/goosemuse-web-ext.XXXXXX")"
-  updates_file="$(mktemp "${TMPDIR:-/tmp}/goosemuse-updates.XXXXXX.json")"
+  artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/chatgoose-web-ext.XXXXXX")"
+  updates_file="$(mktemp "${TMPDIR:-/tmp}/chatgoose-updates.XXXXXX.json")"
 
-  log "Signing GooseMuse $version with AMO"
+  log "Signing ChatGoose $version with AMO"
   web-ext sign \
     --channel unlisted \
     --source-dir dist \
@@ -151,7 +151,7 @@ main() {
   fi
 
   local xpi_name
-  xpi_name="goosemuse-${version}.xpi"
+  xpi_name="chatgoose-${version}.xpi"
   local xpi_url
   xpi_url="${BASE_URL}/${xpi_name}"
   local latest_xpi_url

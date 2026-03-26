@@ -116,7 +116,7 @@ export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
 // ─── UI ──────────────────────────────────────────────────────────────────
 
 export const OVERLAY_Z_INDEX = 2147483646;
-export const GOOSEMUSE_NAMESPACE = 'goosemuse';
+export const CHATGOOSE_NAMESPACE = 'chatgoose';
 
 // ─── Feature Categories ─────────────────────────────────────────────────
 
@@ -158,4 +158,4 @@ export const DEFAULT_SETTINGS: Settings = {
 
 // ─── Build ──────────────────────────────────────────────────────────────
 
-export const BUILD_TIME = __GOOSEMUSE_BUILD_TIME__;
+export const BUILD_TIME = __CHATGOOSE_BUILD_TIME__;
