@@ -110,6 +110,9 @@
       overflow-x: auto;
       scrollbar-width: none;
       -ms-overflow-style: none;
+      flex-shrink: 1;
+      min-width: 0;
+      padding-right: 8px;
     }
 
     .nav-links::-webkit-scrollbar { display: none; }
@@ -874,6 +877,11 @@
 
     /* ─── Responsive ─────────────────────────────────────────────── */
 
+    @media (max-width: 1024px) {
+      .nav-install { font-size: 12px; padding: 4px 10px; }
+      .nav-version { display: none; }
+    }
+
     @media (max-width: 768px) {
       .hero { padding: 48px 20px 40px; }
       .hero h1 { font-size: 28px; }
@@ -883,6 +891,8 @@
       .setting-row { grid-template-columns: 1fr; gap: 4px; }
       .cmp-grid { grid-template-columns: 1fr; }
       .nav-links { display: none; }
+      .nav-install { display: none; }
+      .nav-version { display: none; }
       .feature-detail { padding: 20px; }
       .flow { flex-direction: column; align-items: flex-start; }
       .flow-arrow { transform: rotate(90deg); align-self: center; }
