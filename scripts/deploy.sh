@@ -9,12 +9,14 @@ readonly BASE_URL="https://ext.gosling-agency.ru"
 readonly EXTENSION_ID="chatgoose@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
+readonly CHANGELOG_PAGE_FILE="$ROOT_DIR/changelog.html"
 readonly INSTALL_PAGE_ASSET="$ROOT_DIR/mascot.png"
 readonly LATEST_XPI_NAME="chatgoose-latest.xpi"
 readonly REMOTE_UPDATES_PATH="$REMOTE_DIR/updates.json"
 readonly REMOTE_INDEX_PATH="$REMOTE_DIR/index.html"
 readonly REMOTE_MASCOT_PATH="$REMOTE_DIR/mascot.png"
 readonly REMOTE_GUIDE_PATH="$REMOTE_DIR/guide.html"
+readonly REMOTE_CHANGELOG_PATH="$REMOTE_DIR/changelog.html"
 readonly REMOTE_LATEST_XPI_PATH="$REMOTE_DIR/$LATEST_XPI_NAME"
 readonly VERIFY_ATTEMPTS=30
 readonly VERIFY_DELAY_SECONDS=10
@@ -23,6 +25,7 @@ artifacts_dir=""
 updates_file=""
 install_page_backup=""
 guide_page_backup=""
+changelog_page_backup=""
 
 cleanup() {
   local exit_code=$?
@@ -103,6 +106,12 @@ restore_release_pages() {
     rm -f "$guide_page_backup"
     guide_page_backup=""
   fi
+
+  if [[ -n "$changelog_page_backup" && -f "$changelog_page_backup" ]]; then
+    cp "$changelog_page_backup" "$CHANGELOG_PAGE_FILE"
+    rm -f "$changelog_page_backup"
+    changelog_page_backup=""
+  fi
 }
 
 stamp_install_page_version() {
@@ -154,17 +163,51 @@ stamp_guide_page_version() {
   ' "$GUIDE_PAGE_FILE" "$version"
 }
 
+stamp_changelog_page_version() {
+  local version="$1"
+
+  node --input-type=module -e '
+    import { readFileSync, writeFileSync } from "node:fs";
+
+    const [filePath, version] = process.argv.slice(1);
+    const replacements = [
+      {
+        description: "changelog nav version",
+        pattern: /(<span class="nav-version">)v[^<]+(<\/span>)/,
+      },
+      {
+        description: "changelog footer version",
+        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by Claude<\/p>)/,
+      },
+    ];
+
+    let source = readFileSync(filePath, "utf8");
+
+    for (const { description, pattern } of replacements) {
+      if (!pattern.test(source)) {
+        throw new Error(`Could not find ${description} in ${filePath}`);
+      }
+      source = source.replace(pattern, `$1v${version}$2`);
+    }
+
+    writeFileSync(filePath, source);
+  ' "$CHANGELOG_PAGE_FILE" "$version"
+}
+
 stamp_release_pages() {
   local version="$1"
 
   install_page_backup="$(mktemp "${TMPDIR:-/tmp}/install.html.XXXXXX")"
   guide_page_backup="$(mktemp "${TMPDIR:-/tmp}/guide.html.XXXXXX")"
+  changelog_page_backup="$(mktemp "${TMPDIR:-/tmp}/changelog.html.XXXXXX")"
 
   cp "$INSTALL_PAGE_FILE" "$install_page_backup"
   cp "$GUIDE_PAGE_FILE" "$guide_page_backup"
+  cp "$CHANGELOG_PAGE_FILE" "$changelog_page_backup"
 
   stamp_install_page_version "$version"
   stamp_guide_page_version "$version"
+  stamp_changelog_page_version "$version"
 }
 
 verify_http_200_with_retry() {
@@ -209,6 +252,7 @@ main() {
 
   require_file "$INSTALL_PAGE_FILE"
   require_file "$GUIDE_PAGE_FILE"
+  require_file "$CHANGELOG_PAGE_FILE"
   require_file "$INSTALL_PAGE_ASSET"
 
   load_env
@@ -277,6 +321,8 @@ EOF
   remote_tmp_mascot="$REMOTE_DIR/.mascot.png.upload.$$"
   local remote_tmp_guide
   remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
+  local remote_tmp_changelog
+  remote_tmp_changelog="$REMOTE_DIR/.changelog.html.upload.$$"
 
   log "Stamping release pages with version ${version}"
   stamp_release_pages "$version"
@@ -288,11 +334,12 @@ EOF
   scp "$INSTALL_PAGE_FILE" "${VPS_HOST}:${remote_tmp_index}"
   scp "$INSTALL_PAGE_ASSET" "${VPS_HOST}:${remote_tmp_mascot}"
   scp "$GUIDE_PAGE_FILE" "${VPS_HOST}:${remote_tmp_guide}"
+  scp "$CHANGELOG_PAGE_FILE" "${VPS_HOST}:${remote_tmp_changelog}"
   restore_release_pages
 
   ssh "$VPS_HOST" "
     set -euo pipefail
-    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide'
+    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide' '$remote_tmp_changelog'
     mv '$remote_tmp_xpi' '$REMOTE_DIR/$xpi_name'
     cp '$REMOTE_DIR/$xpi_name' '$remote_tmp_latest_xpi'
     chmod 644 '$remote_tmp_latest_xpi'
@@ -301,6 +348,7 @@ EOF
     mv '$remote_tmp_index' '$REMOTE_INDEX_PATH'
     mv '$remote_tmp_mascot' '$REMOTE_MASCOT_PATH'
     mv '$remote_tmp_guide' '$REMOTE_GUIDE_PATH'
+    mv '$remote_tmp_changelog' '$REMOTE_CHANGELOG_PATH'
   "
 
   log "Verifying public URLs"

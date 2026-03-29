@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatGoose — Что нового</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #F9F5EF;
+      --bg-card: #FFFFFF;
+      --text: #2D2015;
+      --text-secondary: #6B5B4E;
+      --text-muted: #9A8B7C;
+      --accent: #C4704B;
+      --accent-hover: #A85D3B;
+      --accent-soft: #E8A882;
+      --accent-bg: rgba(196, 112, 75, 0.08);
+      --accent-bg-hover: rgba(196, 112, 75, 0.12);
+      --border: rgba(45, 32, 21, 0.08);
+      --shadow-sm: 0 1px 3px rgba(45, 32, 21, 0.04);
+      --shadow-md: 0 4px 16px rgba(45, 32, 21, 0.06);
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --green: #2D8A5E;
+      --green-bg: rgba(45, 138, 94, 0.08);
+      --blue: #4A7AE3;
+      --blue-bg: rgba(74, 122, 227, 0.08);
+      --amber: #B8860B;
+      --amber-bg: rgba(184, 134, 11, 0.08);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ─── Navigation ─────────────────────────────────────────────── */
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(249, 245, 239, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+    }
+
+    .nav-inner {
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      height: 56px;
+      gap: 16px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+
+    .nav-brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+    }
+
+    .nav-brand span {
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .nav-link {
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      padding: 5px 12px;
+      border-radius: 999px;
+      transition: all 0.15s;
+    }
+
+    .nav-link:hover {
+      color: var(--text);
+      background: var(--accent-bg);
+    }
+
+    .nav-version {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--accent-bg);
+      padding: 3px 8px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+
+    /* ─── Hero ───────────────────────────────────────────────────── */
+
+    .hero {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 48px;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .hero-sub {
+      font-size: 16px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ─── Timeline ───────────────────────────────────────────────── */
+
+    .timeline {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    .release {
+      position: relative;
+      padding-left: 32px;
+      padding-bottom: 48px;
+    }
+
+    .release:last-child {
+      padding-bottom: 0;
+    }
+
+    .release::before {
+      content: '';
+      position: absolute;
+      left: 7px;
+      top: 10px;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .release:last-child::before {
+      display: none;
+    }
+
+    .release::after {
+      content: '';
+      position: absolute;
+      left: 1px;
+      top: 6px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 2.5px solid var(--accent-soft);
+    }
+
+    .release:first-child::after {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .release-header {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .release-version {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .release-date {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .release-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .release-badge.latest {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .release-changes {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .change-group {
+      margin-bottom: 16px;
+    }
+
+    .change-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .change-group-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .change-group-title.improved {
+      color: var(--blue);
+    }
+
+    .change-group-title.new {
+      color: var(--green);
+    }
+
+    .change-group-title.fixed {
+      color: var(--amber);
+    }
+
+    .change-group-title .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .change-group-title.improved .dot {
+      background: var(--blue);
+    }
+
+    .change-group-title.new .dot {
+      background: var(--green);
+    }
+
+    .change-group-title.fixed .dot {
+      background: var(--amber);
+    }
+
+    .changes-list {
+      list-style: none;
+    }
+
+    .changes-list li {
+      position: relative;
+      padding-left: 16px;
+      margin-bottom: 6px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .changes-list li:last-child {
+      margin-bottom: 0;
+    }
+
+    .changes-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 9px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────── */
+
+    .footer {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .footer-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .footer-brand img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+    }
+
+    .footer-brand span {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .footer p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Responsive ─────────────────────────────────────────────── */
+
+    @media (max-width: 480px) {
+      .hero { padding: 48px 16px 32px; }
+      .hero h1 { font-size: 26px; }
+      .timeline { padding: 0 16px 60px; }
+      .release { padding-left: 28px; }
+      .release-changes { padding: 16px 18px; }
+      .release-version { font-size: 19px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Navigation ────────────────────────────────────────────────────── -->
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">
+      <img src="mascot.png" alt="ChatGoose">
+      <span>ChatGoose</span>
+    </a>
+    <div class="nav-actions">
+      <a href="guide.html" class="nav-link">Руководство</a>
+      <a href="index.html" class="nav-link">Установить</a>
+      <span class="nav-version">v1.1.3</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Hero ──────────────────────────────────────────────────────────── -->
+
+<div class="hero">
+  <h1>Что нового</h1>
+  <p class="hero-sub">История обновлений ChatGoose</p>
+</div>
+
+<!-- ─── Timeline ─────────────────────────────────────────────────────── -->
+
+<div class="timeline">
+
+  <!-- 1.1.3 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.1.3</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Улучшено</div>
+        <ul class="changes-list">
+          <li>Бот теперь старается задавать вопрос в конце сообщения, чтобы поддерживать диалог с фаном</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.1.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.1.2</span>
+    </div>
+    <div class="release-changes">
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li>Навигация в руководстве больше не прыгает при скролле</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.1.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.1.1</span>
+    </div>
+    <div class="release-changes">
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li>Ребрендинг: GooseMuse стал ChatGoose</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li>Навигационные ссылки больше не наезжают друг на друга на планшетах</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.1.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.1.0</span>
+    </div>
+    <div class="release-changes">
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li>Кнопка Hi для быстрого приветствия новых подписчиков</li>
+          <li>Страница-руководство по использованию расширения</li>
+          <li>Страница установки для Firefox</li>
+          <li>Автоматический деплой Firefox-расширения</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.0.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.0.0</span>
+    </div>
+    <div class="release-changes">
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Первый релиз</div>
+        <ul class="changes-list">
+          <li>Быстрые ответы фанам с учётом персоналити модели</li>
+          <li>Выбор тона ответа: casual, flirty, upsell, spicy</li>
+          <li>Разбивка ответа на несколько сообщений</li>
+          <li>Улучшение черновиков</li>
+          <li>Пинг неактивных фанов</li>
+          <li>Обзор чата и саммари фана</li>
+          <li>Интеграция с Agency Hub</li>
+          <li>Отслеживание расходов на API</li>
+          <li>Встроенная персоналити Lora</li>
+          <li>Поддержка Firefox и Chrome</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─── Footer ────────────────────────────────────────────────────────── -->
+
+<footer class="footer">
+  <div class="footer-brand">
+    <img src="mascot.png" alt="ChatGoose">
+    <span>ChatGoose</span>
+  </div>
+  <p>v1.1.3 &middot; Gosling Agency &middot; Powered by Claude</p>
+</footer>
+
+</body>
+</html>
