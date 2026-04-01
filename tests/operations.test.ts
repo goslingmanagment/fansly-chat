@@ -324,7 +324,7 @@ describe('OperationCoordinator', () => {
         generatedAt: 2000,
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
-        modelId: DEFAULT_MODEL_ID,
+        modelId: DEFAULT_FEATURE_MODELS['fan-summary'],
       },
     };
 
@@ -472,7 +472,7 @@ describe('OperationCoordinator', () => {
       summary: 'Hub summary',
       personalityId: 'personality-1',
       generatedAt: 1234,
-      modelId: DEFAULT_MODEL_ID,
+      modelId: DEFAULT_FEATURE_MODELS['fan-summary'],
       fanAccountId: 'fan-1',
     });
   });
@@ -2534,7 +2534,7 @@ describe('OperationCoordinator', () => {
       generatedAt: createdAtMs,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
-      modelId: DEFAULT_MODEL_ID,
+      modelId: DEFAULT_FEATURE_MODELS['fan-summary'],
       fanAccountId: 'fan-9',
       agencyHubSync: {
         state: 'saved',
@@ -2656,7 +2656,7 @@ describe('OperationCoordinator', () => {
       agencyHubApiKey: 'hub-key',
       featureModels: {
         ...DEFAULT_FEATURE_MODELS,
-        'fan-summary': 'claude-opus-4-6',
+        'fan-summary': 'claude-haiku-4-5',
       },
     };
 
@@ -2913,7 +2913,7 @@ describe('OperationCoordinator', () => {
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
-      modelId: DEFAULT_MODEL_ID,
+      modelId: DEFAULT_FEATURE_MODELS['fan-summary'],
     };
 
     const fetchMock = vi.fn(async (url: URL | string) => {
@@ -3104,7 +3104,7 @@ describe('OperationCoordinator', () => {
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
-      modelId: DEFAULT_MODEL_ID,
+      modelId: DEFAULT_FEATURE_MODELS['fan-summary'],
       fanAccountId: 'fan-1',
       agencyHubSync: {
         baseUrl: 'http://hub-a.test',
@@ -3702,7 +3702,7 @@ describe('OperationCoordinator', () => {
   it('invalidates summary cache when model changes', async () => {
     (mockStorage.settings as Record<string, unknown>).featureModels = {
       ...DEFAULT_FEATURE_MODELS,
-      'fan-summary': 'claude-opus-4-6',
+      'fan-summary': 'claude-haiku-4-5',
     };
 
     const { coordinator, anthropicClient, port } = await createCoordinatorHarness({
@@ -3719,10 +3719,10 @@ describe('OperationCoordinator', () => {
       forceRegenerate: false,
     });
 
-    // Cache had modelId: DEFAULT_MODEL_ID but we're using claude-opus-4-6 — should miss
+    // Cache had modelId from default but we're using claude-haiku-4-5 — should miss
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-opus-4-6' }),
+      expect.objectContaining({ model: 'claude-haiku-4-5' }),
     );
 
     const completeMessage = postedMessages(port).find(

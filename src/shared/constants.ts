@@ -34,7 +34,7 @@ export const CLAUDE_MODEL_IDS = new Set(CLAUDE_MODELS.map((m) => m.id));
 export const DEFAULT_FEATURE_MODELS: Record<ModelSelectableFeatureType, string> = {
   'fast-reply': DEFAULT_MODEL_ID,
   'help-me': DEFAULT_MODEL_ID,
-  'fan-summary': DEFAULT_MODEL_ID,
+  'fan-summary': 'claude-opus-4-6',
   'chat-review': DEFAULT_MODEL_ID,
   'ping': DEFAULT_MODEL_ID,
 };
@@ -80,9 +80,9 @@ export const PING_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
 export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
 export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
-export const DEEP_DEFAULT_MESSAGE_COUNT = 1000;
+export const DEEP_DEFAULT_MESSAGE_COUNT = 1500;
 export const DEEP_MIN_MESSAGE_COUNT = 100;
-export const DEEP_MAX_MESSAGE_COUNT = 1000;
+export const DEEP_MAX_MESSAGE_COUNT = 2000;
 
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
