@@ -56,8 +56,6 @@ const SYSTEM_PERSONALITY_ANCHOR = '\n\n## Model Personality\n\n';
 const USER_TRANSCRIPT_ANCHOR = '## Conversation Transcript';
 const USER_DRAFT_ANCHOR = '## Current Draft';
 const USER_TASK_ANCHOR = '## Your Task';
-const PING_SEGMENT_ANCHOR = '## Fan Segment';
-const PING_RULES_ANCHOR = '## Rules';
 
 type PromptSegmentKey =
   | 'system-instructions'
@@ -103,7 +101,7 @@ const USER_TEMPLATE_PLANS: Record<FeatureType, UserTemplatePlan> = {
     'chat-review',
     chatReviewTemplate,
   ),
-  ping: createPingUserTemplatePlan(pingTemplate),
+  ping: createStandardUserTemplatePlan('ping', pingTemplate),
   'hi-greeting': createStandardUserTemplatePlan('hi-greeting', hiGreetingTemplate),
 };
 
@@ -182,70 +180,6 @@ function createStandardUserTemplatePlan(
       {
         key: 'user-dynamic',
         template: template.slice(contextIndex, taskIndex),
-        cacheControl: EPHEMERAL_CACHE_CONTROL,
-      },
-      {
-        key: 'user-task',
-        template: template.slice(taskIndex),
-      },
-    ],
-  };
-}
-
-function createPingUserTemplatePlan(template: string): UserTemplatePlan {
-  const segmentIndex = template.indexOf(PING_SEGMENT_ANCHOR);
-  if (segmentIndex < 0) {
-    return {
-      kind: 'fallback',
-      template,
-      warningAnchor: PING_SEGMENT_ANCHOR,
-    };
-  }
-
-  const rulesIndex = template.indexOf(
-    PING_RULES_ANCHOR,
-    segmentIndex + PING_SEGMENT_ANCHOR.length,
-  );
-  if (rulesIndex < 0 || segmentIndex >= rulesIndex) {
-    return {
-      kind: 'fallback',
-      template,
-      warningAnchor: PING_RULES_ANCHOR,
-    };
-  }
-
-  const transcriptIndex = template.indexOf(
-    USER_TRANSCRIPT_ANCHOR,
-    rulesIndex + PING_RULES_ANCHOR.length,
-  );
-  if (transcriptIndex < 0 || rulesIndex >= transcriptIndex) {
-    return {
-      kind: 'fallback',
-      template,
-      warningAnchor: USER_TRANSCRIPT_ANCHOR,
-    };
-  }
-
-  const taskIndex = template.lastIndexOf(USER_TASK_ANCHOR);
-  if (taskIndex < 0 || transcriptIndex >= taskIndex) {
-    return {
-      kind: 'fallback',
-      template,
-      warningAnchor: USER_TASK_ANCHOR,
-    };
-  }
-
-  return {
-    kind: 'segmented',
-    segments: [
-      {
-        key: 'user-static',
-        template: template.slice(0, segmentIndex),
-        cacheControl: ONE_HOUR_CACHE_CONTROL,
-      },
-      {
-        key: 'user-dynamic',
-        template: template.slice(segmentIndex, taskIndex),
         cacheControl: EPHEMERAL_CACHE_CONTROL,
       },
       {

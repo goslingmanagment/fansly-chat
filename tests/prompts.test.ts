@@ -561,6 +561,33 @@ describe('ping segment substitution', () => {
     expect(result.user).not.toContain('Segment A');
     expect(result.user).not.toContain('Segment B');
   });
+
+  it('keeps ping segment guidance in the uncached task block', () => {
+    const result = buildPrompt(buildTestInput({
+      feature: 'ping',
+      pingSegment: 'segment-a',
+    }));
+
+    expect(result.userBlocks).toHaveLength(3);
+    expect(result.userBlocks[0]?.text).toContain('## Rules');
+    expect(result.userBlocks[0]?.text).not.toContain('## Conversation Transcript');
+    expect(result.userBlocks[0]?.text).not.toContain('Segment A');
+    expect(result.userBlocks[0]?.cache_control).toEqual({
+      type: 'ephemeral',
+      ttl: '1h',
+    });
+
+    expect(result.userBlocks[1]?.text).toContain('## Conversation Transcript');
+    expect(result.userBlocks[1]?.text).toContain('<transcript>');
+    expect(result.userBlocks[1]?.text).not.toContain('Segment A');
+    expect(result.userBlocks[1]?.cache_control).toEqual({
+      type: 'ephemeral',
+    });
+
+    expect(result.userBlocks[2]?.text).toContain('Use this fan segment strategy');
+    expect(result.userBlocks[2]?.text).toContain('Segment A');
+    expect(result.userBlocks[2]?.cache_control).toBeUndefined();
+  });
 });
 
 // ─── Placeholder injection resistance ────────────────────────────────────
