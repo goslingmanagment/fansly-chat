@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { FeatureType, Personality, SummaryCacheEntry } from '../src/shared/types.js';
 import { normalizeAgencyHubSummarySyncMetadata } from '../src/shared/agency-hub.js';
-import { DEFAULT_MODEL_ID, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { DEFAULT_FEATURE_MODELS, DEFAULT_MODEL_ID, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { migrateState, createDefaultSettings, createSeedState } from '../src/shared/migrations.js';
 import {
   BUNDLED_LORA_PERSONALITY_ID,
@@ -166,7 +166,7 @@ describe('migrateState', () => {
     const result = migrateState(legacy);
     expect(result.settings.featureModels).toBeDefined();
     expect(result.settings.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
-    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
   });
 
   it('carries forward summary:* keys during migration', () => {
@@ -312,7 +312,7 @@ describe('sanitizeSettings', () => {
   it('defaults featureModels when missing from input', () => {
     const result = storage.sanitizeSettings({});
     expect(result.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
-    expect(result.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
     expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
   });
 
@@ -351,7 +351,7 @@ describe('sanitizeSettings', () => {
     });
     expect(result.featureModels['fast-reply']).toBe('claude-haiku-4-5');
     expect(result.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
-    expect(result.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+    expect(result.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
     expect(result.featureModels['chat-review']).toBe(DEFAULT_MODEL_ID);
     expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
   });
@@ -519,7 +519,7 @@ describe('loadStorageState', () => {
     const result = await storage.loadStorageState();
     expect(result.settings.featureModels['fast-reply']).toBe('claude-haiku-4-5');
     expect(result.settings.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
-    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_MODEL_ID);
+    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
   });
 });
 
