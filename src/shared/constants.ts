@@ -82,7 +82,7 @@ export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
 export const DEEP_DEFAULT_MESSAGE_COUNT = 1500;
 export const DEEP_MIN_MESSAGE_COUNT = 100;
-export const DEEP_MAX_MESSAGE_COUNT = 2000;
+export const DEEP_MAX_MESSAGE_COUNT = 3000;
 
 // ─── Timeouts ────────────────────────────────────────────────────────────
 

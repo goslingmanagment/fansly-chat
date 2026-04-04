@@ -194,6 +194,19 @@ describe('Options page — AI Models section', () => {
     expect(input?.value).toBe('66');
   });
 
+  it('renders the deep message count input with a 3000 upper bound', async () => {
+    await loadOptionsPage(makeState({ deepMessageCount: 2500 }));
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const deepLabel = labels.find((label) =>
+      label.textContent?.includes('Deep feature message count'),
+    );
+    const input = deepLabel?.querySelector<HTMLInputElement>('input[type="number"]');
+
+    expect(input?.value).toBe('2500');
+    expect(input?.max).toBe('3000');
+  });
+
   it('saves featureModels when a dropdown changes', async () => {
     await loadOptionsPage(makeState());
 

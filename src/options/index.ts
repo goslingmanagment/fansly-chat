@@ -310,7 +310,7 @@ async function render(): Promise<void> {
   deepInput.type = 'number';
   deepInput.className = 'chatgoose-input';
   deepInput.min = '100';
-  deepInput.max = '2000';
+  deepInput.max = '3000';
   deepInput.value = String(state.settings.deepMessageCount);
 
   const debugInput = document.createElement('input');

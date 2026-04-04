@@ -129,7 +129,7 @@ Each suggestion supports multi-message splitting (same `[NEXT]` separator and pa
 
 The exact sections and formatting are controlled by the AI prompt. The prompt can be refined over time to improve output quality without changing the extension itself.
 
-**Context:** Uses the "deep" message count setting (default 500, range 100–1000).
+**Context:** Uses the "deep" message count setting (default 1500, range 100–3000).
 
 **Additional context:** Fan Summary includes a supplemental `FAN SPENDING DATA` block sourced from the earnings stats endpoint (see §2.6 and §8.6.1).
 
@@ -169,7 +169,7 @@ The exact sections and formatting are controlled by the AI prompt. The prompt ca
 
 The output is read-only — there are no Insert buttons (this is analysis, not a reply).
 
-**Context:** Uses the "deep" message count setting (default 500, range 100–1000).
+**Context:** Uses the "deep" message count setting (default 1500, range 100–3000).
 
 **Additional context:** Chat Review includes a supplemental `FAN SPENDING DATA` block sourced from the earnings stats endpoint (see §2.6 and §8.6.1).
 
@@ -457,7 +457,7 @@ Accessible from the toolbar popup. Contains:
 **Message Counts:**
 - **Reply + Help** — numeric input, default 100, range 5–200.
 - **Ping** — numeric input, default 100, range 5–200.
-- **Deep features** (Fan Summary, Chat Review) — numeric input, default 500, range 100–1000.
+- **Deep features** (Fan Summary, Chat Review) — numeric input, default 1500, range 100–3000.
 
 **Model Personalities:**
 - List of all configured personalities, each showing the model name.
@@ -486,7 +486,7 @@ Accessible from the toolbar popup. Contains:
 | Claude API key | Empty (must be set before extension works) |
 | Reply + Help message count | 100 |
 | Ping message count | 100 |
-| Deep feature message count | 500 |
+| Deep feature message count | 1500 |
 | Claude model | Hardcoded to Claude Sonnet (not configurable) |
 | Debug mode | Off |
 
@@ -501,7 +501,7 @@ All persistent data is stored in `browser.storage.local` under the following sch
     "claudeApiKey": "sk-ant-...",
     "quickMessageCount": 100,
     "pingMessageCount": 100,
-    "deepMessageCount": 500,
+    "deepMessageCount": 1500,
     "debugMode": false
   },
   "personalities": [
