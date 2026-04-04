@@ -26,7 +26,7 @@ Each suggestion has its own Insert button. Quick feature — 60-second timeout.
 
 ### Fan Summary
 
-Generates a profile of the fan covering interests, communication style, spending behavior, conversation patterns, and red flags. Uses deep message history (~500 messages, configurable) for a thorough read.
+Generates a profile of the fan covering interests, communication style, spending behavior, conversation patterns, and red flags. Uses deep message history (~1500 messages by default, configurable up to 3000) for a thorough read.
 
 Results are cached per conversation. If the personality hasn't changed since the last summary, the cached version is returned instantly. Deep feature — staged timeout guards (180s prep, 45s Claude TTFB/idle, 300s max stream).
 
@@ -132,7 +132,7 @@ If you're logged into a new account and the extension detects it via intercepted
 |---------|---------|-------|-------------|
 | Reply + Help message count | 100 | 5–200 | Messages loaded for Reply and Help Me |
 | Ping message count | 100 | 5–200 | Messages loaded for Ping |
-| Deep message count | 500 | 100–1000 | Messages loaded for Summary, Chat Review |
+| Deep message count | 1500 | 100–3000 | Messages loaded for Summary, Chat Review |
 | Debug mode | Off | — | Enables verbose logging and prompt inspector in error overlays |
 
 ## Development

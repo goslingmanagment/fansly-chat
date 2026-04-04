@@ -266,6 +266,11 @@ describe('sanitizeSettings', () => {
     expect(result.deepMessageCount).toBe(100);
   });
 
+  it('clamps deepMessageCount to the configured max', () => {
+    const result = storage.sanitizeSettings({ deepMessageCount: 9999 });
+    expect(result.deepMessageCount).toBe(3000);
+  });
+
   it('clamps improveMessageCount within bounds', () => {
     const result = storage.sanitizeSettings({ improveMessageCount: 999 });
     expect(result.improveMessageCount).toBe(200);
