@@ -1,5 +1,9 @@
 # Что нового
 
+## 1.2.1
+
+- Исправлен endpoint отправки AI usage batch в Agency Hub: теперь используется корректный путь `/api/v1/ai-usage/batch`
+
 ## 1.2.0
 
 - ChatGoose теперь отправляет usage AI в Agency Hub после каждого успешно завершённого действия
