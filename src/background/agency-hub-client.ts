@@ -267,7 +267,7 @@ export class AgencyHubClient {
     signal: AbortSignal,
   ): Promise<AgencyHubAiUsageBatchResponse> {
     const response = await this.fetchImpl(
-      buildAgencyHubUrl(baseUrl, 'api/v1/ai-usage:batch'),
+      buildAgencyHubUrl(baseUrl, 'api/v1/ai-usage/batch'),
       {
         method: 'POST',
         headers: {

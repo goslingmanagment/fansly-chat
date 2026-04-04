@@ -97,7 +97,7 @@ describe('AgencyHubClient', () => {
     const permissionsContains = vi.fn(async () => true);
     const events = [makeUsageEvent(1), makeUsageEvent(2)];
     const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
-      expect(String(url)).toBe('http://localhost:3000/api/v1/ai-usage:batch');
+      expect(String(url)).toBe('http://localhost:3000/api/v1/ai-usage/batch');
       expect(init?.method).toBe('POST');
       expect(init?.headers).toMatchObject({
         authorization: 'Bearer hub-key',
