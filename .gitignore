@@ -7,4 +7,5 @@ TOMO.md
 reviews/
 drafts/
 prompts/drafts/
+.claude/
 *.zip
