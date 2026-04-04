@@ -18,6 +18,23 @@ function makeSettings(overrides: Partial<ReturnType<typeof createDefaultSettings
   };
 }
 
+function makeUsageEvent(index = 1) {
+  return {
+    clientEventId: `event-${index}`,
+    feature: 'fast-reply' as const,
+    model: 'claude-sonnet-4-6',
+    inputTokens: 120 + index,
+    outputTokens: 20 + index,
+    cacheWriteTokens: 10,
+    cacheReadTokens: 5,
+    conversationId: `group-${index}`,
+    durationMs: 450,
+    isCacheHit: false,
+    isRegeneration: false,
+    completedAt: '2026-04-04T00:00:00.000Z',
+  };
+}
+
 describe('AgencyHubClient', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -76,6 +93,80 @@ describe('AgencyHubClient', () => {
     });
   });
 
+  it('submits AI usage events as a batch', async () => {
+    const permissionsContains = vi.fn(async () => true);
+    const events = [makeUsageEvent(1), makeUsageEvent(2)];
+    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      expect(String(url)).toBe('http://localhost:3000/api/v1/ai-usage:batch');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({
+        authorization: 'Bearer hub-key',
+        'content-type': 'application/json',
+      });
+      expect(init?.body).toBe(JSON.stringify({ events }));
+      return jsonResponse({
+        receivedCount: 2,
+        insertedCount: 2,
+        dedupedCount: 0,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: permissionsContains,
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.submitAiUsageBatch({
+      settings: makeSettings(),
+      events,
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toEqual({
+      status: 'submitted',
+      reason: 'submitted',
+      baseUrl: 'http://localhost:3000',
+      response: {
+        receivedCount: 2,
+        insertedCount: 2,
+        dedupedCount: 0,
+      },
+    });
+    expect(permissionsContains).toHaveBeenCalledWith({
+      origins: ['http://localhost/*'],
+    });
+  });
+
+  it('accepts a full 100-event AI usage batch', async () => {
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { events: unknown[] };
+      expect(body.events).toHaveLength(100);
+      return jsonResponse({
+        receivedCount: 100,
+        insertedCount: 100,
+        dedupedCount: 0,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.submitAiUsageBatch({
+      settings: makeSettings(),
+      events: Array.from({ length: 100 }, (_, index) => makeUsageEvent(index + 1)),
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe('submitted');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('skips oversized profile bodies before making any network call', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -126,6 +217,54 @@ describe('AgencyHubClient', () => {
     });
     expect(permissionsContains).toHaveBeenCalledWith({
       origins: ['http://localhost/*'],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips AI usage submission when the Hub is not configured', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.submitAiUsageBatch({
+      settings: makeSettings({ agencyHubBaseUrl: '' }),
+      events: [makeUsageEvent()],
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'skipped',
+      reason: 'missing_base_url',
+      baseUrl: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips AI usage submission when host permission is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => false),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.submitAiUsageBatch({
+      settings: makeSettings(),
+      events: [makeUsageEvent()],
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'skipped',
+      reason: 'missing_host_permission',
+      baseUrl: 'http://localhost:3000',
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -249,6 +388,52 @@ describe('AgencyHubClient', () => {
     expect(result.error).toMatchObject({
       key: 'hub_request_failed',
       code: 'CG-HUB-07',
+    });
+  });
+
+  it('returns failed for AI usage submission on non-ok responses', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'bad gateway' }, 503)));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.submitAiUsageBatch({
+      settings: makeSettings(),
+      events: [makeUsageEvent()],
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: 'hub_request_failed',
+      baseUrl: 'http://localhost:3000',
+    });
+  });
+
+  it('returns failed for AI usage submission on network errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('socket hang up');
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.submitAiUsageBatch({
+      settings: makeSettings(),
+      events: [makeUsageEvent()],
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: 'socket hang up',
+      baseUrl: 'http://localhost:3000',
     });
   });
 

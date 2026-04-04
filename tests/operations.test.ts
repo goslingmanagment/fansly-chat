@@ -198,6 +198,9 @@ async function createCoordinatorHarness(options?: {
     fetchFanProfileByConversation: (...args: any[]) => Promise<any>;
     pushFanProfile: (...args: any[]) => Promise<any>;
   };
+  agencyHubUsageReporter?: {
+    enqueue: (...args: any[]) => void;
+  };
 }) {
   const [{ OperationCoordinator }, { SessionStore }, { StorageCoordinator }, { TabContextStore }] =
     await Promise.all([
@@ -227,6 +230,9 @@ async function createCoordinatorHarness(options?: {
       baseUrl: null,
     })),
   };
+  const agencyHubUsageReporter = options?.agencyHubUsageReporter ?? {
+    enqueue: vi.fn(),
+  };
   const storageCoordinator = new StorageCoordinator();
 
   const coordinator = new OperationCoordinator(
@@ -236,6 +242,7 @@ async function createCoordinatorHarness(options?: {
     anthropicClient as never,
     storageCoordinator,
     agencyHubClient as never,
+    agencyHubUsageReporter as never,
   ) as any;
   const port = {
     postMessage: vi.fn(),
@@ -249,6 +256,7 @@ async function createCoordinatorHarness(options?: {
     fanslyClient,
     anthropicClient,
     agencyHubClient,
+    agencyHubUsageReporter,
     port,
     sessionStore,
     storageCoordinator,
@@ -4121,5 +4129,535 @@ describe('OperationCoordinator', () => {
 
     resolveStream!('Result');
     await startPromise;
+  });
+
+  it('reports successful completed operations with feature, model, tokens, duration, and timestamp', async () => {
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        onUsage,
+      }: {
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        onUsage?.({
+          input_tokens: 120,
+          cache_creation_input_tokens: 8,
+          cache_read_input_tokens: 4,
+          output_tokens: 16,
+        });
+        advanceNow(321);
+        return 'Reported reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicClient,
+      agencyHubUsageReporter,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(1);
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agencyHubBaseUrl: '',
+        agencyHubApiKey: '',
+        debugMode: false,
+      }),
+      expect.objectContaining({
+        clientEventId: 'reply-op',
+        feature: 'fast-reply',
+        model: DEFAULT_MODEL_ID,
+        inputTokens: 120,
+        outputTokens: 16,
+        cacheWriteTokens: 8,
+        cacheReadTokens: 4,
+        conversationId: 'group-1',
+        durationMs: 321,
+        isCacheHit: false,
+        isRegeneration: false,
+        completedAt: new Date(currentNow).toISOString(),
+      }),
+    );
+  });
+
+  it('keeps feature names for improve-draft and hi-greeting while using the shared fast-reply model config', async () => {
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      transcriptMessages: buildTranscriptMessages(5),
+      windowStartMs: 0,
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    const { coordinator } = await createCoordinatorHarness({
+      fanslyClient,
+      agencyHubUsageReporter,
+      anthropicClient: {
+        streamMessage: vi.fn(async () => 'Reply'),
+      },
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'improve-op',
+      feature: 'improve-draft',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      draftText: 'fix this',
+      forceRegenerate: false,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'hi-op',
+      feature: 'hi-greeting',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(2);
+    expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
+      clientEventId: 'improve-op',
+      feature: 'improve-draft',
+      model: DEFAULT_MODEL_ID,
+    });
+    expect(agencyHubUsageReporter.enqueue.mock.calls[1]?.[1]).toMatchObject({
+      clientEventId: 'hi-op',
+      feature: 'hi-greeting',
+      model: DEFAULT_MODEL_ID,
+    });
+  });
+
+  it('reports cached fan-summary hits as zero-token cache hits', async () => {
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({
+      agencyHubUsageReporter,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(1);
+    expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
+      clientEventId: 'summary-op',
+      feature: 'fan-summary',
+      model: DEFAULT_FEATURE_MODELS['fan-summary'],
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+      conversationId: 'group-1',
+      isCacheHit: true,
+      isRegeneration: false,
+    });
+  });
+
+  it('reports Agency Hub prefetched fan-summary hits as zero-token cache hits', async () => {
+    delete mockStorage['summary:group-1'];
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+    };
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({
+      agencyHubUsageReporter,
+      agencyHubClient: {
+        isConfigured: vi.fn(() => true),
+        fetchFanProfileByConversation: vi.fn(async () => ({
+          status: 'fetched',
+          reason: 'fetched',
+          baseUrl: 'http://localhost:3000',
+          pageLabel: 'creator-fs',
+          body: 'Hub summary',
+          createdAtMs: 1234,
+          fanAccountId: 'fan-1',
+        })),
+        pushFanProfile: vi.fn(async () => ({
+          status: 'skipped',
+          reason: 'disabled',
+          baseUrl: null,
+        })),
+      },
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(1);
+    expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
+      clientEventId: 'summary-op',
+      feature: 'fan-summary',
+      model: DEFAULT_FEATURE_MODELS['fan-summary'],
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+      conversationId: 'group-1',
+      isCacheHit: true,
+    });
+  });
+
+  it('does not report failed operations', async () => {
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({
+      agencyHubUsageReporter,
+      anthropicClient: {
+        streamMessage: vi.fn(async () => {
+          throw new ChatGooseError('network_error');
+        }),
+      },
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not report discarded operations', async () => {
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    let streamStarted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      streamStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+        streamStarted?.();
+        return await new Promise<string>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicClient,
+      agencyHubUsageReporter,
+    });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await started;
+    await coordinator.handlePortMessage(1, {
+      type: 'tab:routeChanged',
+      groupId: 'group-2',
+      routeNonce: 2,
+    });
+    await startPromise;
+
+    expect(agencyHubUsageReporter.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('reports the fallback model after model_unavailable retries', async () => {
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'claude-opus-4-5',
+    };
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    let callCount = 0;
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        model,
+        onUsage,
+      }: {
+        model: string;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        callCount += 1;
+        if (callCount === 1 && model === 'claude-opus-4-5') {
+          throw new ChatGooseError('model_unavailable');
+        }
+        onUsage?.({
+          input_tokens: 50,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 2,
+          output_tokens: 7,
+        });
+        return 'Fallback reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicClient,
+      agencyHubUsageReporter,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(1);
+    expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
+      clientEventId: 'reply-op',
+      model: DEFAULT_MODEL_ID,
+    });
+  });
+
+  it('reports one AI usage event per successful compare card and no extra aggregate compare event', async () => {
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        onUsage,
+      }: {
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        onUsage?.({
+          input_tokens: 75,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 3,
+          output_tokens: 6,
+        });
+        return 'Compare reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicClient,
+      agencyHubUsageReporter,
+    });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(2);
+    expect(agencyHubUsageReporter.enqueue.mock.calls.map((call) => call[1].clientEventId)).toEqual(
+      expect.arrayContaining(['compare-op:current:personality-1', 'compare-op:draft-1']),
+    );
+    for (const [, event] of agencyHubUsageReporter.enqueue.mock.calls) {
+      expect(event).toMatchObject({
+        feature: 'fast-reply',
+        model: DEFAULT_MODEL_ID,
+        conversationId: 'group-1',
+        isCacheHit: false,
+        isRegeneration: false,
+      });
+    }
+  });
+
+  it('reports only successful compare cards when compare has mixed outcomes', async () => {
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        systemBlocks,
+        onUsage,
+      }: {
+        systemBlocks: Array<{ text: string }>;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        const system = systemBlocks.map((block) => block.text).join('');
+        if (system.includes('Current baseline personality')) {
+          onUsage?.({
+            input_tokens: 50,
+            cache_creation_input_tokens: 4,
+            cache_read_input_tokens: 2,
+            output_tokens: 0,
+          });
+          throw new ChatGooseError('network_error');
+        }
+        onUsage?.({
+          input_tokens: 75,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 3,
+          output_tokens: 6,
+        });
+        return 'Draft reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicClient,
+      agencyHubUsageReporter,
+    });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(1);
+    expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
+      clientEventId: 'compare-op:draft-1',
+      feature: 'fast-reply',
+    });
+  });
+
+  it('reports the fallback model for successful compare cards after model_unavailable retries', async () => {
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'claude-opus-4-5',
+    };
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        model,
+        onUsage,
+      }: {
+        model: string;
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        if (model === 'claude-opus-4-5') {
+          throw new ChatGooseError('model_unavailable');
+        }
+        onUsage?.({
+          input_tokens: 60,
+          cache_creation_input_tokens: 4,
+          cache_read_input_tokens: 1,
+          output_tokens: 8,
+        });
+        return 'Fallback compare reply';
+      }),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicClient,
+      agencyHubUsageReporter,
+    });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(2);
+    for (const [, event] of agencyHubUsageReporter.enqueue.mock.calls) {
+      expect(event).toMatchObject({
+        model: DEFAULT_MODEL_ID,
+        feature: 'fast-reply',
+        isRegeneration: true,
+      });
+    }
   });
 });
