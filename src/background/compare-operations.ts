@@ -13,6 +13,7 @@ import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import { formatTranscript } from '../shared/transcript.js';
 import type {
+  AgencyHubAiUsageEvent,
   AggregatedEarnings,
   AnthropicCostEstimate,
   AnthropicSpendSummary,
@@ -60,6 +61,7 @@ import {
 import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
+import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 
 export interface ActiveCompareCardState {
   card: Pick<CompareModelCard, 'id' | 'label' | 'source'>;
@@ -73,6 +75,7 @@ export interface ActiveCompareOperation {
   tabId: number;
   groupId: string;
   routeNonce: number;
+  startedAtMs: number;
   controller: AbortController;
   profiler: OperationProfiler;
   compareCards: Map<string, ActiveCompareCardState>;
@@ -86,6 +89,7 @@ export interface CompareOperationsContext {
   storageCoordinator: StorageCoordinator;
   fanslyClient: FanslyClient;
   anthropicClient: AnthropicClient;
+  agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>;
   hasActiveFeature: (tabId: number) => boolean;
   hasPort: (tabId: number) => boolean;
   send: (tabId: number, message: BackgroundPortMessage) => void;
@@ -120,6 +124,41 @@ function buildCompareCardProfilingSnapshot(
     ...snapshot,
     ...(usage ? { anthropicUsage: { ...usage } } : {}),
     ...(cost ? { anthropicCost: { ...cost } } : {}),
+  };
+}
+
+function buildAiUsageEvent({
+  clientEventId,
+  model,
+  spend,
+  conversationId,
+  startedAtMs,
+  completedAtMs,
+  isRegeneration,
+}: {
+  clientEventId: string;
+  model: string;
+  spend: AnthropicSpendSummary;
+  conversationId: string | null;
+  startedAtMs: number | null | undefined;
+  completedAtMs: number;
+  isRegeneration: boolean;
+}): AgencyHubAiUsageEvent {
+  return {
+    clientEventId,
+    feature: 'fast-reply',
+    model,
+    inputTokens: spend.inputTokens,
+    outputTokens: spend.outputTokens,
+    cacheWriteTokens: spend.cacheWriteTokens,
+    cacheReadTokens: spend.cacheReadTokens,
+    conversationId,
+    durationMs: typeof startedAtMs === 'number'
+      ? Math.max(0, completedAtMs - startedAtMs)
+      : null,
+    isCacheHit: false,
+    isRegeneration: isRegeneration,
+    completedAt: new Date(completedAtMs).toISOString(),
   };
 }
 
@@ -415,6 +454,7 @@ export async function executeCompare(
       tabId,
       groupId: validated.urlGroupId,
       routeNonce: payload.routeNonce,
+      startedAtMs: Date.now(),
       controller: compareController,
       profiler,
       compareCards: new Map(),
@@ -1059,6 +1099,8 @@ export async function executeCompare(
         splitModeRequested: payload.replyMode === 'preferSplit',
         parts: splitByNext(rawText),
       };
+      const completedAtMs = Date.now();
+      const completedSpend = cardSpend ?? createZeroAnthropicSpendSummary();
       sendCompareCardComplete(
         context,
         tabId,
@@ -1068,10 +1110,26 @@ export async function executeCompare(
           cardId: card.id,
           result,
           fanDisplayName,
-          anthropicSpend: cardSpend ?? createZeroAnthropicSpendSummary(),
+          anthropicSpend: completedSpend,
         },
         profiler,
         buildCompareCardProfilingSnapshot(profiler, cardUsage, cardCost),
+      );
+      context.agencyHubUsageReporter.enqueue(
+        {
+          agencyHubBaseUrl: validated.storage.settings.agencyHubBaseUrl,
+          agencyHubApiKey: validated.storage.settings.agencyHubApiKey,
+          debugMode: validated.storage.settings.debugMode,
+        },
+        buildAiUsageEvent({
+          clientEventId: `${payload.operationId}:${card.id}`,
+          model: actualModel,
+          spend: completedSpend,
+          conversationId: validated.urlGroupId,
+          startedAtMs: activeCompare.startedAtMs,
+          completedAtMs,
+          isRegeneration: Boolean(payload.forceRegenerate),
+        }),
       );
     };
 

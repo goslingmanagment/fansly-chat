@@ -55,6 +55,7 @@ import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
+  AgencyHubAiUsageEvent,
   AnthropicCostEstimate,
   AnthropicSpendSummary,
   AnthropicUsageMetrics,
@@ -86,6 +87,7 @@ import {
   type AgencyHubFetchFanProfileResult,
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
+import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 import { AnthropicClient } from './anthropic-client.js';
 import {
   buildAnthropicSpendSummary,
@@ -122,6 +124,7 @@ interface ActiveOperation {
   feature: FeatureType;
   groupId: string;
   routeNonce: number;
+  startedAtMs: number;
   controller: AbortController;
   rawText: string;
   flushBuffer: string;
@@ -402,6 +405,7 @@ export class OperationCoordinator {
     private readonly anthropicClient: AnthropicClient,
     private readonly storageCoordinator: StorageCoordinator,
     private readonly agencyHubClient: AgencyHubClient,
+    private readonly agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>,
   ) {}
 
   registerPort(port: browser.runtime.Port): void {
@@ -812,6 +816,52 @@ export class OperationCoordinator {
       ...(anthropicSpend ? { anthropicSpend } : {}),
       ...(profiling ? { profiling } : {}),
     });
+  }
+
+  private buildAiUsageEvent({
+    clientEventId,
+    feature,
+    model,
+    spend,
+    conversationId,
+    startedAtMs,
+    completedAtMs,
+    isCacheHit,
+    isRegeneration,
+  }: {
+    clientEventId: string;
+    feature: FeatureType;
+    model: string;
+    spend: AnthropicSpendSummary;
+    conversationId: string | null;
+    startedAtMs: number | null | undefined;
+    completedAtMs: number;
+    isCacheHit: boolean;
+    isRegeneration: boolean;
+  }): AgencyHubAiUsageEvent {
+    return {
+      clientEventId,
+      feature,
+      model,
+      inputTokens: spend.inputTokens,
+      outputTokens: spend.outputTokens,
+      cacheWriteTokens: spend.cacheWriteTokens,
+      cacheReadTokens: spend.cacheReadTokens,
+      conversationId,
+      durationMs: typeof startedAtMs === 'number'
+        ? Math.max(0, completedAtMs - startedAtMs)
+        : null,
+      isCacheHit,
+      isRegeneration,
+      completedAt: new Date(completedAtMs).toISOString(),
+    };
+  }
+
+  private enqueueCompletedOperationUsage(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'debugMode'>,
+    event: AgencyHubAiUsageEvent,
+  ): void {
+    this.agencyHubUsageReporter.enqueue(settings, event);
   }
 
   private flushChunks(tabId: number, operation: ActiveOperation): void {
@@ -1226,6 +1276,7 @@ export class OperationCoordinator {
         feature: payload.feature,
         groupId: validated.urlGroupId,
         routeNonce: payload.routeNonce,
+        startedAtMs: Date.now(),
         controller: operationController,
         rawText: '',
         flushBuffer: '',
@@ -1503,18 +1554,34 @@ export class OperationCoordinator {
             syncStatus,
           },
         };
-        this.assertActive(tabId, payload.operationId);
+        const current = this.assertActive(tabId, payload.operationId);
         completeStage(
           'summary-cache-check',
           'Summary cache hit',
           'cache hit',
         );
+        const completedAtMs = Date.now();
+        const zeroSpend = createZeroAnthropicSpendSummary();
         this.sendComplete(tabId, {
           type: 'operation:complete',
           operationId: payload.operationId,
           result,
           fanDisplayName: payload.domFanDisplayName ?? 'fan',
-        }, createZeroAnthropicSpendSummary(), profiler);
+        }, zeroSpend, profiler);
+        this.enqueueCompletedOperationUsage(
+          validated.storage.settings,
+          this.buildAiUsageEvent({
+            clientEventId: payload.operationId,
+            feature: payload.feature,
+            model: resolvedModel,
+            spend: zeroSpend,
+            conversationId: validated.urlGroupId,
+            startedAtMs: current.startedAtMs,
+            completedAtMs,
+            isCacheHit: true,
+            isRegeneration: Boolean(payload.forceRegenerate),
+          }),
+        );
         this.clearCompletedOperation(tabId);
         if (shouldAttemptSync && !savedForCurrentTarget) {
           this.enqueueAgencyHubSummarySync({
@@ -1561,18 +1628,34 @@ export class OperationCoordinator {
               },
             };
 
-            this.assertActive(tabId, payload.operationId);
+            const current = this.assertActive(tabId, payload.operationId);
             completeStage(
               'summary-cache-check',
               'Summary loaded from Agency Hub',
               'hub hit',
             );
+            const completedAtMs = Date.now();
+            const zeroSpend = createZeroAnthropicSpendSummary();
             this.sendComplete(tabId, {
               type: 'operation:complete',
               operationId: payload.operationId,
               result,
               fanDisplayName: payload.domFanDisplayName ?? 'fan',
-            }, createZeroAnthropicSpendSummary(), profiler);
+            }, zeroSpend, profiler);
+            this.enqueueCompletedOperationUsage(
+              validated.storage.settings,
+              this.buildAiUsageEvent({
+                clientEventId: payload.operationId,
+                feature: payload.feature,
+                model: resolvedModel,
+                spend: zeroSpend,
+                conversationId: validated.urlGroupId,
+                startedAtMs: current.startedAtMs,
+                completedAtMs,
+                isCacheHit: true,
+                isRegeneration: Boolean(payload.forceRegenerate),
+              }),
+            );
             this.clearCompletedOperation(tabId);
             return;
           }
@@ -2289,12 +2372,28 @@ export class OperationCoordinator {
         }
       }
 
+      const completedAtMs = Date.now();
+      const completedSpend = latestAnthropicSpend ?? createZeroAnthropicSpendSummary();
       this.sendComplete(tabId, {
         type: 'operation:complete',
         operationId: payload.operationId,
         result,
         fanDisplayName,
-      }, latestAnthropicSpend ?? createZeroAnthropicSpendSummary(), profiler);
+      }, completedSpend, profiler);
+      this.enqueueCompletedOperationUsage(
+        validated.storage.settings,
+        this.buildAiUsageEvent({
+          clientEventId: payload.operationId,
+          feature: payload.feature,
+          model: actualModel,
+          spend: completedSpend,
+          conversationId: validated.urlGroupId,
+          startedAtMs: current.startedAtMs,
+          completedAtMs,
+          isCacheHit: Boolean(result.summaryMeta?.cached),
+          isRegeneration: Boolean(payload.forceRegenerate),
+        }),
+      );
 
       this.clearCompletedOperation(tabId);
       if (payload.feature === 'fan-summary' && result.summaryMeta) {
@@ -2374,6 +2473,7 @@ export class OperationCoordinator {
       storageCoordinator: this.storageCoordinator,
       fanslyClient: this.fanslyClient,
       anthropicClient: this.anthropicClient,
+      agencyHubUsageReporter: this.agencyHubUsageReporter,
       hasActiveFeature: (tabId) => this.activeByTabId.has(tabId),
       hasPort: (tabId) => this.portsByTabId.has(tabId),
       send: (tabId, message) => this.send(tabId, message),

@@ -634,6 +634,27 @@ export interface AgencyHubConnectionTestResponse {
   error?: UserFacingError;
 }
 
+export interface AgencyHubAiUsageEvent {
+  clientEventId: string;
+  feature: FeatureType;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  conversationId: string | null;
+  durationMs: number | null;
+  isCacheHit: boolean;
+  isRegeneration: boolean;
+  completedAt: string;
+}
+
+export interface AgencyHubAiUsageBatchResponse {
+  receivedCount: number;
+  insertedCount: number;
+  dedupedCount: number;
+}
+
 // ─── Port Messages (Discriminated Unions) ────────────────────────────────
 
 export interface PortEnvelopeBase {

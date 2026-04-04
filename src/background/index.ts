@@ -1,4 +1,5 @@
 import { AgencyHubClient } from './agency-hub-client.js';
+import { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 import { AnthropicClient } from './anthropic-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { OperationCoordinator } from './operations.js';
@@ -16,6 +17,7 @@ const storageCoordinator = new StorageCoordinator();
 const fanslyClient = new FanslyClient(sessionStore);
 const anthropicClient = new AnthropicClient();
 const agencyHubClient = new AgencyHubClient();
+const agencyHubUsageReporter = new AgencyHubUsageReporter(agencyHubClient);
 const coordinator = new OperationCoordinator(
   sessionStore,
   tabContexts,
@@ -23,6 +25,7 @@ const coordinator = new OperationCoordinator(
   anthropicClient,
   storageCoordinator,
   agencyHubClient,
+  agencyHubUsageReporter,
 );
 
 browser.runtime.onConnect.addListener((port) => {

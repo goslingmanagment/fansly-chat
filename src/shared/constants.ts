@@ -112,6 +112,9 @@ export const PING_MIN_FAN_MESSAGES = 3;
 export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 export const AGENCY_HUB_PREFETCH_TIMEOUT_MS = 5_000;
 export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
+export const AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS = 100;
+export const AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS = 1_000;
+export const AGENCY_HUB_AI_USAGE_REPORT_TIMEOUT_MS = 5_000;
 
 // ─── UI ──────────────────────────────────────────────────────────────────
 

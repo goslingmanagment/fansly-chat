@@ -7,12 +7,15 @@ import {
   normalizeAgencyHubBaseUrl,
   normalizeAgencyHubUsername,
 } from '../shared/agency-hub.js';
+import { AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS } from '../shared/constants.js';
 import {
   ChatGooseError,
   createUserError,
   toUserError,
 } from '../shared/errors.js';
 import type {
+  AgencyHubAiUsageBatchResponse,
+  AgencyHubAiUsageEvent,
   AgencyHubConnectionTestResponse,
   AgencyHubSummarySyncMetadata,
   Settings,
@@ -79,6 +82,17 @@ export interface AgencyHubFetchFanProfileResult extends AgencyHubResultBase {
   body?: string;
   createdAtMs?: number;
   fanAccountId?: string;
+}
+
+export interface AgencyHubSubmitAiUsageBatchInput {
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>;
+  events: AgencyHubAiUsageEvent[];
+  signal: AbortSignal;
+}
+
+export interface AgencyHubSubmitAiUsageBatchResult extends AgencyHubResultBase {
+  status: 'submitted' | 'skipped' | 'failed';
+  response?: AgencyHubAiUsageBatchResponse;
 }
 
 async function readResponseSnippet(response: Response): Promise<string> {
@@ -246,6 +260,32 @@ export class AgencyHubClient {
     }
   }
 
+  private async postAiUsageBatch(
+    baseUrl: string,
+    apiKey: string,
+    events: AgencyHubAiUsageEvent[],
+    signal: AbortSignal,
+  ): Promise<AgencyHubAiUsageBatchResponse> {
+    const response = await this.fetchImpl(
+      buildAgencyHubUrl(baseUrl, 'api/v1/ai-usage:batch'),
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ events }),
+        signal,
+      },
+    );
+
+    if (!response.ok) {
+      throw await this.createHubResponseError(response);
+    }
+
+    return await response.json() as AgencyHubAiUsageBatchResponse;
+  }
+
   async testConnection(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>,
     signal: AbortSignal,
@@ -276,6 +316,84 @@ export class AgencyHubClient {
         error: error instanceof ChatGooseError
           ? toUserError(error)
           : hubError('hub_request_failed'),
+      };
+    }
+  }
+
+  async submitAiUsageBatch({
+    settings,
+    events,
+    signal,
+  }: AgencyHubSubmitAiUsageBatchInput): Promise<AgencyHubSubmitAiUsageBatchResult> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const apiKey = settings.agencyHubApiKey.trim();
+
+    if (!baseUrl) {
+      return {
+        status: 'skipped',
+        reason: 'missing_base_url',
+        baseUrl: null,
+      };
+    }
+    if (!apiKey) {
+      return {
+        status: 'skipped',
+        reason: 'missing_api_key',
+        baseUrl,
+      };
+    }
+    if (!events.length) {
+      return {
+        status: 'skipped',
+        reason: 'empty_batch',
+        baseUrl,
+      };
+    }
+    if (events.length > AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS) {
+      return {
+        status: 'failed',
+        reason: 'too_many_events',
+        baseUrl,
+      };
+    }
+    if (!await this.hasHostPermission(baseUrl)) {
+      return {
+        status: 'skipped',
+        reason: 'missing_host_permission',
+        baseUrl,
+      };
+    }
+
+    try {
+      const response = await this.postAiUsageBatch(
+        baseUrl,
+        apiKey,
+        events,
+        signal,
+      );
+      return {
+        status: 'submitted',
+        reason: 'submitted',
+        baseUrl,
+        response,
+      };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return {
+          status: 'failed',
+          reason: 'aborted',
+          baseUrl,
+        };
+      }
+
+      return {
+        status: 'failed',
+        reason: error instanceof ChatGooseError
+          ? error.key
+          : error instanceof Error
+            ? error.message
+            : 'unknown_error',
+        baseUrl,
       };
     }
   }
