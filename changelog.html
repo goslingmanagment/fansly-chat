@@ -374,7 +374,7 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.1.6</span>
+      <span class="nav-version">v1.1.7</span>
     </div>
   </div>
 </nav>
@@ -390,11 +390,41 @@
 
 <div class="timeline">
 
+  <!-- 1.1.7 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.1.7</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li>После каждого успешно завершённого AI-действия ChatGoose отправляет usage в Agency Hub</li>
+          <li>Учитываются и обычные AI-фичи, и Compare, поэтому видно, кто из чаттеров сколько токенов использует</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Улучшено</div>
+        <ul class="changes-list">
+          <li>Usage отправляется батчами в фоне и не тормозит работу чаттера</li>
+          <li>В отчёт попадают модель, токены, длительность, conversation id, регенерация и cache hit для fan summary</li>
+          <li>Если Agency Hub недоступен или не настроен, расширение тихо пропускает отправку и продолжает работать как обычно</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li>Ошибочные и прерванные операции больше не могут случайно попадать в usage-статистику</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.1.6 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.6</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="change-group">
@@ -541,7 +571,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.1.6 &middot; Gosling Agency &middot; Powered by Claude</p>
+  <p>v1.1.7 &middot; Gosling Agency &middot; Powered by Claude</p>
 </footer>
 
 </body>
