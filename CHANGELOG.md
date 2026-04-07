@@ -1,5 +1,15 @@
 # Что нового
 
+## 1.2.5
+
+- **Anti-AI overhaul**: все промпты генерации сообщений переработаны для борьбы с AI-шаблонами
+- `fast-reply`: добавлен блок Anti-AI Rules — забанена структура "validate → elaborate → question", список запрещённых фраз ("hits different", "I don't take that lightly", "that's actually meaningful" и др.), ограничение длины по умолчанию, правила для эмоциональных моментов, self-test
+- `improve-draft`: добавлен Anti-AI блок — запрет раздувать простые мысли, бан AI-фраз, контроль длины
+- `help-me`: suggestions теперь проходят anti-AI фильтр — без терапевт-энергии и мотивационных шаблонов
+- `hi-greeting`: запрет generic enthusiasm и AI-polish в вариантах приветствий
+- `ping`: бан на "you crossed my mind", "just been thinking about you" и прочий AI-slop
+- Основано на анализе реальных чатов + Wikipedia "Signs of AI writing" (29 паттернов)
+
 ## 1.2.2
 
 - Увеличен максимальный лимит `Deep feature message count` до 3000 сообщений
