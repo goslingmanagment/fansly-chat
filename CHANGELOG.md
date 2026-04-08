@@ -1,5 +1,14 @@
 # Что нового
 
+## 1.2.14
+
+- **Anti-AI v5: examples-first rewrite** — полная переработка `fast-reply.md`
+- Удалены все prose rules (Anti-coaching, Structural rules, Banned phrases, Emotional moments, Final check, How to build your reply)
+- Заменены на 8 пар BAD/GOOD examples по 5 сценариям (fitness, work stress, promotion, stress, compliment)
+- Каждый BAD показывает конкретный реальный провал из тестирования
+- Короткий "What makes GOOD replies good" заменяет стену правил
+- Инсайт: Sonnet 4.6 хорошо учится по few-shot examples, но игнорирует длинные prose rules
+
 ## 1.2.13
 
 - `fast-reply`: убрано противоречие examples vs rules — GOOD examples переписаны без opening recap. Vague rule "don't repeat details" заменён на positional rule: "first 2-5 words = reaction, not recap" с конкретными bad/good openings. Final check теперь проверяет opening clause на числа/факты фана. Generation process: "open with your feeling, not his facts"
