@@ -1,6 +1,6 @@
 # Что нового
 
-## 1.2.8
+## 1.2.9
 
 - **Anti-AI v3: formula across splits + personality update**
 - `fast-reply`: validate→elaborate→question бан теперь явно распространяется на [NEXT] splits. Добавлен бан на life-coach energy ("having a goal makes it easier")
