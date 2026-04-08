@@ -1,5 +1,12 @@
 # Что нового
 
+## 1.2.7
+
+- **Anti-AI v3: formula across splits + personality update**
+- `fast-reply`: validate→elaborate→question бан теперь явно распространяется на [NEXT] splits. Добавлен бан на life-coach energy ("having a goal makes it easier")
+- `Lora personality v2`: добавлены banned phrases с life-coach энергией ("solid routine", "great motivation", "makes it easier to stay consistent"), бан на объяснение ПОЧЕМУ что-то хорошо вместо реакции, бан на wellness-influencer тон
+- Существующие установки получат обновлённую personality автоматически (builtinVersion bump)
+
 ## 1.2.6
 
 - **Anti-AI v2: emotional slop fix**: новый блок banned emotional patterns во всех промптах
