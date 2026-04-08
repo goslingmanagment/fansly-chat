@@ -1,5 +1,15 @@
 # Что нового
 
+## 1.2.6
+
+- **Anti-AI v2: emotional slop fix**: новый блок banned emotional patterns во всех промптах
+- `fast-reply`: добавлены правила против артикулированной эмпатии — бан на "the worst kind", "that kind of X where Y", "hope [thing] gets better", copula-avoidance, synonym cycling. Расширен self-test до 5 проверок (therapist, analysis, length, synonym, soul)
+- `improve-draft`: добавлены 5 новых banned patterns (articulated empathy, categorization, AI-polite, copula-avoidance, synonym cycling)
+- `help-me`: расширен anti-AI фильтр — бан на articulated empathy и categorization language
+- `hi-greeting`: добавлен бан на analytical emotion labels и copula-avoidance
+- `ping`: добавлен бан на "hope gets better", synonym cycling, analytical categorization
+- Основано на анализе Humanizer (github.com/blader/humanizer) — 29 AI writing patterns + свежий research по anti-AI prompting
+
 ## 1.2.5
 
 - **Anti-AI overhaul**: все промпты генерации сообщений переработаны для борьбы с AI-шаблонами
