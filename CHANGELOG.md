@@ -1,5 +1,9 @@
 # Что нового
 
+## 1.2.13
+
+- `fast-reply`: убрано противоречие examples vs rules — GOOD examples переписаны без opening recap. Vague rule "don't repeat details" заменён на positional rule: "first 2-5 words = reaction, not recap" с конкретными bad/good openings. Final check теперь проверяет opening clause на числа/факты фана. Generation process: "open with your feeling, not his facts"
+
 ## 1.2.12
 
 - `fast-reply`: усилен бан на пересказ — AI vs Human пример конкретно показывает разницу между "recap all details" и "grab one detail". Обновлён generation process: шаг 1 теперь "pick ONE detail, ignore the rest". Обновлён BAD example чтобы показать что recap с восклицанием — тоже recap
