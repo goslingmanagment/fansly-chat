@@ -1,5 +1,12 @@
 # Что нового
 
+## 1.2.10
+
+- **Anti-AI v4: examples over bans** — полная переработка подхода
+- `fast-reply`: заменены banned-lists на конкретные GOOD vs BAD примеры с объяснениями. Добавлен пошаговый process генерации (gut reaction → one thought → question). Финальная проверка: "если 3 части — удали среднюю". Забанены конкретные AI-слова: "solid [noun]", "actually" как filler, "but honestly", negative parallelism "not X, Y"
+- `improve-draft`: упрощён anti-AI блок — структурные правила вместо длинных списков фраз
+- Инсайт: banned lists не работают, модель находит синонимы. Примеры + структурные ограничения эффективнее
+
 ## 1.2.9
 
 - **Anti-AI v3: formula across splits + personality update**
