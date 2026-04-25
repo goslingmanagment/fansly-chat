@@ -264,6 +264,7 @@ export interface FanslyMessage {
 export interface FanslyMediaPermissionFlag {
   flags?: number;
   price?: number;
+  metadata?: string;
 }
 
 export interface FanslyMediaPermissions {

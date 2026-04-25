@@ -39,11 +39,12 @@ type MediaState =
   | { kind: 'ppv-unknown' };
 
 function deriveMediaState(item: FanslyMedia | FanslyMediaBundle): MediaState {
+  // PPV is signaled by permission flag bit 1 (Price) alone. Some Fansly payloads
+  // emit `flags: 1, price: 0` and stash the real price in a JSON `metadata`
+  // string — requiring `price > 0` here would silently demote those to free.
   const flags = item.permissions?.permissionFlags ?? [];
-  const hasPriceFlag = flags.some(
-    (entry) => ((entry.flags ?? 0) & 1) === 1 && (entry.price ?? 0) > 0,
-  );
-  if (!hasPriceFlag) {
+  const hasPpvFlag = flags.some((entry) => ((entry.flags ?? 0) & 1) === 1);
+  if (!hasPpvFlag) {
     return { kind: 'free' };
   }
   if (item.purchased === true) {
@@ -115,13 +116,15 @@ function describeAttachment(
 
   // ContentType-first dispatch: 1 = accountMedia, 2 = accountMediaBundle.
   // The API discriminator is authoritative; trust it over map probing when present.
+  // Preserve bundle identity even when the bundle details are missing from the
+  // page payload — `[Media Bundle]` is more informative than generic `[Media]`.
   if (attachment.contentType === 1) {
     const media = mediaMap.get(contentId);
     return media ? describeMedia(media) : '[Media]';
   }
   if (attachment.contentType === 2) {
     const bundle = bundleMap.get(contentId);
-    return bundle ? describeBundle(bundle) : '[Media]';
+    return bundle ? describeBundle(bundle) : '[Media Bundle]';
   }
 
   // Legacy fallback when contentType is absent.

@@ -658,6 +658,7 @@ describe('prompt caching fallback', () => {
 
 describe('paid-media state rule', () => {
   const NO_REPITCH_PHRASE = 'do NOT pitch buying or unlocking it again';
+  const NO_LABEL_LEAK_PHRASE = 'never quote them back to the fan';
   const REPLY_TEMPLATES_WITH_RULE: Array<[string, string]> = [
     ['fast-reply', fastReplyTemplate],
     ['improve-draft', improveDraftTemplate],
@@ -676,6 +677,10 @@ describe('paid-media state rule', () => {
       expect(template).toContain('PPV, locked');
       expect(template).toContain('PPV, unknown');
       expect(template).toContain(NO_REPITCH_PHRASE);
+    });
+
+    it(`${name} template forbids quoting internal labels back to the fan`, () => {
+      expect(template).toContain(NO_LABEL_LEAK_PHRASE);
     });
   }
 
