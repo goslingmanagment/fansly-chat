@@ -16,20 +16,62 @@ function compareMessageIds(left: string, right: string): number {
   return left.localeCompare(right, 'en', { numeric: true });
 }
 
-function mediaLabelFromMime(mimetype?: string): string {
+function mediaLabelInner(mimetype?: string): string {
   if (!mimetype) {
-    return '[Media]';
+    return 'Media';
   }
   if (mimetype.startsWith('image/')) {
-    return '[Photo]';
+    return 'Photo';
   }
   if (mimetype.startsWith('video/')) {
-    return '[Video]';
+    return 'Video';
   }
   if (mimetype.startsWith('audio/')) {
-    return '[Audio]';
+    return 'Audio';
   }
-  return '[Media]';
+  return 'Media';
+}
+
+type MediaState =
+  | { kind: 'free' }
+  | { kind: 'ppv-locked' }
+  | { kind: 'ppv-purchased' }
+  | { kind: 'ppv-unknown' };
+
+function deriveMediaState(item: FanslyMedia | FanslyMediaBundle): MediaState {
+  const flags = item.permissions?.permissionFlags ?? [];
+  const hasPriceFlag = flags.some(
+    (entry) => ((entry.flags ?? 0) & 1) === 1 && (entry.price ?? 0) > 0,
+  );
+  if (!hasPriceFlag) {
+    return { kind: 'free' };
+  }
+  if (item.purchased === true) {
+    return { kind: 'ppv-purchased' };
+  }
+  if (item.purchased === false) {
+    return { kind: 'ppv-locked' };
+  }
+  return { kind: 'ppv-unknown' };
+}
+
+function ppvSuffix(state: MediaState): string {
+  switch (state.kind) {
+    case 'ppv-locked':
+      return ' — PPV, locked';
+    case 'ppv-purchased':
+      return ' — PPV, purchased';
+    case 'ppv-unknown':
+      return ' — PPV, unknown';
+    default:
+      return '';
+  }
+}
+
+function describeMedia(media: FanslyMedia): string {
+  const inner = mediaLabelInner(media.mimetype);
+  const suffix = ppvSuffix(deriveMediaState(media));
+  return `[${inner}${suffix}]`;
 }
 
 function describeBundle(bundle: FanslyMediaBundle): string {
@@ -55,31 +97,43 @@ function describeBundle(bundle: FanslyMediaBundle): string {
   if (videoCount > 0) {
     parts.push(`${videoCount} Videos`);
   }
-  return parts.length > 0 ? `[Media Bundle: ${parts.join(', ')}]` : '[Media Bundle]';
+
+  const body = parts.length > 0 ? `Media Bundle: ${parts.join(', ')}` : 'Media Bundle';
+  const suffix = ppvSuffix(deriveMediaState(bundle));
+  return `[${body}${suffix}]`;
 }
 
 function describeAttachment(
   attachment: FanslyAttachment,
-  totalTipAmount: number,
   mediaMap: Map<string, FanslyMedia>,
   bundleMap: Map<string, FanslyMediaBundle>,
 ): string {
   const contentId = attachment.contentId;
   if (!contentId) {
-    return totalTipAmount > 0 ? '[PPV Media]' : '[Media]';
+    return '[Media]';
   }
 
+  // ContentType-first dispatch: 1 = accountMedia, 2 = accountMediaBundle.
+  // The API discriminator is authoritative; trust it over map probing when present.
+  if (attachment.contentType === 1) {
+    const media = mediaMap.get(contentId);
+    return media ? describeMedia(media) : '[Media]';
+  }
+  if (attachment.contentType === 2) {
+    const bundle = bundleMap.get(contentId);
+    return bundle ? describeBundle(bundle) : '[Media]';
+  }
+
+  // Legacy fallback when contentType is absent.
   const bundle = bundleMap.get(contentId);
   if (bundle) {
     return describeBundle(bundle);
   }
-
   const media = mediaMap.get(contentId);
   if (media) {
-    return totalTipAmount > 0 ? '[PPV Media]' : mediaLabelFromMime(media.mimetype);
+    return describeMedia(media);
   }
-
-  return totalTipAmount > 0 ? '[PPV Media]' : '[Media]';
+  return '[Media]';
 }
 
 export function normalizeTranscript(
@@ -110,7 +164,7 @@ export function normalizeTranscript(
       const totalTipAmount = message.totalTipAmount ?? 0;
 
       for (const attachment of message.attachments ?? []) {
-        labels.push(describeAttachment(attachment, totalTipAmount, mediaMap, bundleMap));
+        labels.push(describeAttachment(attachment, mediaMap, bundleMap));
       }
 
       if ((message.attachments?.length ?? 0) === 0 && (message.embeds?.length ?? 0) > 0) {

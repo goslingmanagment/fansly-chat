@@ -261,10 +261,24 @@ export interface FanslyMessage {
   totalTipAmount?: number;
 }
 
+export interface FanslyMediaPermissionFlag {
+  flags?: number;
+  price?: number;
+}
+
+export interface FanslyMediaPermissions {
+  permissionFlags?: FanslyMediaPermissionFlag[];
+}
+
 export interface FanslyMedia {
   id: string;
   mimetype?: string;
   type?: number;
+  purchased?: boolean;
+  access?: boolean;
+  whitelisted?: boolean;
+  permissionFlags?: number;
+  permissions?: FanslyMediaPermissions;
 }
 
 export interface FanslyMediaBundleItem {
@@ -274,6 +288,11 @@ export interface FanslyMediaBundleItem {
 export interface FanslyMediaBundle {
   id: string;
   accountMedia?: FanslyMediaBundleItem[];
+  purchased?: boolean;
+  access?: boolean;
+  whitelisted?: boolean;
+  permissionFlags?: number;
+  permissions?: FanslyMediaPermissions;
 }
 
 export interface FanslyMessagePageResponse {
