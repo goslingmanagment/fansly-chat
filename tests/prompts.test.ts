@@ -653,3 +653,35 @@ describe('prompt caching fallback', () => {
     );
   });
 });
+
+// ─── Paid-media state rule ──────────────────────────────────────────────
+
+describe('paid-media state rule', () => {
+  const NO_REPITCH_PHRASE = 'do NOT pitch buying or unlocking it again';
+  const REPLY_TEMPLATES_WITH_RULE: Array<[string, string]> = [
+    ['fast-reply', fastReplyTemplate],
+    ['improve-draft', improveDraftTemplate],
+    ['help-me', helpMeTemplate],
+    ['ping', pingTemplate],
+  ];
+  const TEMPLATES_WITHOUT_RULE: Array<[string, string]> = [
+    ['chat-review', chatReviewTemplate],
+    ['fan-summary', fanSummaryTemplate],
+    ['hi-greeting', hiGreetingTemplate],
+  ];
+
+  for (const [name, template] of REPLY_TEMPLATES_WITH_RULE) {
+    it(`${name} template carries the no-repitch rule with all four label states`, () => {
+      expect(template).toContain('PPV, purchased');
+      expect(template).toContain('PPV, locked');
+      expect(template).toContain('PPV, unknown');
+      expect(template).toContain(NO_REPITCH_PHRASE);
+    });
+  }
+
+  for (const [name, template] of TEMPLATES_WITHOUT_RULE) {
+    it(`${name} template intentionally omits the no-repitch rule`, () => {
+      expect(template).not.toContain(NO_REPITCH_PHRASE);
+    });
+  }
+});

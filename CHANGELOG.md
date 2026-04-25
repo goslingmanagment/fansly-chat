@@ -1,5 +1,13 @@
 # Что нового
 
+## 1.2.15
+
+- **Fix: AI больше не предлагает купить уже купленный PPV-контент** — транскрипт теперь читает поля `purchased` и `permissions.permissionFlags[]` из `/api/v1/message`, которые раньше отбрасывались на уровне типов
+- Метки вложений показывают состояние: `[Video — PPV, purchased]` / `[Video — PPV, locked]` / `[Video — PPV, unknown]`
+- Чаевые (`totalTipAmount`) больше не считаются PPV-разблокировкой — это разные транзакции в Fansly (`7101` против `2110`/`2116`)
+- ContentType-first диспетчинг (`contentType: 1` = media, `2` = bundle) — fallback на legacy id-probe только если поле отсутствует
+- Правило в `fast-reply` / `improve-draft` / `help-me` / `ping`: при `purchased` не питчить покупку повторно, при `unknown` не делать уверенных утверждений
+
 ## 1.2.14
 
 - **Anti-AI v5: examples-first rewrite** — полная переработка `fast-reply.md`
