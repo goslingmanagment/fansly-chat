@@ -12,6 +12,7 @@ import type { FanslyMessagePageResponse, NormalizedTranscriptMessage } from '../
 
 const MODEL_ID = 'model-1';
 const FAN_ID = 'fan-1';
+const OTHER_FAN_ID = 'fan-other';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function makeNormalized(overrides: Partial<NormalizedTranscriptMessage> = {}): NormalizedTranscriptMessage {
@@ -32,6 +33,7 @@ function makePage(overrides: Partial<FanslyMessagePageResponse> = {}): FanslyMes
     messages: [],
     accountMedia: [],
     accountMediaBundles: [],
+    accountMediaOrders: [],
     ...overrides,
   };
 }
@@ -55,7 +57,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
 
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result.map((m) => m.id)).toEqual(['1', '2', '3']);
     expect(result[0]!.senderLabel).toBe('Model');
     expect(result[1]!.senderLabel).toBe('Fan');
@@ -70,7 +72,7 @@ describe('normalizeTranscript', () => {
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.text).toBe('[System message]');
   });
 
@@ -82,11 +84,11 @@ describe('normalizeTranscript', () => {
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.labels).toContain('[Tip: $25.00]');
   });
 
-  it('resolves media labels from accountMedia map', () => {
+  it('resolves media labels from accountMedia map (legacy top-level mimetype)', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
@@ -95,7 +97,7 @@ describe('normalizeTranscript', () => {
         accountMedia: [{ id: 'media-1', mimetype: 'image/jpeg' }],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.labels).toContain('[Photo]');
   });
 
@@ -103,18 +105,18 @@ describe('normalizeTranscript', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'thanks', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentId: 'media-free' }], embeds: [], totalTipAmount: 5000 },
+          { id: '1', type: 1, content: 'thanks', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-free' }], embeds: [], totalTipAmount: 5000 },
         ],
-        accountMedia: [{ id: 'media-free', mimetype: 'image/jpeg' }],
+        accountMedia: [{ id: 'media-free', media: { type: 1, mimetype: 'image/jpeg' } }],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.labels).toContain('[Photo]');
     expect(result[0]!.labels).toContain('[Tip: $5.00]');
     expect(result[0]!.labels.join(' ')).not.toContain('PPV');
   });
 
-  it('labels purchased PPV media as "PPV, purchased"', () => {
+  it('labels PPV single as "PPV $X, purchased" only when an exact fan order matches', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
@@ -123,100 +125,354 @@ describe('normalizeTranscript', () => {
         accountMedia: [
           {
             id: 'media-ppv',
-            mimetype: 'video/mp4',
+            media: { type: 2, mimetype: 'video/mp4' },
+            // viewer-perspective access flags — must NOT drive purchase state
             purchased: true,
-            permissions: { permissionFlags: [{ flags: 9, price: 3000 }] },
+            access: true,
+            whitelisted: true,
+            permissions: { permissionFlags: [{ flags: 9, price: 80000 }] },
           },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'media-ppv', type: 1, createdAt: 26 },
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Video — PPV, purchased]');
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
+    expect(result[0]!.labels).toContain('[Video — PPV $80.00, purchased]');
     expect(result[0]!.labels.join(' ')).not.toContain('locked');
     expect(result[0]!.labels.join(' ')).not.toContain('unknown');
   });
 
-  it('labels not-yet-purchased PPV media as "PPV, locked"', () => {
+  it('treats viewer-side `purchased: true` with no fan order as PPV unknown (key regression)', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'wanna see?', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'check', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
         ],
         accountMedia: [
           {
             id: 'media-ppv',
-            mimetype: 'video/mp4',
-            purchased: false,
-            permissions: { permissionFlags: [{ flags: 9, price: 3000 }] },
-          },
-        ],
-      }),
-    ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Video — PPV, locked]');
-    expect(result[0]!.labels.join(' ')).not.toContain('purchased');
-    expect(result[0]!.labels.join(' ')).not.toContain('unknown');
-  });
-
-  it('labels PPV media with missing purchased field as "PPV, unknown"', () => {
-    const pages: FanslyMessagePageResponse[] = [
-      makePage({
-        messages: [
-          { id: '1', type: 1, content: 'check this', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
-        ],
-        accountMedia: [
-          {
-            id: 'media-ppv',
-            mimetype: 'video/mp4',
-            permissions: { permissionFlags: [{ flags: 9, price: 3000 }] },
-          },
-        ],
-      }),
-    ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Video — PPV, unknown]');
-    expect(result[0]!.labels.join(' ')).not.toContain('purchased');
-    expect(result[0]!.labels.join(' ')).not.toContain('locked');
-  });
-
-  it('labels purchased bundles with counts and "PPV, purchased"', () => {
-    const pages: FanslyMessagePageResponse[] = [
-      makePage({
-        messages: [
-          { id: '1', type: 1, content: 'enjoy the set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'bundle-ppv' }], embeds: [], totalTipAmount: 0 },
-        ],
-        accountMediaBundles: [
-          {
-            id: 'bundle-ppv',
-            accountMedia: [{ media: [{ type: 1 }, { type: 1 }, { type: 2 }] }],
+            media: { type: 2, mimetype: 'video/mp4' },
             purchased: true,
-            permissions: { permissionFlags: [{ flags: 9, price: 4000 }] },
+            access: true,
+            whitelisted: true,
+            permissions: { permissionFlags: [{ flags: 9, price: 33000 }] },
           },
         ],
+        accountMediaOrders: [],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Media Bundle: 2 Photos, 1 Videos — PPV, purchased]');
+    const labels = normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels;
+    expect(labels).toContain('[Video — PPV $33.00, unknown]');
+    expect(labels.join(' ')).not.toContain('purchased');
+    expect(labels.join(' ')).not.toContain('locked');
   });
 
-  it('labels not-yet-purchased bundles with "PPV, locked"', () => {
+  it('does not credit PPV singles from another fan\'s order', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'set just dropped', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'bundle-ppv' }], embeds: [], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-ppv',
+            media: { type: 2, mimetype: 'video/mp4' },
+            permissions: { permissionFlags: [{ flags: 9, price: 5000 }] },
+          },
+        ],
+        accountMediaOrders: [
+          { accountId: OTHER_FAN_ID, accountMediaId: 'media-ppv', type: 1, createdAt: 11 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Video — PPV $5.00, unknown]');
+  });
+
+  it('does not credit a PPV single from a same-fan order on a different content id', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-ppv',
+            media: { type: 2, mimetype: 'video/mp4' },
+            permissions: { permissionFlags: [{ flags: 9, price: 5000 }] },
+          },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'other-media', type: 1, createdAt: 11 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Video — PPV $5.00, unknown]');
+  });
+
+  it('does not credit a single from a bundle order on the same id (type-mismatch is decisive)', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'shared-id' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'shared-id',
+            media: { type: 2, mimetype: 'video/mp4' },
+            permissions: { permissionFlags: [{ flags: 9, price: 5000 }] },
+          },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'shared-id', type: 2, createdAt: 11 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Video — PPV $5.00, unknown]');
+  });
+
+  it('treats PPV single as unknown when fanAccountId is null', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-ppv',
+            media: { type: 2, mimetype: 'video/mp4' },
+            purchased: true,
+            permissions: { permissionFlags: [{ flags: 9, price: 5000 }] },
+          },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'media-ppv', type: 1, createdAt: 11 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, null)[0]!.labels)
+      .toContain('[Video — PPV $5.00, unknown]');
+  });
+
+  it('aggregates fan orders across pages so a later page can credit an earlier-page attachment', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-ppv',
+            media: { type: 2, mimetype: 'video/mp4' },
+            permissions: { permissionFlags: [{ flags: 9, price: 5000 }] },
+          },
+        ],
+        accountMediaOrders: [],
+      }),
+      makePage({
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'media-ppv', type: 1, createdAt: 11 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Video — PPV $5.00, purchased]');
+  });
+
+  it('labels purchased PPV bundles with counts when the inline order matches by accountMediaId', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'bundle-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          { id: 'am-a', media: { type: 2, mimetype: 'video/mp4' } },
+          { id: 'am-b', media: { type: 2, mimetype: 'video/mp4' } },
         ],
         accountMediaBundles: [
           {
             id: 'bundle-ppv',
-            accountMedia: [{ media: [{ type: 1 }, { type: 2 }] }],
-            purchased: false,
-            permissions: { permissionFlags: [{ flags: 9, price: 4000 }] },
+            accountMediaIds: ['am-a', 'am-b'],
+            bundleContent: [
+              { accountMediaId: 'am-a', pos: 0 },
+              { accountMediaId: 'am-b', pos: 1 },
+            ],
+            purchased: true,
+            permissions: { permissionFlags: [{ flags: 9, price: 20000 }] },
           },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'bundle-ppv', type: 2, createdAt: 26 },
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Media Bundle: 1 Photos, 1 Videos — PPV, locked]');
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Media Bundle: 2 Videos — PPV $20.00, purchased]');
+  });
+
+  it('credits a bundle purchase via the orderhistory `accountMediaBundleId` shape', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'bundle-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMediaBundles: [
+          {
+            id: 'bundle-ppv',
+            accountMediaIds: [],
+            permissions: { permissionFlags: [{ flags: 9, price: 8000 }] },
+          },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaBundleId: 'bundle-ppv', type: 2, createdAt: 26 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Media Bundle — PPV $8.00, purchased]');
+  });
+
+  it('does not credit a single child purchase from a parent bundle order', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'mix', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-child' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-child',
+            media: { type: 1, mimetype: 'image/jpeg' },
+            permissions: { permissionFlags: [{ flags: 9, price: 5000 }] },
+          },
+        ],
+        accountMediaOrders: [
+          { accountId: FAN_ID, accountMediaId: 'bundle-ppv', type: 2, createdAt: 26 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Photo — PPV $5.00, unknown]');
+  });
+
+  it('handles a mixed message: PPV single (no fan order) + free bundle counts independently', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'mix', groupId: 'g1', senderId: MODEL_ID, createdAt: 10,
+            attachments: [
+              { contentType: 1, contentId: 'media-ppv', pos: 0 },
+              { contentType: 2, contentId: 'bundle-free', pos: 1 },
+            ],
+            embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-ppv',
+            media: { type: 2, mimetype: 'video/mp4' },
+            purchased: true,
+            permissions: { permissionFlags: [{ flags: 9, price: 33000 }] },
+          },
+          { id: 'bm-1', media: { type: 2, mimetype: 'video/mp4' } },
+          { id: 'bm-2', media: { type: 1, mimetype: 'image/jpeg' } },
+          { id: 'bm-3', media: { type: 1, mimetype: 'image/jpeg' } },
+          { id: 'bm-4', media: { type: 1, mimetype: 'image/jpeg' } },
+          { id: 'bm-5', media: { type: 1, mimetype: 'image/jpeg' } },
+        ],
+        accountMediaBundles: [
+          {
+            id: 'bundle-free',
+            accountMediaIds: ['bm-1', 'bm-2', 'bm-3', 'bm-4', 'bm-5'],
+            bundleContent: [
+              { accountMediaId: 'bm-1', pos: 0 },
+              { accountMediaId: 'bm-2', pos: 1 },
+              { accountMediaId: 'bm-3', pos: 2 },
+              { accountMediaId: 'bm-4', pos: 3 },
+              { accountMediaId: 'bm-5', pos: 4 },
+            ],
+            purchased: true,
+            permissions: { permissionFlags: [{ flags: 8, price: 0 }] },
+          },
+        ],
+        accountMediaOrders: [],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual([
+      '[Video — PPV $33.00, unknown]',
+      '[Media Bundle: 4 Photos, 1 Videos]',
+    ]);
+  });
+
+  it('treats a tip-only attachment (contentType:7) as silent — no [Media] label', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: '', groupId: 'g1', senderId: FAN_ID, createdAt: 10,
+            attachments: [{ contentType: 7, contentId: 'tip-id' }],
+            embeds: [], totalTipAmount: 100000 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual(['[Tip: $100.00]']);
+  });
+
+  it('treats a tip attachment alongside text as silent on the attachment side', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'thanks!', groupId: 'g1', senderId: FAN_ID, createdAt: 10,
+            attachments: [{ contentType: 7, contentId: 'tip-id' }],
+            embeds: [], totalTipAmount: 100000 },
+        ],
+      }),
+    ];
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
+    expect(result[0]!.text).toBe('thanks!');
+    expect(result[0]!.labels).toEqual(['[Tip: $100.00]']);
+  });
+
+  it('emits no label for embed-only fan messages (no false [Media])', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'haha', groupId: 'g1', senderId: FAN_ID, createdAt: 10,
+            attachments: [],
+            embeds: [{ type: 2, data: '...', match: 'tenor.com/view/...' }],
+            totalTipAmount: 0 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual([]);
+  });
+
+  it('emits only [Tip] for embed-only tipped messages, never [Media]', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: '', groupId: 'g1', senderId: FAN_ID, createdAt: 10,
+            attachments: [],
+            embeds: [{}],
+            totalTipAmount: 100000 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual(['[Tip: $100.00]']);
+  });
+
+  it('emits no label for unknown attachment contentType', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'mystery', groupId: 'g1', senderId: FAN_ID, createdAt: 10,
+            attachments: [{ contentType: 99, contentId: 'unknown-1' }],
+            embeds: [], totalTipAmount: 0 },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual([]);
   });
 
   it('uses contentType to disambiguate when an id collides between media and bundle maps', () => {
@@ -226,72 +482,126 @@ describe('normalizeTranscript', () => {
           { id: '1', type: 1, content: 'media', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'collision' }], embeds: [], totalTipAmount: 0 },
           { id: '2', type: 1, content: 'bundle', groupId: 'g1', senderId: MODEL_ID, createdAt: 20, attachments: [{ contentType: 2, contentId: 'collision' }], embeds: [], totalTipAmount: 0 },
         ],
-        accountMedia: [{ id: 'collision', mimetype: 'image/jpeg' }],
+        accountMedia: [{ id: 'collision', media: { type: 1, mimetype: 'image/jpeg' } }],
         accountMediaBundles: [
-          { id: 'collision', accountMedia: [{ media: [{ type: 1 }] }] },
+          { id: 'collision', accountMediaIds: ['collision'] },
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.labels).toContain('[Photo]');
     expect(result[1]!.labels).toContain('[Media Bundle: 1 Photos]');
   });
 
-  it('classifies PPV with structured price=0 (real price in metadata) as paid', () => {
-    // Fansly emits some accountMedia with `flags & 1` set but the structured `price` left at 0;
-    // the actual price lives in a JSON `metadata` string (see core/reference timeline_wall fixture).
-    // PPV state must come from the flag bit alone, not from price > 0.
+  it('extracts PPV price from metadata when permission price is 0', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-meta-purchased' }], embeds: [], totalTipAmount: 0 },
-          { id: '2', type: 1, content: 'tease', groupId: 'g1', senderId: MODEL_ID, createdAt: 20, attachments: [{ contentType: 1, contentId: 'media-meta-locked' }], embeds: [], totalTipAmount: 0 },
-          { id: '3', type: 1, content: 'pic', groupId: 'g1', senderId: MODEL_ID, createdAt: 30, attachments: [{ contentType: 1, contentId: 'media-meta-unknown' }], embeds: [], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-meta' }], embeds: [], totalTipAmount: 0 },
         ],
         accountMedia: [
           {
-            id: 'media-meta-purchased',
-            mimetype: 'video/mp4',
-            purchased: true,
-            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
-          },
-          {
-            id: 'media-meta-locked',
-            mimetype: 'video/mp4',
-            purchased: false,
-            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
-          },
-          {
-            id: 'media-meta-unknown',
-            mimetype: 'video/mp4',
-            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
+            id: 'media-meta',
+            media: { type: 2, mimetype: 'video/mp4' },
+            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":20000}"}' }] },
           },
         ],
+        accountMediaOrders: [],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Video — PPV, purchased]');
-    expect(result[1]!.labels).toContain('[Video — PPV, locked]');
-    expect(result[2]!.labels).toContain('[Video — PPV, unknown]');
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Video — PPV $20.00, unknown]');
   });
 
-  it('labels a bundle with PPV flag and missing purchased as "PPV, unknown"', () => {
+  it('still labels PPV state when metadata is malformed (no price suffix)', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'bundle-ppv' }], embeds: [], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-bad' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-bad',
+            media: { type: 2, mimetype: 'video/mp4' },
+            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: 'not-json' }] },
+          },
+        ],
+        accountMediaOrders: [],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Video — PPV, unknown]');
+  });
+
+  it('uses nested media.media.mimetype in preference to top-level mimetype', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'look', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'm1' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [{ id: 'm1', media: { type: 2, mimetype: 'video/mp4' } }],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toContain('[Video]');
+  });
+
+  it('counts bundle children resolved via accountMediaIds when bundleContent is missing', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'b1' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          { id: 'm1', media: { type: 1, mimetype: 'image/jpeg' } },
+          { id: 'm2', media: { type: 2, mimetype: 'video/mp4' } },
         ],
         accountMediaBundles: [
-          {
-            id: 'bundle-ppv',
-            accountMedia: [{ media: [{ type: 1 }, { type: 2 }] }],
-            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
-          },
+          { id: 'b1', accountMediaIds: ['m1', 'm2'] },
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Media Bundle: 1 Photos, 1 Videos — PPV, unknown]');
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Media Bundle: 1 Photos, 1 Videos]');
+  });
+
+  it('counts bundle children resolved via bundleContent (order is irrelevant for counts)', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'b1' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          { id: 'm1', media: { type: 1, mimetype: 'image/jpeg' } },
+          { id: 'm2', media: { type: 2, mimetype: 'video/mp4' } },
+        ],
+        accountMediaBundles: [
+          { id: 'b1', bundleContent: [
+            { accountMediaId: 'm2', pos: 1 },
+            { accountMediaId: 'm1', pos: 0 },
+          ] },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Media Bundle: 1 Photos, 1 Videos]');
+  });
+
+  it('survives bundles with unresolved child ids by counting only resolved ones', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'b1' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          { id: 'm1', media: { type: 1, mimetype: 'image/jpeg' } },
+        ],
+        accountMediaBundles: [
+          { id: 'b1', accountMediaIds: ['m1', 'missing-1', 'missing-2'] },
+        ],
+      }),
+    ];
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
+      .toContain('[Media Bundle: 1 Photos]');
   });
 
   it('preserves bundle identity for contentType:2 attachments missing from bundleMap', () => {
@@ -302,7 +612,7 @@ describe('normalizeTranscript', () => {
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.labels).toContain('[Media Bundle]');
     const joined = result[0]!.labels.join(' ');
     expect(joined).not.toContain('PPV');
@@ -311,51 +621,41 @@ describe('normalizeTranscript', () => {
     expect(joined).not.toContain('unknown');
   });
 
-  it('returns conservative [Media] for unresolved attachments without claiming purchase state', () => {
+  it('returns conservative [Media] for unresolved contentType:1 attachments without claiming purchase state', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'mystery', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentId: 'orphan-id' }], embeds: [], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'mystery', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'orphan-id' }], embeds: [], totalTipAmount: 0 },
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
+    const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
     expect(result[0]!.labels).toContain('[Media]');
     const joined = result[0]!.labels.join(' ');
     expect(joined).not.toContain('PPV');
-    expect(joined).not.toContain('purchased');
-    expect(joined).not.toContain('locked');
-    expect(joined).not.toContain('unknown');
   });
 
-  it('describes media bundles with photo/video counts', () => {
+  it('legacy fallback: contentType missing but id resolves to media still labels', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentId: 'bundle-1' }], embeds: [], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'old', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentId: 'media-1' }], embeds: [], totalTipAmount: 0 },
         ],
-        accountMediaBundles: [
-          {
-            id: 'bundle-1',
-            accountMedia: [{ media: [{ type: 1 }, { type: 1 }, { type: 2 }] }],
-          },
-        ],
+        accountMedia: [{ id: 'media-1', media: { type: 1, mimetype: 'image/jpeg' } }],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Media Bundle: 2 Photos, 1 Videos]');
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toContain('[Photo]');
   });
 
-  it('adds [Media] label for messages with embeds but no attachments', () => {
+  it('legacy fallback: contentType missing and id unresolved — emits no label', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
         messages: [
-          { id: '1', type: 1, content: 'embed', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [], embeds: [{}], totalTipAmount: 0 },
+          { id: '1', type: 1, content: 'old', groupId: 'g1', senderId: FAN_ID, createdAt: 10, attachments: [{ contentId: 'orphan' }], embeds: [], totalTipAmount: 0 },
         ],
       }),
     ];
-    const result = normalizeTranscript(pages, MODEL_ID);
-    expect(result[0]!.labels).toContain('[Media]');
+    expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual([]);
   });
 });
 

@@ -51,7 +51,11 @@ import {
 } from '../shared/summary-cache.js';
 import { splitByNext, splitByVariant } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
-import { analyzePingSegment, formatTranscript } from '../shared/transcript.js';
+import {
+  analyzePingSegment,
+  formatTranscript,
+  normalizeTranscript,
+} from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
@@ -1681,7 +1685,6 @@ export class OperationCoordinator {
         validated.urlGroupId,
         validated.messageCount,
         validated.session,
-        resolvedAccountId,
         signal,
         shouldReportMessageProgress
           ? (progress) => {
@@ -1707,54 +1710,9 @@ export class OperationCoordinator {
       );
       completeStage(
         'load-messages',
-        `Loaded messages: ${messageLoad.pagesLoaded} pages, ${messageLoad.transcriptMessages.length} transcript messages`,
-        `${messageLoad.pagesLoaded} pages, ${messageLoad.transcriptMessages.length} transcript messages`,
+        `Loaded messages: ${messageLoad.pagesLoaded} pages`,
+        `${messageLoad.pagesLoaded} pages`,
       );
-
-      if (
-        isDeepFeature(payload.feature) &&
-        messageLoad.transcriptMessages.length < MIN_MESSAGES_FOR_DEEP
-      ) {
-        throw new ChatGooseError('not_enough_history');
-      }
-
-      if (
-        payload.feature === 'hi-greeting' &&
-        messageLoad.transcriptMessages.length > HI_GREETING_MAX_TRANSCRIPT
-      ) {
-        throw new ChatGooseError('hi_too_many_messages');
-      }
-
-      let pingSegment: PingSegment | undefined;
-      if (featureUsesPingSegment(payload.feature)) {
-        startStage('ping-analysis', 'Analyze ping segment');
-        const pingAnalysis = analyzePingSegment(
-          messageLoad.transcriptMessages,
-          Date.now(),
-        );
-        pingSegment = pingAnalysis.segment;
-        completeStage(
-          'ping-analysis',
-          `Ping segment selected: ${pingAnalysis.segment}`,
-          pingAnalysis.segment,
-        );
-        logDebug(debugEnabled, 'ping segment selected', {
-          groupId: validated.urlGroupId,
-          segment: pingAnalysis.segment,
-          fanTextMessageCount: pingAnalysis.fanTextMessageCount,
-          latestFanTextAtMs: pingAnalysis.latestFanTextAtMs,
-        });
-
-        if (pingSegment === 'active') {
-          this.sendError(tabId, {
-            type: 'operation:error',
-            operationId: payload.operationId,
-            error: toUserError(new ChatGooseError('ping_blocked')),
-          }, createZeroAnthropicSpendSummary(), profiler);
-          this.clearCompletedOperation(tabId);
-          return;
-        }
-      }
 
       let groupUsers: Array<{ userId: string }> | null = null;
       if (payload.feature !== 'ping' || authenticatedIdentityResolved) {
@@ -1801,6 +1759,61 @@ export class OperationCoordinator {
         groupUsers?.find(
           (user) => user.userId !== resolvedAccountId,
         )?.userId ?? null;
+
+      // Normalize after group-lookup so transcript labels can use the
+      // resolved fan id for fan-perspective purchase state. When the lookup
+      // fails or is skipped, fanAccountId is null and PPV labels degrade to
+      // "unknown" rather than misclassifying.
+      const transcriptMessages = normalizeTranscript(
+        messageLoad.pages,
+        resolvedAccountId,
+        fanAccountId,
+      );
+
+      if (
+        isDeepFeature(payload.feature) &&
+        transcriptMessages.length < MIN_MESSAGES_FOR_DEEP
+      ) {
+        throw new ChatGooseError('not_enough_history');
+      }
+
+      if (
+        payload.feature === 'hi-greeting' &&
+        transcriptMessages.length > HI_GREETING_MAX_TRANSCRIPT
+      ) {
+        throw new ChatGooseError('hi_too_many_messages');
+      }
+
+      let pingSegment: PingSegment | undefined;
+      if (featureUsesPingSegment(payload.feature)) {
+        startStage('ping-analysis', 'Analyze ping segment');
+        const pingAnalysis = analyzePingSegment(
+          transcriptMessages,
+          Date.now(),
+        );
+        pingSegment = pingAnalysis.segment;
+        completeStage(
+          'ping-analysis',
+          `Ping segment selected: ${pingAnalysis.segment}`,
+          pingAnalysis.segment,
+        );
+        logDebug(debugEnabled, 'ping segment selected', {
+          groupId: validated.urlGroupId,
+          segment: pingAnalysis.segment,
+          fanTextMessageCount: pingAnalysis.fanTextMessageCount,
+          latestFanTextAtMs: pingAnalysis.latestFanTextAtMs,
+        });
+
+        if (pingSegment === 'active') {
+          this.sendError(tabId, {
+            type: 'operation:error',
+            operationId: payload.operationId,
+            error: toUserError(new ChatGooseError('ping_blocked')),
+          }, createZeroAnthropicSpendSummary(), profiler);
+          this.clearCompletedOperation(tabId);
+          return;
+        }
+      }
 
       if (fanAccountId) {
         startStage('account-name-lookup', 'Resolve fan display name');
@@ -2098,9 +2111,7 @@ export class OperationCoordinator {
       }
 
       startStage('prompt-build', 'Build Claude prompt');
-      const formattedTranscript = formatTranscript(
-        messageLoad.transcriptMessages,
-      );
+      const formattedTranscript = formatTranscript(transcriptMessages);
       const { prompt, systemBlocks, userBlocks } = buildOperationPromptRequest({
         feature: payload.feature,
         personality,
@@ -2117,8 +2128,8 @@ export class OperationCoordinator {
       });
       completeStage(
         'prompt-build',
-        `Built Claude prompt: ${messageLoad.transcriptMessages.length} transcript messages`,
-        `${messageLoad.transcriptMessages.length} transcript messages`,
+        `Built Claude prompt: ${transcriptMessages.length} transcript messages`,
+        `${transcriptMessages.length} transcript messages`,
       );
 
       const sendDebugPromptSnapshot = (modelId: string): void => {

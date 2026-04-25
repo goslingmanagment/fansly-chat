@@ -11,7 +11,7 @@ import { logDebug } from '../shared/log.js';
 import { buildPromptRequest } from '../shared/prompts.js';
 import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
-import { formatTranscript } from '../shared/transcript.js';
+import { formatTranscript, normalizeTranscript } from '../shared/transcript.js';
 import type {
   AgencyHubAiUsageEvent,
   AggregatedEarnings,
@@ -664,7 +664,6 @@ export async function executeCompare(
       validated.urlGroupId,
       validated.messageCount,
       validated.session,
-      resolvedAccountId,
       signal,
       (progress) => {
         if (profiler.enabled) {
@@ -680,8 +679,8 @@ export async function executeCompare(
     );
     completeStage(
       'load-messages',
-      `Loaded messages: ${messageLoad.pagesLoaded} pages, ${messageLoad.transcriptMessages.length} transcript messages`,
-      `${messageLoad.pagesLoaded} pages, ${messageLoad.transcriptMessages.length} transcript messages`,
+      `Loaded messages: ${messageLoad.pagesLoaded} pages`,
+      `${messageLoad.pagesLoaded} pages`,
     );
 
     let groupUsers: Array<{ userId: string }> | null = null;
@@ -717,6 +716,13 @@ export async function executeCompare(
     const fanAccountId =
       groupUsers?.find((user) => user.userId !== resolvedAccountId)?.userId ??
       null;
+    // Normalize after group-lookup so transcript labels use fan-perspective
+    // purchase state. Falls back to "unknown" when fanAccountId is null.
+    const transcriptMessages = normalizeTranscript(
+      messageLoad.pages,
+      resolvedAccountId,
+      fanAccountId,
+    );
     let fanDisplayName = payload.domFanDisplayName ?? 'fan';
     if (fanAccountId) {
       startStage('account-name-lookup', 'Resolve fan display name');
@@ -918,9 +924,7 @@ export async function executeCompare(
     }
 
     startStage('prompt-build', 'Build compare prompts');
-    const formattedTranscript = formatTranscript(
-      messageLoad.transcriptMessages,
-    );
+    const formattedTranscript = formatTranscript(transcriptMessages);
     const promptInputs = {
       transcript: formattedTranscript,
       fanSpendingData: spendingData,

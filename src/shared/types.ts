@@ -247,6 +247,7 @@ export interface FanslyAttachment {
   contentId?: string;
   fileName?: string;
   mimetype?: string;
+  pos?: number;
 }
 
 export interface FanslyMessage {
@@ -265,41 +266,76 @@ export interface FanslyMediaPermissionFlag {
   flags?: number;
   price?: number;
   metadata?: string;
+  type?: number;
 }
 
 export interface FanslyMediaPermissions {
   permissionFlags?: FanslyMediaPermissionFlag[];
 }
 
+// Real `accountMedia[i].media` payload — `type` and `mimetype` live here on the
+// wire. Top-level `accountMedia.{type,mimetype}` are null on real items and are
+// kept only as a legacy fallback.
+export interface FanslyMediaInner {
+  id?: string;
+  type?: number;
+  mimetype?: string;
+  metadata?: string;
+}
+
 export interface FanslyMedia {
   id: string;
+  accountId?: string;
+  media?: FanslyMediaInner;
+  // Legacy fallbacks. Current API responses leave these null/undefined for
+  // accountMedia entries; read them only after `media.media.{type,mimetype}`.
   mimetype?: string;
   type?: number;
+  // Viewer-perspective access flags. NOT fan-purchase proof — in a model
+  // session these are essentially always `true` for the model's own content.
   purchased?: boolean;
   access?: boolean;
   whitelisted?: boolean;
   permissionFlags?: number;
+  price?: number;
   permissions?: FanslyMediaPermissions;
 }
 
-export interface FanslyMediaBundleItem {
-  media?: { type?: number }[];
+export interface FanslyMediaBundleContentEntry {
+  accountMediaId?: string;
+  pos?: number;
 }
 
 export interface FanslyMediaBundle {
   id: string;
-  accountMedia?: FanslyMediaBundleItem[];
+  accountId?: string;
+  accountMediaIds?: string[];
+  bundleContent?: FanslyMediaBundleContentEntry[];
+  // Same viewer-perspective warning as FanslyMedia.
   purchased?: boolean;
   access?: boolean;
   whitelisted?: boolean;
   permissionFlags?: number;
+  price?: number;
   permissions?: FanslyMediaPermissions;
+}
+
+// Inline order rows from the `/api/v1/message` page. The bundle id lives in
+// `accountMediaId` (with `type === 2`); `accountMediaBundleId` only appears on
+// the `/media/orderhistory` shape and is supported defensively.
+export interface FanslyAccountMediaOrder {
+  accountId?: string;
+  accountMediaId?: string;
+  accountMediaBundleId?: string;
+  type?: number;
+  createdAt?: number;
 }
 
 export interface FanslyMessagePageResponse {
   messages: FanslyMessage[];
   accountMedia: FanslyMedia[];
   accountMediaBundles: FanslyMediaBundle[];
+  accountMediaOrders?: FanslyAccountMediaOrder[];
 }
 
 export interface FanslyGroupResponse {

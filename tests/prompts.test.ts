@@ -659,6 +659,8 @@ describe('prompt caching fallback', () => {
 describe('paid-media state rule', () => {
   const NO_REPITCH_PHRASE = 'do NOT pitch buying or unlocking it again';
   const NO_LABEL_LEAK_PHRASE = 'never quote them back to the fan';
+  const LISTED_PRICE_PHRASE = 'LISTED asking price';
+  const BUNDLE_SHAPE_PHRASE = '[Media Bundle: N Photos, M Videos';
   const REPLY_TEMPLATES_WITH_RULE: Array<[string, string]> = [
     ['fast-reply', fastReplyTemplate],
     ['improve-draft', improveDraftTemplate],
@@ -673,10 +675,18 @@ describe('paid-media state rule', () => {
 
   for (const [name, template] of REPLY_TEMPLATES_WITH_RULE) {
     it(`${name} template carries the no-repitch rule with all four label states`, () => {
-      expect(template).toContain('PPV, purchased');
-      expect(template).toContain('PPV, locked');
-      expect(template).toContain('PPV, unknown');
+      expect(template).toContain('PPV $X.XX, purchased');
+      expect(template).toContain('PPV $X.XX, locked');
+      expect(template).toContain('PPV $X.XX, unknown');
       expect(template).toContain(NO_REPITCH_PHRASE);
+    });
+
+    it(`${name} template clarifies that the price tag is the listed asking price`, () => {
+      expect(template).toContain(LISTED_PRICE_PHRASE);
+    });
+
+    it(`${name} template documents the bundle-with-counts shape`, () => {
+      expect(template).toContain(BUNDLE_SHAPE_PHRASE);
     });
 
     it(`${name} template forbids quoting internal labels back to the fan`, () => {
