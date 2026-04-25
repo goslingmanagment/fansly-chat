@@ -237,6 +237,80 @@ describe('normalizeTranscript', () => {
     expect(result[1]!.labels).toContain('[Media Bundle: 1 Photos]');
   });
 
+  it('classifies PPV with structured price=0 (real price in metadata) as paid', () => {
+    // Fansly emits some accountMedia with `flags & 1` set but the structured `price` left at 0;
+    // the actual price lives in a JSON `metadata` string (see core/reference timeline_wall fixture).
+    // PPV state must come from the flag bit alone, not from price > 0.
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'enjoy', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 1, contentId: 'media-meta-purchased' }], embeds: [], totalTipAmount: 0 },
+          { id: '2', type: 1, content: 'tease', groupId: 'g1', senderId: MODEL_ID, createdAt: 20, attachments: [{ contentType: 1, contentId: 'media-meta-locked' }], embeds: [], totalTipAmount: 0 },
+          { id: '3', type: 1, content: 'pic', groupId: 'g1', senderId: MODEL_ID, createdAt: 30, attachments: [{ contentType: 1, contentId: 'media-meta-unknown' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMedia: [
+          {
+            id: 'media-meta-purchased',
+            mimetype: 'video/mp4',
+            purchased: true,
+            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
+          },
+          {
+            id: 'media-meta-locked',
+            mimetype: 'video/mp4',
+            purchased: false,
+            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
+          },
+          {
+            id: 'media-meta-unknown',
+            mimetype: 'video/mp4',
+            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
+          },
+        ],
+      }),
+    ];
+    const result = normalizeTranscript(pages, MODEL_ID);
+    expect(result[0]!.labels).toContain('[Video — PPV, purchased]');
+    expect(result[1]!.labels).toContain('[Video — PPV, locked]');
+    expect(result[2]!.labels).toContain('[Video — PPV, unknown]');
+  });
+
+  it('labels a bundle with PPV flag and missing purchased as "PPV, unknown"', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'bundle-ppv' }], embeds: [], totalTipAmount: 0 },
+        ],
+        accountMediaBundles: [
+          {
+            id: 'bundle-ppv',
+            accountMedia: [{ media: [{ type: 1 }, { type: 2 }] }],
+            permissions: { permissionFlags: [{ flags: 1, price: 0, metadata: '{"1":"{\\"price\\":10990}"}' }] },
+          },
+        ],
+      }),
+    ];
+    const result = normalizeTranscript(pages, MODEL_ID);
+    expect(result[0]!.labels).toContain('[Media Bundle: 1 Photos, 1 Videos — PPV, unknown]');
+  });
+
+  it('preserves bundle identity for contentType:2 attachments missing from bundleMap', () => {
+    const pages: FanslyMessagePageResponse[] = [
+      makePage({
+        messages: [
+          { id: '1', type: 1, content: 'set', groupId: 'g1', senderId: MODEL_ID, createdAt: 10, attachments: [{ contentType: 2, contentId: 'orphan-bundle' }], embeds: [], totalTipAmount: 0 },
+        ],
+      }),
+    ];
+    const result = normalizeTranscript(pages, MODEL_ID);
+    expect(result[0]!.labels).toContain('[Media Bundle]');
+    const joined = result[0]!.labels.join(' ');
+    expect(joined).not.toContain('PPV');
+    expect(joined).not.toContain('purchased');
+    expect(joined).not.toContain('locked');
+    expect(joined).not.toContain('unknown');
+  });
+
   it('returns conservative [Media] for unresolved attachments without claiming purchase state', () => {
     const pages: FanslyMessagePageResponse[] = [
       makePage({
