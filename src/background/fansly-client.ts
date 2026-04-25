@@ -6,10 +6,8 @@ import {
 import { aggregateEarnings } from '../shared/earnings.js';
 import { ChatGooseError } from '../shared/errors.js';
 import {
-  buildTranscriptWindowStart,
   estimateTargetPages,
   extractOldestMessageId,
-  normalizeTranscript,
 } from '../shared/transcript.js';
 import type {
   AggregatedEarnings,
@@ -22,7 +20,6 @@ import type {
   FanSubscriptionContext,
   FanSubscriptionSource,
   MonthlyEarningsRow,
-  NormalizedTranscriptMessage,
   RouteKey,
   SessionTemplate,
   SubscriptionLookupMode,
@@ -71,8 +68,7 @@ async function readResponseSnippet(response: Response): Promise<string> {
 }
 
 export interface MessageLoadResult {
-  transcriptMessages: NormalizedTranscriptMessage[];
-  windowStartMs: number;
+  pages: FanslyMessagePageResponse[];
   pagesLoaded: number;
   targetPages: number;
 }
@@ -557,7 +553,6 @@ export class FanslyClient {
     groupId: string,
     requestedCount: number,
     session: SessionTemplate,
-    modelAccountId: string,
     signal: AbortSignal,
     onProgress?: (progress: MessageLoadProgress) => void,
   ): Promise<MessageLoadResult> {
@@ -588,10 +583,8 @@ export class FanslyClient {
       await delay(FANSLY_PAGINATION_DELAY_MS, signal);
     }
 
-    const transcriptMessages = normalizeTranscript(pages, modelAccountId);
     return {
-      transcriptMessages,
-      windowStartMs: buildTranscriptWindowStart(transcriptMessages, Date.now()),
+      pages,
       pagesLoaded: currentPage,
       targetPages,
     };

@@ -18,6 +18,7 @@ import type {
   BackgroundPortMessage,
   CompareModelCard,
   FanSubscriptionContext,
+  FanslyMessagePageResponse,
   MonthlyEarningsRow,
   NormalizedTranscriptMessage,
   SummaryCacheEntry,
@@ -46,6 +47,31 @@ function buildTranscriptMessages(count: number): NormalizedTranscriptMessage[] {
     text: `message ${index + 1}`,
     labels: [],
   }));
+}
+
+function pagesFromTranscript(messages: NormalizedTranscriptMessage[]): FanslyMessagePageResponse[] {
+  return [
+    {
+      messages: messages.map((m) => ({
+        id: m.id,
+        type: m.type,
+        content: m.text,
+        groupId: 'g1',
+        senderId: m.senderId,
+        createdAt: m.createdAt,
+        attachments: [],
+        embeds: [],
+        totalTipAmount: 0,
+      })),
+      accountMedia: [],
+      accountMediaBundles: [],
+      accountMediaOrders: [],
+    },
+  ];
+}
+
+function buildMessagePages(count: number): FanslyMessagePageResponse[] {
+  return pagesFromTranscript(buildTranscriptMessages(count));
 }
 
 function buildSubscriptionContext(): FanSubscriptionContext {
@@ -122,11 +148,9 @@ function buildFanslyClientMock() {
       _groupId: string,
       _messageCount: number,
       _session: unknown,
-      _accountId: string,
       _signal?: AbortSignal,
     ) => ({
-      transcriptMessages: buildTranscriptMessages(30),
-      windowStartMs: 0,
+      pages: buildMessagePages(30),
       pagesLoaded: 2,
       targetPages: 2,
     })),
@@ -1419,7 +1443,7 @@ describe('OperationCoordinator', () => {
     ]);
     expect(progressMessages.some((message) => message.currentPage !== undefined)).toBe(false);
     const nonDebugLoadMessagesArgs = fanslyClient.loadMessages.mock.calls[0] as unknown[];
-    expect(nonDebugLoadMessagesArgs?.[5]).toBeUndefined();
+    expect(nonDebugLoadMessagesArgs?.[4]).toBeUndefined();
     expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledWith(
       'group-1',
       'fan-1',
@@ -1509,7 +1533,7 @@ describe('OperationCoordinator', () => {
     const nowSeconds = Math.floor(currentNow / 1000);
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.loadMessages.mockResolvedValue({
-      transcriptMessages: [
+      pages: pagesFromTranscript([
         {
           id: 'message-1',
           createdAt: nowSeconds - 20,
@@ -1528,8 +1552,7 @@ describe('OperationCoordinator', () => {
           text: 'hey?',
           labels: [],
         },
-      ],
-      windowStartMs: 0,
+      ]),
       pagesLoaded: 1,
       targetPages: 1,
     });
@@ -1562,7 +1585,7 @@ describe('OperationCoordinator', () => {
   it('preserves non-debug deep-feature page progress without profiling snapshots', async () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.loadMessages.mockImplementation(async (...args: any[]) => {
-      const onProgress = args[5] as
+      const onProgress = args[4] as
         | ((progress: {
             currentPage: number;
             targetPages: number;
@@ -1583,8 +1606,7 @@ describe('OperationCoordinator', () => {
         collectedCount: 30,
       });
       return {
-        transcriptMessages: buildTranscriptMessages(30),
-        windowStartMs: 0,
+        pages: buildMessagePages(30),
         pagesLoaded: 2,
         targetPages: 2,
       };
@@ -1629,7 +1651,7 @@ describe('OperationCoordinator', () => {
       message: 'Loading messages… 2/2 pages',
     });
     const deepFeatureLoadMessagesArgs = fanslyClient.loadMessages.mock.calls[0] as unknown[];
-    expect(typeof deepFeatureLoadMessagesArgs?.[5]).toBe('function');
+    expect(typeof deepFeatureLoadMessagesArgs?.[4]).toBe('function');
     expect(fanslyClient.getFanSubscriptionContext).toHaveBeenCalledWith(
       'group-1',
       'fan-1',
@@ -1700,7 +1722,7 @@ describe('OperationCoordinator', () => {
       return 'account-1';
     });
     fanslyClient.loadMessages.mockImplementation(async (...args: any[]) => {
-      const onProgress = args[5] as
+      const onProgress = args[4] as
         | ((progress: {
             currentPage: number;
             targetPages: number;
@@ -1724,8 +1746,7 @@ describe('OperationCoordinator', () => {
       });
       advanceNow(100);
       return {
-        transcriptMessages: buildTranscriptMessages(30),
-        windowStartMs: 0,
+        pages: buildMessagePages(30),
         pagesLoaded: 2,
         targetPages: 2,
       };
@@ -2019,8 +2040,7 @@ describe('OperationCoordinator', () => {
       async () => new Promise((resolve) => {
         setTimeout(() => {
           resolve({
-            transcriptMessages: buildTranscriptMessages(30),
-            windowStartMs: 0,
+            pages: buildMessagePages(30),
             pagesLoaded: 2,
             targetPages: 2,
           });
@@ -2110,7 +2130,6 @@ describe('OperationCoordinator', () => {
         _groupId: string,
         _messageCount: number,
         _session: unknown,
-        _accountId: string,
         signal?: AbortSignal,
       ) => new Promise((_, reject) => {
         resolveLoadStarted?.();
@@ -2338,7 +2357,7 @@ describe('OperationCoordinator', () => {
     const nowSeconds = Math.floor(currentNow / 1000);
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.loadMessages.mockResolvedValue({
-      transcriptMessages: [
+      pages: pagesFromTranscript([
         {
           id: 'message-1',
           createdAt: nowSeconds - 20,
@@ -2357,8 +2376,7 @@ describe('OperationCoordinator', () => {
           text: 'hey?',
           labels: [],
         },
-      ],
-      windowStartMs: 0,
+      ]),
       pagesLoaded: 1,
       targetPages: 1,
     });
@@ -2389,6 +2407,7 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',
+      'group-lookup',
       'ping-analysis',
     ]);
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'ping-analysis')?.detail).toBe('active');
@@ -4198,8 +4217,7 @@ describe('OperationCoordinator', () => {
     const agencyHubUsageReporter = { enqueue: vi.fn() };
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.loadMessages.mockResolvedValue({
-      transcriptMessages: buildTranscriptMessages(5),
-      windowStartMs: 0,
+      pages: buildMessagePages(5),
       pagesLoaded: 1,
       targetPages: 1,
     });

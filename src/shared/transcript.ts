@@ -1,7 +1,9 @@
 import type {
   FanslyAttachment,
+  FanslyAccountMediaOrder,
   FanslyMedia,
   FanslyMediaBundle,
+  FanslyMediaPermissionFlag,
   FanslyMessage,
   FanslyMessagePageResponse,
   NormalizedTranscriptMessage,
@@ -11,6 +13,13 @@ import type {
 import { millsToUsd } from './earnings.js';
 
 const PING_ACTIVE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
+
+const ATTACHMENT_CONTENT_TYPE_MEDIA = 1;
+const ATTACHMENT_CONTENT_TYPE_BUNDLE = 2;
+const ATTACHMENT_CONTENT_TYPE_TIP = 7;
+
+const ORDER_TYPE_SINGLE = 1;
+const ORDER_TYPE_BUNDLE = 2;
 
 function compareMessageIds(left: string, right: string): number {
   return left.localeCompare(right, 'en', { numeric: true });
@@ -32,62 +41,160 @@ function mediaLabelInner(mimetype?: string): string {
   return 'Media';
 }
 
+function resolveMediaMimetype(media: FanslyMedia): string | undefined {
+  return media.media?.mimetype ?? media.mimetype;
+}
+
+function resolveChildMediaType(media: FanslyMedia): number | undefined {
+  return media.media?.type ?? media.type;
+}
+
+interface PurchaseEvidence {
+  fanAccountKnown: boolean;
+  purchasedSingleIds: Set<string>;
+  purchasedBundleIds: Set<string>;
+}
+
 type MediaState =
   | { kind: 'free' }
-  | { kind: 'ppv-locked' }
-  | { kind: 'ppv-purchased' }
-  | { kind: 'ppv-unknown' };
+  | { kind: 'ppv-purchased'; priceMills: number | null }
+  | { kind: 'ppv-locked'; priceMills: number | null }
+  | { kind: 'ppv-unknown'; priceMills: number | null };
 
-function deriveMediaState(item: FanslyMedia | FanslyMediaBundle): MediaState {
-  // PPV is signaled by permission flag bit 1 (Price) alone. Some Fansly payloads
-  // emit `flags: 1, price: 0` and stash the real price in a JSON `metadata`
-  // string — requiring `price > 0` here would silently demote those to free.
-  const flags = item.permissions?.permissionFlags ?? [];
-  const hasPpvFlag = flags.some((entry) => ((entry.flags ?? 0) & 1) === 1);
-  if (!hasPpvFlag) {
+function findPpvPermission(
+  item: FanslyMedia | FanslyMediaBundle,
+): FanslyMediaPermissionFlag | undefined {
+  return item.permissions?.permissionFlags?.find(
+    (entry) => ((entry.flags ?? 0) & 1) === 1,
+  );
+}
+
+// Some Fansly payloads emit `flags: 1, price: 0` and stash the real price in a
+// JSON-encoded `metadata` string with shape `{"1": "{\"price\": <mills>}"}`.
+// Bundle children can also have `price: 0` while the bundle's PPV listing
+// price is in metadata. Always prefer a positive numeric `price`, then fall
+// back to metadata, then null.
+function extractPpvPriceMills(ppv: FanslyMediaPermissionFlag): number | null {
+  if (typeof ppv.price === 'number' && ppv.price > 0) {
+    return ppv.price;
+  }
+  if (typeof ppv.metadata !== 'string' || ppv.metadata.length === 0) {
+    return null;
+  }
+  try {
+    const outer = JSON.parse(ppv.metadata) as Record<string, unknown>;
+    const innerStr = outer['1'];
+    if (typeof innerStr !== 'string') {
+      return null;
+    }
+    const inner = JSON.parse(innerStr) as { price?: unknown };
+    if (typeof inner.price === 'number' && inner.price > 0) {
+      return inner.price;
+    }
+  } catch {
+    // malformed metadata — degrade to null price
+  }
+  return null;
+}
+
+function deriveAttachmentState(
+  item: FanslyMedia | FanslyMediaBundle,
+  attachmentId: string,
+  kind: 'single' | 'bundle',
+  evidence: PurchaseEvidence,
+): MediaState {
+  const ppv = findPpvPermission(item);
+  if (!ppv) {
     return { kind: 'free' };
   }
-  if (item.purchased === true) {
-    return { kind: 'ppv-purchased' };
+  const priceMills = extractPpvPriceMills(ppv);
+
+  if (!evidence.fanAccountKnown) {
+    return { kind: 'ppv-unknown', priceMills };
   }
-  if (item.purchased === false) {
-    return { kind: 'ppv-locked' };
-  }
-  return { kind: 'ppv-unknown' };
+
+  const purchased =
+    kind === 'single'
+      ? evidence.purchasedSingleIds.has(attachmentId)
+      : evidence.purchasedBundleIds.has(attachmentId);
+
+  // Page-scoped orders are positive proof, not negative proof: an item the fan
+  // bought outside the loaded window will never appear inline. Default to
+  // `unknown` rather than `locked` here. The MediaState union still carries
+  // `ppv-locked` for a future authoritative orderhistory probe.
+  return purchased
+    ? { kind: 'ppv-purchased', priceMills }
+    : { kind: 'ppv-unknown', priceMills };
+}
+
+function formatPriceFragment(priceMills: number | null): string {
+  return priceMills && priceMills > 0 ? ` $${millsToUsd(priceMills)}` : '';
 }
 
 function ppvSuffix(state: MediaState): string {
   switch (state.kind) {
-    case 'ppv-locked':
-      return ' — PPV, locked';
-    case 'ppv-purchased':
-      return ' — PPV, purchased';
-    case 'ppv-unknown':
-      return ' — PPV, unknown';
-    default:
+    case 'free':
       return '';
+    case 'ppv-locked':
+      return ` — PPV${formatPriceFragment(state.priceMills)}, locked`;
+    case 'ppv-purchased':
+      return ` — PPV${formatPriceFragment(state.priceMills)}, purchased`;
+    case 'ppv-unknown':
+      return ` — PPV${formatPriceFragment(state.priceMills)}, unknown`;
   }
 }
 
-function describeMedia(media: FanslyMedia): string {
-  const inner = mediaLabelInner(media.mimetype);
-  const suffix = ppvSuffix(deriveMediaState(media));
-  return `[${inner}${suffix}]`;
+function describeMedia(
+  media: FanslyMedia,
+  attachmentId: string,
+  evidence: PurchaseEvidence,
+): string {
+  const inner = mediaLabelInner(resolveMediaMimetype(media));
+  const state = deriveAttachmentState(media, attachmentId, 'single', evidence);
+  return `[${inner}${ppvSuffix(state)}]`;
 }
 
-function describeBundle(bundle: FanslyMediaBundle): string {
-  const items = bundle.accountMedia ?? [];
+function collectBundleChildIds(bundle: FanslyMediaBundle): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(bundle.bundleContent)) {
+    for (const entry of bundle.bundleContent) {
+      const id = entry?.accountMediaId;
+      if (typeof id === 'string' && id.length > 0 && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+  if (ids.length === 0 && Array.isArray(bundle.accountMediaIds)) {
+    for (const id of bundle.accountMediaIds) {
+      if (typeof id === 'string' && id.length > 0 && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
+function describeBundle(
+  bundle: FanslyMediaBundle,
+  attachmentId: string,
+  mediaMap: Map<string, FanslyMedia>,
+  evidence: PurchaseEvidence,
+): string {
   let photoCount = 0;
   let videoCount = 0;
-
-  for (const item of items) {
-    const media = item.media ?? [];
-    for (const entry of media) {
-      if (entry.type === 1) {
-        photoCount += 1;
-      } else if (entry.type === 2) {
-        videoCount += 1;
-      }
+  for (const childId of collectBundleChildIds(bundle)) {
+    const child = mediaMap.get(childId);
+    if (!child) {
+      continue;
+    }
+    const childType = resolveChildMediaType(child);
+    if (childType === 1) {
+      photoCount += 1;
+    } else if (childType === 2) {
+      videoCount += 1;
     }
   }
 
@@ -100,48 +207,96 @@ function describeBundle(bundle: FanslyMediaBundle): string {
   }
 
   const body = parts.length > 0 ? `Media Bundle: ${parts.join(', ')}` : 'Media Bundle';
-  const suffix = ppvSuffix(deriveMediaState(bundle));
-  return `[${body}${suffix}]`;
+  const state = deriveAttachmentState(bundle, attachmentId, 'bundle', evidence);
+  return `[${body}${ppvSuffix(state)}]`;
 }
 
 function describeAttachment(
   attachment: FanslyAttachment,
   mediaMap: Map<string, FanslyMedia>,
   bundleMap: Map<string, FanslyMediaBundle>,
-): string {
+  evidence: PurchaseEvidence,
+): string | null {
   const contentId = attachment.contentId;
+  const contentType = attachment.contentType;
+
+  if (contentType === ATTACHMENT_CONTENT_TYPE_TIP) {
+    // Tips are not media — the monetary value is rendered via totalTipAmount.
+    return null;
+  }
+
   if (!contentId) {
-    return '[Media]';
+    // Without an id we can't classify; staying silent beats inventing a label.
+    return null;
   }
 
-  // ContentType-first dispatch: 1 = accountMedia, 2 = accountMediaBundle.
-  // The API discriminator is authoritative; trust it over map probing when present.
-  // Preserve bundle identity even when the bundle details are missing from the
-  // page payload — `[Media Bundle]` is more informative than generic `[Media]`.
-  if (attachment.contentType === 1) {
+  if (contentType === ATTACHMENT_CONTENT_TYPE_MEDIA) {
     const media = mediaMap.get(contentId);
-    return media ? describeMedia(media) : '[Media]';
+    return media ? describeMedia(media, contentId, evidence) : '[Media]';
   }
-  if (attachment.contentType === 2) {
+  if (contentType === ATTACHMENT_CONTENT_TYPE_BUNDLE) {
     const bundle = bundleMap.get(contentId);
-    return bundle ? describeBundle(bundle) : '[Media Bundle]';
+    return bundle ? describeBundle(bundle, contentId, mediaMap, evidence) : '[Media Bundle]';
   }
 
-  // Legacy fallback when contentType is absent.
-  const bundle = bundleMap.get(contentId);
-  if (bundle) {
-    return describeBundle(bundle);
+  // Legacy fallback for older payloads that omit `contentType`. Only resolve
+  // through the page maps; never invent a generic `[Media]` label for an
+  // unknown content type.
+  if (contentType === undefined) {
+    const bundle = bundleMap.get(contentId);
+    if (bundle) {
+      return describeBundle(bundle, contentId, mediaMap, evidence);
+    }
+    const media = mediaMap.get(contentId);
+    if (media) {
+      return describeMedia(media, contentId, evidence);
+    }
   }
-  const media = mediaMap.get(contentId);
-  if (media) {
-    return describeMedia(media);
+
+  return null;
+}
+
+function buildPurchaseEvidence(
+  pages: FanslyMessagePageResponse[],
+  fanAccountId: string | null,
+): PurchaseEvidence {
+  const purchasedSingleIds = new Set<string>();
+  const purchasedBundleIds = new Set<string>();
+
+  if (fanAccountId) {
+    for (const page of pages) {
+      const orders: FanslyAccountMediaOrder[] = page.accountMediaOrders ?? [];
+      for (const order of orders) {
+        if (order.accountId !== fanAccountId) {
+          continue;
+        }
+        // Inline `/message` shape: bundle id sits in `accountMediaId` with
+        // `type === 2`. `/media/orderhistory` (defensive support) uses a
+        // separate `accountMediaBundleId` field instead.
+        if (order.type === ORDER_TYPE_SINGLE && order.accountMediaId) {
+          purchasedSingleIds.add(order.accountMediaId);
+        } else if (order.type === ORDER_TYPE_BUNDLE) {
+          if (order.accountMediaBundleId) {
+            purchasedBundleIds.add(order.accountMediaBundleId);
+          } else if (order.accountMediaId) {
+            purchasedBundleIds.add(order.accountMediaId);
+          }
+        }
+      }
+    }
   }
-  return '[Media]';
+
+  return {
+    fanAccountKnown: fanAccountId !== null && fanAccountId.length > 0,
+    purchasedSingleIds,
+    purchasedBundleIds,
+  };
 }
 
 export function normalizeTranscript(
   pages: FanslyMessagePageResponse[],
   modelAccountId: string,
+  fanAccountId: string | null = null,
 ): NormalizedTranscriptMessage[] {
   const messageMap = new Map<string, NormalizedTranscriptMessage>();
   const mediaMap = new Map<string, FanslyMedia>();
@@ -156,6 +311,8 @@ export function normalizeTranscript(
     }
   }
 
+  const evidence = buildPurchaseEvidence(pages, fanAccountId);
+
   for (const page of pages) {
     for (const message of page.messages ?? []) {
       const existing = messageMap.get(message.id);
@@ -167,11 +324,10 @@ export function normalizeTranscript(
       const totalTipAmount = message.totalTipAmount ?? 0;
 
       for (const attachment of message.attachments ?? []) {
-        labels.push(describeAttachment(attachment, mediaMap, bundleMap));
-      }
-
-      if ((message.attachments?.length ?? 0) === 0 && (message.embeds?.length ?? 0) > 0) {
-        labels.push('[Media]');
+        const label = describeAttachment(attachment, mediaMap, bundleMap, evidence);
+        if (label !== null) {
+          labels.push(label);
+        }
       }
 
       if (totalTipAmount > 0) {
