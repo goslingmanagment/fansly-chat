@@ -674,10 +674,11 @@ describe('paid-media state rule', () => {
   ];
 
   for (const [name, template] of REPLY_TEMPLATES_WITH_RULE) {
-    it(`${name} template carries the no-repitch rule with all four label states`, () => {
+    it(`${name} template carries the no-repitch rule with all three label states`, () => {
       expect(template).toContain('PPV $X.XX, purchased');
-      expect(template).toContain('PPV $X.XX, locked');
+      expect(template).toContain('PPV $X.XX, not purchased');
       expect(template).toContain('PPV $X.XX, unknown');
+      expect(template).not.toContain('PPV $X.XX, locked');
       expect(template).toContain(NO_REPITCH_PHRASE);
     });
 

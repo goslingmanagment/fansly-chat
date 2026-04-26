@@ -68,6 +68,10 @@ export const FANSLY_PAGE_LIMIT = 25;
 export const FANSLY_REQUEST_TIMEOUT_MS = 30_000;
 export const FANSLY_PAGINATION_DELAY_MS = 300;
 export const FANSLY_RETRY_DELAYS_MS = [1000, 2000, 4000];
+export const FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT = 10;
+export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CONCURRENCY = 3;
+export const FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS = 3_000;
+export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 // ─── Message Counts ──────────────────────────────────────────────────────
 

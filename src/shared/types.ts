@@ -3,7 +3,7 @@
 export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
-export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers';
+export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers' | 'media';
 export type FanSubscriptionSource = '/api/v1/messaging/groups' | '/api/v1/subscribers';
 export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
@@ -329,6 +329,13 @@ export interface FanslyAccountMediaOrder {
   accountMediaBundleId?: string;
   type?: number;
   createdAt?: number;
+}
+
+export interface FanslyMediaOrderHistoryResponse {
+  accountMediaOrderHistory?: FanslyAccountMediaOrder[];
+  aggregationData?: {
+    accountMediaOrders?: FanslyAccountMediaOrder[];
+  };
 }
 
 export interface FanslyMessagePageResponse {

@@ -2,17 +2,25 @@
 
 ## 1.2.16
 
-Главный баг 1.2.15: расширение читало флаг «куплено» из ответа Fansly, который у модели почти всегда `true` для своего же контента. AI считал, что фан уже всё разблокировал, и писал ему «надеюсь понравилось» там, где фан ничего не покупал. В 1.2.16 покупка засчитывается только при точном совпадении `(accountId, accountMediaId, type)` в `accountMediaOrders[]`; без подтверждения — `unknown`, без догадок.
+Финальная v2-проверка PPV в ChatGoose. Главный баг прошлой версии был в том, что расширение смотрело на «куплено» с точки зрения модели/viewer-side флагов Fansly. Для модели свой PPV-контент часто выглядит доступным, поэтому AI мог решить, что фан уже купил видео или бандл, и отвечать так, будто контент разблокирован.
+
+Теперь ChatGoose проверяет покупку с точки зрения конкретного фана. Это снижает риск неправильных PPV-ответов и ложных предположений о покупке: AI больше не должен поздравлять с просмотром, повторно питчить уже купленное или уверенно говорить «не купил» без проверки. Это не обещание идеального совпадения со всеми внутренними состояниями Fansly — если доказательств не хватает, статус остаётся `unknown`.
+
+### Главное
+
+- `purchased` ставится только когда найден точный заказ этого фана на этот конкретный PPV-контент.
+- `not purchased` ставится только после успешной точной проверки `/media/orderhistory`, если заказ для пары «фан + контент» не найден.
+- `unknown` ставится, когда не удалось определить фана, нет нужных API-данных, проверка заказа не сработала, упала, истекла по таймауту или часть вложений не попала в лимит проверок.
+- Чаевые и embed-only сообщения (GIF/превью ссылок) больше не превращаются в ложные `[Media]`.
 
 ### Подробности
 
-- **Fan-perspective PPV proof**: вместо viewer-side `media.purchased` строим `Set<accountMediaId>` из `accountMediaOrders[]` отфильтрованных по `fanAccountId`, отдельно для `type:1` (single) и `type:2` (bundle). Поддержан и инлайн-формат (`accountMediaId` хранит bundle-id) и orderhistory-формат (`accountMediaBundleId`).
-- **Default `unknown`, не `locked`**: `accountMediaOrders[]` page-scoped — отсутствие записи не доказательство отказа. `ppv-locked` зарезервирован в `MediaState` под будущий orderhistory-зонд.
-- **Реальные wire shapes в типах**: вложенный `media.media.{type, mimetype}` (top-level — legacy fallback), bundle children через `bundleContent[]` / `accountMediaIds[]` с разрешением через page-level `accountMedia` map. `FanslyMessagePageResponse.accountMediaOrders?` добавлен. `FanslyMediaBundleItem` удалён.
-- **Content-type-first диспетчеризация**: `contentType: 7` (tip) → `null` вместо fallback'а в `[Media]`. Embed-only `[Media]` fallback убран целиком — Tenor GIF / превью больше не маркируются как медиа.
-- **Цена PPV в метке**: `extractPpvPriceMills` сначала смотрит на `permission.price > 0`, потом парсит вложенный JSON в `metadata` (`{"1":"{\"price\":N}"}`). Формат метки: `[Inner — PPV $X.XX, state]`; цена опускается, если не извлеклась.
-- **Plumbing**: `loadMessages()` возвращает raw pages (без `transcriptMessages` / `windowStartMs`); оба call-site'а нормализуют после `getGroup` так, что `fanAccountId` известен. Length-gates и ping-analysis выполняются после нормализации.
-- **Промпты** (`fast-reply`/`improve-draft`/`help-me`/`ping`): новый формат тэга `PPV $X.XX, state`; добавлено «цена — листинговая, квотировать фану нельзя»; задокументирован `[Media Bundle: N Photos, M Videos]`.
+- **Fan-perspective вместо viewer-side**: `media.purchased` и похожие model-side флаги больше не считаются доказательством покупки фаном. Inline-заказы из `/message` учитываются только после фильтрации по `fanAccountId` и точному `accountMediaId` / `accountMediaBundleId`.
+- **Точная проверка `/media/orderhistory`**: для PPV-вложений, которые не удалось подтвердить из inline-данных, ChatGoose делает отдельный запрос по конкретному `accountMediaId` или `accountMediaBundleId` и `accountIds=<fanAccountId>`. Пустой успешный ответ даёт `not purchased`; ошибка, malformed response или таймаут оставляют `unknown`.
+- **Статусы без догадок**: `purchased` означает «найден exact fan+content order»; `not purchased` означает «exact verifier check succeeded and found no order»; `unknown` означает «нет надёжного доказательства в обе стороны».
+- **Меньше ложных media-меток**: `contentType: 7` (tip) больше не падает в `[Media]`, а embed-only сообщения вроде Tenor GIF или preview-картинок ссылок не маркируются как медиа-вложения.
+- **Лучшие labels для медиа и бандлов**: тип медиа берётся из вложенного `media.media.{type,mimetype}` с fallback на top-level поля; состав бандла считается через `bundleContent[]` и `accountMediaIds[]`. Формат стал человеческим и с правильным singular/plural: `1 Photo`, `2 Videos`, `[Media Bundle: 1 Photo, 2 Videos — PPV $X.XX, unknown]`.
+- **Промпты стали осторожнее**: `fast-reply`, `improve-draft`, `help-me` и `ping` явно объясняют AI, что PPV-цены и bracket-теги нельзя цитировать фану, а при `unknown` нельзя утверждать ни что фан купил контент, ни что он его не купил.
 
 ## 1.2.15
 

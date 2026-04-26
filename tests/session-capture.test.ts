@@ -24,6 +24,12 @@ describe('normalizeRouteKey', () => {
     ).toBe('subscribers');
   });
 
+  it('maps media orderhistory URL to media', () => {
+    expect(
+      normalizeRouteKey('https://apiv3.fansly.com/api/v1/media/orderhistory?accountMediaId=abc'),
+    ).toBe('media');
+  });
+
   it('maps messaging groups URL to messagingGroups', () => {
     expect(
       normalizeRouteKey('https://apiv3.fansly.com/api/v1/messaging/groups?groupId=g1'),

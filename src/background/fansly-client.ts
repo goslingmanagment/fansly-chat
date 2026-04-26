@@ -1,8 +1,12 @@
 import {
   FANSLY_PAGINATION_DELAY_MS,
+  FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS,
+  FANSLY_MEDIA_PURCHASE_VERIFICATION_CONCURRENCY,
+  FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS,
   FANSLY_REQUEST_TIMEOUT_MS,
   FANSLY_RETRY_DELAYS_MS,
 } from '../shared/constants.js';
+import { mapWithConcurrency } from '../shared/concurrency.js';
 import { aggregateEarnings } from '../shared/earnings.js';
 import { ChatGooseError } from '../shared/errors.js';
 import {
@@ -10,9 +14,15 @@ import {
   extractOldestMessageId,
 } from '../shared/transcript.js';
 import type {
+  PpvAttachmentRequest,
+  PurchaseEvidenceOverride,
+} from '../shared/transcript.js';
+import type {
   AggregatedEarnings,
   EarningsRow,
+  FanslyAccountMediaOrder,
   FanslyAccountResponse,
+  FanslyMediaOrderHistoryResponse,
   FanslyMessagingGroupsResponse,
   FanslyMessagePageResponse,
   FanslySubscriberSubscriptionRecord,
@@ -29,6 +39,20 @@ import { SessionStore } from './session-store.js';
 const MESSAGING_GROUPS_PAGE_SIZE = 100;
 const SUBSCRIBERS_PAGE_SIZE = 100;
 const SUBSCRIPTION_CACHE_TTL_MS = 5 * 60 * 1000;
+const ORDER_TYPE_SINGLE = 1;
+const ORDER_TYPE_BUNDLE = 2;
+
+type MediaPurchaseStatus = 'purchased' | 'not-purchased';
+
+interface CachedMediaPurchaseStatus {
+  expiresAt: number;
+  status: MediaPurchaseStatus;
+}
+
+interface MediaPurchaseCheckResult {
+  request: PpvAttachmentRequest;
+  status: MediaPurchaseStatus;
+}
 
 function withNgswBypass(url: URL): URL {
   url.searchParams.set('ngsw-bypass', 'true');
@@ -112,6 +136,79 @@ function timestampToIso(value: number | null | undefined): string | null {
     : null;
 }
 
+function extractOrderHistoryRows(
+  response: FanslyMediaOrderHistoryResponse,
+): FanslyAccountMediaOrder[] | null {
+  const raw = response as {
+    accountMediaOrderHistory?: unknown;
+    aggregationData?: {
+      accountMediaOrders?: unknown;
+    };
+  };
+  const direct = raw.accountMediaOrderHistory;
+  const aggregated = raw.aggregationData?.accountMediaOrders;
+
+  if (direct !== undefined && !Array.isArray(direct)) {
+    return null;
+  }
+  if (aggregated !== undefined && !Array.isArray(aggregated)) {
+    return null;
+  }
+  if (direct === undefined && aggregated === undefined) {
+    return null;
+  }
+
+  return [
+    ...(Array.isArray(direct) ? direct : []),
+    ...(Array.isArray(aggregated) ? aggregated : []),
+  ].filter((row): row is FanslyAccountMediaOrder => Boolean(row && typeof row === 'object'));
+}
+
+function orderMatchesPurchaseRequest(
+  order: FanslyAccountMediaOrder,
+  request: PpvAttachmentRequest,
+  fanAccountId: string,
+): boolean {
+  if (order.accountId !== fanAccountId) {
+    return false;
+  }
+
+  if (request.kind === 'single') {
+    return (
+      order.accountMediaId === request.contentId &&
+      order.accountMediaBundleId == null &&
+      (order.type == null || order.type === ORDER_TYPE_SINGLE)
+    );
+  }
+
+  if (order.accountMediaBundleId) {
+    return (
+      order.accountMediaBundleId === request.contentId &&
+      order.type !== ORDER_TYPE_SINGLE
+    );
+  }
+
+  return order.type === ORDER_TYPE_BUNDLE && order.accountMediaId === request.contentId;
+}
+
+function uniquePurchaseRequests(requests: PpvAttachmentRequest[]): PpvAttachmentRequest[] {
+  const seen = new Set<string>();
+  const unique: PpvAttachmentRequest[] = [];
+  for (const request of requests) {
+    const contentId = request.contentId.trim();
+    if (!contentId) {
+      continue;
+    }
+    const key = `${request.kind}:${contentId}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push({ kind: request.kind, contentId });
+  }
+  return unique;
+}
+
 function normalizeSubscriberSubscription(
   record: FanslySubscriberSubscriptionRecord,
   source: FanSubscriptionSource,
@@ -144,6 +241,7 @@ function normalizeSubscriberSubscription(
 
 export class FanslyClient {
   private readonly subscriberSubscriptionCache = new Map<string, CachedSubscriberSubscription>();
+  private readonly mediaPurchaseVerificationCache = new Map<string, CachedMediaPurchaseStatus>();
 
   constructor(private readonly sessionStore: SessionStore) {}
 
@@ -167,6 +265,43 @@ export class FanslyClient {
     this.subscriberSubscriptionCache.set(cacheKey, {
       value,
       expiresAt: Date.now() + SUBSCRIPTION_CACHE_TTL_MS,
+    });
+  }
+
+  private getMediaPurchaseCacheKey(
+    fanAccountId: string,
+    request: PpvAttachmentRequest,
+    session: SessionTemplate,
+  ): string {
+    return [
+      session.resolvedAccountId ?? session.accountId,
+      fanAccountId,
+      request.kind,
+      request.contentId,
+    ].join(':');
+  }
+
+  private readCachedMediaPurchaseStatus(
+    cacheKey: string,
+  ): MediaPurchaseStatus | undefined {
+    const cached = this.mediaPurchaseVerificationCache.get(cacheKey);
+    if (!cached) {
+      return undefined;
+    }
+    if (cached.expiresAt <= Date.now()) {
+      this.mediaPurchaseVerificationCache.delete(cacheKey);
+      return undefined;
+    }
+    return cached.status;
+  }
+
+  private writeCachedMediaPurchaseStatus(
+    cacheKey: string,
+    status: MediaPurchaseStatus,
+  ): void {
+    this.mediaPurchaseVerificationCache.set(cacheKey, {
+      status,
+      expiresAt: Date.now() + FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS,
     });
   }
 
@@ -310,6 +445,128 @@ export class FanslyClient {
       url.searchParams.set('before', before);
     }
     return this.fetchEnvelope<FanslyMessagePageResponse>(url, session, 'message', signal);
+  }
+
+  private async getMediaOrderHistory(
+    request: PpvAttachmentRequest,
+    fanAccountId: string,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<FanslyMediaOrderHistoryResponse> {
+    const url = new URL('https://apiv3.fansly.com/api/v1/media/orderhistory');
+    if (request.kind === 'single') {
+      url.searchParams.set('accountMediaId', request.contentId);
+    } else {
+      url.searchParams.set('accountMediaBundleId', request.contentId);
+    }
+    url.searchParams.set('accountIds', fanAccountId);
+    url.searchParams.set('limit', '100');
+
+    return this.fetchEnvelope<FanslyMediaOrderHistoryResponse>(
+      url,
+      session,
+      'media',
+      signal,
+      true,
+    );
+  }
+
+  private async verifyMediaPurchaseState(
+    request: PpvAttachmentRequest,
+    fanAccountId: string,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<MediaPurchaseCheckResult | null> {
+    const cacheKey = this.getMediaPurchaseCacheKey(fanAccountId, request, session);
+    const cached = this.readCachedMediaPurchaseStatus(cacheKey);
+    if (cached) {
+      return { request, status: cached };
+    }
+
+    const timeoutController = new AbortController();
+    const timeout = globalThis.setTimeout(
+      () => timeoutController.abort(),
+      FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS,
+    );
+    const composite = AbortSignal.any([signal, timeoutController.signal]);
+
+    try {
+      const response = await this.getMediaOrderHistory(
+        request,
+        fanAccountId,
+        session,
+        composite,
+      );
+      const rows = extractOrderHistoryRows(response);
+      if (!rows) {
+        return null;
+      }
+
+      const status = rows.some((order) =>
+        orderMatchesPurchaseRequest(order, request, fanAccountId),
+      )
+        ? 'purchased'
+        : 'not-purchased';
+      this.writeCachedMediaPurchaseStatus(cacheKey, status);
+      return { request, status };
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      return null;
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  }
+
+  async verifyMediaPurchaseStates(
+    requests: PpvAttachmentRequest[],
+    fanAccountId: string,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<PurchaseEvidenceOverride> {
+    const uniqueRequests = uniquePurchaseRequests(requests);
+    const purchasedSingleIds = new Set<string>();
+    const purchasedBundleIds = new Set<string>();
+    const checkedNotPurchasedSingleIds = new Set<string>();
+    const checkedNotPurchasedBundleIds = new Set<string>();
+    let verificationIncomplete = false;
+
+    const results = await mapWithConcurrency(
+      uniqueRequests,
+      FANSLY_MEDIA_PURCHASE_VERIFICATION_CONCURRENCY,
+      async (request) =>
+        this.verifyMediaPurchaseState(request, fanAccountId, session, signal),
+    );
+
+    for (let index = 0; index < uniqueRequests.length; index += 1) {
+      const request = uniqueRequests[index]!;
+      const result = results[index] ?? null;
+      if (!result) {
+        verificationIncomplete = true;
+        continue;
+      }
+
+      if (request.kind === 'single') {
+        if (result.status === 'purchased') {
+          purchasedSingleIds.add(request.contentId);
+        } else {
+          checkedNotPurchasedSingleIds.add(request.contentId);
+        }
+      } else if (result.status === 'purchased') {
+        purchasedBundleIds.add(request.contentId);
+      } else {
+        checkedNotPurchasedBundleIds.add(request.contentId);
+      }
+    }
+
+    return {
+      purchasedSingleIds,
+      purchasedBundleIds,
+      checkedNotPurchasedSingleIds,
+      checkedNotPurchasedBundleIds,
+      verificationIncomplete,
+    };
   }
 
   async getAccountNames(

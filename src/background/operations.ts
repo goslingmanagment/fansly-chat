@@ -14,6 +14,7 @@ import {
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   FEATURE_TEMPERATURES,
   DEFAULT_FEATURE_MODELS,
+  FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   HI_GREETING_MAX_TRANSCRIPT,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
@@ -53,9 +54,12 @@ import { splitByNext, splitByVariant } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   analyzePingSegment,
+  buildPurchaseEvidence,
+  collectUnverifiedPpvAttachmentRequests,
   formatTranscript,
   normalizeTranscript,
 } from '../shared/transcript.js';
+import type { PurchaseEvidenceOverride } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
@@ -76,6 +80,7 @@ import type {
   OperationPhase,
   OperationProgressPayload,
   OperationStartPayload,
+  FanslyMessagePageResponse,
   PingSegment,
   PersistedState,
   Settings,
@@ -1172,6 +1177,53 @@ export class OperationCoordinator {
     this.sendSummarySyncStatus(task.tabId, task.groupId, syncStatus);
   }
 
+  private async verifyMediaPurchaseEvidence(
+    pages: FanslyMessagePageResponse[],
+    fanAccountId: string | null,
+    session: SessionTemplate,
+    signal: AbortSignal,
+    debugEnabled: boolean,
+  ): Promise<PurchaseEvidenceOverride> {
+    if (!fanAccountId) {
+      return {};
+    }
+
+    const inlineEvidence = buildPurchaseEvidence(pages, fanAccountId);
+    const unresolved = collectUnverifiedPpvAttachmentRequests(pages, inlineEvidence);
+    if (unresolved.length === 0) {
+      return {};
+    }
+
+    const capped = unresolved.slice(0, FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
+    const capOverflow = unresolved.length > capped.length;
+
+    try {
+      const verified = await this.fanslyClient.verifyMediaPurchaseStates(
+        capped,
+        fanAccountId,
+        session,
+        signal,
+      );
+      return {
+        ...verified,
+        verificationIncomplete: Boolean(
+          verified.verificationIncomplete || capOverflow,
+        ),
+      };
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      logDebug(debugEnabled, 'media purchase verification failed (fail-open)', {
+        fanAccountId,
+        requested: capped.length,
+        capOverflow,
+        error: toDebugErrorPayload(error),
+      });
+      return { verificationIncomplete: true };
+    }
+  }
+
   private assertActive(
     tabId: number,
     operationId: string,
@@ -1760,6 +1812,14 @@ export class OperationCoordinator {
           (user) => user.userId !== resolvedAccountId,
         )?.userId ?? null;
 
+      const purchaseEvidence = await this.verifyMediaPurchaseEvidence(
+        messageLoad.pages,
+        fanAccountId,
+        validated.session,
+        signal,
+        debugEnabled,
+      );
+
       // Normalize after group-lookup so transcript labels can use the
       // resolved fan id for fan-perspective purchase state. When the lookup
       // fails or is skipped, fanAccountId is null and PPV labels degrade to
@@ -1768,6 +1828,7 @@ export class OperationCoordinator {
         messageLoad.pages,
         resolvedAccountId,
         fanAccountId,
+        purchaseEvidence,
       );
 
       if (

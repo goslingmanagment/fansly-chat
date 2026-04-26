@@ -18,6 +18,9 @@ export function normalizeRouteKey(url: string): RouteKey | null {
   if (url.includes('/api/v1/subscribers')) {
     return 'subscribers';
   }
+  if (url.includes('/api/v1/media/orderhistory')) {
+    return 'media';
+  }
   if (url.includes('/api/v1/messaging/groups')) {
     return 'messagingGroups';
   }
