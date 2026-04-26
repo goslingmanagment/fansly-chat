@@ -255,3 +255,144 @@ describe('FanslyClient getMonthlyEarnings', () => {
     expect(result).toEqual([]);
   });
 });
+
+describe('FanslyClient media purchase verification', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('treats a type-less exact single orderhistory row as purchased', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      expect(href).toContain('/media/orderhistory');
+      expect(href).toContain('accountMediaId=media-1');
+      expect(href).toContain('accountIds=fan-1');
+      return jsonSuccessResponse({
+        accountMediaOrderHistory: [
+          { accountId: 'fan-1', accountMediaId: 'media-1' },
+        ],
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.verifyMediaPurchaseStates(
+      [{ kind: 'single', contentId: 'media-1' }],
+      'fan-1',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(Array.from(result.purchasedSingleIds ?? [])).toEqual(['media-1']);
+    expect(Array.from(result.checkedNotPurchasedSingleIds ?? [])).toEqual([]);
+  });
+
+  it('treats an explicit type-less accountMediaBundleId orderhistory row as purchased', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      expect(href).toContain('/media/orderhistory');
+      expect(href).toContain('accountMediaBundleId=bundle-1');
+      expect(href).toContain('accountIds=fan-1');
+      return jsonSuccessResponse({
+        aggregationData: {
+          accountMediaOrders: [
+            { accountId: 'fan-1', accountMediaBundleId: 'bundle-1' },
+          ],
+        },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.verifyMediaPurchaseStates(
+      [{ kind: 'bundle', contentId: 'bundle-1' }],
+      'fan-1',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(Array.from(result.purchasedBundleIds ?? [])).toEqual(['bundle-1']);
+    expect(Array.from(result.checkedNotPurchasedBundleIds ?? [])).toEqual([]);
+  });
+
+  it('returns checked not purchased for a successful exact empty orderhistory result', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () =>
+      jsonSuccessResponse({ accountMediaOrderHistory: [] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.verifyMediaPurchaseStates(
+      [{ kind: 'single', contentId: 'media-1' }],
+      'fan-1',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(Array.from(result.purchasedSingleIds ?? [])).toEqual([]);
+    expect(Array.from(result.checkedNotPurchasedSingleIds ?? [])).toEqual(['media-1']);
+    expect(result.verificationIncomplete).toBe(false);
+  });
+
+  it('does not credit mismatched orderhistory rows and still treats the exact check as not purchased', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () =>
+      jsonSuccessResponse({
+        accountMediaOrderHistory: [
+          { accountId: 'fan-other', accountMediaId: 'media-1' },
+          { accountId: 'fan-1', accountMediaId: 'other-media' },
+          { accountId: 'fan-1', accountMediaId: 'media-1', type: 2 },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.verifyMediaPurchaseStates(
+      [{ kind: 'single', contentId: 'media-1' }],
+      'fan-1',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(Array.from(result.purchasedSingleIds ?? [])).toEqual([]);
+    expect(Array.from(result.checkedNotPurchasedSingleIds ?? [])).toEqual(['media-1']);
+  });
+
+  it('fails open to unknown evidence on verifier errors', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('network down');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.verifyMediaPurchaseStates(
+      [{ kind: 'single', contentId: 'media-1' }],
+      'fan-1',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(Array.from(result.purchasedSingleIds ?? [])).toEqual([]);
+    expect(Array.from(result.checkedNotPurchasedSingleIds ?? [])).toEqual([]);
+    expect(result.verificationIncomplete).toBe(true);
+  });
+
+  it('fails open to unknown evidence on malformed orderhistory responses', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () => jsonSuccessResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.verifyMediaPurchaseStates(
+      [{ kind: 'bundle', contentId: 'bundle-1' }],
+      'fan-1',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(Array.from(result.purchasedBundleIds ?? [])).toEqual([]);
+    expect(Array.from(result.checkedNotPurchasedBundleIds ?? [])).toEqual([]);
+    expect(result.verificationIncomplete).toBe(true);
+  });
+});

@@ -7,6 +7,7 @@ import {
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   DEFAULT_MODEL_ID,
   DEFAULT_FEATURE_MODELS,
+  FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   FEATURE_TEMPERATURES,
   QUICK_OPERATION_TIMEOUT_MS,
   STORAGE_SCHEMA_VERSION,
@@ -72,6 +73,32 @@ function pagesFromTranscript(messages: NormalizedTranscriptMessage[]): FanslyMes
 
 function buildMessagePages(count: number): FanslyMessagePageResponse[] {
   return pagesFromTranscript(buildTranscriptMessages(count));
+}
+
+function buildPpvMediaPage(ids: string[]): FanslyMessagePageResponse {
+  return {
+    messages: ids.map((id, index) => ({
+      id: `ppv-message-${index + 1}`,
+      type: 1,
+      content: `ppv ${index + 1}`,
+      groupId: 'g1',
+      senderId: 'account-1',
+      createdAt: 2_000 + index,
+      attachments: [{ contentType: 1, contentId: id }],
+      embeds: [],
+      totalTipAmount: 0,
+    })),
+    accountMedia: ids.map((id) => ({
+      id,
+      media: { type: 2, mimetype: 'video/mp4' },
+      purchased: true,
+      access: true,
+      whitelisted: true,
+      permissions: { permissionFlags: [{ flags: 9, price: 33000 }] },
+    })),
+    accountMediaBundles: [],
+    accountMediaOrders: [],
+  };
 }
 
 function buildSubscriptionContext(): FanSubscriptionContext {
@@ -169,6 +196,7 @@ function buildFanslyClientMock() {
     getFanSubscriptionContext: vi.fn(
       async (): Promise<FanSubscriptionContext | null> => null,
     ),
+    verifyMediaPurchaseStates: vi.fn(async (..._args: unknown[]) => ({})),
   };
 }
 
@@ -692,6 +720,178 @@ describe('OperationCoordinator', () => {
     expect(flattenUserBlocksFromStreamCall(anthropicClient)).not.toContain(
       '## Fan Subscription Data',
     );
+  });
+
+  it('passes exact orderhistory not-purchased evidence into fast-reply prompts', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: [buildPpvMediaPage(['media-ppv'])],
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    fanslyClient.verifyMediaPurchaseStates.mockResolvedValue({
+      checkedNotPurchasedSingleIds: new Set(['media-ppv']),
+      verificationIncomplete: false,
+    });
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Reply',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(fanslyClient.verifyMediaPurchaseStates).toHaveBeenCalledWith(
+      [{ kind: 'single', contentId: 'media-ppv' }],
+      'fan-1',
+      expect.objectContaining({ accountId: 'account-1' }),
+      expect.anything(),
+    );
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain(
+      '[Video — PPV $33.00, not purchased]',
+    );
+  });
+
+  it('does not call the verifier for PPV media already proven purchased inline', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    const page = buildPpvMediaPage(['media-ppv']);
+    page.accountMediaOrders = [
+      { accountId: 'fan-1', accountMediaId: 'media-ppv', type: 1, createdAt: 2_001 },
+    ];
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: [page],
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Reply',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(fanslyClient.verifyMediaPurchaseStates).not.toHaveBeenCalled();
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain(
+      '[Video — PPV $33.00, purchased]',
+    );
+  });
+
+  it('keeps PPV unknown when group lookup cannot resolve a fan id', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: [buildPpvMediaPage(['media-ppv'])],
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    fanslyClient.getGroup.mockRejectedValue(new Error('group failed'));
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Reply',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(fanslyClient.verifyMediaPurchaseStates).not.toHaveBeenCalled();
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain(
+      '[Video — PPV $33.00, unknown]',
+    );
+  });
+
+  it('fails open to unknown when media purchase verification rejects', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: [buildPpvMediaPage(['media-ppv'])],
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    fanslyClient.verifyMediaPurchaseStates.mockRejectedValue(new Error('verifier down'));
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Reply',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    expect(flattenUserBlocksFromStreamCall(anthropicClient)).toContain(
+      '[Video — PPV $33.00, unknown]',
+    );
+  });
+
+  it('leaves PPV cap overflow unknown while using verifier evidence for capped items', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    const ids = Array.from(
+      { length: FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT + 1 },
+      (_, index) => `media-${index + 1}`,
+    );
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: [buildPpvMediaPage(ids)],
+      pagesLoaded: 1,
+      targetPages: 1,
+    });
+    fanslyClient.verifyMediaPurchaseStates.mockImplementation(async (requests: unknown) => ({
+      checkedNotPurchasedSingleIds: new Set(
+        (requests as Array<{ contentId: string }>).map((request) => request.contentId),
+      ),
+      verificationIncomplete: false,
+    }));
+    const { coordinator, anthropicClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Reply',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const verifyCalls = fanslyClient.verifyMediaPurchaseStates.mock.calls as unknown as [unknown[], ...unknown[]][];
+    const verifiedRequests = verifyCalls[0]?.[0] ?? [];
+    const prompt = flattenUserBlocksFromStreamCall(anthropicClient);
+    expect(verifiedRequests).toHaveLength(FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
+    expect(prompt).toContain('[Video — PPV $33.00, not purchased] ppv 1');
+    expect(prompt).toContain('[Video — PPV $33.00, unknown] ppv 11');
   });
 
   it('includes the selected tone in fast-reply debug prompts and uncached user blocks', async () => {

@@ -421,23 +421,34 @@
     <div class="release-changes">
       <div class="release-summary">
         <p>
-          Главный баг прошлой версии: расширение читало флаг «куплено» с точки зрения <em>модели</em>, а не фана —
-          а у модели свой контент почти всегда «куплен», она же его создатель. Из-за этого AI решал, что фан уже всё
-          разблокировал, и иногда писал ему «надеюсь понравилось» там, где фан ничего не покупал.
+          Финальная v2-проверка PPV в ChatGoose. Главный баг прошлой версии был в том, что расширение смотрело на
+          «куплено» с точки зрения <em>модели</em> / viewer-side флагов Fansly. Для модели свой PPV-контент часто
+          выглядит доступным, поэтому AI мог решить, что фан уже купил видео или бандл, и отвечать так, будто контент
+          разблокирован.
         </p>
         <p>
-          Теперь покупка засчитывается только если в загруженной переписке видна именно её — конкретно от этого фана.
-          Если подтверждения нет — статус «неизвестно», и AI не строит догадок в обе стороны.
+          Теперь ChatGoose проверяет покупку с точки зрения конкретного фана. Это снижает риск неправильных PPV-ответов
+          и ложных предположений о покупке, но не обещает идеальное совпадение со всеми внутренними состояниями Fansly:
+          если доказательств не хватает, статус остаётся <code>unknown</code>.
         </p>
       </div>
       <div class="change-group">
-        <div class="change-group-title fixed"><span class="dot"></span> Подробности</div>
+        <div class="change-group-title fixed"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
-          <li>В метке PPV-вложения теперь сразу видна цена: <code>[Video — PPV $33.00, unknown]</code>, <code>[Media Bundle: 4 Photos, 1 Videos — PPV $20.00, purchased]</code>. AI понимает порядок цены, но не цитирует её фану</li>
-          <li>Bundle'ы наконец показывают, что внутри — сколько фото и сколько видео, а не безликое «Media Bundle»</li>
-          <li>Чаевые в сообщении больше не помечаются как «медиа» — отдельная метка <code>[Tip: $X.XX]</code></li>
-          <li>GIF-ки и превью ссылок (Tenor, OG-картинки) больше не считаются медиа-вложениями в транскрипте</li>
-          <li>«Неизвестно» вместо «заблокировано» для PPV без подтверждения: список покупок ограничен загруженным окном переписки, и оплата за его пределами — не доказательство отказа</li>
+          <li><code>purchased</code> ставится только когда найден точный заказ этого фана на этот конкретный PPV-контент</li>
+          <li><code>not purchased</code> ставится только после успешной точной проверки <code>/media/orderhistory</code>, если заказ для пары «фан + контент» не найден</li>
+          <li><code>unknown</code> ставится, когда не удалось определить фана, нет нужных API-данных, проверка заказа не сработала, упала, истекла по таймауту или часть вложений не попала в лимит проверок</li>
+          <li>Чаевые и embed-only сообщения (GIF/превью ссылок) больше не превращаются в ложные <code>[Media]</code></li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Подробности</div>
+        <ul class="changes-list">
+          <li>Проверка идёт с fan-perspective: <code>media.purchased</code> и похожие model-side/viewer-side флаги больше не считаются доказательством покупки фаном</li>
+          <li>Для неподтверждённых PPV-вложений ChatGoose делает exact <code>/media/orderhistory</code> check по <code>accountMediaId</code> или <code>accountMediaBundleId</code> и <code>accountIds=&lt;fanAccountId&gt;</code></li>
+          <li>Метки медиа и бандлов стали точнее: nested mimetype fallback, состав через <code>bundleContent[]</code> / <code>accountMediaIds[]</code>, правильные формы <code>1 Photo</code>, <code>2 Videos</code></li>
+          <li>Пример новой метки: <code>[Media Bundle: 1 Photo, 2 Videos — PPV $20.00, unknown]</code></li>
+          <li>Промпты <code>fast-reply</code>, <code>improve-draft</code>, <code>help-me</code> и <code>ping</code> теперь прямо говорят AI не цитировать PPV-цены/теги фану и не утверждать «купил» или «не купил» при <code>unknown</code></li>
         </ul>
       </div>
     </div>

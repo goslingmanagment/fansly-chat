@@ -1,17 +1,24 @@
 import {
   COMPARE_TEMPERATURE,
   DEFAULT_FEATURE_MODELS,
+  FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
 import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
-import { ChatGooseError, toUserError } from '../shared/errors.js';
+import { ChatGooseError, toDebugErrorPayload, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import { buildPromptRequest } from '../shared/prompts.js';
 import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
-import { formatTranscript, normalizeTranscript } from '../shared/transcript.js';
+import {
+  buildPurchaseEvidence,
+  collectUnverifiedPpvAttachmentRequests,
+  formatTranscript,
+  normalizeTranscript,
+} from '../shared/transcript.js';
+import type { PurchaseEvidenceOverride } from '../shared/transcript.js';
 import type {
   AgencyHubAiUsageEvent,
   AggregatedEarnings,
@@ -30,6 +37,7 @@ import type {
   CompareReadyPayload,
   CompareStartPayload,
   FeatureResult,
+  FanslyMessagePageResponse,
   OperationPhase,
   OperationProfilingSnapshot,
   ReplyMode,
@@ -410,6 +418,54 @@ export function cancelCompareOperation(
   }
 }
 
+async function verifyMediaPurchaseEvidence(
+  context: CompareOperationsContext,
+  pages: FanslyMessagePageResponse[],
+  fanAccountId: string | null,
+  session: SessionTemplate,
+  signal: AbortSignal,
+  debugEnabled: boolean,
+): Promise<PurchaseEvidenceOverride> {
+  if (!fanAccountId) {
+    return {};
+  }
+
+  const inlineEvidence = buildPurchaseEvidence(pages, fanAccountId);
+  const unresolved = collectUnverifiedPpvAttachmentRequests(pages, inlineEvidence);
+  if (unresolved.length === 0) {
+    return {};
+  }
+
+  const capped = unresolved.slice(0, FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
+  const capOverflow = unresolved.length > capped.length;
+
+  try {
+    const verified = await context.fanslyClient.verifyMediaPurchaseStates(
+      capped,
+      fanAccountId,
+      session,
+      signal,
+    );
+    return {
+      ...verified,
+      verificationIncomplete: Boolean(
+        verified.verificationIncomplete || capOverflow,
+      ),
+    };
+  } catch (error) {
+    if (signal.aborted) {
+      throw error;
+    }
+    logDebug(debugEnabled, 'media purchase verification failed (fail-open)', {
+      fanAccountId,
+      requested: capped.length,
+      capOverflow,
+      error: toDebugErrorPayload(error),
+    });
+    return { verificationIncomplete: true };
+  }
+}
+
 export async function executeCompare(
   context: CompareOperationsContext,
   tabId: number,
@@ -716,12 +772,21 @@ export async function executeCompare(
     const fanAccountId =
       groupUsers?.find((user) => user.userId !== resolvedAccountId)?.userId ??
       null;
+    const purchaseEvidence = await verifyMediaPurchaseEvidence(
+      context,
+      messageLoad.pages,
+      fanAccountId,
+      validated.session,
+      signal,
+      debugEnabled,
+    );
     // Normalize after group-lookup so transcript labels use fan-perspective
     // purchase state. Falls back to "unknown" when fanAccountId is null.
     const transcriptMessages = normalizeTranscript(
       messageLoad.pages,
       resolvedAccountId,
       fanAccountId,
+      purchaseEvidence,
     );
     let fanDisplayName = payload.domFanDisplayName ?? 'fan';
     if (fanAccountId) {
