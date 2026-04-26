@@ -22,6 +22,16 @@
 - **Лучшие labels для медиа и бандлов**: тип медиа берётся из вложенного `media.media.{type,mimetype}` с fallback на top-level поля; состав бандла считается через `bundleContent[]` и `accountMediaIds[]`. Формат стал человеческим и с правильным singular/plural: `1 Photo`, `2 Videos`, `[Media Bundle: 1 Photo, 2 Videos — PPV $X.XX, unknown]`.
 - **Промпты стали осторожнее**: `fast-reply`, `improve-draft`, `help-me` и `ping` явно объясняют AI, что PPV-цены и bracket-теги нельзя цитировать фану, а при `unknown` нельзя утверждать ни что фан купил контент, ни что он его не купил.
 
+### Технически
+
+- `normalizeTranscript()` теперь принимает `PurchaseEvidenceOverride`: inline `/message.accountMediaOrders[]` даёт только positive proof, а `checkedNotPurchased*` приходит только из exact verifier.
+- Inline single засчитывается только как `accountId === fanAccountId + type === 1 + accountMediaId`; inline bundle — только `type === 2 + accountMediaId`. Type-less `accountMediaId` из обычного inline payload не считается покупкой.
+- `/media/orderhistory` вызывается только для unresolved PPV-вложений: single через `accountMediaId`, bundle через `accountMediaBundleId`, всегда с `accountIds=<fanAccountId>` и `limit=100`.
+- Ответ verifier парсится из `accountMediaOrderHistory[]` и defensive fallback `aggregationData.accountMediaOrders[]`; строки всё равно повторно фильтруются по exact fan/content/kind.
+- Verifier ограничен, чтобы не убить быстрые replies: cap 10 уникальных PPV-вложений на операцию, concurrency 3, timeout 3s на запрос, in-memory cache 5 минут по `(modelAccountId, fanAccountId, kind, contentId)`.
+- Любая неполная проверка (`cap overflow`, timeout, malformed response, API error) fail-open'ится в `unknown`, а не ломает операцию и не превращается в `not purchased`.
+- `session-capture` теперь знает route key для `/api/v1/media/orderhistory`, чтобы session/auth check брался из правильного Fansly route.
+
 ## 1.2.15
 
 - **Fix: AI больше не предлагает купить уже купленный PPV-контент** — транскрипт теперь читает поля `purchased` и `permissions.permissionFlags[]` из `/api/v1/message`, которые раньше отбрасывались на уровне типов
