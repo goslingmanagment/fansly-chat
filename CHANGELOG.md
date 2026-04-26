@@ -2,13 +2,17 @@
 
 ## 1.2.16
 
-- **Fix: статус «куплено» только при точном подтверждении конкретного фана** — раньше `[PPV, purchased]` ставился по флагу `media.purchased`, который у модели почти всегда `true` для своего же контента; теперь покупка определяется только по точному совпадению `(accountId, accountMediaId, type)` в `accountMediaOrders[]`
-- Если точного ордера нет, ставится `unknown` (а не `locked`): инлайн-ордера ограничены загруженным окном, и покупка за его пределами — не доказательство отказа
-- В метке теперь видна листинговая цена: `[Video — PPV $33.00, unknown]`, `[Media Bundle: 4 Photos, 1 Videos — PPV $20.00, purchased]`
-- Tip-only сообщения (`contentType: 7`) больше не помечаются как `[Media] [Tip: $X]` — только `[Tip: $X.XX]`
-- Embed-only сообщения (Tenor GIF, превью ссылок) больше не помечаются как `[Media]`
-- Bundle children считаются через настоящие поля `bundleContent[]` / `accountMediaIds[]` с реальными mimetype'ами вложенного `media.media.{type,mimetype}` — counts наконец отображаются
-- Промпты: добавлено «цена в метке — листинговая, не сумма платежа фана; квотировать её нельзя»; задокументирован новый формат `[Media Bundle: N Photos, M Videos]`
+Главный баг 1.2.15: расширение читало флаг «куплено» из ответа Fansly, который у модели почти всегда `true` для своего же контента. AI считал, что фан уже всё разблокировал, и писал ему «надеюсь понравилось» там, где фан ничего не покупал. В 1.2.16 покупка засчитывается только при точном совпадении `(accountId, accountMediaId, type)` в `accountMediaOrders[]`; без подтверждения — `unknown`, без догадок.
+
+### Подробности
+
+- **Fan-perspective PPV proof**: вместо viewer-side `media.purchased` строим `Set<accountMediaId>` из `accountMediaOrders[]` отфильтрованных по `fanAccountId`, отдельно для `type:1` (single) и `type:2` (bundle). Поддержан и инлайн-формат (`accountMediaId` хранит bundle-id) и orderhistory-формат (`accountMediaBundleId`).
+- **Default `unknown`, не `locked`**: `accountMediaOrders[]` page-scoped — отсутствие записи не доказательство отказа. `ppv-locked` зарезервирован в `MediaState` под будущий orderhistory-зонд.
+- **Реальные wire shapes в типах**: вложенный `media.media.{type, mimetype}` (top-level — legacy fallback), bundle children через `bundleContent[]` / `accountMediaIds[]` с разрешением через page-level `accountMedia` map. `FanslyMessagePageResponse.accountMediaOrders?` добавлен. `FanslyMediaBundleItem` удалён.
+- **Content-type-first диспетчеризация**: `contentType: 7` (tip) → `null` вместо fallback'а в `[Media]`. Embed-only `[Media]` fallback убран целиком — Tenor GIF / превью больше не маркируются как медиа.
+- **Цена PPV в метке**: `extractPpvPriceMills` сначала смотрит на `permission.price > 0`, потом парсит вложенный JSON в `metadata` (`{"1":"{\"price\":N}"}`). Формат метки: `[Inner — PPV $X.XX, state]`; цена опускается, если не извлеклась.
+- **Plumbing**: `loadMessages()` возвращает raw pages (без `transcriptMessages` / `windowStartMs`); оба call-site'а нормализуют после `getGroup` так, что `fanAccountId` известен. Length-gates и ping-analysis выполняются после нормализации.
+- **Промпты** (`fast-reply`/`improve-draft`/`help-me`/`ping`): новый формат тэга `PPV $X.XX, state`; добавлено «цена — листинговая, квотировать фану нельзя»; задокументирован `[Media Bundle: N Photos, M Videos]`.
 
 ## 1.2.15
 
