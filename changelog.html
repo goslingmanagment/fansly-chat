@@ -451,6 +451,18 @@
           <li>Промпты <code>fast-reply</code>, <code>improve-draft</code>, <code>help-me</code> и <code>ping</code> теперь прямо говорят AI не цитировать PPV-цены/теги фану и не утверждать «купил» или «не купил» при <code>unknown</code></li>
         </ul>
       </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li><code>normalizeTranscript()</code> принимает <code>PurchaseEvidenceOverride</code>: inline <code>/message.accountMediaOrders[]</code> даёт только positive proof, а <code>checkedNotPurchased*</code> приходит только из exact verifier</li>
+          <li>Inline single засчитывается только как <code>accountId === fanAccountId + type === 1 + accountMediaId</code>; inline bundle — только <code>type === 2 + accountMediaId</code>. Type-less <code>accountMediaId</code> из обычного inline payload не считается покупкой</li>
+          <li><code>/media/orderhistory</code> вызывается только для unresolved PPV-вложений: single через <code>accountMediaId</code>, bundle через <code>accountMediaBundleId</code>, всегда с <code>accountIds=&lt;fanAccountId&gt;</code> и <code>limit=100</code></li>
+          <li>Ответ verifier парсится из <code>accountMediaOrderHistory[]</code> и fallback <code>aggregationData.accountMediaOrders[]</code>; строки повторно фильтруются по exact fan/content/kind</li>
+          <li>Verifier ограничен для быстрых replies: cap 10 уникальных PPV-вложений на операцию, concurrency 3, timeout 3s на запрос, in-memory cache 5 минут по <code>(modelAccountId, fanAccountId, kind, contentId)</code></li>
+          <li>Любая неполная проверка — cap overflow, timeout, malformed response или API error — fail-open'ится в <code>unknown</code>, а не ломает операцию и не превращается в <code>not purchased</code></li>
+          <li><code>session-capture</code> теперь знает route key для <code>/api/v1/media/orderhistory</code>, чтобы session/auth check брался из правильного Fansly route</li>
+        </ul>
+      </div>
     </div>
   </div>
 
