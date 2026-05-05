@@ -11,6 +11,7 @@ import { ChatGooseError, toDebugErrorPayload, toUserError } from '../shared/erro
 import { logDebug } from '../shared/log.js';
 import {
   getAgencyHubModelId,
+  getModelEntry,
   isAnthropicModelSelection,
 } from '../shared/model-registry.js';
 import { buildPromptRequest } from '../shared/prompts.js';
@@ -26,9 +27,9 @@ import type { PurchaseEvidenceOverride } from '../shared/transcript.js';
 import type {
   AgencyHubAiUsageEvent,
   AggregatedEarnings,
-  AnthropicCostEstimate,
-  AnthropicSpendSummary,
-  AnthropicUsageMetrics,
+  LlmCostEstimate,
+  LlmSpendSummary,
+  LlmUsageMetrics,
   BackgroundPortMessage,
   CompareCardCompletePayload,
   CompareCardErrorPayload,
@@ -49,11 +50,12 @@ import type {
   SessionTemplate,
 } from '../shared/types.js';
 import {
-  buildAnthropicSpendSummary,
-  createZeroAnthropicSpendSummary,
-  estimateAnthropicCost,
-  formatAnthropicCostLog,
-} from './anthropic-cost.js';
+  buildLlmSpendSummary,
+  createZeroLlmSpendSummary,
+  estimateLlmCost,
+  formatModelCostLog,
+  formatModelUsageLog,
+} from './llm-cost.js';
 import type {
   SubscriptionLookupTraceEvent,
   FanslyClient,
@@ -118,14 +120,30 @@ interface ValidatedCompareStart {
 
 const NO_OP_PROFILER = createOperationProfiler(false);
 
-function formatAnthropicUsageLog(usage: AnthropicUsageMetrics): string {
-  return `Claude usage: input_tokens=${usage.input_tokens}, cache_creation_input_tokens=${usage.cache_creation_input_tokens}, cache_read_input_tokens=${usage.cache_read_input_tokens}, output_tokens=${usage.output_tokens}`;
+function hasApiKeyForSelectedCompareModel(
+  storage: Awaited<ReturnType<StorageCoordinator['getState']>>,
+): { ok: boolean; provider?: string } {
+  const model = getModelEntry(storage.settings.featureModels['fast-reply']);
+  if (!model) {
+    return {
+      ok: Boolean(storage.settings.claudeApiKey || storage.settings.openRouterApiKey),
+    };
+  }
+
+  if (model.provider === 'anthropic') {
+    return { ok: Boolean(storage.settings.claudeApiKey), provider: model.provider };
+  }
+  if (model.provider === 'openrouter') {
+    return { ok: Boolean(storage.settings.openRouterApiKey), provider: model.provider };
+  }
+
+  return { ok: false, provider: model.provider };
 }
 
 function buildCompareCardProfilingSnapshot(
   profiler: OperationProfiler,
-  usage?: AnthropicUsageMetrics,
-  cost?: AnthropicCostEstimate,
+  usage?: LlmUsageMetrics,
+  cost?: LlmCostEstimate,
 ): OperationProfilingSnapshot | undefined {
   const snapshot = profiler.snapshot();
   if (!snapshot) {
@@ -134,9 +152,15 @@ function buildCompareCardProfilingSnapshot(
 
   return {
     ...snapshot,
-    ...(usage ? { anthropicUsage: { ...usage } } : {}),
-    ...(cost ? { anthropicCost: { ...cost } } : {}),
+    ...(usage ? { llmUsage: { ...usage } } : {}),
+    ...(cost ? { llmCost: { ...cost } } : {}),
   };
+}
+
+function buildLlmSpendPayload(
+  llmSpend?: LlmSpendSummary,
+): { llmSpend: LlmSpendSummary } | object {
+  return llmSpend ? { llmSpend } : {};
 }
 
 function buildAiUsageEvent({
@@ -150,7 +174,7 @@ function buildAiUsageEvent({
 }: {
   clientEventId: string;
   model: string;
-  spend: AnthropicSpendSummary;
+  spend: LlmSpendSummary;
   conversationId: string | null;
   startedAtMs: number | null | undefined;
   completedAtMs: number;
@@ -214,6 +238,7 @@ function sendCompareCardComplete(
   const profiling = profilingOverride ?? profiler.snapshot();
   context.send(tabId, {
     ...payload,
+    ...buildLlmSpendPayload(payload.llmSpend),
     ...(profiling ? { profiling } : {}),
   });
 }
@@ -228,6 +253,7 @@ function sendCompareCardError(
   const profiling = profilingOverride ?? profiler.snapshot();
   context.send(tabId, {
     ...payload,
+    ...buildLlmSpendPayload(payload.llmSpend),
     ...(profiling ? { profiling } : {}),
   });
 }
@@ -341,8 +367,14 @@ async function validateCompareStart(
   const session = context.sessionStore.getSessionForTab(tabId);
   const legacyAccountId = context.sessionStore.getAccountIdForTab(tabId);
 
-  if (!storage.settings.claudeApiKey && !storage.settings.openRouterApiKey) {
-    throw new ChatGooseError('missing_api_key');
+  const apiKeyCheck = hasApiKeyForSelectedCompareModel(storage);
+  if (!apiKeyCheck.ok) {
+    throw new ChatGooseError('missing_api_key', {
+      details: apiKeyCheck.provider ? { provider: apiKeyCheck.provider } : undefined,
+    });
+  }
+  if (storage.personalities.length === 0) {
+    throw new ChatGooseError('no_personalities');
   }
   if (!legacyAccountId || !session) {
     throw new ChatGooseError('not_connected');
@@ -1046,9 +1078,9 @@ export async function executeCompare(
         replyTone: promptInputs.replyTone,
       }, validated.storage.settings.promptCachingEnabled);
 
-      let cardUsage: AnthropicUsageMetrics | undefined;
-      let cardCost: AnthropicCostEstimate | undefined;
-      let cardSpend: AnthropicSpendSummary | undefined;
+      let cardUsage: LlmUsageMetrics | undefined;
+      let cardCost: LlmCostEstimate | undefined;
+      let cardSpend: LlmSpendSummary | undefined;
       let actualModel = resolvedModel;
 
       const streamToCard = async (model: string): Promise<string> => {
@@ -1083,19 +1115,19 @@ export async function executeCompare(
             );
           },
           onUsage: (usage) => {
-            const cost = estimateAnthropicCost(actualModel, usage);
-            const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
+            const cost = estimateLlmCost(actualModel, usage);
+            const spend = buildLlmSpendSummary(actualModel, usage, cost);
             cardUsage = { ...usage };
             cardCost = { ...cost };
             cardSpend = { ...spend };
-            profiler.log(formatAnthropicUsageLog(usage));
-            profiler.log(formatAnthropicCostLog(cost));
-            logDebug(debugEnabled, 'anthropic usage', {
+            profiler.log(formatModelUsageLog(actualModel, usage));
+            profiler.log(formatModelCostLog(cost));
+            logDebug(debugEnabled, 'model usage', {
               cardId: card.id,
               model: actualModel,
               ...usage,
             });
-            logDebug(debugEnabled, 'anthropic cost', {
+            logDebug(debugEnabled, 'model cost', {
               cardId: card.id,
               ...cost,
             });
@@ -1145,8 +1177,8 @@ export async function executeCompare(
               operationId: payload.operationId,
               cardId: card.id,
               error: toUserError(abortError ?? error),
-              anthropicSpend:
-                cardSpend ?? createZeroAnthropicSpendSummary(),
+              llmSpend:
+                cardSpend ?? createZeroLlmSpendSummary(),
             },
             profiler,
             profiling,
@@ -1177,7 +1209,7 @@ export async function executeCompare(
         parts: splitByNext(rawText),
       };
       const completedAtMs = Date.now();
-      const completedSpend = cardSpend ?? createZeroAnthropicSpendSummary();
+      const completedSpend = cardSpend ?? createZeroLlmSpendSummary();
       sendCompareCardComplete(
         context,
         tabId,
@@ -1187,7 +1219,7 @@ export async function executeCompare(
           cardId: card.id,
           result,
           fanDisplayName,
-          anthropicSpend: completedSpend,
+          llmSpend: completedSpend,
         },
         profiler,
         buildCompareCardProfilingSnapshot(profiler, cardUsage, cardCost),

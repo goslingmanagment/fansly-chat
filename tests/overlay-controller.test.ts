@@ -12,7 +12,7 @@ import { OverlayController } from '../src/content/overlay/overlay-controller.js'
 import { installContentStyles } from '../src/content/dom-anchor.js';
 import { copyToClipboard } from '../src/content/textarea.js';
 import type {
-  AnthropicSpendSummary,
+  LlmSpendSummary,
   OperationProfilingSnapshot,
   OverlayInsertPart,
   OverlayViewModel,
@@ -28,7 +28,7 @@ function createLoadingModel(
     statusCode?: string;
     retryAtMs?: number;
     profiling?: OperationProfilingSnapshot;
-    anthropicSpend?: AnthropicSpendSummary;
+    llmSpend?: LlmSpendSummary;
   },
 ): Extract<OverlayViewModel, { kind: 'loading' }> {
   return {
@@ -47,7 +47,7 @@ function createLoadingModel(
       : null,
     rawText,
     debugPrompt: undefined,
-    anthropicSpend: options?.anthropicSpend,
+    llmSpend: options?.llmSpend,
     profiling: options?.profiling,
     canCancel: true,
     canRegenerate: true,
@@ -58,7 +58,7 @@ function createLoadingModel(
 function createReplyModel(
   part: OverlayInsertPart,
   options?: {
-    anthropicSpend?: AnthropicSpendSummary;
+    llmSpend?: LlmSpendSummary;
     profiling?: OperationProfilingSnapshot;
   },
 ): Extract<OverlayViewModel, { kind: 'reply' }> {
@@ -71,7 +71,7 @@ function createReplyModel(
     rawText: part.text,
     splitModeRequested: false,
     debugPrompt: undefined,
-    anthropicSpend: options?.anthropicSpend,
+    llmSpend: options?.llmSpend,
     profiling: options?.profiling,
     rerunActionLabel: 'Regenerate',
   };
@@ -164,13 +164,13 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
   return {
     elapsedMs: 1850,
     activeLabel: 'Load messages',
-    anthropicUsage: {
+    llmUsage: {
       input_tokens: 420,
       cache_creation_input_tokens: 300,
       cache_read_input_tokens: 90,
       output_tokens: 11,
     },
-    anthropicCost: {
+    llmCost: {
       modelId: 'claude-sonnet-4-6',
       inputUsd: 0.00126,
       cacheWrite5mUsd: 0.00045,
@@ -209,8 +209,8 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
 }
 
 function createSpendSummary(
-  overrides?: Partial<AnthropicSpendSummary>,
-): AnthropicSpendSummary {
+  overrides?: Partial<LlmSpendSummary>,
+): LlmSpendSummary {
   return {
     totalTokens: 821,
     inputTokens: 420,
@@ -525,7 +525,7 @@ describe('OverlayController', () => {
 
     const grid = requireElement<HTMLDivElement>('.chatgoose-grid');
     expect(requireElement<HTMLDivElement>('.chatgoose-overlay-status').textContent).toBe('Generating…');
-    expect(requireElement<HTMLDivElement>('.chatgoose-stream').textContent).toBe('Waiting for Claude…');
+    expect(requireElement<HTMLDivElement>('.chatgoose-stream').textContent).toBe('Waiting for AI…');
     expect(document.querySelector('.chatgoose-profiling')).toBeNull();
     expect(Array.from(grid.children).map((element) => element.className)).toEqual([
       'chatgoose-loading-spend-host',
@@ -639,7 +639,7 @@ describe('OverlayController', () => {
     });
 
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Total');
-    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Claude usage');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Claude Sonnet 4.6 usage');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('cache read 90');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('input 420');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Load messages');
@@ -804,7 +804,7 @@ describe('OverlayController', () => {
     expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
   });
 
-  it('renders spend summary and Claude cost row in completed reply views', () => {
+  it('renders spend summary and model cost row in completed reply views', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
       onCancel: () => undefined,
@@ -814,7 +814,7 @@ describe('OverlayController', () => {
 
     controller.render(
       createReplyModel(createPart('Reply text'), {
-        anthropicSpend: createSpendSummary({
+        llmSpend: createSpendSummary({
           cacheEffectKind: 'saved',
           cacheEffectUsd: 0.00045,
         }),
@@ -829,7 +829,7 @@ describe('OverlayController', () => {
       'saved',
     );
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain(
-      'Claude cost',
+      'Claude Sonnet 4.6 cost',
     );
   });
 
@@ -997,7 +997,7 @@ describe('OverlayController', () => {
 
     const inspector = document.querySelector('.chatgoose-debug-inspector');
     expect(inspector).not.toBeNull();
-    expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('Claude Input');
+    expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('LLM Input');
   });
 
   it('renders debug prompt inspector in Read Only view when debugPrompt is present', () => {
@@ -1012,7 +1012,7 @@ describe('OverlayController', () => {
 
     const inspector = document.querySelector('.chatgoose-debug-inspector');
     expect(inspector).not.toBeNull();
-    expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('Claude Input');
+    expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('LLM Input');
   });
 
   it('shows inline error when copy to clipboard fails (Bug 6)', async () => {

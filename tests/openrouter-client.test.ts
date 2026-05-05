@@ -91,7 +91,7 @@ describe('OpenRouterClient', () => {
     expect(args.userBlocks[0]?.cache_control).toEqual({ type: 'ephemeral' });
   });
 
-  it('streams Anthropic Messages text deltas and normalizes usage', async () => {
+  it('calls onText for content_block_delta text deltas', async () => {
     const onText = vi.fn();
     const onUsage = vi.fn();
     mockFetchResponse(200, undefined, {
@@ -127,7 +127,7 @@ describe('OpenRouterClient', () => {
     });
   });
 
-  it('preserves priced cache reads but zeroes unpriced cache writes for OpenRouter usage', async () => {
+  it('preserves Anthropic-shaped cache read and write usage', async () => {
     const onUsage = vi.fn();
     mockFetchResponse(200, undefined, {
       bodyStream: [
@@ -147,10 +147,74 @@ describe('OpenRouterClient', () => {
 
     expect(onUsage).toHaveBeenLastCalledWith({
       input_tokens: 10,
-      cache_creation_input_tokens: 0,
+      cache_creation_input_tokens: 42,
       cache_read_input_tokens: 99,
       output_tokens: 3,
     });
+  });
+
+  it('maps OpenAI-shaped usage without prompt token details to uncached input', async () => {
+    const onUsage = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_delta',
+        'data: {"type":"message_delta","usage":{"prompt_tokens":1000,"completion_tokens":100}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(streamArgs({ onUsage }));
+
+    expect(onUsage).toHaveBeenLastCalledWith({
+      input_tokens: 1000,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 100,
+    });
+  });
+
+  it('maps OpenAI-shaped usage with prompt token details without double-counting cached tokens', async () => {
+    const onUsage = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_delta',
+        'data: {"type":"message_delta","usage":{"prompt_tokens":1000,"completion_tokens":100,"prompt_tokens_details":{"cached_tokens":300,"cache_write_tokens":200}}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(streamArgs({ onUsage }));
+
+    expect(onUsage).toHaveBeenLastCalledWith({
+      input_tokens: 500,
+      cache_creation_input_tokens: 200,
+      cache_read_input_tokens: 300,
+      output_tokens: 100,
+    });
+  });
+
+  it('rejects unsupported OpenAI chat completion chunks on the Messages stream', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"hi"}}]}',
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n'),
+    });
+
+    await expect(new OpenRouterClient().streamMessage(streamArgs())).rejects.toThrow(
+      expect.objectContaining({
+        key: 'unknown_error',
+        details: expect.objectContaining({ provider: 'openrouter' }),
+      }),
+    );
   });
 
   it('maps OpenRouter model errors without retrying another endpoint', async () => {

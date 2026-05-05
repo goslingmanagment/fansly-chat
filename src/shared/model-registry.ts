@@ -129,6 +129,8 @@ export const AI_MODELS: AiModelEntry[] = [
     label: 'Grok 4.20',
     description: 'OpenRouter',
     supportsPromptCache: false,
+    costApproximate: true,
+    pricingNote: 'OpenRouter Grok cache-read pricing is approximate/unconfirmed for this registry entry; do not treat the placeholder USD rate as source-confirmed model pricing.',
     pricing: {
       inputUsdPerMillion: 1.25,
       cacheReadUsdPerMillion: 0.20,
@@ -144,7 +146,7 @@ export const AI_MODELS: AiModelEntry[] = [
     description: 'OpenRouter',
     supportsPromptCache: false,
     costApproximate: true,
-    pricingNote: 'Base-tier pricing; requests above 200k total tokens may cost more.',
+    pricingNote: 'Base-tier pricing; requests above 200k total tokens may cost more. OpenRouter Grok cache-read pricing is approximate/unconfirmed for this registry entry; do not treat the placeholder USD rate as source-confirmed model pricing.',
     pricing: {
       inputUsdPerMillion: 1.25,
       cacheReadUsdPerMillion: 0.20,
@@ -202,6 +204,13 @@ export function normalizeModelId(modelId: string | null | undefined): string | n
 export function getModelEntry(modelId: string | null | undefined): AiModelEntry | null {
   const normalized = normalizeModelId(modelId);
   return normalized ? MODELS_BY_ID.get(normalized) ?? null : null;
+}
+
+export function getModelDisplayName(
+  modelId: string | null | undefined,
+  fallback = 'AI model',
+): string {
+  return getModelEntry(modelId)?.label ?? fallback;
 }
 
 export function isSupportedModelSelection(modelId: string | null | undefined): boolean {

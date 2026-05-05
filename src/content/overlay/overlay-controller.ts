@@ -4,8 +4,8 @@ import {
   toUserError,
 } from '../../shared/errors.js';
 import type {
-  AnthropicSpendSummary,
-  AnthropicUsageMetrics,
+  LlmSpendSummary,
+  LlmUsageMetrics,
   FanSummarySyncStatus,
   FeatureType,
   OperationProgressPayload,
@@ -18,8 +18,10 @@ import type {
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
 import {
-  formatAnthropicCostSummary,
+  formatLlmCostSummary,
   formatCacheEffectInline,
+  formatModelCostLabel,
+  formatModelUsageLabel,
   formatSpendPrimary,
   formatSpendSecondary,
   formatUsd,
@@ -149,7 +151,7 @@ function formatProfilingElapsed(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function formatAnthropicUsageSummary(usage: AnthropicUsageMetrics): string {
+function formatLlmUsageSummary(usage: LlmUsageMetrics): string {
   return `input ${usage.input_tokens} • cache create ${usage.cache_creation_input_tokens} • cache read ${usage.cache_read_input_tokens} • output ${usage.output_tokens}`;
 }
 
@@ -649,7 +651,7 @@ export class OverlayController {
     view: LoadingViewState,
     model: Extract<OverlayViewModel, { kind: 'loading' }>,
   ): void {
-    const streamText = model.rawText || 'Waiting for Claude\u2026';
+    const streamText = model.rawText || 'Waiting for AI\u2026';
 
     this.syncLoadingSpend(view, model);
     this.syncLoadingProfiling(view, model);
@@ -675,7 +677,7 @@ export class OverlayController {
     view: LoadingViewState,
     model: Extract<OverlayViewModel, { kind: 'loading' }>,
   ): void {
-    const spend = model.anthropicSpend;
+    const spend = model.llmSpend;
     const spendKey = spend
       ? [
           spend.totalTokens,
@@ -1074,8 +1076,9 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatgoose-grid';
 
-    if (model.anthropicSpend) {
-      section.append(this.renderSpendStrip(model.anthropicSpend));
+    const spend = model.llmSpend;
+    if (spend) {
+      section.append(this.renderSpendStrip(spend));
     }
 
     if (model.profiling) {
@@ -1088,7 +1091,7 @@ export class OverlayController {
       helper.textContent =
         model.parts.length > 1
           ? 'Split mode was on. Start with message 1, send it manually in Fansly, then use the follow-up if it still feels right.'
-          : 'Split mode was on, but Claude kept this as one message because a natural split did not fit this reply.';
+          : 'Split mode was on, but the AI kept this as one message because a natural split did not fit this reply.';
       section.append(helper);
     }
 
@@ -1132,8 +1135,9 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatgoose-grid';
 
-    if (model.anthropicSpend) {
-      section.append(this.renderSpendStrip(model.anthropicSpend));
+    const spend = model.llmSpend;
+    if (spend) {
+      section.append(this.renderSpendStrip(spend));
     }
 
     if (model.profiling) {
@@ -1184,8 +1188,9 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatgoose-grid';
 
-    if (model.anthropicSpend) {
-      section.append(this.renderSpendStrip(model.anthropicSpend));
+    const spend = model.llmSpend;
+    if (spend) {
+      section.append(this.renderSpendStrip(spend));
     }
 
     if (model.profiling) {
@@ -1349,8 +1354,9 @@ export class OverlayController {
     const section = document.createElement('div');
     section.className = 'chatgoose-grid';
 
-    if (model.anthropicSpend) {
-      section.append(this.renderSpendStrip(model.anthropicSpend));
+    const spend = model.llmSpend;
+    if (spend) {
+      section.append(this.renderSpendStrip(spend));
     }
 
     section.append(createUserErrorBlock(model.error));
@@ -1367,7 +1373,7 @@ export class OverlayController {
   }
 
   private renderSpendStrip(
-    spend?: AnthropicSpendSummary,
+    spend?: LlmSpendSummary,
     options?: { placeholder?: boolean },
   ): HTMLElement {
     const strip = document.createElement('div');
@@ -1468,13 +1474,15 @@ export class OverlayController {
     total.append(totalLabel, totalDuration);
     container.append(total);
 
-    if (snapshot.anthropicUsage) {
+    const usage = snapshot.llmUsage;
+    const cost = snapshot.llmCost;
+    if (usage) {
       const usageRow = document.createElement('div');
       usageRow.className = 'chatgoose-profiling-stage';
 
       const usageLabel = document.createElement('div');
       usageLabel.className = 'chatgoose-profiling-stage-label';
-      usageLabel.textContent = 'Claude usage';
+      usageLabel.textContent = formatModelUsageLabel(cost);
 
       const usageDuration = document.createElement('div');
       usageDuration.className = 'chatgoose-profiling-stage-duration';
@@ -1482,32 +1490,32 @@ export class OverlayController {
 
       const usageDetail = document.createElement('div');
       usageDetail.className = 'chatgoose-profiling-stage-detail';
-      usageDetail.textContent = formatAnthropicUsageSummary(
-        snapshot.anthropicUsage,
+      usageDetail.textContent = formatLlmUsageSummary(
+        usage,
       );
 
       usageRow.append(usageLabel, usageDuration, usageDetail);
       container.append(usageRow);
     }
 
-    if (snapshot.anthropicCost) {
+    if (cost) {
       const costRow = document.createElement('div');
       costRow.className = 'chatgoose-profiling-stage';
 
       const costLabel = document.createElement('div');
       costLabel.className = 'chatgoose-profiling-stage-label';
-      costLabel.textContent = 'Claude cost';
+      costLabel.textContent = formatModelCostLabel(cost);
 
       const costDuration = document.createElement('div');
       costDuration.className = 'chatgoose-profiling-stage-duration';
       costDuration.textContent = formatUsd(
-        snapshot.anthropicCost.totalUsd,
-        snapshot.anthropicCost.approximate,
+        cost.totalUsd,
+        cost.approximate,
       );
 
       const costDetail = document.createElement('div');
       costDetail.className = 'chatgoose-profiling-stage-detail';
-      costDetail.textContent = formatAnthropicCostSummary(snapshot.anthropicCost);
+      costDetail.textContent = formatLlmCostSummary(cost);
 
       costRow.append(costLabel, costDuration, costDetail);
       container.append(costRow);
@@ -1559,14 +1567,14 @@ export class OverlayController {
 
     const summary = document.createElement('summary');
     summary.className = 'chatgoose-debug-summary';
-    summary.textContent = 'Claude Input';
+    summary.textContent = 'LLM Input';
     details.append(summary);
 
     const content = document.createElement('div');
     content.className = 'chatgoose-debug-content';
     content.append(
       this.createDebugSection('System Prompt', snapshot.system),
-      this.createDebugSection('Transcript Sent to Claude', snapshot.transcript),
+      this.createDebugSection('Transcript Sent to LLM', snapshot.transcript),
       this.createDebugSection('Fan Spending Data', snapshot.fanSpendingData.trim() || 'Not included'),
       this.createDebugSection('Fan Subscription Data', snapshot.fanSubscriptionData.trim() || 'Not included'),
       this.createDebugSection('Final User Prompt', snapshot.user),

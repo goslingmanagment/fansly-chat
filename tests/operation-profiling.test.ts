@@ -34,13 +34,13 @@ describe('createOperationProfiler', () => {
 
     profiler.startStage('resolve-identity', 'Resolve account identity');
     profiler.log('Resolve account identity');
-    profiler.setAnthropicUsage({
+    profiler.setLlmUsage({
       input_tokens: 420,
       cache_creation_input_tokens: 300,
       cache_read_input_tokens: 90,
       output_tokens: 11,
     });
-    profiler.setAnthropicCost({
+    profiler.setLlmCost({
       modelId: 'claude-sonnet-4-6',
       inputUsd: 0.00126,
       cacheWrite5mUsd: 0,
@@ -58,13 +58,13 @@ describe('createOperationProfiler', () => {
       elapsedMs: 125,
       activeLabel: null,
       logEntries: [{ elapsedMs: 0, message: 'Resolve account identity' }],
-      anthropicUsage: {
+      llmUsage: {
         input_tokens: 420,
         cache_creation_input_tokens: 300,
         cache_read_input_tokens: 90,
         output_tokens: 11,
       },
-      anthropicCost: {
+      llmCost: {
         modelId: 'claude-sonnet-4-6',
         inputUsd: 0.00126,
         cacheWrite5mUsd: 0,
@@ -102,13 +102,13 @@ describe('createOperationProfiler', () => {
   it('marks unfinished stages as failed during finalization', () => {
     const profiler = createOperationProfiler(true);
 
-    profiler.startStage('claude-ttfb', 'Wait for Claude TTFB');
+    profiler.startStage('llm-ttfb', 'Wait for AI TTFB');
     advanceNow(220);
     const snapshot = profiler.finalizeRunningStages('operation failed');
 
     expect(snapshot?.stages).toEqual([
       expect.objectContaining({
-        key: 'claude-ttfb',
+        key: 'llm-ttfb',
         status: 'failed',
         durationMs: 220,
         detail: 'operation failed',
@@ -142,14 +142,14 @@ describe('createOperationProfiler', () => {
   it('uses the stage key as the label when skipStage receives only detail', () => {
     const profiler = createOperationProfiler(true);
 
-    profiler.skipStage('claude-stream', 'no streamed chunks');
+    profiler.skipStage('llm-stream', 'no streamed chunks');
 
     expect(profiler.snapshot()).toMatchObject({
       activeLabel: null,
       stages: [
         expect.objectContaining({
-          key: 'claude-stream',
-          label: 'claude-stream',
+          key: 'llm-stream',
+          label: 'llm-stream',
           status: 'skipped',
           durationMs: 0,
           detail: 'no streamed chunks',

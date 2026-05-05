@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COMPARE_TEMPERATURE,
-  DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
-  DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
-  DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
+  DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
+  DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
+  DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   DEFAULT_MODEL_ID,
   DEFAULT_FEATURE_MODELS,
@@ -1283,15 +1283,15 @@ describe('OperationCoordinator', () => {
     const currentCard = completeMessages.find((message) => message.cardId === 'current:personality-1');
     const draftCard = completeMessages.find((message) => message.cardId === 'draft-1');
 
-    expect(currentCard?.profiling?.anthropicUsage).toEqual({
+    expect(currentCard?.profiling?.llmUsage).toEqual({
       input_tokens: 100,
       cache_creation_input_tokens: 10,
       cache_read_input_tokens: 5,
       output_tokens: 8,
     });
-    expect(currentCard?.profiling?.anthropicCost?.totalUsd).toBe(0.00046);
-    expect(currentCard?.profiling?.anthropicCost?.approximate).toBe(true);
-    expect(currentCard?.anthropicSpend).toEqual({
+    expect(currentCard?.profiling?.llmCost?.totalUsd).toBe(0.00046);
+    expect(currentCard?.profiling?.llmCost?.approximate).toBe(true);
+    expect(currentCard?.llmSpend).toEqual({
       totalTokens: 123,
       inputTokens: 100,
       cacheWriteTokens: 10,
@@ -1305,15 +1305,15 @@ describe('OperationCoordinator', () => {
       cacheReadUsd: 0.000002,
       approximate: true,
     });
-    expect(draftCard?.profiling?.anthropicUsage).toEqual({
+    expect(draftCard?.profiling?.llmUsage).toEqual({
       input_tokens: 200,
       cache_creation_input_tokens: 20,
       cache_read_input_tokens: 10,
       output_tokens: 16,
     });
-    expect(draftCard?.profiling?.anthropicCost?.totalUsd).toBe(0.000918);
-    expect(draftCard?.profiling?.anthropicCost?.approximate).toBe(true);
-    expect(draftCard?.anthropicSpend).toEqual({
+    expect(draftCard?.profiling?.llmCost?.totalUsd).toBe(0.000918);
+    expect(draftCard?.profiling?.llmCost?.approximate).toBe(true);
+    expect(draftCard?.llmSpend).toEqual({
       totalTokens: 246,
       inputTokens: 200,
       cacheWriteTokens: 20,
@@ -1403,7 +1403,7 @@ describe('OperationCoordinator', () => {
       key: 'network_error',
       code: 'CG-NET-01',
     });
-    expect(cardError?.anthropicSpend).toEqual({
+    expect(cardError?.llmSpend).toEqual({
       totalTokens: 56,
       inputTokens: 50,
       cacheWriteTokens: 4,
@@ -1418,7 +1418,7 @@ describe('OperationCoordinator', () => {
       approximate: true,
     });
     expect(cardComplete?.cardId).toBe('draft-1');
-    expect(cardComplete?.anthropicSpend).toEqual({
+    expect(cardComplete?.llmSpend).toEqual({
       totalTokens: 89,
       inputTokens: 75,
       cacheWriteTokens: 5,
@@ -1664,7 +1664,7 @@ describe('OperationCoordinator', () => {
     }
   });
 
-  it('includes anthropicSpend in non-debug progress and completion payloads once usage arrives', async () => {
+  it('includes llmSpend in non-debug progress and completion payloads once usage arrives', async () => {
     const anthropicClient = {
       streamMessage: vi.fn(async ({
         onText,
@@ -1704,14 +1704,14 @@ describe('OperationCoordinator', () => {
     const messages = postedMessages(port);
     const progressWithSpend = messages.find(
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
-        message.type === 'operation:progress' && Boolean(message.anthropicSpend),
+        message.type === 'operation:progress' && Boolean(message.llmSpend),
     );
     const completeMessage = messages.find(
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
         message.type === 'operation:complete',
     );
 
-    expect(progressWithSpend?.anthropicSpend).toEqual({
+    expect(progressWithSpend?.llmSpend).toEqual({
       totalTokens: 123,
       inputTokens: 100,
       cacheWriteTokens: 10,
@@ -1725,7 +1725,7 @@ describe('OperationCoordinator', () => {
       cacheReadUsd: 0.000002,
       approximate: true,
     });
-    expect(completeMessage?.anthropicSpend).toEqual(progressWithSpend?.anthropicSpend);
+    expect(completeMessage?.llmSpend).toEqual(progressWithSpend?.llmSpend);
     expect(progressWithSpend).not.toHaveProperty('profiling');
     expect(completeMessage).not.toHaveProperty('profiling');
   });
@@ -2041,7 +2041,7 @@ describe('OperationCoordinator', () => {
 
     expect(progressMessages.some((message) => Boolean(message.profiling))).toBe(true);
     expect(completeMessage?.profiling).toBeDefined();
-    expect(completeMessage?.profiling?.anthropicUsage).toEqual({
+    expect(completeMessage?.profiling?.llmUsage).toEqual({
       input_tokens: 420,
       cache_creation_input_tokens: 300,
       cache_read_input_tokens: 90,
@@ -2051,7 +2051,7 @@ describe('OperationCoordinator', () => {
         ephemeral_1h_input_tokens: 180,
       },
     });
-    expect(completeMessage?.profiling?.anthropicCost).toEqual({
+    expect(completeMessage?.profiling?.llmCost).toEqual({
       modelId: DEFAULT_FEATURE_MODELS['fast-reply'],
       inputUsd: 0.00126,
       cacheWrite5mUsd: 0.00045,
@@ -2068,8 +2068,8 @@ describe('OperationCoordinator', () => {
       flattenUserBlocksFromStreamCall(anthropicClient),
     );
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
-    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
-    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude cost: model=anthropic:claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 cost: model=anthropic:claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);
     expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',
@@ -2078,14 +2078,14 @@ describe('OperationCoordinator', () => {
       'earnings',
       'subscription-lookup',
       'prompt-build',
-      'claude-ttfb',
-      'claude-stream',
+      'llm-ttfb',
+      'llm-stream',
     ]);
-    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'completed',
       detail: 'first chunk received',
     });
-    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toMatchObject({
       status: 'completed',
       detail: '11 chars',
     });
@@ -2125,11 +2125,11 @@ describe('OperationCoordinator', () => {
     );
 
     expect(errorMessage?.profiling).toBeDefined();
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toBeUndefined();
   });
 
   it('maps unexpected aborts to network_error in debug mode', async () => {
@@ -2169,11 +2169,11 @@ describe('OperationCoordinator', () => {
       code: 'CG-NET-01',
     });
     expect(errorMessage?.profiling).toBeDefined();
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toBeUndefined();
   });
 
   it('includes profiling data on true timeout in debug mode', async () => {
@@ -2226,11 +2226,11 @@ describe('OperationCoordinator', () => {
       code: 'CG-NET-02',
     });
     expect(errorMessage?.profiling).toBeDefined();
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toBeUndefined();
   });
 
   it('lets deep fan summary complete after more than 120 seconds when progress continues', async () => {
@@ -2368,10 +2368,10 @@ describe('OperationCoordinator', () => {
       status: 'failed',
       detail: 'operation failed',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toBeUndefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toBeUndefined();
   });
 
-  it('times out deep operations when Claude TTFB exceeds the stage budget', async () => {
+  it('times out deep operations when LLM TTFB exceeds the stage budget', async () => {
     vi.useFakeTimers();
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -2405,7 +2405,7 @@ describe('OperationCoordinator', () => {
     });
 
     await streamStarted;
-    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS);
     await startPromise;
 
     const errorMessage = postedMessages(port).find(
@@ -2417,14 +2417,14 @@ describe('OperationCoordinator', () => {
       key: 'timed_out',
       code: 'CG-NET-02',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toBeUndefined();
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toBeUndefined();
   });
 
-  it('times out deep operations when Claude stream goes idle after the first chunk', async () => {
+  it('times out deep operations when LLM stream goes idle after the first chunk', async () => {
     vi.useFakeTimers();
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -2463,7 +2463,7 @@ describe('OperationCoordinator', () => {
     });
 
     await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS);
     await startPromise;
 
     const errorMessage = postedMessages(port).find(
@@ -2475,17 +2475,17 @@ describe('OperationCoordinator', () => {
       key: 'timed_out',
       code: 'CG-NET-02',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-ttfb')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'completed',
       detail: 'first chunk received',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
     });
   });
 
-  it('times out deep operations when Claude stream exceeds the max stream budget', async () => {
+  it('times out deep operations when LLM stream exceeds the max stream budget', async () => {
     vi.useFakeTimers();
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -2510,7 +2510,7 @@ describe('OperationCoordinator', () => {
           setTimeout(() => {
             onText('Hello');
           }, 1_000);
-          for (let offset = 31_000; offset < DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS; offset += 30_000) {
+          for (let offset = 31_000; offset < DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS; offset += 30_000) {
             setTimeout(() => {
               onProgress?.();
             }, offset);
@@ -2531,7 +2531,7 @@ describe('OperationCoordinator', () => {
     });
 
     await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS);
     await startPromise;
 
     const errorMessage = postedMessages(port).find(
@@ -2543,7 +2543,7 @@ describe('OperationCoordinator', () => {
       key: 'timed_out',
       code: 'CG-NET-02',
     });
-    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'claude-stream')).toMatchObject({
+    expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toMatchObject({
       status: 'failed',
       detail: 'operation failed',
     });
@@ -3460,15 +3460,31 @@ describe('OperationCoordinator', () => {
   it('routes OpenRouter selections through the shared stream client with provider-aware settings', async () => {
     (mockStorage.settings as Record<string, unknown>).openRouterApiKey = 'sk-or-v1-test';
     (mockStorage.settings as Record<string, unknown>).claudeApiKey = '';
+    (mockStorage.settings as Record<string, unknown>).debugMode = true;
     (mockStorage.settings as Record<string, unknown>).featureModels = {
       ...DEFAULT_FEATURE_MODELS,
-      'fast-reply': 'openrouter:x-ai/grok-4.3',
+      'fast-reply': 'openrouter:google/gemini-3.1-pro-preview',
     };
 
     const anthropicClient = {
-      streamMessage: vi.fn(async () => 'OpenRouter reply'),
+      streamMessage: vi.fn(async ({ onUsage }: {
+        onUsage?: (usage: {
+          input_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+          output_tokens: number;
+        }) => void;
+      }) => {
+        onUsage?.({
+          input_tokens: 6026,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          output_tokens: 786,
+        });
+        return 'OpenRouter reply';
+      }),
     };
-    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
 
     await coordinator.startOperation(1, {
       type: 'operation:start',
@@ -3483,13 +3499,122 @@ describe('OperationCoordinator', () => {
 
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: 'openrouter:x-ai/grok-4.3',
+        model: 'openrouter:google/gemini-3.1-pro-preview',
         settings: expect.objectContaining({
           claudeApiKey: '',
           openRouterApiKey: 'sk-or-v1-test',
         }),
       }),
     );
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.profiling?.llmCost).toMatchObject({
+      modelId: 'openrouter:google/gemini-3.1-pro-preview',
+      inputUsd: 0.012052,
+      outputUsd: 0.009432,
+      totalUsd: 0.021484,
+    });
+    const profilingLogs = completeMessage?.profiling?.logEntries
+      .map((entry) => entry.message)
+      .join('\n') ?? '';
+    expect(profilingLogs).toContain('Gemini 3.1 Pro Preview usage');
+    expect(profilingLogs).toContain('Gemini 3.1 Pro Preview cost');
+    expect(profilingLogs).not.toContain('Claude usage');
+    expect(profilingLogs).not.toContain('Claude cost');
+  });
+
+  it('shows an OpenRouter-specific missing key error for OpenRouter operation selections', async () => {
+    (mockStorage.settings as Record<string, unknown>).claudeApiKey = 'sk-ant-test';
+    (mockStorage.settings as Record<string, unknown>).openRouterApiKey = '';
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'openrouter:x-ai/grok-4.3',
+    };
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error).toMatchObject({
+      key: 'missing_api_key',
+      message: 'OpenRouter API key not configured.',
+    });
+  });
+
+  it('keeps the Anthropic-specific missing key error for Anthropic operation selections', async () => {
+    (mockStorage.settings as Record<string, unknown>).claudeApiKey = '';
+    (mockStorage.settings as Record<string, unknown>).openRouterApiKey = 'sk-or-v1-test';
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'anthropic:claude-sonnet-4-6',
+    };
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error).toMatchObject({
+      key: 'missing_api_key',
+      message: 'Claude API key not configured.',
+    });
+  });
+
+  it('shows an OpenRouter-specific missing key error for OpenRouter compare selections', async () => {
+    (mockStorage.settings as Record<string, unknown>).claudeApiKey = 'sk-ant-test';
+    (mockStorage.settings as Record<string, unknown>).openRouterApiKey = '';
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'openrouter:x-ai/grok-4.3',
+    };
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:error' }> =>
+        message.type === 'compare:error',
+    );
+
+    expect(errorMessage?.error).toMatchObject({
+      key: 'missing_api_key',
+      message: 'OpenRouter API key not configured.',
+    });
   });
 
   it('does not fallback from an unavailable OpenRouter model to Claude or another OpenRouter model', async () => {
@@ -4507,9 +4632,9 @@ describe('OperationCoordinator', () => {
           }) => void;
         }) => {
           onUsage?.({
-            input_tokens: 10,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
+            input_tokens: 500,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 300,
             output_tokens: 5,
           });
           return 'OpenRouter reply';
@@ -4531,6 +4656,10 @@ describe('OperationCoordinator', () => {
     expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
       clientEventId: 'reply-op',
       model: 'openrouter:x-ai/grok-4.3',
+      inputTokens: 500,
+      cacheWriteTokens: 200,
+      cacheReadTokens: 300,
+      outputTokens: 5,
     });
   });
 

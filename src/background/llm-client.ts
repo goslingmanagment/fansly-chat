@@ -5,7 +5,7 @@ import {
   OPENROUTER_PROVIDER,
 } from '../shared/model-registry.js';
 import type {
-  AnthropicUsageMetrics,
+  LlmUsageMetrics,
   FeatureType,
   PromptTextBlock,
   Settings,
@@ -22,7 +22,7 @@ export interface LlmStreamArgs {
   feature: FeatureType;
   signal: AbortSignal;
   onText: (text: string) => void;
-  onUsage?: (usage: AnthropicUsageMetrics) => void;
+  onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
 }
 

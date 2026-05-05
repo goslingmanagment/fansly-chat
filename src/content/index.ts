@@ -34,7 +34,7 @@ import {
 import { splitByNext } from '../shared/split.js';
 import { loadStorageState } from '../shared/storage.js';
 import type {
-  AnthropicSpendSummary,
+  LlmSpendSummary,
   BackgroundPortMessage,
   CompareInlineTabState,
   CompareInlineViewModel,
@@ -92,6 +92,12 @@ function applyFanSummarySyncStatus(
   return true;
 }
 
+function getMessageLlmSpend(
+  message: { llmSpend?: LlmSpendSummary },
+): LlmSpendSummary | undefined {
+  return message.llmSpend;
+}
+
 export class ChatGooseContentApp {
   private routeNonce = 0;
   private currentGroupId: string | null = null;
@@ -100,7 +106,7 @@ export class ChatGooseContentApp {
   private activeOperationId: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
-  private activeAnthropicSpend: AnthropicSpendSummary | null = null;
+  private activeLlmSpend: LlmSpendSummary | null = null;
   private activeProfiling: OperationProfilingSnapshot | null = null;
   private activeProgress: OperationProgressPayload | null = null;
   private lastFeature: FeatureType | null = null;
@@ -430,7 +436,7 @@ export class ChatGooseContentApp {
       progress: this.activeProgress,
       rawText: this.overlayRawText,
       debugPrompt: this.activeDebugPrompt ?? undefined,
-      anthropicSpend: this.activeAnthropicSpend ?? undefined,
+      llmSpend: this.activeLlmSpend ?? undefined,
       profiling: this.activeProfiling ?? undefined,
       canCancel: true,
       canRegenerate: options?.canRegenerate ?? false,
@@ -554,7 +560,7 @@ export class ChatGooseContentApp {
   ): void {
     this.cancelScheduledLoadingRender();
     this.activeDebugPrompt = null;
-    this.activeAnthropicSpend = null;
+    this.activeLlmSpend = null;
     this.activeProfiling = null;
     this.activeProgress = null;
     this.activeFeature = feature;
@@ -935,9 +941,10 @@ export class ChatGooseContentApp {
     if (this.activeOperationId !== message.operationId) {
       return;
     }
-    this.activeAnthropicSpend = message.anthropicSpend ?? this.activeAnthropicSpend;
+    const llmSpend = getMessageLlmSpend(message);
+    this.activeLlmSpend = llmSpend ?? this.activeLlmSpend;
     if (
-      message.anthropicSpend &&
+      llmSpend &&
       this.activeFeature &&
       usesInlineFeatureSurface(this.activeFeature) &&
       !featureRequiresDraft(this.activeFeature) &&
@@ -1032,7 +1039,7 @@ export class ChatGooseContentApp {
         ? message.result.parts
         : splitByNext(message.result.rawText),
     );
-    tab.anthropicSpend = message.anthropicSpend;
+    tab.llmSpend = getMessageLlmSpend(message);
     tab.splitModeRequested = Boolean(message.result.splitModeRequested);
     tab.error = undefined;
     this.renderSurfaces();
@@ -1046,7 +1053,7 @@ export class ChatGooseContentApp {
       return;
     }
     tab.status = 'error';
-    tab.anthropicSpend = message.anthropicSpend;
+    tab.llmSpend = getMessageLlmSpend(message);
     tab.error = message.error;
     this.renderSurfaces();
   }
@@ -1172,7 +1179,7 @@ export class ChatGooseContentApp {
       message.operationId,
       message.fanDisplayName,
       message.result,
-      message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
+      getMessageLlmSpend(message) ?? this.activeLlmSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
     if (feature === 'fan-summary' && this.tabState) {
@@ -1218,8 +1225,8 @@ export class ChatGooseContentApp {
         fanDisplayName: this.currentFanDisplayName(),
         operationId: message.operationId,
         debugPrompt: this.activeDebugPrompt ?? undefined,
-        anthropicSpend:
-          message.anthropicSpend ?? this.activeAnthropicSpend ?? undefined,
+        llmSpend:
+          getMessageLlmSpend(message) ?? this.activeLlmSpend ?? undefined,
         profiling: message.profiling ?? this.activeProfiling ?? undefined,
         error: message.error,
       };
@@ -1237,7 +1244,7 @@ export class ChatGooseContentApp {
     this.activeFeature = null;
     this.activeOperationId = null;
     this.activeFanDisplayName = null;
-    this.activeAnthropicSpend = null;
+    this.activeLlmSpend = null;
     this.activeProfiling = null;
     this.activeProgress = null;
     this.activeImproveDraftCacheKey = null;
@@ -1367,7 +1374,7 @@ export class ChatGooseContentApp {
     operationId: string,
     fanDisplayName: string,
     result: FeatureResult,
-    anthropicSpend?: AnthropicSpendSummary,
+    llmSpend?: LlmSpendSummary,
     profiling?: OperationProfilingSnapshot,
   ): CompletedOverlayViewModel {
     const rawText = result.rawText;
@@ -1386,7 +1393,7 @@ export class ChatGooseContentApp {
           flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
           parseFallback: !parsed?.valid,
           debugPrompt: this.activeDebugPrompt ?? undefined,
-          anthropicSpend,
+          llmSpend,
           profiling,
           rerunActionLabel: 'Regenerate',
         };
@@ -1400,7 +1407,7 @@ export class ChatGooseContentApp {
           rawText,
           summaryMeta: result.summaryMeta,
           debugPrompt: this.activeDebugPrompt ?? undefined,
-          anthropicSpend,
+          llmSpend,
           profiling,
           rerunActionLabel: 'Refresh',
         };
@@ -1419,7 +1426,7 @@ export class ChatGooseContentApp {
             parseFallback: !result.chatReview?.valid,
           },
           debugPrompt: this.activeDebugPrompt ?? undefined,
-          anthropicSpend,
+          llmSpend,
           profiling,
           rerunActionLabel: 'Refresh',
         };
@@ -1438,7 +1445,7 @@ export class ChatGooseContentApp {
       rawText,
       splitModeRequested: Boolean(result.splitModeRequested),
       debugPrompt: this.activeDebugPrompt ?? undefined,
-      anthropicSpend,
+      llmSpend,
       profiling,
       rerunActionLabel: 'Regenerate',
     };

@@ -165,20 +165,20 @@ export interface PromptTextBlock {
   cache_control?: PromptCacheControl;
 }
 
-export interface AnthropicCacheCreationUsage {
+export interface LlmCacheCreationUsage {
   ephemeral_5m_input_tokens: number;
   ephemeral_1h_input_tokens: number;
 }
 
-export interface AnthropicUsageMetrics {
+export interface LlmUsageMetrics {
   input_tokens: number;
   cache_creation_input_tokens: number;
   cache_read_input_tokens: number;
   output_tokens: number;
-  cache_creation?: AnthropicCacheCreationUsage;
+  cache_creation?: LlmCacheCreationUsage;
 }
 
-export interface AnthropicCostEstimate {
+export interface LlmCostEstimate {
   modelId: string;
   inputUsd: number;
   cacheWrite5mUsd: number;
@@ -189,7 +189,7 @@ export interface AnthropicCostEstimate {
   approximate: boolean;
 }
 
-export interface AnthropicSpendSummary {
+export interface LlmSpendSummary {
   totalTokens: number;
   inputTokens: number;
   cacheWriteTokens: number;
@@ -489,7 +489,7 @@ export interface FanSubscriptionContext {
   createdAtIso: string | null;
 }
 
-// ─── Subscription Tiers (from Claude — richer) ──────────────────────────
+// ─── Subscription Tiers (richer) ──────────────────────────
 
 export interface FanslySubscriptionTier {
   id: string;
@@ -599,8 +599,8 @@ export type OperationProfilingStageKey =
   | 'earnings'
   | 'subscription-lookup'
   | 'prompt-build'
-  | 'claude-ttfb'
-  | 'claude-stream';
+  | 'llm-ttfb'
+  | 'llm-stream';
 
 export type OperationProfilingStageStatus =
   | 'running'
@@ -628,8 +628,8 @@ export interface OperationProfilingSnapshot {
   activeLabel: string | null;
   logEntries: OperationProfilingLogEntry[];
   stages: OperationProfilingStage[];
-  anthropicUsage?: AnthropicUsageMetrics;
-  anthropicCost?: AnthropicCostEstimate;
+  llmUsage?: LlmUsageMetrics;
+  llmCost?: LlmCostEstimate;
 }
 
 // ─── Operation Progress ──────────────────────────────────────────────────
@@ -643,7 +643,7 @@ export interface OperationProgressPayload {
   message?: string;
   statusCode?: string;
   retryAtMs?: number;
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -840,7 +840,7 @@ export interface CompletePayload extends PortEnvelopeBase {
   operationId: string;
   result: FeatureResult;
   fanDisplayName: string;
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -848,7 +848,7 @@ export interface ErrorPayload extends PortEnvelopeBase {
   type: 'operation:error';
   operationId: string;
   error: UserFacingError;
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -856,7 +856,7 @@ export interface DiscardedPayload extends PortEnvelopeBase {
   type: 'operation:discarded';
   operationId: string;
   error: UserFacingError;
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -866,7 +866,7 @@ export interface CompareCardCompletePayload extends PortEnvelopeBase {
   cardId: string;
   result: FeatureResult;
   fanDisplayName: string;
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -875,7 +875,7 @@ export interface CompareCardErrorPayload extends PortEnvelopeBase {
   operationId: string;
   cardId: string;
   error: UserFacingError;
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
 }
 
@@ -967,7 +967,7 @@ export interface CompareInlineTabState {
   status: 'loading' | 'reply' | 'error';
   rawText: string;
   parts: OverlayInsertPart[];
-  anthropicSpend?: AnthropicSpendSummary;
+  llmSpend?: LlmSpendSummary;
   splitModeRequested?: boolean;
   error?: UserFacingError;
 }
@@ -992,7 +992,7 @@ export type OverlayViewModel =
       progress: OperationProgressPayload | null;
       rawText: string;
       debugPrompt?: PromptDebugSnapshot;
-      anthropicSpend?: AnthropicSpendSummary;
+      llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       canCancel: boolean;
       canRegenerate: boolean;
@@ -1007,7 +1007,7 @@ export type OverlayViewModel =
       rawText: string;
       splitModeRequested?: boolean;
       debugPrompt?: PromptDebugSnapshot;
-      anthropicSpend?: AnthropicSpendSummary;
+      llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       error?: UserFacingError;
@@ -1022,7 +1022,7 @@ export type OverlayViewModel =
       engagingParts: OverlayInsertPart[];
       flirtyParts: OverlayInsertPart[];
       parseFallback: boolean;
-      anthropicSpend?: AnthropicSpendSummary;
+      llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       debugPrompt?: PromptDebugSnapshot;
@@ -1041,7 +1041,7 @@ export type OverlayViewModel =
         recommendations: string | null;
         parseFallback: boolean;
       };
-      anthropicSpend?: AnthropicSpendSummary;
+      llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       debugPrompt?: PromptDebugSnapshot;
@@ -1053,7 +1053,7 @@ export type OverlayViewModel =
       fanDisplayName: string;
       operationId: string | null;
       debugPrompt?: PromptDebugSnapshot;
-      anthropicSpend?: AnthropicSpendSummary;
+      llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       error: UserFacingError;
     };
