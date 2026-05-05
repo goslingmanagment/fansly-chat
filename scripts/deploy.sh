@@ -146,7 +146,7 @@ stamp_guide_page_version() {
       },
       {
         description: "guide footer version",
-        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by Claude<\/p>)/,
+        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers<\/p>)/,
       },
     ];
 
@@ -177,7 +177,7 @@ stamp_changelog_page_version() {
       },
       {
         description: "changelog footer version",
-        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by Claude<\/p>)/,
+        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers<\/p>)/,
       },
     ];
 
