@@ -331,6 +331,26 @@ describe('ChatGooseContentApp', () => {
     }));
   });
 
+  it('shows an OpenRouter missing-key toast when the selected feature model uses OpenRouter', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState({
+      hasApiKey: false,
+      modelProviderByFeature: { 'fast-reply': 'openrouter' },
+    });
+    app.currentGroupId = 'group-1';
+
+    app.startFeature('fast-reply', false);
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
+      'OpenRouter API key not configured.',
+    );
+  });
+
   it('clears the cached result before rerunning Chat Review from the overlay', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

@@ -190,6 +190,17 @@ interface OperationPromptRequestArgs {
   promptCachingEnabled: boolean;
 }
 
+function buildModelProviderByFeature(
+  settings: Settings,
+): TabUiState['modelProviderByFeature'] {
+  return Object.fromEntries(
+    Object.entries(settings.featureModels).flatMap(([feature, modelId]) => {
+      const provider = getModelEntry(modelId)?.provider;
+      return provider ? [[feature, provider]] : [];
+    }),
+  ) as TabUiState['modelProviderByFeature'];
+}
+
 function buildLlmSpendPayload(
   llmSpend?: LlmSpendSummary,
 ): { llmSpend: LlmSpendSummary } | object {
@@ -671,6 +682,7 @@ export class OperationCoordinator {
       ),
       connected: Boolean(session?.connected),
       hasApiKey: Boolean(storage.settings.claudeApiKey || storage.settings.openRouterApiKey),
+      modelProviderByFeature: buildModelProviderByFeature(storage.settings),
       hasPersonalities: storage.personalities.length > 0,
       mappedPersonalityId,
       mappedPersonalityName,

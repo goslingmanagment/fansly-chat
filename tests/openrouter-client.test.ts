@@ -127,6 +127,36 @@ describe('OpenRouterClient', () => {
     });
   });
 
+  it('handles data-only Anthropic message events by using payload.type', async () => {
+    const onText = vi.fn();
+    const onUsage = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":8,"output_tokens":1}}}',
+        '',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}',
+        '',
+        'data: {"type":"message_delta","usage":{"output_tokens":2}}',
+        '',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    const rawText = await new OpenRouterClient().streamMessage(
+      streamArgs({ onText, onUsage }),
+    );
+
+    expect(rawText).toBe('hi');
+    expect(onText).toHaveBeenCalledWith('hi');
+    expect(onUsage).toHaveBeenLastCalledWith({
+      input_tokens: 8,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 2,
+    });
+  });
+
   it('preserves Anthropic-shaped cache read and write usage', async () => {
     const onUsage = vi.fn();
     mockFetchResponse(200, undefined, {
@@ -212,6 +242,23 @@ describe('OpenRouterClient', () => {
     await expect(new OpenRouterClient().streamMessage(streamArgs())).rejects.toThrow(
       expect.objectContaining({
         key: 'unknown_error',
+        details: expect.objectContaining({ provider: 'openrouter' }),
+      }),
+    );
+  });
+
+  it('classifies data-only stream error payloads before event validation', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'data: {"error":{"code":429,"message":"rate limit exceeded"}}',
+        '',
+        '',
+      ].join('\n'),
+    });
+
+    await expect(new OpenRouterClient().streamMessage(streamArgs())).rejects.toThrow(
+      expect.objectContaining({
+        key: 'rate_limited',
         details: expect.objectContaining({ provider: 'openrouter' }),
       }),
     );

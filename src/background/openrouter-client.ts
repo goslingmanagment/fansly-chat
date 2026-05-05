@@ -301,6 +301,8 @@ export class OpenRouterClient {
 
         let payload: {
           type?: string;
+          object?: string;
+          choices?: unknown[];
           message?: { usage?: OpenRouterUsagePayload };
           usage?: OpenRouterUsagePayload;
           delta?: { type?: string; text?: string };
@@ -314,20 +316,30 @@ export class OpenRouterClient {
 
         onProgress?.();
 
-        if (parsed.event === 'error' || payload.type === 'error') {
+        if (parsed.event === 'error' || payload.type === 'error' || payload.error) {
           throw buildOpenRouterError(0, payload.error ?? null);
         }
 
-        if (!SUPPORTED_OPENROUTER_SSE_EVENTS.has(parsed.event)) {
-          throw new ChatGooseError('unknown_error', {
-            details: {
-              provider: 'openrouter',
-              providerMessage: `Unsupported OpenRouter SSE event: ${parsed.event}`,
-            },
-          });
+        const effectiveEvent =
+          parsed.event === 'message' && typeof payload.type === 'string'
+            ? payload.type
+            : parsed.event;
+
+        if (!SUPPORTED_OPENROUTER_SSE_EVENTS.has(effectiveEvent)) {
+          if (payload.object === 'chat.completion.chunk' || Array.isArray(payload.choices)) {
+            throw new ChatGooseError('unknown_error', {
+              details: {
+                provider: 'openrouter',
+                providerMessage: 'Unsupported OpenRouter chat completion stream chunk',
+              },
+            });
+          }
+          // Ignore forward-compatible provider metadata events that do not map
+          // to Anthropic Messages streaming semantics.
+          continue;
         }
 
-        if (parsed.event === 'message_start') {
+        if (effectiveEvent === 'message_start') {
           const nextUsage = mergeUsage(usage, normalizeUsage(payload.message?.usage));
           if (!usageEquals(usage, nextUsage)) {
             usage = nextUsage;
@@ -339,7 +351,7 @@ export class OpenRouterClient {
           }
         }
 
-        if (parsed.event === 'message_delta') {
+        if (effectiveEvent === 'message_delta') {
           const nextUsage = mergeUsage(usage, normalizeUsage(payload.usage));
           if (!usageEquals(usage, nextUsage)) {
             usage = nextUsage;
@@ -352,7 +364,7 @@ export class OpenRouterClient {
         }
 
         if (
-          parsed.event === 'content_block_delta' &&
+          effectiveEvent === 'content_block_delta' &&
           payload.delta?.type === 'text_delta' &&
           payload.delta.text
         ) {
