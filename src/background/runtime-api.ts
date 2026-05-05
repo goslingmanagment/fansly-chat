@@ -93,7 +93,7 @@ export function registerRuntimeApi({
             mappedPersonalityId,
           ),
           connected,
-          hasApiKey: Boolean(state.settings.claudeApiKey),
+          hasApiKey: Boolean(state.settings.claudeApiKey || state.settings.openRouterApiKey),
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,

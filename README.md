@@ -1,6 +1,6 @@
 # ChatGoose
 
-A Firefox extension that gives Fansly chatters AI-powered tools for managing DM conversations on behalf of content creators. It intercepts Fansly session data, sends conversation context to Claude, and renders results in an overlay directly on the page.
+A Firefox extension that gives Fansly chatters AI-powered tools for managing DM conversations on behalf of content creators. It intercepts Fansly session data, sends conversation context to the selected AI model, and renders results in an overlay directly on the page.
 
 ## Who This Is For
 
@@ -28,13 +28,13 @@ Each suggestion has its own Insert button. Quick feature — 60-second timeout.
 
 Generates a profile of the fan covering interests, communication style, spending behavior, conversation patterns, and red flags. Uses deep message history (~1500 messages by default, configurable up to 3000) for a thorough read.
 
-Results are cached per conversation. If the personality hasn't changed since the last summary, the cached version is returned instantly. Deep feature — staged timeout guards (180s prep, 45s Claude TTFB/idle, 300s max stream).
+Results are cached per conversation. If the personality hasn't changed since the last summary, the cached version is returned instantly. Deep feature — staged timeout guards (180s prep, 45s AI TTFB/idle, 300s max stream).
 
 ### Chat Review
 
 Quality review of the chatter's performance with a 1–10 rating. Evaluates persona adherence, conversation quality, specific mistakes, monetization awareness, and fan handling. Returns a rating, evaluation, and recommendations.
 
-Uses deep message history. Deep feature — staged timeout guards (180s prep, 45s Claude TTFB/idle, 300s max stream).
+Uses deep message history. Deep feature — staged timeout guards (180s prep, 45s AI TTFB/idle, 300s max stream).
 
 ### Ping
 
@@ -53,14 +53,14 @@ If the fan has been active in the last 5 days, the ping is blocked — they don'
 │  (browser)  │  intercept headers  │                     │
 └─────────────┘                     │  - SessionStore     │
        ▲                            │  - FanslyClient     │
-       │  content script            │  - AnthropicClient  │
+       │  content script            │  - LlmClient        │
        │  (injected)                │  - OperationCoord.  │
        │                            └────────┬───────────┘
 ┌──────┴──────┐    Port messages         │
 │  Button Bar │ ◄──────────────────────► │
 │  Overlay UI │    start/cancel/         │
 │  Toasts     │    chunks/complete   ┌───┴───────────┐
-└─────────────┘                      │  Claude API   │
+└─────────────┘                      │  AI provider  │
                                      │  (streaming)  │
                                      └───────────────┘
 ```
@@ -69,7 +69,7 @@ If the fan has been active in the last 5 days, the ping is blocked — they don'
 
 2. **Content script** — Injected into `fansly.com`. Renders a button bar below the conversation and manages the overlay. Communicates with the background via a long-lived `runtime.Port` with auto-reconnect.
 
-3. **Operation flow** — When you click a feature button, the content script validates prerequisites (API key configured, personality assigned, session connected), then sends an `operation:start` message. The background loads messages from the Fansly API, builds a prompt with the conversation transcript and spending/subscription context, and streams the response from Claude. Text chunks are batched at 50ms intervals and forwarded to the content script for live rendering.
+3. **Operation flow** — When you click a feature button, the content script validates prerequisites (API key configured, personality assigned, session connected), then sends an `operation:start` message. The background loads messages from the Fansly API, builds a prompt with the conversation transcript and spending/subscription context, and streams the response from the selected AI provider. Text chunks are batched at 50ms intervals and forwarded to the content script for live rendering.
 
 4. **Overlay** — Results appear in a dark-themed overlay anchored to the conversation. Reply and ping results have Insert buttons. The overlay uses a shell-reuse pattern (outer frame created once, body swapped) and updates text nodes directly during streaming to prevent flicker.
 
@@ -78,7 +78,8 @@ If the fan has been active in the last 5 days, the ping is blocked — they don'
 ### Prerequisites
 
 - Firefox (tested on 128+)
-- A Claude API key from [console.anthropic.com](https://console.anthropic.com)
+- A Claude API key from [console.anthropic.com](https://console.anthropic.com) for Claude Direct models
+- Optional: an OpenRouter API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) for Gemini/Grok models
 - Node.js 18+ and npm
 
 ### Build
@@ -98,17 +99,27 @@ Output goes to `dist/`.
 
 The extension icon appears in the toolbar. Navigate to [fansly.com](https://fansly.com) and open a DM conversation — the ChatGoose button bar should appear.
 
-### Enter Your API Key
+### Enter Your API Keys
 
 1. Click the ChatGoose toolbar icon and choose **Open Settings** (or right-click the icon → Extension Options)
-2. Paste your Claude API key in the **API Configuration** section
-3. The key is stored in `browser.storage.local` and never leaves the extension except in direct calls to `api.anthropic.com`
+2. Paste your Claude API key for Claude Direct models, and/or your OpenRouter API key for OpenRouter models
+3. Keys are stored in `browser.storage.local` and only sent to their matching provider: Claude keys to `api.anthropic.com`, OpenRouter keys to `openrouter.ai`
+
+### AI Models
+
+Settings → **AI Models** lets you choose a model per feature. Claude Direct models continue to use Anthropic. OpenRouter currently supports only this curated whitelist:
+
+- `openrouter:google/gemini-3.1-pro-preview`
+- `openrouter:x-ai/grok-4.20`
+- `openrouter:x-ai/grok-4.3`
+
+Use `x-ai/grok-4.20` exactly. `x-ai/grok-4.2` is not a supported OpenRouter slug in ChatGoose.
 
 ## Configuration
 
 ### Personalities
 
-A personality is the voice profile Claude uses when generating replies. Each personality has a name and a content block — free-form instructions describing tone, style, boundaries, and any other behavioral guidance.
+A personality is the voice profile the selected AI model uses when generating replies. Each personality has a name and a content block — free-form instructions describing tone, style, boundaries, and any other behavioral guidance.
 
 In Settings → **Model Personalities**, create one or more personalities. Example:
 
@@ -153,7 +164,9 @@ npm run typecheck    # TypeScript strict check (tsc --noEmit)
 src/
 ├── background/          # Service worker — orchestration, API clients, session management
 │   ├── index.ts         # Composition root (dependency wiring)
+│   ├── llm-client.ts         # Provider routing
 │   ├── anthropic-client.ts   # Claude API streaming (SSE)
+│   ├── openrouter-client.ts  # OpenRouter Messages API streaming
 │   ├── fansly-client.ts      # Fansly API (messages, earnings, subscriptions)
 │   ├── operations.ts         # OperationCoordinator — main business logic
 │   ├── runtime-api.ts        # Popup/options message handlers
@@ -219,7 +232,7 @@ All tests should pass. No network calls — everything is unit-tested with mocks
 
 ### API Key Handling
 
-The Claude API key is stored in `browser.storage.local` and sent only to `api.anthropic.com`. It is never logged, included in Fansly API calls, or exposed to page scripts. The debug logger redacts any object property matching known sensitive key names.
+AI provider keys are stored in `browser.storage.local` and sent only to their matching provider. Claude Direct still uses `api.anthropic.com`; Gemini and Grok use `openrouter.ai`. Keys are never logged, included in Fansly API calls, or exposed to page scripts. The debug logger redacts known sensitive key names, including `claudeApiKey` and `openRouterApiKey`.
 
 ### Prompt Injection Protection
 

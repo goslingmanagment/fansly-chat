@@ -1,40 +1,38 @@
 import type { FeatureType, ModelSelectableFeatureType, Settings } from './types.js';
 import { FEATURE_POLICIES } from './features.js';
 import type { FeaturePolicy } from './features.js';
+export {
+  AI_MODEL_GROUPS,
+  AI_MODEL_IDS,
+  AI_MODELS,
+  CLAUDE_MODEL_IDS,
+  CLAUDE_MODELS,
+  DEFAULT_MODEL_ID,
+  LEGACY_CLAUDE_MODEL_IDS,
+  OPENROUTER_MODELS,
+} from './model-registry.js';
+import {
+  DEFAULT_FAN_SUMMARY_MODEL_ID,
+  DEFAULT_MODEL_ID,
+} from './model-registry.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 5;
+export const STORAGE_SCHEMA_VERSION = 6;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
 
-// ─── Claude API ──────────────────────────────────────────────────────────
+// ─── AI Provider APIs ────────────────────────────────────────────────────
 
-export const DEFAULT_MODEL_ID = 'claude-sonnet-4-6';
 export const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+export const OPENROUTER_MESSAGES_API_URL = 'https://openrouter.ai/api/v1/messages';
 export const ANTHROPIC_VERSION = '2023-06-01';
-
-export interface ClaudeModelEntry {
-  id: string;
-  label: string;
-  description: string;
-}
-
-export const CLAUDE_MODELS: ClaudeModelEntry[] = [
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Recommended' },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', description: 'Balanced' },
-  { id: 'claude-opus-4-6',   label: 'Claude Opus 4.6',   description: 'Best quality' },
-  { id: 'claude-opus-4-5',   label: 'Claude Opus 4.5',   description: 'Best quality (older)' },
-  { id: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5',  description: 'Fastest & cheapest' },
-];
-
-export const CLAUDE_MODEL_IDS = new Set(CLAUDE_MODELS.map((m) => m.id));
 
 export const DEFAULT_FEATURE_MODELS: Record<ModelSelectableFeatureType, string> = {
   'fast-reply': DEFAULT_MODEL_ID,
   'help-me': DEFAULT_MODEL_ID,
-  'fan-summary': 'claude-opus-4-6',
+  'fan-summary': DEFAULT_FAN_SUMMARY_MODEL_ID,
   'chat-review': DEFAULT_MODEL_ID,
   'ping': DEFAULT_MODEL_ID,
 };
@@ -152,6 +150,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
 
 export const DEFAULT_SETTINGS: Settings = {
   claudeApiKey: '',
+  openRouterApiKey: '',
   agencyHubBaseUrl: '',
   agencyHubApiKey: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,

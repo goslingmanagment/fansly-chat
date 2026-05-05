@@ -3,55 +3,11 @@ import type {
   AnthropicSpendSummary,
   AnthropicUsageMetrics,
 } from '../shared/types.js';
-
-interface AnthropicPricing {
-  inputUsdPerMillion: number;
-  cacheWrite5mUsdPerMillion: number;
-  cacheWrite1hUsdPerMillion: number;
-  cacheReadUsdPerMillion: number;
-  outputUsdPerMillion: number;
-}
+import { getModelEntry } from '../shared/model-registry.js';
+import type { ModelPricing } from '../shared/model-registry.js';
 
 const USD_PRECISION = 1_000_000;
 const TOKENS_PER_MILLION = 1_000_000;
-
-const MODEL_PRICING: Record<string, AnthropicPricing> = {
-  'claude-sonnet-4-5': {
-    inputUsdPerMillion: 3,
-    cacheWrite5mUsdPerMillion: 3.75,
-    cacheWrite1hUsdPerMillion: 6,
-    cacheReadUsdPerMillion: 0.30,
-    outputUsdPerMillion: 15,
-  },
-  'claude-sonnet-4-6': {
-    inputUsdPerMillion: 3,
-    cacheWrite5mUsdPerMillion: 3.75,
-    cacheWrite1hUsdPerMillion: 6,
-    cacheReadUsdPerMillion: 0.30,
-    outputUsdPerMillion: 15,
-  },
-  'claude-opus-4-5': {
-    inputUsdPerMillion: 15,
-    cacheWrite5mUsdPerMillion: 18.75,
-    cacheWrite1hUsdPerMillion: 30,
-    cacheReadUsdPerMillion: 1.50,
-    outputUsdPerMillion: 75,
-  },
-  'claude-opus-4-6': {
-    inputUsdPerMillion: 15,
-    cacheWrite5mUsdPerMillion: 18.75,
-    cacheWrite1hUsdPerMillion: 30,
-    cacheReadUsdPerMillion: 1.50,
-    outputUsdPerMillion: 75,
-  },
-  'claude-haiku-4-5': {
-    inputUsdPerMillion: 1,
-    cacheWrite5mUsdPerMillion: 1.25,
-    cacheWrite1hUsdPerMillion: 2,
-    cacheReadUsdPerMillion: 0.10,
-    outputUsdPerMillion: 5,
-  },
-};
 
 function roundUsd(value: number): number {
   return Math.round((value + Number.EPSILON) * USD_PRECISION) / USD_PRECISION;
@@ -61,12 +17,20 @@ function priceTokens(tokens: number, usdPerMillion: number): number {
   return roundUsd((Math.max(0, tokens) * usdPerMillion) / TOKENS_PER_MILLION);
 }
 
-function resolvePricing(modelId: string): AnthropicPricing {
-  const pricing = MODEL_PRICING[modelId];
-  if (!pricing) {
-    throw new Error(`Unsupported Anthropic model for cost estimation: ${modelId}`);
+function resolvePricing(modelId: string): {
+  normalizedModelId: string;
+  pricing: ModelPricing;
+  approximate: boolean;
+} {
+  const entry = getModelEntry(modelId);
+  if (!entry) {
+    throw new Error(`Unsupported model for cost estimation: ${modelId}`);
   }
-  return pricing;
+  return {
+    normalizedModelId: entry.id,
+    pricing: entry.pricing,
+    approximate: Boolean(entry.costApproximate),
+  };
 }
 
 function resolveCacheWriteTokens(
@@ -118,27 +82,35 @@ export function estimateAnthropicCost(
   modelId: string,
   usage: AnthropicUsageMetrics,
 ): AnthropicCostEstimate {
-  const pricing = resolvePricing(modelId);
+  const { normalizedModelId, pricing, approximate: modelApproximate } =
+    resolvePricing(modelId);
 
-  const { cacheWrite5mTokens, cacheWrite1hTokens, approximate } =
+  const { cacheWrite5mTokens, cacheWrite1hTokens, approximate: cacheApproximate } =
     resolveCacheWriteTokens(usage);
+  const unpricedCacheWrite =
+    usage.cache_creation_input_tokens > 0 &&
+    pricing.cacheWrite5mUsdPerMillion === undefined &&
+    pricing.cacheWrite1hUsdPerMillion === undefined;
+  const unpricedCacheRead =
+    usage.cache_read_input_tokens > 0 &&
+    pricing.cacheReadUsdPerMillion === undefined;
   const inputUsd = priceTokens(usage.input_tokens, pricing.inputUsdPerMillion);
   const cacheWrite5mUsd = priceTokens(
     cacheWrite5mTokens,
-    pricing.cacheWrite5mUsdPerMillion,
+    pricing.cacheWrite5mUsdPerMillion ?? 0,
   );
   const cacheWrite1hUsd = priceTokens(
     cacheWrite1hTokens,
-    pricing.cacheWrite1hUsdPerMillion,
+    pricing.cacheWrite1hUsdPerMillion ?? 0,
   );
   const cacheReadUsd = priceTokens(
     usage.cache_read_input_tokens,
-    pricing.cacheReadUsdPerMillion,
+    pricing.cacheReadUsdPerMillion ?? 0,
   );
   const outputUsd = priceTokens(usage.output_tokens, pricing.outputUsdPerMillion);
 
   return {
-    modelId,
+    modelId: normalizedModelId,
     inputUsd,
     cacheWrite5mUsd,
     cacheWrite1hUsd,
@@ -151,7 +123,11 @@ export function estimateAnthropicCost(
       cacheReadUsd +
       outputUsd,
     ),
-    approximate,
+    approximate:
+      modelApproximate ||
+      cacheApproximate ||
+      unpricedCacheWrite ||
+      unpricedCacheRead,
   };
 }
 
@@ -161,7 +137,7 @@ export function buildAnthropicSpendSummary(
   cost?: AnthropicCostEstimate,
 ): AnthropicSpendSummary {
   const resolvedCost = cost ?? estimateAnthropicCost(modelId, usage);
-  const pricing = resolvePricing(modelId);
+  const { pricing } = resolvePricing(modelId);
   const baselineInputTokens =
     usage.input_tokens +
     usage.cache_creation_input_tokens +

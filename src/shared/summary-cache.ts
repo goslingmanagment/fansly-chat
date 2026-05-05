@@ -1,4 +1,5 @@
 import { SUMMARY_CACHE_PREFIX } from './constants.js';
+import { modelSelectionsEquivalent } from './model-registry.js';
 import type { PersistedState, SummaryCacheEntry } from './types.js';
 
 export function isValidSummaryCacheEntry(
@@ -11,7 +12,7 @@ export function isValidSummaryCacheEntry(
     entry &&
     entry.personalityId === personalityId &&
     entry.personalityUpdatedAt === personalityUpdatedAt &&
-    entry.modelId === modelId &&
+    modelSelectionsEquivalent(entry.modelId, modelId) &&
     entry.spendingDataVerified === true &&
     entry.subscriptionLookupVerified === true
   );

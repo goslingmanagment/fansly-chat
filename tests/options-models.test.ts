@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { CLAUDE_MODELS, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { AI_MODELS, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import {
   BUNDLED_LORA_PERSONALITY_VERSION,
   createBundledPersonalities,
@@ -16,6 +16,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       quickMessageCount: 30,
@@ -123,7 +124,7 @@ describe('Options page — AI Models section', () => {
     expect(labels).toEqual(EXPECTED_LABELS);
   });
 
-  it('each dropdown contains all CLAUDE_MODELS in registry order', async () => {
+  it('each dropdown contains all AI models grouped by provider in registry order', async () => {
     await loadOptionsPage(makeState());
 
     const root = document.getElementById('chatgoose-options-root')!;
@@ -131,10 +132,14 @@ describe('Options page — AI Models section', () => {
 
     for (const select of selects) {
       const options = Array.from(select.options);
-      expect(options.length).toBe(CLAUDE_MODELS.length);
+      expect(options.length).toBe(AI_MODELS.length);
       options.forEach((opt, i) => {
-        expect(opt.value).toBe(CLAUDE_MODELS[i]!.id);
+        expect(opt.value).toBe(AI_MODELS[i]!.id);
       });
+      expect(Array.from(select.querySelectorAll('optgroup')).map((group) => group.label)).toEqual([
+        'Anthropic Direct',
+        'OpenRouter',
+      ]);
     }
   });
 
@@ -153,8 +158,8 @@ describe('Options page — AI Models section', () => {
     for (const select of selects) {
       values[select.dataset.feature!] = select.value;
     }
-    expect(values['fan-summary']).toBe('claude-opus-4-6');
-    expect(values['ping']).toBe('claude-haiku-4-5');
+    expect(values['fan-summary']).toBe('anthropic:claude-opus-4-6');
+    expect(values['ping']).toBe('anthropic:claude-haiku-4-5');
     expect(values['fast-reply']).toBe(DEFAULT_FEATURE_MODELS['fast-reply']);
   });
 
@@ -168,6 +173,32 @@ describe('Options page — AI Models section', () => {
     const checkbox = promptCachingLabel?.querySelector<HTMLInputElement>('input[type="checkbox"]');
 
     expect(checkbox?.checked).toBe(true);
+  });
+
+  it('renders an OpenRouter API key field', async () => {
+    await loadOptionsPage(makeState({ openRouterApiKey: 'sk-or-v1-test' }));
+
+    const labels = Array.from(document.querySelectorAll('label'));
+    const openRouterLabel = labels.find((label) =>
+      label.textContent?.includes('OpenRouter API key'),
+    );
+    const input = openRouterLabel?.querySelector<HTMLInputElement>('input[type="password"]');
+
+    expect(input?.value).toBe('sk-or-v1-test');
+  });
+
+  it('warns when an OpenRouter model is selected without an OpenRouter key', async () => {
+    await loadOptionsPage(makeState({
+      openRouterApiKey: '',
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fast-reply': 'openrouter:x-ai/grok-4.3',
+      },
+    }));
+
+    expect(document.body.textContent).toContain(
+      'OpenRouter model selected: add an OpenRouter API key before using those features.',
+    );
   });
 
   it('initializes the separate improve message count input from persisted settings', async () => {
@@ -215,7 +246,7 @@ describe('Options page — AI Models section', () => {
       'select.chatgoose-select[data-feature="fan-summary"]',
     )!;
 
-    summarySelect.value = 'claude-opus-4-6';
+    summarySelect.value = 'anthropic:claude-opus-4-6';
     summarySelect.dispatchEvent(new Event('change'));
 
     // Wait for debounced save (350ms)
@@ -225,7 +256,7 @@ describe('Options page — AI Models section', () => {
 
     const saved = savedSettings as { featureModels?: Record<string, string> };
     expect(saved.featureModels).toBeDefined();
-    expect(saved.featureModels!['fan-summary']).toBe('claude-opus-4-6');
+    expect(saved.featureModels!['fan-summary']).toBe('anthropic:claude-opus-4-6');
   });
 
   it('saves promptCachingEnabled when the checkbox changes', async () => {

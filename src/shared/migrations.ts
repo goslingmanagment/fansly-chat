@@ -11,6 +11,7 @@ import type { PersistedState, Settings } from './types.js';
 export function createDefaultSettings(): Settings {
   return {
     claudeApiKey: '',
+    openRouterApiKey: '',
     agencyHubBaseUrl: '',
     agencyHubApiKey: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
@@ -45,6 +46,10 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
 
   return {
     claudeApiKey: legacyClaudeApiKey,
+    openRouterApiKey:
+      typeof raw?.openRouterApiKey === 'string'
+        ? raw.openRouterApiKey
+        : defaults.openRouterApiKey,
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
     agencyHubApiKey:

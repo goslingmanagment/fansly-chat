@@ -14,6 +14,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       claudeApiKey: 'sk-test',
+      openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       quickMessageCount: 30,

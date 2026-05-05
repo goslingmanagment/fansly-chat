@@ -331,8 +331,27 @@ describe('sanitizeSettings', () => {
         'ping': DEFAULT_MODEL_ID,
       },
     });
-    expect(result.featureModels['fast-reply']).toBe('claude-haiku-4-5');
-    expect(result.featureModels['fan-summary']).toBe('claude-opus-4-6');
+    expect(result.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
+    expect(result.featureModels['fan-summary']).toBe('anthropic:claude-opus-4-6');
+  });
+
+  it('preserves provider-aware OpenRouter model choices', () => {
+    const result = storage.sanitizeSettings({
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fast-reply': 'openrouter:x-ai/grok-4.3',
+      },
+    });
+
+    expect(result.featureModels['fast-reply']).toBe('openrouter:x-ai/grok-4.3');
+  });
+
+  it('preserves the OpenRouter API key', () => {
+    const result = storage.sanitizeSettings({
+      openRouterApiKey: '  sk-or-v1-test  ',
+    });
+
+    expect(result.openRouterApiKey).toBe('sk-or-v1-test');
   });
 
   it('falls back to default for unknown model IDs', () => {
@@ -354,7 +373,7 @@ describe('sanitizeSettings', () => {
         'fast-reply': 'claude-haiku-4-5',
       } as Record<FeatureType, string>,
     });
-    expect(result.featureModels['fast-reply']).toBe('claude-haiku-4-5');
+    expect(result.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
     expect(result.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
     expect(result.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
     expect(result.featureModels['chat-review']).toBe(DEFAULT_MODEL_ID);
@@ -522,7 +541,7 @@ describe('loadStorageState', () => {
       knownAccounts: [],
     };
     const result = await storage.loadStorageState();
-    expect(result.settings.featureModels['fast-reply']).toBe('claude-haiku-4-5');
+    expect(result.settings.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
     expect(result.settings.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
     expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
   });

@@ -38,9 +38,23 @@ describe('logDebug', () => {
     spy.mockRestore();
   });
 
+  it('redacts openRouterApiKey', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    logDebug(true, 'test', { openRouterApiKey: 'sk-or-v1-secret' });
+    expect(spy).toHaveBeenCalledWith('[ChatGoose] test', { openRouterApiKey: '[REDACTED]' });
+    spy.mockRestore();
+  });
+
   it('redacts sk-ant-* patterns in string values', () => {
     const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     logDebug(true, 'test', { note: 'key is sk-ant-abc123_XYZ ok' });
+    expect(spy).toHaveBeenCalledWith('[ChatGoose] test', { note: 'key is [REDACTED] ok' });
+    spy.mockRestore();
+  });
+
+  it('redacts sk-or-v1-* patterns in string values', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    logDebug(true, 'test', { note: 'key is sk-or-v1-abc123_XYZ ok' });
     expect(spy).toHaveBeenCalledWith('[ChatGoose] test', { note: 'key is [REDACTED] ok' });
     spy.mockRestore();
   });
@@ -79,6 +93,7 @@ describe('isDebugEnabled', () => {
   it('returns true when debugMode is true', () => {
     expect(isDebugEnabled({
       claudeApiKey: '',
+      openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       quickMessageCount: 100,
@@ -94,6 +109,7 @@ describe('isDebugEnabled', () => {
   it('returns false when debugMode is false', () => {
     expect(isDebugEnabled({
       claudeApiKey: '',
+      openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       quickMessageCount: 100,

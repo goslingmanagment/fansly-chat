@@ -1307,7 +1307,7 @@
     <div class="flow-arrow">&rarr;</div>
     <div class="flow-step">&#128221; Сборка промпта</div>
     <div class="flow-arrow">&rarr;</div>
-    <div class="flow-step">&#129302; Claude API</div>
+    <div class="flow-step">&#129302; AI Provider</div>
     <div class="flow-arrow">&rarr;</div>
     <div class="flow-step">&#128172; Стриминг ответа</div>
     <div class="flow-arrow">&rarr;</div>
@@ -1346,8 +1346,8 @@
         <p>Нажмите на иконку ChatGoose в панели Firefox &rarr; «Open Settings». Или правый клик на иконку &rarr; «Manage Extension» &rarr; «Preferences».</p>
       </li>
       <li>
-        <h4>Введите Claude API Key</h4>
-        <p>Получите ключ на <strong>console.anthropic.com</strong> и вставьте в поле «Claude API Key». Ключ хранится локально и отправляется только в API Anthropic.</p>
+        <h4>Введите API-ключи</h4>
+        <p>Для Claude Direct получите ключ на <strong>console.anthropic.com</strong>. Для Gemini/Grok получите OpenRouter key на <strong>openrouter.ai/settings/keys</strong>. Каждый ключ хранится локально и отправляется только своему провайдеру.</p>
       </li>
       <li>
         <h4>Создайте личность</h4>
@@ -1375,7 +1375,11 @@
     <div class="settings-group-title">&#128273; API</div>
     <div class="setting-row">
       <div class="setting-name">Claude API Key</div>
-      <div class="setting-desc">Ключ доступа к Anthropic API. Обязательное поле. Хранится локально, отправляется только на <code>api.anthropic.com</code>. Никогда не логируется.</div>
+      <div class="setting-desc">Ключ доступа к Anthropic API для Claude Direct. Хранится локально, отправляется только на <code>api.anthropic.com</code>. Никогда не логируется.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">OpenRouter API Key</div>
+      <div class="setting-desc">Ключ OpenRouter для Gemini и Grok. Хранится локально, отправляется только на <code>openrouter.ai</code>. Нужен, если выбрана модель из группы OpenRouter.</div>
     </div>
     <div class="setting-row">
       <div class="setting-name">Agency Hub URL</div>
@@ -1448,8 +1452,8 @@
 <section id="models" class="section">
   <div class="section-header">
     <span class="section-label">AI-модели</span>
-    <h2>Выбор модели Claude</h2>
-    <p class="section-desc">Каждую функцию можно настроить на свою модель. Баланс качества, скорости и цены.</p>
+    <h2>Выбор AI-модели</h2>
+    <p class="section-desc">Каждую функцию можно настроить на свою модель. Claude Direct использует Anthropic, Gemini и Grok используют OpenRouter.</p>
   </div>
 
   <div class="feature-detail">
@@ -1464,28 +1468,43 @@
       <tbody>
         <tr>
           <td>Claude Sonnet 4.6 <span class="model-rec">default</span></td>
-          <td><code>claude-sonnet-4-6</code></td>
+          <td><code>anthropic:claude-sonnet-4-6</code></td>
           <td>Рекомендуемая. Оптимальный баланс качества, скорости и стоимости</td>
         </tr>
         <tr>
           <td>Claude Sonnet 4.5</td>
-          <td><code>claude-sonnet-4-5</code></td>
+          <td><code>anthropic:claude-sonnet-4-5</code></td>
           <td>Сбалансированная. Предыдущая версия Sonnet</td>
         </tr>
         <tr>
           <td>Claude Opus 4.6</td>
-          <td><code>claude-opus-4-6</code></td>
+          <td><code>anthropic:claude-opus-4-6</code></td>
           <td>Лучшее качество. Самая мощная, но дороже и медленнее</td>
         </tr>
         <tr>
           <td>Claude Opus 4.5</td>
-          <td><code>claude-opus-4-5</code></td>
+          <td><code>anthropic:claude-opus-4-5</code></td>
           <td>Лучшее качество (старше). Предыдущая версия Opus</td>
         </tr>
         <tr>
           <td>Claude Haiku 4.5</td>
-          <td><code>claude-haiku-4-5</code></td>
+          <td><code>anthropic:claude-haiku-4-5</code></td>
           <td>Самая быстрая и дешёвая. Для простых задач и высокого объёма</td>
+        </tr>
+        <tr>
+          <td>Gemini 3.1 Pro Preview</td>
+          <td><code>openrouter:google/gemini-3.1-pro-preview</code></td>
+          <td>OpenRouter. Ключ OpenRouter обязателен</td>
+        </tr>
+        <tr>
+          <td>Grok 4.20</td>
+          <td><code>openrouter:x-ai/grok-4.20</code></td>
+          <td>OpenRouter. Используйте именно <code>x-ai/grok-4.20</code>, не <code>x-ai/grok-4.2</code></td>
+        </tr>
+        <tr>
+          <td>Grok 4.3</td>
+          <td><code>openrouter:x-ai/grok-4.3</code></td>
+          <td>OpenRouter. Стоимость в ChatGoose считается по base-tier; выше 200k total tokens у OpenRouter может быть дороже</td>
         </tr>
       </tbody>
     </table>
@@ -1493,12 +1512,12 @@
 
   <div class="info-box tip">
     <strong>Рекомендация</strong>
-    Используйте Sonnet для Reply и Help Me (скорость важна), Opus для Summary и Chat Review (качество важнее), Haiku для Polish (простая задача). Настроить можно в разделе «Feature Models» в настройках.
+    Используйте Sonnet для Reply и Help Me (скорость важна), Opus для Summary и Chat Review (качество важнее), Haiku для Polish (простая задача). Gemini/Grok можно выбрать в группе OpenRouter, если добавлен OpenRouter API key.
   </div>
 
   <div class="feature-detail" style="margin-top: 20px;">
     <h4>Какая модель используется для чего</h4>
-    <p>По умолчанию все функции используют <strong>Claude Sonnet 4.6</strong>, но вы можете назначить отдельную модель для каждой из пяти функций: Reply, Help Me, Summary, Chat Review и Ping. Polish (Fix) использует ту же модель, что и Reply.</p>
+    <p>По умолчанию функции используют <strong>Claude Sonnet 4.6</strong> (а Summary — Claude Opus 4.6), но вы можете назначить отдельную модель для Reply, Help Me, Summary, Chat Review и Ping. Polish (Fix) использует ту же модель, что и Reply.</p>
 
     <div class="cmp-grid" style="margin-top: 16px;">
       <div class="cmp-card quick">
@@ -1537,7 +1556,7 @@
       <div class="security-icon">&#128274;</div>
       <div>
         <h4>API-ключ</h4>
-        <p>Хранится в browser.storage.local. Отправляется только на api.anthropic.com. Никогда не логируется, не передаётся третьим сторонам.</p>
+        <p>Хранятся в browser.storage.local. Claude key отправляется только на api.anthropic.com, OpenRouter key — только на openrouter.ai. Ключи не логируются и не передаются в Fansly.</p>
       </div>
     </div>
     <div class="security-item">
@@ -1565,7 +1584,7 @@
       <div class="security-icon">&#127760;</div>
       <div>
         <h4>Минимум разрешений</h4>
-        <p>Расширение запрашивает доступ только к fansly.com, apiv3.fansly.com и api.anthropic.com. Никаких лишних хостов.</p>
+        <p>Расширение запрашивает доступ только к fansly.com, apiv3.fansly.com, api.anthropic.com и openrouter.ai. Никаких лишних хостов.</p>
       </div>
     </div>
     <div class="security-item">
@@ -1644,7 +1663,7 @@
     <div class="faq-q">Безопасно ли вводить API-ключ?</div>
     <div class="faq-a">
       <div class="faq-a-inner">
-        API-ключ хранится в локальном хранилище браузера и отправляется исключительно на api.anthropic.com в заголовке авторизации. Он не передаётся ни на какие другие серверы, не логируется и не включается в промпты. Но помните: любой, кто имеет доступ к вашему профилю Firefox, теоретически может прочитать хранилище расширения.
+        API-ключи хранятся в локальном хранилище браузера и отправляются только соответствующему провайдеру: Claude key на api.anthropic.com, OpenRouter key на openrouter.ai. Они не логируются и не включаются в промпты. Но помните: любой, кто имеет доступ к вашему профилю Firefox, теоретически может прочитать хранилище расширения.
       </div>
     </div>
   </div>
@@ -1653,7 +1672,7 @@
     <div class="faq-q">Сколько стоит использование?</div>
     <div class="faq-a">
       <div class="faq-a-inner">
-        Расширение само по себе бесплатно. Оплачивается только использование Claude API по тарифам Anthropic. Стоимость зависит от выбранной модели и объёма текста. В оверлее после генерации показывается стоимость каждого запроса. Prompt Caching помогает снизить расходы при повторных запросах.
+        Расширение само по себе бесплатно. Оплачивается использование выбранного AI-провайдера: Anthropic для Claude Direct или OpenRouter для Gemini/Grok. Стоимость зависит от выбранной модели и объёма текста. В оверлее после генерации показывается стоимость каждого запроса.
       </div>
     </div>
   </div>
@@ -1668,7 +1687,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.0.1 &middot; Gosling Agency &middot; Powered by Claude</p>
+  <p>v1.0.1 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
 </footer>
 
 <!-- ─── FAQ Toggle Script ────────────────────────────────────────────── -->

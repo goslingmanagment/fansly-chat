@@ -412,11 +412,62 @@
 
 <div class="timeline">
 
+  <!-- 1.3.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.0</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          ChatGoose теперь умеет работать не только с Claude Direct, но и с OpenRouter. Это даёт доступ к Gemini и Grok
+          прямо из настроек, без изменения привычного workflow: выбираете модель для каждой функции отдельно, а ChatGoose
+          сам отправляет запрос нужному провайдеру.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Добавлена поддержка OpenRouter как второго AI-провайдера</li>
+          <li>В настройках появилось отдельное поле <strong>OpenRouter API Key</strong></li>
+          <li>В выборе моделей появились две группы: <strong>Anthropic Direct</strong> и <strong>OpenRouter</strong></li>
+          <li>Добавлены OpenRouter-модели: <strong>Gemini 3.1 Pro Preview</strong>, <strong>Grok 4.20</strong>, <strong>Grok 4.3</strong></li>
+          <li>Модель можно выбирать отдельно для каждой функции: Reply, Help Me, Summary, Review и Ping</li>
+          <li>Claude продолжает работать напрямую через Anthropic, как раньше</li>
+          <li>Старые Claude-настройки сохраняются и мигрируют автоматически</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Что это даёт</div>
+        <ul class="changes-list">
+          <li>Можно тестировать Gemini и Grok на реальных чатах, не отключая Claude</li>
+          <li>Быстрые ответы, summaries и reviews можно сравнивать на разных моделях</li>
+          <li>Для дорогих или экспериментальных моделей можно включать OpenRouter только на отдельных функциях</li>
+          <li>Если OpenRouter key не добавлен, ChatGoose заранее покажет понятное предупреждение</li>
+          <li>OpenRouter-модели не подменяются Claude автоматически: выбранная модель остаётся явной</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Новые сохранённые model ids теперь provider-aware: <code>anthropic:...</code> и <code>openrouter:...</code></li>
+          <li>Старые bare Claude ids вроде <code>claude-sonnet-4-6</code> остаются совместимыми и нормализуются автоматически</li>
+          <li>OpenRouter работает через Anthropic-compatible endpoint <code>/api/v1/messages</code></li>
+          <li>Live smoke прошёл для <code>google/gemini-3.1-pro-preview</code>, <code>x-ai/grok-4.20</code> и <code>x-ai/grok-4.3</code></li>
+          <li>Стоимость считается из локального model registry</li>
+          <li>Для Grok учитываются <code>cache_read_input_tokens</code>, которые OpenRouter возвращает в usage</li>
+          <li>Для Grok 4.3 оценка стоимости помечается approximate: OpenRouter может применять tiered pricing выше 200k total tokens</li>
+          <li><code>x-ai/grok-4.20</code> — поддерживаемый slug. <code>x-ai/grok-4.2</code> не используется и не добавлен</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.2.17 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.2.17</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -694,7 +745,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.2.2 &middot; Gosling Agency &middot; Powered by Claude</p>
+  <p>v1.2.2 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
 </footer>
 
 </body>

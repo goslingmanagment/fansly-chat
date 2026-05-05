@@ -62,4 +62,58 @@ describe('Anthropic spend summary', () => {
       approximate: false,
     });
   });
+
+  it('uses OpenRouter registry pricing including priced Grok cache reads', () => {
+    const usage = {
+      input_tokens: 1_000_000,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    };
+
+    const cost = estimateAnthropicCost('openrouter:x-ai/grok-4.20', usage);
+    const summary = buildAnthropicSpendSummary('openrouter:x-ai/grok-4.20', usage, cost);
+
+    expect(cost).toMatchObject({
+      modelId: 'openrouter:x-ai/grok-4.20',
+      inputUsd: 1.25,
+      cacheReadUsd: 0.2,
+      outputUsd: 2.5,
+      totalUsd: 3.95,
+      approximate: false,
+    });
+    expect(summary).toMatchObject({
+      totalTokens: 3_000_000,
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 1_000_000,
+      cacheReadUsd: 0.2,
+      cacheEffectKind: 'saved',
+      approximate: false,
+    });
+  });
+
+  it('marks costs approximate when a model reports cache reads without cache pricing', () => {
+    const cost = estimateAnthropicCost('openrouter:google/gemini-3.1-pro-preview', {
+      input_tokens: 100,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 10,
+      output_tokens: 100,
+    });
+
+    expect(cost.cacheReadUsd).toBe(0);
+    expect(cost.approximate).toBe(true);
+  });
+
+  it('marks Grok 4.3 costs approximate because OpenRouter tiering can apply', () => {
+    const cost = estimateAnthropicCost('openrouter:x-ai/grok-4.3', {
+      input_tokens: 100,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 100,
+    });
+
+    expect(cost.approximate).toBe(true);
+  });
 });

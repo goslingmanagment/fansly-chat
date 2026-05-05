@@ -3,11 +3,12 @@ import type { SessionTemplate, Settings } from './types.js';
 const SENSITIVE_KEY_PATTERNS = [
   'authorization',
   'claudeapikey',
+  'openrouterapikey',
   'agencyhubapikey',
   'fanslyclient',
   'fanslysession',
 ];
-const API_KEY_REGEX = /sk-ant-[a-zA-Z0-9_-]+/g;
+const API_KEY_REGEX = /(sk-ant-[a-zA-Z0-9_-]+|sk-or-v1-[a-zA-Z0-9_-]+)/g;
 
 function serializeError(error: Error): Record<string, unknown> {
   const serialized: Record<string, unknown> = {

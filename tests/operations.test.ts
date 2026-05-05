@@ -13,6 +13,7 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { ChatGooseError } from '../src/shared/errors.js';
+import { getAgencyHubModelId } from '../src/shared/model-registry.js';
 import { flattenPromptBlocks } from '../src/shared/prompts.js';
 import type {
   AggregatedEarnings,
@@ -2068,7 +2069,7 @@ describe('OperationCoordinator', () => {
     );
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
-    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude cost: model=claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude cost: model=anthropic:claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);
     expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',
@@ -3452,8 +3453,82 @@ describe('OperationCoordinator', () => {
     });
 
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-haiku-4-5' }),
+      expect.objectContaining({ model: 'anthropic:claude-haiku-4-5' }),
     );
+  });
+
+  it('routes OpenRouter selections through the shared stream client with provider-aware settings', async () => {
+    (mockStorage.settings as Record<string, unknown>).openRouterApiKey = 'sk-or-v1-test';
+    (mockStorage.settings as Record<string, unknown>).claudeApiKey = '';
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'openrouter:x-ai/grok-4.3',
+    };
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => 'OpenRouter reply'),
+    };
+    const { coordinator } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'openrouter:x-ai/grok-4.3',
+        settings: expect.objectContaining({
+          claudeApiKey: '',
+          openRouterApiKey: 'sk-or-v1-test',
+        }),
+      }),
+    );
+  });
+
+  it('does not fallback from an unavailable OpenRouter model to Claude or another OpenRouter model', async () => {
+    (mockStorage.settings as Record<string, unknown>).openRouterApiKey = 'sk-or-v1-test';
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'openrouter:x-ai/grok-4.20',
+    };
+
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        throw new ChatGooseError('model_unavailable', {
+          details: { provider: 'openrouter' },
+        });
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'model_unavailable',
+      code: 'CG-API-03',
+    });
+    expect(errorMessage?.error.message).toBe('Selected OpenRouter model is unavailable.');
   });
 
   it('passes the configured temperature for each operation type', async () => {
@@ -3534,7 +3609,7 @@ describe('OperationCoordinator', () => {
 
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: 'claude-haiku-4-5',
+        model: 'anthropic:claude-haiku-4-5',
         feature: 'improve-draft',
       }),
     );
@@ -3625,7 +3700,7 @@ describe('OperationCoordinator', () => {
     const anthropicClient = {
       streamMessage: vi.fn(async ({ model }: { model: string }) => {
         callCount++;
-        if (callCount === 1 && model === 'claude-opus-4-5') {
+        if (callCount === 1 && model === 'anthropic:claude-opus-4-5') {
           throw new ChatGooseError('model_unavailable');
         }
         return 'Fallback result';
@@ -3648,7 +3723,7 @@ describe('OperationCoordinator', () => {
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
     expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ model: 'claude-opus-4-5' }),
+      expect.objectContaining({ model: 'anthropic:claude-opus-4-5' }),
     );
     expect(anthropicClient.streamMessage).toHaveBeenNthCalledWith(
       2,
@@ -3874,7 +3949,7 @@ describe('OperationCoordinator', () => {
     expect(waitingMessage).toMatchObject({
       phase: 'generating',
       statusCode: 'CG-API-05',
-      message: 'Claude unavailable. Retrying…',
+      message: 'Anthropic Direct unavailable. Retrying…',
     });
     expect(typeof waitingMessage?.retryAtMs).toBe('number');
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
@@ -3949,7 +4024,7 @@ describe('OperationCoordinator', () => {
     // Cache had modelId from default but we're using claude-haiku-4-5 — should miss
     expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
     expect(anthropicClient.streamMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-haiku-4-5' }),
+      expect.objectContaining({ model: 'anthropic:claude-haiku-4-5' }),
     );
 
     const completeMessage = postedMessages(port).find(
@@ -4399,7 +4474,7 @@ describe('OperationCoordinator', () => {
       expect.objectContaining({
         clientEventId: 'reply-op',
         feature: 'fast-reply',
-        model: DEFAULT_MODEL_ID,
+        model: getAgencyHubModelId(DEFAULT_MODEL_ID),
         inputTokens: 120,
         outputTokens: 16,
         cacheWriteTokens: 8,
@@ -4411,6 +4486,52 @@ describe('OperationCoordinator', () => {
         completedAt: new Date(currentNow).toISOString(),
       }),
     );
+  });
+
+  it('reports canonical OpenRouter model ids to Agency Hub usage', async () => {
+    (mockStorage.settings as Record<string, unknown>).openRouterApiKey = 'sk-or-v1-test';
+    (mockStorage.settings as Record<string, unknown>).featureModels = {
+      ...DEFAULT_FEATURE_MODELS,
+      'fast-reply': 'openrouter:x-ai/grok-4.3',
+    };
+    const agencyHubUsageReporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({
+      agencyHubUsageReporter,
+      anthropicClient: {
+        streamMessage: vi.fn(async ({ onUsage }: {
+          onUsage?: (usage: {
+            input_tokens: number;
+            cache_creation_input_tokens: number;
+            cache_read_input_tokens: number;
+            output_tokens: number;
+          }) => void;
+        }) => {
+          onUsage?.({
+            input_tokens: 10,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            output_tokens: 5,
+          });
+          return 'OpenRouter reply';
+        }),
+      },
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
+      clientEventId: 'reply-op',
+      model: 'openrouter:x-ai/grok-4.3',
+    });
   });
 
   it('keeps feature names for improve-draft and hi-greeting while using the shared fast-reply model config', async () => {
@@ -4454,12 +4575,12 @@ describe('OperationCoordinator', () => {
     expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
       clientEventId: 'improve-op',
       feature: 'improve-draft',
-      model: DEFAULT_MODEL_ID,
+      model: getAgencyHubModelId(DEFAULT_MODEL_ID),
     });
     expect(agencyHubUsageReporter.enqueue.mock.calls[1]?.[1]).toMatchObject({
       clientEventId: 'hi-op',
       feature: 'hi-greeting',
-      model: DEFAULT_MODEL_ID,
+      model: getAgencyHubModelId(DEFAULT_MODEL_ID),
     });
   });
 
@@ -4483,7 +4604,7 @@ describe('OperationCoordinator', () => {
     expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
       clientEventId: 'summary-op',
       feature: 'fan-summary',
-      model: DEFAULT_FEATURE_MODELS['fan-summary'],
+      model: getAgencyHubModelId(DEFAULT_FEATURE_MODELS['fan-summary']),
       inputTokens: 0,
       outputTokens: 0,
       cacheWriteTokens: 0,
@@ -4537,7 +4658,7 @@ describe('OperationCoordinator', () => {
     expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
       clientEventId: 'summary-op',
       feature: 'fan-summary',
-      model: DEFAULT_FEATURE_MODELS['fan-summary'],
+      model: getAgencyHubModelId(DEFAULT_FEATURE_MODELS['fan-summary']),
       inputTokens: 0,
       outputTokens: 0,
       cacheWriteTokens: 0,
@@ -4638,7 +4759,7 @@ describe('OperationCoordinator', () => {
         }) => void;
       }) => {
         callCount += 1;
-        if (callCount === 1 && model === 'claude-opus-4-5') {
+        if (callCount === 1 && model === 'anthropic:claude-opus-4-5') {
           throw new ChatGooseError('model_unavailable');
         }
         onUsage?.({
@@ -4669,7 +4790,7 @@ describe('OperationCoordinator', () => {
     expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(1);
     expect(agencyHubUsageReporter.enqueue.mock.calls[0]?.[1]).toMatchObject({
       clientEventId: 'reply-op',
-      model: DEFAULT_MODEL_ID,
+      model: getAgencyHubModelId(DEFAULT_MODEL_ID),
     });
   });
 
@@ -4731,7 +4852,7 @@ describe('OperationCoordinator', () => {
     for (const [, event] of agencyHubUsageReporter.enqueue.mock.calls) {
       expect(event).toMatchObject({
         feature: 'fast-reply',
-        model: DEFAULT_MODEL_ID,
+        model: getAgencyHubModelId(DEFAULT_MODEL_ID),
         conversationId: 'group-1',
         isCacheHit: false,
         isRegeneration: false,
@@ -4842,7 +4963,7 @@ describe('OperationCoordinator', () => {
           output_tokens: number;
         }) => void;
       }) => {
-        if (model === 'claude-opus-4-5') {
+        if (model === 'anthropic:claude-opus-4-5') {
           throw new ChatGooseError('model_unavailable');
         }
         onUsage?.({
@@ -4872,7 +4993,7 @@ describe('OperationCoordinator', () => {
     expect(agencyHubUsageReporter.enqueue).toHaveBeenCalledTimes(2);
     for (const [, event] of agencyHubUsageReporter.enqueue.mock.calls) {
       expect(event).toMatchObject({
-        model: DEFAULT_MODEL_ID,
+        model: getAgencyHubModelId(DEFAULT_MODEL_ID),
         feature: 'fast-reply',
         isRegeneration: true,
       });
