@@ -511,7 +511,7 @@ describe('ChatGooseContentApp', () => {
       operationId: 'improve-op',
       feature: 'improve-draft',
       phase: 'generating',
-      anthropicSpend: {
+      llmSpend: {
         totalTokens: 123,
         inputTokens: 100,
         cacheWriteTokens: 0,

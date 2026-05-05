@@ -8,9 +8,9 @@ import {
 import {
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   AGENCY_HUB_SYNC_TIMEOUT_MS,
-  DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
-  DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
-  DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
+  DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
+  DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
+  DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   FEATURE_TEMPERATURES,
   DEFAULT_FEATURE_MODELS,
@@ -47,6 +47,7 @@ import {
 import { logDebug } from '../shared/log.js';
 import {
   getAgencyHubModelId,
+  getModelDisplayName,
   getModelEntry,
   isAnthropicModelSelection,
 } from '../shared/model-registry.js';
@@ -69,9 +70,9 @@ import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
   AgencyHubAiUsageEvent,
-  AnthropicCostEstimate,
-  AnthropicSpendSummary,
-  AnthropicUsageMetrics,
+  LlmCostEstimate,
+  LlmSpendSummary,
+  LlmUsageMetrics,
   BackgroundPortMessage,
   CompareStartPayload,
   CompletePayload,
@@ -103,11 +104,12 @@ import {
 } from './agency-hub-client.js';
 import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 import {
-  buildAnthropicSpendSummary,
-  createZeroAnthropicSpendSummary,
-  estimateAnthropicCost,
-  formatAnthropicCostLog,
-} from './anthropic-cost.js';
+  buildLlmSpendSummary,
+  createZeroLlmSpendSummary,
+  estimateLlmCost,
+  formatModelCostLog,
+  formatModelUsageLog,
+} from './llm-cost.js';
 import {
   cancelCompareOperation,
   executeCompare,
@@ -143,7 +145,7 @@ interface ActiveOperation {
   rawText: string;
   flushBuffer: string;
   flushTimer: number | null;
-  anthropicSpend: AnthropicSpendSummary | null;
+  llmSpend: LlmSpendSummary | null;
   profiler: OperationProfiler;
 }
 
@@ -151,18 +153,18 @@ const NO_OP_PROFILER = createOperationProfiler(false);
 const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
 const DEEP_OPERATION_TIMEOUTS = {
   prep: DEEP_OPERATION_PREP_TIMEOUT_MS,
-  claudeTtfb: DEEP_OPERATION_CLAUDE_TTFB_TIMEOUT_MS,
-  claudeIdle: DEEP_OPERATION_CLAUDE_IDLE_TIMEOUT_MS,
-  claudeMaxStream: DEEP_OPERATION_CLAUDE_MAX_STREAM_TIMEOUT_MS,
+  llmTtfb: DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
+  llmIdle: DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
+  llmMaxStream: DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
 } as const;
 const AUTO_RETRY_RATE_LIMIT_MAX_MS = 60_000;
 const AUTO_RETRY_SERVICE_UNAVAILABLE_MS = 5_000;
 type OperationTimeoutKey =
   | 'quick-total'
   | 'deep-prep'
-  | 'claude-ttfb'
-  | 'claude-idle'
-  | 'claude-max-stream';
+  | 'llm-ttfb'
+  | 'llm-idle'
+  | 'llm-max-stream';
 
 interface ValidatedOperationStart {
   tab: browser.tabs.Tab;
@@ -186,6 +188,34 @@ interface OperationPromptRequestArgs {
   replyMode?: OperationStartPayload['replyMode'];
   replyTone?: OperationStartPayload['replyTone'];
   promptCachingEnabled: boolean;
+}
+
+function buildLlmSpendPayload(
+  llmSpend?: LlmSpendSummary,
+): { llmSpend: LlmSpendSummary } | object {
+  return llmSpend ? { llmSpend } : {};
+}
+
+function hasApiKeyForSelectedModel(settings: Settings, feature: FeatureType): {
+  ok: boolean;
+  provider?: string;
+} {
+  const modelFeature = resolveFeatureModelFeature(feature);
+  const model = getModelEntry(settings.featureModels[modelFeature]);
+  if (!model) {
+    return {
+      ok: Boolean(settings.claudeApiKey || settings.openRouterApiKey),
+    };
+  }
+
+  if (model.provider === 'anthropic') {
+    return { ok: Boolean(settings.claudeApiKey), provider: model.provider };
+  }
+  if (model.provider === 'openrouter') {
+    return { ok: Boolean(settings.openRouterApiKey), provider: model.provider };
+  }
+
+  return { ok: false, provider: model.provider };
 }
 
 interface AgencyHubSummarySyncTask {
@@ -391,10 +421,6 @@ function buildFeatureResult(
       };
     }
   }
-}
-
-function formatAnthropicUsageLog(usage: AnthropicUsageMetrics): string {
-  return `Claude usage: input_tokens=${usage.input_tokens}, cache_creation_input_tokens=${usage.cache_creation_input_tokens}, cache_read_input_tokens=${usage.cache_read_input_tokens}, output_tokens=${usage.output_tokens}`;
 }
 
 export class OperationCoordinator {
@@ -778,14 +804,14 @@ export class OperationCoordinator {
   private sendProgress(
     tabId: number,
     progress: OperationProgressPayload,
-    anthropicSpend?: AnthropicSpendSummary,
+    llmSpend?: LlmSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       type: 'operation:progress',
       ...progress,
-      ...(anthropicSpend ? { anthropicSpend } : {}),
+      ...buildLlmSpendPayload(llmSpend),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -793,13 +819,13 @@ export class OperationCoordinator {
   private sendComplete(
     tabId: number,
     payload: CompletePayload,
-    anthropicSpend?: AnthropicSpendSummary,
+    llmSpend?: LlmSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       ...payload,
-      ...(anthropicSpend ? { anthropicSpend } : {}),
+      ...buildLlmSpendPayload(llmSpend),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -807,13 +833,13 @@ export class OperationCoordinator {
   private sendError(
     tabId: number,
     payload: ErrorPayload,
-    anthropicSpend?: AnthropicSpendSummary,
+    llmSpend?: LlmSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       ...payload,
-      ...(anthropicSpend ? { anthropicSpend } : {}),
+      ...buildLlmSpendPayload(llmSpend),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -821,13 +847,13 @@ export class OperationCoordinator {
   private sendDiscarded(
     tabId: number,
     payload: DiscardedPayload,
-    anthropicSpend?: AnthropicSpendSummary,
+    llmSpend?: LlmSpendSummary,
     profiler: OperationProfiler = NO_OP_PROFILER,
   ): void {
     const profiling = profiler.snapshot();
     this.send(tabId, {
       ...payload,
-      ...(anthropicSpend ? { anthropicSpend } : {}),
+      ...buildLlmSpendPayload(llmSpend),
       ...(profiling ? { profiling } : {}),
     });
   }
@@ -846,7 +872,7 @@ export class OperationCoordinator {
     clientEventId: string;
     feature: FeatureType;
     model: string;
-    spend: AnthropicSpendSummary;
+    spend: LlmSpendSummary;
     conversationId: string | null;
     startedAtMs: number | null | undefined;
     completedAtMs: number;
@@ -927,8 +953,14 @@ export class OperationCoordinator {
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
 
-    if (!storage.settings.claudeApiKey && !storage.settings.openRouterApiKey) {
-      throw new ChatGooseError('missing_api_key');
+    const apiKeyCheck = hasApiKeyForSelectedModel(
+      storage.settings,
+      payload.feature,
+    );
+    if (!apiKeyCheck.ok) {
+      throw new ChatGooseError('missing_api_key', {
+        details: apiKeyCheck.provider ? { provider: apiKeyCheck.provider } : undefined,
+      });
     }
     if (storage.personalities.length === 0) {
       throw new ChatGooseError('no_personalities');
@@ -977,7 +1009,7 @@ export class OperationCoordinator {
         type: 'operation:discarded',
         operationId: active.operationId,
         error: toUserError(error ?? new ChatGooseError('chat_changed')),
-      }, active.anthropicSpend ?? createZeroAnthropicSpendSummary(), active.profiler);
+      }, active.llmSpend ?? createZeroLlmSpendSummary(), active.profiler);
     }
   }
 
@@ -1290,34 +1322,34 @@ export class OperationCoordinator {
         ) as unknown as number;
         timeoutHandles.set(key, handle);
       };
-      const startClaudeTtfbTimeout = (): void => {
+      const startLlmTtfbTimeout = (): void => {
         if (!usesDeepOperationTimeouts(payload.feature)) {
           return;
         }
         clearTimeoutHandle('deep-prep');
-        armTimeoutHandle('claude-ttfb', DEEP_OPERATION_TIMEOUTS.claudeTtfb);
+        armTimeoutHandle('llm-ttfb', DEEP_OPERATION_TIMEOUTS.llmTtfb);
       };
-      const startClaudeStreamTimeouts = (): void => {
+      const startLlmStreamTimeouts = (): void => {
         if (!usesDeepOperationTimeouts(payload.feature)) {
           return;
         }
-        clearTimeoutHandle('claude-ttfb');
-        armTimeoutHandle('claude-idle', DEEP_OPERATION_TIMEOUTS.claudeIdle);
+        clearTimeoutHandle('llm-ttfb');
+        armTimeoutHandle('llm-idle', DEEP_OPERATION_TIMEOUTS.llmIdle);
         armTimeoutHandle(
-          'claude-max-stream',
-          DEEP_OPERATION_TIMEOUTS.claudeMaxStream,
+          'llm-max-stream',
+          DEEP_OPERATION_TIMEOUTS.llmMaxStream,
         );
       };
-      const resetClaudeIdleTimeout = (): void => {
+      const resetLlmIdleTimeout = (): void => {
         if (!usesDeepOperationTimeouts(payload.feature)) {
           return;
         }
-        armTimeoutHandle('claude-idle', DEEP_OPERATION_TIMEOUTS.claudeIdle);
+        armTimeoutHandle('llm-idle', DEEP_OPERATION_TIMEOUTS.llmIdle);
       };
-      const clearClaudeTimeouts = (): void => {
-        clearTimeoutHandle('claude-ttfb');
-        clearTimeoutHandle('claude-idle');
-        clearTimeoutHandle('claude-max-stream');
+      const clearLlmTimeouts = (): void => {
+        clearTimeoutHandle('llm-ttfb');
+        clearTimeoutHandle('llm-idle');
+        clearTimeoutHandle('llm-max-stream');
       };
       if (usesDeepOperationTimeouts(payload.feature)) {
         armTimeoutHandle('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
@@ -1342,7 +1374,7 @@ export class OperationCoordinator {
         rawText: '',
         flushBuffer: '',
         flushTimer: null,
-        anthropicSpend: null,
+        llmSpend: null,
         profiler,
       };
 
@@ -1405,7 +1437,7 @@ export class OperationCoordinator {
             statusCode: progressStatusCode,
             retryAtMs: progressRetryAtMs,
           },
-          active.anthropicSpend ?? undefined,
+          active.llmSpend ?? undefined,
           profiler,
         );
       };
@@ -1622,7 +1654,7 @@ export class OperationCoordinator {
           'cache hit',
         );
         const completedAtMs = Date.now();
-        const zeroSpend = createZeroAnthropicSpendSummary();
+        const zeroSpend = createZeroLlmSpendSummary();
         this.sendComplete(tabId, {
           type: 'operation:complete',
           operationId: payload.operationId,
@@ -1696,7 +1728,7 @@ export class OperationCoordinator {
               'hub hit',
             );
             const completedAtMs = Date.now();
-            const zeroSpend = createZeroAnthropicSpendSummary();
+            const zeroSpend = createZeroLlmSpendSummary();
             this.sendComplete(tabId, {
               type: 'operation:complete',
               operationId: payload.operationId,
@@ -1875,7 +1907,7 @@ export class OperationCoordinator {
             type: 'operation:error',
             operationId: payload.operationId,
             error: toUserError(new ChatGooseError('ping_blocked')),
-          }, createZeroAnthropicSpendSummary(), profiler);
+          }, createZeroLlmSpendSummary(), profiler);
           this.clearCompletedOperation(tabId);
           return;
         }
@@ -2176,7 +2208,7 @@ export class OperationCoordinator {
         );
       }
 
-      startStage('prompt-build', 'Build Claude prompt');
+      startStage('prompt-build', 'Build prompt');
       const formattedTranscript = formatTranscript(transcriptMessages);
       const { prompt, systemBlocks, userBlocks } = buildOperationPromptRequest({
         feature: payload.feature,
@@ -2194,7 +2226,7 @@ export class OperationCoordinator {
       });
       completeStage(
         'prompt-build',
-        `Built Claude prompt: ${transcriptMessages.length} transcript messages`,
+        `Built prompt: ${transcriptMessages.length} transcript messages`,
         `${transcriptMessages.length} transcript messages`,
       );
 
@@ -2222,29 +2254,33 @@ export class OperationCoordinator {
       sendDebugPromptSnapshot(resolvedModel);
 
       let sawFirstChunk = false;
-      startStage('claude-ttfb', 'Wait for Claude TTFB');
-      profiler.log('Waiting for Claude');
-      sendDebugProgress();
-      startClaudeTtfbTimeout();
-
       let actualModel = resolvedModel;
-      let latestAnthropicSpend: AnthropicSpendSummary | null = null;
-      const handleAnthropicUsage = (
-        usage: AnthropicUsageMetrics,
-      ): AnthropicCostEstimate => {
-        const cost = estimateAnthropicCost(actualModel, usage);
-        const spend = buildAnthropicSpendSummary(actualModel, usage, cost);
-        latestAnthropicSpend = spend;
+      const actualModelName = (): string => getModelDisplayName(actualModel);
+      startStage('llm-ttfb', 'Wait for AI TTFB');
+      profiler.log(`Waiting for ${actualModelName()}`);
+      sendDebugProgress();
+      startLlmTtfbTimeout();
+
+      let latestLlmSpend: LlmSpendSummary | null = null;
+      const handleLlmUsage = (
+        usage: LlmUsageMetrics,
+      ): LlmCostEstimate => {
+        const cost = estimateLlmCost(actualModel, usage);
+        const spend = buildLlmSpendSummary(actualModel, usage, cost);
+        latestLlmSpend = spend;
         const current = this.getActive(tabId);
         if (current?.operationId === payload.operationId) {
-          current.anthropicSpend = spend;
+          current.llmSpend = spend;
         }
-        profiler.setAnthropicUsage(usage);
-        profiler.setAnthropicCost(cost);
-        profiler.log(formatAnthropicUsageLog(usage));
-        profiler.log(formatAnthropicCostLog(cost));
-        logDebug(debugEnabled, 'anthropic usage', usage);
-        logDebug(debugEnabled, 'anthropic cost', cost);
+        profiler.setLlmUsage(usage);
+        profiler.setLlmCost(cost);
+        profiler.log(formatModelUsageLog(actualModel, usage));
+        profiler.log(formatModelCostLog(cost));
+        logDebug(debugEnabled, 'model usage', {
+          model: actualModel,
+          ...usage,
+        });
+        logDebug(debugEnabled, 'model cost', cost);
         sendOperationProgress();
         return cost;
       };
@@ -2267,11 +2303,11 @@ export class OperationCoordinator {
           }
           if (!sawFirstChunk) {
             sawFirstChunk = true;
-            startClaudeStreamTimeouts();
-            profiler.completeStage('claude-ttfb', 'first chunk received');
-            profiler.log('Claude first token');
-            profiler.startStage('claude-stream', 'Stream Claude response');
-            profiler.log('Stream Claude response');
+            startLlmStreamTimeouts();
+            profiler.completeStage('llm-ttfb', 'first chunk received');
+            profiler.log(`${actualModelName()} first token`);
+            profiler.startStage('llm-stream', 'Stream AI response');
+            profiler.log(`Stream ${actualModelName()} response`);
             sendDebugProgress();
           }
           current.rawText += chunk;
@@ -2282,10 +2318,10 @@ export class OperationCoordinator {
           if (!sawFirstChunk) {
             return;
           }
-          resetClaudeIdleTimeout();
+          resetLlmIdleTimeout();
         },
-        onUsage: (usage: AnthropicUsageMetrics) => {
-          handleAnthropicUsage(usage);
+        onUsage: (usage: LlmUsageMetrics) => {
+          handleLlmUsage(usage);
         },
       } as const;
 
@@ -2335,7 +2371,7 @@ export class OperationCoordinator {
             } else {
               serviceUnavailableRetried = true;
             }
-            clearClaudeTimeouts();
+            clearLlmTimeouts();
             const retryDelayMs = canRetryRateLimit
               ? (retryAfterMs ?? 0)
               : AUTO_RETRY_SERVICE_UNAVAILABLE_MS;
@@ -2369,7 +2405,7 @@ export class OperationCoordinator {
               retryAtMs: undefined,
             });
             if (!sawFirstChunk) {
-              startClaudeTtfbTimeout();
+              startLlmTtfbTimeout();
             }
             continue;
           }
@@ -2388,23 +2424,23 @@ export class OperationCoordinator {
           throw err;
         }
       }
-      clearClaudeTimeouts();
+      clearLlmTimeouts();
 
       if (sawFirstChunk) {
         completeStage(
-          'claude-stream',
-          `Claude stream complete: ${rawText.length} chars`,
+          'llm-stream',
+          `${actualModelName()} stream complete: ${rawText.length} chars`,
           `${rawText.length} chars`,
         );
       } else {
         completeStage(
-          'claude-ttfb',
-          'Claude completed without streamed text',
+          'llm-ttfb',
+          `${actualModelName()} completed without streamed text`,
           'completed without streamed text',
         );
         skipStage(
-          'claude-stream',
-          'Stream Claude response',
+          'llm-stream',
+          'Stream AI response',
           'no streamed chunks',
         );
       }
@@ -2455,7 +2491,7 @@ export class OperationCoordinator {
       }
 
       const completedAtMs = Date.now();
-      const completedSpend = latestAnthropicSpend ?? createZeroAnthropicSpendSummary();
+      const completedSpend = latestLlmSpend ?? createZeroLlmSpendSummary();
       this.sendComplete(tabId, {
         type: 'operation:complete',
         operationId: payload.operationId,
@@ -2519,7 +2555,7 @@ export class OperationCoordinator {
         this.sendError(
           tabId,
           errorPayload,
-          active?.anthropicSpend ?? createZeroAnthropicSpendSummary(),
+          active?.llmSpend ?? createZeroLlmSpendSummary(),
           active?.profiler ?? NO_OP_PROFILER,
         );
       } else {
@@ -2531,7 +2567,7 @@ export class OperationCoordinator {
         this.sendError(
           tabId,
           errorPayload,
-          active?.anthropicSpend ?? createZeroAnthropicSpendSummary(),
+          active?.llmSpend ?? createZeroLlmSpendSummary(),
           active?.profiler ?? NO_OP_PROFILER,
         );
       }

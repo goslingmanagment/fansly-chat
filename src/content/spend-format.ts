@@ -1,4 +1,5 @@
-import type { AnthropicCostEstimate, AnthropicSpendSummary } from '../shared/types.js';
+import type { LlmCostEstimate, LlmSpendSummary } from '../shared/types.js';
+import { getModelDisplayName } from '../shared/model-registry.js';
 
 export function formatCompactTokens(n: number): string {
   if (n < 1000) return String(n);
@@ -16,11 +17,11 @@ export function formatUsd(value: number, approximate = false): string {
   return `${approximate ? '~' : ''}$${value.toFixed(digits)}`;
 }
 
-export function formatSpendPrimary(spend: AnthropicSpendSummary): string {
+export function formatSpendPrimary(spend: LlmSpendSummary): string {
   return `${formatUsd(spend.totalUsd, spend.approximate)} · ${formatCompactTokens(spend.totalTokens)} tokens`;
 }
 
-export function formatSpendSecondary(spend: AnthropicSpendSummary): string {
+export function formatSpendSecondary(spend: LlmSpendSummary): string {
   return (
     `in ${formatCompactTokens(spend.inputTokens)} · ` +
     `write ${formatCompactTokens(spend.cacheWriteTokens)} · ` +
@@ -30,7 +31,7 @@ export function formatSpendSecondary(spend: AnthropicSpendSummary): string {
 }
 
 export function formatCacheEffectInline(
-  spend: AnthropicSpendSummary,
+  spend: LlmSpendSummary,
 ): { text: string; kind: 'saved' | 'overhead' } | null {
   if (spend.cacheEffectKind === 'neutral' || spend.cacheEffectUsd === 0) {
     return null;
@@ -41,7 +42,7 @@ export function formatCacheEffectInline(
   };
 }
 
-export function formatAnthropicCostSummary(cost: AnthropicCostEstimate): string {
+export function formatLlmCostSummary(cost: LlmCostEstimate): string {
   return `total ${formatUsd(cost.totalUsd, cost.approximate)} • input ${formatUsd(
     cost.inputUsd,
     cost.approximate,
@@ -52,4 +53,12 @@ export function formatAnthropicCostSummary(cost: AnthropicCostEstimate): string 
     cost.outputUsd,
     cost.approximate,
   )}`;
+}
+
+export function formatModelCostLabel(cost: LlmCostEstimate): string {
+  return `${getModelDisplayName(cost.modelId)} cost`;
+}
+
+export function formatModelUsageLabel(cost?: LlmCostEstimate): string {
+  return cost ? `${getModelDisplayName(cost.modelId)} usage` : 'Model usage';
 }

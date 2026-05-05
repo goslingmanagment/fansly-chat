@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildAnthropicSpendSummary,
-  estimateAnthropicCost,
-} from '../src/background/anthropic-cost.js';
+  buildLlmSpendSummary,
+  estimateLlmCost,
+} from '../src/background/llm-cost.js';
 
-describe('Anthropic spend summary', () => {
+describe('LLM spend summary', () => {
   it('marks cache savings when cached reads reduce total request cost', () => {
     const usage = {
       input_tokens: 100,
@@ -13,8 +13,8 @@ describe('Anthropic spend summary', () => {
       output_tokens: 8,
     };
 
-    const cost = estimateAnthropicCost('claude-sonnet-4-6', usage);
-    const summary = buildAnthropicSpendSummary('claude-sonnet-4-6', usage, cost);
+    const cost = estimateLlmCost('claude-sonnet-4-6', usage);
+    const summary = buildLlmSpendSummary('claude-sonnet-4-6', usage, cost);
 
     expect(summary).toEqual({
       totalTokens: 123,
@@ -44,8 +44,8 @@ describe('Anthropic spend summary', () => {
       },
     };
 
-    const cost = estimateAnthropicCost('claude-sonnet-4-6', usage);
-    const summary = buildAnthropicSpendSummary('claude-sonnet-4-6', usage, cost);
+    const cost = estimateLlmCost('claude-sonnet-4-6', usage);
+    const summary = buildLlmSpendSummary('claude-sonnet-4-6', usage, cost);
 
     expect(summary).toEqual({
       totalTokens: 821,
@@ -63,7 +63,7 @@ describe('Anthropic spend summary', () => {
     });
   });
 
-  it('uses OpenRouter registry pricing including priced Grok cache reads', () => {
+  it('treats Grok cache-read pricing as approximate rather than source-confirmed truth', () => {
     const usage = {
       input_tokens: 1_000_000,
       cache_creation_input_tokens: 0,
@@ -71,31 +71,54 @@ describe('Anthropic spend summary', () => {
       output_tokens: 1_000_000,
     };
 
-    const cost = estimateAnthropicCost('openrouter:x-ai/grok-4.20', usage);
-    const summary = buildAnthropicSpendSummary('openrouter:x-ai/grok-4.20', usage, cost);
+    const cost = estimateLlmCost('openrouter:x-ai/grok-4.20', usage);
+    const summary = buildLlmSpendSummary('openrouter:x-ai/grok-4.20', usage, cost);
 
     expect(cost).toMatchObject({
       modelId: 'openrouter:x-ai/grok-4.20',
       inputUsd: 1.25,
-      cacheReadUsd: 0.2,
       outputUsd: 2.5,
-      totalUsd: 3.95,
-      approximate: false,
+      approximate: true,
     });
+    expect(cost.cacheReadUsd).toBeGreaterThan(0);
     expect(summary).toMatchObject({
       totalTokens: 3_000_000,
       inputTokens: 1_000_000,
       outputTokens: 1_000_000,
       cacheWriteTokens: 0,
       cacheReadTokens: 1_000_000,
-      cacheReadUsd: 0.2,
       cacheEffectKind: 'saved',
-      approximate: false,
+      approximate: true,
     });
+    expect(summary.cacheReadUsd).toBeGreaterThan(0);
+  });
+
+  it('summarizes normalized OpenRouter cached usage without double-counting prompt tokens', () => {
+    const usage = {
+      input_tokens: 500,
+      cache_creation_input_tokens: 200,
+      cache_read_input_tokens: 300,
+      output_tokens: 100,
+    };
+
+    const cost = estimateLlmCost('openrouter:x-ai/grok-4.20', usage);
+    const summary = buildLlmSpendSummary('openrouter:x-ai/grok-4.20', usage, cost);
+
+    expect(summary).toMatchObject({
+      totalTokens: 1100,
+      inputTokens: 500,
+      cacheWriteTokens: 200,
+      cacheReadTokens: 300,
+      outputTokens: 100,
+      uncachedUsd: 0.0015,
+      approximate: true,
+    });
+    expect(summary.totalUsd).toBeGreaterThan(cost.inputUsd + cost.outputUsd);
+    expect(summary.totalUsd).toBeLessThan(summary.uncachedUsd);
   });
 
   it('marks costs approximate when a model reports cache reads without cache pricing', () => {
-    const cost = estimateAnthropicCost('openrouter:google/gemini-3.1-pro-preview', {
+    const cost = estimateLlmCost('openrouter:google/gemini-3.1-pro-preview', {
       input_tokens: 100,
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 10,
@@ -107,7 +130,7 @@ describe('Anthropic spend summary', () => {
   });
 
   it('marks Grok 4.3 costs approximate because OpenRouter tiering can apply', () => {
-    const cost = estimateAnthropicCost('openrouter:x-ai/grok-4.3', {
+    const cost = estimateLlmCost('openrouter:x-ai/grok-4.3', {
       input_tokens: 100,
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,

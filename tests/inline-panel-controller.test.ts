@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import type {
-  AnthropicSpendSummary,
+  LlmSpendSummary,
   CompareInlineViewModel,
   OverlayInsertPart,
   OverlayViewModel,
@@ -16,7 +16,7 @@ vi.mock('../src/content/textarea.js', () => ({
 function createLoadingModel(
   operationId: string,
   rawText: string,
-  options?: { progressMessage?: string; anthropicSpend?: AnthropicSpendSummary },
+  options?: { progressMessage?: string; llmSpend?: LlmSpendSummary },
 ): Extract<OverlayViewModel, { kind: 'loading' }> {
   return {
     kind: 'loading',
@@ -32,7 +32,7 @@ function createLoadingModel(
       : null,
     rawText,
     debugPrompt: undefined,
-    anthropicSpend: options?.anthropicSpend,
+    llmSpend: options?.llmSpend,
     profiling: undefined,
     canCancel: true,
     canRegenerate: true,
@@ -42,7 +42,7 @@ function createLoadingModel(
 
 function createReplyModel(
   parts: OverlayInsertPart[],
-  options?: { operationId?: string; anthropicSpend?: AnthropicSpendSummary },
+  options?: { operationId?: string; llmSpend?: LlmSpendSummary },
 ): Extract<OverlayViewModel, { kind: 'reply' }> {
   return {
     kind: 'reply',
@@ -53,7 +53,7 @@ function createReplyModel(
     rawText: parts.map((p) => p.text).join('\n'),
     splitModeRequested: false,
     debugPrompt: undefined,
-    anthropicSpend: options?.anthropicSpend,
+    llmSpend: options?.llmSpend,
     profiling: undefined,
     rerunActionLabel: 'Regenerate',
   };
@@ -112,8 +112,8 @@ function createCompareModel(
 }
 
 function createSpendSummary(
-  overrides?: Partial<AnthropicSpendSummary>,
-): AnthropicSpendSummary {
+  overrides?: Partial<LlmSpendSummary>,
+): LlmSpendSummary {
   return {
     totalTokens: 821,
     inputTokens: 420,
@@ -235,7 +235,7 @@ describe('InlinePanelController', () => {
     controller.render(createLoadingModel('op', ''));
 
     expect(requireElement(controller.root, '.chatgoose-overlay-status').textContent).toBe('Generating\u2026');
-    expect(requireElement(controller.root, '.chatgoose-stream').textContent).toBe('Waiting for Claude\u2026');
+    expect(requireElement(controller.root, '.chatgoose-stream').textContent).toBe('Waiting for AI\u2026');
   });
 
   it('hides header meta while loading before usage arrives', () => {
@@ -253,7 +253,7 @@ describe('InlinePanelController', () => {
     document.body.append(controller.root);
 
     controller.render(createLoadingModel('op', 'chunk', {
-      anthropicSpend: createSpendSummary(),
+      llmSpend: createSpendSummary(),
     }));
 
     const meta = requireElement(controller.root, '.chatgoose-inline-panel-meta');
@@ -292,7 +292,7 @@ describe('InlinePanelController', () => {
 
     controller.render(
       createReplyModel([createPart('Hey there!')], {
-        anthropicSpend: createSpendSummary({ cacheEffectKind: 'saved', cacheEffectUsd: 0.00045 }),
+        llmSpend: createSpendSummary({ cacheEffectKind: 'saved', cacheEffectUsd: 0.00045 }),
       }),
     );
 
@@ -580,7 +580,7 @@ describe('InlinePanelController', () => {
             status: 'reply',
             rawText: 'Current reply',
             parts: [createPart('Current reply')],
-            anthropicSpend: createSpendSummary({ totalUsd: 0.001111 }),
+            llmSpend: createSpendSummary({ totalUsd: 0.001111 }),
           },
           {
             cardId: 'draft',
@@ -589,7 +589,7 @@ describe('InlinePanelController', () => {
             status: 'reply',
             rawText: 'Draft reply',
             parts: [createPart('Draft reply')],
-            anthropicSpend: createSpendSummary({ totalUsd: 0.002222 }),
+            llmSpend: createSpendSummary({ totalUsd: 0.002222 }),
           },
         ],
       }),
@@ -616,7 +616,7 @@ describe('InlinePanelController', () => {
             status: 'reply',
             rawText: 'Current reply',
             parts: [createPart('Current reply')],
-            anthropicSpend: createSpendSummary({ totalUsd: 0.001111 }),
+            llmSpend: createSpendSummary({ totalUsd: 0.001111 }),
           },
           {
             cardId: 'draft',
@@ -625,7 +625,7 @@ describe('InlinePanelController', () => {
             status: 'reply',
             rawText: 'Draft reply',
             parts: [createPart('Draft reply')],
-            anthropicSpend: createSpendSummary({ totalUsd: 0.002222 }),
+            llmSpend: createSpendSummary({ totalUsd: 0.002222 }),
           },
         ],
       }),

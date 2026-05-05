@@ -1,7 +1,7 @@
 import { MAX_TOKENS, OPENROUTER_MESSAGES_API_URL } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
 import type {
-  AnthropicUsageMetrics,
+  LlmUsageMetrics,
   FeatureType,
   PromptTextBlock,
 } from '../shared/types.js';
@@ -10,7 +10,7 @@ import {
   parseRetryAfterMs,
   parseSseBlock,
   usageEquals,
-} from './anthropic-client.js';
+} from './llm-stream-utils.js';
 
 interface OpenRouterStreamArgs {
   apiKey: string;
@@ -21,7 +21,7 @@ interface OpenRouterStreamArgs {
   feature: FeatureType;
   signal: AbortSignal;
   onText: (text: string) => void;
-  onUsage?: (usage: AnthropicUsageMetrics) => void;
+  onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
 }
 
@@ -39,12 +39,31 @@ interface OpenRouterApiErrorInfo {
   message?: string;
 }
 
-type OpenRouterUsagePayload = Partial<AnthropicUsageMetrics> & {
+const SUPPORTED_OPENROUTER_SSE_EVENTS = new Set([
+  'message_start',
+  'message_delta',
+  'message_stop',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+  'ping',
+  'error',
+]);
+
+type OpenRouterUsagePayload = Partial<LlmUsageMetrics> & {
   prompt_tokens?: number;
   completion_tokens?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
 };
 
 function stripCacheControl(blocks: PromptTextBlock[]): PromptTextBlock[] {
+  // OpenRouter Grok prompt caching is automatic, so cache_control is not needed.
+  // Gemini requires explicit breakpoints, but this app currently marks Gemini as
+  // supportsPromptCache=false and does not build Gemini cache breakpoints. Enabling
+  // Gemini explicit caching needs registry, prompt builder, and adapter changes.
   return blocks.map((block) => ({
     type: block.type,
     text: block.text,
@@ -53,28 +72,49 @@ function stripCacheControl(blocks: PromptTextBlock[]): PromptTextBlock[] {
 
 function normalizeUsage(
   usage: OpenRouterUsagePayload | null | undefined,
-): Partial<AnthropicUsageMetrics> | undefined {
+): Partial<LlmUsageMetrics> | undefined {
   if (!usage) {
     return undefined;
   }
 
-  const inputTokens =
-    typeof usage.input_tokens === 'number'
-      ? usage.input_tokens
-      : usage.prompt_tokens;
+  const normalized: Partial<LlmUsageMetrics> = {};
   const outputTokens =
     typeof usage.output_tokens === 'number'
       ? usage.output_tokens
       : usage.completion_tokens;
-  const normalized: Partial<AnthropicUsageMetrics> = {};
 
-  if (typeof inputTokens === 'number') {
-    normalized.input_tokens = inputTokens;
+  if (typeof usage.input_tokens !== 'number' && typeof usage.prompt_tokens === 'number') {
+    const promptDetails = usage.prompt_tokens_details;
+    const cacheReadTokens =
+      typeof promptDetails?.cached_tokens === 'number'
+        ? promptDetails.cached_tokens
+        : 0;
+    const cacheWriteTokens =
+      typeof promptDetails?.cache_write_tokens === 'number'
+        ? promptDetails.cache_write_tokens
+        : 0;
+
+    normalized.input_tokens = Math.max(
+      0,
+      usage.prompt_tokens - cacheReadTokens - cacheWriteTokens,
+    );
+    normalized.cache_creation_input_tokens = Math.max(0, cacheWriteTokens);
+    normalized.cache_read_input_tokens = Math.max(0, cacheReadTokens);
+  } else {
+    if (typeof usage.input_tokens === 'number') {
+      normalized.input_tokens = usage.input_tokens;
+    }
+    if (typeof usage.cache_creation_input_tokens === 'number') {
+      normalized.cache_creation_input_tokens = usage.cache_creation_input_tokens;
+    }
+    if (typeof usage.cache_read_input_tokens === 'number') {
+      normalized.cache_read_input_tokens = usage.cache_read_input_tokens;
+    }
+    if (usage.cache_creation) {
+      normalized.cache_creation = usage.cache_creation;
+    }
   }
-  normalized.cache_creation_input_tokens = 0;
-  if (typeof usage.cache_read_input_tokens === 'number') {
-    normalized.cache_read_input_tokens = usage.cache_read_input_tokens;
-  }
+
   if (typeof outputTokens === 'number') {
     normalized.output_tokens = outputTokens;
   }
@@ -211,7 +251,7 @@ export class OpenRouterClient {
     onProgress,
   }: OpenRouterStreamArgs): Promise<string> {
     let rawText = '';
-    let usage: AnthropicUsageMetrics | null = null;
+    let usage: LlmUsageMetrics | null = null;
     const response = await fetch(OPENROUTER_MESSAGES_API_URL, {
       method: 'POST',
       headers: {
@@ -276,6 +316,15 @@ export class OpenRouterClient {
 
         if (parsed.event === 'error' || payload.type === 'error') {
           throw buildOpenRouterError(0, payload.error ?? null);
+        }
+
+        if (!SUPPORTED_OPENROUTER_SSE_EVENTS.has(parsed.event)) {
+          throw new ChatGooseError('unknown_error', {
+            details: {
+              provider: 'openrouter',
+              providerMessage: `Unsupported OpenRouter SSE event: ${parsed.event}`,
+            },
+          });
         }
 
         if (parsed.event === 'message_start') {

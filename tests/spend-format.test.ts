@@ -6,7 +6,7 @@ import {
   formatSpendSecondary,
   formatCacheEffectInline,
 } from '../src/content/spend-format.js';
-import type { AnthropicSpendSummary } from '../src/shared/types.js';
+import type { LlmSpendSummary } from '../src/shared/types.js';
 
 describe('formatCompactTokens', () => {
   it.each([
@@ -44,7 +44,7 @@ describe('formatUsd', () => {
   });
 });
 
-function createSpend(overrides?: Partial<AnthropicSpendSummary>): AnthropicSpendSummary {
+function createSpend(overrides?: Partial<LlmSpendSummary>): LlmSpendSummary {
   return {
     totalTokens: 4500,
     inputTokens: 1200,

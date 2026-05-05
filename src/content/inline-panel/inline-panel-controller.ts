@@ -5,7 +5,7 @@ import {
   toUserError,
 } from '../../shared/errors.js';
 import type {
-  AnthropicSpendSummary,
+  LlmSpendSummary,
   CompareInlineTabState,
   CompareInlineViewModel,
   FeatureType,
@@ -322,7 +322,7 @@ export class InlinePanelController {
       return;
     }
 
-    const spend = model.anthropicSpend;
+    const spend = model.llmSpend;
     if (!spend) {
       this.metaEl.replaceChildren();
       this.metaEl.classList.add('chatgoose-hidden');
@@ -333,7 +333,7 @@ export class InlinePanelController {
     this.metaEl.classList.remove('chatgoose-hidden');
   }
 
-  private setHeaderMetaContent(spend: AnthropicSpendSummary): void {
+  private setHeaderMetaContent(spend: LlmSpendSummary): void {
     const primary = document.createElement('div');
     primary.className = 'chatgoose-inline-panel-meta-primary';
     primary.textContent = formatSpendPrimary(spend);
@@ -356,7 +356,7 @@ export class InlinePanelController {
   }
 
   private createSpendStrip(
-    spend?: AnthropicSpendSummary,
+    spend?: LlmSpendSummary,
     placeholder = false,
   ): HTMLElement {
     const section = document.createElement('div');
@@ -447,7 +447,7 @@ export class InlinePanelController {
     model: Extract<OverlayViewModel, { kind: 'loading' }>,
   ): void {
     const statusText = formatLoadingStatus(model.progress);
-    const streamText = model.rawText || 'Waiting for Claude\u2026';
+    const streamText = model.rawText || 'Waiting for AI\u2026';
     if (view.statusText.data !== statusText) {
       view.statusText.data = statusText;
     }
@@ -637,21 +637,23 @@ export class InlinePanelController {
       status.textContent = model.progress?.message ?? 'Generating…';
       const stream = document.createElement('div');
       stream.className = 'chatgoose-stream';
-      stream.textContent = tab.rawText || 'Waiting for Claude…';
+      stream.textContent = tab.rawText || 'Waiting for AI…';
       section.append(status, stream);
       return section;
     }
 
     if (tab.status === 'error') {
-      if (tab.anthropicSpend) {
-        section.append(this.createSpendStrip(tab.anthropicSpend));
+      const spend = tab.llmSpend;
+      if (spend) {
+        section.append(this.createSpendStrip(spend));
       }
       section.append(createUserErrorBlock(tab.error ?? toUserError(null)));
       return section;
     }
 
-    if (tab.anthropicSpend) {
-      section.append(this.createSpendStrip(tab.anthropicSpend));
+    const spend = tab.llmSpend;
+    if (spend) {
+      section.append(this.createSpendStrip(spend));
     }
 
     if (tab.parts.length > 0) {

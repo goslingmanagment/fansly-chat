@@ -1,9 +1,9 @@
 import type {
-  AnthropicCostEstimate,
-  AnthropicSpendSummary,
-  AnthropicUsageMetrics,
+  LlmCostEstimate,
+  LlmSpendSummary,
+  LlmUsageMetrics,
 } from '../shared/types.js';
-import { getModelEntry } from '../shared/model-registry.js';
+import { getModelDisplayName, getModelEntry } from '../shared/model-registry.js';
 import type { ModelPricing } from '../shared/model-registry.js';
 
 const USD_PRECISION = 1_000_000;
@@ -34,7 +34,7 @@ function resolvePricing(modelId: string): {
 }
 
 function resolveCacheWriteTokens(
-  usage: AnthropicUsageMetrics,
+  usage: LlmUsageMetrics,
 ): {
   cacheWrite5mTokens: number;
   cacheWrite1hTokens: number;
@@ -78,10 +78,10 @@ function resolveCacheWriteTokens(
   };
 }
 
-export function estimateAnthropicCost(
+export function estimateLlmCost(
   modelId: string,
-  usage: AnthropicUsageMetrics,
-): AnthropicCostEstimate {
+  usage: LlmUsageMetrics,
+): LlmCostEstimate {
   const { normalizedModelId, pricing, approximate: modelApproximate } =
     resolvePricing(modelId);
 
@@ -131,12 +131,12 @@ export function estimateAnthropicCost(
   };
 }
 
-export function buildAnthropicSpendSummary(
+export function buildLlmSpendSummary(
   modelId: string,
-  usage: AnthropicUsageMetrics,
-  cost?: AnthropicCostEstimate,
-): AnthropicSpendSummary {
-  const resolvedCost = cost ?? estimateAnthropicCost(modelId, usage);
+  usage: LlmUsageMetrics,
+  cost?: LlmCostEstimate,
+): LlmSpendSummary {
+  const resolvedCost = cost ?? estimateLlmCost(modelId, usage);
   const { pricing } = resolvePricing(modelId);
   const baselineInputTokens =
     usage.input_tokens +
@@ -177,7 +177,7 @@ export function buildAnthropicSpendSummary(
   };
 }
 
-export function createZeroAnthropicSpendSummary(): AnthropicSpendSummary {
+export function createZeroLlmSpendSummary(): LlmSpendSummary {
   return {
     totalTokens: 0,
     inputTokens: 0,
@@ -194,6 +194,15 @@ export function createZeroAnthropicSpendSummary(): AnthropicSpendSummary {
   };
 }
 
-export function formatAnthropicCostLog(cost: AnthropicCostEstimate): string {
-  return `Claude cost: model=${cost.modelId}, total_usd=${cost.totalUsd.toFixed(6)}, input_usd=${cost.inputUsd.toFixed(6)}, cache_write_5m_usd=${cost.cacheWrite5mUsd.toFixed(6)}, cache_write_1h_usd=${cost.cacheWrite1hUsd.toFixed(6)}, cache_read_usd=${cost.cacheReadUsd.toFixed(6)}, output_usd=${cost.outputUsd.toFixed(6)}, approximate=${cost.approximate}`;
+export function formatModelUsageLog(
+  modelId: string,
+  usage: LlmUsageMetrics,
+): string {
+  const modelName = getModelDisplayName(modelId);
+  return `${modelName} usage: input_tokens=${usage.input_tokens}, cache_creation_input_tokens=${usage.cache_creation_input_tokens}, cache_read_input_tokens=${usage.cache_read_input_tokens}, output_tokens=${usage.output_tokens}`;
+}
+
+export function formatModelCostLog(cost: LlmCostEstimate): string {
+  const modelName = getModelDisplayName(cost.modelId);
+  return `${modelName} cost: model=${cost.modelId}, total_usd=${cost.totalUsd.toFixed(6)}, input_usd=${cost.inputUsd.toFixed(6)}, cache_write_5m_usd=${cost.cacheWrite5mUsd.toFixed(6)}, cache_write_1h_usd=${cost.cacheWrite1hUsd.toFixed(6)}, cache_read_usd=${cost.cacheReadUsd.toFixed(6)}, output_usd=${cost.outputUsd.toFixed(6)}, approximate=${cost.approximate}`;
 }

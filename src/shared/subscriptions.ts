@@ -55,7 +55,7 @@ function formatUsd(value: number | null): string {
 /**
  * Format rich subscription context for AI prompt inclusion.
  *
- * Uses Claude's rich formatting approach: gift/promo detection, churn risk,
+ * Uses the richer formatting approach: gift/promo detection, churn risk,
  * days-until-end, auto-renew status, benefits, available plans.
  *
  * Accepts Codex's FanSubscriptionContext (normalized form) with optional
