@@ -1,5 +1,25 @@
 # Что нового
 
+## 1.3.1
+
+Фикс OpenRouter usage/cost и финальная зачистка AI provider abstraction после добавления Gemini/Grok. Расходы, debug-профилирование и ошибки API key теперь больше не используют Claude-лейблы там, где выбран OpenRouter.
+
+### Главное
+
+- OpenRouter usage теперь корректно считает cached/read/write tokens без double-counting.
+- `cached_tokens` и `cache_write_tokens` из OpenRouter responses попадают в spend и Agency Hub usage.
+- Если выбрана OpenRouter-модель без OpenRouter API key, ChatGoose показывает OpenRouter-specific ошибку, а не Claude key warning.
+- Debug/profiling строки для Gemini и Grok больше не подписаны как Claude.
+- Grok cache-read pricing помечен approximate, пока cache-read цена не подтверждена надёжным source.
+
+### Технически
+
+- Provider-neutral контракт переведён на `llmSpend`, `llmUsage`, `llmCost`.
+- Удалены legacy `anthropic*` aliases из payload/profiling contract.
+- `claude-ttfb` / `claude-stream` timeout и profiling keys заменены на `llm-ttfb` / `llm-stream`.
+- OpenRouter adapter поддерживает Anthropic-shaped и OpenAI-shaped usage payloads.
+- Unsupported OpenRouter SSE chunk shapes теперь дают ошибку вместо silent empty success.
+
 ## 1.3.0
 
 ChatGoose теперь умеет работать не только с Claude Direct, но и с OpenRouter. Это даёт доступ к Gemini и Grok прямо из настроек, без изменения привычного workflow: выбираете модель для каждой функции отдельно, а ChatGoose сам отправляет запрос нужному провайдеру.
