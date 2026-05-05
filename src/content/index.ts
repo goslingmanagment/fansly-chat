@@ -28,6 +28,7 @@ import {
   featureSupportsReplyMode,
   featureSupportsReplyTone,
   getFeaturePolicy,
+  resolveFeatureModelFeature,
   usesInlineFeatureSurface,
   usesOverlayFeatureSurface,
 } from '../shared/features.js';
@@ -501,7 +502,7 @@ export class ChatGooseContentApp {
     }
 
     if (!this.tabState.hasApiKey) {
-      this.showUserErrorToast(getErrorMessage('missing_api_key'));
+      this.showUserErrorToast(this.getMissingApiKeyError(feature));
       return false;
     }
     if (!this.tabState.hasPersonalities) {
@@ -525,6 +526,31 @@ export class ChatGooseContentApp {
     }
 
     return true;
+  }
+
+  private getMissingApiKeyError(feature: FeatureType): ReturnType<typeof getErrorMessage> {
+    const modelFeature = resolveFeatureModelFeature(feature);
+    const provider = this.tabState?.modelProviderByFeature?.[modelFeature];
+    if (provider === 'openrouter') {
+      return toUserError({
+        key: 'missing_api_key',
+        details: { provider },
+      });
+    }
+
+    return getErrorMessage('missing_api_key');
+  }
+
+  private getCompareMissingApiKeyError(): ReturnType<typeof getErrorMessage> {
+    const provider = this.tabState?.modelProviderByFeature?.['fast-reply'];
+    if (provider === 'openrouter') {
+      return toUserError({
+        key: 'missing_api_key',
+        details: { provider },
+      });
+    }
+
+    return getErrorMessage('missing_api_key');
   }
 
   private buildOperationStartPayload(
@@ -721,7 +747,7 @@ export class ChatGooseContentApp {
       return;
     }
     if (!this.tabState.hasApiKey) {
-      this.showUserErrorToast(getErrorMessage('missing_api_key'));
+      this.showUserErrorToast(this.getCompareMissingApiKeyError());
       return;
     }
     if (!this.tabState.connected) {

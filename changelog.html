@@ -412,11 +412,45 @@
 
 <div class="timeline">
 
+  <!-- 1.3.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.2</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Hotfix после OpenRouter/LLM abstraction cleanup: исправлены цены Claude Opus 4.6/4.5,
+          более устойчивый parsing OpenRouter stream и preflight warning для OpenRouter API key.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Claude Opus 4.6 и Claude Opus 4.5 теперь считаются по актуальным тарифам <code>$5/$25</code> за MTok вместо старых Opus 4 тарифов <code>$15/$75</code></li>
+          <li>Fan Summary больше не завышает отображаемый spend и Agency Hub usage cost при дефолтной Opus 4.6 модели</li>
+          <li>OpenRouter stream больше не падает на валидных SSE <code>data:</code> фреймах без явного <code>event:</code></li>
+          <li>OpenRouter in-stream <code>error</code> payload классифицируется как rate limit / balance / API key / provider error, а не превращается в silent empty result</li>
+          <li>Если выбрана OpenRouter-модель и ключей вообще нет, preflight toast теперь просит OpenRouter API key, а не Claude key</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li><code>OpenRouterClient</code> выводит effective event из <code>payload.type</code> для Anthropic Messages stream</li>
+          <li>OpenAI chat-completion chunks на <code>/api/v1/messages</code> по-прежнему reject'ятся как unsupported shape</li>
+          <li><code>TabUiState</code> получил provider map по feature models для provider-aware content preflight</li>
+          <li>Добавлены regression tests для Opus pricing, OpenRouter data-only SSE frames, OpenRouter stream errors и OpenRouter missing-key toast</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.3.1 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.1</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

@@ -63,6 +63,30 @@ describe('LLM spend summary', () => {
     });
   });
 
+  it('prices Claude Opus 4.6 using current Opus 4.6 rates', () => {
+    const cost = estimateLlmCost('anthropic:claude-opus-4-6', {
+      input_tokens: 1_000_000,
+      cache_creation_input_tokens: 1_000_000,
+      cache_read_input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 500_000,
+        ephemeral_1h_input_tokens: 500_000,
+      },
+    });
+
+    expect(cost).toEqual({
+      modelId: 'anthropic:claude-opus-4-6',
+      inputUsd: 5,
+      cacheWrite5mUsd: 3.125,
+      cacheWrite1hUsd: 5,
+      cacheReadUsd: 0.5,
+      outputUsd: 25,
+      totalUsd: 38.625,
+      approximate: false,
+    });
+  });
+
   it('treats Grok cache-read pricing as approximate rather than source-confirmed truth', () => {
     const usage = {
       input_tokens: 1_000_000,

@@ -1,8 +1,14 @@
 import { AGENCY_HUB_PREFETCH_TIMEOUT_MS } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError } from '../shared/errors.js';
+import { getModelEntry } from '../shared/model-registry.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
-import type { AgencyHubConnectionTestRequest, PopupStatus } from '../shared/types.js';
+import type {
+  AgencyHubConnectionTestRequest,
+  PopupStatus,
+  Settings,
+  TabUiState,
+} from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
@@ -11,6 +17,17 @@ import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
+
+function buildModelProviderByFeature(
+  settings: Settings,
+): TabUiState['modelProviderByFeature'] {
+  return Object.fromEntries(
+    Object.entries(settings.featureModels).flatMap(([feature, modelId]) => {
+      const provider = getModelEntry(modelId)?.provider;
+      return provider ? [[feature, provider]] : [];
+    }),
+  ) as TabUiState['modelProviderByFeature'];
+}
 
 export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
@@ -94,6 +111,7 @@ export function registerRuntimeApi({
           ),
           connected,
           hasApiKey: Boolean(state.settings.claudeApiKey || state.settings.openRouterApiKey),
+          modelProviderByFeature: buildModelProviderByFeature(state.settings),
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,

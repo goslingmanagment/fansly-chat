@@ -69,11 +69,11 @@ export const AI_MODELS: AiModelEntry[] = [
     description: 'Best quality',
     supportsPromptCache: true,
     pricing: {
-      inputUsdPerMillion: 15,
-      cacheWrite5mUsdPerMillion: 18.75,
-      cacheWrite1hUsdPerMillion: 30,
-      cacheReadUsdPerMillion: 1.50,
-      outputUsdPerMillion: 75,
+      inputUsdPerMillion: 5,
+      cacheWrite5mUsdPerMillion: 6.25,
+      cacheWrite1hUsdPerMillion: 10,
+      cacheReadUsdPerMillion: 0.50,
+      outputUsdPerMillion: 25,
     },
   },
   {
@@ -85,11 +85,11 @@ export const AI_MODELS: AiModelEntry[] = [
     description: 'Best quality (older)',
     supportsPromptCache: true,
     pricing: {
-      inputUsdPerMillion: 15,
-      cacheWrite5mUsdPerMillion: 18.75,
-      cacheWrite1hUsdPerMillion: 30,
-      cacheReadUsdPerMillion: 1.50,
-      outputUsdPerMillion: 75,
+      inputUsdPerMillion: 5,
+      cacheWrite5mUsdPerMillion: 6.25,
+      cacheWrite1hUsdPerMillion: 10,
+      cacheReadUsdPerMillion: 0.50,
+      outputUsdPerMillion: 25,
     },
   },
   {

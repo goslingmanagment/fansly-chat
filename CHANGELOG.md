@@ -1,5 +1,24 @@
 # Что нового
 
+## 1.3.2
+
+Hotfix после OpenRouter/LLM abstraction cleanup: исправлены цены Claude Opus 4.6/4.5, более устойчивый parsing OpenRouter stream и preflight warning для OpenRouter API key.
+
+### Главное
+
+- Claude Opus 4.6 и Claude Opus 4.5 теперь считаются по актуальным тарифам `$5/$25` за MTok вместо старых Opus 4 тарифов `$15/$75`.
+- Fan Summary больше не завышает отображаемый spend и Agency Hub usage cost при дефолтной Opus 4.6 модели.
+- OpenRouter stream больше не падает на валидных SSE `data:` фреймах без явного `event:`.
+- OpenRouter in-stream `error` payload классифицируется как rate limit / balance / API key / provider error, а не превращается в silent empty result.
+- Если выбрана OpenRouter-модель и ключей вообще нет, preflight toast теперь просит OpenRouter API key, а не Claude key.
+
+### Технически
+
+- `OpenRouterClient` выводит effective event из `payload.type` для Anthropic Messages stream.
+- OpenAI chat-completion chunks на `/api/v1/messages` по-прежнему reject'ятся как unsupported shape.
+- `TabUiState` получил provider map по feature models для provider-aware content preflight.
+- Добавлены regression tests для Opus pricing, OpenRouter data-only SSE frames, OpenRouter stream errors и OpenRouter missing-key toast.
+
 ## 1.3.1
 
 Фикс OpenRouter usage/cost и финальная зачистка AI provider abstraction после добавления Gemini/Grok. Расходы, debug-профилирование и ошибки API key теперь больше не используют Claude-лейблы там, где выбран OpenRouter.
