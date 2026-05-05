@@ -288,34 +288,100 @@ export function getErrorMessage(key: UserErrorKey): UserFacingError {
 
 export function createUserError(
   key: UserErrorKey,
-  overrides?: Partial<Pick<UserFacingError, 'description' | 'retryAtMs' | 'retryAfterMs'>>,
+  overrides?: Partial<Pick<UserFacingError, 'message' | 'description' | 'retryAtMs' | 'retryAfterMs'>>,
 ): UserFacingError {
   const base = getErrorMessage(key);
   return {
     ...base,
+    ...(overrides?.message ? { message: overrides.message } : {}),
     ...(overrides?.description ? { description: overrides.description } : {}),
     ...(typeof overrides?.retryAtMs === 'number' ? { retryAtMs: overrides.retryAtMs } : {}),
     ...(typeof overrides?.retryAfterMs === 'number' ? { retryAfterMs: overrides.retryAfterMs } : {}),
   };
 }
 
+function providerUserErrorOverrides(
+  key: UserErrorKey,
+  provider: string | undefined,
+): Partial<Pick<UserFacingError, 'message' | 'description'>> | null {
+  if (provider !== 'openrouter') {
+    return null;
+  }
+
+  switch (key) {
+    case 'missing_api_key':
+      return {
+        message: 'OpenRouter API key not configured.',
+        description: 'Open Settings and add a valid OpenRouter API key.',
+      };
+    case 'invalid_api_key':
+      return {
+        message: 'OpenRouter API key is invalid.',
+        description: 'Check the OpenRouter key in Settings and try again.',
+      };
+    case 'rate_limited':
+      return {
+        message: 'OpenRouter rate limit reached.',
+        description: 'ChatGoose will retry if the wait is short; otherwise run it again later.',
+      };
+    case 'insufficient_balance':
+      return {
+        message: 'OpenRouter balance is insufficient.',
+        description: 'Add credits or update billing in OpenRouter before trying again.',
+      };
+    case 'service_unavailable':
+      return {
+        message: 'OpenRouter service is unavailable.',
+        description: 'Wait a moment and try again.',
+      };
+    case 'model_unavailable':
+      return {
+        message: 'Selected OpenRouter model is unavailable.',
+        description: 'Pick another model in Settings or wait until the model is available again.',
+      };
+    default:
+      return null;
+  }
+}
+
 export function toUserError(error: unknown): UserFacingError {
   if (error instanceof ChatGooseError) {
+    const providerOverrides = providerUserErrorOverrides(error.key, error.details?.provider);
     return createUserError(error.key, {
+      ...providerOverrides,
       retryAtMs: error.retryAtMs,
       retryAfterMs: error.retryAfterMs,
     });
+  }
+
+  const key = (error as { key?: unknown })?.key;
+  const provider = (error as { details?: { provider?: unknown } })?.details?.provider;
+  if (isUserErrorKey(key) && typeof provider === 'string') {
+    const providerOverrides = providerUserErrorOverrides(key, provider);
+    if (providerOverrides) {
+      const retryAtMs = (error as { retryAtMs?: unknown })?.retryAtMs;
+      const retryAfterMs = (error as { retryAfterMs?: unknown })?.retryAfterMs;
+      return createUserError(key, {
+        ...providerOverrides,
+        ...(typeof retryAtMs === 'number' ? { retryAtMs } : {}),
+        ...(typeof retryAfterMs === 'number' ? { retryAfterMs } : {}),
+      });
+    }
   }
 
   if (isUserFacingError(error)) {
     return error;
   }
 
-  const key = (error as { key?: unknown })?.key;
   if (isUserErrorKey(key)) {
     const retryAtMs = (error as { retryAtMs?: unknown })?.retryAtMs;
     const retryAfterMs = (error as { retryAfterMs?: unknown })?.retryAfterMs;
+    const providerOverrides = providerUserErrorOverrides(
+      key,
+      typeof provider === 'string' ? provider : undefined,
+    );
     return createUserError(key, {
+      ...providerOverrides,
       ...(typeof retryAtMs === 'number' ? { retryAtMs } : {}),
       ...(typeof retryAfterMs === 'number' ? { retryAfterMs } : {}),
     });

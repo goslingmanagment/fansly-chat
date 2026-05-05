@@ -14,6 +14,7 @@ export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft' | 
 
 export interface Settings {
   claudeApiKey: string;
+  openRouterApiKey: string;
   agencyHubBaseUrl: string;
   agencyHubApiKey: string;
   quickMessageCount: number;
@@ -540,6 +541,7 @@ export interface ChatGooseErrorDetails {
   retryAfterMs?: number;
   retryAtMs?: number;
   providerMessage?: string;
+  provider?: string;
 }
 
 export type UserErrorKey =

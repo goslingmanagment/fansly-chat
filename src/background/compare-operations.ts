@@ -9,6 +9,10 @@ import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
 import { ChatGooseError, toDebugErrorPayload, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
+import {
+  getAgencyHubModelId,
+  isAnthropicModelSelection,
+} from '../shared/model-registry.js';
 import { buildPromptRequest } from '../shared/prompts.js';
 import { splitByNext } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
@@ -44,7 +48,6 @@ import type {
   ReplyTone,
   SessionTemplate,
 } from '../shared/types.js';
-import type { AnthropicClient } from './anthropic-client.js';
 import {
   buildAnthropicSpendSummary,
   createZeroAnthropicSpendSummary,
@@ -70,6 +73,7 @@ import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
+import type { LlmClient } from './llm-client.js';
 
 export interface ActiveCompareCardState {
   card: Pick<CompareModelCard, 'id' | 'label' | 'source'>;
@@ -96,7 +100,7 @@ export interface CompareOperationsContext {
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
   fanslyClient: FanslyClient;
-  anthropicClient: AnthropicClient;
+  llmClient: LlmClient;
   agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>;
   hasActiveFeature: (tabId: number) => boolean;
   hasPort: (tabId: number) => boolean;
@@ -155,7 +159,7 @@ function buildAiUsageEvent({
   return {
     clientEventId,
     feature: 'fast-reply',
-    model,
+    model: getAgencyHubModelId(model),
     inputTokens: spend.inputTokens,
     outputTokens: spend.outputTokens,
     cacheWriteTokens: spend.cacheWriteTokens,
@@ -337,7 +341,7 @@ async function validateCompareStart(
   const session = context.sessionStore.getSessionForTab(tabId);
   const legacyAccountId = context.sessionStore.getAccountIdForTab(tabId);
 
-  if (!storage.settings.claudeApiKey) {
+  if (!storage.settings.claudeApiKey && !storage.settings.openRouterApiKey) {
     throw new ChatGooseError('missing_api_key');
   }
   if (!legacyAccountId || !session) {
@@ -1049,8 +1053,8 @@ export async function executeCompare(
 
       const streamToCard = async (model: string): Promise<string> => {
         actualModel = model;
-        return context.anthropicClient.streamMessage({
-          apiKey: validated.storage.settings.claudeApiKey,
+        return context.llmClient.streamMessage({
+          settings: validated.storage.settings,
           model,
           temperature: COMPARE_TEMPERATURE,
           systemBlocks,
@@ -1117,7 +1121,11 @@ export async function executeCompare(
           timeoutSignal: timeoutController?.signal,
           cancelSignal: controller?.signal,
         });
-        if (isModelError && resolvedModel !== defaultModel) {
+        if (
+          isModelError &&
+          isAnthropicModelSelection(resolvedModel) &&
+          resolvedModel !== defaultModel
+        ) {
           rawText = await streamToCard(defaultModel);
         } else if (abortError?.key === 'timed_out') {
           throw abortError;

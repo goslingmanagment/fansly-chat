@@ -7,7 +7,7 @@ import type {
   PromptTextBlock,
 } from '../shared/types.js';
 
-interface StreamArgs {
+export interface AnthropicStreamArgs {
   apiKey: string;
   model: string;
   temperature: number;
@@ -32,7 +32,7 @@ interface AnthropicApiErrorInfo {
   message?: string;
 }
 
-function parseSseBlock(block: string): { event: string; data: string } | null {
+export function parseSseBlock(block: string): { event: string; data: string } | null {
   const lines = block.split('\n').map((line) => line.trim());
   let event = 'message';
   const dataLines: string[] = [];
@@ -57,7 +57,7 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
   return { event, data: dataLines.join('\n') };
 }
 
-function mergeUsage(
+export function mergeUsage(
   current: AnthropicUsageMetrics | null,
   next?: Partial<AnthropicUsageMetrics>,
 ): AnthropicUsageMetrics | null {
@@ -101,7 +101,7 @@ function mergeUsage(
   };
 }
 
-function usageEquals(
+export function usageEquals(
   left: AnthropicUsageMetrics | null,
   right: AnthropicUsageMetrics | null,
 ): boolean {
@@ -149,7 +149,7 @@ async function readAnthropicError(response: Response): Promise<AnthropicApiError
   }
 }
 
-function parseRetryAfterMs(value: string | null): number | undefined {
+export function parseRetryAfterMs(value: string | null): number | undefined {
   if (!value) {
     return undefined;
   }
@@ -283,7 +283,7 @@ export class AnthropicClient {
     onText,
     onUsage,
     onProgress,
-  }: StreamArgs): Promise<string> {
+  }: AnthropicStreamArgs): Promise<string> {
     let rawText = '';
     let usage: AnthropicUsageMetrics | null = null;
     const response = await fetch(CLAUDE_API_URL, {

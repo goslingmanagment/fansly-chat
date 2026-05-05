@@ -45,6 +45,11 @@ import {
   resolveFeatureModelFeature,
 } from '../shared/features.js';
 import { logDebug } from '../shared/log.js';
+import {
+  getAgencyHubModelId,
+  getModelEntry,
+  isAnthropicModelSelection,
+} from '../shared/model-registry.js';
 import { buildPromptRequest } from '../shared/prompts.js';
 import {
   hasAvailableFanSummary,
@@ -97,7 +102,6 @@ import {
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
 import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
-import { AnthropicClient } from './anthropic-client.js';
 import {
   buildAnthropicSpendSummary,
   createZeroAnthropicSpendSummary,
@@ -112,6 +116,7 @@ import {
 } from './compare-operations.js';
 import type { SubscriptionLookupTraceEvent } from './fansly-client.js';
 import { FanslyClient } from './fansly-client.js';
+import type { LlmClient } from './llm-client.js';
 import {
   createOperationProfiler,
   type OperationProfiler,
@@ -411,7 +416,7 @@ export class OperationCoordinator {
     private readonly sessionStore: SessionStore,
     private readonly tabContexts: TabContextStore,
     private readonly fanslyClient: FanslyClient,
-    private readonly anthropicClient: AnthropicClient,
+    private readonly llmClient: LlmClient,
     private readonly storageCoordinator: StorageCoordinator,
     private readonly agencyHubClient: AgencyHubClient,
     private readonly agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>,
@@ -639,7 +644,7 @@ export class OperationCoordinator {
         mappedPersonalityId,
       ),
       connected: Boolean(session?.connected),
-      hasApiKey: Boolean(storage.settings.claudeApiKey),
+      hasApiKey: Boolean(storage.settings.claudeApiKey || storage.settings.openRouterApiKey),
       hasPersonalities: storage.personalities.length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
@@ -851,7 +856,7 @@ export class OperationCoordinator {
     return {
       clientEventId,
       feature,
-      model,
+      model: getAgencyHubModelId(model),
       inputTokens: spend.inputTokens,
       outputTokens: spend.outputTokens,
       cacheWriteTokens: spend.cacheWriteTokens,
@@ -922,7 +927,7 @@ export class OperationCoordinator {
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
 
-    if (!storage.settings.claudeApiKey) {
+    if (!storage.settings.claudeApiKey && !storage.settings.openRouterApiKey) {
       throw new ChatGooseError('missing_api_key');
     }
     if (storage.personalities.length === 0) {
@@ -2245,7 +2250,7 @@ export class OperationCoordinator {
       };
 
       const streamArgs = {
-        apiKey: validated.storage.settings.claudeApiKey,
+        settings: validated.storage.settings,
         model: actualModel,
         temperature: FEATURE_TEMPERATURES[payload.feature],
         systemBlocks,
@@ -2290,7 +2295,7 @@ export class OperationCoordinator {
       let rawText: string;
       while (true) {
         try {
-          rawText = await this.anthropicClient.streamMessage({
+          rawText = await this.llmClient.streamMessage({
             ...streamArgs,
             model: actualModel,
           });
@@ -2337,13 +2342,14 @@ export class OperationCoordinator {
             const nextRetryAtMs = canRetryRateLimit
               ? (retryAtMs ?? (Date.now() + retryDelayMs))
               : (Date.now() + retryDelayMs);
+            const providerLabel = getModelEntry(actualModel)?.providerLabel ?? 'Provider';
             const retryMessage = canRetryRateLimit
               ? 'Rate limited. Waiting to retry…'
-              : 'Claude unavailable. Retrying…';
+              : `${providerLabel} unavailable. Retrying…`;
             profiler.log(
               canRetryRateLimit
-                ? `Anthropic rate limited, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`
-                : `Anthropic service unavailable, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`,
+                ? `${providerLabel} rate limited, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`
+                : `${providerLabel} service unavailable, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`,
             );
             sendOperationProgress({
               phase: 'generating',
@@ -2368,7 +2374,11 @@ export class OperationCoordinator {
             continue;
           }
 
-          if (errorKey === 'model_unavailable' && actualModel !== defaultModel) {
+          if (
+            errorKey === 'model_unavailable' &&
+            isAnthropicModelSelection(actualModel) &&
+            actualModel !== defaultModel
+          ) {
             actualModel = defaultModel;
             profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
             sendDebugPromptSnapshot(defaultModel);
@@ -2544,7 +2554,7 @@ export class OperationCoordinator {
       tabContexts: this.tabContexts,
       storageCoordinator: this.storageCoordinator,
       fanslyClient: this.fanslyClient,
-      anthropicClient: this.anthropicClient,
+      llmClient: this.llmClient,
       agencyHubUsageReporter: this.agencyHubUsageReporter,
       hasActiveFeature: (tabId) => this.activeByTabId.has(tabId),
       hasPort: (tabId) => this.portsByTabId.has(tabId),

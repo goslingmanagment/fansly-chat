@@ -3,11 +3,12 @@ import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
-import { CLAUDE_MODELS } from '../shared/constants.js';
+import { AI_MODEL_GROUPS } from '../shared/constants.js';
 import {
   createUserError,
   getUserErrorDescription,
 } from '../shared/errors.js';
+import { isOpenRouterModelSelection } from '../shared/model-registry.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type {
   AgencyHubConnectionTestResponse,
@@ -262,7 +263,7 @@ async function render(): Promise<void> {
   title.textContent = 'ChatGoose Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure Claude, personalities, mappings, and live Fansly connections.';
+  subtitle.textContent = 'Configure AI providers, personalities, mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatgoose-muted)';
   hero.append(createVersionTag(), title, subtitle);
   root.append(hero);
@@ -284,6 +285,22 @@ async function render(): Promise<void> {
   keyRow.style.gap = '8px';
   keyRow.append(keyInput, toggle);
   apiSection.append(labeledField('Claude API key', keyRow));
+
+  const openRouterKeyInput = document.createElement('input');
+  openRouterKeyInput.type = 'password';
+  openRouterKeyInput.className = 'chatgoose-input';
+  openRouterKeyInput.value = state.settings.openRouterApiKey;
+  const openRouterToggle = createButton('Show', true);
+  openRouterToggle.addEventListener('click', () => {
+    openRouterKeyInput.type = openRouterKeyInput.type === 'password' ? 'text' : 'password';
+    openRouterToggle.textContent = openRouterKeyInput.type === 'password' ? 'Show' : 'Hide';
+  });
+  const openRouterKeyRow = document.createElement('div');
+  openRouterKeyRow.style.display = 'grid';
+  openRouterKeyRow.style.gridTemplateColumns = '1fr auto';
+  openRouterKeyRow.style.gap = '8px';
+  openRouterKeyRow.append(openRouterKeyInput, openRouterToggle);
+  apiSection.append(labeledField('OpenRouter API key', openRouterKeyRow));
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -727,7 +744,7 @@ async function render(): Promise<void> {
   // ─── AI Models ───────────────────────────────────────────
   const modelSection = createSection(
     'AI Models',
-    'Pick which Claude model each feature uses. If you\'re not sure, leave everything on Claude Sonnet 4.6.',
+    'Pick which AI model each feature uses. Claude models use the Anthropic key; Gemini and Grok use the OpenRouter key.',
   );
 
   const FEATURE_ROWS: Array<{ feature: ModelSelectableFeatureType; label: string; helper: string }> = [
@@ -739,17 +756,45 @@ async function render(): Promise<void> {
   ];
 
   const modelSelects: HTMLSelectElement[] = [];
+  const openRouterWarning = document.createElement('div');
+  openRouterWarning.style.padding = '10px 12px';
+  openRouterWarning.style.borderRadius = '12px';
+  openRouterWarning.style.border = '1px solid rgba(245, 158, 11, 0.35)';
+  openRouterWarning.style.background = 'rgba(245, 158, 11, 0.12)';
+  openRouterWarning.style.color = 'var(--chatgoose-warning, #fbbf24)';
+  openRouterWarning.style.fontWeight = '700';
+  openRouterWarning.style.fontSize = '13px';
+
+  const renderOpenRouterWarning = (): void => {
+    const usesOpenRouter = modelSelects.some((select) =>
+      isOpenRouterModelSelection(select.value),
+    );
+    const missingKey = !openRouterKeyInput.value.trim();
+    openRouterWarning.textContent =
+      usesOpenRouter && missingKey
+        ? 'OpenRouter model selected: add an OpenRouter API key before using those features.'
+        : '';
+    openRouterWarning.style.display = usesOpenRouter && missingKey ? 'block' : 'none';
+  };
 
   for (const { feature, label, helper } of FEATURE_ROWS) {
     const select = document.createElement('select');
     select.className = 'chatgoose-select';
     select.dataset.feature = feature;
 
-    for (const model of CLAUDE_MODELS) {
-      const option = document.createElement('option');
-      option.value = model.id;
-      option.textContent = `${model.label} \u2014 ${model.description}`;
-      select.append(option);
+    for (const group of AI_MODEL_GROUPS) {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.label;
+      for (const model of group.models) {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = `${model.label} \u2014 ${model.description}`;
+        if (model.pricingNote) {
+          option.title = model.pricingNote;
+        }
+        optgroup.append(option);
+      }
+      select.append(optgroup);
     }
 
     select.value = state.settings.featureModels[feature];
@@ -772,6 +817,8 @@ async function render(): Promise<void> {
     row.append(featureLabel, helperText, select);
     modelSection.append(row);
   }
+  renderOpenRouterWarning();
+  modelSection.append(openRouterWarning);
 
   const saveSettingsDebounced = debounce(async () => {
     const featureModels: Record<string, string> = {};
@@ -781,6 +828,7 @@ async function render(): Promise<void> {
 
     const savedSettings = await saveSettings({
       claudeApiKey: keyInput.value,
+      openRouterApiKey: openRouterKeyInput.value,
       agencyHubBaseUrl: agencyHubUrlInput.value,
       agencyHubApiKey: agencyHubKeyInput.value,
       quickMessageCount: Number(quickInput.value),
@@ -793,6 +841,7 @@ async function render(): Promise<void> {
     });
 
     keyInput.value = savedSettings.claudeApiKey;
+    openRouterKeyInput.value = savedSettings.openRouterApiKey;
     agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
     agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
 
@@ -808,6 +857,7 @@ async function render(): Promise<void> {
 
   [
     keyInput,
+    openRouterKeyInput,
     agencyHubUrlInput,
     agencyHubKeyInput,
     quickInput,
@@ -820,6 +870,8 @@ async function render(): Promise<void> {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
+  openRouterKeyInput.addEventListener('input', renderOpenRouterWarning);
+  openRouterKeyInput.addEventListener('change', renderOpenRouterWarning);
   agencyHubUrlInput.addEventListener('input', () => {
     markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
@@ -858,7 +910,10 @@ async function render(): Promise<void> {
     });
   }
   modelSelects.forEach((select) => {
-    select.addEventListener('change', saveSettingsDebounced);
+    select.addEventListener('change', () => {
+      renderOpenRouterWarning();
+      void saveSettingsDebounced();
+    });
   });
 
   root.append(apiSection);

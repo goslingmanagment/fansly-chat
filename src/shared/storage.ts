@@ -1,5 +1,4 @@
 import {
-  CLAUDE_MODEL_IDS,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   IMPROVE_MAX_MESSAGE_COUNT,
@@ -12,6 +11,7 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_CACHE_PREFIX,
 } from './constants.js';
+import { normalizeModelId } from './model-registry.js';
 import {
   collectAliasKeysForCanonical,
   resolveCanonicalAccountId,
@@ -75,13 +75,15 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const featureModels = { ...defaults.featureModels };
   for (const feature of Object.keys(defaults.featureModels) as ModelSelectableFeatureType[]) {
     const candidate = rawModels[feature];
-    if (candidate && CLAUDE_MODEL_IDS.has(candidate)) {
-      featureModels[feature] = candidate;
+    const normalizedModel = normalizeModelId(candidate);
+    if (normalizedModel) {
+      featureModels[feature] = normalizedModel;
     }
   }
 
   return {
     claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
+    openRouterApiKey: String(input.openRouterApiKey ?? defaults.openRouterApiKey).trim(),
     agencyHubBaseUrl: normalizeAgencyHubBaseUrl(
       String(input.agencyHubBaseUrl ?? defaults.agencyHubBaseUrl),
     ),

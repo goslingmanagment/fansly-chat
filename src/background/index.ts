@@ -2,6 +2,8 @@ import { AgencyHubClient } from './agency-hub-client.js';
 import { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 import { AnthropicClient } from './anthropic-client.js';
 import { FanslyClient } from './fansly-client.js';
+import { LlmClient } from './llm-client.js';
+import { OpenRouterClient } from './openrouter-client.js';
 import { OperationCoordinator } from './operations.js';
 import { registerRuntimeApi } from './runtime-api.js';
 import { initializeSessionCapture } from './session-capture.js';
@@ -16,13 +18,15 @@ const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const fanslyClient = new FanslyClient(sessionStore);
 const anthropicClient = new AnthropicClient();
+const openRouterClient = new OpenRouterClient();
+const llmClient = new LlmClient(anthropicClient, openRouterClient);
 const agencyHubClient = new AgencyHubClient();
 const agencyHubUsageReporter = new AgencyHubUsageReporter(agencyHubClient);
 const coordinator = new OperationCoordinator(
   sessionStore,
   tabContexts,
   fanslyClient,
-  anthropicClient,
+  llmClient,
   storageCoordinator,
   agencyHubClient,
   agencyHubUsageReporter,
