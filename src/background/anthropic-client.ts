@@ -56,11 +56,13 @@ const ADAPTIVE_THINKING_EFFORTS: Record<FeatureType, AnthropicThinkingEffort> = 
 };
 
 const ADAPTIVE_THINKING_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
-  'fast-reply': 1600,
-  'improve-draft': 1600,
-  'help-me': 2000,
-  ping: 1600,
-  'hi-greeting': 1600,
+  'fast-reply': 8000,
+  'improve-draft': 8000,
+  'help-me': 16000,
+  'fan-summary': 24000,
+  'chat-review': 16000,
+  ping: 8000,
+  'hi-greeting': 8000,
 };
 
 function supportsAdaptiveThinking(model: string): boolean {

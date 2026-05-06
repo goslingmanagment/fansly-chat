@@ -224,7 +224,7 @@ describe('AnthropicClient streaming requests', () => {
     expect(body.max_tokens).toBe(MAX_TOKENS['fan-summary']);
   });
 
-  it('uses low omitted adaptive thinking and a larger cap for Claude 4.6 reply features', async () => {
+  it('uses low omitted adaptive thinking and a large cap for Claude 4.6 reply features', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_stop',
@@ -249,7 +249,7 @@ describe('AnthropicClient streaming requests', () => {
       output_config?: unknown;
     };
 
-    expect(body.max_tokens).toBe(1600);
+    expect(body.max_tokens).toBe(8000);
     expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
     expect(body.output_config).toEqual({ effort: 'low' });
   });
@@ -284,7 +284,7 @@ describe('AnthropicClient streaming requests', () => {
     expect(body.output_config).toBeUndefined();
   });
 
-  it('uses medium omitted adaptive thinking for Claude 4.6 deep features', async () => {
+  it('uses medium omitted adaptive thinking and a large cap for Claude 4.6 deep features', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_stop',
@@ -309,7 +309,37 @@ describe('AnthropicClient streaming requests', () => {
       output_config?: unknown;
     };
 
-    expect(body.max_tokens).toBe(MAX_TOKENS['fan-summary']);
+    expect(body.max_tokens).toBe(24000);
+    expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+    expect(body.output_config).toEqual({ effort: 'medium' });
+  });
+
+  it('uses a large adaptive cap for Claude 4.6 chat-review', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    await client.streamMessage(
+      streamArgs({
+        model: 'claude-sonnet-4-6',
+        feature: 'chat-review',
+      }),
+    );
+
+    const fetchMock = vi.mocked(fetch);
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      max_tokens: number;
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+
+    expect(body.max_tokens).toBe(16000);
     expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
     expect(body.output_config).toEqual({ effort: 'medium' });
   });
