@@ -3457,6 +3457,59 @@ describe('OperationCoordinator', () => {
     );
   });
 
+  it('sanitizes leaked Gemini meta text before returning insertable reply parts', async () => {
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText:
+        `]\n[NEXT]\n"I think it's cute tbh"\n\nWait, the prompt says "Most replies should be a single message."`,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(completeMessage?.result.rawText).toContain('prompt says');
+    expect(completeMessage?.result.parts).toEqual(["I think it's cute tbh"]);
+  });
+
+  it('returns an unusable-output error when a reply has no insertable parts after sanitizing', async () => {
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText: 'The prompt says output only the message text.',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+
+    expect(errorMessage?.error).toMatchObject({
+      key: 'ai_output_unusable',
+      code: 'CG-API-06',
+    });
+  });
+
   it('routes OpenRouter selections through the shared stream client with provider-aware settings', async () => {
     (mockStorage.settings as Record<string, unknown>).openRouterApiKey = 'sk-or-v1-test';
     (mockStorage.settings as Record<string, unknown>).claudeApiKey = '';

@@ -1085,7 +1085,7 @@ export class OverlayController {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
     }
 
-    if (model.splitModeRequested) {
+    if (model.splitModeRequested && !model.error) {
       const helper = document.createElement('div');
       helper.className = 'chatgoose-inline-note';
       helper.textContent =
@@ -1095,7 +1095,9 @@ export class OverlayController {
       section.append(helper);
     }
 
-    if (model.parts.length > 0) {
+    if (model.error) {
+      section.append(createUserErrorBlock(model.error));
+    } else if (model.parts.length > 0) {
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {

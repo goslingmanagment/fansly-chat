@@ -487,7 +487,9 @@ export class InlinePanelController {
       section.append(createUserErrorBlock(this.inlineError));
     }
 
-    if (model.parts.length > 0) {
+    if (model.error) {
+      section.append(createUserErrorBlock(model.error));
+    } else if (model.parts.length > 0) {
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {

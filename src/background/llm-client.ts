@@ -24,6 +24,7 @@ export interface LlmStreamArgs {
   onText: (text: string) => void;
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
+  onStopReason?: (stopReason: string | null) => void;
 }
 
 export class LlmClient {

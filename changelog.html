@@ -412,11 +412,45 @@
 
 <div class="timeline">
 
+  <!-- 1.3.3 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.3</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Hotfix для Gemini replies: thinking остаётся включённым на <code>low</code>,
+          но ChatGoose больше не вставляет в UI служебные обрывки, prompt-leak текст
+          и незавершённые ответы.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Gemini quick replies теперь идут через OpenRouter Messages API с <code>thinking.display = omitted</code> и <code>output_config.effort = low</code> для коротких insertable-фич</li>
+          <li>Для Gemini quick-фич увеличен output budget, чтобы low thinking не съедал весь лимит и не обрывал финальный reply на границе <code>max_tokens</code></li>
+          <li>Ответы перед <code>[NEXT]</code> / <code>[VARIANT]</code> проходят sanitizer: убираются bracket-обрывки, обрамляющие кавычки, <code>Reply:</code> / <code>Message 1:</code>-префиксы и очевидные meta-leak строки про prompt/instructions</li>
+          <li>Если модель вернула только meta-текст или поток закончился по <code>max_tokens</code>, ChatGoose показывает понятную ошибку и просит regenerate вместо вставки битого текста</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Добавлен общий <code>reply-output</code> normalizer для background и content UI</li>
+          <li>OpenRouter и Anthropic stream clients теперь прокидывают <code>stop_reason</code> в операции</li>
+          <li>Compare cards больше не показывают raw leaked output, если после sanitizer не осталось пригодных частей</li>
+          <li>Добавлены regression tests на Gemini leak, short replies, variant splitting, <code>max_tokens</code> и unusable-output ошибки</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.3.2 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.2</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
