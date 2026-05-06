@@ -15,7 +15,7 @@ import {
   isAnthropicModelSelection,
 } from '../shared/model-registry.js';
 import { buildPromptRequest } from '../shared/prompts.js';
-import { splitByNext } from '../shared/split.js';
+import { normalizeReplyParts } from '../shared/reply-output.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   buildPurchaseEvidence,
@@ -1082,6 +1082,7 @@ export async function executeCompare(
       let cardCost: LlmCostEstimate | undefined;
       let cardSpend: LlmSpendSummary | undefined;
       let actualModel = resolvedModel;
+      let latestStopReason: string | null = null;
 
       const streamToCard = async (model: string): Promise<string> => {
         actualModel = model;
@@ -1136,6 +1137,9 @@ export async function executeCompare(
               message: 'Generating compare replies…',
               fanDisplayName,
             });
+          },
+          onStopReason: (stopReason) => {
+            latestStopReason = stopReason;
           },
         });
       };
@@ -1203,10 +1207,34 @@ export async function executeCompare(
         flushCompareChunks(context, tabId, activeCompare, card.id);
       }
 
+      const parts = normalizeReplyParts(rawText);
+      if (latestStopReason === 'max_tokens' || parts.length === 0) {
+        const profiling = buildCompareCardProfilingSnapshot(
+          profiler,
+          cardUsage,
+          cardCost,
+        );
+        sendCompareCardError(
+          context,
+          tabId,
+          {
+            type: 'compare:cardError',
+            operationId: payload.operationId,
+            cardId: card.id,
+            error: toUserError(new ChatGooseError('ai_output_unusable')),
+            llmSpend:
+              cardSpend ?? createZeroLlmSpendSummary(),
+          },
+          profiler,
+          profiling,
+        );
+        return;
+      }
+
       const result: FeatureResult = {
         rawText,
         splitModeRequested: payload.replyMode === 'preferSplit',
-        parts: splitByNext(rawText),
+        parts,
       };
       const completedAtMs = Date.now();
       const completedSpend = cardSpend ?? createZeroLlmSpendSummary();

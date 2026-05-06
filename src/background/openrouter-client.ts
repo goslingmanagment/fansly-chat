@@ -23,6 +23,7 @@ interface OpenRouterStreamArgs {
   onText: (text: string) => void;
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
+  onStopReason?: (stopReason: string | null) => void;
 }
 
 interface OpenRouterApiErrorBody {
@@ -58,6 +59,41 @@ type OpenRouterUsagePayload = Partial<LlmUsageMetrics> & {
     cache_write_tokens?: number;
   };
 };
+
+const GEMINI_QUICK_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
+  'fast-reply': 1600,
+  'improve-draft': 1600,
+  'hi-greeting': 1600,
+  ping: 1600,
+  'help-me': 2000,
+};
+
+function isGeminiModel(model: string): boolean {
+  return model.startsWith('google/gemini-');
+}
+
+function resolveMaxTokens(model: string, feature: FeatureType): number {
+  if (isGeminiModel(model)) {
+    return GEMINI_QUICK_MAX_TOKENS[feature] ?? MAX_TOKENS[feature];
+  }
+  return MAX_TOKENS[feature];
+}
+
+function buildGeminiThinkingConfig(
+  model: string,
+  feature: FeatureType,
+): {
+  thinking?: { type: 'adaptive'; display: 'omitted' };
+  output_config?: { effort: 'low' };
+} {
+  if (!isGeminiModel(model) || !GEMINI_QUICK_MAX_TOKENS[feature]) {
+    return {};
+  }
+  return {
+    thinking: { type: 'adaptive', display: 'omitted' },
+    output_config: { effort: 'low' },
+  };
+}
 
 function stripCacheControl(blocks: PromptTextBlock[]): PromptTextBlock[] {
   // OpenRouter Grok prompt caching is automatic, so cache_control is not needed.
@@ -249,6 +285,7 @@ export class OpenRouterClient {
     onText,
     onUsage,
     onProgress,
+    onStopReason,
   }: OpenRouterStreamArgs): Promise<string> {
     let rawText = '';
     let usage: LlmUsageMetrics | null = null;
@@ -264,7 +301,8 @@ export class OpenRouterClient {
         model,
         temperature,
         stream: true,
-        max_tokens: MAX_TOKENS[feature],
+        max_tokens: resolveMaxTokens(model, feature),
+        ...buildGeminiThinkingConfig(model, feature),
         system: stripCacheControl(systemBlocks),
         messages: [{ role: 'user', content: stripCacheControl(userBlocks) }],
       }),
@@ -305,7 +343,7 @@ export class OpenRouterClient {
           choices?: unknown[];
           message?: { usage?: OpenRouterUsagePayload };
           usage?: OpenRouterUsagePayload;
-          delta?: { type?: string; text?: string };
+          delta?: { type?: string; text?: string; stop_reason?: string | null };
           error?: { type?: string; message?: string; code?: number | string };
         };
         try {
@@ -352,6 +390,9 @@ export class OpenRouterClient {
         }
 
         if (effectiveEvent === 'message_delta') {
+          if ('stop_reason' in (payload.delta ?? {})) {
+            onStopReason?.(payload.delta?.stop_reason ?? null);
+          }
           const nextUsage = mergeUsage(usage, normalizeUsage(payload.usage));
           if (!usageEquals(usage, nextUsage)) {
             usage = nextUsage;

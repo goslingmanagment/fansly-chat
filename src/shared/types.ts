@@ -564,6 +564,7 @@ export type UserErrorKey =
   | 'model_unavailable'
   | 'context_too_long'
   | 'service_unavailable'
+  | 'ai_output_unusable'
   | 'hub_invalid_url'
   | 'hub_missing_api_key'
   | 'hub_invalid_api_key'

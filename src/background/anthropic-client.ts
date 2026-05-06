@@ -23,6 +23,7 @@ export interface AnthropicStreamArgs {
   onText: (text: string) => void;
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
+  onStopReason?: (stopReason: string | null) => void;
 }
 
 interface AnthropicApiErrorBody {
@@ -173,6 +174,7 @@ export class AnthropicClient {
     onText,
     onUsage,
     onProgress,
+    onStopReason,
   }: AnthropicStreamArgs): Promise<string> {
     let rawText = '';
     let usage: LlmUsageMetrics | null = null;
@@ -226,7 +228,7 @@ export class AnthropicClient {
           type?: string;
           message?: { usage?: Partial<LlmUsageMetrics> };
           usage?: Partial<LlmUsageMetrics>;
-          delta?: { type?: string; text?: string };
+          delta?: { type?: string; text?: string; stop_reason?: string | null };
           error?: { type?: string; message?: string };
         };
         try {
@@ -254,6 +256,9 @@ export class AnthropicClient {
         }
 
         if (parsed.event === 'message_delta') {
+          if ('stop_reason' in (payload.delta ?? {})) {
+            onStopReason?.(payload.delta?.stop_reason ?? null);
+          }
           const nextUsage = mergeUsage(usage, payload.usage);
           if (!usageEquals(usage, nextUsage)) {
             usage = nextUsage;

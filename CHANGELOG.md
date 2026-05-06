@@ -1,5 +1,23 @@
 # Что нового
 
+## 1.3.3
+
+Hotfix для Gemini replies: thinking остаётся включённым на `low`, но ChatGoose больше не вставляет в UI служебные обрывки, prompt-leak текст и незавершённые ответы.
+
+### Главное
+
+- Gemini quick replies теперь идут через OpenRouter Messages API с `thinking: { type: "adaptive", display: "omitted" }` и `output_config.effort = "low"` для коротких insertable-фич.
+- Для Gemini quick-фич увеличен output budget, чтобы low thinking не съедал весь лимит и не обрывал финальный reply на границе `max_tokens`.
+- Ответы перед `[NEXT]` / `[VARIANT]` теперь проходят sanitizer: убираются мусорные bracket-обрывки, обрамляющие кавычки, `Reply:` / `Message 1:`-префиксы и очевидные meta-leak строки про prompt/instructions.
+- Если модель вернула только meta-текст или поток закончился по `max_tokens`, ChatGoose показывает понятную ошибку и просит regenerate вместо вставки битого текста.
+
+### Технически
+
+- Добавлен общий `reply-output` normalizer для background и content UI, чтобы overlay, inline panel и compare cards одинаково очищали insertable replies.
+- OpenRouter и Anthropic stream clients теперь прокидывают `stop_reason` в операции.
+- Compare cards больше не показывают raw leaked output, если после sanitizer не осталось пригодных частей.
+- Добавлены regression tests на Gemini leak вида `] [NEXT] "reply" Wait, the prompt says...`, short replies (`ok`, emoji), variant splitting, stop_reason `max_tokens` и unusable-output ошибки.
+
 ## 1.3.2
 
 Hotfix после OpenRouter/LLM abstraction cleanup: исправлены цены Claude Opus 4.6/4.5, более устойчивый parsing OpenRouter stream и preflight warning для OpenRouter API key.

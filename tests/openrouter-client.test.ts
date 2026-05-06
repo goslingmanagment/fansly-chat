@@ -77,6 +77,8 @@ describe('OpenRouterClient', () => {
     const body = JSON.parse(String(request?.body)) as {
       model: string;
       max_tokens: number;
+      thinking?: unknown;
+      output_config?: unknown;
       system: Array<{ cache_control?: unknown; text: string }>;
       messages: Array<{ role: string; content: Array<{ cache_control?: unknown; text: string }> }>;
     };
@@ -85,10 +87,65 @@ describe('OpenRouterClient', () => {
     expect((request?.headers as Record<string, string>).authorization).toBe('Bearer sk-or-v1-test');
     expect(body.model).toBe('x-ai/grok-4.3');
     expect(body.max_tokens).toBe(MAX_TOKENS['fast-reply']);
+    expect(body.thinking).toBeUndefined();
+    expect(body.output_config).toBeUndefined();
     expect(body.system[0]).toEqual({ type: 'text', text: 'system cached' });
     expect(body.messages[0]?.content[0]).toEqual({ type: 'text', text: 'user dynamic' });
     expect(args.systemBlocks[0]?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
     expect(args.userBlocks[0]?.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('uses low omitted thinking and a larger budget for short Gemini reply features', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(
+      streamArgs({ model: 'google/gemini-3.1-pro-preview' }),
+    );
+
+    const [, request] = vi.mocked(fetch).mock.calls[0]!;
+    const body = JSON.parse(String(request?.body)) as {
+      max_tokens: number;
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+
+    expect(body.max_tokens).toBe(1600);
+    expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+    expect(body.output_config).toEqual({ effort: 'low' });
+  });
+
+  it('keeps the default budget and thinking config for deep Gemini features', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(
+      streamArgs({
+        model: 'google/gemini-3.1-pro-preview',
+        feature: 'fan-summary',
+      }),
+    );
+
+    const [, request] = vi.mocked(fetch).mock.calls[0]!;
+    const body = JSON.parse(String(request?.body)) as {
+      max_tokens: number;
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+
+    expect(body.max_tokens).toBe(MAX_TOKENS['fan-summary']);
+    expect(body.thinking).toBeUndefined();
+    expect(body.output_config).toBeUndefined();
   });
 
   it('calls onText for content_block_delta text deltas', async () => {
@@ -125,6 +182,24 @@ describe('OpenRouterClient', () => {
       cache_read_input_tokens: 0,
       output_tokens: 3,
     });
+  });
+
+  it('reports Anthropic message stop reasons from the OpenRouter stream', async () => {
+    const onStopReason = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_delta',
+        'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":800}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(streamArgs({ onStopReason }));
+
+    expect(onStopReason).toHaveBeenCalledWith('max_tokens');
   });
 
   it('handles data-only Anthropic message events by using payload.type', async () => {

@@ -53,10 +53,14 @@ import {
 } from '../shared/model-registry.js';
 import { buildPromptRequest } from '../shared/prompts.js';
 import {
+  normalizeReplyParts,
+  normalizeSingleReplyPart,
+  normalizeVariantReplyParts,
+} from '../shared/reply-output.js';
+import {
   hasAvailableFanSummary,
   isValidSummaryCacheEntry,
 } from '../shared/summary-cache.js';
-import { splitByNext, splitByVariant } from '../shared/split.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   analyzePingSegment,
@@ -413,14 +417,14 @@ function buildFeatureResult(
     case 'single-reply':
       return {
         rawText,
-        parts: [rawText.trim() || rawText],
+        parts: normalizeSingleReplyPart(rawText),
       };
     case 'summary':
       return { rawText };
     case 'reply': {
       const parts = feature === 'hi-greeting'
-        ? splitByVariant(rawText)
-        : splitByNext(rawText);
+        ? normalizeVariantReplyParts(rawText)
+        : normalizeReplyParts(rawText);
       return {
         rawText,
         ...(getFeaturePolicy(feature).supportsReplyMode
@@ -431,6 +435,19 @@ function buildFeatureResult(
         parts,
       };
     }
+  }
+}
+
+function assertInsertableFeatureResult(
+  feature: FeatureType,
+  result: FeatureResult,
+): void {
+  const resultKind = getFeaturePolicy(feature).resultKind;
+  if (
+    (resultKind === 'reply' || resultKind === 'single-reply') &&
+    (!result.parts || result.parts.length === 0)
+  ) {
+    throw new ChatGooseError('ai_output_unusable');
   }
 }
 
@@ -2267,6 +2284,7 @@ export class OperationCoordinator {
 
       let sawFirstChunk = false;
       let actualModel = resolvedModel;
+      let latestLlmStopReason: string | null = null;
       const actualModelName = (): string => getModelDisplayName(actualModel);
       startStage('llm-ttfb', 'Wait for AI TTFB');
       profiler.log(`Waiting for ${actualModelName()}`);
@@ -2334,6 +2352,9 @@ export class OperationCoordinator {
         },
         onUsage: (usage: LlmUsageMetrics) => {
           handleLlmUsage(usage);
+        },
+        onStopReason: (stopReason: string | null) => {
+          latestLlmStopReason = stopReason;
         },
       } as const;
 
@@ -2463,11 +2484,19 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
+      if (
+        latestLlmStopReason === 'max_tokens' &&
+        getFeaturePolicy(payload.feature).promptMode === 'reply'
+      ) {
+        throw new ChatGooseError('ai_output_unusable');
+      }
+
       const result = buildFeatureResult(
         payload.feature,
         rawText,
         payload.replyMode,
       );
+      assertInsertableFeatureResult(payload.feature, result);
 
       if (payload.feature === 'fan-summary') {
         const generatedAt = Date.now();

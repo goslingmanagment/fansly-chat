@@ -138,6 +138,12 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Anthropic service is unavailable.',
     description: 'Wait a moment and try again.',
   },
+  ai_output_unusable: {
+    key: 'ai_output_unusable',
+    code: 'CG-API-06',
+    message: 'AI reply could not be used.',
+    description: 'The model returned an incomplete or meta response. Regenerate the reply.',
+  },
   hub_invalid_url: {
     key: 'hub_invalid_url',
     code: 'CG-HUB-01',

@@ -18,6 +18,7 @@ import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
 import {
+  createUserError,
   formatUserFacingError,
   getErrorMessage,
   isUserFacingError,
@@ -32,7 +33,12 @@ import {
   usesInlineFeatureSurface,
   usesOverlayFeatureSurface,
 } from '../shared/features.js';
-import { splitByNext } from '../shared/split.js';
+import {
+  normalizeProvidedReplyParts,
+  normalizeReplyParts,
+  normalizeSingleReplyPart,
+  normalizeVariantReplyParts,
+} from '../shared/reply-output.js';
 import { loadStorageState } from '../shared/storage.js';
 import type {
   LlmSpendSummary,
@@ -62,6 +68,28 @@ function createParts(parts: string[]): OverlayInsertPart[] {
     insertedAt: null,
     insertedOnce: false,
   }));
+}
+
+function resultPartTexts(
+  feature: FeatureType,
+  result: FeatureResult,
+  rawText: string,
+): string[] {
+  if (Array.isArray(result.parts)) {
+    return normalizeProvidedReplyParts(result.parts);
+  }
+  switch (getFeaturePolicy(feature).resultKind) {
+    case 'single-reply':
+      return normalizeSingleReplyPart(rawText);
+    case 'reply':
+      return feature === 'hi-greeting'
+        ? normalizeVariantReplyParts(rawText)
+        : normalizeReplyParts(rawText);
+    case 'help-me':
+    case 'summary':
+    case 'chat-review':
+      return [];
+  }
 }
 
 function isEditableElement(el: Element | null): boolean {
@@ -1059,15 +1087,17 @@ export class ChatGooseContentApp {
     }
     model.fanDisplayName = message.fanDisplayName;
     tab.status = 'reply';
-    tab.rawText = message.result.rawText;
-    tab.parts = createParts(
-      message.result.parts && message.result.parts.length > 0
-        ? message.result.parts
-        : splitByNext(message.result.rawText),
-    );
+    const partTexts = resultPartTexts('fast-reply', message.result, message.result.rawText);
+    tab.rawText = partTexts.length > 0 ? message.result.rawText : '';
+    tab.parts = createParts(partTexts);
+    if (tab.parts.length === 0) {
+      tab.status = 'error';
+      tab.error = createUserError('ai_output_unusable');
+    } else {
+      tab.error = undefined;
+    }
     tab.llmSpend = getMessageLlmSpend(message);
     tab.splitModeRequested = Boolean(message.result.splitModeRequested);
-    tab.error = undefined;
     this.renderSurfaces();
   }
 
@@ -1415,8 +1445,8 @@ export class ChatGooseContentApp {
           operationId,
           rawText,
           coaching: parsed?.coaching ?? null,
-          engagingParts: parsed?.engaging ? createParts(splitByNext(parsed.engaging)) : [],
-          flirtyParts: parsed?.flirty ? createParts(splitByNext(parsed.flirty)) : [],
+          engagingParts: parsed?.engaging ? createParts(normalizeReplyParts(parsed.engaging)) : [],
+          flirtyParts: parsed?.flirty ? createParts(normalizeReplyParts(parsed.flirty)) : [],
           parseFallback: !parsed?.valid,
           debugPrompt: this.activeDebugPrompt ?? undefined,
           llmSpend,
@@ -1458,22 +1488,20 @@ export class ChatGooseContentApp {
         };
     }
 
+    const partTexts = resultPartTexts(feature, result, rawText);
     return {
       kind: 'reply',
       feature,
       fanDisplayName,
       operationId,
-      parts: createParts(
-        result.parts && result.parts.length > 0
-          ? result.parts
-          : splitByNext(rawText),
-      ),
-      rawText,
+      parts: createParts(partTexts),
+      rawText: partTexts.length > 0 ? rawText : '',
       splitModeRequested: Boolean(result.splitModeRequested),
       debugPrompt: this.activeDebugPrompt ?? undefined,
       llmSpend,
       profiling,
       rerunActionLabel: 'Regenerate',
+      ...(partTexts.length > 0 ? {} : { error: createUserError('ai_output_unusable') }),
     };
   }
 }
