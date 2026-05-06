@@ -38,6 +38,59 @@ interface AnthropicApiErrorInfo {
   message?: string;
 }
 
+type AnthropicThinkingEffort = 'low' | 'medium' | 'high';
+
+const ADAPTIVE_THINKING_MODELS = new Set([
+  'claude-sonnet-4-6',
+  'claude-opus-4-6',
+]);
+
+const ADAPTIVE_THINKING_EFFORTS: Record<FeatureType, AnthropicThinkingEffort> = {
+  'fast-reply': 'low',
+  'improve-draft': 'low',
+  'help-me': 'medium',
+  'fan-summary': 'medium',
+  'chat-review': 'medium',
+  ping: 'low',
+  'hi-greeting': 'low',
+};
+
+const ADAPTIVE_THINKING_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
+  'fast-reply': 1600,
+  'improve-draft': 1600,
+  'help-me': 2000,
+  ping: 1600,
+  'hi-greeting': 1600,
+};
+
+function supportsAdaptiveThinking(model: string): boolean {
+  return ADAPTIVE_THINKING_MODELS.has(model);
+}
+
+function resolveMaxTokens(model: string, feature: FeatureType): number {
+  if (supportsAdaptiveThinking(model)) {
+    return ADAPTIVE_THINKING_MAX_TOKENS[feature] ?? MAX_TOKENS[feature];
+  }
+  return MAX_TOKENS[feature];
+}
+
+function buildAdaptiveThinkingConfig(
+  model: string,
+  feature: FeatureType,
+): {
+  thinking?: { type: 'adaptive'; display: 'omitted' };
+  output_config?: { effort: AnthropicThinkingEffort };
+} {
+  if (!supportsAdaptiveThinking(model)) {
+    return {};
+  }
+
+  return {
+    thinking: { type: 'adaptive', display: 'omitted' },
+    output_config: { effort: ADAPTIVE_THINKING_EFFORTS[feature] },
+  };
+}
+
 function getHeader(response: Response, name: string): string | null {
   if (!response.headers || typeof response.headers.get !== 'function') {
     return null;
@@ -191,7 +244,8 @@ export class AnthropicClient {
         model,
         temperature,
         stream: true,
-        max_tokens: MAX_TOKENS[feature],
+        max_tokens: resolveMaxTokens(model, feature),
+        ...buildAdaptiveThinkingConfig(model, feature),
         system: systemBlocks,
         messages: [{ role: 'user', content: userBlocks }],
       }),
