@@ -7,7 +7,9 @@ import {
 import type {
   LlmUsageMetrics,
   FeatureType,
+  LlmReasoningSignal,
   PromptTextBlock,
+  ReasoningEffort,
   Settings,
 } from '../shared/types.js';
 import { AnthropicClient } from './anthropic-client.js';
@@ -20,10 +22,12 @@ export interface LlmStreamArgs {
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
   feature: FeatureType;
+  reasoningEffort: ReasoningEffort;
   signal: AbortSignal;
   onText: (text: string) => void;
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
+  onReasoningObserved?: (signal: LlmReasoningSignal) => void;
   onStopReason?: (stopReason: string | null) => void;
 }
 

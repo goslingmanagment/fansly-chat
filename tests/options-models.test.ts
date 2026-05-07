@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { AI_MODELS, DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  AI_MODELS,
+  DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import {
   BUNDLED_LORA_PERSONALITY_VERSION,
   createBundledPersonalities,
@@ -26,6 +31,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       debugMode: false,
       promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
+      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
       ...overrides,
     },
     personalities: [
@@ -111,14 +117,16 @@ describe('Options page — AI Models section', () => {
     await loadOptionsPage(makeState());
 
     const root = document.getElementById('chatgoose-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatgoose-select');
+    const selects = root.querySelectorAll<HTMLSelectElement>(
+      'select.chatgoose-select[data-feature]',
+    );
     expect(selects.length).toBe(5);
 
     const features = Array.from(selects).map((s) => s.dataset.feature);
     expect(features).toEqual(EXPECTED_FEATURES);
 
     const labels = Array.from(selects).map((s) => {
-      const row = s.parentElement!;
+      const row = s.closest('.chatgoose-model-config-grid')!.parentElement!;
       return row.querySelector('span')!.textContent;
     });
     expect(labels).toEqual(EXPECTED_LABELS);
@@ -128,7 +136,9 @@ describe('Options page — AI Models section', () => {
     await loadOptionsPage(makeState());
 
     const root = document.getElementById('chatgoose-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatgoose-select');
+    const selects = root.querySelectorAll<HTMLSelectElement>(
+      'select.chatgoose-select[data-feature]',
+    );
 
     for (const select of selects) {
       const options = Array.from(select.options);
@@ -152,7 +162,9 @@ describe('Options page — AI Models section', () => {
     await loadOptionsPage(makeState({ featureModels: customModels }));
 
     const root = document.getElementById('chatgoose-options-root')!;
-    const selects = root.querySelectorAll<HTMLSelectElement>('select.chatgoose-select');
+    const selects = root.querySelectorAll<HTMLSelectElement>(
+      'select.chatgoose-select[data-feature]',
+    );
 
     const values: Record<string, string> = {};
     for (const select of selects) {
@@ -199,6 +211,52 @@ describe('Options page — AI Models section', () => {
     expect(document.body.textContent).toContain(
       'OpenRouter model selected: add an OpenRouter API key before using those features.',
     );
+  });
+
+  it('renders 5 reasoning dropdowns with default medium options', async () => {
+    await loadOptionsPage(makeState());
+
+    const root = document.getElementById('chatgoose-options-root')!;
+    const selects = root.querySelectorAll<HTMLSelectElement>(
+      'select.chatgoose-select[data-reasoning-feature]',
+    );
+
+    expect(selects.length).toBe(5);
+    expect(Array.from(selects).map((select) => select.dataset.reasoningFeature)).toEqual(
+      EXPECTED_FEATURES,
+    );
+    for (const select of selects) {
+      expect(select.value).toBe('medium');
+      expect(Array.from(select.options).map((option) => option.value)).toEqual([
+        'off',
+        'low',
+        'medium',
+        'high',
+      ]);
+    }
+  });
+
+  it('initializes reasoning dropdowns from persisted featureReasoning', async () => {
+    await loadOptionsPage(makeState({
+      featureReasoning: {
+        ...DEFAULT_FEATURE_REASONING,
+        'fast-reply': 'off',
+        'fan-summary': 'high',
+      },
+    }));
+
+    const root = document.getElementById('chatgoose-options-root')!;
+    const selects = root.querySelectorAll<HTMLSelectElement>(
+      'select.chatgoose-select[data-reasoning-feature]',
+    );
+
+    const values: Record<string, string> = {};
+    for (const select of selects) {
+      values[select.dataset.reasoningFeature!] = select.value;
+    }
+    expect(values['fast-reply']).toBe('off');
+    expect(values['fan-summary']).toBe('high');
+    expect(values.ping).toBe('medium');
   });
 
   it('initializes the separate improve message count input from persisted settings', async () => {
@@ -257,6 +315,26 @@ describe('Options page — AI Models section', () => {
     const saved = savedSettings as { featureModels?: Record<string, string> };
     expect(saved.featureModels).toBeDefined();
     expect(saved.featureModels!['fan-summary']).toBe('anthropic:claude-opus-4-6');
+  });
+
+  it('saves featureReasoning when a reasoning dropdown changes', async () => {
+    await loadOptionsPage(makeState());
+
+    const root = document.getElementById('chatgoose-options-root')!;
+    const summaryReasoningSelect = root.querySelector<HTMLSelectElement>(
+      'select.chatgoose-select[data-reasoning-feature="fan-summary"]',
+    )!;
+
+    summaryReasoningSelect.value = 'high';
+    summaryReasoningSelect.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('not saved yet');
+    }, { timeout: 2000 });
+
+    const saved = savedSettings as { featureReasoning?: Record<string, string> };
+    expect(saved.featureReasoning).toBeDefined();
+    expect(saved.featureReasoning!['fan-summary']).toBe('high');
   });
 
   it('saves promptCachingEnabled when the checkbox changes', async () => {

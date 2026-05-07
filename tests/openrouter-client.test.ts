@@ -45,6 +45,7 @@ function streamArgs(
       },
     ],
     feature: 'fast-reply',
+    reasoningEffort: 'medium',
     signal: new AbortController().signal,
     onText: vi.fn(),
     onUsage: vi.fn(),
@@ -95,7 +96,7 @@ describe('OpenRouterClient', () => {
     expect(args.userBlocks[0]?.cache_control).toEqual({ type: 'ephemeral' });
   });
 
-  it('uses low omitted thinking and a larger budget for short Gemini reply features', async () => {
+  it('uses medium omitted thinking and a larger budget for short Gemini reply features by default', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_stop',
@@ -117,7 +118,63 @@ describe('OpenRouterClient', () => {
 
     expect(body.max_tokens).toBe(1600);
     expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
-    expect(body.output_config).toEqual({ effort: 'low' });
+    expect(body.output_config).toEqual({ effort: 'medium' });
+  });
+
+  it('omits Gemini thinking config when reasoning is off', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(
+      streamArgs({
+        model: 'google/gemini-3.1-pro-preview',
+        reasoningEffort: 'off',
+      }),
+    );
+
+    const [, request] = vi.mocked(fetch).mock.calls[0]!;
+    const body = JSON.parse(String(request?.body)) as {
+      max_tokens: number;
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+
+    expect(body.max_tokens).toBe(1600);
+    expect(body.thinking).toBeUndefined();
+    expect(body.output_config).toBeUndefined();
+  });
+
+  it('reports observed reasoning blocks from the OpenRouter Messages stream', async () => {
+    const onReasoningObserved = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: content_block_start',
+        'data: {"type":"content_block_start","content_block":{"type":"thinking"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"signature_delta","signature":"sig"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}',
+        '',
+        '',
+      ].join('\n'),
+    });
+
+    await expect(new OpenRouterClient().streamMessage(
+      streamArgs({
+        model: 'google/gemini-3.1-pro-preview',
+        onReasoningObserved,
+      }),
+    )).resolves.toBe('ok');
+
+    expect(onReasoningObserved).toHaveBeenCalledWith('thinking_block');
+    expect(onReasoningObserved).toHaveBeenCalledWith('signature_delta');
   });
 
   it('keeps the default budget and thinking config for deep Gemini features', async () => {

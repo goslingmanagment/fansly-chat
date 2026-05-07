@@ -412,11 +412,107 @@
 
 <div class="timeline">
 
+  <!-- 1.3.7 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.7</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Debug/profiling теперь показывает, был ли reasoning фактически замечен в ответном
+          stream, а не только выбран в настройках.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>В debug profiling добавлены строки <code>Reasoning requested: ...</code> и <code>Reasoning observed: yes/no</code></li>
+          <li><code>Reasoning observed: yes</code> появляется только если в stream пришёл thinking/redacted thinking block, <code>thinking_delta</code>, <code>signature_delta</code> или reasoning delta</li>
+          <li>Теперь можно отличить “reasoning был включён в request body” от “adaptive thinking реально сработал в этом ответе”</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Anthropic и OpenRouter stream parsers прокидывают <code>onReasoningObserved</code></li>
+          <li>Operation и Compare profiling логируют первый observed reasoning signal и явное <code>no</code>, если reasoning был запрошен, но stream не содержал reasoning-событий</li>
+          <li>Добавлены regression tests на stream-level reasoning detection и profiling log</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.3.6 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.6</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Hotfix для <code>CG-APP-01</code> после включения reasoning: Anthropic adaptive thinking
+          теперь не отправляется вместе с <code>temperature</code>, потому что extended/adaptive
+          thinking несовместим с temperature modifications.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li><code>Reply</code>, <code>Fix</code>, <code>Ping</code>, <code>Hi</code>, <code>Help</code>, <code>Summary</code> и <code>Review</code> сохраняют reasoning <code>medium</code> по умолчанию</li>
+          <li>Anthropic-запросы с reasoning больше не получают <code>temperature</code>, поэтому API не должен отклонять их validation error</li>
+          <li>Если reasoning выключен через <code>Off</code> или выбранная Claude-модель не поддерживает adaptive thinking, temperature продолжает использоваться как раньше</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Request body для Anthropic теперь собирается условно: <code>temperature</code> добавляется только когда <code>thinking</code> не отправляется</li>
+          <li>Добавлены regression checks, что adaptive requests содержат <code>thinking/output_config</code>, но не содержат <code>temperature</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.3.5 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.5</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Reasoning теперь по умолчанию работает на <code>medium</code>, а в настройках можно
+          отдельно управлять reasoning effort для каждой feature-модели.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Все reasoning defaults подняты до <code>medium</code>: быстрые replies больше не остаются на <code>low</code></li>
+          <li>В <code>Settings → AI Models</code> у каждой feature-строки появился отдельный селект <code>Reasoning</code></li>
+          <li>Доступные значения: <code>Off</code>, <code>Low</code>, <code>Medium</code>, <code>High</code></li>
+          <li><code>Fix</code>, <code>Hi</code> и Compare наследуют reasoning-настройку от <code>Fast Reply</code></li>
+          <li><code>Off</code> полностью убирает thinking/reasoning config из запроса для поддерживаемых моделей</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Добавлен <code>settings.featureReasoning</code> со storage schema <code>7</code>; старые настройки автоматически получают <code>medium</code></li>
+          <li>Anthropic Direct и OpenRouter clients теперь принимают явный <code>reasoningEffort</code> вместо feature-hardcode</li>
+          <li>Для неподдерживаемых моделей thinking config по-прежнему не отправляется, чтобы не ловить provider errors</li>
+          <li>Добавлены regression tests для storage migration, Options UI, Anthropic adaptive thinking и OpenRouter Gemini thinking</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.3.4 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.4</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

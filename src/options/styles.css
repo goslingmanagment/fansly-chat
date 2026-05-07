@@ -126,3 +126,16 @@ h2 {
   letter-spacing: 0.04em;
   pointer-events: none;
 }
+
+.chatgoose-model-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 10px;
+  align-items: end;
+}
+
+@media (max-width: 640px) {
+  .chatgoose-model-config-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -57,6 +57,7 @@ function streamArgs(
       { type: 'text' as const, text: 'uncached tail' },
     ],
     feature: 'fast-reply' as const,
+    reasoningEffort: 'medium' as const,
     signal: new AbortController().signal,
     onText: vi.fn(),
     onUsage: vi.fn(),
@@ -224,7 +225,7 @@ describe('AnthropicClient streaming requests', () => {
     expect(body.max_tokens).toBe(MAX_TOKENS['fan-summary']);
   });
 
-  it('uses low omitted adaptive thinking and a large cap for Claude 4.6 reply features', async () => {
+  it('uses medium omitted adaptive thinking and a large cap for Claude 4.6 reply features by default', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_stop',
@@ -245,13 +246,111 @@ describe('AnthropicClient streaming requests', () => {
     const request = fetchMock.mock.calls[0]?.[1];
     const body = JSON.parse(String(request?.body)) as {
       max_tokens: number;
+      temperature?: number;
       thinking?: unknown;
       output_config?: unknown;
     };
 
     expect(body.max_tokens).toBe(8000);
+    expect(body.temperature).toBeUndefined();
     expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
-    expect(body.output_config).toEqual({ effort: 'low' });
+    expect(body.output_config).toEqual({ effort: 'medium' });
+  });
+
+  it('omits adaptive thinking config when reasoning is off', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    await client.streamMessage(
+      streamArgs({
+        model: 'claude-sonnet-4-6',
+        feature: 'fast-reply',
+        reasoningEffort: 'off',
+      }),
+    );
+
+    const fetchMock = vi.mocked(fetch);
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      max_tokens: number;
+      temperature?: number;
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+
+    expect(body.max_tokens).toBe(8000);
+    expect(body.temperature).toBe(0.65);
+    expect(body.thinking).toBeUndefined();
+    expect(body.output_config).toBeUndefined();
+  });
+
+  it.each(['low', 'high'] as const)(
+    'uses %s omitted adaptive thinking when selected',
+    async (reasoningEffort) => {
+      mockFetchResponse(200, undefined, {
+        bodyStream: [
+          'event: message_stop',
+          'data: {"type":"message_stop"}',
+          '',
+        ].join('\n'),
+      });
+      const client = new AnthropicClient();
+
+      await client.streamMessage(
+        streamArgs({
+          model: 'claude-sonnet-4-6',
+          feature: 'fast-reply',
+          reasoningEffort,
+        }),
+      );
+
+      const fetchMock = vi.mocked(fetch);
+      const request = fetchMock.mock.calls[0]?.[1];
+      const body = JSON.parse(String(request?.body)) as {
+        temperature?: number;
+        thinking?: unknown;
+        output_config?: unknown;
+      };
+
+      expect(body.temperature).toBeUndefined();
+      expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+      expect(body.output_config).toEqual({ effort: reasoningEffort });
+    },
+  );
+
+  it('reports observed reasoning blocks from the Anthropic stream', async () => {
+    const onReasoningObserved = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: content_block_start',
+        'data: {"type":"content_block_start","content_block":{"type":"thinking"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"signature_delta","signature":"sig"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}',
+        '',
+        '',
+      ].join('\n'),
+    });
+    const client = new AnthropicClient();
+
+    await expect(client.streamMessage(
+      streamArgs({
+        model: 'claude-sonnet-4-6',
+        onReasoningObserved,
+      }),
+    )).resolves.toBe('ok');
+
+    expect(onReasoningObserved).toHaveBeenCalledWith('thinking_block');
+    expect(onReasoningObserved).toHaveBeenCalledWith('signature_delta');
   });
 
   it('keeps adaptive thinking off for Claude models that do not support adaptive mode', async () => {
@@ -275,11 +374,13 @@ describe('AnthropicClient streaming requests', () => {
     const request = fetchMock.mock.calls[0]?.[1];
     const body = JSON.parse(String(request?.body)) as {
       max_tokens: number;
+      temperature?: number;
       thinking?: unknown;
       output_config?: unknown;
     };
 
     expect(body.max_tokens).toBe(MAX_TOKENS['fast-reply']);
+    expect(body.temperature).toBe(0.65);
     expect(body.thinking).toBeUndefined();
     expect(body.output_config).toBeUndefined();
   });
@@ -305,11 +406,13 @@ describe('AnthropicClient streaming requests', () => {
     const request = fetchMock.mock.calls[0]?.[1];
     const body = JSON.parse(String(request?.body)) as {
       max_tokens: number;
+      temperature?: number;
       thinking?: unknown;
       output_config?: unknown;
     };
 
     expect(body.max_tokens).toBe(24000);
+    expect(body.temperature).toBeUndefined();
     expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
     expect(body.output_config).toEqual({ effort: 'medium' });
   });
@@ -335,11 +438,13 @@ describe('AnthropicClient streaming requests', () => {
     const request = fetchMock.mock.calls[0]?.[1];
     const body = JSON.parse(String(request?.body)) as {
       max_tokens: number;
+      temperature?: number;
       thinking?: unknown;
       output_config?: unknown;
     };
 
     expect(body.max_tokens).toBe(16000);
+    expect(body.temperature).toBeUndefined();
     expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
     expect(body.output_config).toEqual({ effort: 'medium' });
   });

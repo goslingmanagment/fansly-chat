@@ -75,6 +75,7 @@ import type {
   AggregatedEarnings,
   AgencyHubAiUsageEvent,
   LlmCostEstimate,
+  LlmReasoningSignal,
   LlmSpendSummary,
   LlmUsageMetrics,
   BackgroundPortMessage,
@@ -2284,6 +2285,7 @@ export class OperationCoordinator {
 
       let sawFirstChunk = false;
       let actualModel = resolvedModel;
+      let reasoningObserved = false;
       let latestLlmStopReason: string | null = null;
       const actualModelName = (): string => getModelDisplayName(actualModel);
       startStage('llm-ttfb', 'Wait for AI TTFB');
@@ -2322,6 +2324,7 @@ export class OperationCoordinator {
         systemBlocks,
         userBlocks,
         feature: payload.feature,
+        reasoningEffort: validated.storage.settings.featureReasoning[modelFeature],
         signal,
         onText: (chunk: string) => {
           const current = this.getActive(tabId);
@@ -2353,6 +2356,20 @@ export class OperationCoordinator {
         onUsage: (usage: LlmUsageMetrics) => {
           handleLlmUsage(usage);
         },
+        onReasoningObserved: (reasoningSignal: LlmReasoningSignal) => {
+          if (reasoningObserved) {
+            return;
+          }
+          reasoningObserved = true;
+          profiler.log(`Reasoning observed: yes (${reasoningSignal})`);
+          logDebug(debugEnabled, 'reasoning observed', {
+            model: actualModel,
+            feature: payload.feature,
+            reasoningEffort: validated.storage.settings.featureReasoning[modelFeature],
+            signal: reasoningSignal,
+          });
+          sendDebugProgress();
+        },
         onStopReason: (stopReason: string | null) => {
           latestLlmStopReason = stopReason;
         },
@@ -2364,10 +2381,23 @@ export class OperationCoordinator {
       let rawText: string;
       while (true) {
         try {
+          reasoningObserved = false;
+          profiler.log(
+            `Reasoning requested: ${streamArgs.reasoningEffort} (${actualModelName()})`,
+          );
           rawText = await this.llmClient.streamMessage({
             ...streamArgs,
             model: actualModel,
           });
+          if (streamArgs.reasoningEffort !== 'off' && !reasoningObserved) {
+            profiler.log('Reasoning observed: no');
+            logDebug(debugEnabled, 'reasoning observed', {
+              model: actualModel,
+              feature: payload.feature,
+              reasoningEffort: streamArgs.reasoningEffort,
+              observed: false,
+            });
+          }
           break;
         } catch (err) {
           const errorKey = err instanceof ChatGooseError

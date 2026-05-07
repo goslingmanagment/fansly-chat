@@ -3,7 +3,9 @@ import { ChatGooseError } from '../shared/errors.js';
 import type {
   LlmUsageMetrics,
   FeatureType,
+  LlmReasoningSignal,
   PromptTextBlock,
+  ReasoningEffort,
 } from '../shared/types.js';
 import {
   mergeUsage,
@@ -19,10 +21,12 @@ interface OpenRouterStreamArgs {
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
   feature: FeatureType;
+  reasoningEffort: ReasoningEffort;
   signal: AbortSignal;
   onText: (text: string) => void;
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
+  onReasoningObserved?: (signal: LlmReasoningSignal) => void;
   onStopReason?: (stopReason: string | null) => void;
 }
 
@@ -82,17 +86,49 @@ function resolveMaxTokens(model: string, feature: FeatureType): number {
 function buildGeminiThinkingConfig(
   model: string,
   feature: FeatureType,
+  reasoningEffort: ReasoningEffort,
 ): {
   thinking?: { type: 'adaptive'; display: 'omitted' };
-  output_config?: { effort: 'low' };
+  output_config?: { effort: Exclude<ReasoningEffort, 'off'> };
 } {
-  if (!isGeminiModel(model) || !GEMINI_QUICK_MAX_TOKENS[feature]) {
+  if (!isGeminiModel(model) || !GEMINI_QUICK_MAX_TOKENS[feature] || reasoningEffort === 'off') {
     return {};
   }
   return {
     thinking: { type: 'adaptive', display: 'omitted' },
-    output_config: { effort: 'low' },
+    output_config: { effort: reasoningEffort },
   };
+}
+
+function detectReasoningSignal(payload: {
+  content_block?: { type?: string };
+  delta?: { type?: string; reasoning?: unknown };
+  reasoning?: unknown;
+  choices?: unknown[];
+}): LlmReasoningSignal | null {
+  switch (payload.content_block?.type) {
+    case 'thinking':
+      return 'thinking_block';
+    case 'redacted_thinking':
+      return 'redacted_thinking_block';
+  }
+
+  switch (payload.delta?.type) {
+    case 'thinking_delta':
+      return 'thinking_delta';
+    case 'signature_delta':
+      return 'signature_delta';
+  }
+
+  if (payload.delta?.reasoning !== undefined || payload.reasoning !== undefined) {
+    return 'reasoning_delta';
+  }
+
+  const hasChoiceReasoning = payload.choices?.some((choice) =>
+    Boolean((choice as { delta?: { reasoning?: unknown }; message?: { reasoning?: unknown } }).delta?.reasoning) ||
+    Boolean((choice as { delta?: { reasoning?: unknown }; message?: { reasoning?: unknown } }).message?.reasoning),
+  );
+  return hasChoiceReasoning ? 'reasoning_delta' : null;
 }
 
 function stripCacheControl(blocks: PromptTextBlock[]): PromptTextBlock[] {
@@ -281,10 +317,12 @@ export class OpenRouterClient {
     systemBlocks,
     userBlocks,
     feature,
+    reasoningEffort,
     signal,
     onText,
     onUsage,
     onProgress,
+    onReasoningObserved,
     onStopReason,
   }: OpenRouterStreamArgs): Promise<string> {
     let rawText = '';
@@ -302,7 +340,7 @@ export class OpenRouterClient {
         temperature,
         stream: true,
         max_tokens: resolveMaxTokens(model, feature),
-        ...buildGeminiThinkingConfig(model, feature),
+        ...buildGeminiThinkingConfig(model, feature, reasoningEffort),
         system: stripCacheControl(systemBlocks),
         messages: [{ role: 'user', content: stripCacheControl(userBlocks) }],
       }),
@@ -342,8 +380,15 @@ export class OpenRouterClient {
           object?: string;
           choices?: unknown[];
           message?: { usage?: OpenRouterUsagePayload };
+          content_block?: { type?: string };
           usage?: OpenRouterUsagePayload;
-          delta?: { type?: string; text?: string; stop_reason?: string | null };
+          delta?: {
+            type?: string;
+            text?: string;
+            stop_reason?: string | null;
+            reasoning?: unknown;
+          };
+          reasoning?: unknown;
           error?: { type?: string; message?: string; code?: number | string };
         };
         try {
@@ -356,6 +401,11 @@ export class OpenRouterClient {
 
         if (parsed.event === 'error' || payload.type === 'error' || payload.error) {
           throw buildOpenRouterError(0, payload.error ?? null);
+        }
+
+        const reasoningSignal = detectReasoningSignal(payload);
+        if (reasoningSignal) {
+          onReasoningObserved?.(reasoningSignal);
         }
 
         const effectiveEvent =

@@ -13,6 +13,7 @@ function streamArgs(overrides?: Record<string, unknown>) {
     systemBlocks: [{ type: 'text' as const, text: 'system' }],
     userBlocks: [{ type: 'text' as const, text: 'user' }],
     feature: 'fast-reply' as const,
+    reasoningEffort: 'medium' as const,
     signal: new AbortController().signal,
     onText: vi.fn(),
     ...overrides,

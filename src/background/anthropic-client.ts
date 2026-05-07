@@ -3,7 +3,9 @@ import { ChatGooseError } from '../shared/errors.js';
 import type {
   LlmUsageMetrics,
   FeatureType,
+  LlmReasoningSignal,
   PromptTextBlock,
+  ReasoningEffort,
 } from '../shared/types.js';
 import {
   mergeUsage,
@@ -19,10 +21,12 @@ export interface AnthropicStreamArgs {
   systemBlocks: PromptTextBlock[];
   userBlocks: PromptTextBlock[];
   feature: FeatureType;
+  reasoningEffort: ReasoningEffort;
   signal: AbortSignal;
   onText: (text: string) => void;
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
+  onReasoningObserved?: (signal: LlmReasoningSignal) => void;
   onStopReason?: (stopReason: string | null) => void;
 }
 
@@ -38,22 +42,12 @@ interface AnthropicApiErrorInfo {
   message?: string;
 }
 
-type AnthropicThinkingEffort = 'low' | 'medium' | 'high';
+type AnthropicThinkingEffort = Exclude<ReasoningEffort, 'off'>;
 
 const ADAPTIVE_THINKING_MODELS = new Set([
   'claude-sonnet-4-6',
   'claude-opus-4-6',
 ]);
-
-const ADAPTIVE_THINKING_EFFORTS: Record<FeatureType, AnthropicThinkingEffort> = {
-  'fast-reply': 'low',
-  'improve-draft': 'low',
-  'help-me': 'medium',
-  'fan-summary': 'medium',
-  'chat-review': 'medium',
-  ping: 'low',
-  'hi-greeting': 'low',
-};
 
 const ADAPTIVE_THINKING_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
   'fast-reply': 8000,
@@ -78,19 +72,45 @@ function resolveMaxTokens(model: string, feature: FeatureType): number {
 
 function buildAdaptiveThinkingConfig(
   model: string,
-  feature: FeatureType,
+  reasoningEffort: ReasoningEffort,
 ): {
   thinking?: { type: 'adaptive'; display: 'omitted' };
   output_config?: { effort: AnthropicThinkingEffort };
 } {
-  if (!supportsAdaptiveThinking(model)) {
+  if (!supportsAdaptiveThinking(model) || reasoningEffort === 'off') {
     return {};
   }
 
   return {
     thinking: { type: 'adaptive', display: 'omitted' },
-    output_config: { effort: ADAPTIVE_THINKING_EFFORTS[feature] },
+    output_config: { effort: reasoningEffort },
   };
+}
+
+function detectReasoningSignal(payload: {
+  content_block?: { type?: string };
+  delta?: { type?: string; reasoning?: unknown };
+  reasoning?: unknown;
+}): LlmReasoningSignal | null {
+  switch (payload.content_block?.type) {
+    case 'thinking':
+      return 'thinking_block';
+    case 'redacted_thinking':
+      return 'redacted_thinking_block';
+  }
+
+  switch (payload.delta?.type) {
+    case 'thinking_delta':
+      return 'thinking_delta';
+    case 'signature_delta':
+      return 'signature_delta';
+  }
+
+  if (payload.delta?.reasoning !== undefined || payload.reasoning !== undefined) {
+    return 'reasoning_delta';
+  }
+
+  return null;
 }
 
 function getHeader(response: Response, name: string): string | null {
@@ -225,14 +245,30 @@ export class AnthropicClient {
     systemBlocks,
     userBlocks,
     feature,
+    reasoningEffort,
     signal,
     onText,
     onUsage,
     onProgress,
+    onReasoningObserved,
     onStopReason,
   }: AnthropicStreamArgs): Promise<string> {
     let rawText = '';
     let usage: LlmUsageMetrics | null = null;
+    const adaptiveThinkingConfig = buildAdaptiveThinkingConfig(model, reasoningEffort);
+    const requestBody: Record<string, unknown> = {
+      model,
+      stream: true,
+      max_tokens: resolveMaxTokens(model, feature),
+      ...adaptiveThinkingConfig,
+      system: systemBlocks,
+      messages: [{ role: 'user', content: userBlocks }],
+    };
+
+    if (!adaptiveThinkingConfig.thinking) {
+      requestBody.temperature = temperature;
+    }
+
     const response = await fetch(CLAUDE_API_URL, {
       method: 'POST',
       headers: {
@@ -242,15 +278,7 @@ export class AnthropicClient {
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       signal,
-      body: JSON.stringify({
-        model,
-        temperature,
-        stream: true,
-        max_tokens: resolveMaxTokens(model, feature),
-        ...buildAdaptiveThinkingConfig(model, feature),
-        system: systemBlocks,
-        messages: [{ role: 'user', content: userBlocks }],
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -283,8 +311,15 @@ export class AnthropicClient {
         let payload: {
           type?: string;
           message?: { usage?: Partial<LlmUsageMetrics> };
+          content_block?: { type?: string };
           usage?: Partial<LlmUsageMetrics>;
-          delta?: { type?: string; text?: string; stop_reason?: string | null };
+          delta?: {
+            type?: string;
+            text?: string;
+            stop_reason?: string | null;
+            reasoning?: unknown;
+          };
+          reasoning?: unknown;
           error?: { type?: string; message?: string };
         };
         try {
@@ -297,6 +332,11 @@ export class AnthropicClient {
 
         if (parsed.event === 'error' || payload.type === 'error') {
           throw buildAnthropicError(0, payload.error ?? null);
+        }
+
+        const reasoningSignal = detectReasoningSignal(payload);
+        if (reasoningSignal) {
+          onReasoningObserved?.(reasoningSignal);
         }
 
         if (parsed.event === 'message_start') {
