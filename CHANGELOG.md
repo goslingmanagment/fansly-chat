@@ -1,5 +1,21 @@
 # Что нового
 
+## 1.3.9
+
+Claude reasoning теперь проще проверить: включённый Anthropic adaptive thinking запрашивает видимый summarized stream-сигнал, а в настройках появился отдельный `Max`.
+
+### Главное
+
+- В `Settings → AI Models → Reasoning` добавлено значение `Max`.
+- Для Claude Sonnet 4.6 и Opus 4.6 `Max` уходит в Anthropic как `output_config.effort = "max"`.
+- Claude-запросы с reasoning теперь используют `thinking.display = "summarized"`, чтобы `Reasoning observed` мог увидеть thinking-событие в stream.
+
+### Технически
+
+- Reply-текст по-прежнему берётся только из `text_delta`, поэтому summarized thinking не вставляется в чат.
+- Для OpenRouter Gemini значение `Max` безопасно мапится в `high`.
+- Обновлены regression tests для Claude adaptive request body, OpenRouter Gemini mapping, storage и Options UI.
+
 ## 1.3.8
 
 Reasoning visibility теперь вынесена прямо в completed profiling summary, чтобы её было видно после генерации без live log.

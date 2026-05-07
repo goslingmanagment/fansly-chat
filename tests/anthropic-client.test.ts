@@ -225,7 +225,7 @@ describe('AnthropicClient streaming requests', () => {
     expect(body.max_tokens).toBe(MAX_TOKENS['fan-summary']);
   });
 
-  it('uses medium omitted adaptive thinking and a large cap for Claude 4.6 reply features by default', async () => {
+  it('uses medium summarized adaptive thinking and a large cap for Claude 4.6 reply features by default', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_stop',
@@ -253,7 +253,7 @@ describe('AnthropicClient streaming requests', () => {
 
     expect(body.max_tokens).toBe(8000);
     expect(body.temperature).toBeUndefined();
-    expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+    expect(body.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
     expect(body.output_config).toEqual({ effort: 'medium' });
   });
 
@@ -290,8 +290,8 @@ describe('AnthropicClient streaming requests', () => {
     expect(body.output_config).toBeUndefined();
   });
 
-  it.each(['low', 'high'] as const)(
-    'uses %s omitted adaptive thinking when selected',
+  it.each(['low', 'high', 'max'] as const)(
+    'uses %s summarized adaptive thinking when selected',
     async (reasoningEffort) => {
       mockFetchResponse(200, undefined, {
         bodyStream: [
@@ -319,7 +319,7 @@ describe('AnthropicClient streaming requests', () => {
       };
 
       expect(body.temperature).toBeUndefined();
-      expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+      expect(body.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
       expect(body.output_config).toEqual({ effort: reasoningEffort });
     },
   );
@@ -385,7 +385,7 @@ describe('AnthropicClient streaming requests', () => {
     expect(body.output_config).toBeUndefined();
   });
 
-  it('uses medium omitted adaptive thinking and a large cap for Claude 4.6 deep features', async () => {
+  it('uses medium summarized adaptive thinking and a large cap for Claude 4.6 deep features', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: message_stop',
@@ -413,7 +413,7 @@ describe('AnthropicClient streaming requests', () => {
 
     expect(body.max_tokens).toBe(24000);
     expect(body.temperature).toBeUndefined();
-    expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+    expect(body.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
     expect(body.output_config).toEqual({ effort: 'medium' });
   });
 
@@ -445,7 +445,7 @@ describe('AnthropicClient streaming requests', () => {
 
     expect(body.max_tokens).toBe(16000);
     expect(body.temperature).toBeUndefined();
-    expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+    expect(body.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
     expect(body.output_config).toEqual({ effort: 'medium' });
   });
 

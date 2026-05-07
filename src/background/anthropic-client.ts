@@ -74,7 +74,7 @@ function buildAdaptiveThinkingConfig(
   model: string,
   reasoningEffort: ReasoningEffort,
 ): {
-  thinking?: { type: 'adaptive'; display: 'omitted' };
+  thinking?: { type: 'adaptive'; display: 'summarized' };
   output_config?: { effort: AnthropicThinkingEffort };
 } {
   if (!supportsAdaptiveThinking(model) || reasoningEffort === 'off') {
@@ -82,7 +82,7 @@ function buildAdaptiveThinkingConfig(
   }
 
   return {
-    thinking: { type: 'adaptive', display: 'omitted' },
+    thinking: { type: 'adaptive', display: 'summarized' },
     output_config: { effort: reasoningEffort },
   };
 }

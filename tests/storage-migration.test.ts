@@ -351,12 +351,12 @@ describe('sanitizeSettings', () => {
       featureReasoning: {
         ...DEFAULT_FEATURE_REASONING,
         'fast-reply': 'off',
-        'fan-summary': 'high',
+        'fan-summary': 'max',
         ping: 'low',
       },
     });
     expect(result.featureReasoning['fast-reply']).toBe('off');
-    expect(result.featureReasoning['fan-summary']).toBe('high');
+    expect(result.featureReasoning['fan-summary']).toBe('max');
     expect(result.featureReasoning.ping).toBe('low');
     expect(result.featureReasoning['help-me']).toBe('medium');
   });
@@ -365,7 +365,7 @@ describe('sanitizeSettings', () => {
     const result = storage.sanitizeSettings({
       featureReasoning: {
         ...DEFAULT_FEATURE_REASONING,
-        'fast-reply': 'max',
+        'fast-reply': 'turbo',
       } as unknown as typeof DEFAULT_FEATURE_REASONING,
     });
     expect(result.featureReasoning['fast-reply']).toBe('medium');
