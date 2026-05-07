@@ -529,7 +529,7 @@ export class ChatGooseContentApp {
       return false;
     }
 
-    if (!this.tabState.hasApiKey) {
+    if (!this.isApiKeyReadyForFeature(feature)) {
       this.showUserErrorToast(this.getMissingApiKeyError(feature));
       return false;
     }
@@ -554,6 +554,13 @@ export class ChatGooseContentApp {
     }
 
     return true;
+  }
+
+  private isApiKeyReadyForFeature(feature: FeatureType): boolean {
+    const modelFeature = resolveFeatureModelFeature(feature);
+    return this.tabState?.apiKeyReadyByFeature?.[modelFeature] ??
+      this.tabState?.hasApiKey ??
+      false;
   }
 
   private getMissingApiKeyError(feature: FeatureType): ReturnType<typeof getErrorMessage> {
@@ -774,7 +781,7 @@ export class ChatGooseContentApp {
     if (!this.tabState) {
       return;
     }
-    if (!this.tabState.hasApiKey) {
+    if (!this.isApiKeyReadyForFeature('fast-reply')) {
       this.showUserErrorToast(this.getCompareMissingApiKeyError());
       return;
     }

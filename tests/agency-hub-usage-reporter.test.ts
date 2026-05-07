@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgencyHubUsageReporter } from '../src/background/agency-hub-usage-reporter.js';
+import {
+  AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS,
+  AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS,
+} from '../src/shared/constants.js';
 
 function makeUsageEvent(index = 1) {
   return {
@@ -118,27 +122,7 @@ describe('AgencyHubUsageReporter', () => {
     );
   });
 
-  it('drops failed batches without requeueing them', async () => {
-    vi.useFakeTimers();
-    const submitAiUsageBatch = vi.fn(async (_input: unknown) => ({
-      status: 'failed',
-      reason: 'hub_request_failed',
-      baseUrl: 'http://hub.test',
-    }));
-    const reporter = new AgencyHubUsageReporter({ submitAiUsageBatch } as never);
-
-    reporter.enqueue(makeSettings(), makeUsageEvent(1));
-
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.waitFor(() => {
-      expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
-    });
-
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
-  });
-
-  it('continues sending later events after an earlier batch fails', async () => {
+  it('retries failed submit results after backoff', async () => {
     vi.useFakeTimers();
     const submitAiUsageBatch = vi
       .fn()
@@ -156,17 +140,106 @@ describe('AgencyHubUsageReporter', () => {
     const reporter = new AgencyHubUsageReporter({ submitAiUsageBatch } as never);
 
     reporter.enqueue(makeSettings(), makeUsageEvent(1));
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[0]!);
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(2);
+    });
+    expect(submitAiUsageBatch.mock.calls[1]?.[0].events).toEqual([makeUsageEvent(1)]);
+  });
+
+  it('retries thrown submits after backoff', async () => {
+    vi.useFakeTimers();
+    const submitAiUsageBatch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({
+        status: 'submitted',
+        reason: 'submitted',
+        baseUrl: 'http://hub.test',
+        response: { receivedCount: 1, insertedCount: 1, dedupedCount: 0 },
+      });
+    const reporter = new AgencyHubUsageReporter({ submitAiUsageBatch } as never);
+
+    reporter.enqueue(makeSettings(), makeUsageEvent(1));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[0]!);
+
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(2);
+    });
+    expect(submitAiUsageBatch.mock.calls[1]?.[0].events).toEqual([makeUsageEvent(1)]);
+  });
+
+  it('drops events after the max retry attempts', async () => {
+    vi.useFakeTimers();
+    const submitAiUsageBatch = vi.fn(async (_input: unknown) => ({
+      status: 'failed',
+      reason: 'hub_request_failed',
+      baseUrl: 'http://hub.test',
+    }));
+    const reporter = new AgencyHubUsageReporter({ submitAiUsageBatch } as never);
+
+    reporter.enqueue(makeSettings(), makeUsageEvent(1));
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
+    });
+
+    for (let attempt = 1; attempt < AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS; attempt += 1) {
+      const delay = AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[attempt - 1]!;
+      await vi.advanceTimersByTimeAsync(delay);
+      await vi.waitFor(() => {
+        expect(submitAiUsageBatch).toHaveBeenCalledTimes(attempt + 1);
+      });
+    }
+
+    await vi.advanceTimersByTimeAsync(AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS.at(-1)!);
+    expect(submitAiUsageBatch).toHaveBeenCalledTimes(AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS);
+  });
+
+  it('flushes later events after a failed batch succeeds on retry', async () => {
+    vi.useFakeTimers();
+    const submitAiUsageBatch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'failed',
+        reason: 'hub_request_failed',
+        baseUrl: 'http://hub.test',
+      })
+      .mockResolvedValue({
+        status: 'submitted',
+        reason: 'submitted',
+        baseUrl: 'http://hub.test',
+        response: { receivedCount: 1, insertedCount: 1, dedupedCount: 0 },
+      });
+    const reporter = new AgencyHubUsageReporter({ submitAiUsageBatch } as never);
+
+    reporter.enqueue(makeSettings(), makeUsageEvent(1));
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
       expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
     });
 
     reporter.enqueue(makeSettings(), makeUsageEvent(2));
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[0]!);
 
     await vi.waitFor(() => {
       expect(submitAiUsageBatch).toHaveBeenCalledTimes(2);
     });
-    expect(submitAiUsageBatch.mock.calls[1]?.[0].events).toEqual([makeUsageEvent(2)]);
+    expect(submitAiUsageBatch.mock.calls[1]?.[0].events).toEqual([
+      makeUsageEvent(1),
+      makeUsageEvent(2),
+    ]);
   });
 });

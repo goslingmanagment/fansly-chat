@@ -8,6 +8,7 @@ import {
   createUserError,
   getUserErrorDescription,
 } from '../shared/errors.js';
+import { supportsModelReasoningConfig } from '../shared/model-capabilities.js';
 import { isOpenRouterModelSelection } from '../shared/model-registry.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type {
@@ -766,6 +767,7 @@ async function render(): Promise<void> {
 
   const modelSelects: HTMLSelectElement[] = [];
   const reasoningSelects: HTMLSelectElement[] = [];
+  const reasoningSelectsByFeature = new Map<ModelSelectableFeatureType, HTMLSelectElement>();
   const openRouterWarning = document.createElement('div');
   openRouterWarning.style.padding = '10px 12px';
   openRouterWarning.style.borderRadius = '12px';
@@ -821,6 +823,7 @@ async function render(): Promise<void> {
     }
     reasoningSelect.value = state.settings.featureReasoning[feature];
     reasoningSelects.push(reasoningSelect);
+    reasoningSelectsByFeature.set(feature, reasoningSelect);
 
     const row = document.createElement('div');
     row.style.display = 'grid';
@@ -845,6 +848,31 @@ async function render(): Promise<void> {
 
     row.append(featureLabel, helperText, controls);
     modelSection.append(row);
+  }
+
+  const updateReasoningCapability = (
+    feature: ModelSelectableFeatureType,
+    modelId: string,
+  ): void => {
+    const reasoningSelect = reasoningSelectsByFeature.get(feature);
+    if (!reasoningSelect) {
+      return;
+    }
+
+    const supported = supportsModelReasoningConfig(modelId, feature);
+    reasoningSelect.disabled = !supported;
+    reasoningSelect.dataset.reasoningSupported = supported ? 'true' : 'false';
+    reasoningSelect.setAttribute('aria-disabled', supported ? 'false' : 'true');
+    reasoningSelect.title = supported
+      ? ''
+      : 'Reasoning is not supported for this selected model and feature.';
+  };
+
+  for (const select of modelSelects) {
+    updateReasoningCapability(
+      select.dataset.feature as ModelSelectableFeatureType,
+      select.value,
+    );
   }
   renderOpenRouterWarning();
   modelSection.append(openRouterWarning);
@@ -949,6 +977,10 @@ async function render(): Promise<void> {
   }
   modelSelects.forEach((select) => {
     select.addEventListener('change', () => {
+      updateReasoningCapability(
+        select.dataset.feature as ModelSelectableFeatureType,
+        select.value,
+      );
       renderOpenRouterWarning();
       void saveSettingsDebounced();
     });

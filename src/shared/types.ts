@@ -667,6 +667,7 @@ export interface TabUiState {
   connected: boolean;
   hasApiKey: boolean;
   modelProviderByFeature?: Partial<Record<ModelSelectableFeatureType, 'anthropic' | 'openrouter'>>;
+  apiKeyReadyByFeature?: Partial<Record<ModelSelectableFeatureType, boolean>>;
   hasPersonalities: boolean;
   mappedPersonalityId: string | null;
   mappedPersonalityName: string | null;

@@ -10,6 +10,7 @@ import {
   buildPrompt,
   flattenPromptBlocks,
 } from '../src/shared/prompts.js';
+import { createBundledPersonalities } from '../src/shared/personalities.js';
 import { escapeForPrompt } from '../src/shared/prompt-injection.js';
 import type { FeatureType, Personality, PromptBuildInput, ReplyTone } from '../src/shared/types.js';
 
@@ -190,6 +191,16 @@ function buildCurrentFlatUser(input: PromptBuildInput): string {
 // ─── System prompt ──────────────────────────────────────────────────────
 
 describe('system prompt', () => {
+  it('does not leak TODO pricing placeholders from bundled personalities', () => {
+    const bundledContent = createBundledPersonalities()
+      .map((personality) => personality.content)
+      .join('\n');
+
+    expect(bundledContent).not.toContain('[TODO: fill in actual prices]');
+    expect(bundledContent).not.toContain('Prices: [TODO');
+    expect(bundledContent).toContain('without making up numbers');
+  });
+
   it('includes the safety preamble', () => {
     const result = buildPrompt(buildTestInput());
     expect(result.system).toContain('CRITICAL SAFETY RULES');

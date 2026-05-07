@@ -29,6 +29,23 @@ function buildModelProviderByFeature(
   ) as TabUiState['modelProviderByFeature'];
 }
 
+function buildApiKeyReadyByFeature(
+  settings: Settings,
+): TabUiState['apiKeyReadyByFeature'] {
+  return Object.fromEntries(
+    Object.entries(settings.featureModels).map(([feature, modelId]) => {
+      const provider = getModelEntry(modelId)?.provider;
+      if (provider === 'anthropic') {
+        return [feature, Boolean(settings.claudeApiKey)];
+      }
+      if (provider === 'openrouter') {
+        return [feature, Boolean(settings.openRouterApiKey)];
+      }
+      return [feature, Boolean(settings.claudeApiKey || settings.openRouterApiKey)];
+    }),
+  ) as TabUiState['apiKeyReadyByFeature'];
+}
+
 export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
   fanslyClient: FanslyClient;
@@ -112,6 +129,7 @@ export function registerRuntimeApi({
           connected,
           hasApiKey: Boolean(state.settings.claudeApiKey || state.settings.openRouterApiKey),
           modelProviderByFeature: buildModelProviderByFeature(state.settings),
+          apiKeyReadyByFeature: buildApiKeyReadyByFeature(state.settings),
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,

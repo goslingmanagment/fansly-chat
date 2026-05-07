@@ -340,8 +340,9 @@ describe('ChatGooseContentApp', () => {
 
     app.port.send = sendSpy;
     app.tabState = readyState({
-      hasApiKey: false,
+      hasApiKey: true,
       modelProviderByFeature: { 'fast-reply': 'openrouter' },
+      apiKeyReadyByFeature: { 'fast-reply': false },
     });
     app.currentGroupId = 'group-1';
 
@@ -1011,6 +1012,27 @@ describe('ChatGooseContentApp', () => {
       replyTone: 'upsell',
     }));
     expect(app.nextReplyTone).toBe('none');
+  });
+
+  it('blocks compare when the fast-reply model provider key is missing', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy;
+    app.tabState = readyState({
+      hasApiKey: true,
+      modelProviderByFeature: { 'fast-reply': 'openrouter' },
+      apiKeyReadyByFeature: { 'fast-reply': false },
+    });
+    app.currentGroupId = 'group-1';
+
+    await app.startCompare(false);
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
+      'OpenRouter API key not configured.',
+    );
   });
 
   it('reopens an active compare session when the panel was closed', async () => {

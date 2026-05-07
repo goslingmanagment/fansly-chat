@@ -260,6 +260,64 @@ describe('Options page — AI Models section', () => {
     expect(values.ping).toBe('medium');
   });
 
+  it('keeps saved reasoning values while disabling unsupported model-feature pairs', async () => {
+    await loadOptionsPage(makeState({
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fan-summary': 'openrouter:google/gemini-3.1-pro-preview',
+        'fast-reply': 'openrouter:x-ai/grok-4.3',
+      },
+      featureReasoning: {
+        ...DEFAULT_FEATURE_REASONING,
+        'fan-summary': 'max',
+        'fast-reply': 'high',
+      },
+    }));
+
+    const root = document.getElementById('chatgoose-options-root')!;
+    const summaryReasoningSelect = root.querySelector<HTMLSelectElement>(
+      'select.chatgoose-select[data-reasoning-feature="fan-summary"]',
+    )!;
+    const replyReasoningSelect = root.querySelector<HTMLSelectElement>(
+      'select.chatgoose-select[data-reasoning-feature="fast-reply"]',
+    )!;
+
+    expect(summaryReasoningSelect.value).toBe('max');
+    expect(summaryReasoningSelect.disabled).toBe(true);
+    expect(summaryReasoningSelect.dataset.reasoningSupported).toBe('false');
+    expect(replyReasoningSelect.value).toBe('high');
+    expect(replyReasoningSelect.disabled).toBe(true);
+    expect(replyReasoningSelect.dataset.reasoningSupported).toBe('false');
+  });
+
+  it('updates reasoning capability when the selected model changes', async () => {
+    await loadOptionsPage(makeState({
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fast-reply': 'openrouter:x-ai/grok-4.3',
+      },
+    }));
+
+    const root = document.getElementById('chatgoose-options-root')!;
+    const replyModelSelect = root.querySelector<HTMLSelectElement>(
+      'select.chatgoose-select[data-feature="fast-reply"]',
+    )!;
+    const replyReasoningSelect = root.querySelector<HTMLSelectElement>(
+      'select.chatgoose-select[data-reasoning-feature="fast-reply"]',
+    )!;
+
+    expect(replyReasoningSelect.disabled).toBe(true);
+
+    replyModelSelect.value = 'openrouter:google/gemini-3.1-pro-preview';
+    replyModelSelect.dispatchEvent(new Event('change'));
+
+    expect(replyReasoningSelect.disabled).toBe(false);
+    expect(replyReasoningSelect.dataset.reasoningSupported).toBe('true');
+    await vi.waitFor(() => {
+      if (!savedSettings) throw new Error('not saved yet');
+    }, { timeout: 2000 });
+  });
+
   it('initializes the separate improve message count input from persisted settings', async () => {
     await loadOptionsPage(makeState({ improveMessageCount: 77 }));
 

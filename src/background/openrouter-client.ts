@@ -1,5 +1,10 @@
 import { MAX_TOKENS, OPENROUTER_MESSAGES_API_URL } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
+import {
+  getOpenRouterGeminiThinkingMaxTokens,
+  isOpenRouterGeminiModel,
+  supportsOpenRouterGeminiThinking,
+} from '../shared/model-capabilities.js';
 import type {
   LlmUsageMetrics,
   FeatureType,
@@ -66,21 +71,9 @@ type OpenRouterUsagePayload = Partial<LlmUsageMetrics> & {
 
 type OpenRouterThinkingEffort = Exclude<ReasoningEffort, 'off' | 'max'>;
 
-const GEMINI_QUICK_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
-  'fast-reply': 1600,
-  'improve-draft': 1600,
-  'hi-greeting': 1600,
-  ping: 1600,
-  'help-me': 2000,
-};
-
-function isGeminiModel(model: string): boolean {
-  return model.startsWith('google/gemini-');
-}
-
 function resolveMaxTokens(model: string, feature: FeatureType): number {
-  if (isGeminiModel(model)) {
-    return GEMINI_QUICK_MAX_TOKENS[feature] ?? MAX_TOKENS[feature];
+  if (isOpenRouterGeminiModel(model)) {
+    return getOpenRouterGeminiThinkingMaxTokens(feature) ?? MAX_TOKENS[feature];
   }
   return MAX_TOKENS[feature];
 }
@@ -93,7 +86,7 @@ function buildGeminiThinkingConfig(
   thinking?: { type: 'adaptive'; display: 'omitted' };
   output_config?: { effort: OpenRouterThinkingEffort };
 } {
-  if (!isGeminiModel(model) || !GEMINI_QUICK_MAX_TOKENS[feature] || reasoningEffort === 'off') {
+  if (!supportsOpenRouterGeminiThinking(model, feature) || reasoningEffort === 'off') {
     return {};
   }
 
@@ -124,15 +117,23 @@ function detectReasoningSignal(payload: {
       return 'signature_delta';
   }
 
-  if (payload.delta?.reasoning !== undefined || payload.reasoning !== undefined) {
+  if (hasReasoningProperty(payload.delta) || hasReasoningProperty(payload)) {
     return 'reasoning_delta';
   }
 
   const hasChoiceReasoning = payload.choices?.some((choice) =>
-    Boolean((choice as { delta?: { reasoning?: unknown }; message?: { reasoning?: unknown } }).delta?.reasoning) ||
-    Boolean((choice as { delta?: { reasoning?: unknown }; message?: { reasoning?: unknown } }).message?.reasoning),
+    hasReasoningProperty((choice as { delta?: unknown }).delta) ||
+    hasReasoningProperty((choice as { message?: unknown }).message),
   );
   return hasChoiceReasoning ? 'reasoning_delta' : null;
+}
+
+function hasReasoningProperty(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.prototype.hasOwnProperty.call(value, 'reasoning')
+  );
 }
 
 function stripCacheControl(blocks: PromptTextBlock[]): PromptTextBlock[] {

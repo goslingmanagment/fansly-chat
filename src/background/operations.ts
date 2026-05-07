@@ -206,6 +206,23 @@ function buildModelProviderByFeature(
   ) as TabUiState['modelProviderByFeature'];
 }
 
+function buildApiKeyReadyByFeature(
+  settings: Settings,
+): TabUiState['apiKeyReadyByFeature'] {
+  return Object.fromEntries(
+    Object.entries(settings.featureModels).map(([feature, modelId]) => {
+      const provider = getModelEntry(modelId)?.provider;
+      if (provider === 'anthropic') {
+        return [feature, Boolean(settings.claudeApiKey)];
+      }
+      if (provider === 'openrouter') {
+        return [feature, Boolean(settings.openRouterApiKey)];
+      }
+      return [feature, Boolean(settings.claudeApiKey || settings.openRouterApiKey)];
+    }),
+  ) as TabUiState['apiKeyReadyByFeature'];
+}
+
 function buildLlmSpendPayload(
   llmSpend?: LlmSpendSummary,
 ): { llmSpend: LlmSpendSummary } | object {
@@ -701,6 +718,7 @@ export class OperationCoordinator {
       connected: Boolean(session?.connected),
       hasApiKey: Boolean(storage.settings.claudeApiKey || storage.settings.openRouterApiKey),
       modelProviderByFeature: buildModelProviderByFeature(storage.settings),
+      apiKeyReadyByFeature: buildApiKeyReadyByFeature(storage.settings),
       hasPersonalities: storage.personalities.length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
@@ -2283,6 +2301,7 @@ export class OperationCoordinator {
 
       sendDebugPromptSnapshot(resolvedModel);
 
+      let sawProviderActivity = false;
       let sawFirstChunk = false;
       let actualModel = resolvedModel;
       let reasoningObserved = false;
@@ -2317,6 +2336,20 @@ export class OperationCoordinator {
         return cost;
       };
 
+      const markProviderActivity = (ttfbDetail: string): boolean => {
+        if (!sawProviderActivity) {
+          sawProviderActivity = true;
+          startLlmStreamTimeouts();
+          profiler.completeStage('llm-ttfb', ttfbDetail);
+          profiler.startStage('llm-stream', 'Stream AI response');
+          profiler.log(`Stream ${actualModelName()} response`);
+          sendDebugProgress();
+          return true;
+        }
+        resetLlmIdleTimeout();
+        return false;
+      };
+
       const streamArgs = {
         settings: validated.storage.settings,
         model: actualModel,
@@ -2334,29 +2367,30 @@ export class OperationCoordinator {
           ) {
             return;
           }
-          if (!sawFirstChunk) {
+          const firstTextChunk = !sawFirstChunk;
+          const firstProviderActivity = markProviderActivity('first text chunk received');
+          if (firstTextChunk) {
             sawFirstChunk = true;
-            startLlmStreamTimeouts();
-            profiler.completeStage('llm-ttfb', 'first chunk received');
-            profiler.log(`${actualModelName()} first token`);
-            profiler.startStage('llm-stream', 'Stream AI response');
-            profiler.log(`Stream ${actualModelName()} response`);
-            sendDebugProgress();
+            profiler.log(`${actualModelName()} first text chunk`);
+            if (!firstProviderActivity) {
+              sendDebugProgress();
+            }
           }
           current.rawText += chunk;
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
         },
         onProgress: () => {
-          if (!sawFirstChunk) {
-            return;
+          if (markProviderActivity('first provider event received')) {
+            profiler.log(`${actualModelName()} first provider event`);
           }
-          resetLlmIdleTimeout();
         },
         onUsage: (usage: LlmUsageMetrics) => {
+          markProviderActivity('first provider event received');
           handleLlmUsage(usage);
         },
         onReasoningObserved: (reasoningSignal: LlmReasoningSignal) => {
+          markProviderActivity('first provider event received');
           if (reasoningObserved) {
             return;
           }
@@ -2410,13 +2444,13 @@ export class OperationCoordinator {
             ? (err as { retryAtMs: number }).retryAtMs
             : undefined;
           const canRetryRateLimit =
-            !sawFirstChunk &&
+            !sawProviderActivity &&
             !rateLimitRetried &&
             errorKey === 'rate_limited' &&
             typeof retryAfterMs === 'number' &&
             retryAfterMs <= AUTO_RETRY_RATE_LIMIT_MAX_MS;
           const canRetryServiceUnavailable =
-            !sawFirstChunk &&
+            !sawProviderActivity &&
             !serviceUnavailableRetried &&
             errorKey === 'service_unavailable';
 
@@ -2467,7 +2501,7 @@ export class OperationCoordinator {
               statusCode: undefined,
               retryAtMs: undefined,
             });
-            if (!sawFirstChunk) {
+            if (!sawProviderActivity) {
               startLlmTtfbTimeout();
             }
             continue;
@@ -2489,7 +2523,7 @@ export class OperationCoordinator {
       }
       clearLlmTimeouts();
 
-      if (sawFirstChunk) {
+      if (sawProviderActivity) {
         completeStage(
           'llm-stream',
           `${actualModelName()} stream complete: ${rawText.length} chars`,

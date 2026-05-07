@@ -203,6 +203,27 @@ describe('OpenRouterClient', () => {
     expect(onReasoningObserved).toHaveBeenCalledWith('signature_delta');
   });
 
+  it.each([
+    ['delta', '{"type":"message_delta","choices":[{"delta":{"reasoning":""}}]}'],
+    ['message', '{"type":"message_delta","choices":[{"message":{"reasoning":""}}]}'],
+  ])('reports empty choices[].%s.reasoning as observed reasoning', async (_shape, data) => {
+    const onReasoningObserved = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_delta',
+        `data: ${data}`,
+        '',
+        '',
+      ].join('\n'),
+    });
+
+    await expect(new OpenRouterClient().streamMessage(
+      streamArgs({ onReasoningObserved }),
+    )).resolves.toBe('');
+
+    expect(onReasoningObserved).toHaveBeenCalledWith('reasoning_delta');
+  });
+
   it('keeps the default budget and thinking config for deep Gemini features', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
