@@ -42,7 +42,7 @@ export const DEFAULT_FEATURE_MODELS: Record<ModelSelectableFeatureType, string> 
   'ping': DEFAULT_MODEL_ID,
 };
 
-export const REASONING_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high'];
+export const REASONING_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high', 'max'];
 
 export const DEFAULT_FEATURE_REASONING: Record<ModelSelectableFeatureType, ReasoningEffort> = {
   'fast-reply': 'medium',

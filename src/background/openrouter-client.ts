@@ -64,6 +64,8 @@ type OpenRouterUsagePayload = Partial<LlmUsageMetrics> & {
   };
 };
 
+type OpenRouterThinkingEffort = Exclude<ReasoningEffort, 'off' | 'max'>;
+
 const GEMINI_QUICK_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
   'fast-reply': 1600,
   'improve-draft': 1600,
@@ -89,14 +91,16 @@ function buildGeminiThinkingConfig(
   reasoningEffort: ReasoningEffort,
 ): {
   thinking?: { type: 'adaptive'; display: 'omitted' };
-  output_config?: { effort: Exclude<ReasoningEffort, 'off'> };
+  output_config?: { effort: OpenRouterThinkingEffort };
 } {
   if (!isGeminiModel(model) || !GEMINI_QUICK_MAX_TOKENS[feature] || reasoningEffort === 'off') {
     return {};
   }
+
+  const effort: OpenRouterThinkingEffort = reasoningEffort === 'max' ? 'high' : reasoningEffort;
   return {
     thinking: { type: 'adaptive', display: 'omitted' },
-    output_config: { effort: reasoningEffort },
+    output_config: { effort },
   };
 }
 

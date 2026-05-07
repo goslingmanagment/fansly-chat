@@ -232,6 +232,7 @@ describe('Options page — AI Models section', () => {
         'low',
         'medium',
         'high',
+        'max',
       ]);
     }
   });
@@ -241,7 +242,7 @@ describe('Options page — AI Models section', () => {
       featureReasoning: {
         ...DEFAULT_FEATURE_REASONING,
         'fast-reply': 'off',
-        'fan-summary': 'high',
+        'fan-summary': 'max',
       },
     }));
 
@@ -255,7 +256,7 @@ describe('Options page — AI Models section', () => {
       values[select.dataset.reasoningFeature!] = select.value;
     }
     expect(values['fast-reply']).toBe('off');
-    expect(values['fan-summary']).toBe('high');
+    expect(values['fan-summary']).toBe('max');
     expect(values.ping).toBe('medium');
   });
 
@@ -325,7 +326,7 @@ describe('Options page — AI Models section', () => {
       'select.chatgoose-select[data-reasoning-feature="fan-summary"]',
     )!;
 
-    summaryReasoningSelect.value = 'high';
+    summaryReasoningSelect.value = 'max';
     summaryReasoningSelect.dispatchEvent(new Event('change'));
 
     await vi.waitFor(() => {
@@ -334,7 +335,7 @@ describe('Options page — AI Models section', () => {
 
     const saved = savedSettings as { featureReasoning?: Record<string, string> };
     expect(saved.featureReasoning).toBeDefined();
-    expect(saved.featureReasoning!['fan-summary']).toBe('high');
+    expect(saved.featureReasoning!['fan-summary']).toBe('max');
   });
 
   it('saves promptCachingEnabled when the checkbox changes', async () => {

@@ -761,6 +761,7 @@ async function render(): Promise<void> {
     low: 'Low',
     medium: 'Medium',
     high: 'High',
+    max: 'Max',
   };
 
   const modelSelects: HTMLSelectElement[] = [];

@@ -149,6 +149,32 @@ describe('OpenRouterClient', () => {
     expect(body.output_config).toBeUndefined();
   });
 
+  it('maps max Gemini reasoning to high for OpenRouter', async () => {
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n'),
+    });
+
+    await new OpenRouterClient().streamMessage(
+      streamArgs({
+        model: 'google/gemini-3.1-pro-preview',
+        reasoningEffort: 'max',
+      }),
+    );
+
+    const [, request] = vi.mocked(fetch).mock.calls[0]!;
+    const body = JSON.parse(String(request?.body)) as {
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+
+    expect(body.thinking).toEqual({ type: 'adaptive', display: 'omitted' });
+    expect(body.output_config).toEqual({ effort: 'high' });
+  });
+
   it('reports observed reasoning blocks from the OpenRouter Messages stream', async () => {
     const onReasoningObserved = vi.fn();
     mockFetchResponse(200, undefined, {

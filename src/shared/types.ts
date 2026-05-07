@@ -9,7 +9,7 @@ export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
 export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft' | 'hi-greeting'>;
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'max';
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
