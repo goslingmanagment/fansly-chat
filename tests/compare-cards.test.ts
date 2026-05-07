@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import type { PersistedState } from '../src/shared/types.js';
 
 function createStorage(overrides?: Partial<PersistedState>): PersistedState {
@@ -17,6 +21,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       debugMode: false,
       promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
+      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
     },
     personalities: [],
     accountMappings: {},

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DEFAULT_FEATURE_MODELS } from '../src/shared/constants.js';
+import {
+  DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
+} from '../src/shared/constants.js';
 import { logDebug, isDebugEnabled } from '../src/shared/log.js';
 
 describe('logDebug', () => {
@@ -103,6 +106,7 @@ describe('isDebugEnabled', () => {
       debugMode: true,
       promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
+      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
     })).toBe(true);
   });
 
@@ -119,6 +123,7 @@ describe('isDebugEnabled', () => {
       debugMode: false,
       promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
+      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
     })).toBe(false);
   });
 

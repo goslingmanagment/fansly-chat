@@ -1,6 +1,7 @@
 import {
   DEEP_DEFAULT_MESSAGE_COUNT,
   DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
   IMPROVE_DEFAULT_MESSAGE_COUNT,
   PING_DEFAULT_MESSAGE_COUNT,
   QUICK_DEFAULT_MESSAGE_COUNT,
@@ -21,6 +22,7 @@ export function createDefaultSettings(): Settings {
     debugMode: false,
     promptCachingEnabled: true,
     featureModels: { ...DEFAULT_FEATURE_MODELS },
+    featureReasoning: { ...DEFAULT_FEATURE_REASONING },
   };
 }
 
@@ -66,6 +68,10 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
       raw?.featureModels && typeof raw.featureModels === 'object'
         ? raw.featureModels as Settings['featureModels']
         : defaults.featureModels,
+    featureReasoning:
+      raw?.featureReasoning && typeof raw.featureReasoning === 'object'
+        ? raw.featureReasoning as Settings['featureReasoning']
+        : defaults.featureReasoning,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   DEFAULT_MODEL_ID,
   DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
   FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   FEATURE_TEMPERATURES,
   QUICK_OPERATION_TIMEOUT_MS,
@@ -364,6 +365,7 @@ describe('OperationCoordinator', () => {
         debugMode: false,
         promptCachingEnabled: true,
         featureModels: { ...DEFAULT_FEATURE_MODELS },
+        featureReasoning: { ...DEFAULT_FEATURE_REASONING },
       },
       personalities: [
         {
@@ -1977,6 +1979,7 @@ describe('OperationCoordinator', () => {
       streamMessage: vi.fn(async ({
         onText,
         onUsage,
+        onReasoningObserved,
       }: {
         onText: (text: string) => void;
         onUsage?: (usage: {
@@ -1989,8 +1992,10 @@ describe('OperationCoordinator', () => {
             ephemeral_1h_input_tokens: number;
           };
         }) => void;
+        onReasoningObserved?: (signal: 'thinking_block') => void;
       }) => {
         advanceNow(200);
+        onReasoningObserved?.('thinking_block');
         onText('Hello');
         advanceNow(250);
         onText(' there');
@@ -2070,6 +2075,8 @@ describe('OperationCoordinator', () => {
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 cost: model=anthropic:claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Reasoning requested: medium (Claude Sonnet 4.6)'))).toBe(true);
+    expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Reasoning observed: yes (thinking_block)'))).toBe(true);
     expect(completeMessage?.profiling?.stages.map((stage) => stage.key)).toEqual([
       'resolve-identity',
       'load-messages',

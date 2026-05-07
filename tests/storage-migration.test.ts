@@ -1,7 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { FeatureType, Personality, SummaryCacheEntry } from '../src/shared/types.js';
 import { normalizeAgencyHubSummarySyncMetadata } from '../src/shared/agency-hub.js';
-import { DEFAULT_FEATURE_MODELS, DEFAULT_MODEL_ID, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
+  DEFAULT_MODEL_ID,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import { migrateState, createDefaultSettings, createSeedState } from '../src/shared/migrations.js';
 import {
   BUNDLED_LORA_PERSONALITY_ID,
@@ -106,6 +111,7 @@ describe('migrateState', () => {
     expect(result.settings.pingMessageCount).toBe(createDefaultSettings().pingMessageCount);
     expect(result.settings.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
     expect(result.settings.deepMessageCount).toBe(createDefaultSettings().deepMessageCount);
+    expect(result.settings.featureReasoning).toEqual(DEFAULT_FEATURE_REASONING);
   });
 
   it('seeds pingMessageCount from quickMessageCount when migrating legacy settings', () => {
@@ -321,6 +327,11 @@ describe('sanitizeSettings', () => {
     expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
   });
 
+  it('defaults featureReasoning to medium when missing from input', () => {
+    const result = storage.sanitizeSettings({});
+    expect(result.featureReasoning).toEqual(DEFAULT_FEATURE_REASONING);
+  });
+
   it('preserves valid model choices', () => {
     const result = storage.sanitizeSettings({
       featureModels: {
@@ -333,6 +344,31 @@ describe('sanitizeSettings', () => {
     });
     expect(result.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
     expect(result.featureModels['fan-summary']).toBe('anthropic:claude-opus-4-6');
+  });
+
+  it('preserves valid featureReasoning choices', () => {
+    const result = storage.sanitizeSettings({
+      featureReasoning: {
+        ...DEFAULT_FEATURE_REASONING,
+        'fast-reply': 'off',
+        'fan-summary': 'high',
+        ping: 'low',
+      },
+    });
+    expect(result.featureReasoning['fast-reply']).toBe('off');
+    expect(result.featureReasoning['fan-summary']).toBe('high');
+    expect(result.featureReasoning.ping).toBe('low');
+    expect(result.featureReasoning['help-me']).toBe('medium');
+  });
+
+  it('falls back to medium for unknown featureReasoning values', () => {
+    const result = storage.sanitizeSettings({
+      featureReasoning: {
+        ...DEFAULT_FEATURE_REASONING,
+        'fast-reply': 'max',
+      } as unknown as typeof DEFAULT_FEATURE_REASONING,
+    });
+    expect(result.featureReasoning['fast-reply']).toBe('medium');
   });
 
   it('preserves provider-aware OpenRouter model choices', () => {
@@ -544,6 +580,23 @@ describe('loadStorageState', () => {
     expect(result.settings.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
     expect(result.settings.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
     expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
+  });
+
+  it('deep-merges featureReasoning on load even when schema matches', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: {
+        ...createDefaultSettings(),
+        featureReasoning: { 'fast-reply': 'off' },
+      },
+      personalities: [],
+      accountMappings: {},
+      knownAccounts: [],
+    };
+    const result = await storage.loadStorageState();
+    expect(result.settings.featureReasoning['fast-reply']).toBe('off');
+    expect(result.settings.featureReasoning['help-me']).toBe('medium');
+    expect(result.settings.featureReasoning['fan-summary']).toBe('medium');
   });
 });
 

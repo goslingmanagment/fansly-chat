@@ -78,11 +78,11 @@ main() {
 
   stamp_version "$GUIDE_PAGE_FILE" "$version" \
     '(<span class="nav-version">)v[^<]+(</span>)' \
-    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by Claude</p>)'
+    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers</p>)'
 
   stamp_version "$CHANGELOG_PAGE_FILE" "$version" \
     '(<span class="nav-version">)v[^<]+(</span>)' \
-    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by Claude</p>)'
+    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers</p>)'
 
   # Upload
   log "Uploading pages to ${VPS_HOST}"

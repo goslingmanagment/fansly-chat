@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import { createBundledPersonalities } from '../src/shared/personalities.js';
 import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
 
@@ -44,6 +48,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       debugMode: false,
       promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
+      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
       ...overrides,
     },
     personalities: [

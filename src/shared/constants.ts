@@ -1,4 +1,9 @@
-import type { FeatureType, ModelSelectableFeatureType, Settings } from './types.js';
+import type {
+  FeatureType,
+  ModelSelectableFeatureType,
+  ReasoningEffort,
+  Settings,
+} from './types.js';
 import { FEATURE_POLICIES } from './features.js';
 import type { FeaturePolicy } from './features.js';
 export {
@@ -18,7 +23,7 @@ import {
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 6;
+export const STORAGE_SCHEMA_VERSION = 7;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -35,6 +40,16 @@ export const DEFAULT_FEATURE_MODELS: Record<ModelSelectableFeatureType, string> 
   'fan-summary': DEFAULT_FAN_SUMMARY_MODEL_ID,
   'chat-review': DEFAULT_MODEL_ID,
   'ping': DEFAULT_MODEL_ID,
+};
+
+export const REASONING_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high'];
+
+export const DEFAULT_FEATURE_REASONING: Record<ModelSelectableFeatureType, ReasoningEffort> = {
+  'fast-reply': 'medium',
+  'help-me': 'medium',
+  'fan-summary': 'medium',
+  'chat-review': 'medium',
+  'ping': 'medium',
 };
 
 export const MAX_TOKENS: Record<FeatureType, number> = {
@@ -160,6 +175,7 @@ export const DEFAULT_SETTINGS: Settings = {
   debugMode: false,
   promptCachingEnabled: true,
   featureModels: { ...DEFAULT_FEATURE_MODELS },
+  featureReasoning: { ...DEFAULT_FEATURE_REASONING },
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

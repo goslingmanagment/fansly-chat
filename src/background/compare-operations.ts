@@ -11,6 +11,7 @@ import { ChatGooseError, toDebugErrorPayload, toUserError } from '../shared/erro
 import { logDebug } from '../shared/log.js';
 import {
   getAgencyHubModelId,
+  getModelDisplayName,
   getModelEntry,
   isAnthropicModelSelection,
 } from '../shared/model-registry.js';
@@ -1082,10 +1083,16 @@ export async function executeCompare(
       let cardCost: LlmCostEstimate | undefined;
       let cardSpend: LlmSpendSummary | undefined;
       let actualModel = resolvedModel;
+      let reasoningObserved = false;
       let latestStopReason: string | null = null;
 
       const streamToCard = async (model: string): Promise<string> => {
         actualModel = model;
+        reasoningObserved = false;
+        const reasoningEffort = validated.storage.settings.featureReasoning['fast-reply'];
+        profiler.log(
+          `Reasoning requested: ${reasoningEffort} (${getModelDisplayName(actualModel)})`,
+        );
         return context.llmClient.streamMessage({
           settings: validated.storage.settings,
           model,
@@ -1093,6 +1100,7 @@ export async function executeCompare(
           systemBlocks,
           userBlocks,
           feature: 'fast-reply',
+          reasoningEffort,
           signal,
           onText: (chunk) => {
             const activeCompare = getActiveCompare(context, tabId);
@@ -1138,9 +1146,40 @@ export async function executeCompare(
               fanDisplayName,
             });
           },
+          onReasoningObserved: (reasoningSignal) => {
+            if (reasoningObserved) {
+              return;
+            }
+            reasoningObserved = true;
+            profiler.log(`Reasoning observed: yes (${reasoningSignal})`);
+            logDebug(debugEnabled, 'reasoning observed', {
+              cardId: card.id,
+              model: actualModel,
+              feature: 'fast-reply',
+              reasoningEffort,
+              signal: reasoningSignal,
+            });
+            sendDebugCompareProgress({
+              phase: 'generating',
+              message: 'Generating compare replies…',
+              fanDisplayName,
+            });
+          },
           onStopReason: (stopReason) => {
             latestStopReason = stopReason;
           },
+        }).then((text) => {
+          if (reasoningEffort !== 'off' && !reasoningObserved) {
+            profiler.log('Reasoning observed: no');
+            logDebug(debugEnabled, 'reasoning observed', {
+              cardId: card.id,
+              model: actualModel,
+              feature: 'fast-reply',
+              reasoningEffort,
+              observed: false,
+            });
+          }
+          return text;
         });
       };
 

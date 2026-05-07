@@ -3,7 +3,7 @@ import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
-import { AI_MODEL_GROUPS } from '../shared/constants.js';
+import { AI_MODEL_GROUPS, REASONING_EFFORTS } from '../shared/constants.js';
 import {
   createUserError,
   getUserErrorDescription,
@@ -14,6 +14,7 @@ import type {
   AgencyHubConnectionTestResponse,
   ModelSelectableFeatureType,
   Personality,
+  ReasoningEffort,
   SessionSnapshotEntry,
   UserFacingError,
 } from '../shared/types.js';
@@ -755,7 +756,15 @@ async function render(): Promise<void> {
     { feature: 'fan-summary', label: 'Fan Summary', helper: 'Longer summaries of the fan relationship and context.' },
   ];
 
+  const REASONING_LABELS: Record<ReasoningEffort, string> = {
+    off: 'Off',
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+  };
+
   const modelSelects: HTMLSelectElement[] = [];
+  const reasoningSelects: HTMLSelectElement[] = [];
   const openRouterWarning = document.createElement('div');
   openRouterWarning.style.padding = '10px 12px';
   openRouterWarning.style.borderRadius = '12px';
@@ -800,6 +809,18 @@ async function render(): Promise<void> {
     select.value = state.settings.featureModels[feature];
     modelSelects.push(select);
 
+    const reasoningSelect = document.createElement('select');
+    reasoningSelect.className = 'chatgoose-select';
+    reasoningSelect.dataset.reasoningFeature = feature;
+    for (const effort of REASONING_EFFORTS) {
+      const option = document.createElement('option');
+      option.value = effort;
+      option.textContent = REASONING_LABELS[effort];
+      reasoningSelect.append(option);
+    }
+    reasoningSelect.value = state.settings.featureReasoning[feature];
+    reasoningSelects.push(reasoningSelect);
+
     const row = document.createElement('div');
     row.style.display = 'grid';
     row.style.gap = '4px';
@@ -814,7 +835,14 @@ async function render(): Promise<void> {
     helperText.style.fontSize = '13px';
     helperText.style.marginBottom = '4px';
 
-    row.append(featureLabel, helperText, select);
+    const controls = document.createElement('div');
+    controls.className = 'chatgoose-model-config-grid';
+    controls.append(
+      labeledField('Model', select),
+      labeledField('Reasoning', reasoningSelect),
+    );
+
+    row.append(featureLabel, helperText, controls);
     modelSection.append(row);
   }
   renderOpenRouterWarning();
@@ -824,6 +852,10 @@ async function render(): Promise<void> {
     const featureModels: Record<string, string> = {};
     for (const sel of modelSelects) {
       featureModels[sel.dataset.feature!] = sel.value;
+    }
+    const featureReasoning: Record<string, ReasoningEffort> = {};
+    for (const sel of reasoningSelects) {
+      featureReasoning[sel.dataset.reasoningFeature!] = sel.value as ReasoningEffort;
     }
 
     const savedSettings = await saveSettings({
@@ -838,6 +870,7 @@ async function render(): Promise<void> {
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
       featureModels: featureModels as Record<ModelSelectableFeatureType, string>,
+      featureReasoning: featureReasoning as Record<ModelSelectableFeatureType, ReasoningEffort>,
     });
 
     keyInput.value = savedSettings.claudeApiKey;
@@ -872,6 +905,10 @@ async function render(): Promise<void> {
   });
   openRouterKeyInput.addEventListener('input', renderOpenRouterWarning);
   openRouterKeyInput.addEventListener('change', renderOpenRouterWarning);
+  for (const select of reasoningSelects) {
+    select.addEventListener('input', saveSettingsDebounced);
+    select.addEventListener('change', saveSettingsDebounced);
+  }
   agencyHubUrlInput.addEventListener('input', () => {
     markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();

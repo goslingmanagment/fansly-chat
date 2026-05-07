@@ -9,6 +9,7 @@ export type SubscriptionLookupMode = 'full' | 'cache-only';
 export type ReplyMode = 'default' | 'preferSplit';
 export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft' | 'hi-greeting'>;
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ export interface Settings {
   debugMode: boolean;
   promptCachingEnabled: boolean;
   featureModels: Record<ModelSelectableFeatureType, string>;
+  featureReasoning: Record<ModelSelectableFeatureType, ReasoningEffort>;
 }
 
 export interface Personality {
@@ -177,6 +179,13 @@ export interface LlmUsageMetrics {
   output_tokens: number;
   cache_creation?: LlmCacheCreationUsage;
 }
+
+export type LlmReasoningSignal =
+  | 'thinking_block'
+  | 'redacted_thinking_block'
+  | 'thinking_delta'
+  | 'signature_delta'
+  | 'reasoning_delta';
 
 export interface LlmCostEstimate {
   modelId: string;

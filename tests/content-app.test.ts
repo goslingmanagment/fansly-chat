@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
   DEFAULT_FEATURE_MODELS,
+  DEFAULT_FEATURE_REASONING,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import type {
@@ -181,6 +182,7 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
       debugMode: false,
       promptCachingEnabled: true,
       featureModels: { ...DEFAULT_FEATURE_MODELS },
+      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
     },
     personalities: [
       {

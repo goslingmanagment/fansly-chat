@@ -1,5 +1,55 @@
 # Что нового
 
+## 1.3.7
+
+Debug/profiling теперь показывает, был ли reasoning фактически замечен в ответном stream, а не только выбран в настройках.
+
+### Главное
+
+- В debug profiling добавлены строки `Reasoning requested: ...` и `Reasoning observed: yes/no`.
+- `Reasoning observed: yes` появляется только если в stream пришёл thinking/redacted thinking block, `thinking_delta`, `signature_delta` или reasoning delta.
+- Теперь можно отличить “reasoning был включён в request body” от “adaptive thinking реально сработал в этом ответе”.
+
+### Технически
+
+- Anthropic и OpenRouter stream parsers прокидывают `onReasoningObserved`.
+- Operation и Compare profiling логируют первый observed reasoning signal и явное `no`, если reasoning был запрошен, но stream не содержал reasoning-событий.
+- Добавлены regression tests на stream-level reasoning detection и profiling log.
+
+## 1.3.6
+
+Hotfix для `CG-APP-01` после включения reasoning: Anthropic adaptive thinking теперь не отправляется вместе с `temperature`, потому что extended/adaptive thinking несовместим с temperature modifications.
+
+### Главное
+
+- `Reply`, `Fix`, `Ping`, `Hi`, `Help`, `Summary` и `Review` сохраняют reasoning `medium` по умолчанию.
+- Anthropic-запросы с reasoning больше не получают `temperature`, поэтому API не должен отклонять их validation error.
+- Если reasoning выключен через `Off` или выбранная Claude-модель не поддерживает adaptive thinking, temperature продолжает использоваться как раньше.
+
+### Технически
+
+- Request body для Anthropic теперь собирается условно: `temperature` добавляется только когда `thinking` не отправляется.
+- Добавлены regression checks, что adaptive requests содержат `thinking/output_config`, но не содержат `temperature`.
+
+## 1.3.5
+
+Reasoning теперь по умолчанию работает на `medium`, а в настройках можно отдельно управлять reasoning effort для каждой feature-модели.
+
+### Главное
+
+- Все reasoning defaults подняты до `medium`: быстрые replies больше не остаются на `low`.
+- В `Settings → AI Models` у каждой feature-строки появился отдельный селект `Reasoning`.
+- Доступные значения: `Off`, `Low`, `Medium`, `High`.
+- `Fix`, `Hi` и Compare наследуют reasoning-настройку от `Fast Reply`.
+- `Off` полностью убирает thinking/reasoning config из запроса для поддерживаемых моделей.
+
+### Технически
+
+- Добавлен `settings.featureReasoning` со storage schema `7`; старые настройки автоматически получают `medium`.
+- Anthropic Direct и OpenRouter clients теперь принимают явный `reasoningEffort` вместо feature-hardcode.
+- Для неподдерживаемых моделей thinking config по-прежнему не отправляется, чтобы не ловить provider errors.
+- Добавлены regression tests для storage migration, Options UI, Anthropic adaptive thinking и OpenRouter Gemini thinking.
+
 ## 1.3.4
 
 Claude Direct replies теперь используют Anthropic adaptive thinking для Sonnet 4.6 и Opus 4.6, с большими аварийными output caps, чтобы thinking не обрезал финальный текст.
