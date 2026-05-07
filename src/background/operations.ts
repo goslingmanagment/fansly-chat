@@ -2302,6 +2302,7 @@ export class OperationCoordinator {
       sendDebugPromptSnapshot(resolvedModel);
 
       let sawProviderActivity = false;
+      let sawProviderActivityInAttempt = false;
       let sawFirstChunk = false;
       let actualModel = resolvedModel;
       let reasoningObserved = false;
@@ -2337,9 +2338,14 @@ export class OperationCoordinator {
       };
 
       const markProviderActivity = (ttfbDetail: string): boolean => {
-        if (!sawProviderActivity) {
-          sawProviderActivity = true;
+        if (!sawProviderActivityInAttempt) {
+          sawProviderActivityInAttempt = true;
           startLlmStreamTimeouts();
+          if (sawProviderActivity) {
+            sendDebugProgress();
+            return false;
+          }
+          sawProviderActivity = true;
           profiler.completeStage('llm-ttfb', ttfbDetail);
           profiler.startStage('llm-stream', 'Stream AI response');
           profiler.log(`Stream ${actualModelName()} response`);
@@ -2444,13 +2450,13 @@ export class OperationCoordinator {
             ? (err as { retryAtMs: number }).retryAtMs
             : undefined;
           const canRetryRateLimit =
-            !sawProviderActivity &&
+            !sawFirstChunk &&
             !rateLimitRetried &&
             errorKey === 'rate_limited' &&
             typeof retryAfterMs === 'number' &&
             retryAfterMs <= AUTO_RETRY_RATE_LIMIT_MAX_MS;
           const canRetryServiceUnavailable =
-            !sawProviderActivity &&
+            !sawFirstChunk &&
             !serviceUnavailableRetried &&
             errorKey === 'service_unavailable';
 
@@ -2501,7 +2507,8 @@ export class OperationCoordinator {
               statusCode: undefined,
               retryAtMs: undefined,
             });
-            if (!sawProviderActivity) {
+            if (!sawFirstChunk) {
+              sawProviderActivityInAttempt = false;
               startLlmTtfbTimeout();
             }
             continue;
@@ -2515,6 +2522,11 @@ export class OperationCoordinator {
             actualModel = defaultModel;
             profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
             sendDebugPromptSnapshot(defaultModel);
+            if (!sawFirstChunk) {
+              clearLlmTimeouts();
+              sawProviderActivityInAttempt = false;
+              startLlmTtfbTimeout();
+            }
             continue;
           }
 

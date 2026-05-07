@@ -35,6 +35,12 @@ function makeSettings(overrides?: Partial<{
   };
 }
 
+type FailedSubmitResult = {
+  status: 'failed';
+  reason: string;
+  baseUrl: string;
+};
+
 describe('AgencyHubUsageReporter', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -178,6 +184,51 @@ describe('AgencyHubUsageReporter', () => {
       expect(submitAiUsageBatch).toHaveBeenCalledTimes(2);
     });
     expect(submitAiUsageBatch.mock.calls[1]?.[0].events).toEqual([makeUsageEvent(1)]);
+  });
+
+  it('keeps retry backoff when a later event is enqueued during an in-flight failed submit', async () => {
+    vi.useFakeTimers();
+    const firstSubmit = {} as {
+      resolve?: (value: FailedSubmitResult) => void;
+    };
+    const submitAiUsageBatch = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        firstSubmit.resolve = resolve as (value: FailedSubmitResult) => void;
+      }))
+      .mockResolvedValueOnce({
+        status: 'submitted',
+        reason: 'submitted',
+        baseUrl: 'http://hub.test',
+        response: { receivedCount: 2, insertedCount: 2, dedupedCount: 0 },
+      });
+    const reporter = new AgencyHubUsageReporter({ submitAiUsageBatch } as never);
+
+    reporter.enqueue(makeSettings(), makeUsageEvent(1));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
+    });
+
+    reporter.enqueue(makeSettings(), makeUsageEvent(2));
+    firstSubmit.resolve?.({
+      status: 'failed',
+      reason: 'hub_request_failed',
+      baseUrl: 'http://hub.test',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(submitAiUsageBatch).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[0]! - 1_000);
+    await vi.waitFor(() => {
+      expect(submitAiUsageBatch).toHaveBeenCalledTimes(2);
+    });
+    expect(submitAiUsageBatch.mock.calls[1]?.[0].events).toEqual([
+      makeUsageEvent(1),
+      makeUsageEvent(2),
+    ]);
   });
 
   it('drops events after the max retry attempts', async () => {

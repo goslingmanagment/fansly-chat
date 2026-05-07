@@ -1,5 +1,22 @@
 # Что нового
 
+## 1.3.11
+
+Follow-up hotfix после review 1.3.10: retry/backoff теперь сохраняет ожидаемое поведение в edge cases.
+
+### Главное
+
+- Agency Hub AI usage reporter больше не обходит retry backoff, если новый usage event пришёл прямо во время failing flush.
+- LLM auto-retry снова разрешён после provider progress/reasoning event, если текстовый chunk ещё не приходил.
+- Retry-таймеры LLM корректно перевооружаются для новой попытки после pre-text provider activity.
+
+### Технически
+
+- `enqueue()` не ставит debounce timer, пока target queue уже flushing; post-flush scheduling выбирает backoff.
+- Retry gating в operations снова опирается на первый text chunk, а provider activity остаётся отдельным сигналом для TTFB/idle timers.
+- Убран недостижимый `60s` Agency Hub retry delay при `MAX_ATTEMPTS = 3`.
+- Добавлены regression tests для enqueue-during-flush и service_unavailable после provider progress до текста.
+
 ## 1.3.10
 
 Hotfix для reasoning stream, provider-aware ключей и Agency Hub usage retry.
