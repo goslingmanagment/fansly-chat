@@ -1,5 +1,19 @@
 # Что нового
 
+## 1.3.8
+
+Reasoning visibility теперь вынесена прямо в completed profiling summary, чтобы её было видно после генерации без live log.
+
+### Главное
+
+- В завершённой карточке `Pipeline Profiling` появились отдельные строки `Reasoning requested` и `Reasoning observed`.
+- Больше не нужно ловить live profiling log во время генерации: статус reasoning виден рядом с usage/cost/stages.
+
+### Технически
+
+- Completed overlay summary извлекает reasoning-события из profiling `logEntries` и рендерит их как обычные profiling rows.
+- Добавлен regression test на отображение reasoning rows в completed overlay.
+
 ## 1.3.7
 
 Debug/profiling теперь показывает, был ли reasoning фактически замечен в ответном stream, а не только выбран в настройках.
