@@ -1,5 +1,22 @@
 # Что нового
 
+## 1.3.4
+
+Claude Direct replies теперь используют Anthropic adaptive thinking для Sonnet 4.6 и Opus 4.6, с большими аварийными output caps, чтобы thinking не обрезал финальный текст.
+
+### Главное
+
+- Claude Sonnet 4.6 и Claude Opus 4.6 теперь отправляются с `thinking: { type: "adaptive", display: "omitted" }`.
+- Для reply-like функций (`Reply`, `Fix`, `Ping`, `Hi`) включён `output_config.effort = "low"`, чтобы получить reasoning без лишней задержки.
+- Для аналитических функций (`Help`, `Summary`, `Review`) включён `output_config.effort = "medium"`.
+- Adaptive-mode caps подняты до больших потолков: `8000` для коротких replies, `16000` для Help/Review и `24000` для Summary.
+
+### Технически
+
+- Adaptive thinking включается только для моделей, которые его поддерживают: `claude-sonnet-4-6` и `claude-opus-4-6`.
+- Claude 4.5 и Haiku 4.5 остаются в обычном режиме, чтобы не отправлять неподдерживаемый adaptive config.
+- Добавлены regression tests на Claude adaptive request body, большие caps и fallback без thinking для неподдерживаемых Claude-моделей.
+
 ## 1.3.3
 
 Hotfix для Gemini replies: thinking остаётся включённым на `low`, но ChatGoose больше не вставляет в UI служебные обрывки, prompt-leak текст и незавершённые ответы.
