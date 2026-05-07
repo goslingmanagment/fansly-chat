@@ -182,6 +182,8 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
     },
     logEntries: [
       { elapsedMs: 0, message: 'Resolve account identity' },
+      { elapsedMs: 900, message: 'Reasoning requested: medium (Claude Sonnet 4.6)' },
+      { elapsedMs: 1100, message: 'Reasoning observed: yes (thinking_block)' },
       { elapsedMs: 125, message: 'Loaded messages page 1/2 (25 msgs, 25 collected)' },
       { elapsedMs: 850, message: 'Loaded messages page 2/2 (5 msgs, 30 collected)' },
     ],
@@ -642,6 +644,10 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Claude Sonnet 4.6 usage');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('cache read 90');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('input 420');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Reasoning requested');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('medium');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Reasoning observed');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('thinking_block');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Load messages');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('2 pages, 30 transcript messages');
   });

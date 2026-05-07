@@ -1523,6 +1523,30 @@ export class OverlayController {
       container.append(costRow);
     }
 
+    for (const reasoningEntry of this.extractReasoningEntries(snapshot)) {
+      const row = document.createElement('div');
+      row.className = 'chatgoose-profiling-stage';
+
+      const label = document.createElement('div');
+      label.className = 'chatgoose-profiling-stage-label';
+      label.textContent = reasoningEntry.label;
+
+      const value = document.createElement('div');
+      value.className = 'chatgoose-profiling-stage-duration';
+      value.textContent = reasoningEntry.value;
+
+      row.append(label, value);
+
+      if (reasoningEntry.detail) {
+        const detail = document.createElement('div');
+        detail.className = 'chatgoose-profiling-stage-detail';
+        detail.textContent = reasoningEntry.detail;
+        row.append(detail);
+      }
+
+      container.append(row);
+    }
+
     for (const stage of snapshot.stages) {
       const row = document.createElement('div');
       row.className = 'chatgoose-profiling-stage';
@@ -1555,6 +1579,38 @@ export class OverlayController {
     }
 
     return container;
+  }
+
+  private extractReasoningEntries(
+    snapshot: OperationProfilingSnapshot,
+  ): Array<{ label: string; value: string; detail?: string }> {
+    const requested = [...snapshot.logEntries]
+      .reverse()
+      .find((entry) => entry.message.startsWith('Reasoning requested: '));
+    const observed = [...snapshot.logEntries]
+      .reverse()
+      .find((entry) => entry.message.startsWith('Reasoning observed: '));
+    const entries: Array<{ label: string; value: string; detail?: string }> = [];
+
+    if (requested) {
+      const match = /^Reasoning requested: ([^(]+)(?: \((.+)\))?$/.exec(requested.message);
+      entries.push({
+        label: 'Reasoning requested',
+        value: match?.[1]?.trim() || 'yes',
+        ...(match?.[2] ? { detail: match[2] } : {}),
+      });
+    }
+
+    if (observed) {
+      const match = /^Reasoning observed: (yes|no)(?: \((.+)\))?$/.exec(observed.message);
+      entries.push({
+        label: 'Reasoning observed',
+        value: match?.[1] ?? observed.message.replace('Reasoning observed: ', ''),
+        ...(match?.[2] ? { detail: match[2] } : {}),
+      });
+    }
+
+    return entries;
   }
 
   // ─── Debug Prompt Inspector ─────────────────────────────────────────
