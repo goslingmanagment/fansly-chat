@@ -479,6 +479,44 @@ describe('OperationCoordinator', () => {
     );
   });
 
+  it('includes provider-aware API key readiness in tab state', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      claudeApiKey: 'sk-ant-test',
+      openRouterApiKey: '',
+      featureModels: {
+        ...DEFAULT_FEATURE_MODELS,
+        'fast-reply': 'openrouter:x-ai/grok-4.3',
+      },
+    };
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.handlePortMessage(1, {
+      type: 'tab:init',
+      groupId: 'group-1',
+      routeNonce: 1,
+    });
+
+    expect(postedMessages(port)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tab:state',
+          state: expect.objectContaining({
+            hasApiKey: true,
+            modelProviderByFeature: expect.objectContaining({
+              'fast-reply': 'openrouter',
+              'help-me': 'anthropic',
+            }),
+            apiKeyReadyByFeature: expect.objectContaining({
+              'fast-reply': false,
+              'help-me': true,
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('prefetches an Agency Hub summary for tab state availability and marks it ready', async () => {
     delete mockStorage['summary:group-1'];
 
@@ -2090,7 +2128,7 @@ describe('OperationCoordinator', () => {
     ]);
     expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'completed',
-      detail: 'first chunk received',
+      detail: 'first provider event received',
     });
     expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toMatchObject({
       status: 'completed',
@@ -2431,6 +2469,82 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toBeUndefined();
   });
 
+  it('treats reasoning progress before text as deep LLM provider activity', async () => {
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const anthropicClient = {
+      streamMessage: vi.fn(
+        ({
+          signal,
+          onText,
+          onProgress,
+          onReasoningObserved,
+        }: {
+          signal: AbortSignal;
+          onText: (text: string) => void;
+          onProgress?: () => void;
+          onReasoningObserved?: (signal: 'thinking_delta') => void;
+        }) => new Promise<string>((resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+
+          setTimeout(() => {
+            onProgress?.();
+            onReasoningObserved?.('thinking_delta');
+          }, 10_000);
+          setTimeout(() => {
+            onText('Deep review');
+          }, 50_000);
+          setTimeout(() => {
+            resolve('Deep review');
+          }, 51_000);
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'review-op',
+      feature: 'chat-review',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await streamStarted;
+    await vi.advanceTimersByTimeAsync(51_000);
+    await startPromise;
+
+    const messages = postedMessages(port);
+    const completeMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+
+    expect(messages.find((message) => message.type === 'operation:error')).toBeUndefined();
+    expect(completeMessage?.result.rawText).toBe('Deep review');
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
+      status: 'completed',
+      detail: 'first provider event received',
+    });
+    expect(completeMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toMatchObject({
+      status: 'completed',
+      detail: '11 chars',
+    });
+  });
+
   it('times out deep operations when LLM stream goes idle after the first chunk', async () => {
     vi.useFakeTimers();
     mockStorage.settings = {
@@ -2484,7 +2598,7 @@ describe('OperationCoordinator', () => {
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toMatchObject({
       status: 'completed',
-      detail: 'first chunk received',
+      detail: 'first text chunk received',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toMatchObject({
       status: 'failed',

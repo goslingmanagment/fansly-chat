@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { AgencyHubConnectionTestRequest, SessionTemplate } from '../src/shared/types.js';
@@ -252,6 +252,49 @@ describe('runtime-api getPopupStatus', () => {
     );
     expect(tabsGet).toHaveBeenCalledWith(2);
     expect(tabsQuery).not.toHaveBeenCalled();
+  });
+
+  it('reports API key readiness for each selected model provider', async () => {
+    mockStorage = createStorage({
+      settings: {
+        ...createDefaultSettings(),
+        claudeApiKey: 'sk-ant-test',
+        openRouterApiKey: '',
+        featureModels: {
+          ...DEFAULT_FEATURE_MODELS,
+          'fast-reply': 'openrouter:x-ai/grok-4.3',
+        },
+      },
+    });
+
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+
+    const { sessionStore, tabsGet } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(1, makeCapture('active'));
+    tabsGet.mockResolvedValue({ id: 1, url: 'https://fansly.com/messages/group-1' });
+
+    const result = await onMessageListener?.({
+      type: 'getPopupStatus',
+      tabId: 1,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        hasApiKey: true,
+        modelProviderByFeature: expect.objectContaining({
+          'fast-reply': 'openrouter',
+          'help-me': 'anthropic',
+        }),
+        apiKeyReadyByFeature: expect.objectContaining({
+          'fast-reply': false,
+          'help-me': true,
+        }),
+      }),
+    );
   });
 });
 

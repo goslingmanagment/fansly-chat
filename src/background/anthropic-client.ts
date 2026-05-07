@@ -1,5 +1,9 @@
 import { ANTHROPIC_VERSION, CLAUDE_API_URL, MAX_TOKENS } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
+import {
+  getAnthropicAdaptiveThinkingMaxTokens,
+  supportsAnthropicAdaptiveThinking,
+} from '../shared/model-capabilities.js';
 import type {
   LlmUsageMetrics,
   FeatureType,
@@ -44,28 +48,9 @@ interface AnthropicApiErrorInfo {
 
 type AnthropicThinkingEffort = Exclude<ReasoningEffort, 'off'>;
 
-const ADAPTIVE_THINKING_MODELS = new Set([
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-]);
-
-const ADAPTIVE_THINKING_MAX_TOKENS: Partial<Record<FeatureType, number>> = {
-  'fast-reply': 8000,
-  'improve-draft': 8000,
-  'help-me': 16000,
-  'fan-summary': 24000,
-  'chat-review': 16000,
-  ping: 8000,
-  'hi-greeting': 8000,
-};
-
-function supportsAdaptiveThinking(model: string): boolean {
-  return ADAPTIVE_THINKING_MODELS.has(model);
-}
-
 function resolveMaxTokens(model: string, feature: FeatureType): number {
-  if (supportsAdaptiveThinking(model)) {
-    return ADAPTIVE_THINKING_MAX_TOKENS[feature] ?? MAX_TOKENS[feature];
+  if (supportsAnthropicAdaptiveThinking(model)) {
+    return getAnthropicAdaptiveThinkingMaxTokens(feature) ?? MAX_TOKENS[feature];
   }
   return MAX_TOKENS[feature];
 }
@@ -77,7 +62,7 @@ function buildAdaptiveThinkingConfig(
   thinking?: { type: 'adaptive'; display: 'summarized' };
   output_config?: { effort: AnthropicThinkingEffort };
 } {
-  if (!supportsAdaptiveThinking(model) || reasoningEffort === 'off') {
+  if (!supportsAnthropicAdaptiveThinking(model) || reasoningEffort === 'off') {
     return {};
   }
 

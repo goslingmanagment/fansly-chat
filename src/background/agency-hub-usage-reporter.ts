@@ -1,6 +1,8 @@
 import {
   AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS,
   AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS,
+  AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS,
+  AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS,
   AGENCY_HUB_AI_USAGE_REPORT_TIMEOUT_MS,
 } from '../shared/constants.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
@@ -8,11 +10,16 @@ import { logDebug } from '../shared/log.js';
 import type { AgencyHubAiUsageEvent, Settings } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 
+interface QueuedUsageEvent {
+  event: AgencyHubAiUsageEvent;
+  attempts: number;
+}
+
 interface UsageReporterTargetState {
   baseUrl: string;
   apiKey: string;
   debugEnabled: boolean;
-  events: AgencyHubAiUsageEvent[];
+  events: QueuedUsageEvent[];
   flushTimer: number | null;
   flushing: boolean;
 }
@@ -47,7 +54,7 @@ export class AgencyHubUsageReporter {
       settings.debugMode,
     );
 
-    state.events.push({ ...event });
+    state.events.push({ event: { ...event }, attempts: 0 });
     state.debugEnabled = Boolean(settings.debugMode);
     this.ensureFlushScheduled(key, state);
   }
@@ -82,6 +89,7 @@ export class AgencyHubUsageReporter {
   private ensureFlushScheduled(
     key: string,
     state: UsageReporterTargetState,
+    delayMs = AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS,
   ): void {
     if (state.flushTimer !== null) {
       return;
@@ -90,7 +98,7 @@ export class AgencyHubUsageReporter {
     state.flushTimer = globalThis.setTimeout(() => {
       state.flushTimer = null;
       void this.flushTarget(key);
-    }, AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS) as unknown as number;
+    }, delayMs) as unknown as number;
   }
 
   private cleanupTargetState(
@@ -104,6 +112,34 @@ export class AgencyHubUsageReporter {
     ) {
       this.queuesByTarget.delete(key);
     }
+  }
+
+  private requeueFailedBatch(
+    state: UsageReporterTargetState,
+    batch: QueuedUsageEvent[],
+  ): number | null {
+    const retriable = batch
+      .map((queued) => ({
+        event: queued.event,
+        attempts: queued.attempts + 1,
+      }))
+      .filter((queued) => queued.attempts < AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS);
+
+    if (retriable.length === 0) {
+      return null;
+    }
+
+    state.events.unshift(...retriable);
+    const highestAttempt = Math.max(...retriable.map((queued) => queued.attempts));
+    const delayIndex = Math.min(
+      highestAttempt - 1,
+      AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS.length - 1,
+    );
+    return AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[delayIndex] ??
+      AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS[
+        AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS.length - 1
+      ] ??
+      AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS;
   }
 
   private async flushTarget(key: string): Promise<void> {
@@ -123,6 +159,7 @@ export class AgencyHubUsageReporter {
     }
 
     state.flushing = true;
+    let retryDelayMs: number | null = null;
 
     try {
       while (state.events.length > 0) {
@@ -139,7 +176,7 @@ export class AgencyHubUsageReporter {
               agencyHubBaseUrl: state.baseUrl,
               agencyHubApiKey: state.apiKey,
             },
-            events: batch,
+            events: batch.map((queued) => queued.event),
             signal: controller.signal,
           });
 
@@ -150,6 +187,19 @@ export class AgencyHubUsageReporter {
             eventCount: batch.length,
             response: result.response,
           });
+          if (result.status === 'failed') {
+            retryDelayMs = this.requeueFailedBatch(state, batch);
+            break;
+          }
+        } catch (error) {
+          retryDelayMs = this.requeueFailedBatch(state, batch);
+          logDebug(state.debugEnabled, 'agency hub ai usage batch', {
+            baseUrl: state.baseUrl,
+            status: 'failed',
+            reason: error instanceof Error ? error.message : 'thrown',
+            eventCount: batch.length,
+          });
+          break;
         } finally {
           clearTimeout(timeoutHandle);
         }
@@ -157,7 +207,11 @@ export class AgencyHubUsageReporter {
     } finally {
       state.flushing = false;
       if (state.events.length > 0) {
-        this.ensureFlushScheduled(key, state);
+        this.ensureFlushScheduled(
+          key,
+          state,
+          retryDelayMs ?? AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS,
+        );
       } else {
         this.cleanupTargetState(key, state);
       }

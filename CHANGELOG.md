@@ -1,5 +1,24 @@
 # Что нового
 
+## 1.3.10
+
+Hotfix для reasoning stream, provider-aware ключей и Agency Hub usage retry.
+
+### Главное
+
+- Deep-фичи больше не падают по LLM TTFB timeout, когда Claude сначала стримит summarized thinking/reasoning, а текст приходит позже.
+- Content UI теперь проверяет API key по провайдеру выбранной модели для каждой feature: OpenRouter-фичи больше не стартуют только с Claude key.
+- В `Settings → AI Models` reasoning-select отключается для моделей/feature, которые реально не отправляют reasoning config.
+- Из bundled Lora personality убран TODO-placeholder цен, чтобы он не попадал в prompt.
+
+### Технически
+
+- `llm-ttfb` завершается на первый provider event/progress/reasoning signal, а первый text chunk по-прежнему только добавляет текст в UI.
+- Capability rules для Anthropic adaptive thinking и OpenRouter Gemini thinking вынесены в общий helper.
+- OpenRouter reasoning detection теперь учитывает наличие `reasoning` property даже при пустой строке.
+- Agency Hub AI usage reporter requeue'ит failed/thrown batches с bounded retry/backoff и max attempts.
+- Добавлены regression tests для timeout, provider-aware key gating, OpenRouter reasoning, Options reasoning capabilities, bundled prompt text и usage reporter retries.
+
 ## 1.3.9
 
 Claude reasoning теперь проще проверить: включённый Anthropic adaptive thinking запрашивает видимый summarized stream-сигнал, а в настройках появился отдельный `Max`.
