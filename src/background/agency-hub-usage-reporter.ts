@@ -91,7 +91,7 @@ export class AgencyHubUsageReporter {
     state: UsageReporterTargetState,
     delayMs = AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS,
   ): void {
-    if (state.flushTimer !== null) {
+    if (state.flushTimer !== null || state.flushing) {
       return;
     }
 

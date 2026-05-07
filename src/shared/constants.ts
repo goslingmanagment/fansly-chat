@@ -133,7 +133,7 @@ export const AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS = 100;
 export const AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS = 1_000;
 export const AGENCY_HUB_AI_USAGE_REPORT_TIMEOUT_MS = 5_000;
 export const AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS = 3;
-export const AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS = [5_000, 15_000, 60_000];
+export const AGENCY_HUB_AI_USAGE_REPORT_RETRY_DELAYS_MS = [5_000, 15_000];
 
 // ─── UI ──────────────────────────────────────────────────────────────────
 

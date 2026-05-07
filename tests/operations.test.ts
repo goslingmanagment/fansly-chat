@@ -4264,6 +4264,66 @@ describe('OperationCoordinator', () => {
     expect(completeMessage?.result.rawText).toBe('Recovered reply');
   });
 
+  it('retries service_unavailable after provider progress arrives before text', async () => {
+    vi.useFakeTimers();
+
+    let callCount = 0;
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({
+        onProgress,
+        onText,
+      }: {
+        onProgress?: () => void;
+        onText: (text: string) => void;
+      }) => {
+        callCount += 1;
+        if (callCount === 1) {
+          onProgress?.();
+          throw new ChatGooseError('service_unavailable');
+        }
+        onText('Recovered reply');
+        return 'Recovered reply';
+      }),
+    };
+
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const waitingMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress' &&
+        message.statusCode === 'CG-API-05',
+    );
+    expect(waitingMessage).toMatchObject({
+      phase: 'generating',
+      statusCode: 'CG-API-05',
+      message: 'Anthropic Direct unavailable. Retrying…',
+    });
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await startPromise;
+
+    expect(anthropicClient.streamMessage).toHaveBeenCalledTimes(2);
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.rawText).toBe('Recovered reply');
+  });
+
   it('does not retry Anthropic service_unavailable more than once', async () => {
     vi.useFakeTimers();
 

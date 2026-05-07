@@ -396,7 +396,7 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.3.10</span>
+      <span class="nav-version">v1.3.11</span>
     </div>
   </div>
 </nav>
@@ -412,11 +412,42 @@
 
 <div class="timeline">
 
+  <!-- 1.3.11 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.11</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Follow-up hotfix после review 1.3.10: retry/backoff теперь сохраняет ожидаемое поведение в edge cases.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Agency Hub AI usage reporter больше не обходит retry backoff, если новый usage event пришёл прямо во время failing flush</li>
+          <li>LLM auto-retry снова разрешён после provider progress/reasoning event, если текстовый chunk ещё не приходил</li>
+          <li>Retry-таймеры LLM корректно перевооружаются для новой попытки после pre-text provider activity</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li><code>enqueue()</code> не ставит debounce timer, пока target queue уже flushing; post-flush scheduling выбирает backoff</li>
+          <li>Retry gating в operations снова опирается на первый text chunk, а provider activity остаётся отдельным сигналом для TTFB/idle timers</li>
+          <li>Убран недостижимый <code>60s</code> Agency Hub retry delay при <code>MAX_ATTEMPTS = 3</code></li>
+          <li>Добавлены regression tests для enqueue-during-flush и service_unavailable после provider progress до текста</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.3.10 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.10</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
