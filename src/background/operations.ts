@@ -2278,7 +2278,7 @@ export class OperationCoordinator {
         `${transcriptMessages.length} transcript messages`,
       );
 
-      const sendDebugPromptSnapshot = (modelId: string, reasoning?: string): void => {
+      const sendDebugPromptSnapshot = (modelId: string): void => {
         if (!profiler.enabled) {
           return;
         }
@@ -2295,7 +2295,6 @@ export class OperationCoordinator {
             fanSpendingData: spendingData,
             fanSubscriptionData: subscriptionData,
             user: prompt.user,
-            ...(reasoning?.trim() ? { reasoning: reasoning.trim() } : {}),
           },
         });
       };
@@ -2440,9 +2439,6 @@ export class OperationCoordinator {
             ...streamArgs,
             model: actualModel,
           });
-          if (reasoningDebugText.trim()) {
-            sendDebugPromptSnapshot(actualModel, reasoningDebugText);
-          }
           if (streamArgs.reasoningEffort !== 'off' && !reasoningObserved) {
             profiler.log('Reasoning observed: no');
             logDebug(debugEnabled, 'reasoning observed', {

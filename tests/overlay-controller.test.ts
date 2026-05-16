@@ -1024,26 +1024,6 @@ describe('OverlayController', () => {
     expect(inspector?.querySelector('.chatgoose-debug-summary')?.textContent).toBe('LLM Input');
   });
 
-  it('renders provider reasoning text in the debug prompt inspector', () => {
-    const controller = new OverlayController({
-      onClose: () => undefined,
-      onCancel: () => undefined,
-      onRerun: () => undefined,
-      onCollapse: () => undefined,
-    });
-
-    controller.render(createReadOnlyModel({
-      debugPrompt: {
-        ...createDebugSnapshot(),
-        reasoning: 'I should answer warmly.',
-      },
-    }));
-
-    const inspector = document.querySelector('.chatgoose-debug-inspector');
-    expect(inspector?.textContent).toContain('Reasoning Block');
-    expect(inspector?.textContent).toContain('I should answer warmly.');
-  });
-
   it('shows inline error when copy to clipboard fails (Bug 6)', async () => {
     const mockCopy = vi.mocked(copyToClipboard);
     mockCopy.mockRejectedValueOnce(new DOMException('Not allowed', 'NotAllowedError'));

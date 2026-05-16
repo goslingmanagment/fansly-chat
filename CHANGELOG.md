@@ -1,5 +1,21 @@
 # Что нового
 
+## 1.3.14
+
+Reasoning block теперь не смешивается с prompt debug: `LLM Input` снова показывает только данные, отправленные в модель.
+
+### Главное
+
+- `Reasoning block` оставлен только в `Pipeline Profiling`.
+- Нижний `LLM Input` inspector больше не показывает provider reasoning output.
+- Это убирает путаницу между prompt input и reasoning/debug output.
+
+### Технически
+
+- Убрано поле `reasoning` из `PromptDebugSnapshot`.
+- `operation:debugPrompt` снова содержит только system/transcript/data/user prompt.
+- Regression tests обновлены под единственный источник reasoning block в profiling summary.
+
 ## 1.3.13
 
 Reasoning block теперь виден прямо в карточке `Pipeline Profiling`, а не только в нижнем `LLM Input` inspector.
