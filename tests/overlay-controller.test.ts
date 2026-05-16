@@ -187,6 +187,7 @@ function createProfilingSnapshot(): OperationProfilingSnapshot {
       { elapsedMs: 125, message: 'Loaded messages page 1/2 (25 msgs, 25 collected)' },
       { elapsedMs: 850, message: 'Loaded messages page 2/2 (5 msgs, 30 collected)' },
     ],
+    reasoningBlock: 'I should answer warmly.',
     stages: [
       {
         key: 'resolve-identity',
@@ -648,6 +649,8 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('medium');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Reasoning observed');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('thinking_block');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Reasoning block');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('I should answer warmly.');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Load messages');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('2 pages, 30 transcript messages');
   });

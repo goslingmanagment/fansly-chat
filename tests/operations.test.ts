@@ -2115,6 +2115,7 @@ describe('OperationCoordinator', () => {
       flattenUserBlocksFromStreamCall(anthropicClient),
     );
     expect(debugPromptMessage?.snapshot.reasoning).toBe('I should answer warmly.');
+    expect(completeMessage?.profiling?.reasoningBlock).toBe('I should answer warmly.');
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 cost: model=anthropic:claude-sonnet-4-6, total_usd=0.002982, input_usd=0.001260, cache_write_5m_usd=0.000450, cache_write_1h_usd=0.001080, cache_read_usd=0.000027, output_usd=0.000165, approximate=false'))).toBe(true);

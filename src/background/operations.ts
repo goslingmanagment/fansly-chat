@@ -2416,6 +2416,7 @@ export class OperationCoordinator {
           markProviderActivity('first provider event received');
           if (profiler.enabled) {
             reasoningDebugText += text;
+            profiler.setReasoningBlock(reasoningDebugText);
           }
         },
         onStopReason: (stopReason: string | null) => {
@@ -2431,6 +2432,7 @@ export class OperationCoordinator {
         try {
           reasoningObserved = false;
           reasoningDebugText = '';
+          profiler.setReasoningBlock('');
           profiler.log(
             `Reasoning requested: ${streamArgs.reasoningEffort} (${actualModelName()})`,
           );

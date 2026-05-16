@@ -641,6 +641,7 @@ export interface OperationProfilingSnapshot {
   stages: OperationProfilingStage[];
   llmUsage?: LlmUsageMetrics;
   llmCost?: LlmCostEstimate;
+  reasoningBlock?: string;
 }
 
 // ─── Operation Progress ──────────────────────────────────────────────────
