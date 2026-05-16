@@ -2278,7 +2278,7 @@ export class OperationCoordinator {
         `${transcriptMessages.length} transcript messages`,
       );
 
-      const sendDebugPromptSnapshot = (modelId: string): void => {
+      const sendDebugPromptSnapshot = (modelId: string, reasoning?: string): void => {
         if (!profiler.enabled) {
           return;
         }
@@ -2295,6 +2295,7 @@ export class OperationCoordinator {
             fanSpendingData: spendingData,
             fanSubscriptionData: subscriptionData,
             user: prompt.user,
+            ...(reasoning?.trim() ? { reasoning: reasoning.trim() } : {}),
           },
         });
       };
@@ -2306,6 +2307,7 @@ export class OperationCoordinator {
       let sawFirstChunk = false;
       let actualModel = resolvedModel;
       let reasoningObserved = false;
+      let reasoningDebugText = '';
       let latestLlmStopReason: string | null = null;
       const actualModelName = (): string => getModelDisplayName(actualModel);
       startStage('llm-ttfb', 'Wait for AI TTFB');
@@ -2410,6 +2412,12 @@ export class OperationCoordinator {
           });
           sendDebugProgress();
         },
+        onReasoningDelta: (text: string) => {
+          markProviderActivity('first provider event received');
+          if (profiler.enabled) {
+            reasoningDebugText += text;
+          }
+        },
         onStopReason: (stopReason: string | null) => {
           latestLlmStopReason = stopReason;
         },
@@ -2422,6 +2430,7 @@ export class OperationCoordinator {
       while (true) {
         try {
           reasoningObserved = false;
+          reasoningDebugText = '';
           profiler.log(
             `Reasoning requested: ${streamArgs.reasoningEffort} (${actualModelName()})`,
           );
@@ -2429,6 +2438,9 @@ export class OperationCoordinator {
             ...streamArgs,
             model: actualModel,
           });
+          if (reasoningDebugText.trim()) {
+            sendDebugPromptSnapshot(actualModel, reasoningDebugText);
+          }
           if (streamArgs.reasoningEffort !== 'off' && !reasoningObserved) {
             profiler.log('Reasoning observed: no');
             logDebug(debugEnabled, 'reasoning observed', {

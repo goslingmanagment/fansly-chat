@@ -28,6 +28,7 @@ export interface LlmStreamArgs {
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
   onReasoningObserved?: (signal: LlmReasoningSignal) => void;
+  onReasoningDelta?: (text: string) => void;
   onStopReason?: (stopReason: string | null) => void;
 }
 
