@@ -2114,7 +2114,6 @@ describe('OperationCoordinator', () => {
     expect(debugPromptMessage?.snapshot.user).toBe(
       flattenUserBlocksFromStreamCall(anthropicClient),
     );
-    expect(debugPromptMessage?.snapshot.reasoning).toBe('I should answer warmly.');
     expect(completeMessage?.profiling?.reasoningBlock).toBe('I should answer warmly.');
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Loaded messages page 1/2'))).toBe(true);
     expect(completeMessage?.profiling?.logEntries.some((entry) => entry.message.includes('Claude Sonnet 4.6 usage: input_tokens=420, cache_creation_input_tokens=300, cache_read_input_tokens=90, output_tokens=11'))).toBe(true);

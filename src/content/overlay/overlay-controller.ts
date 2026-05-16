@@ -1666,9 +1666,6 @@ export class OverlayController {
       this.createDebugSection('Fan Subscription Data', snapshot.fanSubscriptionData.trim() || 'Not included'),
       this.createDebugSection('Final User Prompt', snapshot.user),
     );
-    if (snapshot.reasoning?.trim()) {
-      content.append(this.createDebugSection('Reasoning Block', snapshot.reasoning.trim()));
-    }
     details.append(content);
     return details;
   }
