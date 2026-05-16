@@ -1,5 +1,21 @@
 # Что нового
 
+## 1.3.12
+
+Reasoning debug теперь показывает не только факт thinking-события, но и сам summarized reasoning block, если провайдер прислал его в stream.
+
+### Главное
+
+- В debug inspector появилась секция `Reasoning Block`.
+- Текст reasoning показывается рядом с system prompt, transcript, spending/subscription data и final user prompt.
+- Если provider прислал только redacted/omitted сигнал без текста, UI по-прежнему показывает только `Reasoning observed`.
+
+### Технически
+
+- Anthropic и OpenRouter stream parsers прокидывают отдельный `onReasoningDelta`.
+- Operation debug snapshot накапливает reasoning-текст только в debug mode и добавляет его в `operation:debugPrompt`.
+- Добавлены regression tests для Anthropic/OpenRouter reasoning deltas, operation snapshot и overlay rendering.
+
 ## 1.3.11
 
 Follow-up hotfix после review 1.3.10: retry/backoff теперь сохраняет ожидаемое поведение в edge cases.

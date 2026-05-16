@@ -28,6 +28,65 @@ export function parseSseBlock(block: string): { event: string; data: string } | 
   return { event, data: dataLines.join('\n') };
 }
 
+function extractReasoningText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return '';
+  }
+
+  const record = value as {
+    thinking?: unknown;
+    reasoning?: unknown;
+    text?: unknown;
+    content?: unknown;
+  };
+  for (const key of ['thinking', 'reasoning', 'text', 'content'] as const) {
+    const text = record[key];
+    if (typeof text === 'string') {
+      return text;
+    }
+  }
+
+  return '';
+}
+
+export function extractReasoningDeltaText(payload: {
+  delta?: {
+    type?: string;
+    thinking?: unknown;
+    reasoning?: unknown;
+  };
+  reasoning?: unknown;
+  choices?: unknown[];
+}): string {
+  if (payload.delta?.type === 'thinking_delta') {
+    return extractReasoningText(payload.delta.thinking);
+  }
+
+  const directReasoning = extractReasoningText(payload.delta?.reasoning ?? payload.reasoning);
+  if (directReasoning) {
+    return directReasoning;
+  }
+
+  for (const choice of payload.choices ?? []) {
+    const candidate = choice as {
+      delta?: { reasoning?: unknown };
+      message?: { reasoning?: unknown };
+    };
+    const choiceReasoning = extractReasoningText(
+      candidate.delta?.reasoning ?? candidate.message?.reasoning,
+    );
+    if (choiceReasoning) {
+      return choiceReasoning;
+    }
+  }
+
+  return '';
+}
+
 export function mergeUsage(
   current: LlmUsageMetrics | null,
   next?: Partial<LlmUsageMetrics>,

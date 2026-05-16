@@ -228,6 +228,7 @@ export interface PromptDebugSnapshot {
   fanSpendingData: string;
   fanSubscriptionData: string;
   user: string;
+  reasoning?: string;
 }
 
 // ─── Transcript & Ping ──────────────────────────────────────────────────

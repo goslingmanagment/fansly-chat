@@ -177,10 +177,14 @@ describe('OpenRouterClient', () => {
 
   it('reports observed reasoning blocks from the OpenRouter Messages stream', async () => {
     const onReasoningObserved = vi.fn();
+    const onReasoningDelta = vi.fn();
     mockFetchResponse(200, undefined, {
       bodyStream: [
         'event: content_block_start',
         'data: {"type":"content_block_start","content_block":{"type":"thinking"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"checking context"}}',
         '',
         'event: content_block_delta',
         'data: {"type":"content_block_delta","delta":{"type":"signature_delta","signature":"sig"}}',
@@ -196,11 +200,14 @@ describe('OpenRouterClient', () => {
       streamArgs({
         model: 'google/gemini-3.1-pro-preview',
         onReasoningObserved,
+        onReasoningDelta,
       }),
     )).resolves.toBe('ok');
 
     expect(onReasoningObserved).toHaveBeenCalledWith('thinking_block');
+    expect(onReasoningObserved).toHaveBeenCalledWith('thinking_delta');
     expect(onReasoningObserved).toHaveBeenCalledWith('signature_delta');
+    expect(onReasoningDelta).toHaveBeenCalledWith('checking context');
   });
 
   it.each([

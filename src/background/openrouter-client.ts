@@ -13,6 +13,7 @@ import type {
   ReasoningEffort,
 } from '../shared/types.js';
 import {
+  extractReasoningDeltaText,
   mergeUsage,
   parseRetryAfterMs,
   parseSseBlock,
@@ -32,6 +33,7 @@ interface OpenRouterStreamArgs {
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
   onReasoningObserved?: (signal: LlmReasoningSignal) => void;
+  onReasoningDelta?: (text: string) => void;
   onStopReason?: (stopReason: string | null) => void;
 }
 
@@ -328,6 +330,7 @@ export class OpenRouterClient {
     onUsage,
     onProgress,
     onReasoningObserved,
+    onReasoningDelta,
     onStopReason,
   }: OpenRouterStreamArgs): Promise<string> {
     let rawText = '';
@@ -389,6 +392,7 @@ export class OpenRouterClient {
           usage?: OpenRouterUsagePayload;
           delta?: {
             type?: string;
+            thinking?: unknown;
             text?: string;
             stop_reason?: string | null;
             reasoning?: unknown;
@@ -411,6 +415,10 @@ export class OpenRouterClient {
         const reasoningSignal = detectReasoningSignal(payload);
         if (reasoningSignal) {
           onReasoningObserved?.(reasoningSignal);
+        }
+        const reasoningText = extractReasoningDeltaText(payload);
+        if (reasoningText) {
+          onReasoningDelta?.(reasoningText);
         }
 
         const effectiveEvent =

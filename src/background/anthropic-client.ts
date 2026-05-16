@@ -12,6 +12,7 @@ import type {
   ReasoningEffort,
 } from '../shared/types.js';
 import {
+  extractReasoningDeltaText,
   mergeUsage,
   parseRetryAfterMs,
   parseSseBlock,
@@ -31,6 +32,7 @@ export interface AnthropicStreamArgs {
   onUsage?: (usage: LlmUsageMetrics) => void;
   onProgress?: () => void;
   onReasoningObserved?: (signal: LlmReasoningSignal) => void;
+  onReasoningDelta?: (text: string) => void;
   onStopReason?: (stopReason: string | null) => void;
 }
 
@@ -236,6 +238,7 @@ export class AnthropicClient {
     onUsage,
     onProgress,
     onReasoningObserved,
+    onReasoningDelta,
     onStopReason,
   }: AnthropicStreamArgs): Promise<string> {
     let rawText = '';
@@ -300,6 +303,7 @@ export class AnthropicClient {
           usage?: Partial<LlmUsageMetrics>;
           delta?: {
             type?: string;
+            thinking?: unknown;
             text?: string;
             stop_reason?: string | null;
             reasoning?: unknown;
@@ -322,6 +326,10 @@ export class AnthropicClient {
         const reasoningSignal = detectReasoningSignal(payload);
         if (reasoningSignal) {
           onReasoningObserved?.(reasoningSignal);
+        }
+        const reasoningText = extractReasoningDeltaText(payload);
+        if (reasoningText) {
+          onReasoningDelta?.(reasoningText);
         }
 
         if (parsed.event === 'message_start') {
