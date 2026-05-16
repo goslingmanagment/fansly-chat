@@ -396,7 +396,7 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.3.12</span>
+      <span class="nav-version">v1.3.13</span>
     </div>
   </div>
 </nav>
@@ -412,11 +412,41 @@
 
 <div class="timeline">
 
+  <!-- 1.3.13 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.3.13</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Reasoning block теперь виден прямо в карточке <code>Pipeline Profiling</code>, а не только в нижнем <code>LLM Input</code> inspector.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>В <code>Pipeline Profiling</code> появилась раскрываемая строка <code>Reasoning block</code></li>
+          <li>Блок расположен сразу рядом с <code>Reasoning requested</code> и <code>Reasoning observed</code></li>
+          <li>Если provider не прислал текст reasoning, UI остаётся как раньше и показывает только observed-сигнал</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li><code>OperationProfilingSnapshot</code> теперь хранит <code>reasoningBlock</code></li>
+          <li>Profiler обновляет reasoning block по мере stream delta в debug mode</li>
+          <li>Добавлены regression tests для profiler snapshot и rendering внутри profiling summary</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.3.12 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.12</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -1132,7 +1162,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.3.12 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
+  <p>v1.3.13 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
 </footer>
 
 </body>

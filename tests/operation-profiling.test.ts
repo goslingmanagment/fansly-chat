@@ -50,6 +50,7 @@ describe('createOperationProfiler', () => {
       totalUsd: 0.003252,
       approximate: false,
     });
+    profiler.setReasoningBlock(' I should answer warmly. ');
     advanceNow(125);
     profiler.completeStage('resolve-identity', 'resolved account-1');
 
@@ -74,6 +75,7 @@ describe('createOperationProfiler', () => {
         totalUsd: 0.003252,
         approximate: false,
       },
+      reasoningBlock: 'I should answer warmly.',
     });
     expect(snapshot?.stages).toEqual([
       expect.objectContaining({

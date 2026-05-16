@@ -23,6 +23,7 @@ export interface OperationProfiler {
   ): void;
   setLlmUsage(usage: LlmUsageMetrics): void;
   setLlmCost(cost: LlmCostEstimate): void;
+  setReasoningBlock(text: string): void;
   snapshot(): OperationProfilingSnapshot | undefined;
   finalizeRunningStages(detail?: string): OperationProfilingSnapshot | undefined;
 }
@@ -37,8 +38,10 @@ function buildSnapshot(
   stages: OperationProfilingStage[],
   llmUsage?: LlmUsageMetrics,
   llmCost?: LlmCostEstimate,
+  reasoningBlock?: string,
 ): OperationProfilingSnapshot {
   const activeStages = stages.filter((stage) => stage.status === 'running');
+  const trimmedReasoningBlock = reasoningBlock?.trim();
 
   return {
     elapsedMs: Math.max(0, Date.now() - startMs),
@@ -50,6 +53,7 @@ function buildSnapshot(
     stages: stages.map(cloneStage),
     ...(llmUsage ? { llmUsage: { ...llmUsage } } : {}),
     ...(llmCost ? { llmCost: { ...llmCost } } : {}),
+    ...(trimmedReasoningBlock ? { reasoningBlock: trimmedReasoningBlock } : {}),
   };
 }
 
@@ -64,6 +68,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
       skipStage: () => undefined,
       setLlmUsage: () => undefined,
       setLlmCost: () => undefined,
+      setReasoningBlock: () => undefined,
       snapshot: () => undefined,
       finalizeRunningStages: () => undefined,
     };
@@ -75,6 +80,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
   const stageByKey = new Map<OperationProfilingStageKey, OperationProfilingStage>();
   let llmUsage: LlmUsageMetrics | undefined;
   let llmCost: LlmCostEstimate | undefined;
+  let reasoningBlock: string | undefined;
 
   const elapsed = (): number => Math.max(0, Date.now() - startMs);
 
@@ -180,6 +186,9 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
     setLlmCost(cost: LlmCostEstimate): void {
       llmCost = { ...cost };
     },
+    setReasoningBlock(text: string): void {
+      reasoningBlock = text;
+    },
     snapshot(): OperationProfilingSnapshot | undefined {
       return buildSnapshot(
         startMs,
@@ -187,6 +196,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
         stages,
         llmUsage,
         llmCost,
+        reasoningBlock,
       );
     },
     finalizeRunningStages(detail?: string): OperationProfilingSnapshot | undefined {
@@ -208,6 +218,7 @@ export function createOperationProfiler(enabled: boolean): OperationProfiler {
         stages,
         llmUsage,
         llmCost,
+        reasoningBlock,
       );
     },
   };

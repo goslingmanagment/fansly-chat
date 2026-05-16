@@ -1,5 +1,21 @@
 # Что нового
 
+## 1.3.13
+
+Reasoning block теперь виден прямо в карточке `Pipeline Profiling`, а не только в нижнем `LLM Input` inspector.
+
+### Главное
+
+- В `Pipeline Profiling` появилась раскрываемая строка `Reasoning block`.
+- Блок расположен сразу рядом с `Reasoning requested` и `Reasoning observed`.
+- Если provider не прислал текст reasoning, UI остаётся как раньше и показывает только observed-сигнал.
+
+### Технически
+
+- `OperationProfilingSnapshot` теперь хранит `reasoningBlock`.
+- Profiler обновляет reasoning block по мере stream delta в debug mode.
+- Добавлены regression tests для profiler snapshot и rendering внутри profiling summary.
+
 ## 1.3.12
 
 Reasoning debug теперь показывает не только факт thinking-события, но и сам summarized reasoning block, если провайдер прислал его в stream.

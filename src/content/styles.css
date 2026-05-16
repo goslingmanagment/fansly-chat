@@ -1106,6 +1106,32 @@
   word-break: break-word;
 }
 
+.chatgoose-profiling-reasoning {
+  display: grid;
+  gap: 6px;
+}
+
+.chatgoose-profiling-reasoning-summary {
+  cursor: pointer;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.chatgoose-profiling-reasoning-summary:hover .chatgoose-profiling-stage-label {
+  color: var(--chatgoose-accent-soft);
+}
+
+.chatgoose-profiling-reasoning-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chatgoose-profiling-reasoning-text {
+  max-height: 180px;
+}
+
 /* ─── Debug Inspector ────────────────────────────────────────── */
 
 .chatgoose-debug-inspector {

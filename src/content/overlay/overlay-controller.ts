@@ -1547,6 +1547,10 @@ export class OverlayController {
       container.append(row);
     }
 
+    if (snapshot.reasoningBlock?.trim()) {
+      container.append(this.renderProfilingReasoningBlock(snapshot.reasoningBlock.trim()));
+    }
+
     for (const stage of snapshot.stages) {
       const row = document.createElement('div');
       row.className = 'chatgoose-profiling-stage';
@@ -1611,6 +1615,31 @@ export class OverlayController {
     }
 
     return entries;
+  }
+
+  private renderProfilingReasoningBlock(reasoningBlock: string): HTMLElement {
+    const details = document.createElement('details');
+    details.className = 'chatgoose-profiling-reasoning';
+
+    const summary = document.createElement('summary');
+    summary.className = 'chatgoose-profiling-reasoning-summary';
+
+    const label = document.createElement('span');
+    label.className = 'chatgoose-profiling-stage-label';
+    label.textContent = 'Reasoning block';
+
+    const value = document.createElement('span');
+    value.className = 'chatgoose-profiling-stage-duration';
+    value.textContent = 'text';
+
+    summary.append(label, value);
+
+    const text = document.createElement('div');
+    text.className = 'chatgoose-debug-text chatgoose-profiling-reasoning-text';
+    text.textContent = reasoningBlock;
+
+    details.append(summary, text);
+    return details;
   }
 
   // ─── Debug Prompt Inspector ─────────────────────────────────────────
