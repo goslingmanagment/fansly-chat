@@ -99,6 +99,7 @@ export interface ActiveCompareOperation {
 export interface CompareOperationsContext {
   activeCompareByTabId: Map<number, ActiveCompareOperation>;
   cancelledCompareOperationIds: Set<string>;
+  startingTabIds: Set<number>;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
@@ -508,7 +509,11 @@ export async function executeCompare(
   tabId: number,
   payload: CompareStartPayload,
 ): Promise<void> {
-  if (context.hasActiveFeature(tabId) || context.activeCompareByTabId.has(tabId)) {
+  if (
+    context.hasActiveFeature(tabId) ||
+    context.activeCompareByTabId.has(tabId) ||
+    context.startingTabIds.has(tabId)
+  ) {
     sendCompareError(context, tabId, {
       type: 'compare:error',
       operationId: payload.operationId,
@@ -521,6 +526,9 @@ export async function executeCompare(
     return;
   }
 
+  // Reserve the tab synchronously before the first await so a racing feature
+  // or compare start cannot slip past the guard during validateCompareStart.
+  context.startingTabIds.add(tabId);
   let timeout: number | null = null;
   let timeoutController: AbortController | null = null;
   let controller: AbortController | null = null;
@@ -1377,6 +1385,7 @@ export async function executeCompare(
     // card message remains to suppress, so drop it to avoid unbounded growth.
     context.cancelledCompareOperationIds.delete(operationId);
   } finally {
+    context.startingTabIds.delete(tabId);
     if (timeout !== null) {
       clearTimeout(timeout);
     }
