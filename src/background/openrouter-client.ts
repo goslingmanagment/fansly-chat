@@ -370,116 +370,124 @@ export class OpenRouterClient {
     let buffer = '';
     const reader = response.body.getReader();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
-      const blocks = buffer.split('\n\n');
-      buffer = blocks.pop() ?? '';
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() ?? '';
 
-      for (const block of blocks) {
-        const parsed = parseSseBlock(block);
-        if (!parsed || parsed.data === '[DONE]') {
-          continue;
-        }
+        for (const block of blocks) {
+          const parsed = parseSseBlock(block);
+          if (!parsed || parsed.data === '[DONE]') {
+            continue;
+          }
 
-        let payload: {
-          type?: string;
-          object?: string;
-          choices?: unknown[];
-          message?: { usage?: OpenRouterUsagePayload };
-          content_block?: { type?: string };
-          usage?: OpenRouterUsagePayload;
-          delta?: {
+          let payload: {
             type?: string;
-            thinking?: unknown;
-            text?: string;
-            stop_reason?: string | null;
+            object?: string;
+            choices?: unknown[];
+            message?: { usage?: OpenRouterUsagePayload };
+            content_block?: { type?: string };
+            usage?: OpenRouterUsagePayload;
+            delta?: {
+              type?: string;
+              thinking?: unknown;
+              text?: string;
+              stop_reason?: string | null;
+              reasoning?: unknown;
+            };
             reasoning?: unknown;
+            error?: { type?: string; message?: string; code?: number | string };
           };
-          reasoning?: unknown;
-          error?: { type?: string; message?: string; code?: number | string };
-        };
-        try {
-          payload = JSON.parse(parsed.data) as typeof payload;
-        } catch {
-          continue;
-        }
-
-        onProgress?.();
-
-        if (parsed.event === 'error' || payload.type === 'error' || payload.error) {
-          throw buildOpenRouterError(0, payload.error ?? null);
-        }
-
-        const reasoningSignal = detectReasoningSignal(payload);
-        if (reasoningSignal) {
-          onReasoningObserved?.(reasoningSignal);
-        }
-        const reasoningText = extractReasoningDeltaText(payload);
-        if (reasoningText) {
-          onReasoningDelta?.(reasoningText);
-        }
-
-        const effectiveEvent =
-          parsed.event === 'message' && typeof payload.type === 'string'
-            ? payload.type
-            : parsed.event;
-
-        if (!SUPPORTED_OPENROUTER_SSE_EVENTS.has(effectiveEvent)) {
-          if (payload.object === 'chat.completion.chunk' || Array.isArray(payload.choices)) {
-            throw new ChatGooseError('unknown_error', {
-              details: {
-                provider: 'openrouter',
-                providerMessage: 'Unsupported OpenRouter chat completion stream chunk',
-              },
-            });
+          try {
+            payload = JSON.parse(parsed.data) as typeof payload;
+          } catch {
+            continue;
           }
-          // Ignore forward-compatible provider metadata events that do not map
-          // to Anthropic Messages streaming semantics.
-          continue;
-        }
 
-        if (effectiveEvent === 'message_start') {
-          const nextUsage = mergeUsage(usage, normalizeUsage(payload.message?.usage));
-          if (!usageEquals(usage, nextUsage)) {
-            usage = nextUsage;
-            if (usage) {
-              onUsage?.(usage);
+          onProgress?.();
+
+          if (parsed.event === 'error' || payload.type === 'error' || payload.error) {
+            throw buildOpenRouterError(0, payload.error ?? null);
+          }
+
+          const reasoningSignal = detectReasoningSignal(payload);
+          if (reasoningSignal) {
+            onReasoningObserved?.(reasoningSignal);
+          }
+          const reasoningText = extractReasoningDeltaText(payload);
+          if (reasoningText) {
+            onReasoningDelta?.(reasoningText);
+          }
+
+          const effectiveEvent =
+            parsed.event === 'message' && typeof payload.type === 'string'
+              ? payload.type
+              : parsed.event;
+
+          if (!SUPPORTED_OPENROUTER_SSE_EVENTS.has(effectiveEvent)) {
+            if (payload.object === 'chat.completion.chunk' || Array.isArray(payload.choices)) {
+              throw new ChatGooseError('unknown_error', {
+                details: {
+                  provider: 'openrouter',
+                  providerMessage: 'Unsupported OpenRouter chat completion stream chunk',
+                },
+              });
             }
-          } else {
-            usage = nextUsage;
+            // Ignore forward-compatible provider metadata events that do not map
+            // to Anthropic Messages streaming semantics.
+            continue;
           }
-        }
 
-        if (effectiveEvent === 'message_delta') {
-          if ('stop_reason' in (payload.delta ?? {})) {
-            onStopReason?.(payload.delta?.stop_reason ?? null);
-          }
-          const nextUsage = mergeUsage(usage, normalizeUsage(payload.usage));
-          if (!usageEquals(usage, nextUsage)) {
-            usage = nextUsage;
-            if (usage) {
-              onUsage?.(usage);
+          if (effectiveEvent === 'message_start') {
+            const nextUsage = mergeUsage(usage, normalizeUsage(payload.message?.usage));
+            if (!usageEquals(usage, nextUsage)) {
+              usage = nextUsage;
+              if (usage) {
+                onUsage?.(usage);
+              }
+            } else {
+              usage = nextUsage;
             }
-          } else {
-            usage = nextUsage;
+          }
+
+          if (effectiveEvent === 'message_delta') {
+            if ('stop_reason' in (payload.delta ?? {})) {
+              onStopReason?.(payload.delta?.stop_reason ?? null);
+            }
+            const nextUsage = mergeUsage(usage, normalizeUsage(payload.usage));
+            if (!usageEquals(usage, nextUsage)) {
+              usage = nextUsage;
+              if (usage) {
+                onUsage?.(usage);
+              }
+            } else {
+              usage = nextUsage;
+            }
+          }
+
+          if (
+            effectiveEvent === 'content_block_delta' &&
+            payload.delta?.type === 'text_delta' &&
+            payload.delta.text
+          ) {
+            rawText += payload.delta.text;
+            onText(payload.delta.text);
           }
         }
 
-        if (
-          effectiveEvent === 'content_block_delta' &&
-          payload.delta?.type === 'text_delta' &&
-          payload.delta.text
-        ) {
-          rawText += payload.delta.text;
-          onText(payload.delta.text);
+        if (done) {
+          break;
         }
       }
-
-      if (done) {
-        break;
-      }
+    } finally {
+      // Release the HTTP body on every exit path — including throws from
+      // inside the loop (error events, unsupported chat-completion chunks),
+      // which do not abort the consumer signal and would otherwise leave the
+      // reader/body locked.
+      reader.cancel().catch(() => {});
     }
 
     return rawText;

@@ -283,95 +283,102 @@ export class AnthropicClient {
     let buffer = '';
     const reader = response.body.getReader();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
-      const blocks = buffer.split('\n\n');
-      buffer = blocks.pop() ?? '';
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() ?? '';
 
-      for (const block of blocks) {
-        const parsed = parseSseBlock(block);
-        if (!parsed || parsed.data === '[DONE]') {
-          continue;
-        }
+        for (const block of blocks) {
+          const parsed = parseSseBlock(block);
+          if (!parsed || parsed.data === '[DONE]') {
+            continue;
+          }
 
-        let payload: {
-          type?: string;
-          message?: { usage?: Partial<LlmUsageMetrics> };
-          content_block?: { type?: string };
-          usage?: Partial<LlmUsageMetrics>;
-          delta?: {
+          let payload: {
             type?: string;
-            thinking?: unknown;
-            text?: string;
-            stop_reason?: string | null;
+            message?: { usage?: Partial<LlmUsageMetrics> };
+            content_block?: { type?: string };
+            usage?: Partial<LlmUsageMetrics>;
+            delta?: {
+              type?: string;
+              thinking?: unknown;
+              text?: string;
+              stop_reason?: string | null;
+              reasoning?: unknown;
+            };
             reasoning?: unknown;
+            error?: { type?: string; message?: string };
           };
-          reasoning?: unknown;
-          error?: { type?: string; message?: string };
-        };
-        try {
-          payload = JSON.parse(parsed.data) as typeof payload;
-        } catch {
-          continue;
-        }
+          try {
+            payload = JSON.parse(parsed.data) as typeof payload;
+          } catch {
+            continue;
+          }
 
-        onProgress?.();
+          onProgress?.();
 
-        if (parsed.event === 'error' || payload.type === 'error') {
-          throw buildAnthropicError(0, payload.error ?? null);
-        }
+          if (parsed.event === 'error' || payload.type === 'error') {
+            throw buildAnthropicError(0, payload.error ?? null);
+          }
 
-        const reasoningSignal = detectReasoningSignal(payload);
-        if (reasoningSignal) {
-          onReasoningObserved?.(reasoningSignal);
-        }
-        const reasoningText = extractReasoningDeltaText(payload);
-        if (reasoningText) {
-          onReasoningDelta?.(reasoningText);
-        }
+          const reasoningSignal = detectReasoningSignal(payload);
+          if (reasoningSignal) {
+            onReasoningObserved?.(reasoningSignal);
+          }
+          const reasoningText = extractReasoningDeltaText(payload);
+          if (reasoningText) {
+            onReasoningDelta?.(reasoningText);
+          }
 
-        if (parsed.event === 'message_start') {
-          const nextUsage = mergeUsage(usage, payload.message?.usage);
-          if (!usageEquals(usage, nextUsage)) {
-            usage = nextUsage;
-            if (usage) {
-              onUsage?.(usage);
+          if (parsed.event === 'message_start') {
+            const nextUsage = mergeUsage(usage, payload.message?.usage);
+            if (!usageEquals(usage, nextUsage)) {
+              usage = nextUsage;
+              if (usage) {
+                onUsage?.(usage);
+              }
+            } else {
+              usage = nextUsage;
             }
-          } else {
-            usage = nextUsage;
           }
-        }
 
-        if (parsed.event === 'message_delta') {
-          if ('stop_reason' in (payload.delta ?? {})) {
-            onStopReason?.(payload.delta?.stop_reason ?? null);
-          }
-          const nextUsage = mergeUsage(usage, payload.usage);
-          if (!usageEquals(usage, nextUsage)) {
-            usage = nextUsage;
-            if (usage) {
-              onUsage?.(usage);
+          if (parsed.event === 'message_delta') {
+            if ('stop_reason' in (payload.delta ?? {})) {
+              onStopReason?.(payload.delta?.stop_reason ?? null);
             }
-          } else {
-            usage = nextUsage;
+            const nextUsage = mergeUsage(usage, payload.usage);
+            if (!usageEquals(usage, nextUsage)) {
+              usage = nextUsage;
+              if (usage) {
+                onUsage?.(usage);
+              }
+            } else {
+              usage = nextUsage;
+            }
+          }
+
+          if (
+            parsed.event === 'content_block_delta' &&
+            payload.delta?.type === 'text_delta' &&
+            payload.delta.text
+          ) {
+            rawText += payload.delta.text;
+            onText(payload.delta.text);
           }
         }
 
-        if (
-          parsed.event === 'content_block_delta' &&
-          payload.delta?.type === 'text_delta' &&
-          payload.delta.text
-        ) {
-          rawText += payload.delta.text;
-          onText(payload.delta.text);
+        if (done) {
+          break;
         }
       }
-
-      if (done) {
-        break;
-      }
+    } finally {
+      // Release the HTTP body on every exit path — including throws from
+      // inside the loop (mid-stream error events), which do not abort the
+      // consumer signal and would otherwise leave the reader/body locked.
+      reader.cancel().catch(() => {});
     }
 
     return rawText;

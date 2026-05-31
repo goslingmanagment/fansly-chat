@@ -198,6 +198,33 @@ describe('AnthropicClient streaming requests', () => {
     ]);
   });
 
+  it('cancels the stream reader when a mid-stream error event throws', async () => {
+    const cancel = vi.fn();
+    const response: Partial<Response> = {
+      status: 200,
+      ok: true,
+      json: vi.fn(),
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          // Leave the stream open: the client must throw on the error event
+          // before reaching done, so the finally's reader.cancel() is what
+          // tears the still-active body down.
+          controller.enqueue(
+            new TextEncoder().encode(
+              'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}\n\n',
+            ),
+          );
+        },
+        cancel,
+      }) as unknown as Response['body'],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => response));
+    const client = new AnthropicClient();
+
+    await expect(client.streamMessage(streamArgs())).rejects.toThrow();
+    expect(cancel).toHaveBeenCalled();
+  });
+
   it('uses the raised 8192 max_tokens cap for fan-summary requests', async () => {
     mockFetchResponse(200, undefined, {
       bodyStream: [
