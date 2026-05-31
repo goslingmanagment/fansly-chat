@@ -137,13 +137,13 @@ export class ButtonBar {
         disableForPrereqs ||
         improveDisabled;
       if (isActive && activeLoading) {
-        button.innerHTML = '';
+        button.replaceChildren();
         button.append(
           document.createTextNode(entry.label),
           (() => { const s = document.createElement('span'); s.className = 'chatgoose-spinner'; return s; })(),
         );
       } else {
-        button.textContent = isActive ? entry.label : entry.label;
+        button.textContent = entry.label;
       }
     }
 
