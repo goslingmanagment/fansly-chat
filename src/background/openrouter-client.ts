@@ -375,7 +375,9 @@ export class OpenRouterClient {
         const { done, value } = await reader.read();
         buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
-        const blocks = buffer.split('\n\n');
+        // Split on blank-line event boundaries, tolerating CRLF (\r\n\r\n)
+        // from intermediary proxies as well as LF-only separators.
+        const blocks = buffer.split(/\r?\n\r?\n/);
         buffer = blocks.pop() ?? '';
 
         for (const block of blocks) {
@@ -413,15 +415,6 @@ export class OpenRouterClient {
             throw buildOpenRouterError(0, payload.error ?? null);
           }
 
-          const reasoningSignal = detectReasoningSignal(payload);
-          if (reasoningSignal) {
-            onReasoningObserved?.(reasoningSignal);
-          }
-          const reasoningText = extractReasoningDeltaText(payload);
-          if (reasoningText) {
-            onReasoningDelta?.(reasoningText);
-          }
-
           const effectiveEvent =
             parsed.event === 'message' && typeof payload.type === 'string'
               ? payload.type
@@ -439,6 +432,18 @@ export class OpenRouterClient {
             // Ignore forward-compatible provider metadata events that do not map
             // to Anthropic Messages streaming semantics.
             continue;
+          }
+
+          // Observe reasoning only after the event is known-supported, so a
+          // chunk we are about to reject cannot emit reasoning activity (which
+          // feeds the TTFB/idle timers) first.
+          const reasoningSignal = detectReasoningSignal(payload);
+          if (reasoningSignal) {
+            onReasoningObserved?.(reasoningSignal);
+          }
+          const reasoningText = extractReasoningDeltaText(payload);
+          if (reasoningText) {
+            onReasoningDelta?.(reasoningText);
           }
 
           if (effectiveEvent === 'message_start') {
