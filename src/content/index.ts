@@ -882,6 +882,19 @@ export class ChatGooseContentApp {
         this.activeCompareModel = null;
         this.completedCompareCache.clear(previousGroupId);
         this.renderSurfaces();
+      } else if (
+        this.activeFeature &&
+        usesOverlayFeatureSurface(this.activeFeature)
+      ) {
+        // An overlay feature (Scan/Summary/Review/Help) is in flight: suppress
+        // its terminal message so the previous fan's result is neither shown
+        // over the new conversation nor cached/marked under the new group.
+        // handleComplete/handleOperationError bail on suppressedTerminalOpId
+        // before touching the cache or hasAvailableSummary.
+        this.suppressedTerminalOpId = this.activeOperationId;
+        this.deepOverlayModel = null;
+        this.overlayRawText = '';
+        this.renderSurfaces();
       } else if (!this.activeFeature) {
         this.quickInlineVisible = false;
         this.comparePanelVisible = false;
