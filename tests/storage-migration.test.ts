@@ -85,6 +85,20 @@ describe('migrateState', () => {
     expect(result.knownAccounts).toEqual(['acc1']);
   });
 
+  it('coerces corrupt personalities/accountMappings at the current schema version', () => {
+    const corrupt = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: 'not-an-array',
+      accountMappings: 'not-an-object',
+      accountAliases: {},
+      knownAccounts: [],
+    };
+    const result = migrateState(corrupt as unknown);
+    expect(result.personalities).toEqual([]);
+    expect(result.accountMappings).toEqual({});
+  });
+
   it('preserves existing data during migration from older schema', () => {
     const legacy = {
       schemaVersion: 0,

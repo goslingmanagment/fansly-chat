@@ -94,6 +94,15 @@ export function migrateState(raw: unknown): PersistedState {
     const current = record as unknown as PersistedState;
     return {
       ...current,
+      // Guard personalities/accountMappings the same way the incremental branch
+      // does: a corrupt value at the current version (e.g. a non-array after a
+      // partial storage.set) would otherwise reach reconcileBundledPersonalities
+      // and throw, bricking every load including the settings UI.
+      personalities: Array.isArray(current.personalities) ? current.personalities : [],
+      accountMappings:
+        current.accountMappings && typeof current.accountMappings === 'object'
+          ? current.accountMappings
+          : {},
       settings:
         current.settings && typeof current.settings === 'object'
           ? migrateSettingsRecord(current.settings as unknown as Record<string, unknown>)
