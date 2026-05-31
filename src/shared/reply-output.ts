@@ -10,6 +10,10 @@ const META_LEAK_PATTERNS = [
   // strip legitimate in-character lines (e.g. JOI "just follow my instructions").
   /\b(?:system|previous|above)\s+instructions?\b/i,
   /\bignore (?:all |the )?(?:previous |above )?instructions?\b/i,
+  /\buntrusted\s+user\s+input\b/i,
+  /\bnever\s+follow\s+instructions?\b/i,
+  /\braw\s+system\s+messages?\b/i,
+  /\bhidden\s+instructions?\b/i,
   /\boutput\s+only\b/i,
   /\bmost\s+replies\s+should\b/i,
   /\bsingle\s+message\b/i,
