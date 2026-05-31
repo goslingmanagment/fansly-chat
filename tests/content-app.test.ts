@@ -293,7 +293,7 @@ describe('ChatGooseContentApp', () => {
   it('clears the completed-result session cache on conversation change and hides the inline panel', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
-    const sendSpy = vi.fn();
+    const sendSpy = vi.fn(() => true);
 
     app.port.send = sendSpy;
     app.mountController = { setActiveRoute: vi.fn() };
@@ -357,7 +357,7 @@ describe('ChatGooseContentApp', () => {
   it('clears the cached result before rerunning Chat Review from the overlay', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
-    const sendSpy = vi.fn();
+    const sendSpy = vi.fn(() => true);
 
     app.port.send = sendSpy;
     app.tabState = readyState();
@@ -420,7 +420,7 @@ describe('ChatGooseContentApp', () => {
   it('sends the current composer draft with improve-draft operations', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
-    const sendSpy = vi.fn();
+    const sendSpy = vi.fn(() => true);
 
     mountConversationComposer('hey babe how was your day');
     app.port.send = sendSpy;
@@ -650,7 +650,10 @@ describe('ChatGooseContentApp', () => {
     // Navigate away while operation is in-flight
     app.handleRouteChange('group-2');
 
-    expect(app.suppressedTerminalOpId).toBe('reply-op');
+    expect(app.suppressedTerminalOpIds.has('reply-op')).toBe(true);
+    expect(app.activeFeature).toBeNull();
+    expect(app.activeOperationId).toBeNull();
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatgoose-hidden')).toBe(true);
 
     // Completion arrives for the old operation
     app.handleComplete({
@@ -668,7 +671,43 @@ describe('ChatGooseContentApp', () => {
     // Operation state must be fully cleared
     expect(app.activeFeature).toBeNull();
     expect(app.activeOperationId).toBeNull();
-    expect(app.suppressedTerminalOpId).toBeNull();
+    expect(app.suppressedTerminalOpIds.size).toBe(0);
+  });
+
+  it('keeps a newer operation running when a suppressed old completion arrives', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.port.send = vi.fn();
+    app.mountController = { setActiveRoute: vi.fn() };
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'old-reply-op';
+    app.lastFeature = 'fast-reply';
+
+    app.handleRouteChange('group-2');
+    expect(app.suppressedTerminalOpIds.has('old-reply-op')).toBe(true);
+
+    app.activeFeature = 'ping';
+    app.activeOperationId = 'new-ping-op';
+    app.lastFeature = 'ping';
+    app.activeFanDisplayName = 'bob';
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'old-reply-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Stale result from group-1',
+        parts: ['Stale result from group-1'],
+      },
+    });
+
+    expect(app.completedOverlayCache.get('group-2', 'fast-reply')).toBeNull();
+    expect(app.activeFeature).toBe('ping');
+    expect(app.activeOperationId).toBe('new-ping-op');
+    expect(app.suppressedTerminalOpIds.size).toBe(0);
   });
 
   it('clears the loading state when a feature start is dropped by a disconnected port', async () => {
@@ -698,12 +737,27 @@ describe('ChatGooseContentApp', () => {
     app.currentGroupId = 'group-1';
     app.activeFeature = 'fan-summary';
     app.activeOperationId = 'summary-op';
+    app.activeFanDisplayName = 'alice';
+    app.activeProgress = {
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      phase: 'generating',
+      message: 'Still working',
+    };
+    app.overlayRawText = 'Stale summary stream';
     app.lastFeature = 'fan-summary';
+    app.renderSurfaces();
+    expect(document.body.textContent).toContain('Stale summary stream');
 
     // Navigate away while the deep overlay operation is in-flight.
     app.handleRouteChange('group-2');
 
-    expect(app.suppressedTerminalOpId).toBe('summary-op');
+    expect(app.suppressedTerminalOpIds.has('summary-op')).toBe(true);
+    expect(app.activeFeature).toBeNull();
+    expect(app.activeOperationId).toBeNull();
+    expect(app.activeProgress).toBeNull();
+    expect(app.overlayRawText).toBe('');
+    expect(document.body.textContent).not.toContain('Stale summary stream');
 
     // The stale summary completion arrives for the old conversation.
     app.handleComplete({
@@ -720,7 +774,7 @@ describe('ChatGooseContentApp', () => {
     expect(app.completedOverlayCache.get('group-2', 'fan-summary')).toBeNull();
     expect(app.tabState.hasAvailableSummary).toBe(false);
     expect(app.activeFeature).toBeNull();
-    expect(app.suppressedTerminalOpId).toBeNull();
+    expect(app.suppressedTerminalOpIds.size).toBe(0);
   });
 
   it('dismisses quick-feature error overlay cleanly without getting stuck', async () => {
@@ -1024,7 +1078,7 @@ describe('ChatGooseContentApp', () => {
   it('starts a fresh compare run instead of reopening completed cached compare results', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
-    const sendSpy = vi.fn();
+    const sendSpy = vi.fn(() => true);
 
     app.port.send = sendSpy;
     app.tabState = readyState();
@@ -1116,7 +1170,7 @@ describe('ChatGooseContentApp', () => {
   it('clears cached compare results on conversation change and starts a new compare request', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
-    const sendSpy = vi.fn();
+    const sendSpy = vi.fn(() => true);
 
     app.port.send = sendSpy;
     app.mountController = { setActiveRoute: vi.fn() };
@@ -1272,13 +1326,13 @@ describe('ChatGooseContentApp', () => {
     app.quickInlineVisible = true;
     app.quickSurfaceEverOpened = true;
     app.quickSurfaceMode = 'overlay';
-    app.suppressedTerminalOpId = 'some-op';
+    app.suppressedTerminalOpIds.add('some-op');
 
     // Simulate disconnect
     app.completedOverlayCache.clearAll();
     app.quickInlineVisible = false;
     app.quickSurfaceMode = 'inline';
-    app.suppressedTerminalOpId = null;
+    app.suppressedTerminalOpIds.clear();
     app.clearOperationState(true);
     app.renderAll();
 
@@ -1288,7 +1342,7 @@ describe('ChatGooseContentApp', () => {
     expect(app.activeOperationId).toBeNull();
     expect(app.quickSurfaceMode).toBe('inline');
     expect(app.quickInlineVisible).toBe(false);
-    expect(app.suppressedTerminalOpId).toBeNull();
+    expect(app.suppressedTerminalOpIds.size).toBe(0);
     expect(app.deepOverlayModel).toBeNull();
   });
 });

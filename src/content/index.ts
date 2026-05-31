@@ -152,7 +152,7 @@ export class ChatGooseContentApp {
   private quickInlineVisible = false;
   private quickSurfaceEverOpened = false;
   private pendingLoadingFrame: number | null = null;
-  private suppressedTerminalOpId: string | null = null;
+  private readonly suppressedTerminalOpIds = new Set<string>();
   private activeImproveDraftCacheKey: string | null = null;
   private observedDraftTextarea: HTMLTextAreaElement | null = null;
   private hasDraftText = false;
@@ -180,7 +180,7 @@ export class ChatGooseContentApp {
       this.activeCompareModel = null;
       this.pendingCompareFingerprint = null;
       this.quickSurfaceMode = 'inline';
-      this.suppressedTerminalOpId = null;
+      this.suppressedTerminalOpIds.clear();
       this.detachDraftTextareaObserver();
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
@@ -629,7 +629,6 @@ export class ChatGooseContentApp {
     this.activeFanDisplayName = domFanDisplayName ?? 'fan';
     this.lastFeature = feature;
     this.overlayRawText = '';
-    this.suppressedTerminalOpId = null;
     this.activeImproveDraftCacheKey = improveDraftCacheKey ?? null;
     this.comparePanelVisible = false;
 
@@ -697,7 +696,10 @@ export class ChatGooseContentApp {
   private startFeature(feature: FeatureType, forceRegenerate: boolean): void {
     if (this.activeFeature === feature) {
       if (usesInlineFeatureSurface(feature) && !featureRequiresDraft(feature)) {
-        if (!this.quickInlineVisible && this.suppressedTerminalOpId !== this.activeOperationId) {
+        if (
+          !this.quickInlineVisible &&
+          !this.isTerminalOperationSuppressed(this.activeOperationId)
+        ) {
           this.quickInlineVisible = true;
           this.renderSurfaces();
         }
@@ -776,7 +778,10 @@ export class ChatGooseContentApp {
 
   private async startCompare(forceRegenerate: boolean): Promise<void> {
     if (this.activeCompareModel?.operationId) {
-      if (!this.comparePanelVisible && this.suppressedTerminalOpId !== this.activeCompareModel.operationId) {
+      if (
+        !this.comparePanelVisible &&
+        !this.isTerminalOperationSuppressed(this.activeCompareModel.operationId)
+      ) {
         this.comparePanelVisible = true;
         this.renderSurfaces();
       }
@@ -822,7 +827,6 @@ export class ChatGooseContentApp {
     };
     this.quickInlineVisible = false;
     this.comparePanelVisible = false;
-    this.suppressedTerminalOpId = null;
     this.renderButtonBar();
 
     const sent = this.port.send({
@@ -894,11 +898,13 @@ export class ChatGooseContentApp {
       ) {
         this.quickInlineVisible = false;
         this.quickSurfaceMode = 'inline';
-        this.suppressedTerminalOpId = this.activeOperationId;
+        this.suppressTerminalOperation(this.activeOperationId);
+        this.clearOperationState(true);
+        this.overlayRawText = '';
         this.renderSurfaces();
       } else if (this.activeCompareModel?.operationId) {
         this.comparePanelVisible = false;
-        this.suppressedTerminalOpId = this.activeCompareModel.operationId;
+        this.suppressTerminalOperation(this.activeCompareModel.operationId);
         this.activeCompareModel = null;
         this.completedCompareCache.clear(previousGroupId);
         this.renderSurfaces();
@@ -909,10 +915,10 @@ export class ChatGooseContentApp {
         // An overlay feature (Scan/Summary/Review/Help) is in flight: suppress
         // its terminal message so the previous fan's result is neither shown
         // over the new conversation nor cached/marked under the new group.
-        // handleComplete/handleOperationError bail on suppressedTerminalOpId
+        // handleComplete/handleOperationError consume suppressed terminal ids
         // before touching the cache or hasAvailableSummary.
-        this.suppressedTerminalOpId = this.activeOperationId;
-        this.deepOverlayModel = null;
+        this.suppressTerminalOperation(this.activeOperationId);
+        this.clearOperationState(true);
         this.overlayRawText = '';
         this.renderSurfaces();
       } else if (!this.activeFeature) {
@@ -1157,17 +1163,18 @@ export class ChatGooseContentApp {
   private handleCompareComplete(
     message: Extract<BackgroundPortMessage, { type: 'compare:complete' }>,
   ): void {
-    const model = this.activeCompareFor(message.operationId);
-    if (!model) {
+    if (this.consumeSuppressedTerminalOperation(message.operationId)) {
+      if (this.activeCompareModel?.operationId === message.operationId) {
+        this.activeCompareModel = null;
+        this.comparePanelVisible = false;
+        this.pendingCompareFingerprint = null;
+      }
+      this.renderButtonBar();
       return;
     }
 
-    if (this.suppressedTerminalOpId === message.operationId) {
-      this.suppressedTerminalOpId = null;
-      this.activeCompareModel = null;
-      this.comparePanelVisible = false;
-      this.pendingCompareFingerprint = null;
-      this.renderButtonBar();
+    const model = this.activeCompareFor(message.operationId);
+    if (!model) {
       return;
     }
 
@@ -1197,16 +1204,17 @@ export class ChatGooseContentApp {
       { type: 'compare:error' | 'compare:discarded' }
     >,
   ): void {
-    if (this.activeCompareModel?.operationId === message.operationId) {
-      if (this.suppressedTerminalOpId === message.operationId) {
-        this.suppressedTerminalOpId = null;
+    if (this.consumeSuppressedTerminalOperation(message.operationId)) {
+      if (this.activeCompareModel?.operationId === message.operationId) {
         this.activeCompareModel = null;
         this.comparePanelVisible = false;
         this.pendingCompareFingerprint = null;
-        this.renderButtonBar();
-        return;
       }
+      this.renderButtonBar();
+      return;
+    }
 
+    if (this.activeCompareModel?.operationId === message.operationId) {
       this.activeCompareModel = null;
       this.comparePanelVisible = false;
       this.pendingCompareFingerprint = null;
@@ -1255,15 +1263,15 @@ export class ChatGooseContentApp {
   }
 
   private handleComplete(message: Extract<BackgroundPortMessage, { type: 'operation:complete' }>): void {
-    if (this.activeOperationId !== message.operationId || !this.activeFeature) {
+    if (this.consumeSuppressedTerminalOperation(message.operationId)) {
+      if (this.activeOperationId === message.operationId) {
+        this.clearOperationState(true);
+      }
+      this.renderButtonBar();
       return;
     }
 
-    // Suppressed after route change — discard silently
-    if (this.suppressedTerminalOpId === message.operationId) {
-      this.suppressedTerminalOpId = null;
-      this.clearOperationState(true);
-      this.renderButtonBar();
+    if (this.activeOperationId !== message.operationId || !this.activeFeature) {
       return;
     }
 
@@ -1305,15 +1313,16 @@ export class ChatGooseContentApp {
       { type: 'operation:error' | 'operation:discarded' }
     >,
   ): void {
+    if (this.consumeSuppressedTerminalOperation(message.operationId)) {
+      if (this.activeOperationId === message.operationId) {
+        this.clearOperationState(true);
+      }
+      this.renderButtonBar();
+      return;
+    }
+
     if (this.activeOperationId === message.operationId) {
       const feature = this.activeFeature ?? this.lastFeature ?? 'fast-reply';
-
-      if (this.suppressedTerminalOpId === message.operationId) {
-        this.suppressedTerminalOpId = null;
-        this.clearOperationState(true);
-        this.renderButtonBar();
-        return;
-      }
 
       const errorModel: OverlayViewModel = {
         kind: 'error',
@@ -1335,6 +1344,20 @@ export class ChatGooseContentApp {
   }
 
   // ─── State Helpers ──────────────────────────────────────────────────
+
+  private suppressTerminalOperation(operationId: string | null): void {
+    if (operationId) {
+      this.suppressedTerminalOpIds.add(operationId);
+    }
+  }
+
+  private isTerminalOperationSuppressed(operationId: string | null): boolean {
+    return Boolean(operationId && this.suppressedTerminalOpIds.has(operationId));
+  }
+
+  private consumeSuppressedTerminalOperation(operationId: string): boolean {
+    return this.suppressedTerminalOpIds.delete(operationId);
+  }
 
   private clearOperationState(fullReset: boolean): void {
     this.activeFeature = null;
