@@ -919,6 +919,19 @@ async function render(): Promise<void> {
     agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
     agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
 
+    // Reflect the sanitized/clamped counts back into the fields so an
+    // out-of-range or blank entry doesn't keep displaying a value that differs
+    // from what was stored. Skip a field the user is still editing.
+    const writeCount = (input: HTMLInputElement, value: number): void => {
+      if (document.activeElement !== input) {
+        input.value = String(value);
+      }
+    };
+    writeCount(quickInput, savedSettings.quickMessageCount);
+    writeCount(pingInput, savedSettings.pingMessageCount);
+    writeCount(improveInput, savedSettings.improveMessageCount);
+    writeCount(deepInput, savedSettings.deepMessageCount);
+
     const hubSignature = buildAgencyHubConnectionSignature(
       savedSettings.agencyHubBaseUrl,
       savedSettings.agencyHubApiKey,
