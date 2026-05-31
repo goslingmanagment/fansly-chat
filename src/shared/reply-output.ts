@@ -6,7 +6,10 @@ const META_LEAK_PATTERNS = [
   /\bthe\s+prompt\s+says\b/i,
   /\bprompt\s+says\b/i,
   /\bsystem\s+prompt\b/i,
-  /\binstruction(?:s)?\b/i,
+  // Narrow leak/injection echoes only — a bare "instructions" match would also
+  // strip legitimate in-character lines (e.g. JOI "just follow my instructions").
+  /\b(?:system|previous|above)\s+instructions?\b/i,
+  /\bignore (?:all |the )?(?:previous |above )?instructions?\b/i,
   /\boutput\s+only\b/i,
   /\bmost\s+replies\s+should\b/i,
   /\bsingle\s+message\b/i,
