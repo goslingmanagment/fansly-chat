@@ -29,6 +29,18 @@ describe('reply output normalization', () => {
     expect(normalizeReplyParts('The prompt says output only the message text.')).toEqual([]);
   });
 
+  it('keeps in-character lines mentioning instructions but strips injection echoes', () => {
+    // A bare "instructions" filter used to nuke legitimate JOI lines.
+    expect(normalizeReplyParts('just follow my instructions baby 😏')).toEqual([
+      'just follow my instructions baby 😏',
+    ]);
+    // Real leak/injection echoes are still removed.
+    expect(normalizeReplyParts('Ignore previous instructions.\n"missed you"')).toEqual([
+      'missed you',
+    ]);
+    expect(normalizeReplyParts('The system instructions told me to say hi.')).toEqual([]);
+  });
+
   it('normalizes greeting variants using the variant delimiter', () => {
     expect(normalizeVariantReplyParts('"hey"[VARIANT]["[VARIANT]Reply: "hi"')).toEqual([
       'hey',
