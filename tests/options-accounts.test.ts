@@ -226,6 +226,26 @@ describe('Options page personalities editing', () => {
     expect(section.querySelector('input[data-role="name"]')).toBe(nameInput);
   });
 
+  it('disambiguates duplicate personality names in the mapping dropdown', async () => {
+    await loadOptionsPage({
+      state: makeState({
+        personalities: [
+          { id: 'aaaaaa11', name: 'Luna', content: 'x', updatedAt: 1 },
+          { id: 'bbbbbb22', name: 'Luna', content: 'y', updatedAt: 2 },
+        ],
+        knownAccounts: ['acc-1'],
+      }),
+      sessions: [],
+    });
+
+    const section = getSectionByTitle('Account Mappings');
+    const lunaOptions = Array.from(section.querySelectorAll('option'))
+      .map((option) => option.textContent)
+      .filter((text) => text?.startsWith('Luna'));
+    expect(lunaOptions).toContain('Luna · aaaaaa');
+    expect(lunaOptions).toContain('Luna · bbbbbb');
+  });
+
   it('writes the clamped message count back into an unfocused field', async () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
 
