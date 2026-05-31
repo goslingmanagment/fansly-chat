@@ -10,6 +10,7 @@ import type {
   PingSegmentAnalysis,
   PingSegment,
 } from './types.js';
+import { PING_MIN_FAN_MESSAGES } from './constants.js';
 import { millsToUsd } from './earnings.js';
 
 const PING_ACTIVE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
@@ -566,7 +567,7 @@ export function analyzePingSegment(
     const latestFanTextAtMs = latestFanText.createdAt * 1000;
     if (latestFanTextAtMs >= nowMs - PING_ACTIVE_WINDOW_MS) {
       segment = 'active';
-    } else if (fanTextMessages.length >= 3) {
+    } else if (fanTextMessages.length >= PING_MIN_FAN_MESSAGES) {
       segment = 'segment-a';
     }
   }

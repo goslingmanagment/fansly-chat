@@ -42,4 +42,13 @@ describe('mapWithConcurrency', () => {
     const result = await mapWithConcurrency([1, 2], 10, async (n) => n + 1);
     expect(result).toEqual([2, 3]);
   });
+
+  it('still processes every item when limit is zero or negative', async () => {
+    expect(await mapWithConcurrency([1, 2, 3], 0, async (n) => n + 1)).toEqual([2, 3, 4]);
+    expect(await mapWithConcurrency([1, 2, 3], -5, async (n) => n + 1)).toEqual([2, 3, 4]);
+  });
+
+  it('returns an empty array for no items', async () => {
+    expect(await mapWithConcurrency([], 4, async (n) => n)).toEqual([]);
+  });
 });
