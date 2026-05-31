@@ -1594,6 +1594,52 @@ describe('OperationCoordinator', () => {
     ).toBe(0);
   });
 
+  it('blocks a second operation that races the first across validateStart', async () => {
+    const anthropicClient = {
+      streamMessage: vi.fn(async ({ onText }: { onText: (text: string) => void }) => {
+        onText('hi');
+        return 'hi';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ anthropicClient });
+
+    const basePayload = {
+      type: 'operation:start' as const,
+      feature: 'fast-reply' as const,
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default' as const,
+    };
+
+    // Fire both synchronously: the first reserves the tab before its first
+    // await, so the second must be rejected by the guard rather than racing it
+    // through validateStart and clobbering the first operation's state.
+    const first = coordinator.startOperation(1, { ...basePayload, operationId: 'op-1' });
+    const second = coordinator.startOperation(1, { ...basePayload, operationId: 'op-2' });
+    await Promise.all([first, second]);
+
+    const secondError = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error' && message.operationId === 'op-2',
+    );
+    expectUserErrorIdentity(secondError?.error, {
+      key: 'another_operation',
+      code: 'CG-FLOW-04',
+    });
+
+    // The first operation still completes normally and the reservation clears.
+    const firstComplete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete' && message.operationId === 'op-1',
+    );
+    expect(firstComplete).toBeDefined();
+    expect(
+      (coordinator as unknown as { startingTabIds: Set<number> }).startingTabIds.size,
+    ).toBe(0);
+  });
+
   it('sends compare:error when compare generation hits the shared timeout', async () => {
     vi.useFakeTimers();
     await mockCompareCards([

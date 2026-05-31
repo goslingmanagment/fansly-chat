@@ -451,6 +451,10 @@ export class OperationCoordinator {
   private readonly activeCompareByTabId = new Map<number, ActiveCompareOperation>();
   private readonly cancelledOperationIds = new Set<string>();
   private readonly cancelledCompareOperationIds = new Set<string>();
+  // Tabs with a feature or compare start past its guard but not yet registered
+  // in activeByTabId/activeCompareByTabId. Reserved synchronously so two starts
+  // that race across the validateStart await cannot both pass the guard.
+  private readonly startingTabIds = new Set<number>();
   private readonly pendingSummaryAvailabilityByKey = new Map<string, Promise<void>>();
   private readonly pendingIdentityResolutionByLegacyAccountId = new Map<
     string,
@@ -1303,7 +1307,7 @@ export class OperationCoordinator {
     // SPEC-CORRECT: BLOCK concurrent ops (don't auto-cancel like Codex)
     const existing =
       this.activeByTabId.get(tabId) ?? this.activeCompareByTabId.get(tabId);
-    if (existing) {
+    if (existing || this.startingTabIds.has(tabId)) {
       this.sendError(tabId, {
         type: 'operation:error',
         operationId: payload.operationId,
@@ -1317,6 +1321,9 @@ export class OperationCoordinator {
       return;
     }
 
+    // Reserve the tab synchronously before the first await so a racing start
+    // cannot slip past the guard while validateStart is in flight.
+    this.startingTabIds.add(tabId);
     const timeoutHandles = new Map<OperationTimeoutKey, number>();
     let timeoutController: AbortController | null = null;
     let controller: AbortController | null = null;
@@ -2682,6 +2689,7 @@ export class OperationCoordinator {
       // suppress, so drop it to keep the set from growing unbounded.
       this.cancelledOperationIds.delete(operationId);
     } finally {
+      this.startingTabIds.delete(tabId);
       for (const handle of timeoutHandles.values()) {
         clearTimeout(handle);
       }
@@ -2693,6 +2701,7 @@ export class OperationCoordinator {
     return {
       activeCompareByTabId: this.activeCompareByTabId,
       cancelledCompareOperationIds: this.cancelledCompareOperationIds,
+      startingTabIds: this.startingTabIds,
       sessionStore: this.sessionStore,
       tabContexts: this.tabContexts,
       storageCoordinator: this.storageCoordinator,
