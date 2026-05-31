@@ -16,6 +16,10 @@ import {
 import { ChatGooseError } from '../src/shared/errors.js';
 import { getAgencyHubModelId } from '../src/shared/model-registry.js';
 import { flattenPromptBlocks } from '../src/shared/prompts.js';
+import {
+  createMockRuntimePort,
+  postedMessages,
+} from './helpers/port.js';
 import type {
   AggregatedEarnings,
   BackgroundPortMessage,
@@ -214,10 +218,6 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-function postedMessages(port: { postMessage: ReturnType<typeof vi.fn> }): BackgroundPortMessage[] {
-  return port.postMessage.mock.calls.map(([message]) => message as BackgroundPortMessage);
-}
-
 function expectUserErrorIdentity(
   error: { key?: string; code?: string } | undefined,
   expected: { key: string; code: string },
@@ -298,12 +298,8 @@ async function createCoordinatorHarness(options?: {
     agencyHubClient as never,
     agencyHubUsageReporter as never,
   ) as any;
-  const port = {
-    postMessage: vi.fn(),
-    onDisconnect: { addListener: vi.fn() },
-  };
-
-  coordinator.portsByTabId.set(1, port);
+  const port = createMockRuntimePort(1);
+  coordinator.registerPort(port as never);
 
   return {
     coordinator,

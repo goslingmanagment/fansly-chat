@@ -5,9 +5,13 @@ import {
   buildApiKeyReadyByFeature,
   buildModelProviderByFeature,
 } from '../shared/feature-readiness.js';
+import {
+  getRuntimeRequestType,
+  isAgencyHubConnectionTestSettings,
+  isObjectRecord,
+} from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import type {
-  AgencyHubConnectionTestRequest,
   PopupStatus,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
@@ -35,14 +39,22 @@ export function registerRuntimeApi({
   storageCoordinator,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
-    async (message: { type: string; tabId?: number; settings?: AgencyHubConnectionTestRequest['settings'] }) => {
-      if (message.type === 'getPopupStatus') {
+    async (message: unknown) => {
+      const requestType = getRuntimeRequestType(message);
+      if (!requestType) {
+        return undefined;
+      }
+
+      if (requestType === 'getPopupStatus') {
         let tabId: number | undefined;
         let tabUrl: string | undefined;
+        const requestedTabId = isObjectRecord(message) && typeof message.tabId === 'number'
+          ? message.tabId
+          : undefined;
 
-        if (message.tabId !== undefined) {
-          const tab = await browser.tabs.get(message.tabId);
-          tabId = tab.id ?? message.tabId;
+        if (requestedTabId !== undefined) {
+          const tab = await browser.tabs.get(requestedTabId);
+          tabId = tab.id ?? requestedTabId;
           tabUrl = tab.url;
         } else {
           const [activeTab] = await browser.tabs.query({
@@ -117,7 +129,7 @@ export function registerRuntimeApi({
         } satisfies PopupStatus;
       }
 
-      if (message.type === 'getSessionsSnapshot') {
+      if (requestType === 'getSessionsSnapshot') {
         const unresolvedSessions = sessionStore
           .getSessions()
           .filter(
@@ -171,8 +183,13 @@ export function registerRuntimeApi({
         return snapshot;
       }
 
-      if (message.type === 'testAgencyHubConnection') {
-        if (!message.settings) {
+      if (requestType === 'testAgencyHubConnection') {
+        const settings = isObjectRecord(message) &&
+          isAgencyHubConnectionTestSettings(message.settings)
+          ? message.settings
+          : null;
+
+        if (!settings) {
           return {
             ok: false,
             error: createUserError('hub_request_failed'),
@@ -184,7 +201,7 @@ export function registerRuntimeApi({
           AGENCY_HUB_PREFETCH_TIMEOUT_MS,
         );
         try {
-          return await agencyHubClient.testConnection(message.settings, controller.signal);
+          return await agencyHubClient.testConnection(settings, controller.signal);
         } finally {
           globalThis.clearTimeout(timeout);
         }

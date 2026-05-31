@@ -77,7 +77,8 @@ If the fan has been active in the last 5 days, the ping is blocked — they don'
 
 ### Prerequisites
 
-- Firefox (tested on 128+)
+- Firefox 142+ for current temporary/signed installs. The bundle target remains
+  Firefox 128 APIs so older ESR-compatible syntax is preserved where possible.
 - A Claude API key from [console.anthropic.com](https://console.anthropic.com) for Claude Direct models
 - Optional: an OpenRouter API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) for Gemini/Grok models
 - Node.js 18+ and npm
@@ -152,6 +153,7 @@ If you're logged into a new account and the extension detects it via intercepted
 
 ```bash
 npm run build        # Production build → dist/
+npm run check        # Typecheck, test, then build
 npm run watch        # Rebuild on file changes
 npm test             # Run test suite (vitest)
 npm run test:watch   # Run tests in watch mode
@@ -164,14 +166,20 @@ npm run typecheck    # TypeScript strict check (tsc --noEmit)
 src/
 ├── background/          # Service worker — orchestration, API clients, session management
 │   ├── index.ts         # Composition root (dependency wiring)
+│   ├── agency-hub-client.ts       # Agency Hub lookup/sync HTTP client
+│   ├── agency-hub-usage-reporter.ts # Opt-in AI usage metadata batching
+│   ├── compare-operations.ts      # Compare card operation flow
 │   ├── llm-client.ts         # Provider routing
+│   ├── llm-cost.ts           # Token/cost estimation
 │   ├── anthropic-client.ts   # Claude API streaming (SSE)
 │   ├── openrouter-client.ts  # OpenRouter Messages API streaming
 │   ├── fansly-client.ts      # Fansly API (messages, earnings, subscriptions)
+│   ├── operation-profiling.ts # Per-operation stage/profiling snapshots
 │   ├── operations.ts         # OperationCoordinator — main business logic
 │   ├── runtime-api.ts        # Popup/options message handlers
 │   ├── session-capture.ts    # webRequest header interception
 │   ├── session-store.ts      # In-memory session tracking
+│   ├── storage-coordinator.ts # Queued background storage writes
 │   └── tab-context.ts        # Per-tab state (groupId, fan, operation)
 ├── content/             # Content script — injected into fansly.com
 │   ├── index.ts         # ChatGooseContentApp — entry point
@@ -179,9 +187,11 @@ src/
 │   ├── conversation-dom.ts         # DOM queries for Fansly's Angular UI
 │   ├── conversation-mount-controller.ts  # MutationObserver re-attachment
 │   ├── dom-anchor.ts    # CSS injection, root element creation
+│   ├── inline-panel/    # Inline loading/completed surfaces for quick features
 │   ├── mapping-banner.ts     # Unmapped account prompt
 │   ├── port-client.ts        # Port connection with auto-reconnect
 │   ├── route-watcher.ts      # URL polling for SPA navigation
+│   ├── scroll-compensation.ts # Viewport stability during UI insertion
 │   ├── styles.css             # All content script styles
 │   ├── textarea.ts            # Fansly textarea insertion
 │   ├── toast.ts               # Toast notifications
@@ -191,14 +201,25 @@ src/
 ├── popup/               # Browser action popup
 └── shared/              # Modules used by both background and content
     ├── constants.ts     # All config values
+    ├── account-aliases.ts # Legacy/resolved Fansly account id helpers
+    ├── agency-hub.ts    # Agency Hub URL and sync metadata helpers
+    ├── compare-cards.ts # Compare card registry and draft loading
     ├── earnings.ts      # Earnings aggregation and formatting
     ├── errors.ts        # ChatGooseError + user-facing messages
+    ├── features.ts      # Feature policy registry
+    ├── feature-readiness.ts # Provider/key readiness helpers
     ├── log.ts           # Debug logging with sensitive data redaction
     ├── migrations.ts    # Storage schema versioning
+    ├── model-capabilities.ts # Model capability gates
+    ├── model-registry.ts # Supported model metadata
+    ├── personalities.ts # Bundled personality definitions
     ├── prompt-injection.ts   # HTML entity escaping for prompt safety
     ├── prompts.ts       # Prompt builder (template + personality + safety preamble)
+    ├── protocol.ts      # Runtime and port protocol helpers/guards
+    ├── reply-output.ts  # Reply part normalization
     ├── split.ts         # [NEXT] marker splitting
     ├── storage.ts       # browser.storage.local CRUD
+    ├── summary-cache.ts # Fan Summary cache helpers
     ├── subscriptions.ts # Subscription context formatting
     ├── transcript.ts    # Message normalization, formatting, ping analysis
     ├── types.ts         # All TypeScript types
@@ -223,10 +244,11 @@ esbuild bundles four entry points (background, content, options, popup) as IIFE 
 Tests cover shared business logic: prompt building, transcript processing, XML parsing, earnings formatting, storage migrations, error handling, prompt injection escaping, and overlay DOM behavior. The overlay test uses JSDOM for browser DOM simulation.
 
 ```bash
-npm test
+npm run check
 ```
 
-All tests should pass. No network calls — everything is unit-tested with mocks.
+All checks should pass. Tests make no network calls — everything is unit-tested
+with mocks. Pull requests run the same command in GitHub Actions.
 
 ## Security Considerations
 
@@ -251,6 +273,25 @@ Fan messages are untrusted input. Before inclusion in prompts:
 ### Session Data
 
 Intercepted Fansly headers (auth token, session ID, client ID) are held in memory only — never written to `storage` or disk. They exist for the lifetime of the background service worker and are lost when the extension is reloaded or Firefox restarts.
+
+### Data the Extension Sends
+
+ChatGoose always sends AI prompts to the selected provider for the feature being
+run: Claude Direct requests go to Anthropic, and OpenRouter model requests go to
+OpenRouter.
+
+Agency Hub is opt-in and disabled unless both a Hub URL and API key are saved in
+Settings and the optional host permission is granted. When enabled, ChatGoose can:
+
+- Upload generated Fan Summary profile text for the current fan to the configured
+  Hub URL, keyed by the matched page label and fan account id.
+- Send AI usage metadata batches to the configured Hub URL. These include feature,
+  model, token counts, cache usage, duration, completion time, cache/regeneration
+  flags, and the Fansly conversation/group id. They do not include transcript
+  text, prompt text, API keys, or Fansly session headers.
+
+The Firefox update URL in `manifest.json` is only for extension updates; it is
+not an Agency Hub data destination.
 
 ## License
 

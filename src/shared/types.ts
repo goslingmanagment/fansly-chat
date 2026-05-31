@@ -692,7 +692,7 @@ export interface SessionSnapshotEntry {
 // ─── Runtime API ─────────────────────────────────────────────────────────
 
 export interface RuntimeRequestMap {
-  getPopupStatus: undefined;
+  getPopupStatus: GetPopupStatusRequest | undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
 }
@@ -701,6 +701,10 @@ export interface RuntimeResponseMap {
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
+}
+
+export interface GetPopupStatusRequest {
+  tabId?: number;
 }
 
 export interface AgencyHubConnectionTestRequest {
