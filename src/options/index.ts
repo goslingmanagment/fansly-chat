@@ -286,6 +286,7 @@ async function render(): Promise<void> {
   const apiSection = createSection('API Configuration');
   const keyInput = document.createElement('input');
   keyInput.type = 'password';
+  keyInput.autocomplete = 'off';
   keyInput.className = 'chatgoose-input';
   keyInput.value = state.settings.claudeApiKey;
   const toggle = createButton('Show', true);
@@ -302,6 +303,7 @@ async function render(): Promise<void> {
 
   const openRouterKeyInput = document.createElement('input');
   openRouterKeyInput.type = 'password';
+  openRouterKeyInput.autocomplete = 'off';
   openRouterKeyInput.className = 'chatgoose-input';
   openRouterKeyInput.value = state.settings.openRouterApiKey;
   const openRouterToggle = createButton('Show', true);
@@ -391,6 +393,7 @@ async function render(): Promise<void> {
 
   const agencyHubKeyInput = document.createElement('input');
   agencyHubKeyInput.type = 'password';
+  agencyHubKeyInput.autocomplete = 'off';
   agencyHubKeyInput.className = 'chatgoose-input';
   agencyHubKeyInput.value = state.settings.agencyHubApiKey;
 
@@ -1122,6 +1125,16 @@ async function render(): Promise<void> {
   mappingsTable.style.display = 'grid';
   mappingsTable.style.gap = '12px';
   const personalitiesById = new Map(state.personalities.map((personality) => [personality.id, personality]));
+  // Names aren't unique; track collisions so the mapping dropdown can
+  // disambiguate same-named personalities with a short id suffix.
+  const personalityNameCounts = new Map<string, number>();
+  for (const personality of state.personalities) {
+    personalityNameCounts.set(personality.name, (personalityNameCounts.get(personality.name) ?? 0) + 1);
+  }
+  const personalityOptionLabel = (personality: Personality): string =>
+    (personalityNameCounts.get(personality.name) ?? 0) > 1
+      ? `${personality.name} · ${personality.id.slice(0, 6)}`
+      : personality.name;
 
   state.knownAccounts.forEach((accountId) => {
     const session = sessionsByAccountId.get(accountId);
@@ -1159,7 +1172,7 @@ async function render(): Promise<void> {
     for (const personality of state.personalities) {
       const option = document.createElement('option');
       option.value = personality.id;
-      option.textContent = personality.name;
+      option.textContent = personalityOptionLabel(personality);
       select.append(option);
     }
     select.value = state.accountMappings[accountId] ?? '';
@@ -1172,7 +1185,7 @@ async function render(): Promise<void> {
     info.style.fontSize = '12px';
     info.style.color = 'var(--chatgoose-muted)';
     const mapped = personalitiesById.get(state.accountMappings[accountId] ?? '');
-    info.textContent = `${mapped ? mapped.name : 'Unmapped'} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
+    info.textContent = `${mapped ? personalityOptionLabel(mapped) : 'Unmapped'} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
 
     row.append(label, select, info);
     mappingsTable.append(row);
