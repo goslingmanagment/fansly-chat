@@ -671,6 +671,41 @@ describe('ChatGooseContentApp', () => {
     expect(app.suppressedTerminalOpId).toBeNull();
   });
 
+  it('suppresses an in-flight overlay feature after route change instead of polluting the new group', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.port.send = vi.fn();
+    app.mountController = { setActiveRoute: vi.fn() };
+    app.tabState = readyState({ hasAvailableSummary: false });
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fan-summary';
+    app.activeOperationId = 'summary-op';
+    app.lastFeature = 'fan-summary';
+
+    // Navigate away while the deep overlay operation is in-flight.
+    app.handleRouteChange('group-2');
+
+    expect(app.suppressedTerminalOpId).toBe('summary-op');
+
+    // The stale summary completion arrives for the old conversation.
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'summary-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Stale summary from group-1',
+        parts: ['Stale summary from group-1'],
+      },
+    });
+
+    // Must not cache under or mark the new group as summary-ready.
+    expect(app.completedOverlayCache.get('group-2', 'fan-summary')).toBeNull();
+    expect(app.tabState.hasAvailableSummary).toBe(false);
+    expect(app.activeFeature).toBeNull();
+    expect(app.suppressedTerminalOpId).toBeNull();
+  });
+
   it('dismisses quick-feature error overlay cleanly without getting stuck', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
