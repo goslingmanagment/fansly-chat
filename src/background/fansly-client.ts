@@ -3,6 +3,7 @@ import {
   FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS,
   FANSLY_MEDIA_PURCHASE_VERIFICATION_CONCURRENCY,
   FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS,
+  FANSLY_PAGE_LIMIT,
   FANSLY_REQUEST_TIMEOUT_MS,
   FANSLY_RETRY_DELAYS_MS,
   FANSLY_RETRY_MAX_BACKOFF_MS,
@@ -39,6 +40,10 @@ import type {
 import { SessionStore } from './session-store.js';
 
 const MESSAGING_GROUPS_PAGE_SIZE = 100;
+// Bound the messaging-groups walk so a creator with tens of thousands of
+// conversations can't burn the whole operation budget here before the
+// subscribers fallback runs.
+const MESSAGING_GROUPS_MAX_PAGES = 20;
 const SUBSCRIBERS_PAGE_SIZE = 100;
 const SUBSCRIPTION_CACHE_TTL_MS = 5 * 60 * 1000;
 const ORDER_TYPE_SINGLE = 1;
@@ -465,7 +470,7 @@ export class FanslyClient {
   ): Promise<FanslyMessagePageResponse> {
     const url = new URL('https://apiv3.fansly.com/api/v1/message');
     url.searchParams.set('groupId', groupId);
-    url.searchParams.set('limit', '25');
+    url.searchParams.set('limit', String(FANSLY_PAGE_LIMIT));
     if (before) {
       url.searchParams.set('before', before);
     }
@@ -670,7 +675,7 @@ export class FanslyClient {
   ): Promise<FanSubscriptionContext | null> {
     let offset = 0;
 
-    while (true) {
+    for (let page = 0; page < MESSAGING_GROUPS_MAX_PAGES; page += 1) {
       const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
       url.searchParams.set('sortOrder', '1');
       url.searchParams.set('flags', '0');
@@ -713,6 +718,9 @@ export class FanslyClient {
       offset += MESSAGING_GROUPS_PAGE_SIZE;
       await delay(FANSLY_PAGINATION_DELAY_MS, signal);
     }
+
+    // Page cap reached without a match: fall through to the subscribers lookup.
+    return null;
   }
 
   private async getSubscriptionFromSubscribers(
@@ -861,7 +869,7 @@ export class FanslyClient {
       });
 
       before = extractOldestMessageId(messages);
-      if (!before || messages.length < 25) {
+      if (!before || messages.length < FANSLY_PAGE_LIMIT) {
         break;
       }
 
