@@ -92,14 +92,26 @@ function createVersionTag(): HTMLDivElement {
   return tag;
 }
 
-function debounce<T extends (...args: never[]) => void>(callback: T, waitMs: number): T {
+type Debounced<T extends (...args: never[]) => void> = T & { cancel: () => void };
+
+function debounce<T extends (...args: never[]) => void>(callback: T, waitMs: number): Debounced<T> {
   let timer: number | null = null;
-  return ((...args: never[]) => {
+  const debounced = ((...args: never[]) => {
     if (timer !== null) {
       window.clearTimeout(timer);
     }
-    timer = window.setTimeout(() => callback(...args), waitMs);
-  }) as T;
+    timer = window.setTimeout(() => {
+      timer = null;
+      callback(...args);
+    }, waitMs);
+  }) as Debounced<T>;
+  debounced.cancel = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+  };
+  return debounced;
 }
 
 function getNormalizedUsername(username: string | null | undefined): string | null {
@@ -996,8 +1008,8 @@ async function render(): Promise<void> {
   personalitiesList.style.display = 'grid';
   personalitiesList.style.gap = '16px';
 
-  const savePersonalitiesDebounced = debounce(async () => {
-    const entries = Array.from(personalitiesList.querySelectorAll<HTMLElement>('[data-personality-id]')).map((card) => {
+  const collectPersonalityEntries = (): Personality[] =>
+    Array.from(personalitiesList.querySelectorAll<HTMLElement>('[data-personality-id]')).map((card) => {
       const id = card.dataset.personalityId!;
       const nameVal = card.querySelector<HTMLInputElement>('input[data-role="name"]')!.value;
       const contentVal = card.querySelector<HTMLTextAreaElement>('textarea[data-role="content"]')!.value;
@@ -1012,8 +1024,12 @@ async function render(): Promise<void> {
         ...(builtin && Number.isFinite(builtinVersion) ? { builtinVersion } : {}),
       } satisfies Personality;
     });
-    await savePersonalities(entries);
-    await render();
+
+  const savePersonalitiesDebounced = debounce(async () => {
+    // Persist without re-rendering: rebuilding the DOM here would replace the
+    // textarea the user is editing and steal focus/caret mid-edit. Keep the
+    // in-memory state in sync so add/delete read current values.
+    state.personalities = await savePersonalities(collectPersonalityEntries());
   }, 450);
 
   const makeCard = (personality: Personality): HTMLElement => {
@@ -1045,6 +1061,12 @@ async function render(): Promise<void> {
         if (!confirmed) {
           return;
         }
+        // Cancel the pending debounced save so a stale pre-delete snapshot can't
+        // flush afterwards and resurrect this card, then flush current edits so
+        // other cards' in-progress changes survive the delete (which also clears
+        // this personality's account mappings and cached summaries).
+        savePersonalitiesDebounced.cancel();
+        await savePersonalities(collectPersonalityEntries());
         await deletePersonality(personality.id);
         await render();
       });
@@ -1062,8 +1084,11 @@ async function render(): Promise<void> {
 
   const addPersonality = createButton('Add Personality');
   addPersonality.addEventListener('click', async () => {
+    // Cancel the pending debounced save and read current DOM values so an
+    // in-progress edit isn't lost when the list is rebuilt.
+    savePersonalitiesDebounced.cancel();
     const personalities = [
-      ...state.personalities,
+      ...collectPersonalityEntries(),
       {
         id: crypto.randomUUID(),
         name: 'New Personality',
