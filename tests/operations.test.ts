@@ -1588,6 +1588,10 @@ describe('OperationCoordinator', () => {
       key: 'chat_changed',
       code: 'CG-FLOW-06',
     });
+    expect(
+      (coordinator as unknown as { cancelledCompareOperationIds: Set<string> })
+        .cancelledCompareOperationIds.size,
+    ).toBe(0);
   });
 
   it('sends compare:error when compare generation hits the shared timeout', async () => {
@@ -2180,6 +2184,37 @@ describe('OperationCoordinator', () => {
       detail: 'operation failed',
     });
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-stream')).toBeUndefined();
+  });
+
+  it('does not leak the operation id into the cancelled set after a failed operation', async () => {
+    const anthropicClient = {
+      streamMessage: vi.fn(async () => {
+        throw new ChatGooseError('network_error');
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage).toBeDefined();
+    expect(
+      (coordinator as unknown as { cancelledOperationIds: Set<string> }).cancelledOperationIds.size,
+    ).toBe(0);
   });
 
   it('maps unexpected aborts to network_error in debug mode', async () => {

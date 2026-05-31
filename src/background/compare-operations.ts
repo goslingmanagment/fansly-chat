@@ -1316,6 +1316,10 @@ export async function executeCompare(
       !completedActive ||
       completedActive.operationId !== payload.operationId
     ) {
+      // The session was cancelled/superseded mid-stream: every card swallowed
+      // the abort and resolved, so we never reached the catch that clears the
+      // cancelled id. Drop it here to keep the set from growing unbounded.
+      context.cancelledCompareOperationIds.delete(payload.operationId);
       return;
     }
 
@@ -1369,6 +1373,9 @@ export async function executeCompare(
 
     logDebug(debugEnabled, 'compare operation error', error);
     cancelCompareOperation(context, tabId);
+    // Terminal failure path: cancelCompareOperation re-adds the id, but no late
+    // card message remains to suppress, so drop it to avoid unbounded growth.
+    context.cancelledCompareOperationIds.delete(operationId);
   } finally {
     if (timeout !== null) {
       clearTimeout(timeout);

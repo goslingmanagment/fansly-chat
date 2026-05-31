@@ -2701,6 +2701,10 @@ export class OperationCoordinator {
 
       logDebug(debugEnabled, 'operation error', error);
       await this.cancelOperation(tabId);
+      // cancelOperation re-adds the id to the cancelled set, but this is the
+      // terminal failure path — there is no late chunk/complete left to
+      // suppress, so drop it to keep the set from growing unbounded.
+      this.cancelledOperationIds.delete(operationId);
     } finally {
       for (const handle of timeoutHandles.values()) {
         clearTimeout(handle);
