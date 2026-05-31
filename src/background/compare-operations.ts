@@ -1215,6 +1215,14 @@ export async function executeCompare(
         } else if (abortError?.key === 'chat_changed') {
           return;
         } else {
+          // Stop any pending flush for this card so a buffered chunk can't fire
+          // a stray compare:chunk after the card is reported as errored, while
+          // other cards in the session are still streaming.
+          const erroredCardState = getActiveCompare(context, tabId)?.compareCards.get(card.id);
+          if (erroredCardState?.flushTimer != null) {
+            clearTimeout(erroredCardState.flushTimer);
+            erroredCardState.flushTimer = null;
+          }
           const profiling = buildCompareCardProfilingSnapshot(
             profiler,
             cardUsage,
