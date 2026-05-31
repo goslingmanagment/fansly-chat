@@ -194,3 +194,35 @@ describe('Options page account sections', () => {
     expect(connectionSection.textContent).toContain('Account ID: resolved');
   });
 });
+
+describe('Options page personalities editing', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('persists an edited name without rebuilding the input (no focus steal)', async () => {
+    await loadOptionsPage({
+      state: makeState({
+        personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
+      }),
+      sessions: [],
+    });
+
+    const section = getSectionByTitle('Model Personalities');
+    const nameInput = section.querySelector<HTMLInputElement>('input[data-role="name"]')!;
+    expect(nameInput).toBeTruthy();
+
+    nameInput.value = 'Closer Renamed';
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Wait for the 450ms debounce + save to land in storage.
+    await vi.waitFor(() => {
+      expect(currentState.personalities[0]?.name).toBe('Closer Renamed');
+    }, { timeout: 2000 });
+
+    // A re-render would replace the textarea/input and steal focus mid-edit;
+    // the same element must still be mounted.
+    expect(section.querySelector('input[data-role="name"]')).toBe(nameInput);
+  });
+});
