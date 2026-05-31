@@ -401,7 +401,7 @@ describe('ChatGooseContentApp', () => {
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
-    app.port.send = sendSpy;
+    app.port.send = sendSpy.mockReturnValue(true);
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
     app.selectTone('flirty');
@@ -669,6 +669,23 @@ describe('ChatGooseContentApp', () => {
     expect(app.activeFeature).toBeNull();
     expect(app.activeOperationId).toBeNull();
     expect(app.suppressedTerminalOpId).toBeNull();
+  });
+
+  it('clears the loading state when a feature start is dropped by a disconnected port', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.port.send = vi.fn(() => false);
+    const toastSpy = vi.spyOn(app, 'showUserErrorToast').mockImplementation(() => {});
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+
+    app.startFeature('fast-reply', false);
+
+    // The start never reached the background, so the UI must not be left stuck.
+    expect(app.activeFeature).toBeNull();
+    expect(app.activeOperationId).toBeNull();
+    expect(toastSpy).toHaveBeenCalled();
   });
 
   it('suppresses an in-flight overlay feature after route change instead of polluting the new group', async () => {
@@ -1034,7 +1051,7 @@ describe('ChatGooseContentApp', () => {
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
-    app.port.send = sendSpy;
+    app.port.send = sendSpy.mockReturnValue(true);
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
     app.selectTone('upsell');

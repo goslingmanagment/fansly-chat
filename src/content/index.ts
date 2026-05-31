@@ -746,7 +746,7 @@ export class ChatGooseContentApp {
       improveDraftCacheKey,
     );
 
-    this.port.send(
+    const sent = this.port.send(
       this.buildOperationStartPayload(
         feature,
         operationId,
@@ -755,6 +755,16 @@ export class ChatGooseContentApp {
         forceRegenerate,
       ),
     );
+    if (!sent) {
+      // The port is mid-reconnect; the start never reached the background, so
+      // no terminal message will arrive. Tear down the loading state and ask
+      // the user to retry instead of leaving the surface stuck spinning.
+      this.clearOperationState(true);
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.renderSurfaces();
+      this.renderButtonBar();
+      return;
+    }
     if (featureSupportsReplyMode(feature)) {
       this.resetNextFastReplyMode();
     }
@@ -815,7 +825,7 @@ export class ChatGooseContentApp {
     this.suppressedTerminalOpId = null;
     this.renderButtonBar();
 
-    this.port.send({
+    const sent = this.port.send({
       type: 'compare:start',
       operationId,
       groupId: this.currentGroupId,
@@ -825,6 +835,16 @@ export class ChatGooseContentApp {
       replyMode: this.nextFastReplyMode,
       replyTone: this.nextReplyTone,
     });
+    if (!sent) {
+      // The port is mid-reconnect; the compare start was dropped, so tear down
+      // the pending compare surface and ask the user to retry.
+      this.activeCompareModel = null;
+      this.pendingCompareFingerprint = null;
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.renderSurfaces();
+      this.renderButtonBar();
+      return;
+    }
     this.resetNextFastReplyMode();
     this.resetNextReplyTone();
   }
