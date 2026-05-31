@@ -272,7 +272,9 @@ function buildDraftSection(draftText: string | undefined): string {
   if (!trimmed) {
     return '';
   }
-  return `## Current Draft\n\n<current_draft>\n${escapeForPrompt(trimmed)}\n</current_draft>`;
+  // The "## Current Draft" heading lives in the template (it is also the cache
+  // anchor); emitting it here too produced a duplicate heading in the prompt.
+  return `<current_draft>\n${escapeForPrompt(trimmed)}\n</current_draft>`;
 }
 
 function applyTemplate(

@@ -81,7 +81,7 @@ function buildDraftSection(draftText: string | undefined): string {
   if (!trimmed) {
     return '';
   }
-  return `## Current Draft\n\n<current_draft>\n${escapeForPrompt(trimmed)}\n</current_draft>`;
+  return `<current_draft>\n${escapeForPrompt(trimmed)}\n</current_draft>`;
 }
 
 function buildSplitReplyInstructions(
@@ -345,6 +345,8 @@ describe('template variable substitution', () => {
     expect(result.user).toContain('## Current Draft');
     expect(result.user).toContain('&lt;babe&gt; &amp; more');
     expect(result.user).not.toContain('<babe>');
+    // The heading must appear exactly once (template anchor only).
+    expect(result.user.match(/## Current Draft/g)).toHaveLength(1);
   });
 
   it('tells improve-draft to convert internal-language drafts into the fan language', () => {
