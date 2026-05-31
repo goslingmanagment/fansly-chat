@@ -225,4 +225,21 @@ describe('Options page personalities editing', () => {
     // the same element must still be mounted.
     expect(section.querySelector('input[data-role="name"]')).toBe(nameInput);
   });
+
+  it('writes the clamped message count back into an unfocused field', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+    expect(deepInput).toBeTruthy();
+
+    deepInput.value = '9999';
+    deepInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(currentState.settings.deepMessageCount).toBe(3000);
+    }, { timeout: 2000 });
+
+    // The field reflects the clamped value, not the rejected 9999.
+    expect(deepInput.value).toBe('3000');
+  });
 });
