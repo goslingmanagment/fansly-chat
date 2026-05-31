@@ -31,8 +31,40 @@ function createVersionTag(): HTMLDivElement {
   return tag;
 }
 
+function renderUnavailable(): void {
+  root.replaceChildren();
+  root.style.padding = '18px';
+  root.style.display = 'grid';
+  root.style.gap = '14px';
+  root.style.position = 'relative';
+
+  const title = document.createElement('div');
+  title.textContent = 'ChatGoose';
+  title.style.fontSize = '22px';
+  title.style.fontWeight = '800';
+
+  const message = document.createElement('div');
+  message.textContent = "Couldn't reach ChatGoose. Reopen this popup after it reconnects.";
+  message.style.color = 'var(--chatgoose-muted)';
+
+  const button = createButton('Open Settings');
+  button.addEventListener('click', () => {
+    void browser.runtime.openOptionsPage();
+  });
+
+  root.append(createVersionTag(), title, message, button);
+}
+
 async function render(): Promise<void> {
-  const status = (await browser.runtime.sendMessage({ type: 'getPopupStatus' })) as PopupStatus;
+  let status: PopupStatus;
+  try {
+    status = (await browser.runtime.sendMessage({ type: 'getPopupStatus' })) as PopupStatus;
+  } catch {
+    // Background worker asleep/reloading — render a usable fallback instead of
+    // leaving the popup blank.
+    renderUnavailable();
+    return;
+  }
 
   root.replaceChildren();
   root.style.padding = '18px';
@@ -50,7 +82,7 @@ async function render(): Promise<void> {
   eyebrow.style.letterSpacing = '0.08em';
   eyebrow.style.color = 'var(--chatgoose-accent-soft)';
   const name = document.createElement('div');
-  name.textContent = status.mappedPersonalityName ?? (status.accountId ? 'Unmapped account' : 'Not connected');
+  name.textContent = status.accountLabel;
   name.style.fontSize = '22px';
   name.style.fontWeight = '800';
   const sub = document.createElement('div');
