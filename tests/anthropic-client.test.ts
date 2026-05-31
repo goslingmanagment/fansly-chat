@@ -129,6 +129,26 @@ describe('AnthropicClient error mapping', () => {
     );
   });
 
+  it('does not classify a non-model "not found" message as model_unavailable', async () => {
+    mockFetchResponse(400, {
+      error: { type: 'invalid_request_error', message: 'requested resource was not found' },
+    });
+    const client = new AnthropicClient();
+    await expect(client.streamMessage(streamArgs())).rejects.toThrow(
+      expect.objectContaining({ key: 'unknown_error', code: 'CG-APP-01' }),
+    );
+  });
+
+  it('does not classify a generic "billing" message as insufficient_balance', async () => {
+    mockFetchResponse(400, {
+      error: { type: 'invalid_request_error', message: 'update your billing address' },
+    });
+    const client = new AnthropicClient();
+    await expect(client.streamMessage(streamArgs())).rejects.toThrow(
+      expect.objectContaining({ key: 'unknown_error', code: 'CG-APP-01' }),
+    );
+  });
+
   it('maps 400 with unparseable body to unknown_error', async () => {
     const response: Partial<Response> = {
       status: 400,
