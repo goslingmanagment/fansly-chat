@@ -118,6 +118,10 @@ export const ROUTE_POLL_INTERVAL_MS = 500;
 export const STREAM_CHUNK_FLUSH_MS = 50;
 export const CONVERSATION_ATTACH_TIMEOUT_MS = 10_000;
 export const CONVERSATION_ATTACH_RETRY_MS = 50;
+// After the fast-attach window lapses, keep re-checking at this slower cadence
+// so a conversation subtree rebuilt later is still re-discovered instead of the
+// UI vanishing until the next route change.
+export const CONVERSATION_ATTACH_SLOW_RETRY_MS = 2_000;
 export const PORT_RECONNECT_DELAYS_MS = [100, 200, 400];
 
 // ─── Feature Thresholds ─────────────────────────────────────────────────
