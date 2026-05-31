@@ -14,6 +14,27 @@ function makeCapture(accountId: string): SessionCaptureResult {
 }
 
 describe('SessionStore', () => {
+  it('refreshes credentials in place so an in-flight reference sees the re-login', () => {
+    const store = new SessionStore();
+
+    const inFlight = store.registerCapture(1, {
+      ...makeCapture('account-1'),
+      authorization: 'Bearer stale',
+    });
+    expect(inFlight.connected).toBe(true);
+
+    // The token expired mid-request, then the same account re-logged in.
+    store.markDisconnected('account-1');
+    expect(inFlight.connected).toBe(false);
+
+    store.registerCapture(1, { ...makeCapture('account-1'), authorization: 'Bearer fresh' });
+
+    // The reference the in-flight request still holds reflects both updates.
+    expect(inFlight.authorization).toBe('Bearer fresh');
+    expect(inFlight.connected).toBe(true);
+    expect(store.getSessionByAccount('account-1')).toBe(inFlight);
+  });
+
   it('drops an orphaned session when a tab is recaptured onto a different account', () => {
     const store = new SessionStore();
 
