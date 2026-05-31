@@ -5,10 +5,12 @@ import {
   FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS,
   FANSLY_REQUEST_TIMEOUT_MS,
   FANSLY_RETRY_DELAYS_MS,
+  FANSLY_RETRY_MAX_BACKOFF_MS,
 } from '../shared/constants.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import { aggregateEarnings } from '../shared/earnings.js';
 import { ChatGooseError } from '../shared/errors.js';
+import { parseRetryAfterMs } from './llm-stream-utils.js';
 import {
   estimateTargetPages,
   extractOldestMessageId,
@@ -311,67 +313,90 @@ export class FanslyClient {
     routeKey: RouteKey,
     signal: AbortSignal,
     optional = false,
-    attempt = 0,
+    retryPolicy: 'default' | 'none' = 'default',
   ): Promise<T> {
-    const controller = new AbortController();
-    const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
-    const composite = AbortSignal.any([signal, controller.signal]);
-    const requestTs = String(Date.now());
+    const maxAttempts = retryPolicy === 'none' ? 0 : FANSLY_RETRY_DELAYS_MS.length;
 
-    try {
-      const headers = new Headers({
-        authorization: session.authorization,
-        'fansly-client-id': session.fanslyClientId,
-        'fansly-client-ts': requestTs,
-        'fansly-session-id': session.fanslySessionId,
-      });
+    // Iterative retry: each attempt scopes its own per-request timeout so they
+    // don't stack across retries (the finally clears it before the next loop).
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController();
+      const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
+      const composite = AbortSignal.any([signal, controller.signal]);
+      const requestTs = String(Date.now());
 
-      const routeCheck = session.routeChecks[routeKey] ?? session.latestCheck;
-      if (routeCheck) {
-        headers.set('fansly-client-check', routeCheck);
-      }
-
-      const response = await fetch(withNgswBypass(url), {
-        method: 'GET',
-        headers,
-        signal: composite,
-        credentials: 'omit',
-      });
-
-      if (response.status === 401 || response.status === 403) {
-        this.sessionStore.markDisconnected(session.accountId);
-        throw new ChatGooseError('session_expired', undefined, { status: response.status });
-      }
-
-      if ((response.status === 429 || response.status >= 500) && attempt < FANSLY_RETRY_DELAYS_MS.length) {
-        await delay(FANSLY_RETRY_DELAYS_MS[attempt]!, signal);
-        return this.fetchEnvelope<T>(url, session, routeKey, signal, optional, attempt + 1);
-      }
-
-      if (!response.ok) {
-        const snippet = await readResponseSnippet(response);
-        throw new ChatGooseError(optional ? 'unknown_error' : 'fansly_server_error', undefined, {
-          status: response.status,
-          responseSnippet: snippet,
+      try {
+        const headers = new Headers({
+          authorization: session.authorization,
+          'fansly-client-id': session.fanslyClientId,
+          'fansly-client-ts': requestTs,
+          'fansly-session-id': session.fanslySessionId,
         });
-      }
 
-      const data = (await response.json()) as { success: boolean; response?: T; error?: string };
-      if (!data.success || data.response === undefined) {
-        throw new ChatGooseError(optional ? 'unknown_error' : 'fansly_server_error');
-      }
+        const routeCheck = session.routeChecks[routeKey] ?? session.latestCheck;
+        if (routeCheck) {
+          headers.set('fansly-client-check', routeCheck);
+        }
 
-      return data.response;
-    } catch (error) {
-      if (error instanceof ChatGooseError) {
-        throw error;
+        const response = await fetch(withNgswBypass(url), {
+          method: 'GET',
+          headers,
+          signal: composite,
+          credentials: 'omit',
+        });
+
+        if (response.status === 401 || response.status === 403) {
+          this.sessionStore.markDisconnected(session.accountId);
+          throw new ChatGooseError('session_expired', undefined, { status: response.status });
+        }
+
+        const retryAfterMs = response.status === 429
+          ? parseRetryAfterMs(response.headers.get('retry-after'))
+          : undefined;
+
+        if ((response.status === 429 || response.status >= 500) && attempt < maxAttempts) {
+          const backoff = retryAfterMs !== undefined
+            ? Math.min(retryAfterMs, FANSLY_RETRY_MAX_BACKOFF_MS)
+            : FANSLY_RETRY_DELAYS_MS[attempt]!;
+          await delay(backoff, signal);
+          continue;
+        }
+
+        if (response.status === 429) {
+          const retryFields = retryAfterMs !== undefined
+            ? { retryAfterMs, retryAtMs: Date.now() + retryAfterMs }
+            : {};
+          throw new ChatGooseError('rate_limited', {
+            details: { status: 429, ...retryFields },
+            ...retryFields,
+          });
+        }
+
+        if (!response.ok) {
+          const snippet = await readResponseSnippet(response);
+          throw new ChatGooseError(optional ? 'unknown_error' : 'fansly_server_error', undefined, {
+            status: response.status,
+            responseSnippet: snippet,
+          });
+        }
+
+        const data = (await response.json()) as { success: boolean; response?: T; error?: string };
+        if (!data.success || data.response === undefined) {
+          throw new ChatGooseError(optional ? 'unknown_error' : 'fansly_server_error');
+        }
+
+        return data.response;
+      } catch (error) {
+        if (error instanceof ChatGooseError) {
+          throw error;
+        }
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw error;
+        }
+        throw new ChatGooseError(optional ? 'unknown_error' : 'network_error');
+      } finally {
+        clearTimeout(timeout);
       }
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw error;
-      }
-      throw new ChatGooseError(optional ? 'unknown_error' : 'network_error');
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -606,7 +631,9 @@ export class FanslyClient {
     url.searchParams.set('correlationAccountId', fanAccountId);
     url.searchParams.set('before', String(windowEndMs));
     url.searchParams.set('after', String(windowStartMs));
-    const rows = await this.fetchEnvelope<EarningsRow[]>(url, session, 'earnings', signal, true);
+    // Best-effort: results are discarded on failure upstream, so don't spend
+    // the retry budget on transient errors.
+    const rows = await this.fetchEnvelope<EarningsRow[]>(url, session, 'earnings', signal, true, 'none');
     if (!Array.isArray(rows) || rows.length === 0) {
       return null;
     }
@@ -627,7 +654,8 @@ export class FanslyClient {
     url.searchParams.set('correlationAccountId', fanAccountId);
     url.searchParams.set('before', String(windowEndMs));
     url.searchParams.set('after', String(windowStartMs));
-    const rows = await this.fetchEnvelope<MonthlyEarningsRow[]>(url, session, 'earnings', signal, true);
+    // Best-effort: discarded on failure upstream, so skip the retry budget.
+    const rows = await this.fetchEnvelope<MonthlyEarningsRow[]>(url, session, 'earnings', signal, true, 'none');
     if (!Array.isArray(rows) || rows.length === 0) {
       return [];
     }
