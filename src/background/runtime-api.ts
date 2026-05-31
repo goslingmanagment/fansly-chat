@@ -75,7 +75,10 @@ export function registerRuntimeApi({
         const legacyAccountId = sessionStore.getAccountIdForTab(tabId);
         const accountId = session?.resolvedAccountId ?? legacyAccountId;
         const context = tabContexts.getOrCreate(tabId);
-        context.groupId = parseGroupIdFromUrl(tabUrl) ?? context.groupId;
+        // Popup reads must not clobber the content script's authoritative route.
+        // Prefer the tracked groupId (kept fresh by tab:routeChanged) and fall
+        // back to the tab URL only when none has been recorded yet.
+        const displayGroupId = context.groupId ?? parseGroupIdFromUrl(tabUrl);
         context.accountId = accountId;
 
         const mappedPersonalityId = resolveMappedPersonalityId(
@@ -93,10 +96,10 @@ export function registerRuntimeApi({
         return {
           tabId,
           accountId,
-          groupId: context.groupId,
+          groupId: displayGroupId,
           hasAvailableSummary: hasAvailableFanSummary(
             state,
-            context.groupId,
+            displayGroupId,
             mappedPersonalityId,
           ),
           connected,
