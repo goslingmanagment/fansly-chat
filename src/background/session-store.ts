@@ -21,21 +21,36 @@ export class SessionStore {
       this.pruneOrphanedSession(previousAccountId);
     }
 
+    // Reuse the existing object identity when the same account re-captures
+    // (e.g. a re-login), refreshing its credentials in place so an in-flight
+    // request holding this reference picks up the new token instead of
+    // continuing to 401 on a detached stale copy.
     const existing = this.sessionsByAccount.get(capture.accountId);
-    const session: SessionTemplate = {
+    const session: SessionTemplate = existing ?? {
       accountId: capture.accountId,
-      resolvedAccountId: existing?.resolvedAccountId ?? null,
-      resolvedUsername: existing?.resolvedUsername ?? null,
-      resolvedDisplayName: existing?.resolvedDisplayName ?? null,
+      resolvedAccountId: null,
+      resolvedUsername: null,
+      resolvedDisplayName: null,
       authorization: capture.authorization,
       fanslyClientId: capture.fanslyClientId,
       fanslySessionId: capture.fanslySessionId,
       latestTs: capture.fanslyClientTs,
       latestCheck: capture.fanslyClientCheck,
-      routeChecks: { ...(existing?.routeChecks ?? {}) },
+      routeChecks: {},
       lastSeenAt: Date.now(),
       connected: true,
     };
+
+    if (existing) {
+      // Preserve resolved identity and accumulated routeChecks; refresh creds.
+      existing.authorization = capture.authorization;
+      existing.fanslyClientId = capture.fanslyClientId;
+      existing.fanslySessionId = capture.fanslySessionId;
+      existing.latestTs = capture.fanslyClientTs;
+      existing.latestCheck = capture.fanslyClientCheck;
+      existing.lastSeenAt = Date.now();
+      existing.connected = true;
+    }
 
     if (capture.routeKey && capture.fanslyClientCheck) {
       session.routeChecks[capture.routeKey] = capture.fanslyClientCheck;
@@ -89,10 +104,9 @@ export class SessionStore {
       return;
     }
 
-    this.sessionsByAccount.set(accountId, {
-      ...existing,
-      connected: false,
-    });
+    // Mutate in place so an in-flight request holding this reference observes
+    // the disconnect instead of continuing against a detached stale copy.
+    existing.connected = false;
   }
 
   forgetTab(tabId: number): void {
