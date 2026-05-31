@@ -1,4 +1,8 @@
-import { CONVERSATION_ATTACH_RETRY_MS, CONVERSATION_ATTACH_TIMEOUT_MS } from '../shared/constants.js';
+import {
+  CONVERSATION_ATTACH_RETRY_MS,
+  CONVERSATION_ATTACH_SLOW_RETRY_MS,
+  CONVERSATION_ATTACH_TIMEOUT_MS,
+} from '../shared/constants.js';
 import { getActiveConversationDom } from './conversation-dom.js';
 import type { ActiveConversationDom } from './conversation-dom.js';
 
@@ -116,6 +120,15 @@ export class ConversationMountController {
       return;
     }
 
+    // Fast cadence inside the attach window; once it lapses, fall back to a
+    // slow poll that keeps running until the conversation is re-discovered or
+    // the route changes, rather than giving up and leaving the UI detached.
+    const pastDeadline =
+      this.retryDeadlineMs !== null && Date.now() >= this.retryDeadlineMs;
+    const interval = pastDeadline
+      ? CONVERSATION_ATTACH_SLOW_RETRY_MS
+      : CONVERSATION_ATTACH_RETRY_MS;
+
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = null;
 
@@ -127,13 +140,8 @@ export class ConversationMountController {
         return;
       }
 
-      if (this.retryDeadlineMs !== null && Date.now() >= this.retryDeadlineMs) {
-        this.retryDeadlineMs = null;
-        return;
-      }
-
       this.scheduleRetry(sessionId);
-    }, CONVERSATION_ATTACH_RETRY_MS);
+    }, interval);
   }
 
   private startObserver(sessionId: number): void {
