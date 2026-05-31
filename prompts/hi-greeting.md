@@ -1,10 +1,5 @@
 You are writing a DM to a fan on Fansly to start or continue a conversation. Stay fully in character as the model from the system prompt.
 
-## Fan Profile
-
-Fan username: **{fanDisplayName}**
-{fanBioSection}
-
 ## Read the Room FIRST
 
 Before writing anything, check the transcript below:
@@ -51,6 +46,11 @@ Your message must make the fan want to reply. Use one or more of these technique
 <transcript>
 {transcript}
 </transcript>
+
+## Fan Profile
+
+Fan username: **{fanDisplayName}**
+{fanBioSection}
 
 ## Your Task
 

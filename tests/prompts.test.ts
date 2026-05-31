@@ -315,6 +315,26 @@ describe('prompt caching blocks', () => {
     expect(result.userBlocks[2]?.text).toContain('## Your Task');
     expect(result.userBlocks[2]?.text).not.toContain('## Current Draft');
   });
+
+  it('keeps hi-greeting per-fan data out of the 1h-cached static prefix', () => {
+    // Use a token that does not appear as an example anywhere in the template.
+    const fanToken = 'mxqfan42unique';
+    const result = buildPrompt(buildTestInput({
+      feature: 'hi-greeting',
+      fanDisplayName: fanToken,
+      transcript: 'Model: hey',
+    }));
+
+    expect(result.userBlocks).toHaveLength(3);
+    // The 1h-cached prefix must be fan-agnostic or the breakpoint can never be
+    // reused across fans (it is content-keyed by exact prefix).
+    expect(result.userBlocks[0]?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    expect(result.userBlocks[0]?.text).not.toContain(fanToken);
+    expect(result.userBlocks[0]?.text).not.toContain('## Fan Profile');
+    // The fan profile rides in the ephemeral middle block with the transcript.
+    expect(result.userBlocks[1]?.text).toContain('## Fan Profile');
+    expect(result.userBlocks[1]?.text).toContain(fanToken);
+  });
 });
 
 // ─── Template variable substitution ─────────────────────────────────────
