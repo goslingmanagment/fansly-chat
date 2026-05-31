@@ -49,7 +49,14 @@ export class PortClient {
     }, delay);
   }
 
-  send(message: ContentPortMessage): void {
+  /**
+   * Posts a message to the background port. Returns false when the port is
+   * disconnected (mid-reconnect) and the message was dropped. tab:init/
+   * tab:routeChanged are persisted in lastInit and replayed on reconnect, so a
+   * dropped one is recovered; other messages (operation:start, compare:start,
+   * cancels) are lost, and the caller must handle the false return.
+   */
+  send(message: ContentPortMessage): boolean {
     if (message.type === 'tab:init') {
       this.lastInit = message;
     } else if (message.type === 'tab:routeChanged' && this.lastInit) {
@@ -59,6 +66,10 @@ export class PortClient {
         routeNonce: message.routeNonce,
       };
     }
-    this.port?.postMessage(message);
+    if (!this.port) {
+      return false;
+    }
+    this.port.postMessage(message);
+    return true;
   }
 }
