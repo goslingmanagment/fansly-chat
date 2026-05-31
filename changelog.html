@@ -396,7 +396,7 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.3.14</span>
+      <span class="nav-version">v1.4.0</span>
     </div>
   </div>
 </nav>
@@ -412,11 +412,54 @@
 
 <div class="timeline">
 
+  <!-- 1.4.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.4.0</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Большой проход по code review всей кодовой базы, подготовка к 2.0 релизу: устранены утечки, гонки и слабые места в надёжности в background, content и UI. Новых фич нет — только стабильность и корректность.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Rate limit от Fansly (429) обрабатывается корректно: читается <code>Retry-After</code> и показывается понятная ошибка про лимит со временем повтора</li>
+          <li>Переход между диалогами во время Scan / Summary / Review / Help больше не оставляет зависший overlay и не кэширует результат прошлого фана в новом диалоге</li>
+          <li>Клик по фиче в момент переподключения к фону больше не оставляет кнопку в вечной загрузке</li>
+          <li>Кнопки и overlay восстанавливаются, даже если Fansly пересобрал DOM диалога с задержкой</li>
+          <li>Редактирование личности больше не сбрасывает фокус и курсор; удаление не воскрешает личность из-за отложенного сохранения</li>
+          <li>Поле количества сообщений показывает реально сохранённое (обрезанное) значение</li>
+          <li>Одноимённые личности различаются в списке привязок по короткому id</li>
+          <li>Попап не открывается пустым, если фон временно недоступен</li>
+          <li>Реплики со словом «instructions» (например JOI) больше не вырезаются фильтром meta-leak</li>
+          <li>Активная подписка с прошедшей датой окончания не показывается как «заканчивается через N дней»</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Устранены неограниченные утечки <code>Set</code> отменённых operation id (feature и compare)</li>
+          <li>LLM-стримы освобождают reader и HTTP-тело на всех путях выхода, включая throw из середины цикла</li>
+          <li>SSE-парсинг устойчив к CRLF; reasoning-колбэки OpenRouter не срабатывают для отклоняемых chunk-ов</li>
+          <li>Классификация ошибок провайдеров не матчит широкие подстроки <code>billing</code> / <code>not found</code></li>
+          <li>Конкурентные старты операций сериализуются синхронным резервированием вкладки (TOCTOU)</li>
+          <li>Fansly-клиент: итеративные ретраи, <code>Retry-After</code> → <code>rate_limited</code>, кап пагинации, общая retry-политика</li>
+          <li>Сессии обновляют креды и disconnect in-place, чтобы in-flight пагинация подхватывала релогин</li>
+          <li>Миграция storage гардит <code>personalities</code> / <code>accountMappings</code>; hi-greeting восстановил prompt caching</li>
+          <li>Добавлено 22 regression-теста (745 всего); typecheck и build чистые</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.3.14 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.14</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -1192,7 +1235,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.3.14 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
+  <p>v1.4.0 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
 </footer>
 
 </body>
