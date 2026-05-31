@@ -48,7 +48,7 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   rate_limited: {
     key: 'rate_limited',
     code: 'CG-API-01',
-    message: 'Anthropic rate limit reached.',
+    message: 'Rate limit reached.',
     description: 'ChatGoose will retry if the wait is short; otherwise run it again later.',
   },
   insufficient_balance: {

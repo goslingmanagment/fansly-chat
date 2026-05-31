@@ -81,6 +81,9 @@ export const FANSLY_PAGE_LIMIT = 25;
 export const FANSLY_REQUEST_TIMEOUT_MS = 30_000;
 export const FANSLY_PAGINATION_DELAY_MS = 300;
 export const FANSLY_RETRY_DELAYS_MS = [1000, 2000, 4000];
+// Cap on how long a Retry-After header may delay a single retry, so a long
+// server-requested wait surfaces as rate_limited instead of stalling the op.
+export const FANSLY_RETRY_MAX_BACKOFF_MS = 5_000;
 export const FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT = 10;
 export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CONCURRENCY = 3;
 export const FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS = 3_000;

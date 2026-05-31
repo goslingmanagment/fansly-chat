@@ -239,6 +239,26 @@ describe('FanslyClient getMonthlyEarnings', () => {
     expect(url).toContain('correlationAccountId=fan-1');
   });
 
+  it('throws rate_limited with Retry-After on a 429 and does not retry optional earnings', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () => new Response('slow down', {
+      status: 429,
+      headers: { 'retry-after': '30' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    let error: { key?: string; retryAfterMs?: number } | undefined;
+    await client
+      .getMonthlyEarnings('fan-1', 0, 1000, session, new AbortController().signal)
+      .catch((e) => {
+        error = e as { key?: string; retryAfterMs?: number };
+      });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(error?.key).toBe('rate_limited');
+    expect(error?.retryAfterMs).toBe(30_000);
+  });
+
   it('returns empty array when API returns no data', async () => {
     const { client, session } = createClientHarness();
     const fetchMock = vi.fn(async () => jsonSuccessResponse([]));
