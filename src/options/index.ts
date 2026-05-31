@@ -10,9 +10,9 @@ import {
 } from '../shared/errors.js';
 import { supportsModelReasoningConfig } from '../shared/model-capabilities.js';
 import { isOpenRouterModelSelection } from '../shared/model-registry.js';
+import { sendRuntimeRequest } from '../shared/protocol.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type {
-  AgencyHubConnectionTestResponse,
   ModelSelectableFeatureType,
   Personality,
   ReasoningEffort,
@@ -260,7 +260,7 @@ async function render(): Promise<void> {
   renderCleanup = null;
 
   const cleanupTasks: Array<() => void> = [];
-  const sessions = (await browser.runtime.sendMessage({ type: 'getSessionsSnapshot' })) as SessionSnapshotEntry[];
+  const sessions = await sendRuntimeRequest('getSessionsSnapshot');
   const state = await loadStorageState();
   const sessionsByAccountId = buildSessionLookup(sessions);
 
@@ -527,13 +527,12 @@ async function render(): Promise<void> {
         await persistAgencyHubSettings();
       }
 
-      const response = await browser.runtime.sendMessage({
-        type: 'testAgencyHubConnection',
+      const response = await sendRuntimeRequest('testAgencyHubConnection', {
         settings: {
           agencyHubBaseUrl: agencyHubUrlInput.value,
           agencyHubApiKey: agencyHubKeyInput.value.trim(),
         },
-      }) as AgencyHubConnectionTestResponse;
+      });
 
       if (version !== agencyHubConnectionVersion) {
         return;

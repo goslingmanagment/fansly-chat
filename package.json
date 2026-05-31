@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "node esbuild.config.mjs",
+    "check": "npm run typecheck && npm test && npm run build",
     "watch": "node esbuild.config.mjs --watch",
     "test": "vitest run",
     "test:watch": "vitest",

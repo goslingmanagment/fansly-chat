@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import type { AgencyHubConnectionTestRequest, SessionTemplate } from '../src/shared/types.js';
+import type { SessionTemplate } from '../src/shared/types.js';
 
 let mockStorage: Record<string, unknown> = {};
 let onMessageListener:
-  | ((message: { type: string; tabId?: number; settings?: AgencyHubConnectionTestRequest['settings'] }) => Promise<unknown>)
+  | ((message: unknown) => Promise<unknown>)
   | undefined;
 
 function makeCapture(accountId: string) {
@@ -77,7 +77,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     },
     runtime: {
       onMessage: {
-        addListener: vi.fn((listener: (message: { type: string; tabId?: number; settings?: AgencyHubConnectionTestRequest['settings'] }) => Promise<unknown>) => {
+        addListener: vi.fn((listener: (message: unknown) => Promise<unknown>) => {
           onMessageListener = listener;
         }),
       },
@@ -192,6 +192,30 @@ describe('runtime-api getSessionsSnapshot', () => {
       mappedOffline: 'p1',
     });
     expect(mockStorage.accountAliases).toEqual({});
+  });
+});
+
+describe('runtime-api boundary guard', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('ignores unknown or malformed runtime requests', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+
+    const { tabsGet, tabsQuery } = await installRuntimeApiHarness(fanslyClient);
+
+    await expect(onMessageListener?.({ type: 'unknown' })).resolves.toBeUndefined();
+    await expect(onMessageListener?.({ type: 'getPopupStatus', tabId: '1' })).resolves.toBeUndefined();
+
+    expect(tabsGet).not.toHaveBeenCalled();
+    expect(tabsQuery).not.toHaveBeenCalled();
+    expect(fanslyClient.getAuthenticatedAccount).not.toHaveBeenCalled();
   });
 });
 

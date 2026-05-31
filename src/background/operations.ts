@@ -56,6 +56,7 @@ import {
   isAnthropicModelSelection,
 } from '../shared/model-registry.js';
 import { buildPromptRequest } from '../shared/prompts.js';
+import { isContentPortMessage } from '../shared/protocol.js';
 import {
   normalizeReplyParts,
   normalizeSingleReplyPart,
@@ -482,7 +483,9 @@ export class OperationCoordinator {
 
     this.portsByTabId.set(tabId, port);
     port.onMessage.addListener((message) => {
-      void this.handlePortMessage(tabId, message as ContentPortMessage);
+      if (isContentPortMessage(message)) {
+        void this.handlePortMessage(tabId, message);
+      }
     });
     port.onDisconnect.addListener(() => {
       if (this.portsByTabId.get(tabId) !== port) return;

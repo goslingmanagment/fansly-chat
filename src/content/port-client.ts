@@ -1,4 +1,5 @@
 import { PORT_RECONNECT_DELAYS_MS } from '../shared/constants.js';
+import { isBackgroundPortMessage } from '../shared/protocol.js';
 import type { BackgroundPortMessage, ContentPortMessage } from '../shared/types.js';
 
 interface PortClientCallbacks {
@@ -21,7 +22,9 @@ export class PortClient {
 
     this.port = browser.runtime.connect({ name: 'chatgoose-content' });
     this.port.onMessage.addListener((message) => {
-      this.callbacks.onMessage(message as BackgroundPortMessage);
+      if (isBackgroundPortMessage(message)) {
+        this.callbacks.onMessage(message);
+      }
     });
     this.port.onDisconnect.addListener(() => {
       this.port = null;

@@ -1,4 +1,5 @@
 import popupStyles from './styles.css';
+import { sendRuntimeRequest } from '../shared/protocol.js';
 import type { PopupStatus } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatgoose-popup-root');
@@ -58,7 +59,7 @@ function renderUnavailable(): void {
 async function render(): Promise<void> {
   let status: PopupStatus;
   try {
-    status = (await browser.runtime.sendMessage({ type: 'getPopupStatus' })) as PopupStatus;
+    status = await sendRuntimeRequest('getPopupStatus');
   } catch {
     // Background worker asleep/reloading — render a usable fallback instead of
     // leaving the popup blank.
