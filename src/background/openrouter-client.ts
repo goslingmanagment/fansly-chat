@@ -259,11 +259,12 @@ function buildOpenRouterError(
   if (
     status === 402 ||
     code === '402' ||
+    // Bare 'billing' is excluded — it over-matches; real payment errors are a
+    // 402 status/code or one of the specific phrases below.
     matchesMessage(normalizedMessage, [
       'insufficient credits',
       'insufficient balance',
       'payment required',
-      'billing',
     ])
   ) {
     return new ChatGooseError('insufficient_balance', { details });
@@ -276,13 +277,15 @@ function buildOpenRouterError(
   if (
     status === 404 ||
     type === 'not_found_error' ||
+    // Bare 'not found' is excluded — it over-matches and would wrongly trigger
+    // the model-fallback retry; unknown models surface as a 404 or one of the
+    // model-specific phrases below.
     matchesMessage(normalizedMessage, [
       'model not found',
       'invalid model',
       'not a valid model',
       'does not exist',
       'is unavailable',
-      'not found',
     ])
   ) {
     return new ChatGooseError('model_unavailable', { details });

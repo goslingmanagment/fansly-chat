@@ -133,11 +133,13 @@ function isInsufficientBalanceError(type: string, message: string): boolean {
   return (
     type === 'insufficient_balance_error' ||
     type === 'payment_required_error' ||
+    // Bare 'billing' is intentionally excluded — it over-matches unrelated
+    // messages. Real payment errors carry a structured type or one of the
+    // specific phrases below.
     matchesMessage(message, [
       'insufficient balance',
       'insufficient credits',
       'credit balance is too low',
-      'billing',
       'payment required',
     ])
   );
@@ -146,12 +148,14 @@ function isInsufficientBalanceError(type: string, message: string): boolean {
 function isModelUnavailableError(type: string, message: string): boolean {
   return (
     type === 'not_found_error' ||
+    // Bare 'not found' is intentionally excluded — it over-matches and would
+    // wrongly trigger the model-fallback retry. Unknown models surface as
+    // not_found_error or one of the model-specific phrases below.
     matchesMessage(message, [
       'model not found',
       'does not exist',
       'is unavailable',
       'deprecated',
-      'not found',
     ])
   );
 }
