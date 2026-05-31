@@ -22,6 +22,10 @@ import {
 } from '../shared/constants.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
+  buildApiKeyReadyByFeature,
+  buildModelProviderByFeature,
+} from '../shared/feature-readiness.js';
+import {
   aggregateMonthlyEarnings,
   formatFanSpendingData,
   monthWindowMs,
@@ -193,34 +197,6 @@ interface OperationPromptRequestArgs {
   replyMode?: OperationStartPayload['replyMode'];
   replyTone?: OperationStartPayload['replyTone'];
   promptCachingEnabled: boolean;
-}
-
-function buildModelProviderByFeature(
-  settings: Settings,
-): TabUiState['modelProviderByFeature'] {
-  return Object.fromEntries(
-    Object.entries(settings.featureModels).flatMap(([feature, modelId]) => {
-      const provider = getModelEntry(modelId)?.provider;
-      return provider ? [[feature, provider]] : [];
-    }),
-  ) as TabUiState['modelProviderByFeature'];
-}
-
-function buildApiKeyReadyByFeature(
-  settings: Settings,
-): TabUiState['apiKeyReadyByFeature'] {
-  return Object.fromEntries(
-    Object.entries(settings.featureModels).map(([feature, modelId]) => {
-      const provider = getModelEntry(modelId)?.provider;
-      if (provider === 'anthropic') {
-        return [feature, Boolean(settings.claudeApiKey)];
-      }
-      if (provider === 'openrouter') {
-        return [feature, Boolean(settings.openRouterApiKey)];
-      }
-      return [feature, Boolean(settings.claudeApiKey || settings.openRouterApiKey)];
-    }),
-  ) as TabUiState['apiKeyReadyByFeature'];
 }
 
 function buildLlmSpendPayload(

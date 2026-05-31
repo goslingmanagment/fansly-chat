@@ -1,13 +1,14 @@
 import { AGENCY_HUB_PREFETCH_TIMEOUT_MS } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError } from '../shared/errors.js';
-import { getModelEntry } from '../shared/model-registry.js';
+import {
+  buildApiKeyReadyByFeature,
+  buildModelProviderByFeature,
+} from '../shared/feature-readiness.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import type {
   AgencyHubConnectionTestRequest,
   PopupStatus,
-  Settings,
-  TabUiState,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import { FanslyClient } from './fansly-client.js';
@@ -17,34 +18,6 @@ import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
-
-function buildModelProviderByFeature(
-  settings: Settings,
-): TabUiState['modelProviderByFeature'] {
-  return Object.fromEntries(
-    Object.entries(settings.featureModels).flatMap(([feature, modelId]) => {
-      const provider = getModelEntry(modelId)?.provider;
-      return provider ? [[feature, provider]] : [];
-    }),
-  ) as TabUiState['modelProviderByFeature'];
-}
-
-function buildApiKeyReadyByFeature(
-  settings: Settings,
-): TabUiState['apiKeyReadyByFeature'] {
-  return Object.fromEntries(
-    Object.entries(settings.featureModels).map(([feature, modelId]) => {
-      const provider = getModelEntry(modelId)?.provider;
-      if (provider === 'anthropic') {
-        return [feature, Boolean(settings.claudeApiKey)];
-      }
-      if (provider === 'openrouter') {
-        return [feature, Boolean(settings.openRouterApiKey)];
-      }
-      return [feature, Boolean(settings.claudeApiKey || settings.openRouterApiKey)];
-    }),
-  ) as TabUiState['apiKeyReadyByFeature'];
-}
 
 export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
