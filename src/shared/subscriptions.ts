@@ -133,8 +133,15 @@ function formatWithSubscription(
 
   if (isActive(sub.status) && sub.endsAtIso) {
     const endsAtMs = new Date(sub.endsAtIso).getTime();
-    const daysUntilEnd = daysBetween(now, endsAtMs);
-    lines.push(`Current period ends: ${formatShortDate(endsAtMs)} (in ${daysUntilEnd} days)`);
+    if (endsAtMs >= now) {
+      const daysUntilEnd = Math.floor((endsAtMs - now) / MS_PER_DAY);
+      lines.push(`Current period ends: ${formatShortDate(endsAtMs)} (in ${daysUntilEnd} days)`);
+    } else {
+      // Fansly data lag can leave an active status with a past endsAt; don't
+      // report it as a future date via the absolute-value daysBetween.
+      const daysSinceEnd = Math.floor((now - endsAtMs) / MS_PER_DAY);
+      lines.push(`Current period ends: ${formatShortDate(endsAtMs)} (ended ${daysSinceEnd} days ago — period lapsed)`);
+    }
   }
 
   // Auto-renew with churn signal

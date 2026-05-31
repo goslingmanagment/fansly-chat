@@ -61,6 +61,13 @@ describe('formatFanSubscriptionData', () => {
     expect(result).toContain('Auto-renew: On (renews at $10.00/month)');
   });
 
+  it('reports a lapsed period instead of a phantom future end date', () => {
+    const lapsed = makeSub({ endsAtIso: new Date(NOW - 4 * DAY_MS).toISOString() });
+    const result = formatFanSubscriptionData(lapsed, makeTier(), NOW);
+    expect(result).toContain('ended 4 days ago — period lapsed');
+    expect(result).not.toContain('in 4 days');
+  });
+
   it('shows source field', () => {
     const result = formatFanSubscriptionData(makeSub(), null, NOW);
     expect(result).toContain('Source: /api/v1/messaging/groups');
