@@ -295,6 +295,28 @@ describe('OpenRouterClient', () => {
     });
   });
 
+  it('parses events separated by CRLF blank lines', async () => {
+    const onText = vi.fn();
+    mockFetchResponse(200, undefined, {
+      bodyStream: [
+        'event: message_start',
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"crlf"}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\r\n'),
+    });
+
+    const rawText = await new OpenRouterClient().streamMessage(streamArgs({ onText }));
+
+    expect(rawText).toBe('crlf');
+    expect(onText).toHaveBeenCalledWith('crlf');
+  });
+
   it('reports Anthropic message stop reasons from the OpenRouter stream', async () => {
     const onStopReason = vi.fn();
     mockFetchResponse(200, undefined, {

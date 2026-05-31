@@ -288,7 +288,9 @@ export class AnthropicClient {
         const { done, value } = await reader.read();
         buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
-        const blocks = buffer.split('\n\n');
+        // Split on blank-line event boundaries, tolerating CRLF (\r\n\r\n)
+        // from intermediary proxies as well as LF-only separators.
+        const blocks = buffer.split(/\r?\n\r?\n/);
         buffer = blocks.pop() ?? '';
 
         for (const block of blocks) {
