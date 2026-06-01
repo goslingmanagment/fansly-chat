@@ -396,7 +396,7 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.4.0</span>
+      <span class="nav-version">v1.4.1</span>
     </div>
   </div>
 </nav>
@@ -412,11 +412,46 @@
 
 <div class="timeline">
 
+  <!-- 1.4.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.4.1</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Технический релиз вслед за 1.4.0 на пути к 2.0: код разнесён по модулям с явными границами, на входящих сообщениях добавлена валидация, подключён CI, а кэш Fan Summary стал аккуратнее. Новых фич и изменений в работе кнопок нет.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Главное</div>
+        <ul class="changes-list">
+          <li>Fan Summary: битые/нечитаемые записи кэша вычищаются при загрузке, а не копятся в <code>storage</code></li>
+          <li>При удалении личности убираются все связанные с ней саммари, включая записи, что ссылаются на неё по <code>personalityId</code> (раньше оставались «осиротевшие»)</li>
+          <li>При переполнении квоты <code>storage</code> сначала освобождаются невалидные записи кэша, и только потом самые старые</li>
+          <li>Расширение устойчивее к неожиданным внутренним сообщениям: входящие runtime/port-сообщения проверяются по форме и отбрасываются, если не подходят</li>
+          <li>В README явно описано, какие данные уходят наружу: Agency Hub — строго opt-in, а usage-метрики не содержат текст переписки, промптов, ключей и Fansly-сессии</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Новый <code>shared/protocol.ts</code> с type-guard'ами; <code>runtime-api.ts</code> и <code>port-client.ts</code> валидируют сообщения на границе доверия вместо <code>as</code></li>
+          <li>Жизненный цикл операций вынесен в <code>OperationRegistry</code>, <code>OperationTimeoutController</code>, <code>operation-cleanup</code>, <code>conversation-context-loader</code></li>
+          <li>Frontend разнесён по границам: <code>surface-planner</code> (inline vs overlay как чистая функция), <code>ui/view-helpers</code>; <code>options/index.ts</code> распилен на <code>agency-hub-settings</code>, <code>dom</code>, <code>sessions</code></li>
+          <li>Граница storage подчищена: <code>storage-coordinator</code>, <code>migrations</code>, <code>summary-cache</code> (новые хелперы чистки/эвикции кэша)</li>
+          <li>Добавлен CI (<code>.github/workflows/ci.yml</code>) и скрипт <code>npm run check</code> (typecheck + test + build)</li>
+          <li>Юнит-тесты на новые модули; 783 теста всего (779 проходят, 4 skipped), typecheck и build чистые</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.4.0 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.4.0</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

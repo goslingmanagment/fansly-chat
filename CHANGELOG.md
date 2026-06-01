@@ -1,5 +1,26 @@
 # Что нового
 
+## 1.4.1
+
+Технический релиз вслед за 1.4.0 на пути к 2.0: код разнесён по модулям с явными границами, на входящих сообщениях добавлена валидация, подключён CI, а кэш Fan Summary стал аккуратнее. Новых фич и изменений в работе кнопок нет.
+
+### Главное
+
+- Fan Summary: битые/нечитаемые записи кэша вычищаются при загрузке, а не копятся в `storage`.
+- При удалении личности теперь убираются все связанные с ней саммари — включая записи, которые ссылаются на личность по `personalityId` (раньше могли оставаться «осиротевшие» записи).
+- При переполнении квоты `storage` сначала освобождаются именно невалидные записи кэша, и только потом самые старые.
+- Расширение устойчивее к неожиданным внутренним сообщениям: входящие runtime- и port-сообщения проверяются по форме и отбрасываются, если не подходят, а не исполняются «как есть».
+- В README явно описано, какие данные уходят наружу: Agency Hub — строго opt-in, а usage-метрики не содержат текст переписки, промптов, API-ключей и Fansly-сессии.
+
+### Технически
+
+- Новый `shared/protocol.ts` с type-guard'ами для runtime/port-сообщений; `runtime-api.ts` и `port-client.ts` валидируют сообщения на границе доверия вместо приведения через `as`.
+- Жизненный цикл операций вынесен из `operations.ts` в отдельные модули: `OperationRegistry` (резервирование вкладки, активные feature/compare, наборы отменённых id), `OperationTimeoutController` (keyed-таймауты на `AbortController`), `operation-cleanup`, `conversation-context-loader`.
+- Frontend разнесён по границам: `surface-planner` (inline vs overlay как чистая функция), `ui/view-helpers`, а `options/index.ts` распилен на `agency-hub-settings`, `dom`, `sessions`.
+- Граница storage подчищена: `storage-coordinator`, `migrations`, `summary-cache`; добавлены хелперы `getInvalidSummaryCacheKeys`, `getSummaryCacheKeysReferencingPersonality`, `getSummaryCacheEvictionKeys`.
+- Добавлен CI (`.github/workflows/ci.yml`) и скрипт `npm run check` (typecheck + test + build) — тот же `check` гоняется на каждый PR.
+- Добавлены юнит-тесты на новые модули: `protocol`, `operation-registry`, `operation-timeouts`, `conversation-context-loader`, `surface-planner`, `view-helpers`, `port-client`; 783 теста всего (779 проходят, 4 skipped), typecheck и build чистые.
+
 ## 1.4.0
 
 Большой проход по code review всей кодовой базы, подготовка к 2.0 релизу: устранены утечки, гонки и слабые места в надёжности в background, content и UI. Новых фич нет — только стабильность и корректность.
