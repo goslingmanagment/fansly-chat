@@ -1,5 +1,29 @@
 import optionsStyles from './styles.css';
 import {
+  appendAgencyHubMeta,
+  buildAgencyHubConnectionSignature,
+  buildAgencyHubPermissionScopeNote,
+  formatAgencyHubError,
+  getAgencyHubPermissionCheck,
+  hasAgencyHubConnectionInputs,
+  type AgencyHubConnectionFeedback,
+  type AgencyHubPermissionFeedback,
+} from './agency-hub-settings.js';
+import {
+  createButton,
+  createSection,
+  createVersionTag,
+  debounce,
+  injectStyles,
+  labeledField,
+} from './dom.js';
+import {
+  buildConnectionRows,
+  buildSessionLookup,
+  formatAccountHeading,
+  formatAccountMeta,
+} from './sessions.js';
+import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
@@ -16,8 +40,6 @@ import type {
   ModelSelectableFeatureType,
   Personality,
   ReasoningEffort,
-  SessionSnapshotEntry,
-  UserFacingError,
 } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatgoose-options-root');
@@ -29,231 +51,9 @@ if (!(rootElement instanceof HTMLElement)) {
 
 const root = rootElement;
 
-function injectStyles(): void {
-  const style = document.createElement('style');
-  style.textContent = optionsStyles;
-  document.head.append(style);
-}
-
-function createSection(title: string, description?: string): HTMLElement {
-  const wrapper = document.createElement('section');
-  wrapper.style.display = 'grid';
-  wrapper.style.gap = '12px';
-  wrapper.style.padding = '20px';
-  wrapper.style.margin = '20px';
-  wrapper.style.borderRadius = '24px';
-  wrapper.style.border = '1px solid rgba(255,255,255,0.08)';
-  wrapper.style.background = 'rgba(12, 21, 29, 0.88)';
-
-  const heading = document.createElement('div');
-  heading.style.display = 'grid';
-  heading.style.gap = '4px';
-
-  const titleNode = document.createElement('h2');
-  titleNode.textContent = title;
-  titleNode.style.margin = '0';
-
-  heading.append(titleNode);
-  if (description) {
-    const copy = document.createElement('div');
-    copy.textContent = description;
-    copy.style.color = 'var(--chatgoose-muted)';
-    copy.style.fontSize = '14px';
-    heading.append(copy);
-  }
-
-  wrapper.append(heading);
-  return wrapper;
-}
-
-function labeledField(labelText: string, input: HTMLElement): HTMLElement {
-  const wrapper = document.createElement('label');
-  wrapper.style.display = 'grid';
-  wrapper.style.gap = '8px';
-  const label = document.createElement('span');
-  label.textContent = labelText;
-  label.style.fontWeight = '700';
-  wrapper.append(label, input);
-  return wrapper;
-}
-
-function createButton(label: string, secondary = false, danger = false): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = `chatgoose-button${secondary ? ' chatgoose-button-secondary' : ''}${danger ? ' chatgoose-button-danger' : ''}`;
-  button.textContent = label;
-  return button;
-}
-
-function createVersionTag(): HTMLDivElement {
-  const tag = document.createElement('div');
-  tag.className = 'chatgoose-version-tag';
-  tag.textContent = `v ${extensionVersion}`;
-  return tag;
-}
-
-type Debounced<T extends (...args: never[]) => void> = T & { cancel: () => void };
-
-function debounce<T extends (...args: never[]) => void>(callback: T, waitMs: number): Debounced<T> {
-  let timer: number | null = null;
-  const debounced = ((...args: never[]) => {
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-    timer = window.setTimeout(() => {
-      timer = null;
-      callback(...args);
-    }, waitMs);
-  }) as Debounced<T>;
-  debounced.cancel = () => {
-    if (timer !== null) {
-      window.clearTimeout(timer);
-      timer = null;
-    }
-  };
-  return debounced;
-}
-
-function getNormalizedUsername(username: string | null | undefined): string | null {
-  const normalized = username?.trim().replace(/^@+/, '') ?? '';
-  return normalized || null;
-}
-
-function formatAccountHeading(accountId: string, session: SessionSnapshotEntry | null | undefined): string {
-  const displayName = session?.displayName?.trim() || null;
-  const username = getNormalizedUsername(session?.username);
-
-  if (displayName && username && displayName.replace(/^@+/, '') !== username) {
-    return `${displayName} (@${username})`;
-  }
-  if (username) {
-    return `@${username}`;
-  }
-  if (displayName) {
-    return displayName;
-  }
-  return session?.resolvedAccountId ?? accountId;
-}
-
-function formatAccountMeta(accountId: string, session: SessionSnapshotEntry | null | undefined): string {
-  const resolvedAccountId = session?.resolvedAccountId ?? accountId;
-  return `Account ID: ${resolvedAccountId}`;
-}
-
-function buildSessionLookup(sessions: SessionSnapshotEntry[]): Map<string, SessionSnapshotEntry> {
-  const lookup = new Map<string, SessionSnapshotEntry>();
-
-  sessions.forEach((session) => {
-    lookup.set(session.legacyAccountId, session);
-    if (session.resolvedAccountId) {
-      lookup.set(session.resolvedAccountId, session);
-    }
-  });
-
-  return lookup;
-}
-
-function buildConnectionRows(
-  sessions: SessionSnapshotEntry[],
-): Array<{ accountId: string; session: SessionSnapshotEntry }> {
-  const deduped = new Map<string, SessionSnapshotEntry>();
-
-  sessions.forEach((session) => {
-    const canonicalAccountId = session.resolvedAccountId ?? session.legacyAccountId;
-    const existing = deduped.get(canonicalAccountId);
-    if (!existing || session.lastSeenAt > existing.lastSeenAt) {
-      deduped.set(canonicalAccountId, session);
-    }
-  });
-
-  return Array.from(deduped.entries()).map(([accountId, session]) => ({
-    accountId,
-    session,
-  }));
-}
-
-interface AgencyHubPermissionCheckResult {
-  granted: boolean;
-  errorMessage: string | null;
-}
-
-type AgencyHubPermissionFeedback =
-  | { kind: 'denied'; originPattern: string }
-  | { kind: 'request_error'; originPattern: string; errorMessage: string }
-  | { kind: 'unsupported'; originPattern: string };
-
-type AgencyHubConnectionFeedback =
-  | { kind: 'idle' }
-  | { kind: 'pending' }
-  | { kind: 'testing' }
-  | { kind: 'connected'; baseUrl: string }
-  | { kind: 'failed'; error: UserFacingError };
-
 let renderCleanup: (() => void) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
-
-function formatAgencyHubError(error: unknown): string {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    return message ? `${error.name}: ${message}` : error.name;
-  }
-
-  return String(error);
-}
-
-function appendAgencyHubMeta(baseText: string, note: string | null): string {
-  return note ? `${baseText} ${note}` : baseText;
-}
-
-function buildAgencyHubPermissionScopeNote(baseUrl: string | null | undefined): string | null {
-  const normalized = normalizeAgencyHubBaseUrl(baseUrl);
-  if (!normalized) {
-    return null;
-  }
-
-  const parsed = new URL(normalized);
-  if (!parsed.port) {
-    return null;
-  }
-
-  const originPattern = buildAgencyHubOriginPattern(normalized);
-  if (!originPattern) {
-    return null;
-  }
-
-  return `Firefox grants host access per host rather than per port, so ${originPattern} covers the configured URL ${normalized}.`;
-}
-
-function buildAgencyHubConnectionSignature(baseUrl: string, apiKey: string): string {
-  return `${normalizeAgencyHubBaseUrl(baseUrl)}|${apiKey.trim()}`;
-}
-
-function hasAgencyHubConnectionInputs(baseUrl: string, apiKey: string): boolean {
-  return Boolean(baseUrl.trim() && apiKey.trim());
-}
-
-async function getAgencyHubPermissionCheck(originPattern: string | null): Promise<AgencyHubPermissionCheckResult> {
-  if (!originPattern) {
-    return { granted: false, errorMessage: null };
-  }
-
-  if (typeof browser.permissions?.contains !== 'function') {
-    return { granted: true, errorMessage: null };
-  }
-
-  try {
-    return {
-      granted: await browser.permissions.contains({ origins: [originPattern] }),
-      errorMessage: null,
-    };
-  } catch (error) {
-    return {
-      granted: false,
-      errorMessage: formatAgencyHubError(error),
-    };
-  }
-}
 
 async function render(): Promise<void> {
   renderCleanup?.();
@@ -279,7 +79,7 @@ async function render(): Promise<void> {
   const subtitle = document.createElement('div');
   subtitle.textContent = 'Configure AI providers, personalities, mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatgoose-muted)';
-  hero.append(createVersionTag(), title, subtitle);
+  hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
 
   // ─── API Configuration ─────────────────────────────────────
@@ -1253,5 +1053,5 @@ async function render(): Promise<void> {
   await runAgencyHubConnectionTest({ force: true });
 }
 
-injectStyles();
+injectStyles(optionsStyles);
 void render();

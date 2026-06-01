@@ -7,6 +7,7 @@ import {
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
+import { collectSummaryCacheEntries } from './summary-cache.js';
 import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
@@ -75,6 +76,70 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
   };
 }
 
+type MigrationRecord = Record<string, unknown>;
+
+export interface MigrationStep {
+  toVersion: number;
+  migrate: (record: MigrationRecord) => MigrationRecord;
+}
+
+function normalizePersistedRecord(
+  record: MigrationRecord,
+  schemaVersion: number,
+): PersistedState {
+  const defaults = createSeedState();
+  const settings = record.settings && typeof record.settings === 'object'
+    ? migrateSettingsRecord(record.settings as Record<string, unknown>)
+    : defaults.settings;
+
+  const personalities = Array.isArray(record.personalities) ? record.personalities : defaults.personalities;
+  const accountMappings = record.accountMappings && typeof record.accountMappings === 'object'
+    ? (record.accountMappings as Record<string, string>)
+    : defaults.accountMappings;
+  const accountAliases = record.accountAliases && typeof record.accountAliases === 'object'
+    ? (record.accountAliases as Record<string, string>)
+    : defaults.accountAliases;
+  const knownAccounts = Array.isArray(record.knownAccounts) ? record.knownAccounts : defaults.knownAccounts;
+
+  return {
+    schemaVersion,
+    settings,
+    personalities: personalities as PersistedState['personalities'],
+    accountMappings,
+    accountAliases,
+    knownAccounts: knownAccounts as string[],
+    ...collectSummaryCacheEntries(record),
+  };
+}
+
+export const MIGRATIONS: readonly MigrationStep[] = [
+  {
+    toVersion: STORAGE_SCHEMA_VERSION,
+    migrate: (record) =>
+      normalizePersistedRecord(record, STORAGE_SCHEMA_VERSION) as unknown as MigrationRecord,
+  },
+];
+
+function applyMigrations(
+  record: MigrationRecord,
+  schemaVersion: number,
+): PersistedState {
+  let state: MigrationRecord = record;
+  let migrated = false;
+
+  for (const migration of MIGRATIONS) {
+    if (schemaVersion >= migration.toVersion) {
+      continue;
+    }
+    state = migration.migrate(state);
+    migrated = true;
+  }
+
+  return migrated
+    ? state as unknown as PersistedState
+    : normalizePersistedRecord(record, STORAGE_SCHEMA_VERSION);
+}
+
 /**
  * Migrate raw storage data to the current schema.
  *
@@ -91,59 +156,13 @@ export function migrateState(raw: unknown): PersistedState {
   const schemaVersion = typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
 
   if (schemaVersion === STORAGE_SCHEMA_VERSION) {
-    const current = record as unknown as PersistedState;
-    return {
-      ...current,
-      // Guard personalities/accountMappings the same way the incremental branch
-      // does: a corrupt value at the current version (e.g. a non-array after a
-      // partial storage.set) would otherwise reach reconcileBundledPersonalities
-      // and throw, bricking every load including the settings UI.
-      personalities: Array.isArray(current.personalities) ? current.personalities : [],
-      accountMappings:
-        current.accountMappings && typeof current.accountMappings === 'object'
-          ? current.accountMappings
-          : {},
-      settings:
-        current.settings && typeof current.settings === 'object'
-          ? migrateSettingsRecord(current.settings as unknown as Record<string, unknown>)
-          : createDefaultSettings(),
-      accountAliases: current.accountAliases && typeof current.accountAliases === 'object'
-        ? current.accountAliases
-        : {},
-      knownAccounts: Array.isArray(current.knownAccounts) ? current.knownAccounts : [],
-    };
+    // Guard personalities/accountMappings the same way the incremental branch
+    // does: a corrupt value at the current version (e.g. a non-array after a
+    // partial storage.set) would otherwise reach reconcileBundledPersonalities
+    // and throw, bricking every load including the settings UI.
+    return normalizePersistedRecord(record, STORAGE_SCHEMA_VERSION);
   }
 
-  // Incremental migration: preserve what exists, fill in defaults for missing fields
-  const defaults = createSeedState();
-  const settings = record.settings && typeof record.settings === 'object'
-    ? migrateSettingsRecord(record.settings as Record<string, unknown>)
-    : defaults.settings;
-
-  const personalities = Array.isArray(record.personalities) ? record.personalities : defaults.personalities;
-  const accountMappings = record.accountMappings && typeof record.accountMappings === 'object'
-    ? (record.accountMappings as Record<string, string>)
-    : defaults.accountMappings;
-  const accountAliases = record.accountAliases && typeof record.accountAliases === 'object'
-    ? (record.accountAliases as Record<string, string>)
-    : defaults.accountAliases;
-  const knownAccounts = Array.isArray(record.knownAccounts) ? record.knownAccounts : defaults.knownAccounts;
-
-  // Carry forward any summary:* keys
-  const summaryEntries: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (key.startsWith('summary:')) {
-      summaryEntries[key] = value;
-    }
-  }
-
-  return {
-    schemaVersion: STORAGE_SCHEMA_VERSION,
-    settings,
-    personalities: personalities as PersistedState['personalities'],
-    accountMappings,
-    accountAliases,
-    knownAccounts: knownAccounts as string[],
-    ...summaryEntries,
-  };
+  // Incremental migration: preserve what exists, fill in defaults for missing fields.
+  return applyMigrations(record, schemaVersion);
 }

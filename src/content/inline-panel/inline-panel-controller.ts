@@ -1,9 +1,5 @@
 import { FEATURE_LABELS } from '../../shared/constants.js';
-import {
-  formatUserFacingError,
-  getUserErrorDescription,
-  toUserError,
-} from '../../shared/errors.js';
+import { toUserError } from '../../shared/errors.js';
 import type {
   LlmSpendSummary,
   CompareInlineTabState,
@@ -21,6 +17,17 @@ import {
   formatSpendSecondary,
 } from '../spend-format.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
+import {
+  createUserErrorBlock,
+  formatLoadingStatus,
+  getInsertButtonLabel,
+  getNextInsertablePart,
+  getReplyPartTitle,
+  insertedFeedbackDelayMs,
+  isEditableElement,
+  isInsertFeedbackActive,
+  isInteractiveElement,
+} from '../ui/view-helpers.js';
 
 interface InlinePanelCallbacks {
   onClose: () => void;
@@ -51,20 +58,6 @@ interface StaticViewState {
 
 type InlineViewState = LoadingViewState | StaticViewState;
 
-function isEditableElement(el: Element | null): boolean {
-  if (!el) return false;
-  const tag = el.tagName;
-  if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
-  if ((el as HTMLElement).isContentEditable) return true;
-  return false;
-}
-
-function isInteractiveElement(el: Element | null): boolean {
-  if (!el) return false;
-  const tag = el.tagName;
-  return tag === 'BUTTON' || tag === 'A' || tag === 'SELECT' || tag === 'SUMMARY';
-}
-
 function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
   const currentCount = tabs.filter((tab) => tab.source === 'current').length;
   const draftCount = tabs.filter((tab) => tab.source === 'draft').length;
@@ -83,43 +76,6 @@ function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
 
   return null;
 }
-
-function formatRetryCountdown(retryAtMs: number): string {
-  const remainingSeconds = Math.max(1, Math.ceil((retryAtMs - Date.now()) / 1000));
-  return `${remainingSeconds}s`;
-}
-
-function formatLoadingStatus(progress: OperationProgressPayload | null | undefined): string {
-  if (progress?.statusCode) {
-    const countdown = typeof progress.retryAtMs === 'number'
-      ? ` (${formatRetryCountdown(progress.retryAtMs)})`
-      : '';
-    return `${progress.statusCode} • ${progress.message ?? 'Waiting to retry…'}${countdown}`;
-  }
-
-  return progress?.message ?? 'Generating…';
-}
-
-function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
-  const block = document.createElement('div');
-  block.className = 'chatgoose-inline-error';
-
-  const primary = document.createElement('div');
-  primary.className = 'chatgoose-error-primary';
-  primary.textContent = formatUserFacingError(error);
-  block.append(primary);
-
-  const description = getUserErrorDescription(error);
-  if (description) {
-    const secondary = document.createElement('div');
-    secondary.className = 'chatgoose-error-secondary';
-    secondary.textContent = description;
-    block.append(secondary);
-  }
-
-  return block;
-}
-
 
 export class InlinePanelController {
   readonly root: HTMLDivElement;
@@ -205,7 +161,7 @@ export class InlinePanelController {
         !this.root.contains(document.activeElement)
       ) return;
       const parts = this.model.parts;
-      const next = this.getNextInsertablePart(parts);
+      const next = getNextInsertablePart(parts);
       if (!next) return;
       event.preventDefault();
       void this.insertPart(next);
@@ -496,7 +452,7 @@ export class InlinePanelController {
         const isSplit = model.splitModeRequested && model.parts.length > 1;
         parts.append(
           this.createPartCard(
-            this.partTitle(part, model.splitModeRequested),
+            getReplyPartTitle(part, model.splitModeRequested),
             part,
             {
               hint: isSplit
@@ -665,7 +621,7 @@ export class InlinePanelController {
         const isSplit = tab.splitModeRequested && tab.parts.length > 1;
         parts.append(
           this.createPartCard(
-            this.partTitle(part, tab.splitModeRequested),
+            getReplyPartTitle(part, tab.splitModeRequested),
             part,
             {
               hint: isSplit
@@ -688,11 +644,6 @@ export class InlinePanelController {
     raw.textContent = tab.rawText;
     section.append(raw);
     return section;
-  }
-
-  private partTitle(part: OverlayInsertPart, splitModeRequested?: boolean): string {
-    const number = part.sequenceIndex + 1;
-    return splitModeRequested && part.sequenceIndex > 0 ? `Follow-up ${number}` : `Message ${number}`;
   }
 
   private createPartCard(
@@ -737,8 +688,8 @@ export class InlinePanelController {
     const insert = document.createElement('button');
     insert.type = 'button';
     insert.className = 'chatgoose-button';
-    insert.textContent = part.insertedAt ? 'Inserted \u2713' : part.insertedOnce ? 'Insert again' : 'Insert';
-    insert.disabled = Boolean(part.insertedAt && Date.now() - part.insertedAt < 2000);
+    insert.textContent = getInsertButtonLabel(part);
+    insert.disabled = isInsertFeedbackActive(part);
     insert.addEventListener('click', () => {
       void this.insertPart(part);
     });
@@ -784,23 +735,13 @@ export class InlinePanelController {
     }
   }
 
-  private getNextInsertablePart(parts: OverlayInsertPart[]): OverlayInsertPart | null {
-    const isAvailable = (p: OverlayInsertPart) =>
-      !p.insertedAt || Date.now() - p.insertedAt >= 2000;
-    return (
-      parts.find((p) => !p.insertedOnce && isAvailable(p)) ??
-      parts.find((p) => isAvailable(p)) ??
-      null
-    );
-  }
-
   private scheduleInsertedReset(part: OverlayInsertPart): void {
     window.setTimeout(() => {
       part.insertedAt = null;
       if (this.model.kind !== 'hidden') {
         this.render(this.model);
       }
-    }, 2000);
+    }, insertedFeedbackDelayMs());
   }
 
   private queueComposerFocus(): void {

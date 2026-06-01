@@ -7,7 +7,12 @@ import {
   DEFAULT_MODEL_ID,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
-import { migrateState, createDefaultSettings, createSeedState } from '../src/shared/migrations.js';
+import {
+  MIGRATIONS,
+  migrateState,
+  createDefaultSettings,
+  createSeedState,
+} from '../src/shared/migrations.js';
 import {
   BUNDLED_LORA_PERSONALITY_ID,
   BUNDLED_LORA_PERSONALITY_VERSION,
@@ -53,6 +58,12 @@ beforeEach(() => {
 // ─── migrateState ───────────────────────────────────────────────────────
 
 describe('migrateState', () => {
+  it('keeps migrations ordered up to the current schema', () => {
+    expect(MIGRATIONS.map((migration) => migration.toVersion)).toEqual([
+      STORAGE_SCHEMA_VERSION,
+    ]);
+  });
+
   it('returns seed state for null input', () => {
     const result = migrateState(null);
     expect(result.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
@@ -196,6 +207,24 @@ describe('migrateState', () => {
     };
     const result = migrateState(legacy);
     expect((result as unknown as Record<string, unknown>)['summary:group1']).toBeDefined();
+  });
+
+  it('drops corrupt summary cache entries during migration', () => {
+    const result = migrateState({
+      schemaVersion: 0,
+      'summary:valid': {
+        summary: 'cached',
+        personalityId: 'p1',
+        personalityUpdatedAt: 100,
+        generatedAt: 200,
+      },
+      'summary:corrupt': {
+        summary: 'missing required metadata',
+      },
+    });
+
+    expect((result as unknown as Record<string, unknown>)['summary:valid']).toBeDefined();
+    expect((result as unknown as Record<string, unknown>)['summary:corrupt']).toBeUndefined();
   });
 
   it('preserves agency hub sync metadata in legacy summary cache entries', () => {

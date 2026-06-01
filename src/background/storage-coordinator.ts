@@ -2,15 +2,14 @@ import {
   KNOWN_ACCOUNTS_KEY,
   STORAGE_SCHEMA_VERSION,
   SUMMARY_EVICTION_COUNT,
-  SUMMARY_CACHE_PREFIX,
 } from '../shared/constants.js';
 import { migrateState } from '../shared/migrations.js';
 import { loadStorageState, sanitizeSettings } from '../shared/storage.js';
+import {
+  getSummaryCacheEntry,
+  SummaryCacheStore,
+} from '../shared/summary-cache.js';
 import type { PersistedState, SummaryCacheEntry } from '../shared/types.js';
-
-function isSummaryKey(key: string): key is `summary:${string}` {
-  return key.startsWith(SUMMARY_CACHE_PREFIX);
-}
 
 function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -38,6 +37,19 @@ export class StorageCoordinator {
   private state: PersistedState | null = null;
   private loadingState: Promise<PersistedState> | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
+  private readonly summaryCache = new SummaryCacheStore(
+    browser.storage.local,
+    () => this.getState(),
+    {
+      evictionCount: SUMMARY_EVICTION_COUNT,
+      afterSet: (items) => {
+        this.commitLocalWrite(items);
+      },
+      afterRemove: (keys) => {
+        this.commitLocalWrite({}, keys);
+      },
+    },
+  );
 
   async init(): Promise<PersistedState> {
     return this.getState();
@@ -209,36 +221,12 @@ export class StorageCoordinator {
 
   async getSummaryCache(groupId: string): Promise<SummaryCacheEntry | null> {
     const state = await this.getState();
-    const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
-    return ((state as unknown as Record<string, unknown>)[key] as SummaryCacheEntry | undefined) ?? null;
+    return getSummaryCacheEntry(state, groupId);
   }
 
   async saveSummaryCache(groupId: string, entry: SummaryCacheEntry): Promise<void> {
-    const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
-
     await this.enqueueWrite(async () => {
-      try {
-        await browser.storage.local.set({ [key]: entry });
-        this.commitLocalWrite({ [key]: entry });
-      } catch {
-        const state = await this.getState();
-        const summaryEntries = Object.entries(state)
-          .filter(([summaryKey]) => isSummaryKey(summaryKey))
-          .map(([summaryKey, summaryEntry]) => [summaryKey, summaryEntry as SummaryCacheEntry] as const)
-          .sort((left, right) => left[1].generatedAt - right[1].generatedAt);
-
-        const keysToRemove = summaryEntries
-          .slice(0, SUMMARY_EVICTION_COUNT)
-          .map(([summaryKey]) => summaryKey);
-
-        if (keysToRemove.length > 0) {
-          await browser.storage.local.remove(keysToRemove);
-          this.commitLocalWrite({}, keysToRemove);
-        }
-
-        await browser.storage.local.set({ [key]: entry });
-        this.commitLocalWrite({ [key]: entry });
-      }
+      await this.summaryCache.save(groupId, entry);
     });
   }
 
@@ -246,28 +234,14 @@ export class StorageCoordinator {
     groupId: string,
     updater: (entry: SummaryCacheEntry) => SummaryCacheEntry,
   ): Promise<SummaryCacheEntry | null> {
-    const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
-
     return this.enqueueWrite(async () => {
-      const state = await this.getState();
-      const currentEntry = ((state as unknown as Record<string, unknown>)[key] as SummaryCacheEntry | undefined) ?? null;
-      if (!currentEntry) {
-        return null;
-      }
-
-      const nextEntry = updater(currentEntry);
-      await browser.storage.local.set({ [key]: nextEntry });
-      this.commitLocalWrite({ [key]: nextEntry });
-      return nextEntry;
+      return this.summaryCache.update(groupId, updater);
     });
   }
 
   async removeSummaryCache(groupId: string): Promise<void> {
-    const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
-
     await this.enqueueWrite(async () => {
-      await browser.storage.local.remove(key);
-      this.commitLocalWrite({}, [key]);
+      await this.summaryCache.remove(groupId);
     });
   }
 
