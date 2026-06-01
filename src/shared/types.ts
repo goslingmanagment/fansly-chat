@@ -102,7 +102,6 @@ export interface PersistedState {
   accountMappings: Record<string, string>;
   accountAliases: Record<string, string>;
   knownAccounts: string[];
-  [summaryKey: `summary:${string}`]: SummaryCacheEntry | unknown;
 }
 
 // ─── Session & Tab Context ───────────────────────────────────────────────

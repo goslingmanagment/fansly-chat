@@ -9,8 +9,8 @@ import {
   PING_MIN_MESSAGE_COUNT,
   QUICK_MAX_MESSAGE_COUNT,
   QUICK_MIN_MESSAGE_COUNT,
+  SUMMARY_EVICTION_COUNT,
   STORAGE_SCHEMA_VERSION,
-  SUMMARY_CACHE_PREFIX,
 } from './constants.js';
 import { normalizeModelId } from './model-registry.js';
 import {
@@ -23,6 +23,10 @@ import {
   normalizeSavedPersonality,
   reconcileBundledPersonalities,
 } from './personalities.js';
+import {
+  getSummaryCacheKeysForPersonality,
+  SummaryCacheStore,
+} from './summary-cache.js';
 import type {
   ModelSelectableFeatureType,
   PersistedState,
@@ -32,8 +36,12 @@ import type {
   SummaryCacheEntry,
 } from './types.js';
 
-function isSummaryKey(key: string): key is `summary:${string}` {
-  return key.startsWith(SUMMARY_CACHE_PREFIX);
+function createSummaryCacheStore(): SummaryCacheStore {
+  return new SummaryCacheStore(
+    browser.storage.local,
+    loadStorageState,
+    { evictionCount: SUMMARY_EVICTION_COUNT },
+  );
 }
 
 function arraysEqual(left: string[], right: string[]): boolean {
@@ -150,12 +158,7 @@ export async function deletePersonality(personalityId: string): Promise<void> {
     Object.entries(state.accountMappings).filter(([, mapped]) => mapped !== personalityId),
   );
 
-  const removals = Object.keys(state)
-    .filter((key) => isSummaryKey(key))
-    .filter((key) => {
-      const entry = state[key] as SummaryCacheEntry | undefined;
-      return entry?.personalityId === personalityId;
-    });
+  const removals = getSummaryCacheKeysForPersonality(state, personalityId);
 
   await browser.storage.local.set({ personalities, accountMappings });
   if (removals.length > 0) {
@@ -286,34 +289,13 @@ export async function rekeyAccountIdentity(
 }
 
 export async function getSummaryCache(groupId: string): Promise<SummaryCacheEntry | null> {
-  const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
-  const result = await browser.storage.local.get(key);
-  return (result[key] as SummaryCacheEntry | undefined) ?? null;
-}
-
-async function evictOldestSummariesAndRetry(key: string, entry: SummaryCacheEntry): Promise<void> {
-  const state = await loadStorageState();
-  const summaryEntries = Object.entries(state)
-    .filter(([summaryKey]) => isSummaryKey(summaryKey))
-    .map(([summaryKey, summaryEntry]) => [summaryKey, summaryEntry as SummaryCacheEntry] as const)
-    .sort((left, right) => left[1].generatedAt - right[1].generatedAt);
-
-  const keysToRemove = summaryEntries.slice(0, 10).map(([summaryKey]) => summaryKey);
-  if (keysToRemove.length > 0) {
-    await browser.storage.local.remove(keysToRemove);
-  }
-  await browser.storage.local.set({ [key]: entry });
+  return createSummaryCacheStore().get(groupId);
 }
 
 export async function saveSummaryCache(groupId: string, entry: SummaryCacheEntry): Promise<void> {
-  const key = `${SUMMARY_CACHE_PREFIX}${groupId}`;
-  try {
-    await browser.storage.local.set({ [key]: entry });
-  } catch {
-    await evictOldestSummariesAndRetry(key, entry);
-  }
+  await createSummaryCacheStore().save(groupId, entry);
 }
 
 export async function removeSummaryCache(groupId: string): Promise<void> {
-  await browser.storage.local.remove(`${SUMMARY_CACHE_PREFIX}${groupId}`);
+  await createSummaryCacheStore().remove(groupId);
 }

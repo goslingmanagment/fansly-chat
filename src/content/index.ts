@@ -11,9 +11,14 @@ import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
+import {
+  planSurfaces,
+  type SurfacePlan,
+} from './surface-planner.js';
 import { findActiveConversationTextarea } from './conversation-dom.js';
 import { getActiveConversationDraftText, insertIntoFanslyTextarea } from './textarea.js';
 import { ToastController } from './toast.js';
+import { isEditableElement } from './ui/view-helpers.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
@@ -90,14 +95,6 @@ function resultPartTexts(
     case 'chat-review':
       return [];
   }
-}
-
-function isEditableElement(el: Element | null): boolean {
-  if (!el) return false;
-  const tag = el.tagName;
-  if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
-  if ((el as HTMLElement).isContentEditable) return true;
-  return false;
 }
 
 function applyFanSummarySyncStatus(
@@ -374,86 +371,66 @@ export class ChatGooseContentApp {
 
     const scrollSnapshot = captureScrollSnapshot(this.root);
     try {
-      const visibleCompareModel =
-        this.comparePanelVisible
-          ? this.activeCompareModel
-          : null;
-
-      // Overlay-only features — active loading
-      if (this.activeFeature && usesOverlayFeatureSurface(this.activeFeature)) {
-        this.inlinePanel.hide();
-        this.overlay.render(this.buildActiveLoadingModel());
-        return;
-      }
-
-      // Inline reply features — active operation
-      if (this.activeFeature && usesInlineFeatureSurface(this.activeFeature)) {
-        if (this.quickSurfaceMode === 'overlay') {
-          this.inlinePanel.hide();
-          this.overlay.render(this.buildActiveLoadingModel({ canRegenerate: true }), {
-            dismissMode: 'collapse-to-inline',
-          });
-          return;
-        }
-        // inline mode
-        this.overlay.render({ kind: 'hidden' });
-        if (this.quickInlineVisible) {
-          this.inlinePanel.render(this.buildActiveLoadingModel({ canRegenerate: true }));
-        } else {
-          this.inlinePanel.hide();
-        }
-        return;
-      }
-
-      if (visibleCompareModel) {
-        this.overlay.render({ kind: 'hidden' });
-        this.inlinePanel.render(visibleCompareModel);
-        return;
-      }
-
-      // No active quick feature — check for completed/cached inline results
-      if (
-        this.quickInlineVisible &&
-        this.lastFeature &&
-        usesInlineFeatureSurface(this.lastFeature)
-      ) {
-        const cached = this.completedOverlayCache.get(
-          this.currentGroupId,
-          this.lastFeature,
-          this.buildFeatureCacheKey(
-            this.lastFeature,
-            featureRequiresDraft(this.lastFeature)
-              ? getActiveConversationDraftText()
-              : undefined,
-          ),
-        );
-        if (cached) {
-          if (this.quickSurfaceMode === 'overlay') {
-            this.inlinePanel.hide();
-            this.overlay.render(cached, { dismissMode: 'collapse-to-inline' });
-          } else {
-            this.overlay.render({ kind: 'hidden' });
-            this.inlinePanel.render(cached);
-          }
-          return;
-        }
-      }
-
-      // Deep feature result in overlay (completed, error, or cache hit)
-      if (this.deepOverlayModel) {
-        this.inlinePanel.hide();
-        this.overlay.render(this.deepOverlayModel);
-        return;
-      }
-
-      // Nothing to show — hide both surfaces
-      this.inlinePanel.hide();
-      this.overlay.render({ kind: 'hidden' });
-      if (this.quickSurfaceMode === 'overlay') {
-        this.quickSurfaceMode = 'inline';
-      }
+      this.applySurfacePlan(planSurfaces({
+        activeFeature: this.activeFeature,
+        activeLoadingModel: this.activeFeature
+          ? this.buildActiveLoadingModel()
+          : null,
+        activeRegenerableLoadingModel: this.activeFeature
+          ? this.buildActiveLoadingModel({ canRegenerate: true })
+          : null,
+        activeCompareModel: this.activeCompareModel,
+        comparePanelVisible: this.comparePanelVisible,
+        quickSurfaceMode: this.quickSurfaceMode,
+        quickInlineVisible: this.quickInlineVisible,
+        cachedInlineModel: this.getCachedInlineModelForCurrentState(),
+        deepOverlayModel: this.deepOverlayModel,
+      }));
     } finally {
       applyScrollCompensation(this.root, scrollSnapshot);
+    }
+  }
+
+  private getCachedInlineModelForCurrentState(): CompletedOverlayViewModel | null {
+    if (
+      !this.quickInlineVisible ||
+      !this.lastFeature ||
+      !usesInlineFeatureSurface(this.lastFeature)
+    ) {
+      return null;
+    }
+
+    return this.completedOverlayCache.get(
+      this.currentGroupId,
+      this.lastFeature,
+      this.buildFeatureCacheKey(
+        this.lastFeature,
+        featureRequiresDraft(this.lastFeature)
+          ? getActiveConversationDraftText()
+          : undefined,
+      ),
+    );
+  }
+
+  private applySurfacePlan(plan: SurfacePlan): void {
+    if (plan.inline.kind === 'hidden') {
+      this.inlinePanel.hide();
+    }
+
+    if (plan.overlay.kind === 'hidden') {
+      this.overlay.render(plan.overlay.model);
+    } else if (plan.overlay.dismissMode) {
+      this.overlay.render(plan.overlay.model, { dismissMode: plan.overlay.dismissMode });
+    } else {
+      this.overlay.render(plan.overlay.model);
+    }
+
+    if (plan.inline.kind === 'render') {
+      this.inlinePanel.render(plan.inline.model);
+    }
+
+    if (plan.resetQuickSurfaceMode) {
+      this.quickSurfaceMode = 'inline';
     }
   }
 
