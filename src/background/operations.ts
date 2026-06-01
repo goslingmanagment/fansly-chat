@@ -14,7 +14,6 @@ import {
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   FEATURE_TEMPERATURES,
   DEFAULT_FEATURE_MODELS,
-  FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   HI_GREETING_MAX_TRANSCRIPT,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
@@ -69,12 +68,9 @@ import {
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   analyzePingSegment,
-  buildPurchaseEvidence,
-  collectUnverifiedPpvAttachmentRequests,
   formatTranscript,
   normalizeTranscript,
 } from '../shared/transcript.js';
-import type { PurchaseEvidenceOverride } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   AggregatedEarnings,
@@ -96,7 +92,6 @@ import type {
   OperationPhase,
   OperationProgressPayload,
   OperationStartPayload,
-  FanslyMessagePageResponse,
   PingSegment,
   PersistedState,
   Settings,
@@ -126,13 +121,17 @@ import {
   type ActiveCompareOperation,
   type CompareOperationsContext,
 } from './compare-operations.js';
+import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 import type { SubscriptionLookupTraceEvent } from './fansly-client.js';
 import { FanslyClient } from './fansly-client.js';
 import type { LlmClient } from './llm-client.js';
+import { clearFlushTimer } from './operation-cleanup.js';
 import {
   createOperationProfiler,
   type OperationProfiler,
 } from './operation-profiling.js';
+import { OperationRegistry } from './operation-registry.js';
+import { OperationTimeoutController } from './operation-timeouts.js';
 import {
   describeMessageLoadProgress,
   describeSubscriptionTraceStep,
@@ -448,14 +447,8 @@ function assertInsertableFeatureResult(
 
 export class OperationCoordinator {
   private readonly portsByTabId = new Map<number, browser.runtime.Port>();
-  private readonly activeByTabId = new Map<number, ActiveOperation>();
-  private readonly activeCompareByTabId = new Map<number, ActiveCompareOperation>();
-  private readonly cancelledOperationIds = new Set<string>();
-  private readonly cancelledCompareOperationIds = new Set<string>();
-  // Tabs with a feature or compare start past its guard but not yet registered
-  // in activeByTabId/activeCompareByTabId. Reserved synchronously so two starts
-  // that race across the validateStart await cannot both pass the guard.
-  private readonly startingTabIds = new Set<number>();
+  private readonly lifecycle =
+    new OperationRegistry<ActiveOperation, ActiveCompareOperation>();
   private readonly pendingSummaryAvailabilityByKey = new Map<string, Promise<void>>();
   private readonly pendingIdentityResolutionByLegacyAccountId = new Map<
     string,
@@ -474,6 +467,26 @@ export class OperationCoordinator {
     private readonly agencyHubClient: AgencyHubClient,
     private readonly agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>,
   ) {}
+
+  private get activeByTabId(): Map<number, ActiveOperation> {
+    return this.lifecycle.featureOperations;
+  }
+
+  private get activeCompareByTabId(): Map<number, ActiveCompareOperation> {
+    return this.lifecycle.compareOperations;
+  }
+
+  private get cancelledOperationIds(): Set<string> {
+    return this.lifecycle.cancelledFeatureIds;
+  }
+
+  private get cancelledCompareOperationIds(): Set<string> {
+    return this.lifecycle.cancelledCompareIds;
+  }
+
+  private get startingTabIds(): Set<number> {
+    return this.lifecycle.reservations;
+  }
 
   registerPort(port: browser.runtime.Port): void {
     const tabId = port.sender?.tab?.id;
@@ -560,14 +573,14 @@ export class OperationCoordinator {
         await this.startCompare(tabId, message);
         break;
       case 'operation:cancel': {
-        const active = this.activeByTabId.get(tabId);
+        const active = this.lifecycle.getFeature(tabId);
         if (active && active.operationId === message.operationId) {
           await this.cancelOperation(tabId);
         }
         break;
       }
       case 'compare:cancel': {
-        const active = this.activeCompareByTabId.get(tabId);
+        const active = this.lifecycle.getCompare(tabId);
         if (active && active.operationId === message.operationId) {
           this.cancelCompare(tabId);
         }
@@ -663,7 +676,7 @@ export class OperationCoordinator {
         true,
       );
     }
-    if (changed && this.activeCompareByTabId.has(tabId)) {
+    if (changed && this.lifecycle.hasActiveCompare(tabId)) {
       this.cancelCompare(tabId, new ChatGooseError('chat_changed'), true);
     }
     await this.refreshTabState(tabId, 'tab:state');
@@ -790,7 +803,7 @@ export class OperationCoordinator {
         return;
       }
 
-      const active = this.activeByTabId.get(tabId);
+      const active = this.lifecycle.getFeature(tabId);
       if (active?.feature === 'fan-summary' && active.groupId === groupId) {
         return;
       }
@@ -1021,18 +1034,11 @@ export class OperationCoordinator {
     error?: ChatGooseError,
     notifyDiscard = false,
   ): Promise<void> {
-    const active = this.activeByTabId.get(tabId);
+    const active = this.lifecycle.cancelFeature(tabId, clearFlushTimer);
     if (!active) {
       return;
     }
 
-    this.cancelledOperationIds.add(active.operationId);
-    active.controller.abort();
-    if (active.flushTimer !== null) {
-      clearTimeout(active.flushTimer);
-    }
-
-    this.activeByTabId.delete(tabId);
     this.tabContexts.setActiveOperation(tabId, null);
 
     if (notifyDiscard) {
@@ -1045,22 +1051,16 @@ export class OperationCoordinator {
   }
 
   private clearCompletedOperation(tabId: number): void {
-    const active = this.activeByTabId.get(tabId);
+    const active = this.lifecycle.completeFeature(tabId, clearFlushTimer);
     if (!active) {
       return;
     }
 
-    if (active.flushTimer !== null) {
-      clearTimeout(active.flushTimer);
-    }
-
-    this.activeByTabId.delete(tabId);
     this.tabContexts.setActiveOperation(tabId, null);
-    this.cancelledOperationIds.delete(active.operationId);
   }
 
   private getActive(tabId: number): ActiveOperation | null {
-    return this.activeByTabId.get(tabId) ?? null;
+    return this.lifecycle.getFeature(tabId);
   }
 
   private enqueueAgencyHubSummarySync(task: AgencyHubSummarySyncTask): void {
@@ -1245,58 +1245,11 @@ export class OperationCoordinator {
     this.sendSummarySyncStatus(task.tabId, task.groupId, syncStatus);
   }
 
-  private async verifyMediaPurchaseEvidence(
-    pages: FanslyMessagePageResponse[],
-    fanAccountId: string | null,
-    session: SessionTemplate,
-    signal: AbortSignal,
-    debugEnabled: boolean,
-  ): Promise<PurchaseEvidenceOverride> {
-    if (!fanAccountId) {
-      return {};
-    }
-
-    const inlineEvidence = buildPurchaseEvidence(pages, fanAccountId);
-    const unresolved = collectUnverifiedPpvAttachmentRequests(pages, inlineEvidence);
-    if (unresolved.length === 0) {
-      return {};
-    }
-
-    const capped = unresolved.slice(0, FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
-    const capOverflow = unresolved.length > capped.length;
-
-    try {
-      const verified = await this.fanslyClient.verifyMediaPurchaseStates(
-        capped,
-        fanAccountId,
-        session,
-        signal,
-      );
-      return {
-        ...verified,
-        verificationIncomplete: Boolean(
-          verified.verificationIncomplete || capOverflow,
-        ),
-      };
-    } catch (error) {
-      if (signal.aborted) {
-        throw error;
-      }
-      logDebug(debugEnabled, 'media purchase verification failed (fail-open)', {
-        fanAccountId,
-        requested: capped.length,
-        capOverflow,
-        error: toDebugErrorPayload(error),
-      });
-      return { verificationIncomplete: true };
-    }
-  }
-
   private assertActive(
     tabId: number,
     operationId: string,
   ): ActiveOperation {
-    const active = this.activeByTabId.get(tabId);
+    const active = this.lifecycle.getFeature(tabId);
     if (!active || active.operationId !== operationId) {
       throw new ChatGooseError('chat_changed');
     }
@@ -1308,9 +1261,7 @@ export class OperationCoordinator {
     payload: OperationStartPayload,
   ): Promise<void> {
     // SPEC-CORRECT: BLOCK concurrent ops (don't auto-cancel like Codex)
-    const existing =
-      this.activeByTabId.get(tabId) ?? this.activeCompareByTabId.get(tabId);
-    if (existing || this.startingTabIds.has(tabId)) {
+    if (this.lifecycle.isBusy(tabId)) {
       this.sendError(tabId, {
         type: 'operation:error',
         operationId: payload.operationId,
@@ -1326,50 +1277,37 @@ export class OperationCoordinator {
 
     // Reserve the tab synchronously before the first await so a racing start
     // cannot slip past the guard while validateStart is in flight.
-    this.startingTabIds.add(tabId);
-    const timeoutHandles = new Map<OperationTimeoutKey, number>();
-    let timeoutController: AbortController | null = null;
+    if (!this.lifecycle.reserve(tabId)) {
+      this.sendError(tabId, {
+        type: 'operation:error',
+        operationId: payload.operationId,
+        error: toUserError(new ChatGooseError('another_operation')),
+      });
+      return;
+    }
+    let timeoutController: OperationTimeoutController<OperationTimeoutKey> | null = null;
     let controller: AbortController | null = null;
     let debugEnabled = false;
     try {
       const validated = await this.validateStart(tabId, payload);
       debugEnabled = validated.storage.settings.debugMode;
       const profiler = createOperationProfiler(debugEnabled);
-      const operationTimeoutController = new AbortController();
+      const operationTimeoutController = new OperationTimeoutController<OperationTimeoutKey>();
       timeoutController = operationTimeoutController;
-      const clearTimeoutHandle = (key: OperationTimeoutKey): void => {
-        const handle = timeoutHandles.get(key);
-        if (handle === undefined) {
-          return;
-        }
-        clearTimeout(handle);
-        timeoutHandles.delete(key);
-      };
-      const armTimeoutHandle = (
-        key: OperationTimeoutKey,
-        ms: number,
-      ): void => {
-        clearTimeoutHandle(key);
-        const handle = globalThis.setTimeout(
-          () => operationTimeoutController.abort(),
-          ms,
-        ) as unknown as number;
-        timeoutHandles.set(key, handle);
-      };
       const startLlmTtfbTimeout = (): void => {
         if (!usesDeepOperationTimeouts(payload.feature)) {
           return;
         }
-        clearTimeoutHandle('deep-prep');
-        armTimeoutHandle('llm-ttfb', DEEP_OPERATION_TIMEOUTS.llmTtfb);
+        operationTimeoutController.clear('deep-prep');
+        operationTimeoutController.arm('llm-ttfb', DEEP_OPERATION_TIMEOUTS.llmTtfb);
       };
       const startLlmStreamTimeouts = (): void => {
         if (!usesDeepOperationTimeouts(payload.feature)) {
           return;
         }
-        clearTimeoutHandle('llm-ttfb');
-        armTimeoutHandle('llm-idle', DEEP_OPERATION_TIMEOUTS.llmIdle);
-        armTimeoutHandle(
+        operationTimeoutController.clear('llm-ttfb');
+        operationTimeoutController.arm('llm-idle', DEEP_OPERATION_TIMEOUTS.llmIdle);
+        operationTimeoutController.arm(
           'llm-max-stream',
           DEEP_OPERATION_TIMEOUTS.llmMaxStream,
         );
@@ -1378,17 +1316,17 @@ export class OperationCoordinator {
         if (!usesDeepOperationTimeouts(payload.feature)) {
           return;
         }
-        armTimeoutHandle('llm-idle', DEEP_OPERATION_TIMEOUTS.llmIdle);
+        operationTimeoutController.arm('llm-idle', DEEP_OPERATION_TIMEOUTS.llmIdle);
       };
       const clearLlmTimeouts = (): void => {
-        clearTimeoutHandle('llm-ttfb');
-        clearTimeoutHandle('llm-idle');
-        clearTimeoutHandle('llm-max-stream');
+        operationTimeoutController.clear('llm-ttfb');
+        operationTimeoutController.clear('llm-idle');
+        operationTimeoutController.clear('llm-max-stream');
       };
       if (usesDeepOperationTimeouts(payload.feature)) {
-        armTimeoutHandle('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
+        operationTimeoutController.arm('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
       } else {
-        armTimeoutHandle('quick-total', QUICK_OPERATION_TIMEOUT_MS);
+        operationTimeoutController.arm('quick-total', QUICK_OPERATION_TIMEOUT_MS);
       }
       const operationController = new AbortController();
       controller = operationController;
@@ -1412,7 +1350,7 @@ export class OperationCoordinator {
         profiler,
       };
 
-      this.activeByTabId.set(tabId, active);
+      this.lifecycle.activateFeature(tabId, active);
       this.tabContexts.setActiveOperation(tabId, payload.operationId);
       this.tabContexts.setRoute(
         tabId,
@@ -1883,13 +1821,14 @@ export class OperationCoordinator {
           (user) => user.userId !== resolvedAccountId,
         )?.userId ?? null;
 
-      const purchaseEvidence = await this.verifyMediaPurchaseEvidence(
-        messageLoad.pages,
+      const purchaseEvidence = await loadMediaPurchaseEvidence({
+        fanslyClient: this.fanslyClient,
+        pages: messageLoad.pages,
         fanAccountId,
-        validated.session,
+        session: validated.session,
         signal,
         debugEnabled,
-      );
+      });
 
       // Normalize after group-lookup so transcript labels can use the
       // resolved fan id for fan-perspective purchase state. When the lookup
@@ -2551,8 +2490,7 @@ export class OperationCoordinator {
       }
 
       const current = this.assertActive(tabId, payload.operationId);
-      if (current.flushTimer !== null) {
-        clearTimeout(current.flushTimer);
+      if (clearFlushTimer(current)) {
         this.flushChunks(tabId, current);
       }
 
@@ -2646,7 +2584,7 @@ export class OperationCoordinator {
     } catch (error) {
       const active = this.getActive(tabId);
       const operationId = active?.operationId ?? payload.operationId;
-      if (this.cancelledOperationIds.delete(operationId)) {
+      if (this.lifecycle.consumeCancelledFeature(operationId)) {
         return;
       }
       active?.profiler.finalizeRunningStages('operation failed');
@@ -2690,28 +2628,22 @@ export class OperationCoordinator {
       // cancelOperation re-adds the id to the cancelled set, but this is the
       // terminal failure path — there is no late chunk/complete left to
       // suppress, so drop it to keep the set from growing unbounded.
-      this.cancelledOperationIds.delete(operationId);
+      this.lifecycle.forgetCancelledFeature(operationId);
     } finally {
-      this.startingTabIds.delete(tabId);
-      for (const handle of timeoutHandles.values()) {
-        clearTimeout(handle);
-      }
-      timeoutHandles.clear();
+      this.lifecycle.releaseReservation(tabId);
+      timeoutController?.clearAll();
     }
   }
 
   private getCompareContext(): CompareOperationsContext {
     return {
-      activeCompareByTabId: this.activeCompareByTabId,
-      cancelledCompareOperationIds: this.cancelledCompareOperationIds,
-      startingTabIds: this.startingTabIds,
+      lifecycle: this.lifecycle,
       sessionStore: this.sessionStore,
       tabContexts: this.tabContexts,
       storageCoordinator: this.storageCoordinator,
       fanslyClient: this.fanslyClient,
       llmClient: this.llmClient,
       agencyHubUsageReporter: this.agencyHubUsageReporter,
-      hasActiveFeature: (tabId) => this.activeByTabId.has(tabId),
       hasPort: (tabId) => this.portsByTabId.has(tabId),
       send: (tabId, message) => this.send(tabId, message),
     };
