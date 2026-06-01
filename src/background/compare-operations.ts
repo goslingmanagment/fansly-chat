@@ -1,13 +1,12 @@
 import {
   COMPARE_TEMPERATURE,
   DEFAULT_FEATURE_MODELS,
-  FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
 import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
-import { ChatGooseError, toDebugErrorPayload, toUserError } from '../shared/errors.js';
+import { ChatGooseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
 import {
   getAgencyHubModelId,
@@ -19,12 +18,9 @@ import { buildPromptRequest } from '../shared/prompts.js';
 import { normalizeReplyParts } from '../shared/reply-output.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
-  buildPurchaseEvidence,
-  collectUnverifiedPpvAttachmentRequests,
   formatTranscript,
   normalizeTranscript,
 } from '../shared/transcript.js';
-import type { PurchaseEvidenceOverride } from '../shared/transcript.js';
 import type {
   AgencyHubAiUsageEvent,
   AggregatedEarnings,
@@ -43,7 +39,6 @@ import type {
   CompareReadyPayload,
   CompareStartPayload,
   FeatureResult,
-  FanslyMessagePageResponse,
   OperationPhase,
   OperationProfilingSnapshot,
   ReplyMode,
@@ -65,6 +60,9 @@ import {
   createOperationProfiler,
   type OperationProfiler,
 } from './operation-profiling.js';
+import { clearFlushTimer, clearFlushTimers } from './operation-cleanup.js';
+import { OperationTimeoutController } from './operation-timeouts.js';
+import type { CompareOperationLifecycle } from './operation-registry.js';
 import {
   describeMessageLoadProgress,
   describeSubscriptionTraceStep,
@@ -77,6 +75,7 @@ import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 import type { LlmClient } from './llm-client.js';
+import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 
 export interface ActiveCompareCardState {
   card: Pick<CompareModelCard, 'id' | 'label' | 'source'>;
@@ -97,16 +96,13 @@ export interface ActiveCompareOperation {
 }
 
 export interface CompareOperationsContext {
-  activeCompareByTabId: Map<number, ActiveCompareOperation>;
-  cancelledCompareOperationIds: Set<string>;
-  startingTabIds: Set<number>;
+  lifecycle: CompareOperationLifecycle<ActiveCompareOperation>;
   sessionStore: SessionStore;
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
   fanslyClient: FanslyClient;
   llmClient: LlmClient;
   agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>;
-  hasActiveFeature: (tabId: number) => boolean;
   hasPort: (tabId: number) => boolean;
   send: (tabId: number, message: BackgroundPortMessage) => void;
 }
@@ -303,7 +299,7 @@ function getActiveCompare(
   context: CompareOperationsContext,
   tabId: number,
 ): ActiveCompareOperation | null {
-  return context.activeCompareByTabId.get(tabId) ?? null;
+  return context.lifecycle.getCompare(tabId);
 }
 
 function flushCompareChunks(
@@ -404,21 +400,16 @@ function clearCompareOperation(
     return;
   }
 
-  active.compareCards.forEach((cardState) => {
-    if (cardState.flushTimer !== null) {
-      clearTimeout(cardState.flushTimer);
-    }
+  context.lifecycle.completeCompare(tabId, (operation) => {
+    clearFlushTimers(operation.compareCards.values());
   });
-
-  context.activeCompareByTabId.delete(tabId);
-  context.cancelledCompareOperationIds.delete(active.operationId);
 }
 
 export function hasActiveCompare(
   context: CompareOperationsContext,
   tabId: number,
 ): boolean {
-  return context.activeCompareByTabId.has(tabId);
+  return context.lifecycle.hasActiveCompare(tabId);
 }
 
 export function cancelCompareOperation(
@@ -432,15 +423,9 @@ export function cancelCompareOperation(
     return;
   }
 
-  context.cancelledCompareOperationIds.add(active.operationId);
-  active.controller.abort();
-  active.compareCards.forEach((cardState) => {
-    if (cardState.flushTimer !== null) {
-      clearTimeout(cardState.flushTimer);
-    }
+  context.lifecycle.cancelCompare(tabId, (operation) => {
+    clearFlushTimers(operation.compareCards.values());
   });
-
-  context.activeCompareByTabId.delete(tabId);
 
   if (notifyDiscard) {
     sendCompareDiscarded(
@@ -456,64 +441,12 @@ export function cancelCompareOperation(
   }
 }
 
-async function verifyMediaPurchaseEvidence(
-  context: CompareOperationsContext,
-  pages: FanslyMessagePageResponse[],
-  fanAccountId: string | null,
-  session: SessionTemplate,
-  signal: AbortSignal,
-  debugEnabled: boolean,
-): Promise<PurchaseEvidenceOverride> {
-  if (!fanAccountId) {
-    return {};
-  }
-
-  const inlineEvidence = buildPurchaseEvidence(pages, fanAccountId);
-  const unresolved = collectUnverifiedPpvAttachmentRequests(pages, inlineEvidence);
-  if (unresolved.length === 0) {
-    return {};
-  }
-
-  const capped = unresolved.slice(0, FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
-  const capOverflow = unresolved.length > capped.length;
-
-  try {
-    const verified = await context.fanslyClient.verifyMediaPurchaseStates(
-      capped,
-      fanAccountId,
-      session,
-      signal,
-    );
-    return {
-      ...verified,
-      verificationIncomplete: Boolean(
-        verified.verificationIncomplete || capOverflow,
-      ),
-    };
-  } catch (error) {
-    if (signal.aborted) {
-      throw error;
-    }
-    logDebug(debugEnabled, 'media purchase verification failed (fail-open)', {
-      fanAccountId,
-      requested: capped.length,
-      capOverflow,
-      error: toDebugErrorPayload(error),
-    });
-    return { verificationIncomplete: true };
-  }
-}
-
 export async function executeCompare(
   context: CompareOperationsContext,
   tabId: number,
   payload: CompareStartPayload,
 ): Promise<void> {
-  if (
-    context.hasActiveFeature(tabId) ||
-    context.activeCompareByTabId.has(tabId) ||
-    context.startingTabIds.has(tabId)
-  ) {
+  if (context.lifecycle.isBusy(tabId)) {
     sendCompareError(context, tabId, {
       type: 'compare:error',
       operationId: payload.operationId,
@@ -528,21 +461,24 @@ export async function executeCompare(
 
   // Reserve the tab synchronously before the first await so a racing feature
   // or compare start cannot slip past the guard during validateCompareStart.
-  context.startingTabIds.add(tabId);
-  let timeout: number | null = null;
-  let timeoutController: AbortController | null = null;
+  if (!context.lifecycle.reserve(tabId)) {
+    sendCompareError(context, tabId, {
+      type: 'compare:error',
+      operationId: payload.operationId,
+      error: toUserError(new ChatGooseError('another_operation')),
+    });
+    return;
+  }
+  let timeoutController: OperationTimeoutController<'quick-total'> | null = null;
   let controller: AbortController | null = null;
   let debugEnabled = false;
   try {
     const validated = await validateCompareStart(context, tabId, payload);
     debugEnabled = validated.storage.settings.debugMode;
     const profiler = createOperationProfiler(debugEnabled);
-    const compareTimeoutController = new AbortController();
+    const compareTimeoutController = new OperationTimeoutController<'quick-total'>();
     timeoutController = compareTimeoutController;
-    timeout = globalThis.setTimeout(
-      () => compareTimeoutController.abort(),
-      QUICK_OPERATION_TIMEOUT_MS,
-    ) as unknown as number;
+    compareTimeoutController.arm('quick-total', QUICK_OPERATION_TIMEOUT_MS);
     const compareController = new AbortController();
     controller = compareController;
     const signal = AbortSignal.any([
@@ -562,7 +498,7 @@ export async function executeCompare(
     };
 
     // Feature operations own tabContexts.activeOperationId; compare state is tracked separately here.
-    context.activeCompareByTabId.set(tabId, active);
+    context.lifecycle.activateCompare(tabId, active);
     context.tabContexts.setRoute(
       tabId,
       validated.urlGroupId,
@@ -817,14 +753,14 @@ export async function executeCompare(
     const fanAccountId =
       groupUsers?.find((user) => user.userId !== resolvedAccountId)?.userId ??
       null;
-    const purchaseEvidence = await verifyMediaPurchaseEvidence(
-      context,
-      messageLoad.pages,
+    const purchaseEvidence = await loadMediaPurchaseEvidence({
+      fanslyClient: context.fanslyClient,
+      pages: messageLoad.pages,
       fanAccountId,
-      validated.session,
+      session: validated.session,
       signal,
       debugEnabled,
-    );
+    });
     // Normalize after group-lookup so transcript labels use fan-perspective
     // purchase state. Falls back to "unknown" when fanAccountId is null.
     const transcriptMessages = normalizeTranscript(
@@ -1219,9 +1155,8 @@ export async function executeCompare(
           // a stray compare:chunk after the card is reported as errored, while
           // other cards in the session are still streaming.
           const erroredCardState = getActiveCompare(context, tabId)?.compareCards.get(card.id);
-          if (erroredCardState?.flushTimer != null) {
-            clearTimeout(erroredCardState.flushTimer);
-            erroredCardState.flushTimer = null;
+          if (erroredCardState) {
+            clearFlushTimer(erroredCardState);
           }
           const profiling = buildCompareCardProfilingSnapshot(
             profiler,
@@ -1257,8 +1192,7 @@ export async function executeCompare(
       if (!cardState) {
         return;
       }
-      if (cardState.flushTimer !== null) {
-        clearTimeout(cardState.flushTimer);
+      if (clearFlushTimer(cardState)) {
         flushCompareChunks(context, tabId, activeCompare, card.id);
       }
 
@@ -1335,7 +1269,7 @@ export async function executeCompare(
       // The session was cancelled/superseded mid-stream: every card swallowed
       // the abort and resolved, so we never reached the catch that clears the
       // cancelled id. Drop it here to keep the set from growing unbounded.
-      context.cancelledCompareOperationIds.delete(payload.operationId);
+      context.lifecycle.forgetCancelledCompare(payload.operationId);
       return;
     }
 
@@ -1353,7 +1287,7 @@ export async function executeCompare(
   } catch (error) {
     const active = getActiveCompare(context, tabId);
     const operationId = active?.operationId ?? payload.operationId;
-    if (context.cancelledCompareOperationIds.delete(operationId)) {
+    if (context.lifecycle.consumeCancelledCompare(operationId)) {
       return;
     }
     active?.profiler.finalizeRunningStages('compare failed');
@@ -1391,11 +1325,9 @@ export async function executeCompare(
     cancelCompareOperation(context, tabId);
     // Terminal failure path: cancelCompareOperation re-adds the id, but no late
     // card message remains to suppress, so drop it to avoid unbounded growth.
-    context.cancelledCompareOperationIds.delete(operationId);
+    context.lifecycle.forgetCancelledCompare(operationId);
   } finally {
-    context.startingTabIds.delete(tabId);
-    if (timeout !== null) {
-      clearTimeout(timeout);
-    }
+    context.lifecycle.releaseReservation(tabId);
+    timeoutController?.clearAll();
   }
 }
