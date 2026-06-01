@@ -111,6 +111,14 @@ export function collectSummaryCacheEntries(
   return entries;
 }
 
+export function getInvalidSummaryCacheKeys(storage: object): SummaryCacheKey[] {
+  return Object.entries(storage)
+    .filter(([key, value]) =>
+      isSummaryCacheKey(key) && !normalizeSummaryCacheEntry(value),
+    )
+    .map(([key]) => key as SummaryCacheKey);
+}
+
 export function listSummaryCacheEntries(
   storage: object,
 ): Array<[SummaryCacheKey, SummaryCacheEntry]> {
@@ -137,6 +145,20 @@ export function getSummaryCacheKeysForPersonality(
     .map(([key]) => key);
 }
 
+export function getSummaryCacheKeysReferencingPersonality(
+  storage: object,
+  personalityId: string,
+): SummaryCacheKey[] {
+  return Object.entries(storage)
+    .filter(([key, value]) => {
+      if (!isSummaryCacheKey(key) || !value || typeof value !== 'object') {
+        return false;
+      }
+      return (value as Record<string, unknown>).personalityId === personalityId;
+    })
+    .map(([key]) => key as SummaryCacheKey);
+}
+
 export function getOldestSummaryCacheKeys(
   storage: object,
   count: number,
@@ -145,6 +167,20 @@ export function getOldestSummaryCacheKeys(
     .sort((left, right) => left[1].generatedAt - right[1].generatedAt)
     .slice(0, count)
     .map(([key]) => key);
+}
+
+export function getSummaryCacheEvictionKeys(
+  storage: object,
+  count: number,
+): SummaryCacheKey[] {
+  if (count <= 0) {
+    return [];
+  }
+
+  return [
+    ...getInvalidSummaryCacheKeys(storage),
+    ...getOldestSummaryCacheKeys(storage, count),
+  ].slice(0, count);
 }
 
 export class SummaryCacheStore {
@@ -170,8 +206,8 @@ export class SummaryCacheStore {
     try {
       await this.setEntry(key, normalizedEntry);
     } catch {
-      const keysToRemove = getOldestSummaryCacheKeys(
-        await this.loadState(),
+      const keysToRemove = getSummaryCacheEvictionKeys(
+        await this.storage.get(null),
         this.options.evictionCount,
       );
       if (keysToRemove.length > 0) {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectSummaryCacheEntries,
+  getInvalidSummaryCacheKeys,
   getOldestSummaryCacheKeys,
+  getSummaryCacheEvictionKeys,
   getSummaryCacheEntry,
   isValidSummaryCacheEntry,
   normalizeSummaryCacheEntry,
@@ -56,6 +58,16 @@ describe('summary cache boundaries', () => {
     expect(getSummaryCacheEntry(entries, 'group-2')).toBeNull();
   });
 
+  it('lists corrupt raw entries separately from normalized cache entries', () => {
+    expect(
+      getInvalidSummaryCacheKeys({
+        'summary:group-1': validEntry,
+        'summary:group-2': { summary: 'missing metadata', personalityId: 'p1' },
+        settings: {},
+      }),
+    ).toEqual(['summary:group-2']);
+  });
+
   it('selects the oldest valid entries for quota eviction', () => {
     expect(
       getOldestSummaryCacheKeys(
@@ -68,6 +80,19 @@ describe('summary cache boundaries', () => {
         2,
       ),
     ).toEqual(['summary:old', 'summary:middle']);
+  });
+
+  it('prefers invalid raw entries before valid entries when selecting quota eviction keys', () => {
+    expect(
+      getSummaryCacheEvictionKeys(
+        {
+          'summary:new': { ...validEntry, generatedAt: 300 },
+          'summary:old': { ...validEntry, generatedAt: 100 },
+          'summary:corrupt': { summary: 'bad' },
+        },
+        2,
+      ),
+    ).toEqual(['summary:corrupt', 'summary:old']);
   });
 
   it('encapsulates storage reads, eviction, writes, and removes', async () => {
@@ -113,5 +138,48 @@ describe('summary cache boundaries', () => {
     });
     await store.remove('saved');
     expect(backing['summary:saved']).toBeUndefined();
+  });
+
+  it('evicts raw corrupt entries when quota retry cannot find enough valid summaries', async () => {
+    const backing: Record<string, unknown> = {
+      'summary:corrupt': { summary: 'bad', personalityId: 'p1' },
+    };
+    const removed: string[] = [];
+    let failNextSet = true;
+    const store = new SummaryCacheStore(
+      {
+        async get(key) {
+          if (key === null || key === undefined) {
+            return { ...backing };
+          }
+          if (typeof key === 'string') {
+            return { [key]: backing[key] };
+          }
+          return {};
+        },
+        async set(items) {
+          if (failNextSet) {
+            failNextSet = false;
+            throw new Error('quota');
+          }
+          Object.assign(backing, items);
+        },
+        async remove(keys) {
+          const keyList = Array.isArray(keys) ? keys : [keys];
+          removed.push(...keyList);
+          for (const key of keyList) {
+            delete backing[key];
+          }
+        },
+      },
+      async () => backing,
+      { evictionCount: 1 },
+    );
+
+    await store.save('saved', validEntry);
+
+    expect(removed).toEqual(['summary:corrupt']);
+    expect(backing['summary:corrupt']).toBeUndefined();
+    expect(backing['summary:saved']).toEqual(validEntry);
   });
 });

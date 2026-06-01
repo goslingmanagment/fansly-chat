@@ -475,6 +475,53 @@ describe('OperationCoordinator', () => {
     );
   });
 
+  it('accepts valid content messages through the registered port listener', async () => {
+    const { port } = await createCoordinatorHarness();
+
+    port.emitMessage({
+      type: 'tab:init',
+      groupId: 'group-1',
+      routeNonce: 1,
+    });
+
+    await vi.waitFor(() => {
+      expect(postedMessages(port)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'tab:state',
+            state: expect.objectContaining({
+              groupId: 'group-1',
+              hasAvailableSummary: true,
+            }),
+          }),
+        ]),
+      );
+    });
+  });
+
+  it('drops malformed content messages at the registered port listener', async () => {
+    const { port, anthropicClient, fanslyClient } = await createCoordinatorHarness();
+
+    port.emitMessage({
+      type: 'tab:init',
+      groupId: 123,
+      routeNonce: 1,
+    });
+    port.emitMessage({
+      type: 'operation:start',
+      operationId: 'bad-op',
+      feature: 'not-a-feature',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+    });
+    await Promise.resolve();
+
+    expect(postedMessages(port)).toEqual([]);
+    expect(anthropicClient.streamMessage).not.toHaveBeenCalled();
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
   it('includes provider-aware API key readiness in tab state', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),

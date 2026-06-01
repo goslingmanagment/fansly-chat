@@ -509,6 +509,37 @@ describe('loadStorageState', () => {
     expect(setBrowser.storage.local.set).toHaveBeenCalled();
   });
 
+  it('removes corrupt summary cache entries from browser storage during load cleanup', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: createBundledPersonalities(),
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+      'summary:valid': {
+        summary: 'cached',
+        personalityId: 'p1',
+        personalityUpdatedAt: 100,
+        generatedAt: 200,
+      } as SummaryCacheEntry,
+      'summary:corrupt': {
+        summary: 'missing required metadata',
+        personalityId: 'p1',
+      },
+    };
+
+    const result = await storage.loadStorageState();
+
+    expect((result as unknown as Record<string, unknown>)['summary:valid']).toBeDefined();
+    expect((result as unknown as Record<string, unknown>)['summary:corrupt']).toBeUndefined();
+    expect(mockStorage['summary:valid']).toBeDefined();
+    expect(mockStorage['summary:corrupt']).toBeUndefined();
+    expect((globalThis as any).browser.storage.local.remove).toHaveBeenCalledWith(
+      'summary:corrupt',
+    );
+  });
+
   it('seeds bundled Lora when storage has no personalities', async () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -704,6 +735,7 @@ describe('deletePersonality', () => {
       'summary:group1': { summary: 'sum1', personalityId: 'p1', personalityUpdatedAt: 1000, generatedAt: 2000 } as SummaryCacheEntry,
       'summary:group2': { summary: 'sum2', personalityId: 'p2', personalityUpdatedAt: 1000, generatedAt: 2000 } as SummaryCacheEntry,
       'summary:group3': { summary: 'sum3', personalityId: 'p1', personalityUpdatedAt: 1000, generatedAt: 3000 } as SummaryCacheEntry,
+      'summary:corrupt-group': { summary: 'bad', personalityId: 'p1' },
     };
 
     await storage.deletePersonality('p1');
@@ -717,6 +749,7 @@ describe('deletePersonality', () => {
     expect((mockStorage.accountMappings as Record<string, string>).acc3).toBe('p2');
     expect(mockStorage['summary:group1']).toBeUndefined();
     expect(mockStorage['summary:group3']).toBeUndefined();
+    expect(mockStorage['summary:corrupt-group']).toBeUndefined();
     expect(mockStorage['summary:group2']).toBeDefined();
   });
 
