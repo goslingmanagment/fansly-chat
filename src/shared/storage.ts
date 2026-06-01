@@ -24,7 +24,9 @@ import {
   reconcileBundledPersonalities,
 } from './personalities.js';
 import {
+  getInvalidSummaryCacheKeys,
   getSummaryCacheKeysForPersonality,
+  getSummaryCacheKeysReferencingPersonality,
   SummaryCacheStore,
 } from './summary-cache.js';
 import type {
@@ -59,6 +61,7 @@ function normalizeReasoningEffort(
 
 export async function loadStorageState(): Promise<PersistedState> {
   const raw = await browser.storage.local.get(null);
+  const invalidSummaryKeys = getInvalidSummaryCacheKeys(raw);
   const state = migrateState(raw);
   state.settings = sanitizeSettings(state.settings);
   const {
@@ -67,6 +70,11 @@ export async function loadStorageState(): Promise<PersistedState> {
   } = reconcileBundledPersonalities(state.personalities);
   state.personalities = personalities;
 
+  if (invalidSummaryKeys.length > 0) {
+    await browser.storage.local.remove(
+      invalidSummaryKeys.length === 1 ? invalidSummaryKeys[0]! : invalidSummaryKeys,
+    );
+  }
   if (
     (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION ||
     personalitiesChanged
@@ -158,7 +166,11 @@ export async function deletePersonality(personalityId: string): Promise<void> {
     Object.entries(state.accountMappings).filter(([, mapped]) => mapped !== personalityId),
   );
 
-  const removals = getSummaryCacheKeysForPersonality(state, personalityId);
+  const raw = await browser.storage.local.get(null);
+  const removals = Array.from(new Set([
+    ...getSummaryCacheKeysForPersonality(state, personalityId),
+    ...getSummaryCacheKeysReferencingPersonality(raw, personalityId),
+  ]));
 
   await browser.storage.local.set({ personalities, accountMappings });
   if (removals.length > 0) {

@@ -116,6 +116,14 @@ describe('planSurfaces', () => {
   it('renders cached inline results in the current quick surface mode', () => {
     expect(planSurfaces(baseInput({
       quickInlineVisible: true,
+      cachedInlineModel: completedReplyModel,
+    }))).toMatchObject({
+      overlay: { kind: 'hidden' },
+      inline: { kind: 'render', model: completedReplyModel },
+    });
+
+    expect(planSurfaces(baseInput({
+      quickInlineVisible: true,
       quickSurfaceMode: 'overlay',
       cachedInlineModel: completedReplyModel,
     }))).toMatchObject({
@@ -125,6 +133,21 @@ describe('planSurfaces', () => {
         dismissMode: 'collapse-to-inline',
       },
       inline: { kind: 'hidden' },
+    });
+  });
+
+  it('keeps active inline work hidden without falling through to cached or deep surfaces', () => {
+    expect(planSurfaces(baseInput({
+      activeFeature: 'fast-reply',
+      activeLoadingModel: loadingModel,
+      activeRegenerableLoadingModel: loadingModelWithRegenerate,
+      quickInlineVisible: false,
+      cachedInlineModel: completedReplyModel,
+      deepOverlayModel: summaryLoadingModel,
+    }))).toMatchObject({
+      overlay: { kind: 'hidden' },
+      inline: { kind: 'hidden' },
+      resetQuickSurfaceMode: false,
     });
   });
 
