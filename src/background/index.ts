@@ -8,6 +8,7 @@ import { OperationCoordinator } from './operations.js';
 import { registerRuntimeApi } from './runtime-api.js';
 import { initializeSessionCapture } from './session-capture.js';
 import { SessionStore } from './session-store.js';
+import { SpendersService } from './spenders-service.js';
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 
@@ -17,6 +18,7 @@ const sessionStore = new SessionStore();
 const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const fanslyClient = new FanslyClient(sessionStore);
+const spendersService = new SpendersService(fanslyClient);
 const anthropicClient = new AnthropicClient();
 const openRouterClient = new OpenRouterClient();
 const llmClient = new LlmClient(anthropicClient, openRouterClient);
@@ -45,6 +47,7 @@ registerRuntimeApi({
   agencyHubClient,
   fanslyClient,
   sessionStore,
+  spendersService,
   tabContexts,
   storageCoordinator,
 });

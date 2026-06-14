@@ -4,9 +4,10 @@ import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { SessionTemplate } from '../src/shared/types.js';
 
+type MessageSenderLike = { tab?: { id?: number } };
 let mockStorage: Record<string, unknown> = {};
 let onMessageListener:
-  | ((message: unknown) => Promise<unknown>)
+  | ((message: unknown, sender?: MessageSenderLike) => Promise<unknown>)
   | undefined;
 
 function makeCapture(accountId: string) {
@@ -38,6 +39,9 @@ async function installRuntimeApiHarness(fanslyClient: {
 }, options?: {
   agencyHubClient?: {
     testConnection: ReturnType<typeof vi.fn>;
+  };
+  spendersService?: {
+    getList: ReturnType<typeof vi.fn>;
   };
 }) {
   vi.resetModules();
@@ -77,7 +81,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     },
     runtime: {
       onMessage: {
-        addListener: vi.fn((listener: (message: unknown) => Promise<unknown>) => {
+        addListener: vi.fn((listener: (message: unknown, sender?: MessageSenderLike) => Promise<unknown>) => {
           onMessageListener = listener;
         }),
       },
@@ -100,10 +104,20 @@ async function installRuntimeApiHarness(fanslyClient: {
   const agencyHubClient = options?.agencyHubClient ?? {
     testConnection: vi.fn(async () => ({ ok: true })),
   };
+  const spendersService = options?.spendersService ?? {
+    getList: vi.fn(async () => ({
+      entries: [],
+      builtAt: 0,
+      fanCount: 0,
+      scannedCount: 0,
+      truncated: false,
+    })),
+  };
   registerRuntimeApi({
     agencyHubClient: agencyHubClient as never,
     fanslyClient: fanslyClient as never,
     sessionStore,
+    spendersService: spendersService as never,
     tabContexts: new TabContextStore(),
     storageCoordinator,
   });
@@ -112,7 +126,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     throw new Error('Runtime listener was not registered');
   }
 
-  return { sessionStore, tabsQuery, tabsGet, agencyHubClient };
+  return { sessionStore, tabsQuery, tabsGet, agencyHubClient, spendersService };
 }
 
 describe('runtime-api getSessionsSnapshot', () => {
@@ -386,5 +400,69 @@ describe('runtime-api testAgencyHubConnection', () => {
       ok: false,
       error: createUserError('hub_request_failed'),
     });
+  });
+});
+
+describe('runtime-api getSpendersList', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('builds the board for the sender tab session', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    };
+    const result = {
+      entries: [
+        {
+          fanAccountId: 'fan-1',
+          groupId: 'group-1',
+          displayName: 'Whale Bob',
+          username: 'whalebob',
+          lifetimeMills: 1078000,
+          lifetimeUsd: 1078,
+        },
+      ],
+      builtAt: 123,
+      fanCount: 1,
+      scannedCount: 1,
+      truncated: false,
+    };
+    const spendersService = { getList: vi.fn(async () => result) };
+
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, {
+      spendersService,
+    });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'getSpendersList', refresh: true },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, result });
+    expect(spendersService.getList).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: 'creator-1' }),
+      expect.any(AbortSignal),
+      { refresh: true },
+    );
+  });
+
+  it('returns not_connected when the sender tab has no session', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    };
+    const spendersService = { getList: vi.fn(async () => undefined) };
+
+    await installRuntimeApiHarness(fanslyClient, { spendersService });
+
+    const response = await onMessageListener?.(
+      { type: 'getSpendersList' },
+      { tab: { id: 999 } },
+    );
+
+    expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
+    expect(spendersService.getList).not.toHaveBeenCalled();
   });
 });

@@ -170,6 +170,8 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getSessionsSnapshot';
     case 'testAgencyHubConnection':
       return 'testAgencyHubConnection';
+    case 'getSpendersList':
+      return isOptionalBoolean(message, 'refresh') ? 'getSpendersList' : null;
     default:
       return null;
   }

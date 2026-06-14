@@ -1288,3 +1288,358 @@ body.chatgoose-scroll-lock {
     font-size: 17px;
   }
 }
+
+/* ─── Hotkey cheatsheet (?) ──────────────────────────────────────────────── */
+
+#chatgoose-cheatsheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+}
+
+.chatgoose-cheatsheet-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  pointer-events: auto;
+  font-family: var(--chatgoose-font);
+}
+
+.chatgoose-cheatsheet-panel {
+  width: min(440px, 100%);
+  max-height: min(80vh, 720px);
+  overflow-y: auto;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--chatgoose-border);
+  background: var(--chatgoose-panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  color: var(--chatgoose-text);
+  animation: chatgoose-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chatgoose-cheatsheet-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.chatgoose-cheatsheet-list {
+  display: grid;
+  gap: 6px;
+}
+
+.chatgoose-cheatsheet-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.chatgoose-cheatsheet-key {
+  justify-self: start;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--chatgoose-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--chatgoose-accent-soft);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+.chatgoose-cheatsheet-desc {
+  font-size: 12.5px;
+  color: var(--chatgoose-text);
+}
+
+.chatgoose-cheatsheet-footer {
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--chatgoose-muted);
+}
+
+/* ─── Spenders board ($ / ⌘⇧M) ───────────────────────────────────────────── */
+
+#chatgoose-board-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+
+.chatgoose-board-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px 20px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  pointer-events: auto;
+  overflow-y: auto;
+  font-family: var(--chatgoose-font);
+}
+
+.chatgoose-board-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(940px, 100%);
+  max-height: 88vh;
+  border-radius: 16px;
+  border: 1px solid var(--chatgoose-border);
+  background: var(--chatgoose-panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color: var(--chatgoose-text);
+  overflow: hidden;
+  animation: chatgoose-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chatgoose-board-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--chatgoose-border);
+}
+
+.chatgoose-board-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.chatgoose-board-subtitle {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--chatgoose-muted);
+}
+
+.chatgoose-board-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chatgoose-board-action {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--chatgoose-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--chatgoose-text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-board-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.chatgoose-board-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chatgoose-board-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.chatgoose-board-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--chatgoose-border);
+}
+
+.chatgoose-board-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--chatgoose-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--chatgoose-text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-board-chip:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.chatgoose-board-chip-active {
+  background: rgba(91, 138, 245, 0.18);
+  border-color: var(--chatgoose-border-accent);
+  color: var(--chatgoose-accent-soft);
+}
+
+.chatgoose-board-chip-count {
+  font-size: 10.5px;
+  color: var(--chatgoose-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chatgoose-board-chip-active .chatgoose-board-chip-count {
+  color: var(--chatgoose-accent-soft);
+}
+
+.chatgoose-board-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 10px 10px;
+}
+
+.chatgoose-board-section {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 10px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--chatgoose-muted);
+}
+
+.chatgoose-board-section-title {
+  font-weight: 600;
+  color: var(--chatgoose-text);
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 12.5px;
+}
+
+.chatgoose-board-section-band {
+  color: var(--chatgoose-muted);
+}
+
+.chatgoose-board-section-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.chatgoose-board-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.chatgoose-board-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chatgoose-board-row-active {
+  background: rgba(91, 138, 245, 0.14);
+  outline: 1px solid var(--chatgoose-border-accent);
+}
+
+.chatgoose-board-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--chatgoose-panel-elevated);
+  color: var(--chatgoose-accent-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chatgoose-board-row-main {
+  min-width: 0;
+}
+
+.chatgoose-board-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatgoose-board-row-handle {
+  font-size: 11px;
+  color: var(--chatgoose-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatgoose-board-row-amount {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-success);
+}
+
+.chatgoose-board-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--chatgoose-muted);
+  font-size: 13px;
+}
+
+.chatgoose-board-footer {
+  padding: 10px 20px;
+  border-top: 1px solid var(--chatgoose-border);
+  font-size: 11px;
+  color: var(--chatgoose-muted);
+}
+
+/* ─── Floating $ launcher ────────────────────────────────────────────────── */
+
+#chatgoose-launcher-root {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 2147483644;
+}
+
+.chatgoose-launcher {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--chatgoose-border-accent);
+  background: var(--chatgoose-panel);
+  color: var(--chatgoose-accent-soft);
+  font-size: 17px;
+  font-weight: 600;
+  font-family: var(--chatgoose-font);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 0.55;
+  transition: opacity 150ms ease, transform 150ms ease, background 150ms ease;
+}
+
+.chatgoose-launcher:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+  background: var(--chatgoose-panel-elevated);
+}

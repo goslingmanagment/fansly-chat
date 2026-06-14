@@ -1,6 +1,9 @@
-import { AGENCY_HUB_PREFETCH_TIMEOUT_MS } from '../shared/constants.js';
+import {
+  AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+  SPENDERS_BUILD_TIMEOUT_MS,
+} from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
-import { createUserError } from '../shared/errors.js';
+import { createUserError, toUserError } from '../shared/errors.js';
 import {
   buildApiKeyReadyByFeature,
   buildModelProviderByFeature,
@@ -18,6 +21,7 @@ import type { AgencyHubClient } from './agency-hub-client.js';
 import { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { SessionStore } from './session-store.js';
+import { SpendersService } from './spenders-service.js';
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 
@@ -27,6 +31,7 @@ export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
   fanslyClient: FanslyClient;
   sessionStore: SessionStore;
+  spendersService: SpendersService;
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
 }
@@ -35,11 +40,12 @@ export function registerRuntimeApi({
   agencyHubClient,
   fanslyClient,
   sessionStore,
+  spendersService,
   tabContexts,
   storageCoordinator,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
-    async (message: unknown) => {
+    async (message: unknown, sender: browser.runtime.MessageSender) => {
       const requestType = getRuntimeRequestType(message);
       if (!requestType) {
         return undefined;
@@ -202,6 +208,33 @@ export function registerRuntimeApi({
         );
         try {
           return await agencyHubClient.testConnection(settings, controller.signal);
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
+      }
+
+      if (requestType === 'getSpendersList') {
+        const tabId = sender.tab?.id;
+        const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
+        if (!session || !session.connected) {
+          return { ok: false, error: createUserError('not_connected') };
+        }
+
+        const refresh = isObjectRecord(message) && message.refresh === true;
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          SPENDERS_BUILD_TIMEOUT_MS,
+        );
+        try {
+          const result = await spendersService.getList(session, controller.signal, { refresh });
+          return { ok: true, result };
+        } catch (error) {
+          const timedOut = error instanceof DOMException && error.name === 'AbortError';
+          return {
+            ok: false,
+            error: timedOut ? createUserError('timed_out') : toUserError(error),
+          };
         } finally {
           globalThis.clearTimeout(timeout);
         }
