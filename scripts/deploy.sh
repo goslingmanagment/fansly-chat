@@ -94,6 +94,21 @@ read_manifest_version() {
   ' "$manifest_file"
 }
 
+read_manifest_min_version() {
+  local manifest_file="$1"
+
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const manifestPath = process.argv[1];
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const gecko = (manifest.browser_specific_settings || manifest.applications || {}).gecko || {};
+    if (typeof gecko.strict_min_version !== "string" || gecko.strict_min_version.length === 0) {
+      throw new Error(`${manifestPath} is missing browser_specific_settings.gecko.strict_min_version`);
+    }
+    process.stdout.write(gecko.strict_min_version);
+  ' "$manifest_file"
+}
+
 restore_release_pages() {
   if [[ -n "$install_page_backup" && -f "$install_page_backup" ]]; then
     cp "$install_page_backup" "$INSTALL_PAGE_FILE"
@@ -263,6 +278,8 @@ main() {
 
   local version
   version="$(read_manifest_version "$ROOT_DIR/manifest.json")"
+  local min_version
+  min_version="$(read_manifest_min_version "$ROOT_DIR/manifest.json")"
 
   artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/chatgoose-web-ext.XXXXXX")"
   updates_file="$(mktemp "${TMPDIR:-/tmp}/chatgoose-updates.XXXXXX.json")"
@@ -301,7 +318,12 @@ main() {
         {
           "version": "${version}",
           "update_link": "${xpi_url}",
-          "update_hash": "sha256:${sha256}"
+          "update_hash": "sha256:${sha256}",
+          "applications": {
+            "gecko": {
+              "strict_min_version": "${min_version}"
+            }
+          }
         }
       ]
     }
