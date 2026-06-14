@@ -89,6 +89,21 @@ export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CONCURRENCY = 3;
 export const FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS = 3_000;
 export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
 
+// ─── Spenders board ──────────────────────────────────────────────────────
+// A ranked top-spenders list has no single Fansly endpoint: it enumerates
+// conversations, then fetches lifetime earnings per fan (one call each). To
+// keep the burst bounded and avoid hammering Fansly, the scan is capped, runs
+// at low concurrency, and the result is cached per creator for a short window.
+
+/** Most-recent conversations to fetch lifetime spend for before ranking. */
+export const SPENDERS_MAX_FANS = 150;
+/** Concurrent per-fan earnings fetches (matches the monthly-breakdown fan-out). */
+export const SPENDERS_EARNINGS_CONCURRENCY = 4;
+/** Reuse a built board for this long before a fresh scan is allowed. */
+export const SPENDERS_CACHE_TTL_MS = 10 * 60 * 1000;
+/** Overall budget for one board build (enumerate + per-fan earnings fan-out). */
+export const SPENDERS_BUILD_TIMEOUT_MS = 120_000;
+
 // ─── Message Counts ──────────────────────────────────────────────────────
 
 export const QUICK_DEFAULT_MESSAGE_COUNT = 100;

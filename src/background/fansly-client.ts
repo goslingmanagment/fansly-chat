@@ -646,6 +646,65 @@ export class FanslyClient {
     return aggregateEarnings(rows, fanAccountId, windowStartMs, windowEndMs);
   }
 
+  /**
+   * Enumerate the creator's conversations (newest activity first) as
+   * {groupId, fanAccountId} pairs, deduped by fan, bounded to `maxFans`.
+   * `truncated` is true when the cap was hit before the inbox was exhausted —
+   * the spenders scan then ranks among the most-recent `maxFans` fans only.
+   */
+  async listFanAccounts(
+    maxFans: number,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<{ fans: Array<{ groupId: string; fanAccountId: string }>; truncated: boolean }> {
+    const fans: Array<{ groupId: string; fanAccountId: string }> = [];
+    const seen = new Set<string>();
+    let offset = 0;
+
+    for (let page = 0; page < MESSAGING_GROUPS_MAX_PAGES; page += 1) {
+      const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
+      url.searchParams.set('sortOrder', '1');
+      url.searchParams.set('flags', '0');
+      url.searchParams.set('subscriptionTierId', '');
+      url.searchParams.set('listIds', '');
+      url.searchParams.set('search', '');
+      url.searchParams.set('limit', String(MESSAGING_GROUPS_PAGE_SIZE));
+      url.searchParams.set('offset', String(offset));
+
+      const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(
+        url,
+        session,
+        'messagingGroups',
+        signal,
+      );
+      const groups = Array.isArray(response.data) ? response.data : [];
+
+      for (const entry of groups) {
+        const fanAccountId = entry.partnerAccountId;
+        if (!fanAccountId || seen.has(fanAccountId)) {
+          continue;
+        }
+        seen.add(fanAccountId);
+        fans.push({ groupId: entry.groupId, fanAccountId });
+        if (fans.length >= maxFans) {
+          // More conversations may remain on this or later pages.
+          const moreOnPage = groups.indexOf(entry) < groups.length - 1;
+          return { fans, truncated: moreOnPage || groups.length === MESSAGING_GROUPS_PAGE_SIZE };
+        }
+      }
+
+      if (groups.length < MESSAGING_GROUPS_PAGE_SIZE) {
+        return { fans, truncated: false };
+      }
+
+      offset += MESSAGING_GROUPS_PAGE_SIZE;
+      await delay(FANSLY_PAGINATION_DELAY_MS, signal);
+    }
+
+    // Stopped at the page cap with full pages throughout → likely more remain.
+    return { fans, truncated: true };
+  }
+
   async getMonthlyEarnings(
     fanAccountId: string,
     windowStartMs: number,

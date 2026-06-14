@@ -694,17 +694,52 @@ export interface RuntimeRequestMap {
   getPopupStatus: GetPopupStatusRequest | undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
+  getSpendersList: GetSpendersListRequest | undefined;
 }
 
 export interface RuntimeResponseMap {
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
+  getSpendersList: SpendersListResponse;
 }
 
 export interface GetPopupStatusRequest {
   tabId?: number;
 }
+
+export interface GetSpendersListRequest {
+  /** Force a rebuild, bypassing the per-creator cache. */
+  refresh?: boolean;
+}
+
+export interface SpenderListEntry {
+  fanAccountId: string;
+  /** Fansly messaging group id — the route target for opening the chat. */
+  groupId: string;
+  displayName: string | null;
+  username: string | null;
+  /** Lifetime gross spend with this creator, in Fansly mills. */
+  lifetimeMills: number;
+  /** Lifetime gross spend with this creator, in USD. */
+  lifetimeUsd: number;
+}
+
+export interface SpendersListResult {
+  entries: SpenderListEntry[];
+  /** When this snapshot was built (epoch ms). */
+  builtAt: number;
+  /** Spenders with lifetime spend > 0 in this snapshot. */
+  fanCount: number;
+  /** Conversations scanned for spend before ranking. */
+  scannedCount: number;
+  /** True when more conversations exist than were scanned (bounded scan). */
+  truncated: boolean;
+}
+
+export type SpendersListResponse =
+  | { ok: true; result: SpendersListResult }
+  | { ok: false; error: UserFacingError };
 
 export interface AgencyHubConnectionTestRequest {
   settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>;

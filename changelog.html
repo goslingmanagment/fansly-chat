@@ -412,11 +412,42 @@
 
 <div class="timeline">
 
+  <!-- 1.5.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.5.0</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Первый релиз с новыми фичами после технической серии 1.4.x. Перенесли два удобных решения из десктопной версии ChatGoose: полноценные горячие клавиши для всех AI-действий прямо в диалоге и доску «Спендеры» — рейтинг фанов по сумме трат.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li><strong>Горячие клавиши.</strong> Все AI-действия в открытом диалоге теперь на клавишах: Fast Reply, Polish, Help, Hi, Ping, Scan, Chat Review, переключение тона и отмена. По <code>?</code> — шпаргалка со всеми сочетаниями</li>
+          <li><strong>Кросс-платформенно.</strong> На macOS — <code>⌘⇧‹буква›</code>, на Windows/Linux — <code>Alt+Shift+‹буква›</code>: <code>Ctrl+Shift+‹буква›</code> на Windows занят самим Firefox и не перехватывается из страницы, а <code>Alt+Shift</code> свободен и работает надёжно</li>
+          <li><strong>«Спендеры» — доска топ-плательщиков.</strong> Рейтинг фанов по сумме всех трат, с разбивкой по тирам (🐳 Кит / ⭐ Топ / ✅ Прайм / Базовый / Низкий / Микро). Открытие кнопкой <code>$</code> или хоткеем; навигация <code>J</code>/<code>K</code>, открытие чата по <code>Enter</code>/клику, фильтр по тирам, «Обновить»</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Чистый движок сопоставления клавиш (<code>shared/keymap.ts</code>) + единая таблица биндингов (<code>shared/hotkeys.ts</code>) с платформо-зависимым модификатором; один центральный <code>keydown</code>-listener вместо разрозненных обработчиков</li>
+          <li>Доска собирается в фоне: <code>messaging/groups</code> + <code>earnings/stats/accounts</code> по каждому фану, затем ранжирование; скан ограничен (top-N недавних), низкая конкуренция и кэш 10 минут, чтобы не нагружать Fansly; тиры считаются на клиенте по порогам</li>
+          <li>Новый runtime-запрос <code>getSpendersList</code>; пороги тиров, сборка списка и движок клавиш — чистые функции с тестами</li>
+          <li>822 теста (818 проходят, 4 skipped), typecheck и build чистые; дифф проверен адверсариально (корректность ранжирования и интеграция хоткеев)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.4.1 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.4.1</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

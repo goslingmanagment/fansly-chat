@@ -9,6 +9,9 @@ import { MappingBanner } from './mapping-banner.js';
 import { CompletedOverlayCache } from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
+import { CheatsheetController } from './cheatsheet-controller.js';
+import { BoardLauncher } from './spenders/board-launcher.js';
+import { SpendersBoardController } from './spenders/spenders-board-controller.js';
 import { startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import {
@@ -19,6 +22,14 @@ import { findActiveConversationTextarea } from './conversation-dom.js';
 import { getActiveConversationDraftText, insertIntoFanslyTextarea } from './textarea.js';
 import { ToastController } from './toast.js';
 import { isEditableElement } from './ui/view-helpers.js';
+import {
+  buildHotkeyBindings,
+  detectLabelPlatform,
+  HOTKEY_FEATURE,
+  type HotkeyAction,
+} from '../shared/hotkeys.js';
+import { createKeymap } from '../shared/keymap.js';
+import { sendRuntimeRequest } from '../shared/protocol.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
@@ -289,6 +300,16 @@ export class ChatGooseContentApp {
     },
   });
 
+  private readonly hotkeyBindings = buildHotkeyBindings(detectLabelPlatform());
+  private readonly keymap = createKeymap(this.hotkeyBindings);
+  private readonly cheatsheet = new CheatsheetController(this.hotkeyBindings);
+  private readonly board = new SpendersBoardController({
+    fetchList: (refresh) =>
+      sendRuntimeRequest('getSpendersList', refresh ? { refresh: true } : undefined),
+    openChat: (groupId) => this.openFanChat(groupId),
+  });
+  private readonly launcher = new BoardLauncher(() => this.board.toggle());
+
   constructor() {
     this.root.id = 'chatgoose-root';
     this.root.append(this.inlinePanel.root, this.buttonBar.root, this.mappingBanner.root);
@@ -323,19 +344,94 @@ export class ChatGooseContentApp {
     installContentStyles(contentStyles);
     this.port.connect();
     startRouteWatcher((groupId) => this.handleRouteChange(groupId));
+    this.installKeymap();
+    this.launcher.mount();
+  }
 
-    document.addEventListener('keydown', (e) => {
-      if (
-        (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyE' && !e.repeat &&
-        !isEditableElement(document.activeElement) &&
-        this.currentGroupId &&
-        !this.activeFeature &&
-        !this.activeCompareModel?.operationId
-      ) {
-        e.preventDefault();
-        this.startFeature('fast-reply', false);
+  // ─── Hotkeys ────────────────────────────────────────────────────────────
+
+  private installKeymap(): void {
+    document.addEventListener('keydown', (event) => {
+      if (event.repeat) return;
+      const action = this.keymap.resolve({
+        key: event.key,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+        inEditable: isEditableElement(document.activeElement),
+      });
+      if (action === null) return;
+      // preventDefault only when we actually handle it, so an inapplicable
+      // shortcut (e.g. an AI key with no conversation open) doesn't silently
+      // swallow a browser default.
+      if (this.dispatchHotkey(action)) {
+        event.preventDefault();
       }
     });
+  }
+
+  private dispatchHotkey(action: HotkeyAction): boolean {
+    const feature = HOTKEY_FEATURE[action];
+    if (feature) {
+      if (!this.currentGroupId) return false;
+      this.startFeature(feature, false);
+      return true;
+    }
+    switch (action) {
+      case 'cycle-tone':
+        this.cycleNextReplyTone();
+        return true;
+      case 'cancel':
+        this.cancelActiveOperation();
+        return true;
+      case 'spenders-board':
+        this.board.toggle();
+        return true;
+      case 'cheatsheet':
+        this.cheatsheet.toggle();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private cycleNextReplyTone(): void {
+    if (this.activeFeature || this.activeCompareModel?.operationId) return;
+    const order: ReplyTone[] = ['none', 'casual', 'flirty', 'upsell', 'spicy'];
+    const index = order.indexOf(this.nextReplyTone);
+    this.nextReplyTone = order[(index + 1) % order.length]!;
+    this.renderButtonBar();
+  }
+
+  private cancelActiveOperation(): void {
+    if (this.activeCompareModel?.operationId) {
+      this.port.send({ type: 'compare:cancel', operationId: this.activeCompareModel.operationId });
+      this.activeCompareModel = null;
+      this.comparePanelVisible = false;
+      this.pendingCompareFingerprint = null;
+      this.completedCompareCache.clear(this.currentGroupId);
+      this.renderAll();
+      return;
+    }
+    if (this.activeFeature && this.activeOperationId) {
+      // Mirror the surface's own cancel: overlay features reset mode/tone (see
+      // overlay.onCancel), inline features keep them (see inlinePanel.onCancel).
+      const isOverlayFeature = usesOverlayFeatureSurface(this.activeFeature);
+      this.port.send({ type: 'operation:cancel', operationId: this.activeOperationId });
+      this.quickInlineVisible = false;
+      this.clearOperationState(true);
+      if (isOverlayFeature) {
+        this.resetNextFastReplyMode();
+        this.resetNextReplyTone();
+      }
+      this.renderAll();
+    }
+  }
+
+  private openFanChat(groupId: string): void {
+    this.board.close();
+    window.location.assign(`/messages/${groupId}`);
   }
 
   // ─── Surface Rendering ──────────────────────────────────────────────
