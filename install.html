@@ -1,205 +1,505 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Установить ChatGoose</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ChatGoose — AI-ассистент для чатов на Fansly</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #f6f2ea;
+    --paper-2: #fdfbf6;
+    --paper-3: #f1ebe0;
+    --ink: #2a2016;
+    --ink-soft: #6c5d4d;
+    --ink-faint: #a3947f;
+    --clay: #c4704b;
+    --clay-deep: #a8543a;
+    --clay-tint: rgba(196, 112, 75, 0.10);
+    --clay-line: rgba(196, 112, 75, 0.22);
+    --green: #2f7d5b;
+    --line: rgba(42, 32, 22, 0.10);
+    --line-soft: rgba(42, 32, 22, 0.06);
+    --serif: "Fraunces", Georgia, "Times New Roman", serif;
+    --sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    --shadow: 0 1px 2px rgba(42, 32, 22, 0.04), 0 8px 28px rgba(42, 32, 22, 0.06);
+    --shadow-lg: 0 2px 6px rgba(42, 32, 22, 0.05), 0 24px 60px rgba(42, 32, 22, 0.12);
+  }
 
-    body {
-      background: #F9F5EF;
-      color: #2D2015;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1rem;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    .page {
-      max-width: 420px;
-      width: 100%;
-      text-align: center;
-    }
+  html { scroll-behavior: smooth; }
 
-    .mascot {
-      width: 160px;
-      height: 160px;
-      border-radius: 50%;
-      object-fit: cover;
-      margin-bottom: 1.5rem;
-      filter: drop-shadow(0 8px 24px rgba(196, 112, 75, 0.15));
-    }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background-color: var(--paper);
+    background-image:
+      radial-gradient(900px 520px at 82% -8%, rgba(196, 112, 75, 0.10), transparent 60%),
+      radial-gradient(800px 520px at -5% 8%, rgba(199, 154, 58, 0.08), transparent 55%);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
 
-    h1 {
-      font-size: 2rem;
-      font-weight: 700;
-      letter-spacing: -0.025em;
-      color: #C4704B;
-      margin-bottom: 0.4rem;
-    }
+  /* Paper grain overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.4;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+  }
 
-    .tagline {
-      font-size: 1rem;
-      color: #6B5B4E;
-      margin-bottom: 2rem;
-      line-height: 1.6;
-    }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; position: relative; z-index: 1; }
 
-    .install-btn {
-      display: inline-block;
-      background: #C4704B;
-      color: #FFF8F0;
-      font-family: inherit;
-      font-size: 1.1rem;
-      font-weight: 600;
-      padding: 0.85rem 2.4rem;
-      border-radius: 12px;
-      text-decoration: none;
-      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
-      box-shadow: 0 4px 16px rgba(196, 112, 75, 0.25);
-    }
+  a { color: inherit; text-decoration: none; }
 
-    .install-btn:hover {
-      background: #A85D3B;
-      transform: translateY(-1px);
-      box-shadow: 0 6px 20px rgba(196, 112, 75, 0.3);
-    }
+  /* ── Nav ── */
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 26px 0 8px;
+  }
+  .brand {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .brand .g { color: var(--clay); }
+  .nav-links { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .nav-link {
+    font-size: 14px;
+    color: var(--ink-soft);
+    padding: 8px 14px;
+    border-radius: 999px;
+    transition: background 0.18s, color 0.18s;
+  }
+  .nav-link:hover { color: var(--ink); background: var(--clay-tint); }
+  .nav-cta {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff8f0;
+    background: var(--clay);
+    padding: 9px 18px;
+    border-radius: 999px;
+    transition: background 0.18s, transform 0.15s;
+  }
+  .nav-cta:hover { background: var(--clay-deep); transform: translateY(-1px); }
 
-    .install-btn:active {
-      transform: translateY(0);
-      box-shadow: 0 2px 8px rgba(196, 112, 75, 0.2);
-    }
+  /* ── Hero ── */
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 40px;
+    align-items: center;
+    padding: 72px 0 64px;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--clay-deep);
+    background: var(--paper-2);
+    border: 1px solid var(--clay-line);
+    padding: 6px 14px;
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--clay);
+    box-shadow: 0 0 0 4px var(--clay-tint);
+  }
+  .hero h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(40px, 6vw, 66px);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    margin: 22px 0 0;
+  }
+  .hero h1 em { font-style: italic; color: var(--clay); }
+  .hero .lede {
+    font-size: 18px;
+    color: var(--ink-soft);
+    margin-top: 20px;
+    max-width: 30em;
+  }
+  .hero-actions { display: flex; align-items: center; gap: 16px; margin-top: 32px; flex-wrap: wrap; }
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff8f0;
+    background: var(--clay);
+    padding: 14px 28px;
+    border-radius: 14px;
+    box-shadow: 0 6px 20px rgba(196, 112, 75, 0.28);
+    transition: background 0.18s, transform 0.15s, box-shadow 0.2s;
+  }
+  .btn-primary:hover { background: var(--clay-deep); transform: translateY(-2px); box-shadow: 0 10px 28px rgba(196, 112, 75, 0.34); }
+  .btn-ghost { font-size: 15px; font-weight: 500; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 7px; }
+  .btn-ghost:hover { color: var(--clay-deep); }
 
-    .steps {
-      margin-top: 2.5rem;
-      text-align: left;
-      background: #FFFFFF;
-      border: 1px solid rgba(45, 32, 21, 0.08);
-      border-radius: 14px;
-      padding: 1.25rem 1.5rem;
-      box-shadow: 0 1px 3px rgba(45, 32, 21, 0.04);
-    }
+  .hero-art { position: relative; display: flex; align-items: center; justify-content: center; }
+  .halo {
+    position: absolute;
+    width: 320px; height: 320px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 40%, rgba(196, 112, 75, 0.22), rgba(196, 112, 75, 0.04) 62%, transparent 72%);
+    filter: blur(2px);
+  }
+  .mascot {
+    position: relative;
+    width: 248px; height: 248px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 6px solid var(--paper-2);
+    box-shadow: var(--shadow-lg);
+  }
+  .hero-badge {
+    position: absolute;
+    bottom: 14px; right: 6px;
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 14px;
+    box-shadow: var(--shadow);
+    font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .hero-badge b { font-family: var(--mono); color: var(--green); font-size: 13px; }
 
-    .steps-title {
-      font-weight: 600;
-      font-size: 0.9rem;
-      color: #C4704B;
-      margin-bottom: 0.75rem;
-      letter-spacing: -0.01em;
-    }
+  /* ── Section frame ── */
+  section { padding: 56px 0; }
+  .sec-head { max-width: 36em; margin-bottom: 40px; }
+  .sec-kicker {
+    font-size: 12.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--clay); margin-bottom: 12px;
+  }
+  .sec-head h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(28px, 4vw, 40px);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .sec-head p { color: var(--ink-soft); font-size: 16.5px; margin-top: 12px; }
 
-    .steps ol {
-      list-style: none;
-      counter-reset: step;
-    }
+  /* ── Feature grid ── */
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .feat {
+    background: var(--paper-2);
+    border: 1px solid var(--line-soft);
+    border-radius: 18px;
+    padding: 24px 22px;
+    box-shadow: var(--shadow);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .feat:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+  .feat .ic {
+    width: 42px; height: 42px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; margin-bottom: 16px;
+    background: var(--clay-tint); border: 1px solid var(--clay-line);
+  }
+  .feat h3 { font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .feat p { font-size: 14.5px; color: var(--ink-soft); margin-top: 8px; }
 
-    .steps li {
-      counter-increment: step;
-      position: relative;
-      padding-left: 2rem;
-      margin-bottom: 0.6rem;
-      font-size: 0.9rem;
-      line-height: 1.55;
-      color: #6B5B4E;
-    }
+  /* ── New in 1.5 ── */
+  .newband {
+    background:
+      linear-gradient(180deg, var(--paper-2), var(--paper-3));
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    padding: 44px;
+    box-shadow: var(--shadow);
+  }
+  .new-tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--clay-deep); margin-bottom: 14px;
+  }
+  .new-tag::before { content: "✦"; color: var(--clay); }
+  .newgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 24px; }
 
-    .steps li:last-child {
-      margin-bottom: 0;
-    }
+  .panel {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+  .panel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+  .panel-head .pic { font-size: 17px; }
+  .panel-head h3 { font-family: var(--serif); font-size: 21px; font-weight: 600; }
+  .panel-head .meta { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
 
-    .steps li::before {
-      content: counter(step);
-      position: absolute;
-      left: 0;
-      top: 0.15em;
-      width: 1.35rem;
-      height: 1.35rem;
-      background: rgba(196, 112, 75, 0.1);
-      color: #C4704B;
-      border-radius: 50%;
-      font-size: 0.75rem;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+  .keys { display: grid; gap: 10px; }
+  .keyrow { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 12px; }
+  kbd {
+    justify-self: start;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--clay-deep);
+    background: var(--paper-3);
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 7px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+  .keyrow .act { font-size: 14px; }
+  .keyrow .act small { color: var(--ink-faint); }
+  .panel-foot {
+    margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line);
+    font-size: 13px; color: var(--ink-soft);
+  }
+  .panel-foot b { color: var(--ink); }
 
-    .guide-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      margin-top: 1.75rem;
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: #C4704B;
-      text-decoration: none;
-      padding: 6px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(196, 112, 75, 0.2);
-      background: rgba(196, 112, 75, 0.05);
-      transition: all 0.15s;
-    }
+  /* spenders mini */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+  .chip {
+    font-size: 12px; padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--paper); color: var(--ink-soft);
+    display: inline-flex; gap: 6px; align-items: center;
+  }
+  .chip b { color: var(--ink); }
+  .chip .n { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
+  .chip.on { background: var(--clay-tint); border-color: var(--clay-line); color: var(--clay-deep); }
+  .chip.on b, .chip.on .n { color: var(--clay-deep); }
+  .srow { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 11px; padding: 7px 5px; border-radius: 10px; }
+  .srow.hi { background: var(--clay-tint); outline: 1px solid var(--clay-line); }
+  .av {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11.5px; font-weight: 700; color: #fff8f0;
+    background: linear-gradient(140deg, #d98a64, var(--clay));
+  }
+  .srow .nm { font-size: 13.5px; font-weight: 600; }
+  .srow .nm small { color: var(--ink-faint); font-weight: 400; }
+  .srow .amt { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--green); }
+  .sec-label { font-size: 12px; font-weight: 600; padding: 8px 5px 4px; color: var(--ink-soft); display: flex; gap: 7px; align-items: baseline; }
+  .sec-label .band { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
 
-    .guide-link:hover {
-      background: rgba(196, 112, 75, 0.1);
-      border-color: rgba(196, 112, 75, 0.3);
-    }
+  /* ── Install ── */
+  .install {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: center;
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    padding: 44px;
+    box-shadow: var(--shadow);
+  }
+  .install h2 { font-family: var(--serif); font-size: 32px; font-weight: 600; letter-spacing: -0.02em; }
+  .install p { color: var(--ink-soft); margin-top: 12px; font-size: 16px; }
+  .steps { counter-reset: step; display: grid; gap: 14px; }
+  .step { display: grid; grid-template-columns: 30px 1fr; gap: 14px; align-items: start; }
+  .step .num {
+    counter-increment: step;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--clay-tint); color: var(--clay-deep);
+    border: 1px solid var(--clay-line);
+    font-size: 13px; font-weight: 700; font-family: var(--mono);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step .num::before { content: counter(step); }
+  .step .txt { font-size: 15px; padding-top: 3px; }
+  .step .txt small { display: block; color: var(--ink-faint); font-size: 13px; }
 
-    .guide-link svg {
-      width: 14px;
-      height: 14px;
-      flex-shrink: 0;
-    }
+  /* ── Footer ── */
+  footer { padding: 48px 0 56px; text-align: center; }
+  .footlinks { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .footlinks a { font-size: 14px; color: var(--ink-soft); padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); transition: all 0.15s; }
+  .footlinks a:hover { color: var(--clay-deep); border-color: var(--clay-line); background: var(--clay-tint); }
+  .footer { font-size: 13px; color: var(--ink-faint); }
 
-    .footer {
-      margin-top: 2rem;
-      font-size: 0.78rem;
-      color: #9A8B7C;
-    }
-  </style>
+  /* ── Load animation ── */
+  .rise { opacity: 0; transform: translateY(16px); animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .d1 { animation-delay: 0.05s; } .d2 { animation-delay: 0.13s; } .d3 { animation-delay: 0.22s; } .d4 { animation-delay: 0.32s; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 36px; text-align: center; }
+    .hero .lede { margin-left: auto; margin-right: auto; }
+    .hero-actions { justify-content: center; }
+    .eyebrow { margin: 0 auto; }
+    .features { grid-template-columns: 1fr; }
+    .newgrid, .install { grid-template-columns: 1fr; }
+    .newband, .install { padding: 28px; }
+  }
+</style>
 </head>
 <body>
-  <div class="page">
-    <img src="mascot.png" alt="ChatGoose" class="mascot">
-    <h1>ChatGoose</h1>
-    <p class="tagline">Расширение для Firefox, которое поможет вести чаты быстрее и интереснее</p>
-    <a href="chatgoose-latest.xpi" class="install-btn">Установить ChatGoose</a>
-    <div class="steps">
-      <div class="steps-title">Как установить</div>
-      <ol>
-        <li>Откройте эту страницу в Firefox</li>
-        <li>Нажмите кнопку «Установить ChatGoose»</li>
-        <li>Разрешите установку во всплывающем окне</li>
-        <li>Готово! Обновления будут приходить автоматически</li>
-      </ol>
+
+<div class="wrap">
+  <nav class="rise">
+    <span class="brand">Chat<span class="g">Goose</span></span>
+    <div class="nav-links">
+      <a class="nav-link" href="#features">Возможности</a>
+      <a class="nav-link" href="#whatsnew">Новое</a>
+      <a class="nav-link" href="changelog.html">Что нового</a>
+      <a class="nav-cta" href="chatgoose-latest.xpi">Установить</a>
     </div>
-    <a href="guide.html" class="guide-link">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M2 3h4.5a2 2 0 0 1 2 2v8.5a1.5 1.5 0 0 0-1.5-1.5H2V3z"/>
-        <path d="M14 3H9.5a2 2 0 0 0-2 2v8.5A1.5 1.5 0 0 1 9 12h5V3z"/>
-      </svg>
-      Руководство
-    </a>
-    <a href="changelog.html" class="guide-link">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 2h10v12H3z"/>
-        <path d="M6 5h4M6 8h4M6 11h2"/>
-      </svg>
-      Что нового
-    </a>
-    <p class="footer">ChatGoose v1.0.1 &middot; Gosling Agency</p>
-  </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div>
+      <span class="eyebrow rise d1"><span class="dot"></span> Версия 1.5.0 · Firefox</span>
+      <h1 class="rise d1">AI-ассистент,<br />который ведёт чат <em>вместе с тобой</em></h1>
+      <p class="lede rise d2">ChatGoose помогает чаттерам на Fansly отвечать быстрее и интереснее: ответы в голосе модели, подсказки по диалогу, профили фанов и реактивация — прямо во вкладке, без переключений.</p>
+      <div class="hero-actions rise d2">
+        <a class="btn-primary" href="chatgoose-latest.xpi">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5v9M4.5 7L8 10.5 11.5 7M2.5 13.5h11"/></svg>
+          Установить в Firefox
+        </a>
+        <a class="btn-ghost" href="#whatsnew">Что нового в 1.5.0 →</a>
+      </div>
+    </div>
+    <div class="hero-art rise d3">
+      <div class="halo"></div>
+      <img src="mascot.png" alt="ChatGoose" class="mascot" />
+      <div class="hero-badge">🔥 за сегодня <b>+$1,078</b></div>
+    </div>
+  </header>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="sec-head rise">
+      <div class="sec-kicker">Возможности</div>
+      <h2>Пять инструментов, чтобы держать диалог живым</h2>
+      <p>Каждый — на расстоянии одной клавиши. AI ничего не отправляет сам: ты всегда жмёшь сам.</p>
+    </div>
+    <div class="features">
+      <div class="feat rise d1">
+        <div class="ic">⚡</div>
+        <h3>Fast Reply</h3>
+        <p>Готовый ответ в голосе модели по истории переписки. Вставляется в поле одним кликом.</p>
+      </div>
+      <div class="feat rise d1">
+        <div class="ic">🧭</div>
+        <h3>Help Me</h3>
+        <p>Разбор ситуации: что зашло, где ошибка и какой следующий ход — два варианта реплики.</p>
+      </div>
+      <div class="feat rise d2">
+        <div class="ic">🔍</div>
+        <h3>Fan Summary</h3>
+        <p>Профиль фана: интересы, стиль, траты, паттерны и red flags по глубокой истории.</p>
+      </div>
+      <div class="feat rise d2">
+        <div class="ic">⭐</div>
+        <h3>Chat Review</h3>
+        <p>Оценка диалога 1–10: следование персоне, качество, монетизация, конкретные правки.</p>
+      </div>
+      <div class="feat rise d3">
+        <div class="ic">💬</div>
+        <h3>Ping</h3>
+        <p>Реактивация затихших фанов: тёплое касание с опорой на прошлые темы.</p>
+      </div>
+      <div class="feat rise d3">
+        <div class="ic">🪶</div>
+        <h3>Тоны и Polish</h3>
+        <p>casual / flirty / upsell / spicy и «причесать» свой черновик одним движением.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- What's new -->
+  <section id="whatsnew">
+    <div class="newband rise">
+      <div class="new-tag">Новое в 1.5.0</div>
+      <div class="sec-head" style="margin-bottom: 6px;">
+        <h2>Хоткеи и доска «Спендеры»</h2>
+        <p>Два решения из десктопной версии: работа без мыши и мгновенный взгляд на тех, кто платит.</p>
+      </div>
+      <div class="newgrid">
+        <!-- Hotkeys -->
+        <div class="panel">
+          <div class="panel-head">
+            <span class="pic">⌨️</span>
+            <h3>Горячие клавиши</h3>
+            <span class="meta">macOS ⌘⇧ · Win Alt+Shift</span>
+          </div>
+          <div class="keys">
+            <div class="keyrow"><kbd>⌘⇧E</kbd><span class="act">Fast Reply <small>— быстрый ответ</small></span></div>
+            <div class="keyrow"><kbd>⌘⇧H</kbd><span class="act">Help <small>— подсказка по диалогу</small></span></div>
+            <div class="keyrow"><kbd>⌘⇧D</kbd><span class="act">Ping <small>— реактивация</small></span></div>
+            <div class="keyrow"><kbd>⌘⇧S</kbd><span class="act">Scan <small>— профиль фана</small></span></div>
+            <div class="keyrow"><kbd>⌘⇧M</kbd><span class="act">Доска «Спендеры»</span></div>
+            <div class="keyrow"><kbd>?</kbd><span class="act">Шпаргалка со всеми клавишами</span></div>
+          </div>
+          <div class="panel-foot">На <b>Windows/Linux</b> те же буквы на <b>Alt+Shift</b> — Ctrl+Shift там занят самим Firefox.</div>
+        </div>
+        <!-- Spenders -->
+        <div class="panel">
+          <div class="panel-head">
+            <span class="pic">💰</span>
+            <h3>Спендеры</h3>
+            <span class="meta">$ · ⌘⇧M</span>
+          </div>
+          <div class="chips">
+            <span class="chip on"><b>Все</b><span class="n">384</span></span>
+            <span class="chip">🐳&nbsp;<b>Кит</b><span class="n">8</span></span>
+            <span class="chip">⭐&nbsp;<b>Топ</b><span class="n">12</span></span>
+            <span class="chip">✅&nbsp;<b>Прайм</b><span class="n">23</span></span>
+          </div>
+          <div class="sec-label">🐳 Кит <span class="band">$600+</span></div>
+          <div class="srow hi"><div class="av">JT</div><div class="nm">Jonathan <small>· US</small></div><div class="amt">$1,078</div></div>
+          <div class="srow"><div class="av">CC</div><div class="nm">Charles <small>· DE</small></div><div class="amt">$1,022</div></div>
+          <div class="srow"><div class="av">RK</div><div class="nm">Ricky <small>· US</small></div><div class="amt">$718</div></div>
+          <div class="panel-foot"><b>J / K</b> листать · <b>Enter</b> открыть чат · фильтр по тирам</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section>
+    <div class="install rise">
+      <div>
+        <h2>Поставить — минута</h2>
+        <p>Самостоятельная установка для Firefox. Обновления приходят автоматически.</p>
+        <a class="btn-primary" href="chatgoose-latest.xpi" style="margin-top: 24px;">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5v9M4.5 7L8 10.5 11.5 7M2.5 13.5h11"/></svg>
+          Установить ChatGoose
+        </a>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="num"></span><span class="txt">Откройте эту страницу в <b>Firefox</b></span></div>
+        <div class="step"><span class="num"></span><span class="txt">Нажмите «Установить ChatGoose»</span></div>
+        <div class="step"><span class="num"></span><span class="txt">Разрешите установку <small>во всплывающем окне Firefox</small></span></div>
+        <div class="step"><span class="num"></span><span class="txt">Откройте Fansly и диалог — панель ChatGoose уже там</span></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footlinks">
+      <a href="guide.html">Руководство</a>
+      <a href="changelog.html">Что нового</a>
+      <a href="chatgoose-latest.xpi">Установить</a>
+    </div>
+    <p class="footer">ChatGoose v1.5.0 &middot; Gosling Agency</p>
+  </footer>
+</div>
+
 </body>
 </html>
