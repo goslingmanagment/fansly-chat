@@ -99,12 +99,13 @@ describe('ButtonBar toolbar visibility', () => {
 
     const platform = detectLabelPlatform();
     const replyHotkey = featureHotkeyLabel('fast-reply', platform)!;
-    const expectedChip = platform === 'mac' ? replyHotkey.full : replyHotkey.short;
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
     const reply = buttons.find((button) => labelOf(button) === 'Reply');
     const chip = reply?.querySelector('.chatgoose-kbd');
-    expect(chip?.textContent).toBe(expectedChip);
+    // The chip is the bare letter on every platform — the shared ⌘⇧ / Alt+Shift
+    // modifier would only crowd the bar. The full combo stays in the tooltip.
+    expect(chip?.textContent).toBe(replyHotkey.short);
     expect(reply?.title).toContain(replyHotkey.full);
     // The chip is decorative; the shortcut reaches AT via aria-keyshortcuts and
     // the accessible name stays the clean label.
@@ -283,7 +284,7 @@ describe.skip('ButtonBar compare button', () => {
   });
 });
 
-describe('ButtonBar tone row', () => {
+describe('ButtonBar tone menu', () => {
   beforeEach(() => {
     installDom();
   });
@@ -293,7 +294,7 @@ describe('ButtonBar tone row', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders three tone pills', () => {
+  it('renders a Reply tone caret and a four-item tone menu', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -305,12 +306,14 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
-    expect(pills).toHaveLength(3);
-    expect(pills.map((p) => p.textContent)).toEqual(['Flirty', 'Upsell', 'Horny']);
+    const caret = bar.root.querySelector('.chatgoose-reply-caret');
+    expect(caret?.getAttribute('aria-haspopup')).toBe('menu');
+
+    const items = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-menu-item'));
+    expect(items.map((item) => item.textContent)).toEqual(['Casual', 'Flirty', 'Upsell', 'Horny']);
   });
 
-  it('marks the active tone pill', () => {
+  it('marks the armed tone in the menu', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -322,17 +325,17 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), null, 'default', 'flirty', true, false, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
-    const flirty = pills.find((p) => p.textContent === 'Flirty');
-    const horny = pills.find((p) => p.textContent === 'Horny');
+    const items = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-menu-item'));
+    const flirty = items.find((item) => item.textContent === 'Flirty');
+    const horny = items.find((item) => item.textContent === 'Horny');
 
-    expect(flirty?.classList.contains('chatgoose-tone-pill-active')).toBe(true);
-    expect(flirty?.getAttribute('aria-pressed')).toBe('true');
-    expect(horny?.classList.contains('chatgoose-tone-pill-active')).toBe(false);
-    expect(horny?.getAttribute('aria-pressed')).toBe('false');
+    expect(flirty?.classList.contains('chatgoose-tone-menu-item-active')).toBe(true);
+    expect(flirty?.getAttribute('aria-checked')).toBe('true');
+    expect(horny?.classList.contains('chatgoose-tone-menu-item-active')).toBe(false);
+    expect(horny?.getAttribute('aria-checked')).toBe('false');
   });
 
-  it('disables tone pills during active operation', () => {
+  it('disables the tone caret during an active operation', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -344,13 +347,11 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
-    for (const pill of pills) {
-      expect(pill.disabled).toBe(true);
-    }
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret');
+    expect(caret?.disabled).toBe(true);
   });
 
-  it('hides tone row when not connected', () => {
+  it('disables the tone caret when not connected', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -362,11 +363,11 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
 
-    const toneRow = bar.root.querySelector('.chatgoose-toolbar-tone-row');
-    expect(toneRow?.classList.contains('chatgoose-hidden')).toBe(true);
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret');
+    expect(caret?.disabled).toBe(true);
   });
 
-  it('shows tone row without mapped personality when connected with API key', () => {
+  it('enables the tone caret when connected, keyed and mapped', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -376,17 +377,13 @@ describe('ButtonBar tone row', () => {
     });
     document.body.append(bar.root);
 
-    bar.render(buildState({
-      mappedPersonalityId: null,
-      mappedPersonalityName: null,
-      compareCardCount: 2,
-    }), null, 'default', 'none', true, false, false);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const toneRow = bar.root.querySelector('.chatgoose-toolbar-tone-row');
-    expect(toneRow?.classList.contains('chatgoose-hidden')).toBe(false);
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret');
+    expect(caret?.disabled).toBe(false);
   });
 
-  it('calls onToneSelect when a pill is clicked', () => {
+  it('opens on caret click, generates the chosen tone, then closes', () => {
     const toneSpy = vi.fn();
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
@@ -399,11 +396,20 @@ describe('ButtonBar tone row', () => {
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const pills = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
-    const flirty = pills.find((p) => p.textContent === 'Flirty');
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
+    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+
+    caret.click();
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(caret.getAttribute('aria-expanded')).toBe('true');
+
+    const items = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-menu-item'));
+    const flirty = items.find((item) => item.textContent === 'Flirty');
     flirty?.click();
 
     expect(toneSpy).toHaveBeenCalledWith('flirty');
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
   });
 });
 
