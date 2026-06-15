@@ -22,6 +22,7 @@ import type {
   SpendersListResult,
 } from '../../shared/types.js';
 import { formatUserFacingError } from '../../shared/errors.js';
+import { makeKbd } from '../ui/kbd.js';
 
 export interface SpendersBoardDeps {
   fetchList: (refresh: boolean) => Promise<SpendersListResponse>;
@@ -261,7 +262,16 @@ export class SpendersBoardController {
 
     const footer = document.createElement('div');
     footer.className = 'chatgoose-board-footer';
-    footer.textContent = 'J / K move · Enter open chat · Esc close';
+    footer.append(
+      makeKbd('J'),
+      document.createTextNode(' '),
+      makeKbd('K'),
+      document.createTextNode(' move · '),
+      makeKbd('Enter'),
+      document.createTextNode(' open chat · '),
+      makeKbd('Esc'),
+      document.createTextNode(' close'),
+    );
     body.append(footer);
 
     this.shell(body);

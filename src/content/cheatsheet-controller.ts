@@ -5,6 +5,7 @@
 import type { HotkeyAction } from '../shared/hotkeys.js';
 import { CHEATSHEET_EXTRAS } from '../shared/hotkeys.js';
 import type { KeyBinding } from '../shared/keymap.js';
+import { makeKbd } from './ui/kbd.js';
 
 function ensureCheatsheetRoot(): HTMLElement {
   let root = document.getElementById('chatgoose-cheatsheet-root');
@@ -20,9 +21,8 @@ function row(label: string, description: string): HTMLElement {
   const item = document.createElement('div');
   item.className = 'chatgoose-cheatsheet-row';
 
-  const key = document.createElement('kbd');
-  key.className = 'chatgoose-cheatsheet-key';
-  key.textContent = label;
+  const key = makeKbd(label);
+  key.classList.add('chatgoose-cheatsheet-key');
 
   const desc = document.createElement('div');
   desc.className = 'chatgoose-cheatsheet-desc';

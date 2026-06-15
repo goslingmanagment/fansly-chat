@@ -104,6 +104,26 @@ export function buildHotkeyBindings(
   return bindings;
 }
 
+/**
+ * The hotkey label parts for an AI feature button (the toolbar's
+ * Reply/Polish/Hi/Ping/Scan), or null when the feature has no bound key.
+ * `full` is the platform combo (⌘⇧E / Alt+Shift+E); `short` is the bare letter
+ * (E) for compact, overflow-safe chips on Windows/Linux where the full combo is
+ * long. Sourced from the same AI_HOTKEYS table the keymap dispatches, so chips
+ * can never drift from the live bindings.
+ */
+export function featureHotkeyLabel(
+  feature: FeatureType,
+  platform: LabelPlatform,
+): { full: string; short: string } | null {
+  for (const def of AI_HOTKEYS) {
+    if (HOTKEY_FEATURE[def.action] === feature) {
+      return { full: comboLabel(def.letter, platform), short: def.letter.toUpperCase() };
+    }
+  }
+  return null;
+}
+
 /** Extra rows shown in the cheatsheet for keys handled outside the keymap. */
 export const CHEATSHEET_EXTRAS: ReadonlyArray<{ label: string; description: string }> = [
   { label: 'Enter', description: 'Insert the next reply part (when a reply is shown)' },

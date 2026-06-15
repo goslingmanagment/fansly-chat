@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { ButtonBar } from '../src/content/button-bar.js';
+import { detectLabelPlatform, featureHotkeyLabel } from '../src/shared/hotkeys.js';
 import type { TabUiState } from '../src/shared/types.js';
 
 function installDom() {
@@ -29,6 +30,13 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
     compareDraftCount: 1,
     ...overrides,
   };
+}
+
+// A feature button's label now leads its children with an inline hotkey <kbd>
+// chip after it, so its textContent is e.g. 'ScanS'. Match on the label text
+// node instead.
+function labelOf(el: Element): string {
+  return el.firstChild?.textContent ?? '';
 }
 
 describe('ButtonBar toolbar visibility', () => {
@@ -72,9 +80,61 @@ describe('ButtonBar toolbar visibility', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .map((button) => button.textContent);
+      .map(labelOf);
 
     expect(labels).toContain('Scan');
+  });
+
+  it('renders a hotkey chip and tooltip on feature buttons with a bound key', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const platform = detectLabelPlatform();
+    const replyHotkey = featureHotkeyLabel('fast-reply', platform)!;
+    const expectedChip = platform === 'mac' ? replyHotkey.full : replyHotkey.short;
+
+    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
+    const reply = buttons.find((button) => labelOf(button) === 'Reply');
+    const chip = reply?.querySelector('.chatgoose-kbd');
+    expect(chip?.textContent).toBe(expectedChip);
+    expect(reply?.title).toContain(replyHotkey.full);
+    // The chip is decorative; the shortcut reaches AT via aria-keyshortcuts and
+    // the accessible name stays the clean label.
+    expect(chip?.getAttribute('aria-hidden')).toBe('true');
+    expect(reply?.getAttribute('aria-keyshortcuts')).toBe(
+      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
+    );
+
+    // The Multi reply-mode toggle has no bound key — no chip, no keyshortcuts.
+    const multi = buttons.find((button) => labelOf(button) === 'Multi');
+    expect(multi?.querySelector('.chatgoose-kbd')).toBeNull();
+    expect(multi?.getAttribute('aria-keyshortcuts')).toBeNull();
+  });
+
+  it('keeps the hotkey chip through the active loading spinner', () => {
+    const bar = new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+    });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
+
+    const reply = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => labelOf(button) === 'Reply');
+    expect(reply?.querySelector('.chatgoose-kbd')).not.toBeNull();
+    expect(reply?.querySelector('.chatgoose-spinner')).not.toBeNull();
   });
 
   it('marks Scan when a ready summary is available', () => {
@@ -90,10 +150,10 @@ describe('ButtonBar toolbar visibility', () => {
     bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
 
     const summary = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Scan');
+      .find((button) => labelOf(button) === 'Scan');
 
     expect(summary?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
-    expect(summary?.title).toBe('Scan ready to open');
+    expect(summary?.title).toContain('Scan ready to open');
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
@@ -109,7 +169,7 @@ describe('ButtonBar toolbar visibility', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .map((button) => button.textContent);
+      .map(labelOf);
 
     expect(labels).not.toContain('Help');
     expect(labels).not.toContain('Review');
@@ -148,8 +208,8 @@ describe.skip('ButtonBar compare button', () => {
     }), null, 'default', 'none', true, false, false);
 
     const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
-    const reply = buttons.find((button) => button.textContent === 'Reply');
-    const compare = buttons.find((button) => button.textContent === 'Compare');
+    const reply = buttons.find((button) => labelOf(button) === 'Reply');
+    const compare = buttons.find((button) => labelOf(button) === 'Compare');
 
     expect(reply?.disabled).toBe(true);
     expect(compare?.disabled).toBe(false);
@@ -370,7 +430,7 @@ describe('ButtonBar improve draft state', () => {
     bar.render(buildState(), null, 'default', 'none', false, false, false);
 
     const improve = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Polish');
+      .find((button) => labelOf(button) === 'Polish');
 
     expect(improve?.disabled).toBe(true);
   });
@@ -388,10 +448,10 @@ describe('ButtonBar improve draft state', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const children = Array.from(bar.root.children);
-    const multiIndex = children.findIndex((child) => child.textContent === 'Multi');
-    const polishIndex = children.findIndex((child) => child.textContent === 'Polish');
-    const pingIndex = children.findIndex((child) => child.textContent === 'Ping');
-    const summaryIndex = children.findIndex((child) => child.textContent === 'Scan');
+    const multiIndex = children.findIndex((child) => labelOf(child) === 'Multi');
+    const polishIndex = children.findIndex((child) => labelOf(child) === 'Polish');
+    const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
+    const summaryIndex = children.findIndex((child) => labelOf(child) === 'Scan');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
     );
