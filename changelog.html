@@ -412,11 +412,40 @@
 
 <div class="timeline">
 
+  <!-- 1.5.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.5.1</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Точечное улучшение к 1.5.0: горячие клавиши теперь видно прямо в интерфейсе, а не только в шпаргалке по <code>?</code>. На кнопках действий и в футере доски «Спендеры» появились чипы-клавиши с сочетанием, плюс подсказка при наведении.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li><strong>Чипы хоткеев на кнопках.</strong> На кнопках <code>Reply</code>/<code>Polish</code>/<code>Hi</code>/<code>Ping</code>/<code>Scan</code> теперь видно сочетание: на macOS — полное <code>⌘⇧E</code>, на Windows/Linux — буква (полное комбо в тултипе при наведении). Раньше шорткаты были «скрытыми» — узнать их можно было только через <code>?</code></li>
+          <li><strong>Подсказки в доске «Спендеры».</strong> В футере доски — настоящие клавиши-чипы <code>J</code>/<code>K</code>/<code>Enter</code>/<code>Esc</code> вместо простого текста</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Переиспользуемый кейкап <code>.chatgoose-kbd</code> + хелпер <code>makeKbd()</code> — единый визуал клавиши для бара кнопок, футера доски и шпаргалки <code>?</code> (один источник, чтобы стиль не расходился)</li>
+          <li>Чипы внутри кнопок декоративные (<code>aria-hidden</code>), сочетание уходит ассистивным технологиям через <code>aria-keyshortcuts</code> — доступное имя кнопки остаётся чистым</li>
+          <li>824 теста (820 проходят, 4 skipped), typecheck и build чистые; дифф проверен адверсариально (a11y, вёрстка чипов, порядок спиннера)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.5.0 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.0</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

@@ -1,4 +1,6 @@
 import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/types.js';
+import { detectLabelPlatform, featureHotkeyLabel } from '../shared/hotkeys.js';
+import { makeKbd } from './ui/kbd.js';
 
 type ToolbarAction = FeatureType | 'compare';
 
@@ -26,6 +28,7 @@ interface ButtonBarCallbacks {
 
 export class ButtonBar {
   readonly root: HTMLElement;
+  private readonly platform = detectLabelPlatform();
   private readonly personalityLabel: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
   private readonly replyModeToggle!: HTMLButtonElement;
@@ -42,7 +45,8 @@ export class ButtonBar {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'chatgoose-button chatgoose-toolbar-button';
-      button.textContent = entry.label;
+      this.renderFeatureButton(button, entry.feature, entry.label, false);
+      button.title = this.featureTitle(entry.feature, entry.label);
       button.addEventListener('click', () => this.callbacks.onFeatureClick(entry.feature));
       this.buttons.set(entry.feature, button);
     }
@@ -105,6 +109,45 @@ export class ButtonBar {
     );
   }
 
+  /** The hover tooltip for a feature button: label plus the full combo. */
+  private featureTitle(feature: FeatureType, label: string): string {
+    const hotkey = featureHotkeyLabel(feature, this.platform);
+    return hotkey ? `${label} (${hotkey.full})` : label;
+  }
+
+  /** (Re)build a feature button's content: label, optional hotkey chip, optional
+   *  loading spinner. Idempotent so render() can call it on every update.
+   *
+   *  The visible chip shows the full combo on macOS (⌘⇧E) and the bare letter
+   *  elsewhere (where 'Alt+Shift+E' would crowd the bar), but is decorative —
+   *  the real shortcut reaches assistive tech via aria-keyshortcuts (canonical
+   *  'Meta+Shift+E' / 'Alt+Shift+E' tokens) so the accessible name stays the
+   *  clean label. */
+  private renderFeatureButton(
+    button: HTMLButtonElement,
+    feature: FeatureType,
+    label: string,
+    loading: boolean,
+  ): void {
+    button.replaceChildren(document.createTextNode(label));
+    const hotkey = featureHotkeyLabel(feature, this.platform);
+    if (hotkey) {
+      button.setAttribute(
+        'aria-keyshortcuts',
+        `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${hotkey.short}`,
+      );
+      const chipLabel = this.platform === 'mac' ? hotkey.full : hotkey.short;
+      button.append(makeKbd(chipLabel, { decorative: true }));
+    } else {
+      button.removeAttribute('aria-keyshortcuts');
+    }
+    if (loading) {
+      const spinner = document.createElement('span');
+      spinner.className = 'chatgoose-spinner';
+      button.append(spinner);
+    }
+  }
+
   render(
     state: TabUiState | null,
     activeAction: ToolbarAction | null,
@@ -136,15 +179,7 @@ export class ButtonBar {
         Boolean(activeAction && !isActive) ||
         disableForPrereqs ||
         improveDisabled;
-      if (isActive && activeLoading) {
-        button.replaceChildren();
-        button.append(
-          document.createTextNode(entry.label),
-          (() => { const s = document.createElement('span'); s.className = 'chatgoose-spinner'; return s; })(),
-        );
-      } else {
-        button.textContent = entry.label;
-      }
+      this.renderFeatureButton(button, entry.feature, entry.label, isActive && activeLoading);
     }
 
     const summaryButton = this.buttons.get('fan-summary')!;
@@ -152,9 +187,12 @@ export class ButtonBar {
       'chatgoose-toolbar-button-summary-ready',
       state.hasAvailableSummary,
     );
+    const scanCombo = featureHotkeyLabel('fan-summary', this.platform)?.full;
     summaryButton.title = state.hasAvailableSummary
-      ? 'Scan ready to open'
-      : '';
+      ? scanCombo
+        ? `Scan ready to open (${scanCombo})`
+        : 'Scan ready to open'
+      : this.featureTitle('fan-summary', 'Scan');
 
     const compareButton = this.buttons.get('compare')!;
     const compareActive = activeAction === 'compare';
