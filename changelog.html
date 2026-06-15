@@ -412,11 +412,40 @@
 
 <div class="timeline">
 
+  <!-- 1.5.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.5.2</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Точечное улучшение к 1.5.1: бар действий стал компактнее и чище. Тоны ответа (<code>Flirty</code>/<code>Upsell</code>/<code>Horny</code>) переехали из отдельного ряда в выпадающее меню у кнопки <code>Reply</code> — как в десктопной версии, а чипы хоткеев на macOS ужались до буквы. Бар больше не упирается в край узкого диалога.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li><strong>Тоны в меню у <code>Reply</code>.</strong> Каретка <code>▾</code> рядом с <code>Reply</code> открывает список тонов (<code>Casual</code>/<code>Flirty</code>/<code>Upsell</code>/<code>Horny</code>); клик по тону сразу генерит ответ в нём — один клик, одна генерация (как в десктопе). Отдельный ряд из трёх пилюль убран, бар стал заметно у́же</li>
+          <li><strong>Компактные чипы хоткеев на macOS.</strong> На маке чип теперь показывает только букву (<code>E</code>/<code>F</code>/…), как на Windows/Linux — полное <code>⌘⇧E</code> осталось в подсказке при наведении и шпаргалке <code>?</code>. Раньше пять полных комбо распирали ряд</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li><code>Reply</code> — сплит-контрол (тело + каретка <code>▾</code>), меню тона всплывает над баром; у тулбара убран скролл-обрез — ряд переносится, а не клипается</li>
+          <li>Клик по тону армирует тон и сразу запускает fast-reply (как в десктопе); <code>⌘⇧O</code> по-прежнему листает тон. Меню закрывается по клику вне и <code>Esc</code>, каретка отключается во время операции</li>
+          <li>824 теста (820 проходят, 4 skipped), typecheck и build чистые; тесты бара переписаны под меню</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.5.1 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.1</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

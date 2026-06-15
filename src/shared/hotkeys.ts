@@ -107,10 +107,11 @@ export function buildHotkeyBindings(
 /**
  * The hotkey label parts for an AI feature button (the toolbar's
  * Reply/Polish/Hi/Ping/Scan), or null when the feature has no bound key.
- * `full` is the platform combo (⌘⇧E / Alt+Shift+E); `short` is the bare letter
- * (E) for compact, overflow-safe chips on Windows/Linux where the full combo is
- * long. Sourced from the same AI_HOTKEYS table the keymap dispatches, so chips
- * can never drift from the live bindings.
+ * `full` is the platform combo (⌘⇧E / Alt+Shift+E) for tooltips + the cheatsheet;
+ * `short` is the bare letter (E) for the compact, overflow-safe button chips on
+ * every platform — every combo shares the ⌘⇧ / Alt+Shift modifier, so reprinting
+ * it per button would only crowd the bar. Sourced from the same AI_HOTKEYS table
+ * the keymap dispatches, so chips can never drift from the live bindings.
  */
 export function featureHotkeyLabel(
   feature: FeatureType,

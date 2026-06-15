@@ -205,7 +205,7 @@ export class ChatGooseContentApp {
       void this.reopenCompletedCompare();
     },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
-    onToneSelect: (tone) => this.selectTone(tone),
+    onToneSelect: (tone) => this.startTonedReply(tone),
   });
   private readonly mappingBanner = new MappingBanner({
     onOpenSettings: () => {
@@ -942,10 +942,12 @@ export class ChatGooseContentApp {
     this.nextFastReplyMode = 'default';
   }
 
-  private selectTone(tone: ReplyTone): void {
+  private startTonedReply(tone: ReplyTone): void {
     if (this.activeFeature || this.activeCompareModel?.operationId) return;
-    this.nextReplyTone = this.nextReplyTone === tone ? 'none' : tone;
-    this.renderButtonBar();
+    // Mirror the desktop tone menu: arm the tone, then immediately run the reply
+    // in it. startFeature reads nextReplyTone for the payload and resets it after.
+    this.nextReplyTone = tone;
+    this.startFeature('fast-reply', false);
   }
 
   private resetNextReplyTone(): void {

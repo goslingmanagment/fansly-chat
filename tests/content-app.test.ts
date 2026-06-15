@@ -396,7 +396,7 @@ describe('ChatGooseContentApp', () => {
     }));
   });
 
-  it('sends the selected reply tone with fast-reply operations and resets it after dispatch', async () => {
+  it('picks a tone from the Reply menu, sends it with the fast-reply, and resets after dispatch', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
@@ -404,9 +404,9 @@ describe('ChatGooseContentApp', () => {
     app.port.send = sendSpy.mockReturnValue(true);
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
-    app.selectTone('flirty');
 
-    app.startFeature('fast-reply', false);
+    // The Reply ▾ menu arms the tone AND starts the reply in one step.
+    app.startTonedReply('flirty');
 
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'operation:start',
@@ -1108,7 +1108,8 @@ describe('ChatGooseContentApp', () => {
     app.port.send = sendSpy.mockReturnValue(true);
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
-    app.selectTone('upsell');
+    // Compare uses whatever tone is armed (now via the ⌘⇧O cycle, not a tone pill).
+    app.nextReplyTone = 'upsell';
 
     await app.startCompare(false);
 
