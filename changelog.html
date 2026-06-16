@@ -412,11 +412,41 @@
 
 <div class="timeline">
 
+  <!-- 1.5.4 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.5.4</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Откат направления 1.5.2/1.5.3 по фидбэку: тон убран из кнопки <code>Reply</code> и снова видим — отдельным компактным рядом пилюль. <code>Multi</code> вернулся в ряд, но компактным значком <code>⧉</code>, а не текстовой кнопкой. <code>Scan</code> остался в меню <code>⋯</code>. Бар стал чуть компактнее.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Новое</div>
+        <ul class="changes-list">
+          <li><strong>Тон — снова видимым рядом пилюль.</strong> <code>Casual</code>/<code>Flirty</code>/<code>Upsell</code>/<code>Horny</code> стоят отдельным рядом после <code>Polish</code>, а не прячутся в меню у <code>Reply</code>. Клик по пилюле сразу генерит ответ в этом тоне (один клик = одна генерация), активная пилюля показывает заряженный тон — в т.ч. выставленный с <code>⌘⇧O</code>. Каретка <code>▾</code> и тон-меню убраны</li>
+          <li><strong><code>Multi</code> — компактным значком <code>⧉</code>.</strong> Разбивка на несколько сообщений вернулась в ряд сразу за <code>Reply</code>, но занимает место значка, а не текстовой кнопки: включённый режим подсвечен зелёным. <code>Scan</code> остался в меню <code>⋯</code> — зелёная точка «саммари готово» по-прежнему всплывает на самой <code>⋯</code></li>
+          <li><strong>Бар компактнее.</strong> Кнопки действий чуть ниже и у́же, ряд плотнее</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Тон-пилюли идут через прежний путь <code>onToneSelect → startTonedReply</code>, <code>⌘⇧O</code> листает тот же набор и отражается активной пилюлей. <code>Multi</code> — <code>aria-pressed</code> + класс <code>.chatgoose-toolbar-toggle-icon</code>, смысл значка несут <code>aria-label</code>/тултип; меню <code>⋯</code> теперь держит только <code>Scan</code></li>
+          <li>Удалён мёртвый CSS и код сплит-каретки, тон-меню и пунктов <code>Multi</code>-в-меню; проводка в <code>index.ts</code> (тон, режим ответа, хоткеи) не тронута — изменение только в баре</li>
+          <li>827 тестов проходят (4 skipped), typecheck и build чистые; тесты бара переписаны под пилюли, значок-тумблер <code>Multi</code> и меню <code>⋯</code> только со <code>Scan</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.5.3 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.3</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

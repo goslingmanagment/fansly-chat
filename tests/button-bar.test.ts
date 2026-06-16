@@ -32,9 +32,8 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
   };
 }
 
-// A feature button's label now leads its children with an inline hotkey <kbd>
-// chip after it, so its textContent is e.g. 'ScanS'. Match on the label text
-// node instead.
+// A feature button's label leads its children with an inline hotkey <kbd> chip
+// after it, so its textContent is e.g. 'ReplyE'. Match on the label text node.
 function labelOf(el: Element): string {
   return el.firstChild?.textContent ?? '';
 }
@@ -45,6 +44,26 @@ function moreMenuItem(root: ParentNode, label: string): HTMLButtonElement | unde
   return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-more-menu-item')).find(
     (button) => button.querySelector('.chatgoose-more-menu-label')?.textContent === label,
   );
+}
+
+function tonePills(root: ParentNode): HTMLButtonElement[] {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
+}
+
+function tonePill(root: ParentNode, label: string): HTMLButtonElement | undefined {
+  return tonePills(root).find((pill) => pill.textContent === label);
+}
+
+const noop = () => undefined;
+function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> = {}) {
+  return new ButtonBar({
+    onFeatureClick: noop,
+    onCompareClick: noop,
+    onCompareRestoreClick: noop,
+    onReplyModeToggle: noop,
+    onToneSelect: noop,
+    ...overrides,
+  });
 }
 
 describe('ButtonBar toolbar visibility', () => {
@@ -58,13 +77,7 @@ describe('ButtonBar toolbar visibility', () => {
   });
 
   it('keeps Compare out of the toolbar even when compare cards are available', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
@@ -75,34 +88,26 @@ describe('ButtonBar toolbar visibility', () => {
     expect(compare).toBeUndefined();
   });
 
-  it('moves Scan off the bar row into the More menu', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  it('keeps Scan off the bar row, in the ⋯ More menu', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    // Scan is no longer one of the bar's direct controls…
+    // Scan is not one of the bar's direct controls…
     const rowLabels = Array.from(bar.root.children).map(labelOf);
     expect(rowLabels).not.toContain('Scan');
 
-    // …it lives inside the ⋯ More popover.
+    // …it lives inside the ⋯ More popover, which now holds only Scan.
     expect(moreMenuItem(bar.root, 'Scan')).toBeDefined();
+    const labels = Array.from(bar.root.querySelectorAll('.chatgoose-more-menu-label')).map(
+      (span) => span.textContent,
+    );
+    expect(labels).toEqual(['Scan']);
   });
 
   it('renders a hotkey chip and tooltip on feature buttons with a bound key', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
@@ -124,21 +129,16 @@ describe('ButtonBar toolbar visibility', () => {
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
-    // The Multi reply-mode toggle (now a More-menu item) has no bound key —
-    // no chip, no keyshortcuts.
-    const multi = moreMenuItem(bar.root, 'Multi-message');
+    // The Multi reply-mode toggle is a glyph button with no bound key — no chip,
+    // no keyshortcuts; its accessible name comes from aria-label.
+    const multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon');
     expect(multi?.querySelector('.chatgoose-kbd')).toBeNull();
     expect(multi?.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(multi?.getAttribute('aria-label')).toBe('Multi-message reply');
   });
 
   it('keeps the hotkey chip through the active loading spinner', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
@@ -150,13 +150,7 @@ describe('ButtonBar toolbar visibility', () => {
   });
 
   it('marks a ready summary on the Scan item and the collapsed ⋯ trigger', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
@@ -172,13 +166,7 @@ describe('ButtonBar toolbar visibility', () => {
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
@@ -205,13 +193,7 @@ describe.skip('ButtonBar compare button', () => {
   });
 
   it('enables Compare when two compare cards are available even without a mapped personality', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({
@@ -231,13 +213,7 @@ describe.skip('ButtonBar compare button', () => {
   });
 
   it('disables Compare when fewer than two compare cards are available', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({
@@ -252,13 +228,7 @@ describe.skip('ButtonBar compare button', () => {
   });
 
   it('hides Reopen when there is no completed compare cache to restore', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
@@ -271,13 +241,7 @@ describe.skip('ButtonBar compare button', () => {
 
   it('shows enabled Reopen when a completed compare can be restored even without connection or API key', () => {
     const restoreSpy = vi.fn();
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: restoreSpy,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar({ onCompareRestoreClick: restoreSpy });
     document.body.append(bar.root);
 
     bar.render(buildState({
@@ -298,7 +262,7 @@ describe.skip('ButtonBar compare button', () => {
   });
 });
 
-describe('ButtonBar tone menu', () => {
+describe('ButtonBar tone pills', () => {
   beforeEach(() => {
     installDom();
   });
@@ -308,214 +272,142 @@ describe('ButtonBar tone menu', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders a Reply tone caret and a four-item tone menu', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  it('renders the four tone pills', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const caret = bar.root.querySelector('.chatgoose-reply-caret');
-    expect(caret?.getAttribute('aria-haspopup')).toBe('menu');
-
-    const items = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-menu-item'));
-    expect(items.map((item) => item.textContent)).toEqual(['Casual', 'Flirty', 'Upsell', 'Horny']);
+    expect(tonePills(bar.root).map((pill) => pill.textContent)).toEqual([
+      'Casual',
+      'Flirty',
+      'Upsell',
+      'Horny',
+    ]);
   });
 
-  it('marks the armed tone in the menu', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  it('marks the armed tone pill active', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'flirty', true, false, false);
 
-    const items = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-menu-item'));
-    const flirty = items.find((item) => item.textContent === 'Flirty');
-    const horny = items.find((item) => item.textContent === 'Horny');
+    const flirty = tonePill(bar.root, 'Flirty');
+    const horny = tonePill(bar.root, 'Horny');
 
-    expect(flirty?.classList.contains('chatgoose-tone-menu-item-active')).toBe(true);
-    expect(flirty?.getAttribute('aria-checked')).toBe('true');
-    expect(horny?.classList.contains('chatgoose-tone-menu-item-active')).toBe(false);
-    expect(horny?.getAttribute('aria-checked')).toBe('false');
+    expect(flirty?.classList.contains('chatgoose-tone-pill-active')).toBe(true);
+    expect(flirty?.getAttribute('aria-pressed')).toBe('true');
+    expect(horny?.classList.contains('chatgoose-tone-pill-active')).toBe(false);
+    expect(horny?.getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('disables the tone caret during an active operation', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  it('clicking a tone pill fires onToneSelect with that tone (one click = one generation)', () => {
+    const toneSpy = vi.fn();
+    const bar = makeBar({ onToneSelect: toneSpy });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    tonePill(bar.root, 'Upsell')?.click();
+    expect(toneSpy).toHaveBeenCalledWith('upsell');
+  });
+
+  it('disables the tone pills during an active operation', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret');
-    expect(caret?.disabled).toBe(true);
+    expect(tonePills(bar.root).every((pill) => pill.disabled)).toBe(true);
   });
 
-  it('disables the tone caret when not connected', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  it('disables the tone pills when connected and keyed but unmapped', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(
+      buildState({ mappedPersonalityId: null, mappedPersonalityName: null }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+
+    const row = bar.root.querySelector('.chatgoose-toolbar-tone-row');
+    // The row stays visible (tracks Reply, which is also visible-but-disabled)…
+    expect(row?.classList.contains('chatgoose-hidden')).toBe(false);
+    // …but the pills can't generate without a mapped personality.
+    expect(tonePills(bar.root).every((pill) => pill.disabled)).toBe(true);
+  });
+
+  it('hides the tone row when not connected', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
 
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret');
-    expect(caret?.disabled).toBe(true);
+    const row = bar.root.querySelector('.chatgoose-toolbar-tone-row');
+    expect(row?.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+});
+
+describe('ButtonBar multi toggle', () => {
+  beforeEach(() => {
+    installDom();
   });
 
-  it('enables the tone caret when connected, keyed and mapped', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('renders a compact glyph toggle, unpressed by default', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret');
-    expect(caret?.disabled).toBe(false);
+    const multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
+    expect(multi.textContent).toBe('⧉');
+    expect(multi.getAttribute('aria-pressed')).toBe('false');
+    expect(multi.classList.contains('chatgoose-toolbar-toggle-active')).toBe(false);
   });
 
-  it('opens on caret click, generates the chosen tone, then closes', () => {
-    const toneSpy = vi.fn();
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: toneSpy,
-    });
+  it('reflects an armed Multi mode with aria-pressed and the active style', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
+
+    const multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
+    expect(multi.getAttribute('aria-pressed')).toBe('true');
+    expect(multi.classList.contains('chatgoose-toolbar-toggle-active')).toBe(true);
+  });
+
+  it('clicking the Multi toggle fires onReplyModeToggle', () => {
+    const toggleSpy = vi.fn();
+    const bar = makeBar({ onReplyModeToggle: toggleSpy });
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
-    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
-
-    caret.click();
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-    expect(caret.getAttribute('aria-expanded')).toBe('true');
-
-    const items = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-menu-item'));
-    const flirty = items.find((item) => item.textContent === 'Flirty');
-    flirty?.click();
-
-    expect(toneSpy).toHaveBeenCalledWith('flirty');
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+    bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!.click();
+    expect(toggleSpy).toHaveBeenCalledTimes(1);
   });
 
-  // ─── Hover-open: switching tone shouldn't cost an extra "open" click ──────
-
-  const noop = () => undefined;
-  function freshBar() {
-    return new ButtonBar({
-      onFeatureClick: noop,
-      onCompareClick: noop,
-      onCompareRestoreClick: noop,
-      onReplyModeToggle: noop,
-      onToneSelect: noop,
-    });
-  }
-  function hover(el: Element, type: 'mouseenter' | 'mouseleave'): void {
-    el.dispatchEvent(new window.MouseEvent(type));
-  }
-
-  it('opens the tone menu when the caret is hovered (after the intent delay)', () => {
-    vi.useFakeTimers();
-    const bar = freshBar();
+  it('disables the Multi toggle during an active operation and when not connected', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
-    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
+    let multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
+    expect(multi.disabled).toBe(true);
 
-    hover(caret, 'mouseenter');
-    // Still closed during the open-intent delay (no flash on a quick pass).
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
-    vi.advanceTimersByTime(150);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-    expect(caret.getAttribute('aria-expanded')).toBe('true');
-    vi.useRealTimers();
-  });
-
-  it('does not open when the pointer only sweeps across the caret', () => {
-    vi.useFakeTimers();
-    const bar = freshBar();
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
-    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
-
-    hover(caret, 'mouseenter'); // schedules open
-    hover(caret, 'mouseleave'); // sweeping past toward Polish — cancels intent
-    vi.advanceTimersByTime(300);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
-    vi.useRealTimers();
-  });
-
-  it('closes shortly after the pointer leaves the reply split', () => {
-    vi.useFakeTimers();
-    const bar = freshBar();
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const split = bar.root.querySelector('.chatgoose-reply-split')!;
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
-    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
-
-    hover(caret, 'mouseenter');
-    vi.advanceTimersByTime(150);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-
-    hover(split, 'mouseleave');
-    // Grace window: still open immediately after leaving.
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-    vi.advanceTimersByTime(250);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
-    vi.useRealTimers();
-  });
-
-  it('stays open when the pointer crosses the gap into the popover', () => {
-    vi.useFakeTimers();
-    const bar = freshBar();
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const split = bar.root.querySelector('.chatgoose-reply-split')!;
-    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
-    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
-
-    hover(caret, 'mouseenter');
-    vi.advanceTimersByTime(150); // open
-
-    hover(split, 'mouseleave'); // crossing the 6px gap schedules a close…
-    hover(split, 'mouseenter'); // …but landing on the popover cancels it
-    vi.advanceTimersByTime(300);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-    vi.useRealTimers();
+    bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
+    multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
+    expect(multi.disabled).toBe(true);
   });
 });
 
@@ -530,13 +422,7 @@ describe('ButtonBar improve draft state', () => {
   });
 
   it('disables Polish when the composer draft is empty', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', false, false, false);
@@ -547,21 +433,23 @@ describe('ButtonBar improve draft state', () => {
     expect(improve?.disabled).toBe(true);
   });
 
-  it('renders Reply, Polish, Hi, Ping, then the More menu before the personality pill', () => {
-    const bar = new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-    });
+  it('orders Reply, Multi, Polish, tone row, Hi, Ping, then ⋯ before the personality pill', () => {
+    const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const children = Array.from(bar.root.children);
-    const replyIndex = children.findIndex((child) => child.classList.contains('chatgoose-reply-split'));
+    const replyIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-button-primary'),
+    );
+    const multiIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-toggle-icon'),
+    );
     const polishIndex = children.findIndex((child) => labelOf(child) === 'Polish');
+    const toneIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-tone-row'),
+    );
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
     const moreIndex = children.findIndex((child) => child.classList.contains('chatgoose-more'));
@@ -570,16 +458,13 @@ describe('ButtonBar improve draft state', () => {
     );
 
     expect(replyIndex).toBe(0);
-    expect(polishIndex).toBe(replyIndex + 1);
-    expect(hiIndex).toBe(polishIndex + 1);
+    expect(multiIndex).toBe(replyIndex + 1);
+    expect(polishIndex).toBe(multiIndex + 1);
+    expect(toneIndex).toBe(polishIndex + 1);
+    expect(hiIndex).toBe(toneIndex + 1);
     expect(pingIndex).toBe(hiIndex + 1);
     expect(moreIndex).toBe(pingIndex + 1);
     expect(personalityIndex).toBe(moreIndex + 1);
-
-    // Multi and Scan no longer sit in the row — they moved into the More menu.
-    const rowLabels = children.map(labelOf);
-    expect(rowLabels).not.toContain('Multi');
-    expect(rowLabels).not.toContain('Scan');
   });
 });
 
@@ -593,18 +478,7 @@ describe('ButtonBar More menu', () => {
     vi.restoreAllMocks();
   });
 
-  function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> = {}) {
-    return new ButtonBar({
-      onFeatureClick: () => undefined,
-      onCompareClick: () => undefined,
-      onCompareRestoreClick: () => undefined,
-      onReplyModeToggle: () => undefined,
-      onToneSelect: () => undefined,
-      ...overrides,
-    });
-  }
-
-  it('opens on ⋯ click and lists Scan then Multi-message', () => {
+  it('opens on ⋯ click and lists only Scan', () => {
     const bar = makeBar();
     document.body.append(bar.root);
     bar.render(buildState(), null, 'default', 'none', true, false, false);
@@ -621,31 +495,7 @@ describe('ButtonBar More menu', () => {
     const labels = Array.from(menu.querySelectorAll('.chatgoose-more-menu-label')).map(
       (span) => span.textContent,
     );
-    expect(labels).toEqual(['Scan', 'Multi-message']);
-  });
-
-  it('toggling Multi-message fires onReplyModeToggle and keeps the menu open', () => {
-    const toggleSpy = vi.fn();
-    const bar = makeBar({ onReplyModeToggle: toggleSpy });
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
-    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
-    toggle.click();
-
-    const multi = moreMenuItem(bar.root, 'Multi-message')!;
-    expect(multi.getAttribute('aria-checked')).toBe('false');
-
-    multi.click();
-    expect(toggleSpy).toHaveBeenCalledTimes(1);
-    // A mode toggle stays open so the flip is visible; the controller re-renders.
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-
-    bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
-    expect(multi.getAttribute('aria-checked')).toBe('true');
-    expect(multi.classList.contains('chatgoose-more-menu-item-active')).toBe(true);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(labels).toEqual(['Scan']);
   });
 
   it('clicking Scan starts fan-summary and closes the menu', () => {
@@ -662,16 +512,6 @@ describe('ButtonBar More menu', () => {
     expect(featureSpy).toHaveBeenCalledWith('fan-summary');
     expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('surfaces an armed Multi mode on the collapsed ⋯ trigger', () => {
-    const bar = makeBar();
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
-
-    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
-    expect(toggle.classList.contains('chatgoose-more-toggle-active')).toBe(true);
-    expect(toggle.title).toContain('multi-message on');
   });
 
   it('disables and closes the More menu while an operation runs', () => {

@@ -1,12 +1,12 @@
 import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/types.js';
-import { detectLabelPlatform, featureHotkeyLabel } from '../shared/hotkeys.js';
+import { comboLabel, detectLabelPlatform, featureHotkeyLabel } from '../shared/hotkeys.js';
 import { makeKbd } from './ui/kbd.js';
 
 type ToolbarAction = FeatureType | 'compare';
 
-// Buttons rendered directly in the bar row. Multi (a reply-mode toggle) and Scan
-// (fan-summary) used to sit here too; they now live in the ▾ "More" popover to
-// keep the row compact, so they're handled out of band below.
+// Buttons rendered directly in the bar row. Scan (fan-summary) is the least
+// frequent action, so it lives in the ⋯ "More" popover at the right edge rather
+// than spending a slot in the row.
 const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: 'Reply' },
   { feature: 'improve-draft', label: 'Polish' },
@@ -14,6 +14,10 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'ping', label: 'Ping' },
 ];
 
+// Tone pills sit in their own compact row and modify the next Reply. Clicking a
+// pill arms the tone AND immediately starts a fast-reply in it (one click = one
+// generation); ⌘⇧O cycles the same set, and the active pill reflects whatever is
+// armed. The four match the cycle-tone order so every armed tone has a pill.
 const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> = [
   { tone: 'casual', label: 'Casual' },
   { tone: 'flirty', label: 'Flirty' },
@@ -21,13 +25,23 @@ const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> =
   { tone: 'spicy', label: 'Horny' },
 ];
 
+// Multi-message reply mode is a single-glyph toggle to stay compact — its
+// meaning rides on the aria-label + tooltip, and the armed state shows via
+// aria-pressed and the green active style. Two overlapping squares ≈ "more than
+// one message".
+const MULTI_GLYPH = '⧉';
+
+// The letter bound to cycle-tone in the hotkey table — only used to enrich the
+// tone pills' tooltip with the combo that cycles them.
+const TONE_CYCLE_LETTER = 'O';
+
 interface ButtonBarCallbacks {
   onFeatureClick: (feature: FeatureType) => void;
   onCompareClick: () => void;
   onCompareRestoreClick: () => void;
   onReplyModeToggle: () => void;
-  /** A tone was chosen from the Reply ▾ menu — select it AND immediately start a
-   *  fast-reply in it (one click = one generation), like the desktop tone menu. */
+  /** A tone pill was clicked — arm the tone AND immediately start a fast-reply in
+   *  it (one click = one generation), mirroring the desktop tone control. */
   onToneSelect: (tone: ReplyTone) => void;
 }
 
@@ -36,26 +50,16 @@ export class ButtonBar {
   private readonly platform = detectLabelPlatform();
   private readonly personalityLabel: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
-  private readonly replySplit: HTMLElement;
-  private readonly toneCaret: HTMLButtonElement;
-  private readonly toneMenu: HTMLElement;
-  private readonly toneMenuItems = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
-  private toneMenuOpen = false;
-  // Hover-open timers: a short open-intent delay so sweeping the mouse past the
-  // caret (on the way to Polish/Hi/…) doesn't flash the menu, and a close grace
-  // so the pointer can cross the 6px gap up into the popover without it snapping
-  // shut.
-  private toneHoverOpenTimer: ReturnType<typeof setTimeout> | null = null;
-  private toneHoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
-  // The "More" overflow popover (opens upward, mirrors the tone menu): the
-  // Multi-message mode toggle and the Scan action, pulled off the row so it
-  // breathes. Both stay reachable, and the collapsed ⋯ trigger keeps surfacing
-  // the two states that mustn't go invisible — a ready Scan summary and an armed
-  // Multi mode.
+  // Multi-message mode (preferSplit) — a compact glyph toggle next to Reply.
+  private readonly multiToggle: HTMLButtonElement;
+  private readonly toneRow: HTMLElement;
+  private readonly tonePills = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
+  // The "More" (⋯) overflow popover holds Scan (fan-summary). The collapsed ⋯
+  // trigger keeps surfacing a ready summary as a green dot so that signal never
+  // goes invisible while the action is tucked away.
   private readonly moreWrap: HTMLElement;
   private readonly moreToggle: HTMLButtonElement;
   private readonly moreMenu: HTMLElement;
-  private readonly multiMenuItem: HTMLButtonElement;
   private readonly scanMenuItem: HTMLButtonElement;
   private moreMenuOpen = false;
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
@@ -76,8 +80,10 @@ export class ButtonBar {
     }
 
     const replyButton = this.buttons.get('fast-reply')!;
-    replyButton.classList.add('chatgoose-toolbar-button-primary', 'chatgoose-reply-body');
+    replyButton.classList.add('chatgoose-toolbar-button-primary');
     const improveButton = this.buttons.get('improve-draft')!;
+    const hiButton = this.buttons.get('hi-greeting')!;
+    const pingButton = this.buttons.get('ping')!;
 
     const compareButton = document.createElement('button');
     compareButton.type = 'button';
@@ -93,80 +99,43 @@ export class ButtonBar {
     this.compareRestoreButton.textContent = 'Reopen';
     this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
 
+    // Multi — multi-message reply-mode toggle, pinned next to Reply (the mode it
+    // changes). A glyph stays compact; the accessible name + tooltip carry the
+    // meaning, aria-pressed + the active style carry the armed state.
+    this.multiToggle = document.createElement('button');
+    this.multiToggle.type = 'button';
+    this.multiToggle.className =
+      'chatgoose-button chatgoose-toolbar-toggle chatgoose-toolbar-toggle-icon';
+    this.multiToggle.textContent = MULTI_GLYPH;
+    this.multiToggle.setAttribute('aria-label', 'Multi-message reply');
+    this.multiToggle.setAttribute('aria-pressed', 'false');
+    this.multiToggle.title = 'Reply as multiple messages';
+    this.multiToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
+
     this.personalityLabel = document.createElement('div');
     this.personalityLabel.className = 'chatgoose-pill chatgoose-personality chatgoose-toolbar-pill chatgoose-toolbar-personality-end';
 
-    // Reply is a split control (mirrors the desktop, variant C): the body runs a
-    // fast-reply in the armed tone (normally none → neutral); the ▾ caret opens a
-    // tone menu where clicking a tone immediately starts a fast-reply in it.
-    this.toneCaret = document.createElement('button');
-    this.toneCaret.type = 'button';
-    this.toneCaret.className =
-      'chatgoose-button chatgoose-toolbar-button chatgoose-toolbar-button-primary chatgoose-reply-caret';
-    this.toneCaret.textContent = '▾';
-    this.toneCaret.setAttribute('aria-haspopup', 'menu');
-    this.toneCaret.setAttribute('aria-expanded', 'false');
-    this.toneCaret.setAttribute('aria-label', 'Reply tone');
-    this.toneCaret.title = 'Reply tone';
-    this.toneCaret.addEventListener('click', (event) => {
-      event.stopPropagation();
-      this.toggleToneMenu();
-    });
-
-    this.toneMenu = document.createElement('div');
-    this.toneMenu.className = 'chatgoose-tone-menu chatgoose-hidden';
-    this.toneMenu.setAttribute('role', 'menu');
-    this.toneMenu.setAttribute('aria-label', 'Reply tone');
-    const toneMenuHeading = document.createElement('div');
-    toneMenuHeading.className = 'chatgoose-tone-menu-heading';
-    toneMenuHeading.textContent = 'Tone';
-    this.toneMenu.append(toneMenuHeading);
+    // Tone pills — a compact, muted cluster distinct from the solid action
+    // buttons. Click = one generation in that tone; the active pill mirrors the
+    // armed tone (incl. the ⌘⇧O cycle).
+    this.toneRow = document.createElement('div');
+    this.toneRow.className = 'chatgoose-toolbar-tone-row';
+    this.toneRow.setAttribute('role', 'group');
+    this.toneRow.setAttribute('aria-label', 'Reply tone');
+    const toneCombo = comboLabel(TONE_CYCLE_LETTER, this.platform);
     for (const entry of TONE_OPTIONS) {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'chatgoose-tone-menu-item';
-      item.setAttribute('role', 'menuitemradio');
-      item.setAttribute('aria-checked', 'false');
-      const check = document.createElement('span');
-      check.className = 'chatgoose-tone-menu-check';
-      const text = document.createElement('span');
-      text.textContent = entry.label;
-      item.append(check, text);
-      // One click = one generation: select the tone AND start the reply in it.
-      item.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.closeToneMenu();
-        this.callbacks.onToneSelect(entry.tone);
-      });
-      this.toneMenuItems.set(entry.tone, item);
-      this.toneMenu.append(item);
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'chatgoose-tone-pill';
+      pill.textContent = entry.label;
+      pill.setAttribute('aria-pressed', 'false');
+      pill.title = `${entry.label} tone — ${toneCombo} cycles tone`;
+      pill.addEventListener('click', () => this.callbacks.onToneSelect(entry.tone));
+      this.tonePills.set(entry.tone, pill);
+      this.toneRow.append(pill);
     }
 
-    this.replySplit = document.createElement('div');
-    this.replySplit.className = 'chatgoose-reply-split';
-    this.replySplit.append(replyButton, this.toneCaret, this.toneMenu);
-
-    // Hover the ▾ caret to reveal the tone menu — switching tone then costs no
-    // extra "open" click, you just glide onto a tone (one click = one
-    // generation). Open is scoped to the caret (so merely mousing over Reply to
-    // fire a default reply never pops it) with an intent delay; close is scoped
-    // to the whole split — the menu is a child, so moving onto it never counts as
-    // "leaving" — with a grace delay. Click still toggles for keyboard/touch.
-    this.toneCaret.addEventListener('mouseenter', () => {
-      this.cancelToneHoverClose();
-      this.scheduleToneHoverOpen();
-    });
-    this.toneCaret.addEventListener('mouseleave', () => this.cancelToneHoverOpen());
-    this.replySplit.addEventListener('mouseenter', () => this.cancelToneHoverClose());
-    this.replySplit.addEventListener('mouseleave', () => {
-      this.cancelToneHoverOpen();
-      this.scheduleToneHoverClose();
-    });
-
-    const hiButton = this.buttons.get('hi-greeting')!;
-    const pingButton = this.buttons.get('ping')!;
-
-    // ─── "More" overflow popover: ⋯ trigger + upward menu (Scan, Multi) ───────
+    // ─── "More" overflow popover: ⋯ trigger + upward menu (Scan) ──────────────
     this.moreToggle = document.createElement('button');
     this.moreToggle.type = 'button';
     this.moreToggle.className = 'chatgoose-button chatgoose-toolbar-button chatgoose-more-toggle';
@@ -214,41 +183,21 @@ export class ButtonBar {
       this.callbacks.onFeatureClick('fan-summary');
     });
 
-    const moreDivider = document.createElement('div');
-    moreDivider.className = 'chatgoose-more-menu-divider';
-    moreDivider.setAttribute('role', 'separator');
-
-    // Multi — a mode toggle (checkbox semantics): the leading check lights when
-    // multi-message mode is armed. Toggling keeps the menu open so the user sees
-    // the state flip; render() repaints aria-checked on the controller's re-render.
-    this.multiMenuItem = document.createElement('button');
-    this.multiMenuItem.type = 'button';
-    this.multiMenuItem.className = 'chatgoose-more-menu-item chatgoose-more-menu-item-toggle';
-    this.multiMenuItem.setAttribute('role', 'menuitemcheckbox');
-    this.multiMenuItem.setAttribute('aria-checked', 'false');
-    this.multiMenuItem.title = 'Reply as multiple messages';
-    const multiCheck = document.createElement('span');
-    multiCheck.className = 'chatgoose-more-menu-check';
-    const multiLabel = document.createElement('span');
-    multiLabel.className = 'chatgoose-more-menu-label';
-    multiLabel.textContent = 'Multi-message';
-    this.multiMenuItem.append(multiCheck, multiLabel);
-    this.multiMenuItem.addEventListener('click', (event) => {
-      event.stopPropagation();
-      this.callbacks.onReplyModeToggle();
-    });
-
-    this.moreMenu.append(this.scanMenuItem, moreDivider, this.multiMenuItem);
+    this.moreMenu.append(this.scanMenuItem);
 
     this.moreWrap = document.createElement('div');
     this.moreWrap.className = 'chatgoose-more';
     this.moreWrap.append(this.moreToggle, this.moreMenu);
 
-    // Main actions first, secondary controls later so narrow layouts degrade gracefully.
-    // Help / Review / Compare stay implemented but are intentionally hidden from the toolbar for now.
+    // Main actions first, secondary controls later so narrow layouts degrade
+    // gracefully. Reply carries its Multi mode-toggle; tone pills follow Polish;
+    // Scan tucks into ⋯ at the right, ahead of the personality pill.
+    // Help / Review / Compare stay implemented but are intentionally hidden for now.
     this.root.append(
-      this.replySplit,
+      replyButton,
+      this.multiToggle,
       improveButton,
+      this.toneRow,
       hiButton,
       pingButton,
       this.moreWrap,
@@ -308,7 +257,6 @@ export class ButtonBar {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatgoose-hidden', !hasState);
     if (!hasState) {
-      this.closeToneMenu();
       this.closeMoreMenu();
     }
     if (!state) {
@@ -341,7 +289,27 @@ export class ButtonBar {
     this.compareRestoreButton.classList.add('chatgoose-hidden');
     this.compareRestoreButton.disabled = true;
 
-    // ─── Scan (fan-summary), now a "More" menu item ───────────────────────────
+    // ─── Multi (reply-mode toggle) ────────────────────────────────────────────
+    const multiArmed = nextReplyMode === 'preferSplit';
+    this.multiToggle.disabled = Boolean(activeAction) || !state.connected || !state.hasApiKey;
+    this.multiToggle.setAttribute('aria-pressed', multiArmed ? 'true' : 'false');
+    this.multiToggle.classList.toggle('chatgoose-toolbar-toggle-active', multiArmed);
+
+    // ─── Tone pills ───────────────────────────────────────────────────────────
+    // Hide the whole row when there's nothing to reply with (not connected / no
+    // key); when connected but unmapped, keep the pills visible-but-disabled so
+    // they track Reply's own disabled state (clicking a pill generates a reply).
+    const hideToneRow = !state.connected || !state.hasApiKey;
+    this.toneRow.classList.toggle('chatgoose-hidden', hideToneRow);
+    for (const entry of TONE_OPTIONS) {
+      const pill = this.tonePills.get(entry.tone)!;
+      const isActive = nextReplyTone === entry.tone;
+      pill.disabled = Boolean(activeAction) || disableForPrereqs;
+      pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      pill.classList.toggle('chatgoose-tone-pill-active', isActive);
+    }
+
+    // ─── Scan (fan-summary), a "More" menu item ───────────────────────────────
     const scanActive = activeAction === 'fan-summary';
     this.scanMenuItem.disabled = Boolean(activeAction && !scanActive) || disableForPrereqs;
     this.scanMenuItem.classList.toggle(
@@ -355,125 +323,18 @@ export class ButtonBar {
         : 'Scan ready to open'
       : this.featureTitle('fan-summary', 'Scan');
 
-    // ─── Multi (reply-mode toggle), now a "More" menu item ────────────────────
-    const multiArmed = nextReplyMode === 'preferSplit';
-    this.multiMenuItem.disabled = Boolean(activeAction) || !state.connected || !state.hasApiKey;
-    this.multiMenuItem.setAttribute('aria-checked', multiArmed ? 'true' : 'false');
-    this.multiMenuItem.classList.toggle('chatgoose-more-menu-item-active', multiArmed);
-
-    // ─── The collapsed ⋯ trigger keeps both buried states visible ─────────────
-    // It's enabled on the looser (Multi) gate so the toggle stays reachable even
-    // when unmapped (Scan needs a mapped personality and disables on its own).
-    // A disabled trigger closes a hanging menu.
+    // ─── The collapsed ⋯ trigger keeps the ready-summary signal visible ───────
+    // Gated on the loose (connect + key) prereq so Scan stays discoverable even
+    // when unmapped (the Scan item disables on its own). A disabled trigger
+    // closes a hanging menu.
     const moreDisabled = Boolean(activeAction) || !state.connected || !state.hasApiKey;
     this.moreToggle.disabled = moreDisabled;
     if (moreDisabled) this.closeMoreMenu();
     this.moreToggle.classList.toggle('chatgoose-more-toggle-ready', state.hasAvailableSummary);
-    this.moreToggle.classList.toggle('chatgoose-more-toggle-active', multiArmed);
-    const moreState: string[] = [];
-    if (state.hasAvailableSummary) moreState.push('summary ready');
-    if (multiArmed) moreState.push('multi-message on');
-    this.moreToggle.title = moreState.length ? `More — ${moreState.join(', ')}` : 'More actions';
-
-    // Picking a tone now GENERATES, so the caret needs Reply's prereqs AND must be
-    // off while any op runs (the active Reply button itself stays enabled for its
-    // spinner, so we can't key off it). A disabled caret closes a hanging menu;
-    // the menu marks the armed tone (⌘⇧O cycles it; normally none → no check).
-    const toneDisabled = Boolean(activeAction) || disableForPrereqs;
-    this.toneCaret.disabled = toneDisabled;
-    if (toneDisabled) this.closeToneMenu();
-    for (const entry of TONE_OPTIONS) {
-      const item = this.toneMenuItems.get(entry.tone)!;
-      const isActive = nextReplyTone === entry.tone;
-      item.setAttribute('aria-checked', isActive ? 'true' : 'false');
-      item.classList.toggle('chatgoose-tone-menu-item-active', isActive);
-    }
+    this.moreToggle.title = state.hasAvailableSummary ? 'More — summary ready' : 'More actions';
   }
 
-  // ─── Tone menu (the Reply ▾ caret popover, mirrors desktop variant C) ──────
-
-  private toggleToneMenu(): void {
-    if (this.toneMenuOpen) {
-      this.closeToneMenu();
-    } else {
-      this.openToneMenu();
-    }
-  }
-
-  private openToneMenu(): void {
-    if (this.toneMenuOpen || this.toneCaret.disabled) return;
-    this.cancelToneHoverOpen();
-    this.cancelToneHoverClose();
-    this.closeMoreMenu(); // only one popover open at a time
-    this.toneMenuOpen = true;
-    this.toneMenu.classList.remove('chatgoose-hidden');
-    this.toneCaret.setAttribute('aria-expanded', 'true');
-    this.toneCaret.classList.add('chatgoose-reply-caret-open');
-    // The caret/items stopPropagation their own clicks, so re-toggling or picking
-    // an item never trips these; only a click/Esc truly outside closes the menu.
-    document.addEventListener('mousedown', this.handleOutsidePointerDown);
-    document.addEventListener('keydown', this.handleMenuKeyDown);
-  }
-
-  private closeToneMenu(): void {
-    this.cancelToneHoverOpen();
-    this.cancelToneHoverClose();
-    if (!this.toneMenuOpen) return;
-    this.toneMenuOpen = false;
-    this.toneMenu.classList.add('chatgoose-hidden');
-    this.toneCaret.setAttribute('aria-expanded', 'false');
-    this.toneCaret.classList.remove('chatgoose-reply-caret-open');
-    document.removeEventListener('mousedown', this.handleOutsidePointerDown);
-    document.removeEventListener('keydown', this.handleMenuKeyDown);
-  }
-
-  private readonly handleOutsidePointerDown = (event: MouseEvent): void => {
-    if (event.target instanceof Node && !this.replySplit.contains(event.target)) {
-      this.closeToneMenu();
-    }
-  };
-
-  private readonly handleMenuKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      this.closeToneMenu();
-      this.toneCaret.focus();
-    }
-  };
-
-  private scheduleToneHoverOpen(): void {
-    if (this.toneMenuOpen || this.toneCaret.disabled) return;
-    this.cancelToneHoverOpen();
-    this.toneHoverOpenTimer = setTimeout(() => {
-      this.toneHoverOpenTimer = null;
-      this.openToneMenu();
-    }, 110);
-  }
-
-  private cancelToneHoverOpen(): void {
-    if (this.toneHoverOpenTimer !== null) {
-      clearTimeout(this.toneHoverOpenTimer);
-      this.toneHoverOpenTimer = null;
-    }
-  }
-
-  private scheduleToneHoverClose(): void {
-    if (!this.toneMenuOpen) return;
-    this.cancelToneHoverClose();
-    this.toneHoverCloseTimer = setTimeout(() => {
-      this.toneHoverCloseTimer = null;
-      this.closeToneMenu();
-    }, 160);
-  }
-
-  private cancelToneHoverClose(): void {
-    if (this.toneHoverCloseTimer !== null) {
-      clearTimeout(this.toneHoverCloseTimer);
-      this.toneHoverCloseTimer = null;
-    }
-  }
-
-  // ─── "More" menu (the ⋯ overflow popover: Scan + Multi) ────────────────────
+  // ─── "More" menu (the ⋯ overflow popover: Scan) ────────────────────────────
 
   private toggleMoreMenu(): void {
     if (this.moreMenuOpen) {
@@ -485,7 +346,6 @@ export class ButtonBar {
 
   private openMoreMenu(): void {
     if (this.moreMenuOpen || this.moreToggle.disabled) return;
-    this.closeToneMenu(); // only one popover open at a time
     this.moreMenuOpen = true;
     this.moreMenu.classList.remove('chatgoose-hidden');
     this.moreToggle.setAttribute('aria-expanded', 'true');
