@@ -396,7 +396,7 @@ describe('ChatGooseContentApp', () => {
     }));
   });
 
-  it('picks a tone from the Reply menu, sends it with the fast-reply, and resets after dispatch', async () => {
+  it('picks a tone from the tone pills, sends it with the fast-reply, and resets after dispatch', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
@@ -405,7 +405,7 @@ describe('ChatGooseContentApp', () => {
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
 
-    // The Reply ▾ menu arms the tone AND starts the reply in one step.
+    // Clicking a tone pill arms the tone AND starts the reply in one step.
     app.startTonedReply('flirty');
 
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({

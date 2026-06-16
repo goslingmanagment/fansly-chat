@@ -132,10 +132,10 @@
   align-items: center;
   justify-content: flex-start;
   /* Wrap (don't clip) when the row is too wide; a non-clipping overflow also lets
-     the popover tone menu escape upward over the conversation. */
+     the ⋯ popover escape upward over the conversation. */
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 5px;
+  padding: 7px 9px;
   border-radius: 14px;
   background: var(--chatgoose-panel);
   border-color: var(--chatgoose-border);
@@ -169,8 +169,8 @@
 }
 
 .chatgoose-toolbar-button {
-  min-height: 30px;
-  padding: 0 11px;
+  min-height: 28px;
+  padding: 0 10px;
   flex: 0 0 auto;
   border-color: var(--chatgoose-border);
   background: rgba(255, 255, 255, 0.04);
@@ -185,23 +185,6 @@
   line-height: 1;
   white-space: nowrap;
   box-shadow: none;
-}
-
-.chatgoose-toolbar-button-summary {
-  position: relative;
-  padding-right: 20px;
-}
-
-.chatgoose-toolbar-button-summary-ready::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 7px;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #4ade80;
-  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
 }
 
 .chatgoose-toolbar-button:hover:not(:disabled) {
@@ -271,6 +254,21 @@
   color: #6ee7b7;
 }
 
+/* Multi-message toggle as a compact glyph: a rounded square sized like an icon
+   so it pairs with Reply without spending a labelled slot. Meaning rides on the
+   tooltip/aria-label; the armed state uses the shared -toggle-active style. */
+.chatgoose-toolbar-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
 /* ─── Personality (pinned right) ─────────────────────────── */
 
 /* The ⋯ More button (.chatgoose-more) carries the auto margin, so it and the
@@ -280,101 +278,46 @@
   flex: 0 0 auto;
 }
 
-/* ─── Reply split control: Reply body + tone caret + popover tone menu ────── */
-.chatgoose-reply-split {
-  position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  flex: 0 0 auto;
-}
-
-/* Body + caret read as one pill: the body squares its right edge, the caret its
-   left, joined by a 1px accent seam. */
-.chatgoose-reply-body {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.chatgoose-reply-caret {
-  min-height: 30px;
-  margin-left: -1px;
-  padding: 0 8px;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  box-shadow: inset 1px 0 0 0 var(--chatgoose-border-accent);
-  font-size: 10px;
-}
-
-.chatgoose-reply-caret-open {
-  background: rgba(91, 138, 245, 0.22);
-}
-
-.chatgoose-tone-menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 2147483000;
-  min-width: 152px;
-  padding: 5px;
-  border-radius: 10px;
-  border: 1px solid var(--chatgoose-border);
-  background: var(--chatgoose-panel-elevated);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
-}
-
-.chatgoose-tone-menu-heading {
-  padding: 3px 8px 5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--chatgoose-muted);
-}
-
-.chatgoose-tone-menu-item {
+/* ─── Tone pills: a compact, muted cluster that modifies the next Reply ────── */
+.chatgoose-toolbar-tone-row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 30px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--chatgoose-text);
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-}
-
-.chatgoose-tone-menu-item:hover {
-  background: rgba(91, 138, 245, 0.14);
-  color: var(--chatgoose-accent-soft);
-}
-
-.chatgoose-tone-menu-check {
+  gap: 3px;
   flex: 0 0 auto;
-  width: 11px;
-  text-align: center;
-  font-size: 10px;
-  color: transparent;
+  min-width: max-content;
+  padding: 0 2px;
 }
 
-.chatgoose-tone-menu-check::before {
-  content: '✓';
+.chatgoose-tone-pill {
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--chatgoose-muted);
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.chatgoose-tone-menu-item-active {
+.chatgoose-tone-pill:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--chatgoose-text);
+}
+
+.chatgoose-tone-pill-active {
+  background: rgba(91, 138, 245, 0.14);
+  border-color: rgba(91, 138, 245, 0.24);
   color: var(--chatgoose-accent-soft);
 }
 
-.chatgoose-tone-menu-item-active .chatgoose-tone-menu-check {
-  color: var(--chatgoose-accent);
+.chatgoose-tone-pill:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
-/* ─── "More" overflow menu: ⋯ trigger + upward popover (Scan, Multi) ──────── */
+/* ─── "More" overflow menu: ⋯ trigger + upward popover (Scan) ─────────────── */
 .chatgoose-more {
   position: relative;
   display: inline-flex;
@@ -399,13 +342,6 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
-/* Multi-message mode armed — keep the mode visible while it's collapsed. */
-.chatgoose-more-toggle-active {
-  background: rgba(91, 138, 245, 0.14);
-  border-color: var(--chatgoose-border-accent);
-  color: var(--chatgoose-accent-soft);
-}
-
 /* A ready Scan summary — mirror the old Scan dot so the signal survives collapse. */
 .chatgoose-more-toggle-ready::after {
   content: '';
@@ -426,7 +362,7 @@
      popover opens up-and-left and never spills past the conversation. */
   right: 0;
   z-index: 2147483000;
-  min-width: 188px;
+  min-width: 150px;
   padding: 5px;
   border-radius: 10px;
   border: 1px solid var(--chatgoose-border);
@@ -485,33 +421,6 @@
 .chatgoose-more-menu-item-ready .chatgoose-more-menu-dot {
   background: #4ade80;
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
-}
-
-/* Multi row: a leading check that lights when the mode is armed. */
-.chatgoose-more-menu-check {
-  flex: 0 0 auto;
-  width: 12px;
-  text-align: center;
-  font-size: 11px;
-  color: transparent;
-}
-
-.chatgoose-more-menu-check::before {
-  content: '✓';
-}
-
-.chatgoose-more-menu-item-active {
-  color: var(--chatgoose-accent-soft);
-}
-
-.chatgoose-more-menu-item-active .chatgoose-more-menu-check {
-  color: var(--chatgoose-accent);
-}
-
-.chatgoose-more-menu-divider {
-  height: 1px;
-  margin: 4px 6px;
-  background: var(--chatgoose-border);
 }
 
 /* ─── Inline Panel ──────────────────────────────────────────── */
