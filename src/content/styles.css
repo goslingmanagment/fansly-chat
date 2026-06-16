@@ -273,8 +273,9 @@
 
 /* ─── Personality (pinned right) ─────────────────────────── */
 
+/* The ⋯ More button (.chatgoose-more) carries the auto margin, so it and the
+   personality pill ride together at the right edge — ⋯ tucked against Lora. */
 .chatgoose-toolbar-personality-end {
-  margin-left: auto;
   max-width: 100%;
   flex: 0 0 auto;
 }
@@ -371,6 +372,146 @@
 
 .chatgoose-tone-menu-item-active .chatgoose-tone-menu-check {
   color: var(--chatgoose-accent);
+}
+
+/* ─── "More" overflow menu: ⋯ trigger + upward popover (Scan, Multi) ──────── */
+.chatgoose-more {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  /* Soak up the row's free space here so ⋯ sits at the right, next to Lora. */
+  margin-left: auto;
+}
+
+.chatgoose-more-toggle {
+  position: relative;
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+/* Pressed look while the menu is open (mirrors the tone caret). */
+.chatgoose-more-toggle-open {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Multi-message mode armed — keep the mode visible while it's collapsed. */
+.chatgoose-more-toggle-active {
+  background: rgba(91, 138, 245, 0.14);
+  border-color: var(--chatgoose-border-accent);
+  color: var(--chatgoose-accent-soft);
+}
+
+/* A ready Scan summary — mirror the old Scan dot so the signal survives collapse. */
+.chatgoose-more-toggle-ready::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #4ade80;
+  box-shadow: 0 0 0 2px var(--chatgoose-panel);
+}
+
+.chatgoose-more-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  /* Anchored to the trigger's right edge (it sits near the bar's end) so the
+     popover opens up-and-left and never spills past the conversation. */
+  right: 0;
+  z-index: 2147483000;
+  min-width: 188px;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--chatgoose-border);
+  background: var(--chatgoose-panel-elevated);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+
+.chatgoose-more-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--chatgoose-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.chatgoose-more-menu-item:hover:not(:disabled) {
+  background: rgba(91, 138, 245, 0.14);
+  color: var(--chatgoose-accent-soft);
+}
+
+.chatgoose-more-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chatgoose-more-menu-label {
+  flex: 1 1 auto;
+}
+
+/* Scan row: label left, the ready dot pinned right. */
+.chatgoose-more-menu-trailing {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+
+.chatgoose-more-menu-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.chatgoose-more-menu-item-ready .chatgoose-more-menu-dot {
+  background: #4ade80;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+}
+
+/* Multi row: a leading check that lights when the mode is armed. */
+.chatgoose-more-menu-check {
+  flex: 0 0 auto;
+  width: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: transparent;
+}
+
+.chatgoose-more-menu-check::before {
+  content: '✓';
+}
+
+.chatgoose-more-menu-item-active {
+  color: var(--chatgoose-accent-soft);
+}
+
+.chatgoose-more-menu-item-active .chatgoose-more-menu-check {
+  color: var(--chatgoose-accent);
+}
+
+.chatgoose-more-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--chatgoose-border);
 }
 
 /* ─── Inline Panel ──────────────────────────────────────────── */
