@@ -39,6 +39,14 @@ function labelOf(el: Element): string {
   return el.firstChild?.textContent ?? '';
 }
 
+// The More menu's items wrap their label in a .chatgoose-more-menu-label span,
+// so match on that instead of labelOf (whose firstChild may be a check/dot).
+function moreMenuItem(root: ParentNode, label: string): HTMLButtonElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-more-menu-item')).find(
+    (button) => button.querySelector('.chatgoose-more-menu-label')?.textContent === label,
+  );
+}
+
 describe('ButtonBar toolbar visibility', () => {
   beforeEach(() => {
     installDom();
@@ -67,7 +75,7 @@ describe('ButtonBar toolbar visibility', () => {
     expect(compare).toBeUndefined();
   });
 
-  it('shows Scan in the toolbar', () => {
+  it('moves Scan off the bar row into the More menu', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -79,10 +87,12 @@ describe('ButtonBar toolbar visibility', () => {
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .map(labelOf);
+    // Scan is no longer one of the bar's direct controls…
+    const rowLabels = Array.from(bar.root.children).map(labelOf);
+    expect(rowLabels).not.toContain('Scan');
 
-    expect(labels).toContain('Scan');
+    // …it lives inside the ⋯ More popover.
+    expect(moreMenuItem(bar.root, 'Scan')).toBeDefined();
   });
 
   it('renders a hotkey chip and tooltip on feature buttons with a bound key', () => {
@@ -114,8 +124,9 @@ describe('ButtonBar toolbar visibility', () => {
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
-    // The Multi reply-mode toggle has no bound key — no chip, no keyshortcuts.
-    const multi = buttons.find((button) => labelOf(button) === 'Multi');
+    // The Multi reply-mode toggle (now a More-menu item) has no bound key —
+    // no chip, no keyshortcuts.
+    const multi = moreMenuItem(bar.root, 'Multi-message');
     expect(multi?.querySelector('.chatgoose-kbd')).toBeNull();
     expect(multi?.getAttribute('aria-keyshortcuts')).toBeNull();
   });
@@ -138,7 +149,7 @@ describe('ButtonBar toolbar visibility', () => {
     expect(reply?.querySelector('.chatgoose-spinner')).not.toBeNull();
   });
 
-  it('marks Scan when a ready summary is available', () => {
+  it('marks a ready summary on the Scan item and the collapsed ⋯ trigger', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -150,11 +161,14 @@ describe('ButtonBar toolbar visibility', () => {
 
     bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
 
-    const summary = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => labelOf(button) === 'Scan');
+    const scan = moreMenuItem(bar.root, 'Scan');
+    expect(scan?.classList.contains('chatgoose-more-menu-item-ready')).toBe(true);
+    expect(scan?.title).toContain('Scan ready to open');
 
-    expect(summary?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
-    expect(summary?.title).toContain('Scan ready to open');
+    // The signal must survive being collapsed: the ⋯ trigger carries the dot too.
+    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle');
+    expect(toggle?.classList.contains('chatgoose-more-toggle-ready')).toBe(true);
+    expect(toggle?.title).toContain('summary ready');
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
@@ -411,6 +425,98 @@ describe('ButtonBar tone menu', () => {
     expect(toneSpy).toHaveBeenCalledWith('flirty');
     expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
   });
+
+  // ─── Hover-open: switching tone shouldn't cost an extra "open" click ──────
+
+  const noop = () => undefined;
+  function freshBar() {
+    return new ButtonBar({
+      onFeatureClick: noop,
+      onCompareClick: noop,
+      onCompareRestoreClick: noop,
+      onReplyModeToggle: noop,
+      onToneSelect: noop,
+    });
+  }
+  function hover(el: Element, type: 'mouseenter' | 'mouseleave'): void {
+    el.dispatchEvent(new window.MouseEvent(type));
+  }
+
+  it('opens the tone menu when the caret is hovered (after the intent delay)', () => {
+    vi.useFakeTimers();
+    const bar = freshBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
+    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
+
+    hover(caret, 'mouseenter');
+    // Still closed during the open-intent delay (no flash on a quick pass).
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+    vi.advanceTimersByTime(150);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(caret.getAttribute('aria-expanded')).toBe('true');
+    vi.useRealTimers();
+  });
+
+  it('does not open when the pointer only sweeps across the caret', () => {
+    vi.useFakeTimers();
+    const bar = freshBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
+    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
+
+    hover(caret, 'mouseenter'); // schedules open
+    hover(caret, 'mouseleave'); // sweeping past toward Polish — cancels intent
+    vi.advanceTimersByTime(300);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('closes shortly after the pointer leaves the reply split', () => {
+    vi.useFakeTimers();
+    const bar = freshBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const split = bar.root.querySelector('.chatgoose-reply-split')!;
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
+    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
+
+    hover(caret, 'mouseenter');
+    vi.advanceTimersByTime(150);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+
+    hover(split, 'mouseleave');
+    // Grace window: still open immediately after leaving.
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+    vi.advanceTimersByTime(250);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('stays open when the pointer crosses the gap into the popover', () => {
+    vi.useFakeTimers();
+    const bar = freshBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const split = bar.root.querySelector('.chatgoose-reply-split')!;
+    const caret = bar.root.querySelector<HTMLButtonElement>('.chatgoose-reply-caret')!;
+    const menu = bar.root.querySelector('.chatgoose-tone-menu')!;
+
+    hover(caret, 'mouseenter');
+    vi.advanceTimersByTime(150); // open
+
+    hover(split, 'mouseleave'); // crossing the 6px gap schedules a close…
+    hover(split, 'mouseenter'); // …but landing on the popover cancels it
+    vi.advanceTimersByTime(300);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+    vi.useRealTimers();
+  });
 });
 
 describe('ButtonBar improve draft state', () => {
@@ -441,7 +547,7 @@ describe('ButtonBar improve draft state', () => {
     expect(improve?.disabled).toBe(true);
   });
 
-  it('renders Multi, then Polish, then Scan before the personality pill', () => {
+  it('renders Reply, Polish, Hi, Ping, then the More menu before the personality pill', () => {
     const bar = new ButtonBar({
       onFeatureClick: () => undefined,
       onCompareClick: () => undefined,
@@ -454,21 +560,133 @@ describe('ButtonBar improve draft state', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const children = Array.from(bar.root.children);
-    const multiIndex = children.findIndex((child) => labelOf(child) === 'Multi');
+    const replyIndex = children.findIndex((child) => child.classList.contains('chatgoose-reply-split'));
     const polishIndex = children.findIndex((child) => labelOf(child) === 'Polish');
+    const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
-    const summaryIndex = children.findIndex((child) => labelOf(child) === 'Scan');
+    const moreIndex = children.findIndex((child) => child.classList.contains('chatgoose-more'));
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
     );
 
-    expect(multiIndex).toBeGreaterThan(-1);
-    expect(polishIndex).toBeGreaterThan(-1);
-    expect(pingIndex).toBeGreaterThan(-1);
-    expect(summaryIndex).toBeGreaterThan(-1);
-    expect(personalityIndex).toBeGreaterThan(-1);
-    expect(polishIndex).toBe(multiIndex + 1);
-    expect(summaryIndex).toBe(pingIndex + 1);
-    expect(summaryIndex).toBe(personalityIndex - 1);
+    expect(replyIndex).toBe(0);
+    expect(polishIndex).toBe(replyIndex + 1);
+    expect(hiIndex).toBe(polishIndex + 1);
+    expect(pingIndex).toBe(hiIndex + 1);
+    expect(moreIndex).toBe(pingIndex + 1);
+    expect(personalityIndex).toBe(moreIndex + 1);
+
+    // Multi and Scan no longer sit in the row — they moved into the More menu.
+    const rowLabels = children.map(labelOf);
+    expect(rowLabels).not.toContain('Multi');
+    expect(rowLabels).not.toContain('Scan');
+  });
+});
+
+describe('ButtonBar More menu', () => {
+  beforeEach(() => {
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> = {}) {
+    return new ButtonBar({
+      onFeatureClick: () => undefined,
+      onCompareClick: () => undefined,
+      onCompareRestoreClick: () => undefined,
+      onReplyModeToggle: () => undefined,
+      onToneSelect: () => undefined,
+      ...overrides,
+    });
+  }
+
+  it('opens on ⋯ click and lists Scan then Multi-message', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
+    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
+    expect(toggle.getAttribute('aria-haspopup')).toBe('menu');
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+
+    toggle.click();
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    const labels = Array.from(menu.querySelectorAll('.chatgoose-more-menu-label')).map(
+      (span) => span.textContent,
+    );
+    expect(labels).toEqual(['Scan', 'Multi-message']);
+  });
+
+  it('toggling Multi-message fires onReplyModeToggle and keeps the menu open', () => {
+    const toggleSpy = vi.fn();
+    const bar = makeBar({ onReplyModeToggle: toggleSpy });
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
+    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
+    toggle.click();
+
+    const multi = moreMenuItem(bar.root, 'Multi-message')!;
+    expect(multi.getAttribute('aria-checked')).toBe('false');
+
+    multi.click();
+    expect(toggleSpy).toHaveBeenCalledTimes(1);
+    // A mode toggle stays open so the flip is visible; the controller re-renders.
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+
+    bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
+    expect(multi.getAttribute('aria-checked')).toBe('true');
+    expect(multi.classList.contains('chatgoose-more-menu-item-active')).toBe(true);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+  });
+
+  it('clicking Scan starts fan-summary and closes the menu', () => {
+    const featureSpy = vi.fn();
+    const bar = makeBar({ onFeatureClick: featureSpy });
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
+    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
+    toggle.click();
+
+    moreMenuItem(bar.root, 'Scan')!.click();
+    expect(featureSpy).toHaveBeenCalledWith('fan-summary');
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('surfaces an armed Multi mode on the collapsed ⋯ trigger', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
+
+    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
+    expect(toggle.classList.contains('chatgoose-more-toggle-active')).toBe(true);
+    expect(toggle.title).toContain('multi-message on');
+  });
+
+  it('disables and closes the More menu while an operation runs', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
+    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
+    toggle.click();
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
+
+    // An active feature disables the trigger, which closes a hanging menu.
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
+    expect(toggle.disabled).toBe(true);
+    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
   });
 });
