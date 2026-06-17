@@ -398,7 +398,9 @@ export class ChatGooseContentApp {
 
   private cycleNextReplyTone(): void {
     if (this.activeFeature || this.activeCompareModel?.operationId) return;
-    const order: ReplyTone[] = ['none', 'casual', 'flirty', 'upsell', 'spicy'];
+    // Mirrors the bar's tone pills (Flirty / Upsell / Horny) so the cycle and the
+    // visible pills stay in lock-step — 'casual' is intentionally not surfaced.
+    const order: ReplyTone[] = ['none', 'flirty', 'upsell', 'spicy'];
     const index = order.indexOf(this.nextReplyTone);
     this.nextReplyTone = order[(index + 1) % order.length]!;
     this.renderButtonBar();

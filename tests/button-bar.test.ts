@@ -38,12 +38,14 @@ function labelOf(el: Element): string {
   return el.firstChild?.textContent ?? '';
 }
 
-// The More menu's items wrap their label in a .chatgoose-more-menu-label span,
-// so match on that instead of labelOf (whose firstChild may be a check/dot).
-function moreMenuItem(root: ParentNode, label: string): HTMLButtonElement | undefined {
-  return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-more-menu-item')).find(
-    (button) => button.querySelector('.chatgoose-more-menu-label')?.textContent === label,
+function buttonByLabel(root: ParentNode, label: string): HTMLButtonElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(
+    (button) => labelOf(button) === label,
   );
+}
+
+function multiToggle(root: ParentNode): HTMLButtonElement | null {
+  return root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle');
 }
 
 function tonePills(root: ParentNode): HTMLButtonElement[] {
@@ -88,22 +90,15 @@ describe('ButtonBar toolbar visibility', () => {
     expect(compare).toBeUndefined();
   });
 
-  it('keeps Scan off the bar row, in the ⋯ More menu', () => {
+  it('renders Scan as a row button (no overflow ⋯ menu)', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    // Scan is not one of the bar's direct controls…
-    const rowLabels = Array.from(bar.root.children).map(labelOf);
-    expect(rowLabels).not.toContain('Scan');
-
-    // …it lives inside the ⋯ More popover, which now holds only Scan.
-    expect(moreMenuItem(bar.root, 'Scan')).toBeDefined();
-    const labels = Array.from(bar.root.querySelectorAll('.chatgoose-more-menu-label')).map(
-      (span) => span.textContent,
-    );
-    expect(labels).toEqual(['Scan']);
+    expect(buttonByLabel(bar.root, 'Scan')).toBeDefined();
+    expect(bar.root.querySelector('.chatgoose-more')).toBeNull();
+    expect(bar.root.querySelector('.chatgoose-more-menu')).toBeNull();
   });
 
   it('renders a hotkey chip and tooltip on feature buttons with a bound key', () => {
@@ -114,9 +109,9 @@ describe('ButtonBar toolbar visibility', () => {
 
     const platform = detectLabelPlatform();
     const replyHotkey = featureHotkeyLabel('fast-reply', platform)!;
+    const scanHotkey = featureHotkeyLabel('fan-summary', platform)!;
 
-    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
-    const reply = buttons.find((button) => labelOf(button) === 'Reply');
+    const reply = buttonByLabel(bar.root, 'Reply');
     const chip = reply?.querySelector('.chatgoose-kbd');
     // The chip is the bare letter on every platform — the shared ⌘⇧ / Alt+Shift
     // modifier would only crowd the bar. The full combo stays in the tooltip.
@@ -129,12 +124,17 @@ describe('ButtonBar toolbar visibility', () => {
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
-    // The Multi reply-mode toggle is a glyph button with no bound key — no chip,
-    // no keyshortcuts; its accessible name comes from aria-label.
-    const multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon');
+    // Scan keeps its chip too, now that it sits back in the row.
+    expect(buttonByLabel(bar.root, 'Scan')?.querySelector('.chatgoose-kbd')?.textContent).toBe(
+      scanHotkey.short,
+    );
+
+    // The Multi reply-mode toggle is a labelled pill with no bound key — no chip,
+    // no keyshortcuts.
+    const multi = multiToggle(bar.root);
+    expect(multi?.textContent).toBe('Multi');
     expect(multi?.querySelector('.chatgoose-kbd')).toBeNull();
     expect(multi?.getAttribute('aria-keyshortcuts')).toBeNull();
-    expect(multi?.getAttribute('aria-label')).toBe('Multi-message reply');
   });
 
   it('keeps the hotkey chip through the active loading spinner', () => {
@@ -143,26 +143,20 @@ describe('ButtonBar toolbar visibility', () => {
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
-    const reply = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => labelOf(button) === 'Reply');
+    const reply = buttonByLabel(bar.root, 'Reply');
     expect(reply?.querySelector('.chatgoose-kbd')).not.toBeNull();
     expect(reply?.querySelector('.chatgoose-spinner')).not.toBeNull();
   });
 
-  it('marks a ready summary on the Scan item and the collapsed ⋯ trigger', () => {
+  it('marks a ready summary on the Scan button', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
 
-    const scan = moreMenuItem(bar.root, 'Scan');
-    expect(scan?.classList.contains('chatgoose-more-menu-item-ready')).toBe(true);
+    const scan = buttonByLabel(bar.root, 'Scan');
+    expect(scan?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
     expect(scan?.title).toContain('Scan ready to open');
-
-    // The signal must survive being collapsed: the ⋯ trigger carries the dot too.
-    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle');
-    expect(toggle?.classList.contains('chatgoose-more-toggle-ready')).toBe(true);
-    expect(toggle?.title).toContain('summary ready');
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
@@ -204,9 +198,9 @@ describe.skip('ButtonBar compare button', () => {
       compareDraftCount: 2,
     }), null, 'default', 'none', true, false, false);
 
-    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
-    const reply = buttons.find((button) => labelOf(button) === 'Reply');
-    const compare = buttons.find((button) => labelOf(button) === 'Compare');
+    const reply = buttonByLabel(bar.root, 'Reply');
+    const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Compare');
 
     expect(reply?.disabled).toBe(true);
     expect(compare?.disabled).toBe(false);
@@ -272,14 +266,13 @@ describe('ButtonBar tone pills', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the four tone pills', () => {
+  it('renders the three tone pills', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     expect(tonePills(bar.root).map((pill) => pill.textContent)).toEqual([
-      'Casual',
       'Flirty',
       'Upsell',
       'Horny',
@@ -363,14 +356,14 @@ describe('ButtonBar multi toggle', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders a compact glyph toggle, unpressed by default', () => {
+  it('renders a labelled Multi toggle, unpressed by default', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
-    expect(multi.textContent).toBe('⧉');
+    const multi = multiToggle(bar.root)!;
+    expect(multi.textContent).toBe('Multi');
     expect(multi.getAttribute('aria-pressed')).toBe('false');
     expect(multi.classList.contains('chatgoose-toolbar-toggle-active')).toBe(false);
   });
@@ -381,7 +374,7 @@ describe('ButtonBar multi toggle', () => {
 
     bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
 
-    const multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
+    const multi = multiToggle(bar.root)!;
     expect(multi.getAttribute('aria-pressed')).toBe('true');
     expect(multi.classList.contains('chatgoose-toolbar-toggle-active')).toBe(true);
   });
@@ -393,7 +386,7 @@ describe('ButtonBar multi toggle', () => {
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!.click();
+    multiToggle(bar.root)!.click();
     expect(toggleSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -402,12 +395,10 @@ describe('ButtonBar multi toggle', () => {
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
-    let multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
-    expect(multi.disabled).toBe(true);
+    expect(multiToggle(bar.root)!.disabled).toBe(true);
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
-    multi = bar.root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle-icon')!;
-    expect(multi.disabled).toBe(true);
+    expect(multiToggle(bar.root)!.disabled).toBe(true);
   });
 });
 
@@ -427,13 +418,10 @@ describe('ButtonBar improve draft state', () => {
 
     bar.render(buildState(), null, 'default', 'none', false, false, false);
 
-    const improve = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => labelOf(button) === 'Polish');
-
-    expect(improve?.disabled).toBe(true);
+    expect(buttonByLabel(bar.root, 'Polish')?.disabled).toBe(true);
   });
 
-  it('orders Reply, Multi, Polish, tone row, Hi, Ping, then ⋯ before the personality pill', () => {
+  it('orders Reply, Multi, Polish, tone row, Hi, Ping, Scan, then the personality pill', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -444,7 +432,7 @@ describe('ButtonBar improve draft state', () => {
       child.classList.contains('chatgoose-toolbar-button-primary'),
     );
     const multiIndex = children.findIndex((child) =>
-      child.classList.contains('chatgoose-toolbar-toggle-icon'),
+      child.classList.contains('chatgoose-toolbar-toggle'),
     );
     const polishIndex = children.findIndex((child) => labelOf(child) === 'Polish');
     const toneIndex = children.findIndex((child) =>
@@ -452,7 +440,7 @@ describe('ButtonBar improve draft state', () => {
     );
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
-    const moreIndex = children.findIndex((child) => child.classList.contains('chatgoose-more'));
+    const scanIndex = children.findIndex((child) => labelOf(child) === 'Scan');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
     );
@@ -463,70 +451,7 @@ describe('ButtonBar improve draft state', () => {
     expect(toneIndex).toBe(polishIndex + 1);
     expect(hiIndex).toBe(toneIndex + 1);
     expect(pingIndex).toBe(hiIndex + 1);
-    expect(moreIndex).toBe(pingIndex + 1);
-    expect(personalityIndex).toBe(moreIndex + 1);
-  });
-});
-
-describe('ButtonBar More menu', () => {
-  beforeEach(() => {
-    installDom();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('opens on ⋯ click and lists only Scan', () => {
-    const bar = makeBar();
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
-    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
-    expect(toggle.getAttribute('aria-haspopup')).toBe('menu');
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
-
-    toggle.click();
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-
-    const labels = Array.from(menu.querySelectorAll('.chatgoose-more-menu-label')).map(
-      (span) => span.textContent,
-    );
-    expect(labels).toEqual(['Scan']);
-  });
-
-  it('clicking Scan starts fan-summary and closes the menu', () => {
-    const featureSpy = vi.fn();
-    const bar = makeBar({ onFeatureClick: featureSpy });
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
-    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
-    toggle.click();
-
-    moreMenuItem(bar.root, 'Scan')!.click();
-    expect(featureSpy).toHaveBeenCalledWith('fan-summary');
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('disables and closes the More menu while an operation runs', () => {
-    const bar = makeBar();
-    document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const toggle = bar.root.querySelector<HTMLButtonElement>('.chatgoose-more-toggle')!;
-    const menu = bar.root.querySelector('.chatgoose-more-menu')!;
-    toggle.click();
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(false);
-
-    // An active feature disables the trigger, which closes a hanging menu.
-    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
-    expect(toggle.disabled).toBe(true);
-    expect(menu.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(scanIndex).toBe(pingIndex + 1);
+    expect(personalityIndex).toBe(scanIndex + 1);
   });
 });
