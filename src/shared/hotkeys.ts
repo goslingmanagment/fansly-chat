@@ -80,7 +80,7 @@ const AI_HOTKEYS: readonly HotkeyDef[] = [
   { action: 'ping', letter: 'd', description: 'Ping — reactivation message' },
   { action: 'fan-summary', letter: 's', description: 'Scan — deep fan profile' },
   { action: 'chat-review', letter: 'v', description: 'Chat review — rate this chat' },
-  { action: 'cycle-tone', letter: 'o', description: 'Cycle tone (casual / flirty / upsell / spicy)' },
+  { action: 'cycle-tone', letter: 'o', description: 'Cycle tone (flirty / upsell / horny)' },
   { action: 'cancel', letter: 'x', description: 'Cancel running AI operation' },
   { action: 'spenders-board', letter: 'm', description: 'Spenders — board of top spenders' },
 ];
