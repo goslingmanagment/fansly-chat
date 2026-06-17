@@ -32,8 +32,6 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
   };
 }
 
-// A feature button's label leads its children with an inline hotkey <kbd> chip
-// after it, so its textContent is e.g. 'ReplyE'. Match on the label text node.
 function labelOf(el: Element): string {
   return el.firstChild?.textContent ?? '';
 }
@@ -101,7 +99,7 @@ describe('ButtonBar toolbar visibility', () => {
     expect(bar.root.querySelector('.chatgoose-more-menu')).toBeNull();
   });
 
-  it('renders a hotkey chip and tooltip on feature buttons with a bound key', () => {
+  it('renders hover-only hotkey chips while exposing shortcut metadata', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -112,21 +110,21 @@ describe('ButtonBar toolbar visibility', () => {
     const scanHotkey = featureHotkeyLabel('fan-summary', platform)!;
 
     const reply = buttonByLabel(bar.root, 'Reply');
-    const chip = reply?.querySelector('.chatgoose-kbd');
-    // The chip is the bare letter on every platform — the shared ⌘⇧ / Alt+Shift
-    // modifier would only crowd the bar. The full combo stays in the tooltip.
-    expect(chip?.textContent).toBe(replyHotkey.short);
+    const replyChip = reply?.querySelector('.chatgoose-toolbar-hotkey');
+    expect(replyChip?.textContent).toBe(replyHotkey.short);
+    expect(replyChip?.getAttribute('aria-hidden')).toBe('true');
     expect(reply?.title).toContain(replyHotkey.full);
-    // The chip is decorative; the shortcut reaches AT via aria-keyshortcuts and
-    // the accessible name stays the clean label.
-    expect(chip?.getAttribute('aria-hidden')).toBe('true');
     expect(reply?.getAttribute('aria-keyshortcuts')).toBe(
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
-    // Scan keeps its chip too, now that it sits back in the row.
-    expect(buttonByLabel(bar.root, 'Scan')?.querySelector('.chatgoose-kbd')?.textContent).toBe(
-      scanHotkey.short,
+    const scan = buttonByLabel(bar.root, 'Scan');
+    const scanChip = scan?.querySelector('.chatgoose-toolbar-hotkey');
+    expect(scanChip?.textContent).toBe(scanHotkey.short);
+    expect(scanChip?.getAttribute('aria-hidden')).toBe('true');
+    expect(scan?.title).toContain(scanHotkey.full);
+    expect(scan?.getAttribute('aria-keyshortcuts')).toBe(
+      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${scanHotkey.short}`,
     );
 
     // The Multi reply-mode toggle is a labelled pill with no bound key — no chip,
@@ -137,14 +135,14 @@ describe('ButtonBar toolbar visibility', () => {
     expect(multi?.getAttribute('aria-keyshortcuts')).toBeNull();
   });
 
-  it('keeps the hotkey chip through the active loading spinner', () => {
+  it('keeps the hover-only hotkey through the active loading spinner', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
     const reply = buttonByLabel(bar.root, 'Reply');
-    expect(reply?.querySelector('.chatgoose-kbd')).not.toBeNull();
+    expect(reply?.querySelector('.chatgoose-toolbar-hotkey')).not.toBeNull();
     expect(reply?.querySelector('.chatgoose-spinner')).not.toBeNull();
   });
 

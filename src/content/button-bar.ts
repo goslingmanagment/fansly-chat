@@ -5,7 +5,7 @@ import { makeKbd } from './ui/kbd.js';
 type ToolbarAction = FeatureType | 'compare';
 
 // Buttons rendered directly in the bar row — all as plain labelled buttons
-// (Scan included; no overflow ⋯ menu). Each carries an inline hotkey chip.
+// (Scan included; no overflow ⋯ menu).
 const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: 'Reply' },
   { feature: 'improve-draft', label: 'Polish' },
@@ -143,16 +143,8 @@ export class ButtonBar {
     return hotkey ? `${label} (${hotkey.full})` : label;
   }
 
-  /** (Re)build a feature button's content: label, optional hotkey chip, optional
-   *  loading spinner. Idempotent so render() can call it on every update.
-   *
-   *  The visible chip shows just the bare letter (E / F / …) on every platform:
-   *  every combo shares the same ⌘⇧ / Alt+Shift modifier, so reprinting it on
-   *  each button only crowds the bar — the full ⌘⇧E combos overflowed a narrow
-   *  chat column. The chip is decorative; the real shortcut reaches assistive
-   *  tech via aria-keyshortcuts (canonical 'Meta+Shift+E' / 'Alt+Shift+E'
-   *  tokens) and the full combo stays in the hover tooltip + the cheatsheet, so
-   *  the accessible name stays the clean label. */
+  /** (Re)build a feature button's content: label, hover-only hotkey, and
+   *  optional loading spinner. */
   private renderFeatureButton(
     button: HTMLButtonElement,
     feature: FeatureType,
@@ -166,7 +158,9 @@ export class ButtonBar {
         'aria-keyshortcuts',
         `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${hotkey.short}`,
       );
-      button.append(makeKbd(hotkey.short, { decorative: true }));
+      const hotkeyBadge = makeKbd(hotkey.short, { decorative: true });
+      hotkeyBadge.classList.add('chatgoose-toolbar-hotkey');
+      button.append(hotkeyBadge);
     } else {
       button.removeAttribute('aria-keyshortcuts');
     }
