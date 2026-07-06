@@ -85,3 +85,10 @@ the protocol case, pinned by a test in tests/protocol.test.ts; full check
 green. Ships with the NEXT release (alongside the E6 fallback deletions) —
 no emergency release, the chatter-key path covers the interim. Add "issue a
 device token from the options page" to that release's §5 checks.
+
+**Correction to E3 (2026-07-07, found by the Stage 35 orientation drill):**
+E3's line "vendor hosts left in manifest.json host permissions" described a
+draft state — the SHIPPED 1.6.0 manifest carries NO vendor AI hosts
+(`host_permissions` = fansly.com + apiv3.fansly.com only; the hub rides
+`optional_host_permissions`). The current-state authority is CLAUDE.md's
+header. E3's text stays as written (append-only log).
