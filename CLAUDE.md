@@ -49,7 +49,8 @@ legacy chatter-key path. Toolchain: TS 6 / vitest 4 / pnpm@10.33.1; CI runs
 - **AI never sends without explicit human action; never auto-retry an
   indeterminate send** (same family law as the desktop).
 - **Storage migrations are numbered and forward-only** (`createDefaultSettings`
-  / migrations — currently v9); every settings shape change ships a migration.
+  / migrations — currently v10, `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`
+  is the source of truth); every settings shape change ships a migration.
 - **Releases:** merge to `bar-tone-menu` (the release branch), bump
   `package.json` + `manifest.json` versions together, `scripts/deploy.sh`
   (web-ext AMO signing → updates.json + sha256 → scp). The deploy script

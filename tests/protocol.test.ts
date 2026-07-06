@@ -11,6 +11,16 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: 12 })).toBe('getPopupStatus');
     expect(getRuntimeRequestType({ type: 'getSessionsSnapshot' })).toBe('getSessionsSnapshot');
     expect(getRuntimeRequestType({ type: 'testAgencyHubConnection' })).toBe('testAgencyHubConnection');
+    // 1.6.0 shipped without this case — options-page device-token sign-in
+    // was unreachable (found by the Stage 35 map regeneration).
+    expect(
+      getRuntimeRequestType({
+        type: 'issueAgencyHubDeviceToken',
+        baseUrl: 'https://hub.example',
+        username: 'u',
+        password: 'p',
+      }),
+    ).toBe('issueAgencyHubDeviceToken');
 
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: '12' })).toBeNull();
     expect(getRuntimeRequestType({ type: 'unknown' })).toBeNull();
