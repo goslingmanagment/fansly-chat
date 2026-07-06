@@ -27,19 +27,14 @@ import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
-import { AI_MODEL_GROUPS, REASONING_EFFORTS } from '../shared/constants.js';
 import {
   createUserError,
   getUserErrorDescription,
 } from '../shared/errors.js';
-import { supportsModelReasoningConfig } from '../shared/model-capabilities.js';
-import { isOpenRouterModelSelection } from '../shared/model-registry.js';
 import { sendRuntimeRequest } from '../shared/protocol.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
 import type {
-  ModelSelectableFeatureType,
   Personality,
-  ReasoningEffort,
 } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatgoose-options-root');
@@ -82,41 +77,8 @@ async function render(): Promise<void> {
   hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
 
-  // ─── API Configuration ─────────────────────────────────────
-  const apiSection = createSection('API Configuration');
-  const keyInput = document.createElement('input');
-  keyInput.type = 'password';
-  keyInput.autocomplete = 'off';
-  keyInput.className = 'chatgoose-input';
-  keyInput.value = state.settings.claudeApiKey;
-  const toggle = createButton('Show', true);
-  toggle.addEventListener('click', () => {
-    keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
-    toggle.textContent = keyInput.type === 'password' ? 'Show' : 'Hide';
-  });
-  const keyRow = document.createElement('div');
-  keyRow.style.display = 'grid';
-  keyRow.style.gridTemplateColumns = '1fr auto';
-  keyRow.style.gap = '8px';
-  keyRow.append(keyInput, toggle);
-  apiSection.append(labeledField('Claude API key', keyRow));
-
-  const openRouterKeyInput = document.createElement('input');
-  openRouterKeyInput.type = 'password';
-  openRouterKeyInput.autocomplete = 'off';
-  openRouterKeyInput.className = 'chatgoose-input';
-  openRouterKeyInput.value = state.settings.openRouterApiKey;
-  const openRouterToggle = createButton('Show', true);
-  openRouterToggle.addEventListener('click', () => {
-    openRouterKeyInput.type = openRouterKeyInput.type === 'password' ? 'text' : 'password';
-    openRouterToggle.textContent = openRouterKeyInput.type === 'password' ? 'Show' : 'Hide';
-  });
-  const openRouterKeyRow = document.createElement('div');
-  openRouterKeyRow.style.display = 'grid';
-  openRouterKeyRow.style.gridTemplateColumns = '1fr auto';
-  openRouterKeyRow.style.gap = '8px';
-  openRouterKeyRow.append(openRouterKeyInput, openRouterToggle);
-  apiSection.append(labeledField('OpenRouter API key', openRouterKeyRow));
+  // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
+  const apiSection = createSection('Generation');
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -636,152 +598,9 @@ async function render(): Promise<void> {
   );
 
   // ─── AI Models ───────────────────────────────────────────
-  const modelSection = createSection(
-    'AI Models',
-    'Pick which AI model each feature uses. Claude models use the Anthropic key; Gemini and Grok use the OpenRouter key.',
-  );
-
-  const FEATURE_ROWS: Array<{ feature: ModelSelectableFeatureType; label: string; helper: string }> = [
-    { feature: 'fast-reply', label: 'Fast Reply', helper: 'Quick replies you can insert into chat.' },
-    { feature: 'ping', label: 'Ping', helper: 'Reactivation messages for inactive fans.' },
-    { feature: 'help-me', label: 'Help Me', helper: 'Coaching and message ideas when you get stuck.' },
-    { feature: 'chat-review', label: 'Chat Review', helper: 'Deeper conversation analysis and strategy.' },
-    { feature: 'fan-summary', label: 'Fan Summary', helper: 'Longer summaries of the fan relationship and context.' },
-  ];
-
-  const REASONING_LABELS: Record<ReasoningEffort, string> = {
-    off: 'Off',
-    low: 'Low',
-    medium: 'Medium',
-    high: 'High',
-    max: 'Max',
-  };
-
-  const modelSelects: HTMLSelectElement[] = [];
-  const reasoningSelects: HTMLSelectElement[] = [];
-  const reasoningSelectsByFeature = new Map<ModelSelectableFeatureType, HTMLSelectElement>();
-  const openRouterWarning = document.createElement('div');
-  openRouterWarning.style.padding = '10px 12px';
-  openRouterWarning.style.borderRadius = '12px';
-  openRouterWarning.style.border = '1px solid rgba(245, 158, 11, 0.35)';
-  openRouterWarning.style.background = 'rgba(245, 158, 11, 0.12)';
-  openRouterWarning.style.color = 'var(--chatgoose-warning, #fbbf24)';
-  openRouterWarning.style.fontWeight = '700';
-  openRouterWarning.style.fontSize = '13px';
-
-  const renderOpenRouterWarning = (): void => {
-    const usesOpenRouter = modelSelects.some((select) =>
-      isOpenRouterModelSelection(select.value),
-    );
-    const missingKey = !openRouterKeyInput.value.trim();
-    openRouterWarning.textContent =
-      usesOpenRouter && missingKey
-        ? 'OpenRouter model selected: add an OpenRouter API key before using those features.'
-        : '';
-    openRouterWarning.style.display = usesOpenRouter && missingKey ? 'block' : 'none';
-  };
-
-  for (const { feature, label, helper } of FEATURE_ROWS) {
-    const select = document.createElement('select');
-    select.className = 'chatgoose-select';
-    select.dataset.feature = feature;
-
-    for (const group of AI_MODEL_GROUPS) {
-      const optgroup = document.createElement('optgroup');
-      optgroup.label = group.label;
-      for (const model of group.models) {
-        const option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = `${model.label} \u2014 ${model.description}`;
-        if (model.pricingNote) {
-          option.title = model.pricingNote;
-        }
-        optgroup.append(option);
-      }
-      select.append(optgroup);
-    }
-
-    select.value = state.settings.featureModels[feature];
-    modelSelects.push(select);
-
-    const reasoningSelect = document.createElement('select');
-    reasoningSelect.className = 'chatgoose-select';
-    reasoningSelect.dataset.reasoningFeature = feature;
-    for (const effort of REASONING_EFFORTS) {
-      const option = document.createElement('option');
-      option.value = effort;
-      option.textContent = REASONING_LABELS[effort];
-      reasoningSelect.append(option);
-    }
-    reasoningSelect.value = state.settings.featureReasoning[feature];
-    reasoningSelects.push(reasoningSelect);
-    reasoningSelectsByFeature.set(feature, reasoningSelect);
-
-    const row = document.createElement('div');
-    row.style.display = 'grid';
-    row.style.gap = '4px';
-
-    const featureLabel = document.createElement('span');
-    featureLabel.textContent = label;
-    featureLabel.style.fontWeight = '700';
-
-    const helperText = document.createElement('div');
-    helperText.textContent = helper;
-    helperText.style.color = 'var(--chatgoose-muted)';
-    helperText.style.fontSize = '13px';
-    helperText.style.marginBottom = '4px';
-
-    const controls = document.createElement('div');
-    controls.className = 'chatgoose-model-config-grid';
-    controls.append(
-      labeledField('Model', select),
-      labeledField('Reasoning', reasoningSelect),
-    );
-
-    row.append(featureLabel, helperText, controls);
-    modelSection.append(row);
-  }
-
-  const updateReasoningCapability = (
-    feature: ModelSelectableFeatureType,
-    modelId: string,
-  ): void => {
-    const reasoningSelect = reasoningSelectsByFeature.get(feature);
-    if (!reasoningSelect) {
-      return;
-    }
-
-    const supported = supportsModelReasoningConfig(modelId, feature);
-    reasoningSelect.disabled = !supported;
-    reasoningSelect.dataset.reasoningSupported = supported ? 'true' : 'false';
-    reasoningSelect.setAttribute('aria-disabled', supported ? 'false' : 'true');
-    reasoningSelect.title = supported
-      ? ''
-      : 'Reasoning is not supported for this selected model and feature.';
-  };
-
-  for (const select of modelSelects) {
-    updateReasoningCapability(
-      select.dataset.feature as ModelSelectableFeatureType,
-      select.value,
-    );
-  }
-  renderOpenRouterWarning();
-  modelSection.append(openRouterWarning);
 
   const saveSettingsDebounced = debounce(async () => {
-    const featureModels: Record<string, string> = {};
-    for (const sel of modelSelects) {
-      featureModels[sel.dataset.feature!] = sel.value;
-    }
-    const featureReasoning: Record<string, ReasoningEffort> = {};
-    for (const sel of reasoningSelects) {
-      featureReasoning[sel.dataset.reasoningFeature!] = sel.value as ReasoningEffort;
-    }
-
     const savedSettings = await saveSettings({
-      claudeApiKey: keyInput.value,
-      openRouterApiKey: openRouterKeyInput.value,
       agencyHubBaseUrl: agencyHubUrlInput.value,
       agencyHubApiKey: agencyHubKeyInput.value,
       quickMessageCount: Number(quickInput.value),
@@ -790,12 +609,8 @@ async function render(): Promise<void> {
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
       promptCachingEnabled: promptCachingInput.checked,
-      featureModels: featureModels as Record<ModelSelectableFeatureType, string>,
-      featureReasoning: featureReasoning as Record<ModelSelectableFeatureType, ReasoningEffort>,
     });
 
-    keyInput.value = savedSettings.claudeApiKey;
-    openRouterKeyInput.value = savedSettings.openRouterApiKey;
     agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
     agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
 
@@ -823,8 +638,6 @@ async function render(): Promise<void> {
   }, 350);
 
   [
-    keyInput,
-    openRouterKeyInput,
     agencyHubUrlInput,
     agencyHubKeyInput,
     quickInput,
@@ -837,12 +650,6 @@ async function render(): Promise<void> {
     element.addEventListener('input', saveSettingsDebounced);
     element.addEventListener('change', saveSettingsDebounced);
   });
-  openRouterKeyInput.addEventListener('input', renderOpenRouterWarning);
-  openRouterKeyInput.addEventListener('change', renderOpenRouterWarning);
-  for (const select of reasoningSelects) {
-    select.addEventListener('input', saveSettingsDebounced);
-    select.addEventListener('change', saveSettingsDebounced);
-  }
   agencyHubUrlInput.addEventListener('input', () => {
     markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
@@ -880,20 +687,8 @@ async function render(): Promise<void> {
       browser.permissions.onRemoved.removeListener(handlePermissionChanged);
     });
   }
-  modelSelects.forEach((select) => {
-    select.addEventListener('change', () => {
-      updateReasoningCapability(
-        select.dataset.feature as ModelSelectableFeatureType,
-        select.value,
-      );
-      renderOpenRouterWarning();
-      void saveSettingsDebounced();
-    });
-  });
-
   root.append(apiSection);
   root.append(agencyHubSection);
-  root.append(modelSection);
 
   // ─── Personalities ─────────────────────────────────────────
   const personalitiesSection = createSection('Model Personalities');

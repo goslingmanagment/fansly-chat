@@ -5,8 +5,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
-  DEFAULT_FEATURE_MODELS,
-  DEFAULT_FEATURE_REASONING,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import type {
@@ -178,15 +176,12 @@ function createStorageState(overrides?: Partial<Record<string, unknown>>): Recor
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeApiKey: 'sk-test',
       quickMessageCount: 100,
       pingMessageCount: 100,
       improveMessageCount: 100,
       deepMessageCount: 500,
       debugMode: false,
       promptCachingEnabled: true,
-      featureModels: { ...DEFAULT_FEATURE_MODELS },
-      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
     },
     personalities: [
       {

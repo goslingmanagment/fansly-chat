@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
-  DEFAULT_FEATURE_MODELS,
-  DEFAULT_FEATURE_REASONING,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { createBundledPersonalities } from '../src/shared/personalities.js';
@@ -37,8 +35,6 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeApiKey: 'sk-test',
-      openRouterApiKey: '',
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
@@ -48,8 +44,6 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       deepMessageCount: 200,
       debugMode: false,
       promptCachingEnabled: true,
-      featureModels: { ...DEFAULT_FEATURE_MODELS },
-      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
       ...overrides,
     },
     personalities: [

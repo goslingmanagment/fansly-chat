@@ -14,8 +14,6 @@ export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'max';
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
 export interface Settings {
-  claudeApiKey: string;
-  openRouterApiKey: string;
   agencyHubBaseUrl: string;
   agencyHubApiKey: string;
   /** Stage 32: device-bound hub credential (agency_hub_device_…); preferred
@@ -27,8 +25,6 @@ export interface Settings {
   deepMessageCount: number;
   debugMode: boolean;
   promptCachingEnabled: boolean;
-  featureModels: Record<ModelSelectableFeatureType, string>;
-  featureReasoning: Record<ModelSelectableFeatureType, ReasoningEffort>;
 }
 
 export interface Personality {

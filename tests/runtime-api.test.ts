@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_FEATURE_MODELS, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { SessionTemplate } from '../src/shared/types.js';
@@ -292,47 +292,38 @@ describe('runtime-api getPopupStatus', () => {
     expect(tabsQuery).not.toHaveBeenCalled();
   });
 
-  it('reports API key readiness for each selected model provider', async () => {
+  it('reports kernel-lane readiness as hasApiKey (hub transport configured)', async () => {
     mockStorage = createStorage({
       settings: {
         ...createDefaultSettings(),
-        claudeApiKey: 'sk-ant-test',
-        openRouterApiKey: '',
-        featureModels: {
-          ...DEFAULT_FEATURE_MODELS,
-          'fast-reply': 'openrouter:x-ai/grok-4.3',
-        },
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
       },
     });
-
-    const fanslyClient = {
-      getAuthenticatedAccount: vi.fn(async () => {
-        throw new Error('should not be called');
-      }),
-    };
-
-    const { sessionStore, tabsGet } = await installRuntimeApiHarness(fanslyClient);
-    sessionStore.registerCapture(1, makeCapture('active'));
-    tabsGet.mockResolvedValue({ id: 1, url: 'https://fansly.com/messages/group-1' });
-
-    const result = await onMessageListener?.({
-      type: 'getPopupStatus',
-      tabId: 1,
+    const { sessionStore, tabsQuery } = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
     });
+    sessionStore.registerCapture(1, makeCapture('active'));
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
 
-    expect(result).toEqual(
-      expect.objectContaining({
-        hasApiKey: true,
-        modelProviderByFeature: expect.objectContaining({
-          'fast-reply': 'openrouter',
-          'help-me': 'anthropic',
-        }),
-        apiKeyReadyByFeature: expect.objectContaining({
-          'fast-reply': false,
-          'help-me': true,
-        }),
-      }),
-    );
+    const configured = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(configured).toEqual(expect.objectContaining({ hasApiKey: true }));
+  });
+
+  it('reports hasApiKey false when the hub transport is unconfigured', async () => {
+    mockStorage = createStorage();
+    const { sessionStore, tabsQuery } = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    });
+    sessionStore.registerCapture(1, makeCapture('active'));
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
+
+    const cleared = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false }));
   });
 });
 

@@ -1,10 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { FeatureType, Personality, SummaryCacheEntry } from '../src/shared/types.js';
+import type { Personality, SummaryCacheEntry } from '../src/shared/types.js';
 import { normalizeAgencyHubSummarySyncMetadata } from '../src/shared/agency-hub.js';
 import {
-  DEFAULT_FEATURE_MODELS,
-  DEFAULT_FEATURE_REASONING,
-  DEFAULT_MODEL_ID,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import {
@@ -113,13 +110,12 @@ describe('migrateState', () => {
   it('preserves existing data during migration from older schema', () => {
     const legacy = {
       schemaVersion: 0,
-      settings: { claudeApiKey: 'sk-test', quickMessageCount: 50, deepMessageCount: 200, debugMode: true },
+      settings: { quickMessageCount: 50, deepMessageCount: 200, debugMode: true },
       personalities: [{ id: 'p1', name: 'Legacy', content: 'old', updatedAt: 500 }],
       accountMappings: { acc1: 'p1' },
     };
     const result = migrateState(legacy);
     expect(result.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
-    expect(result.settings.claudeApiKey).toBe('sk-test');
     expect(result.settings.debugMode).toBe(true);
     expect(result.settings.pingMessageCount).toBe(50);
     expect(result.personalities).toHaveLength(1);
@@ -129,14 +125,12 @@ describe('migrateState', () => {
   });
 
   it('fills in default settings for missing fields during migration', () => {
-    const partial = { schemaVersion: 0, settings: { claudeApiKey: 'key' } };
+    const partial = { schemaVersion: 0, settings: { debugMode: true } };
     const result = migrateState(partial);
-    expect(result.settings.claudeApiKey).toBe('key');
     expect(result.settings.quickMessageCount).toBe(createDefaultSettings().quickMessageCount);
     expect(result.settings.pingMessageCount).toBe(createDefaultSettings().pingMessageCount);
     expect(result.settings.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
     expect(result.settings.deepMessageCount).toBe(createDefaultSettings().deepMessageCount);
-    expect(result.settings.featureReasoning).toEqual(DEFAULT_FEATURE_REASONING);
   });
 
   it('adds agencyHubDeviceToken on migration from pre-v8 records and keeps a stored one (idempotent)', () => {
@@ -162,7 +156,6 @@ describe('migrateState', () => {
     const result = migrateState({
       schemaVersion: 4,
       settings: {
-        claudeApiKey: 'sk-test',
         quickMessageCount: 73,
       },
       personalities: [],
@@ -174,50 +167,8 @@ describe('migrateState', () => {
     expect(result.settings.pingMessageCount).toBe(73);
   });
 
-  it('backfills claudeApiKey from anthropicApiKey when needed', () => {
-    const result = migrateState({
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: {
-        anthropicApiKey: 'sk-ant-test',
-      },
-      personalities: [],
-      accountMappings: {},
-      knownAccounts: [],
-    });
 
-    expect(result.settings.claudeApiKey).toBe('sk-ant-test');
-    expect((result.settings as unknown as Record<string, unknown>).anthropicApiKey).toBeUndefined();
-  });
 
-  it('preserves claudeApiKey when both key fields exist', () => {
-    const result = migrateState({
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: {
-        claudeApiKey: 'sk-ant-primary',
-        anthropicApiKey: 'sk-ant-secondary',
-      },
-      personalities: [],
-      accountMappings: {},
-      knownAccounts: [],
-    });
-
-    expect(result.settings.claudeApiKey).toBe('sk-ant-primary');
-    expect((result.settings as unknown as Record<string, unknown>).anthropicApiKey).toBeUndefined();
-  });
-
-  it('populates featureModels with defaults when migrating from schema 1', () => {
-    const legacy = {
-      schemaVersion: 1,
-      settings: { claudeApiKey: 'sk-test', quickMessageCount: 100, deepMessageCount: 500, debugMode: false },
-      personalities: [],
-      accountMappings: {},
-      knownAccounts: [],
-    };
-    const result = migrateState(legacy);
-    expect(result.settings.featureModels).toBeDefined();
-    expect(result.settings.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
-    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
-  });
 
   it('carries forward summary:* keys during migration', () => {
     const legacy = {
@@ -345,8 +296,8 @@ describe('sanitizeSettings', () => {
   });
 
   it('trims API key', () => {
-    const result = storage.sanitizeSettings({ claudeApiKey: '  sk-test  ' });
-    expect(result.claudeApiKey).toBe('sk-test');
+    const result = storage.sanitizeSettings({ agencyHubApiKey: '  hub-key  ' });
+    expect(result.agencyHubApiKey).toBe('hub-key');
   });
 
   it('canonicalizes the Agency Hub base URL and trims its API key', () => {
@@ -361,7 +312,6 @@ describe('sanitizeSettings', () => {
 
   it('fills defaults for missing fields', () => {
     const result = storage.sanitizeSettings({});
-    expect(result.claudeApiKey).toBe('');
     expect(result.pingMessageCount).toBe(createDefaultSettings().pingMessageCount);
     expect(result.debugMode).toBe(false);
     expect(result.improveMessageCount).toBe(createDefaultSettings().improveMessageCount);
@@ -370,7 +320,6 @@ describe('sanitizeSettings', () => {
 
   it('defaults promptCachingEnabled to true for legacy settings', () => {
     const result = storage.sanitizeSettings({
-      claudeApiKey: 'sk-test',
       debugMode: false,
     });
     expect(result.promptCachingEnabled).toBe(true);
@@ -383,102 +332,27 @@ describe('sanitizeSettings', () => {
     expect(result.promptCachingEnabled).toBe(false);
   });
 
-  it('defaults featureModels when missing from input', () => {
-    const result = storage.sanitizeSettings({});
-    expect(result.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
-    expect(result.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
-    expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
-  });
 
-  it('defaults featureReasoning to medium when missing from input', () => {
-    const result = storage.sanitizeSettings({});
-    expect(result.featureReasoning).toEqual(DEFAULT_FEATURE_REASONING);
-  });
 
-  it('preserves valid model choices', () => {
-    const result = storage.sanitizeSettings({
-      featureModels: {
-        'fast-reply': 'claude-haiku-4-5',
-        'help-me': DEFAULT_MODEL_ID,
-        'fan-summary': 'claude-opus-4-6',
-        'chat-review': DEFAULT_MODEL_ID,
-        'ping': DEFAULT_MODEL_ID,
+  it('Stage 32 (v9): drops vendor keys and model selections from old records', () => {
+    const result = migrateState({
+      schemaVersion: 8,
+      settings: {
+        claudeApiKey: 'sk-ant-legacy',
+        openRouterApiKey: 'or-legacy',
+        featureModels: { 'fast-reply': 'anthropic:claude-haiku-4-5' },
+        featureReasoning: { 'fast-reply': 'max' },
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
       },
     });
-    expect(result.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
-    expect(result.featureModels['fan-summary']).toBe('anthropic:claude-opus-4-6');
+    const dumped = JSON.stringify(result.settings);
+    expect(dumped).not.toContain('sk-ant-legacy');
+    expect(dumped).not.toContain('or-legacy');
+    expect(dumped).not.toContain('featureModels');
+    expect(dumped).not.toContain('featureReasoning');
+    expect(result.settings.agencyHubApiKey).toBe('hub-key');
   });
-
-  it('preserves valid featureReasoning choices', () => {
-    const result = storage.sanitizeSettings({
-      featureReasoning: {
-        ...DEFAULT_FEATURE_REASONING,
-        'fast-reply': 'off',
-        'fan-summary': 'max',
-        ping: 'low',
-      },
-    });
-    expect(result.featureReasoning['fast-reply']).toBe('off');
-    expect(result.featureReasoning['fan-summary']).toBe('max');
-    expect(result.featureReasoning.ping).toBe('low');
-    expect(result.featureReasoning['help-me']).toBe('medium');
-  });
-
-  it('falls back to medium for unknown featureReasoning values', () => {
-    const result = storage.sanitizeSettings({
-      featureReasoning: {
-        ...DEFAULT_FEATURE_REASONING,
-        'fast-reply': 'turbo',
-      } as unknown as typeof DEFAULT_FEATURE_REASONING,
-    });
-    expect(result.featureReasoning['fast-reply']).toBe('medium');
-  });
-
-  it('preserves provider-aware OpenRouter model choices', () => {
-    const result = storage.sanitizeSettings({
-      featureModels: {
-        ...DEFAULT_FEATURE_MODELS,
-        'fast-reply': 'openrouter:x-ai/grok-4.3',
-      },
-    });
-
-    expect(result.featureModels['fast-reply']).toBe('openrouter:x-ai/grok-4.3');
-  });
-
-  it('preserves the OpenRouter API key', () => {
-    const result = storage.sanitizeSettings({
-      openRouterApiKey: '  sk-or-v1-test  ',
-    });
-
-    expect(result.openRouterApiKey).toBe('sk-or-v1-test');
-  });
-
-  it('falls back to default for unknown model IDs', () => {
-    const result = storage.sanitizeSettings({
-      featureModels: {
-        'fast-reply': 'claude-nonexistent-model',
-        'help-me': DEFAULT_MODEL_ID,
-        'fan-summary': DEFAULT_MODEL_ID,
-        'chat-review': DEFAULT_MODEL_ID,
-        'ping': DEFAULT_MODEL_ID,
-      },
-    });
-    expect(result.featureModels['fast-reply']).toBe(DEFAULT_MODEL_ID);
-  });
-
-  it('fills missing feature keys from defaults in partial featureModels', () => {
-    const result = storage.sanitizeSettings({
-      featureModels: {
-        'fast-reply': 'claude-haiku-4-5',
-      } as Record<FeatureType, string>,
-    });
-    expect(result.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
-    expect(result.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
-    expect(result.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
-    expect(result.featureModels['chat-review']).toBe(DEFAULT_MODEL_ID);
-    expect(result.featureModels['ping']).toBe(DEFAULT_MODEL_ID);
-  });
-
   it('falls back to default when quickMessageCount is NaN-producing string', () => {
     const result = storage.sanitizeSettings({ quickMessageCount: 'abc' as unknown as number });
     const defaults = createDefaultSettings();
@@ -662,44 +536,6 @@ describe('loadStorageState', () => {
     expect(mockStorage.personalities).toEqual([bundledLora]);
   });
 
-  it('deep-merges featureModels on load even when schema matches', async () => {
-    mockStorage = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: {
-        ...createDefaultSettings(),
-        featureModels: { 'fast-reply': 'claude-haiku-4-5' },
-      },
-      personalities: [],
-      accountMappings: {},
-      knownAccounts: [],
-    };
-    const result = await storage.loadStorageState();
-    expect(result.settings.featureModels['fast-reply']).toBe('anthropic:claude-haiku-4-5');
-    expect(result.settings.featureModels['help-me']).toBe(DEFAULT_MODEL_ID);
-    expect(result.settings.featureModels['fan-summary']).toBe(DEFAULT_FEATURE_MODELS['fan-summary']);
-  });
-
-  it('deep-merges featureReasoning on load even when schema matches', async () => {
-    mockStorage = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: {
-        ...createDefaultSettings(),
-        featureReasoning: { 'fast-reply': 'off' },
-      },
-      personalities: [],
-      accountMappings: {},
-      knownAccounts: [],
-    };
-    const result = await storage.loadStorageState();
-    expect(result.settings.featureReasoning['fast-reply']).toBe('off');
-    expect(result.settings.featureReasoning['help-me']).toBe('medium');
-    expect(result.settings.featureReasoning['fan-summary']).toBe('medium');
-  });
-});
-
-// ─── savePersonalities ──────────────────────────────────────────────────
-
-describe('savePersonalities', () => {
   it('normalizes personality names (trim, default to Unnamed)', async () => {
     const personalities: Personality[] = [
       { id: 'p1', name: '  ', content: 'test', updatedAt: 1000 },

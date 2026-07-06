@@ -5,10 +5,6 @@ import {
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError, toUserError } from '../shared/errors.js';
 import {
-  buildApiKeyReadyByFeature,
-  buildModelProviderByFeature,
-} from '../shared/feature-readiness.js';
-import {
   getRuntimeRequestType,
   isAgencyHubConnectionTestSettings,
   isObjectRecord,
@@ -125,9 +121,11 @@ export function registerRuntimeApi({
             mappedPersonalityId,
           ),
           connected,
-          hasApiKey: Boolean(state.settings.claudeApiKey || state.settings.openRouterApiKey),
-          modelProviderByFeature: buildModelProviderByFeature(state.settings),
-          apiKeyReadyByFeature: buildApiKeyReadyByFeature(state.settings),
+          // Stage 32: readiness = kernel lane configured (hub transport up).
+          hasApiKey: Boolean(
+            normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) &&
+            (state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim()),
+          ),
           hasPersonalities: state.personalities.length > 0,
           mappedPersonalityId,
           mappedPersonalityName,

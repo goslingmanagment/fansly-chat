@@ -642,7 +642,7 @@ describe('OverlayController', () => {
     });
 
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Total');
-    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Claude Sonnet 4.6 usage');
+    expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('claude-sonnet-4-6 usage');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('cache read 90');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('input 420');
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain('Reasoning requested');
@@ -838,7 +838,7 @@ describe('OverlayController', () => {
       'saved',
     );
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-summary').textContent).toContain(
-      'Claude Sonnet 4.6 cost',
+      'claude-sonnet-4-6 cost',
     );
   });
 

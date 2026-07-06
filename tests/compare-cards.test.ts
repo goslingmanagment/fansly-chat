@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  DEFAULT_FEATURE_MODELS,
-  DEFAULT_FEATURE_REASONING,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import type { PersistedState } from '../src/shared/types.js';
@@ -10,8 +8,6 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
-      claudeApiKey: 'sk-test',
-      openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       agencyHubDeviceToken: '',
@@ -21,8 +17,6 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       deepMessageCount: 500,
       debugMode: false,
       promptCachingEnabled: true,
-      featureModels: { ...DEFAULT_FEATURE_MODELS },
-      featureReasoning: { ...DEFAULT_FEATURE_REASONING },
     },
     personalities: [],
     accountMappings: {},

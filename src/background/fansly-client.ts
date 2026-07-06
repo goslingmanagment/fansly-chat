@@ -11,11 +11,31 @@ import {
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import { aggregateEarnings } from '../shared/earnings.js';
 import { ChatGooseError } from '../shared/errors.js';
-import { parseRetryAfterMs } from './llm-stream-utils.js';
 import {
   estimateTargetPages,
   extractOldestMessageId,
 } from '../shared/transcript.js';
+
+/** Retry-After header → ms (seconds or HTTP-date form). Relocated from the
+ * deleted llm-stream-utils (Stage 32) — Fansly rate limits still use it. */
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+  const timestamp = Date.parse(trimmed);
+  if (!Number.isFinite(timestamp)) {
+    return undefined;
+  }
+  return Math.max(0, timestamp - Date.now());
+}
 import type {
   PpvAttachmentRequest,
   PurchaseEvidenceOverride,
