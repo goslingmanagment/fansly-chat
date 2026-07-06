@@ -1,5 +1,5 @@
 {
-  "contractHash": "ea3d41824ff9cf56502da0b91934de8147ae68025b958a960b01365fb145891c",
-  "sourceCommit": "69329da97e8ae8fad78202e279ce88d9d21863bd",
+  "contractHash": "e8c867e8861a47a3b781a6c1ba634f99542d439a46d61effb8637e495787baae",
+  "sourceCommit": "cedb00a6340b1e846bfe0a16ce3e38db3c9f74de",
   "source": "core scripts/vendor-sdk.mjs"
 }
