@@ -1,5 +1,7 @@
 node_modules/
-dist/
+/dist/
+# vendored @kernel/sdk dist IS committed (generated artifact, pinned by manifest)
+!vendor/kernel-sdk/dist/
 .env.deploy
 .DS_Store
 TODO.md

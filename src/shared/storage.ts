@@ -126,6 +126,9 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
       String(input.agencyHubBaseUrl ?? defaults.agencyHubBaseUrl),
     ),
     agencyHubApiKey: String(input.agencyHubApiKey ?? defaults.agencyHubApiKey).trim(),
+    agencyHubDeviceToken: String(
+      input.agencyHubDeviceToken ?? defaults.agencyHubDeviceToken,
+    ).trim(),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     pingMessageCount: Math.min(PING_MAX_MESSAGE_COUNT, Math.max(PING_MIN_MESSAGE_COUNT, ping)),
     improveMessageCount: Math.min(

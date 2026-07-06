@@ -331,6 +331,7 @@ async function render(): Promise<void> {
         settings: {
           agencyHubBaseUrl: agencyHubUrlInput.value,
           agencyHubApiKey: agencyHubKeyInput.value.trim(),
+          agencyHubDeviceToken: state.settings.agencyHubDeviceToken,
         },
       });
 
@@ -547,9 +548,86 @@ async function render(): Promise<void> {
     })();
   });
 
+  // ── Stage 32: one-time device-token sign-in (preferred over the key) ──
+  const hubSignInUserInput = document.createElement('input');
+  hubSignInUserInput.type = 'text';
+  hubSignInUserInput.autocomplete = 'username';
+  hubSignInUserInput.className = 'chatgoose-input';
+  hubSignInUserInput.placeholder = 'Hub username';
+
+  const hubSignInPasswordInput = document.createElement('input');
+  hubSignInPasswordInput.type = 'password';
+  hubSignInPasswordInput.autocomplete = 'current-password';
+  hubSignInPasswordInput.className = 'chatgoose-input';
+  hubSignInPasswordInput.placeholder = 'Hub password';
+
+  const hubSignInButton = createButton('Sign in & issue device token', true);
+  const hubSignInStatus = document.createElement('div');
+  hubSignInStatus.style.fontWeight = '700';
+  hubSignInStatus.style.fontSize = '14px';
+  const hubSignInMeta = document.createElement('div');
+  hubSignInMeta.style.color = 'var(--chatgoose-muted)';
+  hubSignInMeta.style.fontSize = '13px';
+
+  const renderHubSignInState = (): void => {
+    const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
+    hubSignInStatus.textContent = hasToken
+      ? 'Device token active ✓'
+      : 'No device token yet.';
+    hubSignInStatus.style.color = hasToken
+      ? 'var(--chatgoose-success)'
+      : 'var(--chatgoose-text)';
+    if (!hubSignInMeta.textContent) {
+      hubSignInMeta.textContent = hasToken
+        ? 'Hub requests use the device token; the legacy API key is the fallback.'
+        : 'Sign in once to issue a device-bound token — it replaces sharing the team API key.';
+    }
+  };
+
+  hubSignInButton.addEventListener('click', () => {
+    void (async () => {
+      const username = hubSignInUserInput.value.trim();
+      const password = hubSignInPasswordInput.value;
+      if (!username || !password || !agencyHubUrlInput.value.trim()) {
+        hubSignInMeta.textContent = 'Enter the Hub base URL, username, and password first.';
+        return;
+      }
+      hubSignInButton.disabled = true;
+      hubSignInMeta.textContent = 'Signing in…';
+      try {
+        const response = await sendRuntimeRequest('issueAgencyHubDeviceToken', {
+          baseUrl: agencyHubUrlInput.value,
+          username,
+          password,
+        });
+        if (response.ok) {
+          state.settings.agencyHubDeviceToken = 'set';
+          hubSignInPasswordInput.value = '';
+          hubSignInMeta.textContent =
+            `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
+        } else {
+          hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
+        }
+      } finally {
+        hubSignInButton.disabled = false;
+        renderHubSignInState();
+      }
+    })();
+  });
+  renderHubSignInState();
+
+  const hubSignInRow = document.createElement('div');
+  hubSignInRow.style.display = 'flex';
+  hubSignInRow.style.gap = '8px';
+  hubSignInRow.style.flexWrap = 'wrap';
+  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
+
   agencyHubSection.append(
     labeledField('Agency Hub base URL', agencyHubUrlInput),
-    labeledField('Agency Hub API key', agencyHubKeyRow),
+    labeledField('Sign in (device token)', hubSignInRow),
+    hubSignInStatus,
+    hubSignInMeta,
+    labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
     agencyHubPermissionStatus,
     agencyHubPermissionMeta,
     agencyHubConnectionStatus,

@@ -14,6 +14,25 @@ function makeSettings(overrides: Partial<ReturnType<typeof createDefaultSettings
     ...createDefaultSettings(),
     agencyHubBaseUrl: 'http://localhost:3000',
     agencyHubApiKey: 'hub-key',
+    agencyHubDeviceToken: '',
+    ...overrides,
+  };
+}
+
+/** Contract-valid page row (the SDK validates responses since Stage 32). */
+function hubPage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    label: 'creator-fs',
+    platform: 'fansly',
+    modelSlug: 'creator',
+    modelName: 'Creator',
+    username: 'creator',
+    displayName: null,
+    followerCount: { value: null, available: false },
+    subscriberCount: { value: null, available: false },
+    lastLightSyncAt: null,
+    lastFollowerSyncAt: null,
     ...overrides,
   };
 }
@@ -47,8 +66,8 @@ describe('AgencyHubClient', () => {
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
         return jsonResponse([
-          { label: 'creator-of', platform: 'onlyfans', username: 'LoraVie' },
-          { label: 'creator-fs', platform: 'fansly', username: 'LoraVie' },
+          hubPage({ id: 1, label: 'creator-of', platform: 'onlyfans', username: 'LoraVie' }),
+          hubPage({ id: 2, label: 'creator-fs', platform: 'fansly', username: 'LoraVie' }),
         ]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
@@ -58,7 +77,13 @@ describe('AgencyHubClient', () => {
           'content-type': 'application/json',
         });
         expect(init?.body).toBe(JSON.stringify({ body: '# fan summary' }));
-        return jsonResponse({ version: 3 });
+        return jsonResponse({
+          version: 3,
+          body: '# fan summary',
+          source: 'chatmuse',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          createdByUserId: null,
+        });
       }
       throw new Error(`Unexpected URL: ${href}`);
     });
@@ -107,6 +132,7 @@ describe('AgencyHubClient', () => {
       return jsonResponse({
         receivedCount: 2,
         insertedCount: 2,
+        invalidCount: 0,
         dedupedCount: 0,
       });
     });
@@ -131,6 +157,7 @@ describe('AgencyHubClient', () => {
       response: {
         receivedCount: 2,
         insertedCount: 2,
+        invalidCount: 0,
         dedupedCount: 0,
       },
     });
@@ -146,6 +173,7 @@ describe('AgencyHubClient', () => {
       return jsonResponse({
         receivedCount: 100,
         insertedCount: 100,
+        invalidCount: 0,
         dedupedCount: 0,
       });
     });
@@ -277,9 +305,7 @@ describe('AgencyHubClient', () => {
       expect(init?.headers).toMatchObject({
         authorization: 'Bearer hub-key',
       });
-      return jsonResponse([
-        { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-      ]);
+      return jsonResponse([hubPage()]);
     });
     vi.stubGlobal('fetch', fetchMock);
     (globalThis as Record<string, unknown>).browser = {
@@ -293,6 +319,7 @@ describe('AgencyHubClient', () => {
       {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: '',
       },
       new AbortController().signal,
     );
@@ -319,6 +346,7 @@ describe('AgencyHubClient', () => {
       {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: '',
       },
       new AbortController().signal,
     );
@@ -346,6 +374,7 @@ describe('AgencyHubClient', () => {
       {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: '',
       },
       new AbortController().signal,
     );
@@ -432,7 +461,7 @@ describe('AgencyHubClient', () => {
 
     expect(result).toMatchObject({
       status: 'failed',
-      reason: 'socket hang up',
+      reason: 'Network error calling POST /api/v1/ai-usage/batch: socket hang up',
       baseUrl: 'http://localhost:3000',
     });
   });
@@ -443,12 +472,16 @@ describe('AgencyHubClient', () => {
 
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPage()]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
-        return jsonResponse({ version: 1 });
+        return jsonResponse({
+          version: 1,
+          body: '# fan summary',
+          source: 'chatmuse',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          createdByUserId: null,
+        });
       }
       throw new Error(`Unexpected URL: ${href}`);
     });
@@ -476,9 +509,7 @@ describe('AgencyHubClient', () => {
     const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPage()]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/conversations/group-1/profile') {
         expect(init?.method).toBe('GET');
@@ -492,11 +523,12 @@ describe('AgencyHubClient', () => {
             username: 'alice',
             displayName: 'Alice',
             createdAtExternal: null,
+            pageAlias: null,
           },
           profile: {
             version: 4,
             body: '# stored fan summary',
-            source: 'chatgoose',
+            source: 'chatmuse',
             createdAt: '2026-03-20T12:00:00.000Z',
             createdByUserId: 42,
           },
@@ -538,9 +570,7 @@ describe('AgencyHubClient', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPage()]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/conversations/group-1/profile') {
         return jsonResponse({
@@ -550,6 +580,7 @@ describe('AgencyHubClient', () => {
             username: 'alice',
             displayName: 'Alice',
             createdAtExternal: null,
+            pageAlias: null,
           },
           profile: null,
         });
@@ -582,9 +613,7 @@ describe('AgencyHubClient', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPage()]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/conversations/group-1/profile') {
         return jsonResponse({ error: 'not found' }, 404);

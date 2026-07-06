@@ -18,6 +18,9 @@ export interface Settings {
   openRouterApiKey: string;
   agencyHubBaseUrl: string;
   agencyHubApiKey: string;
+  /** Stage 32: device-bound hub credential (agency_hub_device_…); preferred
+   * over agencyHubApiKey when present (kernel dual-acceptance). */
+  agencyHubDeviceToken: string;
   quickMessageCount: number;
   pingMessageCount: number;
   improveMessageCount: number;
@@ -694,6 +697,7 @@ export interface RuntimeRequestMap {
   getPopupStatus: GetPopupStatusRequest | undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
+  issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getSpendersList: GetSpendersListRequest | undefined;
 }
 
@@ -701,8 +705,21 @@ export interface RuntimeResponseMap {
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
+  issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getSpendersList: SpendersListResponse;
 }
+
+/** Stage 32: one-time options-page sign-in → device-bound hub credential. */
+export interface AgencyHubDeviceTokenRequest {
+  baseUrl: string;
+  username: string;
+  password: string;
+}
+
+/** Never carries the token itself — it lands directly in settings storage. */
+export type AgencyHubDeviceTokenResponse =
+  | { ok: true; keyPrefix: string; label: string; expiresAt: string }
+  | { ok: false; error: UserFacingError };
 
 export interface GetPopupStatusRequest {
   tabId?: number;
@@ -742,7 +759,7 @@ export type SpendersListResponse =
   | { ok: false; error: UserFacingError };
 
 export interface AgencyHubConnectionTestRequest {
-  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>;
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>;
 }
 
 export interface AgencyHubConnectionTestResponse {

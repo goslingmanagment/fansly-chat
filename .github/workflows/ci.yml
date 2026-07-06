@@ -26,8 +26,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # typecheck + lint + tests + build (the lint step is new with the
-      # Stage 32 toolchain; the SDK contract-hash gate joins in Task 2 when
-      # the vendored @kernel/sdk lands).
+      # typecheck + lint + tests + build. The vendored @kernel/sdk drift gate
+      # (tests/kernel-sdk-vendor.test.ts: manifest contractHash == exported
+      # KERNEL_CONTRACT_HASH) runs inside the test step.
       - name: Check
         run: pnpm check
