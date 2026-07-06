@@ -1,4 +1,5 @@
 import { KernelApiError, createClient } from '@kernel/sdk';
+import { clientVersionHeaders } from '../shared/client-version.js';
 import {
   AGENCY_HUB_PROFILE_MAX_BYTES,
   buildAgencyHubOriginPattern,
@@ -150,6 +151,7 @@ export class AgencyHubClient {
     return createClient({
       baseUrl: baseUrl.replace(/\/+$/, ''),
       auth: { mode: 'bearer', token: () => bearer },
+      headers: clientVersionHeaders(),
       fetch: (input, init) => this.fetchImpl(input, { ...init, signal }),
     });
   }

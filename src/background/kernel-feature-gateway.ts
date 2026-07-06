@@ -10,6 +10,7 @@
 
 import { KernelApiError, streamAiFeature, type AiGatewayStreamFrame } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
+import { clientVersionHeaders } from '../shared/client-version.js';
 import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { resolveHubBearer } from './agency-hub-client.js';
@@ -183,6 +184,7 @@ export function createKernelFeatureGateway(
         {
           baseUrl,
           auth: { mode: 'bearer', token: () => bearer },
+          headers: clientVersionHeaders(),
           fetch: fetchImpl,
         },
         {
