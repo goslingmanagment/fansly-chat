@@ -198,6 +198,12 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
       return isOperationStartMessage(message);
     case 'compare:start':
       return isCompareStartMessage(message);
+    case 'operation:acceptance':
+      return (
+        typeof message.operationId === 'string' &&
+        (message.action === 'copied' || message.action === 'inserted') &&
+        typeof message.partIndex === 'number'
+      );
     case 'operation:cancel':
     case 'compare:cancel':
       return hasOperationId(message);

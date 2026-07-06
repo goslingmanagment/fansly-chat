@@ -793,6 +793,7 @@ export interface PortEnvelopeBase {
     | 'tab:state'
     | 'operation:start'
     | 'operation:cancel'
+    | 'operation:acceptance'
     | 'operation:debugPrompt'
     | 'operation:progress'
     | 'operation:chunk'
@@ -867,8 +868,18 @@ export type ContentPortMessage =
   | RouteChangedPayload
   | OperationStartPayload
   | OperationCancelPayload
+  | OperationAcceptancePayload
   | CompareStartPayload
   | CompareCancelPayload;
+
+/** Stage 32 Task 5: chatter took a suggestion (copy/insert) — rides the
+ * capture lane correlated by operationId + the gateway generation ref. */
+export interface OperationAcceptancePayload extends PortEnvelopeBase {
+  type: 'operation:acceptance';
+  operationId: string;
+  action: 'copied' | 'inserted';
+  partIndex: number;
+}
 
 // Background → Content
 

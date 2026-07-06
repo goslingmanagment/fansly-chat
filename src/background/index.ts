@@ -1,4 +1,5 @@
 import { AgencyHubClient } from './agency-hub-client.js';
+import { createAcceptanceReporter } from './acceptance-reporter.js';
 import { createKernelFeatureGateway } from './kernel-feature-gateway.js';
 import { FanslyClient } from './fansly-client.js';
 import { OperationCoordinator } from './operations.js';
@@ -18,6 +19,12 @@ const fanslyClient = new FanslyClient(sessionStore);
 const spendersService = new SpendersService(fanslyClient);
 const agencyHubClient = new AgencyHubClient();
 const kernelGateway = createKernelFeatureGateway();
+// Stage 32 Task 5: acceptance telemetry on the capture lane (drop-oldest
+// spool in storage.local — recoverable signal, not custody-grade audit).
+const acceptanceReporter = createAcceptanceReporter({
+  storage: browser.storage.local,
+  getSettings: async () => (await storageCoordinator.getState()).settings,
+});
 const coordinator = new OperationCoordinator(
   sessionStore,
   tabContexts,
@@ -25,6 +32,7 @@ const coordinator = new OperationCoordinator(
   kernelGateway,
   storageCoordinator,
   agencyHubClient,
+  acceptanceReporter,
 );
 
 browser.runtime.onConnect.addListener((port) => {
