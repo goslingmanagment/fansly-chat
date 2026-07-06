@@ -217,6 +217,9 @@ export class ChatGooseContentApp {
   private readonly completedOverlayCache = new CompletedOverlayCache();
   private readonly completedCompareCache = new CompletedCompareCache();
   private readonly inlinePanel = new InlinePanelController({
+    onAcceptance: (operationId, action, partIndex) => {
+      this.port.send({ type: 'operation:acceptance', operationId, action, partIndex });
+    },
     onClose: () => {
       if (this.activeCompareModel?.operationId) {
         this.comparePanelVisible = false;
@@ -269,6 +272,9 @@ export class ChatGooseContentApp {
     },
   });
   private readonly overlay = new OverlayController({
+    onAcceptance: (operationId, action, partIndex) => {
+      this.port.send({ type: 'operation:acceptance', operationId, action, partIndex });
+    },
     onClose: () => {
       this.deepOverlayModel = null;
       if (

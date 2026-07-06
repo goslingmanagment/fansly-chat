@@ -46,6 +46,8 @@ interface OverlayCallbacks {
   onCancel: (operationId: string) => void;
   onRerun: (feature: FeatureType) => void;
   onCollapse: () => void;
+  /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry). */
+  onAcceptance?: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
 }
 
 interface PartCardOptions {
@@ -329,6 +331,7 @@ export class OverlayController {
       this.render(this.model);
       const operationId = 'operationId' in this.model ? this.model.operationId : null;
       if (operationId) {
+        this.callbacks.onAcceptance?.(operationId, 'inserted', part.sequenceIndex);
         this.scheduleInsertedReset(part, operationId);
       }
       this.queueComposerFocus();
@@ -990,6 +993,10 @@ export class OverlayController {
     copy.addEventListener('click', async () => {
       try {
         await copyToClipboard(part.text);
+        const operationId = 'operationId' in this.model ? this.model.operationId : null;
+        if (operationId) {
+          this.callbacks.onAcceptance?.(operationId, 'copied', part.sequenceIndex);
+        }
         this.inlineError = null;
         this.render(this.model);
       } catch (error) {

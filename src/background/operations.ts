@@ -91,6 +91,10 @@ import {
   type AgencyHubFetchFanProfileResult,
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
+import type {
+  AcceptanceEventInput,
+  AcceptanceReporter,
+} from './acceptance-reporter.js';
 import {
   buildKernelSpendSummary,
   createZeroLlmSpendSummary,
@@ -385,7 +389,24 @@ export class OperationCoordinator {
     private readonly kernelGateway: KernelFeatureGateway,
     private readonly storageCoordinator: StorageCoordinator,
     private readonly agencyHubClient: AgencyHubClient,
+    private readonly acceptance?: Pick<AcceptanceReporter, 'enqueue'>,
   ) {}
+
+  /** Correlation for post-settle copy/insert signals (bounded, newest-wins). */
+  private readonly acceptanceContexts = new Map<string, Omit<AcceptanceEventInput, 'action' | 'at'>>();
+
+  private rememberAcceptanceContext(
+    operationId: string,
+    context: Omit<AcceptanceEventInput, 'action' | 'at'>,
+  ): void {
+    this.acceptanceContexts.set(operationId, context);
+    if (this.acceptanceContexts.size > 50) {
+      const oldest = this.acceptanceContexts.keys().next().value;
+      if (oldest !== undefined) {
+        this.acceptanceContexts.delete(oldest);
+      }
+    }
+  }
 
   private get activeByTabId(): Map<number, ActiveOperation> {
     return this.lifecycle.featureOperations;
@@ -491,6 +512,17 @@ export class OperationCoordinator {
       case 'compare:start':
         await this.startCompare(tabId, message);
         break;
+      case 'operation:acceptance': {
+        const context = this.acceptanceContexts.get(message.operationId);
+        if (context && this.acceptance) {
+          this.acceptance.enqueue({
+            ...context,
+            action: message.action,
+            at: new Date().toISOString(),
+          });
+        }
+        break;
+      }
       case 'operation:cancel': {
         const active = this.lifecycle.getFeature(tabId);
         if (active && active.operationId === message.operationId) {
@@ -2159,6 +2191,16 @@ export class OperationCoordinator {
             if (!firstProviderActivity) {
               sendDebugProgress();
             }
+            // Acceptance lifecycle: the suggestion became visible.
+            this.acceptance?.enqueue({
+              operationId: payload.operationId,
+              requestId: this.acceptanceContexts.get(payload.operationId)?.requestId ?? null,
+              feature: payload.feature,
+              action: 'shown',
+              pageLabel: kernelRequest.pageLabel,
+              conversationRef: kernelRequest.conversationRef,
+              at: new Date().toISOString(),
+            });
           }
           current.rawText += chunk;
           current.flushBuffer += chunk;
@@ -2166,8 +2208,16 @@ export class OperationCoordinator {
         },
         onMeta: (meta: { requestId: string; clientRequestId: string; model: string }) => {
           // The kernel names the model (client model config died with the
-          // vendor lane); requestId is the generation ref.
+          // vendor lane); requestId is the generation ref — the acceptance
+          // correlation key kernel-side.
           actualModel = meta.model;
+          this.rememberAcceptanceContext(payload.operationId, {
+            operationId: payload.operationId,
+            requestId: meta.requestId,
+            feature: payload.feature,
+            pageLabel: kernelRequest.pageLabel,
+            conversationRef: kernelRequest.conversationRef,
+          });
           if (markProviderActivity('first provider event received')) {
             profiler.log(`${actualModelName()} first provider event`);
           }

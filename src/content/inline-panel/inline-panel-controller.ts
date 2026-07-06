@@ -35,6 +35,8 @@ interface InlinePanelCallbacks {
   onRerun: (feature: FeatureType) => void;
   onCompareRerun: () => void;
   onCompareTabSelect: (cardId: string) => void;
+  /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry). */
+  onAcceptance?: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
 }
 
 interface InlinePanelRenderOptions {
@@ -700,6 +702,9 @@ export class InlinePanelController {
     copy.addEventListener('click', async () => {
       try {
         await copyToClipboard(part.text);
+        if ('operationId' in this.model && typeof this.model.operationId === 'string') {
+          this.callbacks.onAcceptance?.(this.model.operationId, 'copied', part.sequenceIndex);
+        }
         this.inlineError = null;
         this.render(this.model);
       } catch (error) {
@@ -725,6 +730,9 @@ export class InlinePanelController {
       part.insertedOnce = true;
       part.insertedAt = Date.now();
       this.inlineError = null;
+      if ('operationId' in this.model && typeof this.model.operationId === 'string') {
+        this.callbacks.onAcceptance?.(this.model.operationId, 'inserted', part.sequenceIndex);
+      }
       this.render(this.model);
       this.scheduleInsertedReset(part);
       this.queueComposerFocus();
