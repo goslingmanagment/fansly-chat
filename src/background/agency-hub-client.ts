@@ -274,6 +274,23 @@ export class AgencyHubClient {
     }
   }
 
+  /** Stage 32: the feature lane needs the kernel page label for the signed-in
+   * Fansly creator. Exact-match rule over the SDK pages list (the profile
+   * push's resolvePageLabel, exposed). Null = unmapped (caller surfaces it). */
+  async resolvePageLabelForUsername(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    pageUsername: string | null,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl || !bearer || !await this.hasHostPermission(baseUrl)) {
+      return null;
+    }
+    const pages = await this.listVisiblePages(baseUrl, bearer, signal);
+    return this.resolvePageLabel(pages, pageUsername);
+  }
+
   async testConnection(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
