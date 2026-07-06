@@ -13,7 +13,6 @@ export function createDefaultSettings(): Settings {
     agencyHubBaseUrl: '',
     agencyHubApiKey: '',
     agencyHubDeviceToken: '',
-    spendersLegacyRebuild: false,
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
     improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
@@ -38,6 +37,8 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
   const defaults = createDefaultSettings();
   // Stage 32 (v9): vendor keys and model/reasoning selections are DROPPED —
   // AI rides the kernel; models are kernel config. Old fields fall away here.
+  // 1.7.0 (v11): spendersLegacyRebuild DROPPED — the legacy board rebuild is
+  // deleted; the kernel query is the only ranking source.
   return {
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
@@ -47,10 +48,6 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
       typeof raw?.agencyHubDeviceToken === 'string'
         ? raw.agencyHubDeviceToken
         : defaults.agencyHubDeviceToken,
-    spendersLegacyRebuild:
-      typeof raw?.spendersLegacyRebuild === 'boolean'
-        ? raw.spendersLegacyRebuild
-        : defaults.spendersLegacyRebuild,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
     pingMessageCount: Number(raw?.pingMessageCount ?? raw?.quickMessageCount ?? defaults.pingMessageCount),
     improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),

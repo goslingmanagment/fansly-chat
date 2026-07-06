@@ -25,6 +25,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E6 | 2026-07-06 | Board = one kernel top-spenders query; legacy rebuild behind spendersLegacyRebuild for ONE release |
 | E7 | 2026-07-06 | Released 1.6.0 (kernel AI + kernel board + acceptance telemetry) |
 | E8 | 2026-07-07 | Map regen found + fixed unreachable device-token sign-in (missing protocol case); ships next release |
+| E9 | 2026-07-07 | 1.7.0: device-token preferred in all hub ops; legacy board rebuild deleted (v11); chatter-key path deferred one release |
 
 ## Entries
 
@@ -92,3 +93,14 @@ draft state — the SHIPPED 1.6.0 manifest carries NO vendor AI hosts
 (`host_permissions` = fansly.com + apiv3.fansly.com only; the hub rides
 `optional_host_permissions`). The current-state authority is CLAUDE.md's
 header. E3's text stays as written (append-only log).
+
+**E9 (2026-07-07).** 1.7.0 scope settled: (a) the E8 fix ships (device-token
+sign-in reachable); (b) the four legacy-key-only hub ops (testConnection,
+pushFanProfile, fetchFanProfileByConversation, submitAiUsageBatch) now
+prefer the device token via resolveHubBearer — prerequisite for key-path
+deletion; (c) the spendersLegacyRebuild fallback and the legacy per-fan
+board rebuild are DELETED (storage v11 drops the setting); (d) the legacy
+chatter-key path itself is DEFERRED one more release, against E6's plan —
+device_tokens on the kernel is EMPTY (sign-in was broken in 1.6.0, E8), so
+deleting the key path now would strand the whole fleet. Delete it only
+after the fleet demonstrably holds device tokens.

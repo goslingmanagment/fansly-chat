@@ -11,7 +11,6 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
       quickMessageCount: 100,
       pingMessageCount: 100,
       improveMessageCount: 100,

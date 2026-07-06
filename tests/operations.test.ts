@@ -384,7 +384,6 @@ describe('OperationCoordinator', () => {
         agencyHubBaseUrl: '',
         agencyHubApiKey: '',
         agencyHubDeviceToken: '',
-        spendersLegacyRebuild: false,
         quickMessageCount: 100,
         pingMessageCount: 100,
         improveMessageCount: 100,
@@ -2506,7 +2505,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const agencyHubClient = {
@@ -2554,7 +2552,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const createdAtMs = Date.parse('2026-03-20T12:00:00.000Z');
@@ -2637,7 +2634,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const agencyHubClient = {
@@ -2694,7 +2690,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const agencyHubClient = {
@@ -2749,7 +2744,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const agencyHubClient = {
@@ -2803,7 +2797,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const agencyHubClient = {
@@ -2858,7 +2851,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const createdAtMs = Date.parse('2026-03-20T12:00:00.000Z');
@@ -2931,7 +2923,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
     const fetchMock = vi.fn(async (url: URL | string) => {
       const href = String(url);
@@ -3008,7 +2999,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',
@@ -3099,7 +3089,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
     (browser as Record<string, unknown>).permissions = {
       contains: vi.fn(async () => false),
@@ -3158,7 +3147,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
 
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'bad gateway' }, 503));
@@ -3212,7 +3200,6 @@ describe('OperationCoordinator', () => {
       agencyHubBaseUrl: 'http://hub-a.test',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     };
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',

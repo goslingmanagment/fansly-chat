@@ -15,7 +15,6 @@ function makeSettings(overrides: Partial<ReturnType<typeof createDefaultSettings
     agencyHubBaseUrl: 'http://localhost:3000',
     agencyHubApiKey: 'hub-key',
     agencyHubDeviceToken: '',
-    spendersLegacyRebuild: false,
     ...overrides,
   };
 }

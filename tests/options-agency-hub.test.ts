@@ -38,7 +38,6 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
       quickMessageCount: 30,
       pingMessageCount: 30,
       improveMessageCount: 45,
@@ -226,7 +225,6 @@ describe('Options page - Agency Hub section', () => {
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     }));
 
     const section = getSectionByTitle('Agency Hub');
@@ -248,7 +246,6 @@ describe('Options page - Agency Hub section', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     });
   });
 
@@ -417,7 +414,6 @@ describe('Options page - Agency Hub section', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: '',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     }), {
       permissionsContainsImpl: async () => true,
       runtimeSendMessageImpl: runtimeSendMessage,
@@ -493,7 +489,6 @@ describe('Options page - Agency Hub section', () => {
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
     }), {
       permissionsContainsImpl: async () => true,
       runtimeSendMessageImpl: runtimeSendMessage,
@@ -515,7 +510,6 @@ describe('Options page - Agency Hub section', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'invalid-key',
         agencyHubDeviceToken: '',
-        spendersLegacyRebuild: false,
       });
       expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
