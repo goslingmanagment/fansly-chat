@@ -24,6 +24,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E5 | 2026-07-06 | clientContext on the feature lane (Fansly archive is pull-cadenced; extension reads live) |
 | E6 | 2026-07-06 | Board = one kernel top-spenders query; legacy rebuild behind spendersLegacyRebuild for ONE release |
 | E7 | 2026-07-06 | Released 1.6.0 (kernel AI + kernel board + acceptance telemetry) |
+| E8 | 2026-07-07 | Map regen found + fixed unreachable device-token sign-in (missing protocol case); ships next release |
 
 ## Entries
 
@@ -72,3 +73,15 @@ path).
 week-watch: fleet on the version header, kernel-only network panel +
 measured quota drop, chatter walkthrough, acceptance observations under
 producer `chatgoose-extension@1.6.0`.
+
+**E8 (2026-07-07).** The Stage 35 map regeneration found that
+`issueAgencyHubDeviceToken` was UNREACHABLE in shipped 1.6.0:
+`getRuntimeRequestType` (src/shared/protocol.ts) had no case for it, so the
+options-page sign-in message died before the handler
+(src/background/runtime-api.ts) ever ran — device-token sign-in from the
+options page silently failed while the legacy chatter-key path kept
+everything working (which is why the walkthrough missed it). Fixed by adding
+the protocol case, pinned by a test in tests/protocol.test.ts; full check
+green. Ships with the NEXT release (alongside the E6 fallback deletions) —
+no emergency release, the chatter-key path covers the interim. Add "issue a
+device token from the options page" to that release's §5 checks.
