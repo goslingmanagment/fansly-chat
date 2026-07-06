@@ -92,6 +92,9 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     agencyHubDeviceToken: String(
       input.agencyHubDeviceToken ?? defaults.agencyHubDeviceToken,
     ).trim(),
+    spendersLegacyRebuild: Boolean(
+      input.spendersLegacyRebuild ?? defaults.spendersLegacyRebuild,
+    ),
     quickMessageCount: Math.min(QUICK_MAX_MESSAGE_COUNT, Math.max(QUICK_MIN_MESSAGE_COUNT, quick)),
     pingMessageCount: Math.min(PING_MAX_MESSAGE_COUNT, Math.max(PING_MIN_MESSAGE_COUNT, ping)),
     improveMessageCount: Math.min(

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SpendersService } from '../src/background/spenders-service.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
+import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { SessionTemplate } from '../src/shared/types.js';
 
 function session(accountId = 'creator-1'): SessionTemplate {
@@ -106,5 +107,105 @@ describe('SpendersService', () => {
     // A subsequent (non-aborted) call rebuilds rather than serving a poisoned cache.
     await service.getList(session(), new AbortController().signal);
     expect(listFanAccounts).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Stage 32 Task 4: the kernel board query ────────────────────────────────
+
+describe('SpendersService (kernel source)', () => {
+  function kernelSession(): SessionTemplate {
+    return { ...session(), resolvedUsername: 'creator' };
+  }
+
+  function makeKernelHarness(overrides: StubOverrides & {
+    snapshot?: {
+      builtAt: string | null;
+      fanCount: number;
+      entries: Array<{
+        platformUserId: string;
+        username: string | null;
+        displayName: string | null;
+        grossMills: number;
+      }>;
+    };
+    legacyRebuild?: boolean;
+  } = {}) {
+    const { client, listFanAccounts, getEarnings } = makeClient(overrides);
+    const snapshot = overrides.snapshot ?? {
+      builtAt: '2026-07-05T00:00:00.000Z',
+      fanCount: 2,
+      entries: [
+        { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 1_078_000 },
+        { platformUserId: 'f2', username: null, displayName: null, grossMills: 700_000 },
+        // Not among the visible conversations → no groupId → filtered.
+        { platformUserId: 'f-unknown', username: 'ghost', displayName: null, grossMills: 500_000 },
+      ],
+    };
+    const kernelSource = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      fetchTopSpenders: vi.fn(async () => snapshot),
+    };
+    const settings = {
+      ...createDefaultSettings(),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      spendersLegacyRebuild: overrides.legacyRebuild ?? false,
+    };
+    const service = new SpendersService(client, kernelSource, async () => settings);
+    return { service, kernelSource, listFanAccounts, getEarnings };
+  }
+
+  it('builds from one kernel query: no earnings sweep, honest builtAt, group intersection', async () => {
+    const { service, kernelSource, listFanAccounts, getEarnings } = makeKernelHarness();
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(kernelSource.fetchTopSpenders).toHaveBeenCalledWith(
+      expect.objectContaining({ agencyHubApiKey: 'hub-key' }),
+      'creator-fs',
+      expect.any(Number),
+      expect.any(AbortSignal),
+    );
+    // The quota win: one conversations enumeration, ZERO per-fan earnings calls.
+    expect(listFanAccounts).toHaveBeenCalledTimes(1);
+    expect(getEarnings).not.toHaveBeenCalled();
+
+    expect(result.entries).toEqual([
+      {
+        fanAccountId: 'f1',
+        groupId: 'g1',
+        displayName: 'Alice',
+        username: 'alice',
+        lifetimeMills: 1_078_000,
+        lifetimeUsd: 1078,
+      },
+      {
+        fanAccountId: 'f2',
+        groupId: 'g2',
+        displayName: null,
+        username: null,
+        lifetimeMills: 700_000,
+        lifetimeUsd: 700,
+      },
+    ]);
+    // Snapshot honesty: the projection's freshest observation, not "now".
+    expect(result.builtAt).toBe(Date.parse('2026-07-05T00:00:00.000Z'));
+    expect(result.fanCount).toBe(2);
+  });
+
+  it('the hidden spendersLegacyRebuild flip forces the legacy sweep', async () => {
+    const { service, kernelSource, getEarnings } = makeKernelHarness({ legacyRebuild: true });
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(kernelSource.fetchTopSpenders).not.toHaveBeenCalled();
+    expect(getEarnings).toHaveBeenCalled(); // the per-fan sweep ran
+    expect(result.entries[0]?.fanAccountId).toBe('f1');
+  });
+
+  it('fails loudly when the page label cannot be resolved', async () => {
+    const { service, kernelSource } = makeKernelHarness();
+    kernelSource.resolvePageLabelForUsername.mockResolvedValue(null as never);
+    await expect(
+      service.getList(kernelSession(), new AbortController().signal),
+    ).rejects.toMatchObject({ key: 'hub_page_match_failed' });
   });
 });

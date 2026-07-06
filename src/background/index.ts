@@ -16,7 +16,16 @@ const sessionStore = new SessionStore();
 const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const fanslyClient = new FanslyClient(sessionStore);
-const spendersService = new SpendersService(fanslyClient);
+const spendersService = new SpendersService(
+  fanslyClient,
+  {
+    resolvePageLabelForUsername: (settings, pageUsername, signal) =>
+      agencyHubClient.resolvePageLabelForUsername(settings, pageUsername, signal),
+    fetchTopSpenders: (settings, pageLabel, limit, signal) =>
+      agencyHubClient.fetchTopSpenders(settings, pageLabel, limit, signal),
+  },
+  async () => (await storageCoordinator.getState()).settings,
+);
 const agencyHubClient = new AgencyHubClient();
 const kernelGateway = createKernelFeatureGateway();
 // Stage 32 Task 5: acceptance telemetry on the capture lane (drop-oldest
