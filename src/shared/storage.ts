@@ -1,7 +1,6 @@
 import {
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
-  REASONING_EFFORTS,
   IMPROVE_MAX_MESSAGE_COUNT,
   IMPROVE_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
@@ -12,7 +11,6 @@ import {
   SUMMARY_EVICTION_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
-import { normalizeModelId } from './model-registry.js';
 import {
   collectAliasKeysForCanonical,
   resolveCanonicalAccountId,
@@ -30,10 +28,8 @@ import {
   SummaryCacheStore,
 } from './summary-cache.js';
 import type {
-  ModelSelectableFeatureType,
   PersistedState,
   Personality,
-  ReasoningEffort,
   Settings,
   SummaryCacheEntry,
 } from './types.js';
@@ -50,14 +46,6 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function normalizeReasoningEffort(
-  value: unknown,
-  fallback: ReasoningEffort,
-): ReasoningEffort {
-  return typeof value === 'string' && REASONING_EFFORTS.includes(value as ReasoningEffort)
-    ? value as ReasoningEffort
-    : fallback;
-}
 
 export async function loadStorageState(): Promise<PersistedState> {
   const raw = await browser.storage.local.get(null);
@@ -96,32 +84,7 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const improve = Number.isFinite(rawImprove) ? rawImprove : defaults.improveMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
 
-  const rawModels = input.featureModels && typeof input.featureModels === 'object'
-    ? input.featureModels as Partial<Record<ModelSelectableFeatureType, string>>
-    : {};
-  const featureModels = { ...defaults.featureModels };
-  for (const feature of Object.keys(defaults.featureModels) as ModelSelectableFeatureType[]) {
-    const candidate = rawModels[feature];
-    const normalizedModel = normalizeModelId(candidate);
-    if (normalizedModel) {
-      featureModels[feature] = normalizedModel;
-    }
-  }
-
-  const rawReasoning = input.featureReasoning && typeof input.featureReasoning === 'object'
-    ? input.featureReasoning as Partial<Record<ModelSelectableFeatureType, unknown>>
-    : {};
-  const featureReasoning = { ...defaults.featureReasoning };
-  for (const feature of Object.keys(defaults.featureReasoning) as ModelSelectableFeatureType[]) {
-    featureReasoning[feature] = normalizeReasoningEffort(
-      rawReasoning[feature],
-      defaults.featureReasoning[feature],
-    );
-  }
-
   return {
-    claudeApiKey: String(input.claudeApiKey ?? defaults.claudeApiKey).trim(),
-    openRouterApiKey: String(input.openRouterApiKey ?? defaults.openRouterApiKey).trim(),
     agencyHubBaseUrl: normalizeAgencyHubBaseUrl(
       String(input.agencyHubBaseUrl ?? defaults.agencyHubBaseUrl),
     ),
@@ -138,8 +101,6 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),
     promptCachingEnabled: Boolean(input.promptCachingEnabled ?? defaults.promptCachingEnabled),
-    featureModels,
-    featureReasoning,
   };
 }
 

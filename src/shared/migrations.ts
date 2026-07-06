@@ -1,7 +1,5 @@
 import {
   DEEP_DEFAULT_MESSAGE_COUNT,
-  DEFAULT_FEATURE_MODELS,
-  DEFAULT_FEATURE_REASONING,
   IMPROVE_DEFAULT_MESSAGE_COUNT,
   PING_DEFAULT_MESSAGE_COUNT,
   QUICK_DEFAULT_MESSAGE_COUNT,
@@ -12,8 +10,6 @@ import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
   return {
-    claudeApiKey: '',
-    openRouterApiKey: '',
     agencyHubBaseUrl: '',
     agencyHubApiKey: '',
     agencyHubDeviceToken: '',
@@ -23,8 +19,6 @@ export function createDefaultSettings(): Settings {
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
     promptCachingEnabled: true,
-    featureModels: { ...DEFAULT_FEATURE_MODELS },
-    featureReasoning: { ...DEFAULT_FEATURE_REASONING },
   };
 }
 
@@ -41,19 +35,9 @@ export function createSeedState(): PersistedState {
 
 function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined): Settings {
   const defaults = createDefaultSettings();
-  const legacyAnthropicApiKey =
-    typeof raw?.anthropicApiKey === 'string' ? raw.anthropicApiKey : defaults.claudeApiKey;
-  const legacyClaudeApiKey =
-    typeof raw?.claudeApiKey === 'string' && raw.claudeApiKey.trim()
-      ? raw.claudeApiKey
-      : legacyAnthropicApiKey;
-
+  // Stage 32 (v9): vendor keys and model/reasoning selections are DROPPED —
+  // AI rides the kernel; models are kernel config. Old fields fall away here.
   return {
-    claudeApiKey: legacyClaudeApiKey,
-    openRouterApiKey:
-      typeof raw?.openRouterApiKey === 'string'
-        ? raw.openRouterApiKey
-        : defaults.openRouterApiKey,
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
     agencyHubApiKey:
@@ -70,14 +54,6 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
     promptCachingEnabled: Boolean(
       raw?.promptCachingEnabled ?? defaults.promptCachingEnabled,
     ),
-    featureModels:
-      raw?.featureModels && typeof raw.featureModels === 'object'
-        ? raw.featureModels as Settings['featureModels']
-        : defaults.featureModels,
-    featureReasoning:
-      raw?.featureReasoning && typeof raw.featureReasoning === 'object'
-        ? raw.featureReasoning as Settings['featureReasoning']
-        : defaults.featureReasoning,
   };
 }
 

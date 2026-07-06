@@ -1,6 +1,4 @@
 import {
-  COMPARE_TEMPERATURE,
-  DEFAULT_FEATURE_MODELS,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
@@ -8,13 +6,6 @@ import { resolveCompareModelCards } from '../shared/compare-cards.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
 import { ChatGooseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
-import {
-  getAgencyHubModelId,
-  getModelDisplayName,
-  getModelEntry,
-  isAnthropicModelSelection,
-} from '../shared/model-registry.js';
-import { buildPromptRequest } from '../shared/prompts.js';
 import { normalizeReplyParts } from '../shared/reply-output.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
@@ -22,11 +13,8 @@ import {
   normalizeTranscript,
 } from '../shared/transcript.js';
 import type {
-  AgencyHubAiUsageEvent,
   AggregatedEarnings,
-  LlmCostEstimate,
   LlmSpendSummary,
-  LlmUsageMetrics,
   BackgroundPortMessage,
   CompareCardCompletePayload,
   CompareCardErrorPayload,
@@ -46,12 +34,15 @@ import type {
   SessionTemplate,
 } from '../shared/types.js';
 import {
-  buildLlmSpendSummary,
+  buildKernelSpendSummary,
   createZeroLlmSpendSummary,
-  estimateLlmCost,
-  formatModelCostLog,
-  formatModelUsageLog,
-} from './llm-cost.js';
+  formatKernelUsageLog,
+} from '../shared/spend.js';
+import type { AgencyHubClient } from './agency-hub-client.js';
+import type {
+  KernelFeatureGateway,
+  KernelFeatureUsage,
+} from './kernel-feature-gateway.js';
 import type {
   SubscriptionLookupTraceEvent,
   FanslyClient,
@@ -73,8 +64,6 @@ import {
 import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
-import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
-import type { LlmClient } from './llm-client.js';
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 
 export interface ActiveCompareCardState {
@@ -101,8 +90,8 @@ export interface CompareOperationsContext {
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
   fanslyClient: FanslyClient;
-  llmClient: LlmClient;
-  agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>;
+  kernelGateway: KernelFeatureGateway;
+  agencyHubClient: AgencyHubClient;
   hasPort: (tabId: number) => boolean;
   send: (tabId: number, message: BackgroundPortMessage) => void;
 }
@@ -118,30 +107,10 @@ interface ValidatedCompareStart {
 
 const NO_OP_PROFILER = createOperationProfiler(false);
 
-function hasApiKeyForSelectedCompareModel(
-  storage: Awaited<ReturnType<StorageCoordinator['getState']>>,
-): { ok: boolean; provider?: string } {
-  const model = getModelEntry(storage.settings.featureModels['fast-reply']);
-  if (!model) {
-    return {
-      ok: Boolean(storage.settings.claudeApiKey || storage.settings.openRouterApiKey),
-    };
-  }
-
-  if (model.provider === 'anthropic') {
-    return { ok: Boolean(storage.settings.claudeApiKey), provider: model.provider };
-  }
-  if (model.provider === 'openrouter') {
-    return { ok: Boolean(storage.settings.openRouterApiKey), provider: model.provider };
-  }
-
-  return { ok: false, provider: model.provider };
-}
 
 function buildCompareCardProfilingSnapshot(
   profiler: OperationProfiler,
-  usage?: LlmUsageMetrics,
-  cost?: LlmCostEstimate,
+  usage?: KernelFeatureUsage,
 ): OperationProfilingSnapshot | undefined {
   const snapshot = profiler.snapshot();
   if (!snapshot) {
@@ -150,8 +119,16 @@ function buildCompareCardProfilingSnapshot(
 
   return {
     ...snapshot,
-    ...(usage ? { llmUsage: { ...usage } } : {}),
-    ...(cost ? { llmCost: { ...cost } } : {}),
+    ...(usage
+      ? {
+          llmUsage: {
+            input_tokens: usage.inputTokens,
+            cache_creation_input_tokens: usage.cacheWriteTokens,
+            cache_read_input_tokens: usage.cacheReadTokens,
+            output_tokens: usage.outputTokens,
+          },
+        }
+      : {}),
   };
 }
 
@@ -159,41 +136,6 @@ function buildLlmSpendPayload(
   llmSpend?: LlmSpendSummary,
 ): { llmSpend: LlmSpendSummary } | object {
   return llmSpend ? { llmSpend } : {};
-}
-
-function buildAiUsageEvent({
-  clientEventId,
-  model,
-  spend,
-  conversationId,
-  startedAtMs,
-  completedAtMs,
-  isRegeneration,
-}: {
-  clientEventId: string;
-  model: string;
-  spend: LlmSpendSummary;
-  conversationId: string | null;
-  startedAtMs: number | null | undefined;
-  completedAtMs: number;
-  isRegeneration: boolean;
-}): AgencyHubAiUsageEvent {
-  return {
-    clientEventId,
-    feature: 'fast-reply',
-    model: getAgencyHubModelId(model),
-    inputTokens: spend.inputTokens,
-    outputTokens: spend.outputTokens,
-    cacheWriteTokens: spend.cacheWriteTokens,
-    cacheReadTokens: spend.cacheReadTokens,
-    conversationId,
-    durationMs: typeof startedAtMs === 'number'
-      ? Math.max(0, completedAtMs - startedAtMs)
-      : null,
-    isCacheHit: false,
-    isRegeneration: isRegeneration,
-    completedAt: new Date(completedAtMs).toISOString(),
-  };
 }
 
 function sendCompareReady(
@@ -365,11 +307,9 @@ async function validateCompareStart(
   const session = context.sessionStore.getSessionForTab(tabId);
   const legacyAccountId = context.sessionStore.getAccountIdForTab(tabId);
 
-  const apiKeyCheck = hasApiKeyForSelectedCompareModel(storage);
-  if (!apiKeyCheck.ok) {
-    throw new ChatGooseError('missing_api_key', {
-      details: apiKeyCheck.provider ? { provider: apiKeyCheck.provider } : undefined,
-    });
+  // Stage 32: AI rides the kernel feature lane — configured = hub up.
+  if (!context.kernelGateway.isConfigured(storage.settings)) {
+    throw new ChatGooseError('hub_missing_api_key');
   }
   if (storage.personalities.length === 0) {
     throw new ChatGooseError('no_personalities');
@@ -685,7 +625,8 @@ export async function executeCompare(
     });
     sendCompareOperationProgress();
 
-    const resolvedModel = validated.storage.settings.featureModels['fast-reply'];
+    // Stage 32: models are kernel config; the meta frame names the real one.
+    const resolvedModel = 'kernel';
 
     startStage(
       'load-messages',
@@ -973,6 +914,7 @@ export async function executeCompare(
     const formattedTranscript = formatTranscript(transcriptMessages);
     const promptInputs = {
       transcript: formattedTranscript,
+      messageCount: transcriptMessages.length,
       fanSpendingData: spendingData,
       fanSubscriptionData: subscriptionData,
       fanDisplayName,
@@ -980,15 +922,29 @@ export async function executeCompare(
       replyTone: payload.replyTone ?? 'none',
     } satisfies {
       transcript: string;
+      messageCount: number;
       fanSpendingData: string;
       fanSubscriptionData: string;
       fanDisplayName: string;
       replyMode: ReplyMode;
       replyTone: ReplyTone;
     };
+    // Stage 32: the kernel lane needs the page label; resolve once per run.
+    const creatorUsername = validated.session.resolvedUsername?.trim()
+      || (await context.fanslyClient.getAuthenticatedAccount(validated.session, signal))
+        .username?.trim()
+      || null;
+    const pageLabel = await context.agencyHubClient.resolvePageLabelForUsername(
+      validated.storage.settings,
+      creatorUsername,
+      signal,
+    );
+    if (!pageLabel) {
+      throw new ChatGooseError('hub_page_match_failed');
+    }
     completeStage(
       'prompt-build',
-      `Built compare prompts: ${compareCards.length} cards`,
+      `Built compare context: ${compareCards.length} cards`,
       `${compareCards.length} cards`,
     );
 
@@ -1007,146 +963,114 @@ export async function executeCompare(
         return;
       }
 
-      const { systemBlocks, userBlocks } = buildPromptRequest({
-        feature: 'fast-reply',
-        personality: {
-          id: card.id,
-          name: card.label,
-          content: card.content,
-          updatedAt: Date.now(),
-        },
-        transcript: promptInputs.transcript,
-        fanSpendingData: promptInputs.fanSpendingData,
-        fanSubscriptionData: promptInputs.fanSubscriptionData,
-        fanDisplayName: promptInputs.fanDisplayName,
-        replyMode: promptInputs.replyMode,
-        replyTone: promptInputs.replyTone,
-      }, validated.storage.settings.promptCachingEnabled);
+      // Stage 32: a compare card = one kernel fast-reply generation with the
+      // card's persona. Only kernel-known personas can run ('current' cards —
+      // the mapped personality, kernel-synced); local draft cards died with
+      // the local prompt library (the folder was already absent from shipped
+      // builds — the recorded 32.1 deviation).
+      if (card.source !== 'current') {
+        sendCompareCardError(
+          context,
+          tabId,
+          {
+            type: 'compare:cardError',
+            operationId: payload.operationId,
+            cardId: card.id,
+            error: toUserError(new ChatGooseError('compare_cards_unavailable')),
+            llmSpend: createZeroLlmSpendSummary(),
+          },
+          profiler,
+          buildCompareCardProfilingSnapshot(profiler),
+        );
+        return;
+      }
+      const personaKey = card.id.startsWith('current:')
+        ? card.id.slice('current:'.length)
+        : card.id;
 
-      let cardUsage: LlmUsageMetrics | undefined;
-      let cardCost: LlmCostEstimate | undefined;
+      let cardUsage: KernelFeatureUsage | undefined;
       let cardSpend: LlmSpendSummary | undefined;
       let actualModel = resolvedModel;
-      let reasoningObserved = false;
       let latestStopReason: string | null = null;
 
-      const streamToCard = async (model: string): Promise<string> => {
-        actualModel = model;
-        reasoningObserved = false;
-        const reasoningEffort = validated.storage.settings.featureReasoning['fast-reply'];
-        profiler.log(
-          `Reasoning requested: ${reasoningEffort} (${getModelDisplayName(actualModel)})`,
-        );
-        return context.llmClient.streamMessage({
-          settings: validated.storage.settings,
-          model,
-          temperature: COMPARE_TEMPERATURE,
-          systemBlocks,
-          userBlocks,
-          feature: 'fast-reply',
-          reasoningEffort,
+      const streamToCard = async (): Promise<string> => {
+        return context.kernelGateway.streamFeature(
+          validated.storage.settings,
+          {
+            feature: 'fast-reply',
+            clientRequestId: crypto.randomUUID(),
+            pageLabel,
+            conversationRef: fanAccountId ?? validated.urlGroupId,
+            personaKey,
+            replyTone: promptInputs.replyTone,
+            replyMode: promptInputs.replyMode,
+            isRegeneration: Boolean(payload.forceRegenerate),
+            clientContext: {
+              transcript: promptInputs.transcript,
+              messageCount: promptInputs.messageCount,
+              fanDisplayName: promptInputs.fanDisplayName,
+              fanSpendingData: promptInputs.fanSpendingData,
+              fanSubscriptionData: promptInputs.fanSubscriptionData,
+            },
+          },
+          {
+            onText: (chunk) => {
+              const activeCompare = getActiveCompare(context, tabId);
+              if (
+                !activeCompare ||
+                activeCompare.operationId !== payload.operationId
+              ) {
+                return;
+              }
+              const cardState = activeCompare.compareCards.get(card.id);
+              if (!cardState) {
+                return;
+              }
+              cardState.rawText += chunk;
+              cardState.flushBuffer += chunk;
+              scheduleCompareChunkFlush(
+                context,
+                tabId,
+                activeCompare,
+                card.id,
+              );
+            },
+            onMeta: (meta) => {
+              actualModel = meta.model;
+            },
+            onUsage: (usage) => {
+              cardUsage = { ...usage };
+              cardSpend = buildKernelSpendSummary(usage);
+              profiler.log(formatKernelUsageLog(actualModel, usage));
+              logDebug(debugEnabled, 'kernel usage', {
+                cardId: card.id,
+                model: actualModel,
+                costMicroUsd: usage.costMicroUsd,
+              });
+              sendDebugCompareProgress({
+                phase: 'generating',
+                message: 'Generating compare replies…',
+                fanDisplayName,
+              });
+            },
+            onStopReason: (stopReason) => {
+              latestStopReason = stopReason;
+            },
+          },
           signal,
-          onText: (chunk) => {
-            const activeCompare = getActiveCompare(context, tabId);
-            if (
-              !activeCompare ||
-              activeCompare.operationId !== payload.operationId
-            ) {
-              return;
-            }
-            const cardState = activeCompare.compareCards.get(card.id);
-            if (!cardState) {
-              return;
-            }
-            cardState.rawText += chunk;
-            cardState.flushBuffer += chunk;
-            scheduleCompareChunkFlush(
-              context,
-              tabId,
-              activeCompare,
-              card.id,
-            );
-          },
-          onUsage: (usage) => {
-            const cost = estimateLlmCost(actualModel, usage);
-            const spend = buildLlmSpendSummary(actualModel, usage, cost);
-            cardUsage = { ...usage };
-            cardCost = { ...cost };
-            cardSpend = { ...spend };
-            profiler.log(formatModelUsageLog(actualModel, usage));
-            profiler.log(formatModelCostLog(cost));
-            logDebug(debugEnabled, 'model usage', {
-              cardId: card.id,
-              model: actualModel,
-              ...usage,
-            });
-            logDebug(debugEnabled, 'model cost', {
-              cardId: card.id,
-              ...cost,
-            });
-            sendDebugCompareProgress({
-              phase: 'generating',
-              message: 'Generating compare replies…',
-              fanDisplayName,
-            });
-          },
-          onReasoningObserved: (reasoningSignal) => {
-            if (reasoningObserved) {
-              return;
-            }
-            reasoningObserved = true;
-            profiler.log(`Reasoning observed: yes (${reasoningSignal})`);
-            logDebug(debugEnabled, 'reasoning observed', {
-              cardId: card.id,
-              model: actualModel,
-              feature: 'fast-reply',
-              reasoningEffort,
-              signal: reasoningSignal,
-            });
-            sendDebugCompareProgress({
-              phase: 'generating',
-              message: 'Generating compare replies…',
-              fanDisplayName,
-            });
-          },
-          onStopReason: (stopReason) => {
-            latestStopReason = stopReason;
-          },
-        }).then((text) => {
-          if (reasoningEffort !== 'off' && !reasoningObserved) {
-            profiler.log('Reasoning observed: no');
-            logDebug(debugEnabled, 'reasoning observed', {
-              cardId: card.id,
-              model: actualModel,
-              feature: 'fast-reply',
-              reasoningEffort,
-              observed: false,
-            });
-          }
-          return text;
-        });
+        );
       };
 
       let rawText = '';
       try {
-        rawText = await streamToCard(resolvedModel);
+        rawText = await streamToCard();
       } catch (error) {
-        const defaultModel = DEFAULT_FEATURE_MODELS['fast-reply'];
-        const isModelError = error instanceof ChatGooseError
-          ? error.key === 'model_unavailable'
-          : (error as { key?: string })?.key === 'model_unavailable';
         const abortError = resolveAbortChatGooseError(error, {
           active: Boolean(getActiveCompare(context, tabId)),
           timeoutSignal: timeoutController?.signal,
           cancelSignal: controller?.signal,
         });
-        if (
-          isModelError &&
-          isAnthropicModelSelection(resolvedModel) &&
-          resolvedModel !== defaultModel
-        ) {
-          rawText = await streamToCard(defaultModel);
-        } else if (abortError?.key === 'timed_out') {
+        if (abortError?.key === 'timed_out') {
           throw abortError;
         } else if (abortError?.key === 'chat_changed') {
           return;
@@ -1158,11 +1082,7 @@ export async function executeCompare(
           if (erroredCardState) {
             clearFlushTimer(erroredCardState);
           }
-          const profiling = buildCompareCardProfilingSnapshot(
-            profiler,
-            cardUsage,
-            cardCost,
-          );
+          const profiling = buildCompareCardProfilingSnapshot(profiler, cardUsage);
           sendCompareCardError(
             context,
             tabId,
@@ -1198,11 +1118,7 @@ export async function executeCompare(
 
       const parts = normalizeReplyParts(rawText);
       if (latestStopReason === 'max_tokens' || parts.length === 0) {
-        const profiling = buildCompareCardProfilingSnapshot(
-          profiler,
-          cardUsage,
-          cardCost,
-        );
+        const profiling = buildCompareCardProfilingSnapshot(profiler, cardUsage);
         sendCompareCardError(
           context,
           tabId,
@@ -1225,7 +1141,6 @@ export async function executeCompare(
         splitModeRequested: payload.replyMode === 'preferSplit',
         parts,
       };
-      const completedAtMs = Date.now();
       const completedSpend = cardSpend ?? createZeroLlmSpendSummary();
       sendCompareCardComplete(
         context,
@@ -1239,23 +1154,7 @@ export async function executeCompare(
           llmSpend: completedSpend,
         },
         profiler,
-        buildCompareCardProfilingSnapshot(profiler, cardUsage, cardCost),
-      );
-      context.agencyHubUsageReporter.enqueue(
-        {
-          agencyHubBaseUrl: validated.storage.settings.agencyHubBaseUrl,
-          agencyHubApiKey: validated.storage.settings.agencyHubApiKey,
-          debugMode: validated.storage.settings.debugMode,
-        },
-        buildAiUsageEvent({
-          clientEventId: `${payload.operationId}:${card.id}`,
-          model: actualModel,
-          spend: completedSpend,
-          conversationId: validated.urlGroupId,
-          startedAtMs: activeCompare.startedAtMs,
-          completedAtMs,
-          isRegeneration: Boolean(payload.forceRegenerate),
-        }),
+        buildCompareCardProfilingSnapshot(profiler, cardUsage),
       );
     };
 

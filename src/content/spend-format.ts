@@ -1,5 +1,4 @@
 import type { LlmCostEstimate, LlmSpendSummary } from '../shared/types.js';
-import { getModelDisplayName } from '../shared/model-registry.js';
 
 export function formatCompactTokens(n: number): string {
   if (n < 1000) return String(n);
@@ -56,9 +55,9 @@ export function formatLlmCostSummary(cost: LlmCostEstimate): string {
 }
 
 export function formatModelCostLabel(cost: LlmCostEstimate): string {
-  return `${getModelDisplayName(cost.modelId)} cost`;
+  return `${cost.modelId} cost`;
 }
 
 export function formatModelUsageLabel(cost?: LlmCostEstimate): string {
-  return cost ? `${getModelDisplayName(cost.modelId)} usage` : 'Model usage';
+  return cost ? `${cost.modelId} usage` : 'Model usage';
 }

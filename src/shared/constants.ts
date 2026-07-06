@@ -1,76 +1,21 @@
 import type {
   FeatureType,
-  ModelSelectableFeatureType,
-  ReasoningEffort,
   Settings,
 } from './types.js';
 import { FEATURE_POLICIES } from './features.js';
 import type { FeaturePolicy } from './features.js';
-export {
-  AI_MODEL_GROUPS,
-  AI_MODEL_IDS,
-  AI_MODELS,
-  CLAUDE_MODEL_IDS,
-  CLAUDE_MODELS,
-  DEFAULT_MODEL_ID,
-  LEGACY_CLAUDE_MODEL_IDS,
-  OPENROUTER_MODELS,
-} from './model-registry.js';
-import {
-  DEFAULT_FAN_SUMMARY_MODEL_ID,
-  DEFAULT_MODEL_ID,
-} from './model-registry.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 8;
+export const STORAGE_SCHEMA_VERSION = 9;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
 
-// ─── AI Provider APIs ────────────────────────────────────────────────────
+// Stage 32: model/provider config is kernel-side — the vendor endpoints,
+// per-feature model/reasoning defaults, token caps, and temperatures died
+// with the direct AI lane.
 
-export const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-export const OPENROUTER_MESSAGES_API_URL = 'https://openrouter.ai/api/v1/messages';
-export const ANTHROPIC_VERSION = '2023-06-01';
-
-export const DEFAULT_FEATURE_MODELS: Record<ModelSelectableFeatureType, string> = {
-  'fast-reply': DEFAULT_MODEL_ID,
-  'help-me': DEFAULT_MODEL_ID,
-  'fan-summary': DEFAULT_FAN_SUMMARY_MODEL_ID,
-  'chat-review': DEFAULT_MODEL_ID,
-  'ping': DEFAULT_MODEL_ID,
-};
-
-export const REASONING_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high', 'max'];
-
-export const DEFAULT_FEATURE_REASONING: Record<ModelSelectableFeatureType, ReasoningEffort> = {
-  'fast-reply': 'medium',
-  'help-me': 'medium',
-  'fan-summary': 'medium',
-  'chat-review': 'medium',
-  'ping': 'medium',
-};
-
-export const MAX_TOKENS: Record<FeatureType, number> = {
-  'fast-reply': 800,
-  'improve-draft': 800,
-  'help-me': 1200,
-  'fan-summary': 8192,
-  'chat-review': 1600,
-  'ping': 800,
-  'hi-greeting': 800,
-};
-
-export const FEATURE_TEMPERATURES: Record<FeatureType, number> = {
-  'fast-reply': 0.65,
-  'improve-draft': 0.65,
-  'help-me': 0.45,
-  'fan-summary': 0.4,
-  'chat-review': 0.25,
-  'ping': 0.65,
-  'hi-greeting': 0.7,
-};
 
 export const COMPARE_TEMPERATURE = 0.35;
 
@@ -188,8 +133,6 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
 // ─── Default Settings ───────────────────────────────────────────────────
 
 export const DEFAULT_SETTINGS: Settings = {
-  claudeApiKey: '',
-  openRouterApiKey: '',
   agencyHubBaseUrl: '',
   agencyHubApiKey: '',
   agencyHubDeviceToken: '',
@@ -199,8 +142,6 @@ export const DEFAULT_SETTINGS: Settings = {
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
   debugMode: false,
   promptCachingEnabled: true,
-  featureModels: { ...DEFAULT_FEATURE_MODELS },
-  featureReasoning: { ...DEFAULT_FEATURE_REASONING },
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

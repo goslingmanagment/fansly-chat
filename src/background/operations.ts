@@ -12,18 +12,12 @@ import {
   DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
   DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
   DEEP_OPERATION_PREP_TIMEOUT_MS,
-  FEATURE_TEMPERATURES,
-  DEFAULT_FEATURE_MODELS,
   HI_GREETING_MAX_TRANSCRIPT,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
-import {
-  buildApiKeyReadyByFeature,
-  buildModelProviderByFeature,
-} from '../shared/feature-readiness.js';
 import {
   aggregateMonthlyEarnings,
   formatFanSpendingData,
@@ -45,16 +39,8 @@ import {
   getFeaturePolicy,
   isDeepFeature,
   resolveFeatureMessageCount,
-  resolveFeatureModelFeature,
 } from '../shared/features.js';
 import { logDebug } from '../shared/log.js';
-import {
-  getAgencyHubModelId,
-  getModelDisplayName,
-  getModelEntry,
-  isAnthropicModelSelection,
-} from '../shared/model-registry.js';
-import { buildPromptRequest } from '../shared/prompts.js';
 import { isContentPortMessage } from '../shared/protocol.js';
 import {
   normalizeReplyParts,
@@ -75,11 +61,7 @@ import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
   EarningsBreakdownEntry,
   AggregatedEarnings,
-  AgencyHubAiUsageEvent,
-  LlmCostEstimate,
-  LlmReasoningSignal,
   LlmSpendSummary,
-  LlmUsageMetrics,
   BackgroundPortMessage,
   CompareStartPayload,
   CompletePayload,
@@ -109,14 +91,15 @@ import {
   type AgencyHubFetchFanProfileResult,
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
-import type { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
 import {
-  buildLlmSpendSummary,
+  buildKernelSpendSummary,
   createZeroLlmSpendSummary,
-  estimateLlmCost,
-  formatModelCostLog,
-  formatModelUsageLog,
-} from './llm-cost.js';
+  formatKernelUsageLog,
+} from '../shared/spend.js';
+import {
+  type KernelFeatureGateway,
+  type KernelFeatureUsage,
+} from './kernel-feature-gateway.js';
 import {
   cancelCompareOperation,
   executeCompare,
@@ -126,7 +109,6 @@ import {
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 import type { SubscriptionLookupTraceEvent } from './fansly-client.js';
 import type { FanslyClient } from './fansly-client.js';
-import type { LlmClient } from './llm-client.js';
 import { clearFlushTimer } from './operation-cleanup.js';
 import {
   createOperationProfiler,
@@ -161,6 +143,8 @@ interface ActiveOperation {
 }
 
 const NO_OP_PROFILER = createOperationProfiler(false);
+/** Stage 32: models are kernel config — the summary-cache model pin. */
+const KERNEL_MODEL_ID = 'kernel';
 const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
 const DEEP_OPERATION_TIMEOUTS = {
   prep: DEEP_OPERATION_PREP_TIMEOUT_MS,
@@ -168,7 +152,6 @@ const DEEP_OPERATION_TIMEOUTS = {
   llmIdle: DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
   llmMaxStream: DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
 } as const;
-const AUTO_RETRY_RATE_LIMIT_MAX_MS = 60_000;
 const AUTO_RETRY_SERVICE_UNAVAILABLE_MS = 5_000;
 type OperationTimeoutKey =
   | 'quick-total'
@@ -186,20 +169,8 @@ interface ValidatedOperationStart {
   messageCount: number;
 }
 
-interface OperationPromptRequestArgs {
-  feature: FeatureType;
-  personality: PersistedState['personalities'][number];
-  transcript: string;
-  fanSpendingData: string;
-  fanSubscriptionData: string;
-  fanDisplayName: string;
-  fanBio?: string;
-  draftText?: string;
-  pingSegment?: PingSegment;
-  replyMode?: OperationStartPayload['replyMode'];
-  replyTone?: OperationStartPayload['replyTone'];
-  promptCachingEnabled: boolean;
-}
+
+
 
 function buildLlmSpendPayload(
   llmSpend?: LlmSpendSummary,
@@ -207,27 +178,6 @@ function buildLlmSpendPayload(
   return llmSpend ? { llmSpend } : {};
 }
 
-function hasApiKeyForSelectedModel(settings: Settings, feature: FeatureType): {
-  ok: boolean;
-  provider?: string;
-} {
-  const modelFeature = resolveFeatureModelFeature(feature);
-  const model = getModelEntry(settings.featureModels[modelFeature]);
-  if (!model) {
-    return {
-      ok: Boolean(settings.claudeApiKey || settings.openRouterApiKey),
-    };
-  }
-
-  if (model.provider === 'anthropic') {
-    return { ok: Boolean(settings.claudeApiKey), provider: model.provider };
-  }
-  if (model.provider === 'openrouter') {
-    return { ok: Boolean(settings.openRouterApiKey), provider: model.provider };
-  }
-
-  return { ok: false, provider: model.provider };
-}
 
 interface AgencyHubSummarySyncTask {
   tabId: number;
@@ -368,38 +318,6 @@ function usesDeepOperationTimeouts(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
 
-function buildOperationPromptRequest({
-  feature,
-  personality,
-  transcript,
-  fanSpendingData,
-  fanSubscriptionData,
-  fanDisplayName,
-  fanBio,
-  draftText,
-  pingSegment,
-  replyMode,
-  replyTone,
-  promptCachingEnabled,
-}: OperationPromptRequestArgs) {
-  return buildPromptRequest(
-    {
-      feature,
-      personality,
-      transcript,
-      fanSpendingData,
-      fanSubscriptionData,
-      fanDisplayName,
-      fanBio,
-      draftText,
-      pingSegment,
-      replyMode,
-      replyTone,
-    },
-    promptCachingEnabled,
-  );
-}
-
 function buildFeatureResult(
   feature: FeatureType,
   rawText: string,
@@ -464,10 +382,9 @@ export class OperationCoordinator {
     private readonly sessionStore: SessionStore,
     private readonly tabContexts: TabContextStore,
     private readonly fanslyClient: FanslyClient,
-    private readonly llmClient: LlmClient,
+    private readonly kernelGateway: KernelFeatureGateway,
     private readonly storageCoordinator: StorageCoordinator,
     private readonly agencyHubClient: AgencyHubClient,
-    private readonly agencyHubUsageReporter: Pick<AgencyHubUsageReporter, 'enqueue'>,
   ) {}
 
   private get activeByTabId(): Map<number, ActiveOperation> {
@@ -714,9 +631,8 @@ export class OperationCoordinator {
         mappedPersonalityId,
       ),
       connected: Boolean(session?.connected),
-      hasApiKey: Boolean(storage.settings.claudeApiKey || storage.settings.openRouterApiKey),
-      modelProviderByFeature: buildModelProviderByFeature(storage.settings),
-      apiKeyReadyByFeature: buildApiKeyReadyByFeature(storage.settings),
+      // Stage 32: readiness = kernel lane configured (hub transport up).
+      hasApiKey: this.kernelGateway.isConfigured(storage.settings),
       hasPersonalities: storage.personalities.length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
@@ -778,7 +694,7 @@ export class OperationCoordinator {
       return;
     }
 
-    const modelId = storage.settings.featureModels['fan-summary'];
+    const modelId = KERNEL_MODEL_ID;
     const key = [
       tabId,
       groupId,
@@ -904,52 +820,6 @@ export class OperationCoordinator {
     });
   }
 
-  private buildAiUsageEvent({
-    clientEventId,
-    feature,
-    model,
-    spend,
-    conversationId,
-    startedAtMs,
-    completedAtMs,
-    isCacheHit,
-    isRegeneration,
-  }: {
-    clientEventId: string;
-    feature: FeatureType;
-    model: string;
-    spend: LlmSpendSummary;
-    conversationId: string | null;
-    startedAtMs: number | null | undefined;
-    completedAtMs: number;
-    isCacheHit: boolean;
-    isRegeneration: boolean;
-  }): AgencyHubAiUsageEvent {
-    return {
-      clientEventId,
-      feature,
-      model: getAgencyHubModelId(model),
-      inputTokens: spend.inputTokens,
-      outputTokens: spend.outputTokens,
-      cacheWriteTokens: spend.cacheWriteTokens,
-      cacheReadTokens: spend.cacheReadTokens,
-      conversationId,
-      durationMs: typeof startedAtMs === 'number'
-        ? Math.max(0, completedAtMs - startedAtMs)
-        : null,
-      isCacheHit,
-      isRegeneration,
-      completedAt: new Date(completedAtMs).toISOString(),
-    };
-  }
-
-  private enqueueCompletedOperationUsage(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'debugMode'>,
-    event: AgencyHubAiUsageEvent,
-  ): void {
-    this.agencyHubUsageReporter.enqueue(settings, event);
-  }
-
   private flushChunks(tabId: number, operation: ActiveOperation): void {
     if (!operation.flushBuffer) {
       operation.flushTimer = null;
@@ -999,14 +869,10 @@ export class OperationCoordinator {
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId = this.sessionStore.getAccountIdForTab(tabId);
 
-    const apiKeyCheck = hasApiKeyForSelectedModel(
-      storage.settings,
-      payload.feature,
-    );
-    if (!apiKeyCheck.ok) {
-      throw new ChatGooseError('missing_api_key', {
-        details: apiKeyCheck.provider ? { provider: apiKeyCheck.provider } : undefined,
-      });
+    // Stage 32: AI rides the kernel feature lane — configured = hub transport
+    // up (device token or legacy key). Vendor keys are gone.
+    if (!this.kernelGateway.isConfigured(storage.settings)) {
+      throw new ChatGooseError('hub_missing_api_key');
     }
     if (storage.personalities.length === 0) {
       throw new ChatGooseError('no_personalities');
@@ -1548,8 +1414,10 @@ export class OperationCoordinator {
         throw new ChatGooseError('unknown_error');
       }
 
-      const modelFeature = resolveFeatureModelFeature(payload.feature);
-      const resolvedModel = validated.storage.settings.featureModels[modelFeature];
+      // Stage 32: models are kernel config; 'kernel' is the summary-cache
+      // sentinel (existing cached entries pinned to vendor model ids
+      // invalidate once — the desktop cutover's recorded trade).
+      const resolvedModel = KERNEL_MODEL_ID;
 
       let cachedSummary = null;
       let hasValidCachedSummary = false;
@@ -1621,13 +1489,12 @@ export class OperationCoordinator {
             syncStatus,
           },
         };
-        const current = this.assertActive(tabId, payload.operationId);
+        this.assertActive(tabId, payload.operationId);
         completeStage(
           'summary-cache-check',
           'Summary cache hit',
           'cache hit',
         );
-        const completedAtMs = Date.now();
         const zeroSpend = createZeroLlmSpendSummary();
         this.sendComplete(tabId, {
           type: 'operation:complete',
@@ -1635,20 +1502,6 @@ export class OperationCoordinator {
           result,
           fanDisplayName: payload.domFanDisplayName ?? 'fan',
         }, zeroSpend, profiler);
-        this.enqueueCompletedOperationUsage(
-          validated.storage.settings,
-          this.buildAiUsageEvent({
-            clientEventId: payload.operationId,
-            feature: payload.feature,
-            model: resolvedModel,
-            spend: zeroSpend,
-            conversationId: validated.urlGroupId,
-            startedAtMs: current.startedAtMs,
-            completedAtMs,
-            isCacheHit: true,
-            isRegeneration: Boolean(payload.forceRegenerate),
-          }),
-        );
         this.clearCompletedOperation(tabId);
         if (shouldAttemptSync && !savedForCurrentTarget) {
           this.enqueueAgencyHubSummarySync({
@@ -1695,13 +1548,12 @@ export class OperationCoordinator {
               },
             };
 
-            const current = this.assertActive(tabId, payload.operationId);
+            this.assertActive(tabId, payload.operationId);
             completeStage(
               'summary-cache-check',
               'Summary loaded from Agency Hub',
               'hub hit',
             );
-            const completedAtMs = Date.now();
             const zeroSpend = createZeroLlmSpendSummary();
             this.sendComplete(tabId, {
               type: 'operation:complete',
@@ -1709,20 +1561,6 @@ export class OperationCoordinator {
               result,
               fanDisplayName: payload.domFanDisplayName ?? 'fan',
             }, zeroSpend, profiler);
-            this.enqueueCompletedOperationUsage(
-              validated.storage.settings,
-              this.buildAiUsageEvent({
-                clientEventId: payload.operationId,
-                feature: payload.feature,
-                model: resolvedModel,
-                spend: zeroSpend,
-                conversationId: validated.urlGroupId,
-                startedAtMs: current.startedAtMs,
-                completedAtMs,
-                isCacheHit: true,
-                isRegeneration: Boolean(payload.forceRegenerate),
-              }),
-            );
             this.clearCompletedOperation(tabId);
             return;
           }
@@ -2183,25 +2021,44 @@ export class OperationCoordinator {
         );
       }
 
-      startStage('prompt-build', 'Build prompt');
+      startStage('prompt-build', 'Build context');
       const formattedTranscript = formatTranscript(transcriptMessages);
-      const { prompt, systemBlocks, userBlocks } = buildOperationPromptRequest({
+      // Stage 32: prompt ASSEMBLY is kernel-side (templates, personas,
+      // platform wording, budgets, capture). The client ships context VALUES
+      // because Fansly has no webhook lane — the kernel archive is
+      // pull-cadenced while this transcript was read live moments ago.
+      const pageUsername = await this.resolveCreatorUsername(validated.session, signal);
+      const pageLabel = await this.agencyHubClient.resolvePageLabelForUsername(
+        validated.storage.settings,
+        pageUsername,
+        signal,
+      );
+      if (!pageLabel) {
+        throw new ChatGooseError('hub_page_match_failed');
+      }
+      const kernelRequest = {
         feature: payload.feature,
-        personality,
-        transcript: formattedTranscript,
-        fanSpendingData: spendingData,
-        fanSubscriptionData: subscriptionData,
-        fanDisplayName,
-        fanBio,
-        draftText: payload.draftText,
-        pingSegment,
-        replyMode: payload.replyMode,
+        clientRequestId: payload.operationId,
+        pageLabel,
+        conversationRef: fanAccountId ?? validated.urlGroupId,
+        personaKey: personality.id,
         replyTone: payload.replyTone,
-        promptCachingEnabled: validated.storage.settings.promptCachingEnabled,
-      });
+        replyMode: payload.replyMode,
+        draftText: payload.draftText,
+        isRegeneration: Boolean(payload.forceRegenerate),
+        clientContext: {
+          transcript: formattedTranscript,
+          messageCount: transcriptMessages.length,
+          fanDisplayName,
+          fanSpendingData: spendingData,
+          fanSubscriptionData: subscriptionData,
+          ...(fanBio !== undefined ? { fanBio } : {}),
+          ...(pingSegment !== undefined ? { pingSegment } : {}),
+        },
+      } as const;
       completeStage(
         'prompt-build',
-        `Built prompt: ${transcriptMessages.length} transcript messages`,
+        `Built context: ${transcriptMessages.length} transcript messages`,
         `${transcriptMessages.length} transcript messages`,
       );
 
@@ -2217,11 +2074,11 @@ export class OperationCoordinator {
           snapshot: {
             feature: payload.feature,
             modelId,
-            system: prompt.system,
+            system: '[assembled kernel-side]',
             transcript: formattedTranscript,
             fanSpendingData: spendingData,
             fanSubscriptionData: subscriptionData,
-            user: prompt.user,
+            user: '[assembled kernel-side]',
           },
         });
       };
@@ -2235,34 +2092,35 @@ export class OperationCoordinator {
       let reasoningObserved = false;
       let reasoningDebugText = '';
       let latestLlmStopReason: string | null = null;
-      const actualModelName = (): string => getModelDisplayName(actualModel);
+      const actualModelName = (): string => actualModel;
       startStage('llm-ttfb', 'Wait for AI TTFB');
       profiler.log(`Waiting for ${actualModelName()}`);
       sendDebugProgress();
       startLlmTtfbTimeout();
 
       let latestLlmSpend: LlmSpendSummary | null = null;
-      const handleLlmUsage = (
-        usage: LlmUsageMetrics,
-      ): LlmCostEstimate => {
-        const cost = estimateLlmCost(actualModel, usage);
-        const spend = buildLlmSpendSummary(actualModel, usage, cost);
+      const handleKernelUsage = (usage: KernelFeatureUsage): void => {
+        // Gateway-priced (Stage 29) — the only spend source post-cutover.
+        const spend = buildKernelSpendSummary(usage);
         latestLlmSpend = spend;
         const current = this.getActive(tabId);
         if (current?.operationId === payload.operationId) {
           current.llmSpend = spend;
         }
-        profiler.setLlmUsage(usage);
-        profiler.setLlmCost(cost);
-        profiler.log(formatModelUsageLog(actualModel, usage));
-        profiler.log(formatModelCostLog(cost));
-        logDebug(debugEnabled, 'model usage', {
-          model: actualModel,
-          ...usage,
+        profiler.setLlmUsage({
+          input_tokens: usage.inputTokens,
+          cache_creation_input_tokens: usage.cacheWriteTokens,
+          cache_read_input_tokens: usage.cacheReadTokens,
+          output_tokens: usage.outputTokens,
         });
-        logDebug(debugEnabled, 'model cost', cost);
+        profiler.log(formatKernelUsageLog(actualModel, usage));
+        logDebug(debugEnabled, 'kernel usage', {
+          model: actualModel,
+          costMicroUsd: usage.costMicroUsd,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+        });
         sendOperationProgress();
-        return cost;
       };
 
       const markProviderActivity = (ttfbDetail: string): boolean => {
@@ -2284,15 +2142,7 @@ export class OperationCoordinator {
         return false;
       };
 
-      const streamArgs = {
-        settings: validated.storage.settings,
-        model: actualModel,
-        temperature: FEATURE_TEMPERATURES[payload.feature],
-        systemBlocks,
-        userBlocks,
-        feature: payload.feature,
-        reasoningEffort: validated.storage.settings.featureReasoning[modelFeature],
-        signal,
+      const streamCallbacks = {
         onText: (chunk: string) => {
           const current = this.getActive(tabId);
           if (
@@ -2314,32 +2164,24 @@ export class OperationCoordinator {
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
         },
-        onProgress: () => {
+        onMeta: (meta: { requestId: string; clientRequestId: string; model: string }) => {
+          // The kernel names the model (client model config died with the
+          // vendor lane); requestId is the generation ref.
+          actualModel = meta.model;
           if (markProviderActivity('first provider event received')) {
             profiler.log(`${actualModelName()} first provider event`);
           }
         },
-        onUsage: (usage: LlmUsageMetrics) => {
+        onUsage: (usage: KernelFeatureUsage) => {
           markProviderActivity('first provider event received');
-          handleLlmUsage(usage);
-        },
-        onReasoningObserved: (reasoningSignal: LlmReasoningSignal) => {
-          markProviderActivity('first provider event received');
-          if (reasoningObserved) {
-            return;
-          }
-          reasoningObserved = true;
-          profiler.log(`Reasoning observed: yes (${reasoningSignal})`);
-          logDebug(debugEnabled, 'reasoning observed', {
-            model: actualModel,
-            feature: payload.feature,
-            reasoningEffort: validated.storage.settings.featureReasoning[modelFeature],
-            signal: reasoningSignal,
-          });
-          sendDebugProgress();
+          handleKernelUsage(usage);
         },
         onReasoningDelta: (text: string) => {
           markProviderActivity('first provider event received');
+          if (!reasoningObserved) {
+            reasoningObserved = true;
+            profiler.log('Reasoning observed: yes (stream)');
+          }
           if (profiler.enabled) {
             reasoningDebugText += text;
             profiler.setReasoningBlock(reasoningDebugText);
@@ -2350,8 +2192,6 @@ export class OperationCoordinator {
         },
       } as const;
 
-      const defaultModel = DEFAULT_FEATURE_MODELS[modelFeature];
-      let rateLimitRetried = false;
       let serviceUnavailableRetried = false;
       let rawText: string;
       while (true) {
@@ -2359,81 +2199,37 @@ export class OperationCoordinator {
           reasoningObserved = false;
           reasoningDebugText = '';
           profiler.setReasoningBlock('');
-          profiler.log(
-            `Reasoning requested: ${streamArgs.reasoningEffort} (${actualModelName()})`,
+          rawText = await this.kernelGateway.streamFeature(
+            validated.storage.settings,
+            kernelRequest,
+            streamCallbacks,
+            signal,
           );
-          rawText = await this.llmClient.streamMessage({
-            ...streamArgs,
-            model: actualModel,
-          });
-          if (streamArgs.reasoningEffort !== 'off' && !reasoningObserved) {
-            profiler.log('Reasoning observed: no');
-            logDebug(debugEnabled, 'reasoning observed', {
-              model: actualModel,
-              feature: payload.feature,
-              reasoningEffort: streamArgs.reasoningEffort,
-              observed: false,
-            });
-          }
           break;
         } catch (err) {
+          // Duck-typed key (not instanceof): test/dual-module instances of
+          // ChatGooseError must still match — the pre-cutover code's pattern.
           const errorKey = err instanceof ChatGooseError
             ? err.key
             : (err as { key?: string })?.key;
-          const retryAfterMs = typeof (err as { retryAfterMs?: unknown })?.retryAfterMs === 'number'
-            ? (err as { retryAfterMs: number }).retryAfterMs
-            : undefined;
-          const retryAtMs = typeof (err as { retryAtMs?: unknown })?.retryAtMs === 'number'
-            ? (err as { retryAtMs: number }).retryAtMs
-            : undefined;
-          const canRetryRateLimit =
-            !sawFirstChunk &&
-            !rateLimitRetried &&
-            errorKey === 'rate_limited' &&
-            typeof retryAfterMs === 'number' &&
-            retryAfterMs <= AUTO_RETRY_RATE_LIMIT_MAX_MS;
-          const canRetryServiceUnavailable =
-            !sawFirstChunk &&
-            !serviceUnavailableRetried &&
-            errorKey === 'service_unavailable';
-
-          if (canRetryRateLimit || canRetryServiceUnavailable) {
-            const fallbackRetryKey = canRetryServiceUnavailable
-              ? 'service_unavailable'
-              : 'rate_limited';
-            const errorCode = err instanceof ChatGooseError
-              ? err.code
-              : (typeof (err as { code?: unknown })?.code === 'string'
-                  ? (err as { code: string }).code
-                  : createUserError(fallbackRetryKey).code);
-            if (canRetryRateLimit) {
-              rateLimitRetried = true;
-            } else {
-              serviceUnavailableRetried = true;
-            }
+          // One transparent retry when the kernel gateway reports the
+          // provider unavailable and nothing has streamed yet.
+          if (!sawFirstChunk && !serviceUnavailableRetried && errorKey === 'service_unavailable') {
+            serviceUnavailableRetried = true;
             clearLlmTimeouts();
-            const retryDelayMs = canRetryRateLimit
-              ? (retryAfterMs ?? 0)
-              : AUTO_RETRY_SERVICE_UNAVAILABLE_MS;
-            const nextRetryAtMs = canRetryRateLimit
-              ? (retryAtMs ?? (Date.now() + retryDelayMs))
-              : (Date.now() + retryDelayMs);
-            const providerLabel = getModelEntry(actualModel)?.providerLabel ?? 'Provider';
-            const retryMessage = canRetryRateLimit
-              ? 'Rate limited. Waiting to retry…'
-              : `${providerLabel} unavailable. Retrying…`;
+            const retryDelayMs = AUTO_RETRY_SERVICE_UNAVAILABLE_MS;
             profiler.log(
-              canRetryRateLimit
-                ? `${providerLabel} rate limited, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`
-                : `${providerLabel} service unavailable, retrying in ${Math.ceil(retryDelayMs / 1000)}s (${errorCode})`,
+              `Kernel gateway unavailable, retrying in ${Math.ceil(retryDelayMs / 1000)}s`,
             );
             sendOperationProgress({
               phase: 'generating',
-              message: retryMessage,
+              message: 'Provider unavailable. Retrying…',
               currentPage: undefined,
               targetPages: undefined,
-              statusCode: errorCode,
-              retryAtMs: nextRetryAtMs,
+              statusCode: err instanceof ChatGooseError
+                ? err.code
+                : (err as { code?: string })?.code,
+              retryAtMs: Date.now() + retryDelayMs,
             });
             await delay(retryDelayMs, signal);
             sendOperationProgress({
@@ -2444,29 +2240,10 @@ export class OperationCoordinator {
               statusCode: undefined,
               retryAtMs: undefined,
             });
-            if (!sawFirstChunk) {
-              sawProviderActivityInAttempt = false;
-              startLlmTtfbTimeout();
-            }
+            sawProviderActivityInAttempt = false;
+            startLlmTtfbTimeout();
             continue;
           }
-
-          if (
-            errorKey === 'model_unavailable' &&
-            isAnthropicModelSelection(actualModel) &&
-            actualModel !== defaultModel
-          ) {
-            actualModel = defaultModel;
-            profiler.log(`Model ${resolvedModel} unavailable, retrying with ${defaultModel}`);
-            sendDebugPromptSnapshot(defaultModel);
-            if (!sawFirstChunk) {
-              clearLlmTimeouts();
-              sawProviderActivityInAttempt = false;
-              startLlmTtfbTimeout();
-            }
-            continue;
-          }
-
           throw err;
         }
       }
@@ -2542,8 +2319,6 @@ export class OperationCoordinator {
           });
         }
       }
-
-      const completedAtMs = Date.now();
       const completedSpend = latestLlmSpend ?? createZeroLlmSpendSummary();
       this.sendComplete(tabId, {
         type: 'operation:complete',
@@ -2551,20 +2326,6 @@ export class OperationCoordinator {
         result,
         fanDisplayName,
       }, completedSpend, profiler);
-      this.enqueueCompletedOperationUsage(
-        validated.storage.settings,
-        this.buildAiUsageEvent({
-          clientEventId: payload.operationId,
-          feature: payload.feature,
-          model: actualModel,
-          spend: completedSpend,
-          conversationId: validated.urlGroupId,
-          startedAtMs: current.startedAtMs,
-          completedAtMs,
-          isCacheHit: Boolean(result.summaryMeta?.cached),
-          isRegeneration: Boolean(payload.forceRegenerate),
-        }),
-      );
 
       this.clearCompletedOperation(tabId);
       if (payload.feature === 'fan-summary' && result.summaryMeta) {
@@ -2644,8 +2405,8 @@ export class OperationCoordinator {
       tabContexts: this.tabContexts,
       storageCoordinator: this.storageCoordinator,
       fanslyClient: this.fanslyClient,
-      llmClient: this.llmClient,
-      agencyHubUsageReporter: this.agencyHubUsageReporter,
+      kernelGateway: this.kernelGateway,
+      agencyHubClient: this.agencyHubClient,
       hasPort: (tabId) => this.portsByTabId.has(tabId),
       send: (tabId, message) => this.send(tabId, message),
     };

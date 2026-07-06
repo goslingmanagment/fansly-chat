@@ -1,9 +1,6 @@
 import { AgencyHubClient } from './agency-hub-client.js';
-import { AgencyHubUsageReporter } from './agency-hub-usage-reporter.js';
-import { AnthropicClient } from './anthropic-client.js';
+import { createKernelFeatureGateway } from './kernel-feature-gateway.js';
 import { FanslyClient } from './fansly-client.js';
-import { LlmClient } from './llm-client.js';
-import { OpenRouterClient } from './openrouter-client.js';
 import { OperationCoordinator } from './operations.js';
 import { registerRuntimeApi } from './runtime-api.js';
 import { initializeSessionCapture } from './session-capture.js';
@@ -19,19 +16,15 @@ const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const fanslyClient = new FanslyClient(sessionStore);
 const spendersService = new SpendersService(fanslyClient);
-const anthropicClient = new AnthropicClient();
-const openRouterClient = new OpenRouterClient();
-const llmClient = new LlmClient(anthropicClient, openRouterClient);
 const agencyHubClient = new AgencyHubClient();
-const agencyHubUsageReporter = new AgencyHubUsageReporter(agencyHubClient);
+const kernelGateway = createKernelFeatureGateway();
 const coordinator = new OperationCoordinator(
   sessionStore,
   tabContexts,
   fanslyClient,
-  llmClient,
+  kernelGateway,
   storageCoordinator,
   agencyHubClient,
-  agencyHubUsageReporter,
 );
 
 browser.runtime.onConnect.addListener((port) => {

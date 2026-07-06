@@ -11,9 +11,7 @@
   ],
   "host_permissions": [
     "*://fansly.com/*",
-    "*://apiv3.fansly.com/*",
-    "*://api.anthropic.com/*",
-    "https://openrouter.ai/*"
+    "*://apiv3.fansly.com/*"
   ],
   "optional_host_permissions": [
     "http://*/*",

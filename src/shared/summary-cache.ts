@@ -1,6 +1,5 @@
 import { SUMMARY_CACHE_PREFIX } from './constants.js';
 import { normalizeAgencyHubSummarySyncMetadata } from './agency-hub.js';
-import { modelSelectionsEquivalent } from './model-registry.js';
 import type {
   AgencyHubSummarySyncMetadata,
   PersistedState,
@@ -269,7 +268,7 @@ export function isValidSummaryCacheEntry(
     entry &&
     entry.personalityId === personalityId &&
     entry.personalityUpdatedAt === personalityUpdatedAt &&
-    modelSelectionsEquivalent(entry.modelId, modelId) &&
+    (entry.modelId ?? null) === (modelId ?? null) &&
     entry.spendingDataVerified === true &&
     entry.subscriptionLookupVerified === true
   );
@@ -293,10 +292,11 @@ export function hasAvailableFanSummary(
 
   const summaryEntry = getSummaryCacheEntry(storage, groupId);
 
+  // Stage 32: models are kernel config — 'kernel' is the cache model pin.
   return isValidSummaryCacheEntry(
     summaryEntry,
     personality.id,
     personality.updatedAt,
-    storage.settings.featureModels['fan-summary'],
+    'kernel',
   );
 }

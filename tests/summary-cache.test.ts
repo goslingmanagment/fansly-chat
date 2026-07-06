@@ -12,23 +12,24 @@ import {
 import type { SummaryCacheEntry } from '../src/shared/types.js';
 
 describe('summary cache model matching', () => {
-  it('treats legacy bare Claude ids as equivalent to canonical Anthropic selections', () => {
-    expect(
-      isValidSummaryCacheEntry(
-        {
-          summary: 'Cached',
-          personalityId: 'p1',
-          personalityUpdatedAt: 123,
-          generatedAt: 456,
-          spendingDataVerified: true,
-          subscriptionLookupVerified: true,
-          modelId: 'claude-opus-4-6',
-        },
-        'p1',
-        123,
-        'anthropic:claude-opus-4-6',
-      ),
-    ).toBe(true);
+  it('Stage 32: model matching is a strict pin against the kernel sentinel', () => {
+    const entry: SummaryCacheEntry = {
+      summary: 'Cached',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      generatedAt: 456,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+    };
+    expect(isValidSummaryCacheEntry(entry, 'personality-1', 1000, 'kernel')).toBe(true);
+    // Pre-cutover entries pinned to vendor ids invalidate once (recorded trade).
+    expect(isValidSummaryCacheEntry(
+      { ...entry, modelId: 'anthropic:claude-sonnet-4-6' },
+      'personality-1',
+      1000,
+      'kernel',
+    )).toBe(false);
   });
 });
 
