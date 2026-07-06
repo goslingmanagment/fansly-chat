@@ -281,6 +281,14 @@ main() {
   local min_version
   min_version="$(read_manifest_min_version "$ROOT_DIR/manifest.json")"
 
+  # Release hygiene (Stage 35): the two version sources must agree BEFORE we
+  # sign anything — a mismatch here has shipped confusing releases elsewhere.
+  local package_version
+  package_version="$(read_manifest_version "$ROOT_DIR/package.json")"
+  if [[ "$package_version" != "$version" ]]; then
+    fail "Version mismatch: package.json=$package_version manifest.json=$version — bump them together"
+  fi
+
   artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/chatgoose-web-ext.XXXXXX")"
   updates_file="$(mktemp "${TMPDIR:-/tmp}/chatgoose-updates.XXXXXX.json")"
 
@@ -378,6 +386,24 @@ EOF
   verify_http_200_with_retry "${BASE_URL}/updates.json" "updates manifest"
   verify_http_200_with_retry "$xpi_url" "versioned XPI"
   verify_http_200_with_retry "$latest_xpi_url" "latest XPI"
+
+  # Release hygiene (Stage 35): what the feed actually SERVES must be this
+  # release — served updates.json version == manifest == package.json.
+  log "Asserting served feed version == ${version}"
+  local served_version
+  served_version="$(
+    curl --silent --show-error --location "${BASE_URL}/updates.json" \
+      | node --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          const feed = JSON.parse(readFileSync(0, "utf8"));
+          const updates = feed.addons?.["'"$EXTENSION_ID"'"]?.updates ?? [];
+          if (updates.length !== 1) throw new Error(`expected exactly one update entry, got ${updates.length}`);
+          process.stdout.write(updates[0].version);
+        '
+  )"
+  if [[ "$served_version" != "$version" ]]; then
+    fail "Served feed version ($served_version) != release version ($version) — the upload did not take"
+  fi
 
   log "Install page: ${BASE_URL}/"
   log "Install link: $latest_xpi_url"

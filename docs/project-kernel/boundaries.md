@@ -1,3 +1,7 @@
+> **SUPERSEDED (Stage 35, 2026-07-07):** this is the Pass 1 (pre-migration)
+> codebase map, kept as the migration's historical record. The regenerated
+> post-migration maps live in `docs/generated/` in this repo.
+
 # ChatGoose — External Boundary Contract Catalog
 
 **Scope.** This document catalogs every contract ChatGoose has with the world outside its own extension code, described *from ChatGoose's side*: what it calls, what it observes, what it exposes, and exactly what data crosses each boundary. It is the primary reference for stitching ChatGoose together with the `core` backend ("Agency Hub") and the Fansly platform. Wire-level and DOM-level details are authoritative here; the per-module `NN-*.md` docs describe how each module *uses* these boundaries.

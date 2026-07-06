@@ -1,3 +1,7 @@
+> **SUPERSEDED (Stage 35, 2026-07-07):** this is the Pass 1 (pre-migration)
+> codebase map, kept as the migration's historical record. The regenerated
+> post-migration maps live in `docs/generated/` in this repo.
+
 # 15 — Test Suite Overview
 
 **Scope.** This is a legible coverage index for the ChatGoose test suite, not a deep audit. It covers `vitest.config.ts`, the three test-support files under `tests/` (`tests/helpers/port.ts`, `tests/jsdom.d.ts`, `tests/node-shims.d.ts`), and every one of the 53 `tests/**/*.test.ts` files. For each test file it records the module(s) under test, the technique used, the boundaries it exercises (stubbed `fetch`, mocked `browser.*`, jsdom DOM, the runtime Port), and any pinned behavior worth a reviewer's eye. Contract tables for the four external boundaries live in `boundaries.md` and are not re-derived here; this document records how the *tests* touch them.

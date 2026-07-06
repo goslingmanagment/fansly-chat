@@ -1,3 +1,7 @@
+> **SUPERSEDED (Stage 35, 2026-07-07):** this is the Pass 1 (pre-migration)
+> codebase map, kept as the migration's historical record. The regenerated
+> post-migration maps live in `docs/generated/` in this repo.
+
 # ChatGoose — Project Kernel: Overview & Reading Guide
 
 **What this folder is.** A complete, factual map of the ChatGoose codebase, written for a reviewer who will later stitch ChatGoose together with two sibling projects (the `core` backend / "Agency Hub", and a desktop app). It describes the code *as it is now*. It is strictly descriptive — no ratings or recommendations. Older spec/plan/audit files in the repo (`SPEC_FINAL.md`, `TODO.md`, `CHANGELOG.md`, the `prompts/` design notes) are **not** treated as ground truth here; only the code is.
