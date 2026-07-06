@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MAX_TOKENS } from '../src/shared/constants.js';
-import { ChatGooseError } from '../src/shared/errors.js';
 
 // ─── Mock fetch ──────────────────────────────────────────────────────────
 

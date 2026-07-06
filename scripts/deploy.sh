@@ -258,7 +258,7 @@ verify_http_200_with_retry() {
 
 main() {
   require_command node
-  require_command npm
+  require_command pnpm
   require_command web-ext
   require_command ssh
   require_command scp
@@ -274,7 +274,7 @@ main() {
   cd "$ROOT_DIR"
 
   log "Building extension"
-  npm run build
+  pnpm build
 
   local version
   version="$(read_manifest_version "$ROOT_DIR/manifest.json")"

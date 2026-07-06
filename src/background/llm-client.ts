@@ -12,8 +12,8 @@ import type {
   ReasoningEffort,
   Settings,
 } from '../shared/types.js';
-import { AnthropicClient } from './anthropic-client.js';
-import { OpenRouterClient } from './openrouter-client.js';
+import type { AnthropicClient } from './anthropic-client.js';
+import type { OpenRouterClient } from './openrouter-client.js';
 
 export interface LlmStreamArgs {
   settings: Pick<Settings, 'claudeApiKey' | 'openRouterApiKey'>;

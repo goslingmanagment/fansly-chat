@@ -535,7 +535,10 @@ describe('loadStorageState', () => {
     expect((result as unknown as Record<string, unknown>)['summary:corrupt']).toBeUndefined();
     expect(mockStorage['summary:valid']).toBeDefined();
     expect(mockStorage['summary:corrupt']).toBeUndefined();
-    expect((globalThis as any).browser.storage.local.remove).toHaveBeenCalledWith(
+    expect(
+      (globalThis as unknown as { browser: { storage: { local: { remove: unknown } } } })
+        .browser.storage.local.remove,
+    ).toHaveBeenCalledWith(
       'summary:corrupt',
     );
   });

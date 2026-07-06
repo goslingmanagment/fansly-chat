@@ -62,10 +62,6 @@ export function resolveCompareDraftCards(
     }));
 }
 
-function getDraftCards(): CompareModelCard[] {
-  return resolveCompareDraftCards(getCompareDraftSource());
-}
-
 export function resolveCompareModelCardsForPersonality(
   storage: PersistedState,
   personalityId: string | null,

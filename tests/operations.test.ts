@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any --
+   legacy suite drives background operations through `as any` seams; the
+   operations surface is rewritten onto kernel feature services in Stage 32
+   Task 3. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COMPARE_TEMPERATURE,

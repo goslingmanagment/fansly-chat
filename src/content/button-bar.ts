@@ -178,7 +178,7 @@ export class ButtonBar {
     nextReplyTone: ReplyTone,
     hasDraftText: boolean,
     activeLoading = false,
-    showCompareRestore = false,
+    _showCompareRestore = false,
   ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatgoose-hidden', !hasState);

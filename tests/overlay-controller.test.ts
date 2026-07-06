@@ -1106,7 +1106,7 @@ describe('OverlayController', () => {
   it('Enter is ignored for hidden overlay', async () => {
     const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
     vi.mocked(insertIntoFanslyTextarea).mockClear();
-    const controller = new OverlayController({
+    const _controller = new OverlayController({
       onClose: () => undefined,
       onCancel: () => undefined,
       onRerun: () => undefined,

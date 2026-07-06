@@ -37,7 +37,7 @@ import type {
   SessionTemplate,
   SubscriptionLookupMode,
 } from '../shared/types.js';
-import { SessionStore } from './session-store.js';
+import type { SessionStore } from './session-store.js';
 
 const MESSAGING_GROUPS_PAGE_SIZE = 100;
 // Bound the messaging-groups walk so a creator with tens of thousands of

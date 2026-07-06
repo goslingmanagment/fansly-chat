@@ -81,13 +81,13 @@ If the fan has been active in the last 5 days, the ping is blocked — they don'
   Firefox 128 APIs so older ESR-compatible syntax is preserved where possible.
 - A Claude API key from [console.anthropic.com](https://console.anthropic.com) for Claude Direct models
 - Optional: an OpenRouter API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) for Gemini/Grok models
-- Node.js 18+ and npm
+- Node.js 22+ and pnpm
 
 ### Build
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm build
 ```
 
 Output goes to `dist/`.
@@ -152,12 +152,12 @@ If you're logged into a new account and the extension detects it via intercepted
 ### Scripts
 
 ```bash
-npm run build        # Production build → dist/
-npm run check        # Typecheck, test, then build
-npm run watch        # Rebuild on file changes
-npm test             # Run test suite (vitest)
-npm run test:watch   # Run tests in watch mode
-npm run typecheck    # TypeScript strict check (tsc --noEmit)
+pnpm build           # Production build → dist/
+pnpm check           # Typecheck, lint, test, then build
+pnpm watch           # Rebuild on file changes
+pnpm test            # Run test suite (vitest)
+pnpm test:watch      # Run tests in watch mode
+pnpm typecheck       # TypeScript strict check (tsc --noEmit)
 ```
 
 ### Project Structure
@@ -244,7 +244,7 @@ esbuild bundles four entry points (background, content, options, popup) as IIFE 
 Tests cover shared business logic: prompt building, transcript processing, XML parsing, earnings formatting, storage migrations, error handling, prompt injection escaping, and overlay DOM behavior. The overlay test uses JSDOM for browser DOM simulation.
 
 ```bash
-npm run check
+pnpm check
 ```
 
 All checks should pass. Tests make no network calls — everything is unit-tested
