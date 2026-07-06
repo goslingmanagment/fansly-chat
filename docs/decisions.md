@@ -27,6 +27,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E8 | 2026-07-07 | Map regen found + fixed unreachable device-token sign-in (missing protocol case); ships next release |
 | E9 | 2026-07-07 | 1.7.0: device-token preferred in all hub ops; legacy board rebuild deleted (v11); chatter-key path deferred one release |
 | E10 | 2026-07-07 | Pre-ship audit: Bearer-"set" poisoning, key-gated token flow, null-unsafe bearer — all fixed + pinned |
+| E11 | 2026-07-07 | 1.7.0 RELEASED (feed asserts ran in anger); watch device-token adoption + kernel-only board |
 
 ## Entries
 
@@ -120,3 +121,11 @@ changed: the device token lives in storage.local alongside the legacy key
 (the E2 custody class; page context cannot read extension storage) — moving
 hub credentials out of content-script-readable storage is future hardening,
 tracked for the chatter-key-deletion release.
+
+**E11 (2026-07-07 ~22:50 UTC).** 1.7.0 RELEASED — signed and live on
+https://ext.gosling-agency.ru (sha256:580234b3…). The deploy script's new
+version asserts ran in anger for the first time (package==manifest before
+signing; served==1.7.0 after upload). Watch items: device-token sign-in now
+actually works from the options page — expect device_tokens rows on the
+kernel as chatters re-auth; the board must serve from the kernel only
+(legacy sweep is gone).
