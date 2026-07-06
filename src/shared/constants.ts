@@ -7,7 +7,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 9;
+export const STORAGE_SCHEMA_VERSION = 10;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -136,6 +136,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agencyHubBaseUrl: '',
   agencyHubApiKey: '',
   agencyHubDeviceToken: '',
+  spendersLegacyRebuild: false,
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
   improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,

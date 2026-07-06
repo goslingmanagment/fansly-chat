@@ -305,6 +305,7 @@ describe('sanitizeSettings', () => {
       agencyHubBaseUrl: ' https://hub.example.com/base/ ',
       agencyHubApiKey: '  hub-key  ',
       agencyHubDeviceToken: '',
+      spendersLegacyRebuild: false,
     });
     expect(result.agencyHubBaseUrl).toBe('https://hub.example.com/base');
     expect(result.agencyHubApiKey).toBe('hub-key');

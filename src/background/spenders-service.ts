@@ -1,8 +1,16 @@
-// Builds the ranked top-spenders board. Fansly exposes no "all fans by spend"
-// endpoint, so this enumerates the creator's conversations and fetches lifetime
-// earnings per fan (one call each), at bounded concurrency, capped to the most
-// recent SPENDERS_MAX_FANS conversations. Results are cached per creator for a
-// short window so reopening the board is instant and doesn't re-hammer Fansly.
+// The ranked top-spenders board. Stage 32 Task 4: rankings come from ONE
+// kernel query over the Stage 16 fan-earnings projection
+// (GET /api/v1/pages/:pageLabel/top-spenders) instead of the legacy rebuild
+// that fetched lifetime earnings per fan (~150 Fansly calls per creator per
+// 10 minutes). One bounded Fansly conversations enumeration REMAINS — it is
+// the fan→groupId map the board needs to open chats (DP 1-B: the extension
+// stays free to read Fansly for conversation context; it just never rebuilds
+// rankings from quota-expensive sweeps).
+//
+// The legacy rebuild stays behind the hidden `spendersLegacyRebuild` setting
+// for ONE release (diagnostic fallback; no UI — flipped via storage), then
+// dies. Kernel snapshots carry an honest as-of timestamp: builtAt =
+// max(observed_at) of the projection window, not "now".
 
 import {
   SPENDERS_CACHE_TTL_MS,
@@ -10,12 +18,15 @@ import {
   SPENDERS_MAX_FANS,
 } from '../shared/constants.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
+import { ChatGooseError } from '../shared/errors.js';
 import type {
   FanslyAccountResponse,
   SessionTemplate,
+  Settings,
   SpenderListEntry,
   SpendersListResult,
 } from '../shared/types.js';
+import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
 
 const ACCOUNT_NAME_BATCH = 50;
@@ -25,6 +36,25 @@ interface CacheEntry {
   result: SpendersListResult;
 }
 
+export interface SpendersKernelSource {
+  resolvePageLabelForUsername: AgencyHubClient['resolvePageLabelForUsername'];
+  fetchTopSpenders(
+    settings: Settings,
+    pageLabel: string,
+    limit: number,
+    signal: AbortSignal,
+  ): Promise<{
+    builtAt: string | null;
+    fanCount: number;
+    entries: Array<{
+      platformUserId: string;
+      username: string | null;
+      displayName: string | null;
+      grossMills: number;
+    }>;
+  }>;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
@@ -32,7 +62,11 @@ function isAbortError(error: unknown): boolean {
 export class SpendersService {
   private readonly cache = new Map<string, CacheEntry>();
 
-  constructor(private readonly fanslyClient: FanslyClient) {}
+  constructor(
+    private readonly fanslyClient: FanslyClient,
+    private readonly kernelSource?: SpendersKernelSource,
+    private readonly getSettings?: () => Promise<Settings>,
+  ) {}
 
   private cacheKey(session: SessionTemplate): string {
     return session.resolvedAccountId ?? session.accountId;
@@ -53,6 +87,80 @@ export class SpendersService {
       }
     }
 
+    const settings = await this.getSettings?.();
+    const useKernel =
+      this.kernelSource !== undefined &&
+      settings !== undefined &&
+      !settings.spendersLegacyRebuild;
+
+    const result = useKernel
+      ? await this.buildFromKernel(session, settings, signal, now)
+      : await this.buildLegacy(session, signal, now);
+
+    this.cache.set(key, { builtAt: now, result });
+    return result;
+  }
+
+  private async buildFromKernel(
+    session: SessionTemplate,
+    settings: Settings,
+    signal: AbortSignal,
+    nowMs: number,
+  ): Promise<SpendersListResult> {
+    const pageUsername = session.resolvedUsername?.trim() || null;
+    const pageLabel = await this.kernelSource!.resolvePageLabelForUsername(
+      settings,
+      pageUsername,
+      signal,
+    );
+    if (!pageLabel) {
+      throw new ChatGooseError('hub_page_match_failed');
+    }
+
+    // The one Fansly read that remains: conversation enumeration = the
+    // fan→groupId map for opening chats from the board.
+    const { fans, truncated } = await this.fanslyClient.listFanAccounts(
+      SPENDERS_MAX_FANS,
+      session,
+      signal,
+    );
+    const groupByFanId = new Map(fans.map((fan) => [fan.fanAccountId, fan.groupId]));
+
+    const snapshot = await this.kernelSource!.fetchTopSpenders(
+      settings,
+      pageLabel,
+      SPENDERS_MAX_FANS,
+      signal,
+    );
+
+    const entries: SpenderListEntry[] = snapshot.entries
+      .filter((entry) => groupByFanId.has(entry.platformUserId))
+      .map((entry) => ({
+        fanAccountId: entry.platformUserId,
+        groupId: groupByFanId.get(entry.platformUserId)!,
+        displayName: entry.displayName,
+        username: entry.username,
+        lifetimeMills: entry.grossMills,
+        lifetimeUsd: entry.grossMills / 1000,
+      }));
+
+    return {
+      entries,
+      // Honest staleness: the projection's freshest observation, not "now".
+      builtAt: snapshot.builtAt !== null ? Date.parse(snapshot.builtAt) : nowMs,
+      fanCount: entries.length,
+      scannedCount: fans.length,
+      truncated,
+    };
+  }
+
+  /** Pre-cutover rebuild (~SPENDERS_MAX_FANS Fansly calls) — hidden-setting
+   * fallback for one release, then deleted. */
+  private async buildLegacy(
+    session: SessionTemplate,
+    signal: AbortSignal,
+    nowMs: number,
+  ): Promise<SpendersListResult> {
     const { fans, truncated } = await this.fanslyClient.listFanAccounts(
       SPENDERS_MAX_FANS,
       session,
@@ -63,7 +171,7 @@ export class SpendersService {
       fans,
       SPENDERS_EARNINGS_CONCURRENCY,
       async (fan) => {
-        const lifetimeMills = await this.fetchLifetimeMills(fan.fanAccountId, now, session, signal);
+        const lifetimeMills = await this.fetchLifetimeMills(fan.fanAccountId, nowMs, session, signal);
         return { fan, lifetimeMills };
       },
     );
@@ -96,16 +204,13 @@ export class SpendersService {
       })
       .sort((a, b) => b.lifetimeMills - a.lifetimeMills);
 
-    const result: SpendersListResult = {
+    return {
       entries,
-      builtAt: now,
+      builtAt: nowMs,
       fanCount: entries.length,
       scannedCount: fans.length,
       truncated,
     };
-
-    this.cache.set(key, { builtAt: now, result });
-    return result;
   }
 
   /**

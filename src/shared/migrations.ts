@@ -13,6 +13,7 @@ export function createDefaultSettings(): Settings {
     agencyHubBaseUrl: '',
     agencyHubApiKey: '',
     agencyHubDeviceToken: '',
+    spendersLegacyRebuild: false,
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
     improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
@@ -46,6 +47,10 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
       typeof raw?.agencyHubDeviceToken === 'string'
         ? raw.agencyHubDeviceToken
         : defaults.agencyHubDeviceToken,
+    spendersLegacyRebuild:
+      typeof raw?.spendersLegacyRebuild === 'boolean'
+        ? raw.spendersLegacyRebuild
+        : defaults.spendersLegacyRebuild,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
     pingMessageCount: Number(raw?.pingMessageCount ?? raw?.quickMessageCount ?? defaults.pingMessageCount),
     improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),

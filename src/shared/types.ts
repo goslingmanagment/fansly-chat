@@ -19,6 +19,10 @@ export interface Settings {
   /** Stage 32: device-bound hub credential (agency_hub_device_…); preferred
    * over agencyHubApiKey when present (kernel dual-acceptance). */
   agencyHubDeviceToken: string;
+  /** Stage 32 Task 4: HIDDEN one-release fallback — true forces the legacy
+   * per-fan Fansly earnings sweep instead of the kernel board query. No UI;
+   * flipped via storage. Deleted next release. */
+  spendersLegacyRebuild: boolean;
   quickMessageCount: number;
   pingMessageCount: number;
   improveMessageCount: number;
