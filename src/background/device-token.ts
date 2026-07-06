@@ -14,6 +14,7 @@
 
 import { KernelApiError, createClient } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
+import { clientVersionHeaders } from '../shared/client-version.js';
 
 export interface IssueDeviceTokenInput {
   baseUrl: string;
@@ -41,6 +42,7 @@ export async function issueAgencyHubDeviceToken(
   const client = createClient({
     baseUrl: input.baseUrl.trim().replace(/\/+$/, ''),
     auth: { mode: 'cookie' },
+    headers: clientVersionHeaders(),
     fetch: credentialedFetch,
   });
 
