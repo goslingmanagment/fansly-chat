@@ -15,7 +15,6 @@
     "isolatedModules": true,
     "useDefineForClassFields": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
     "outDir": "dist-ts"
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]
