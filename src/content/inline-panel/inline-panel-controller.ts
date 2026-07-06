@@ -6,7 +6,6 @@ import type {
   CompareInlineViewModel,
   FeatureType,
   InlinePanelViewModel,
-  OperationProgressPayload,
   OverlayInsertPart,
   OverlayViewModel,
   UserFacingError,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ChatGooseError } from '../src/shared/errors.js';
+import type { ChatGooseError } from '../src/shared/errors.js';
 import { LlmClient } from '../src/background/llm-client.js';
 
 function streamArgs(overrides?: Record<string, unknown>) {

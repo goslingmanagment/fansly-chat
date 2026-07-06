@@ -4,7 +4,6 @@ import type {
   EarningsRow,
   MonthlyEarningsRow,
   MonthlyEarningsTotal,
-  MonthlyTypeBreakdown,
 } from './types.js';
 
 const LABELS: Record<number, string> = {

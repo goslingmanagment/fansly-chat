@@ -73,6 +73,7 @@ import {
 } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
 import type {
+  EarningsBreakdownEntry,
   AggregatedEarnings,
   AgencyHubAiUsageEvent,
   LlmCostEstimate,
@@ -102,8 +103,9 @@ import type {
   TabStatePayload,
   TabUiState,
 } from '../shared/types.js';
+import type {
+  AgencyHubClient} from './agency-hub-client.js';
 import {
-  AgencyHubClient,
   type AgencyHubFetchFanProfileResult,
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
@@ -123,7 +125,7 @@ import {
 } from './compare-operations.js';
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 import type { SubscriptionLookupTraceEvent } from './fansly-client.js';
-import { FanslyClient } from './fansly-client.js';
+import type { FanslyClient } from './fansly-client.js';
 import type { LlmClient } from './llm-client.js';
 import { clearFlushTimer } from './operation-cleanup.js';
 import {
@@ -139,9 +141,9 @@ import {
   parseGroupIdFromUrl,
   resolveAbortChatGooseError,
 } from './operation-utils.js';
-import { SessionStore } from './session-store.js';
-import { StorageCoordinator } from './storage-coordinator.js';
-import { TabContextStore } from './tab-context.js';
+import type { SessionStore } from './session-store.js';
+import type { StorageCoordinator } from './storage-coordinator.js';
+import type { TabContextStore } from './tab-context.js';
 
 interface ActiveOperation {
   operationId: string;
@@ -2103,7 +2105,7 @@ export class OperationCoordinator {
                   return {
                     year: month.year,
                     month: month.month,
-                    breakdown: [] as import('../shared/types.js').EarningsBreakdownEntry[],
+                    breakdown: [] as EarningsBreakdownEntry[],
                     failed: true,
                   };
                 }

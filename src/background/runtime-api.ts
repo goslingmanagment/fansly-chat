@@ -18,12 +18,12 @@ import type {
   PopupStatus,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
-import { FanslyClient } from './fansly-client.js';
+import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
-import { SessionStore } from './session-store.js';
-import { SpendersService } from './spenders-service.js';
-import { StorageCoordinator } from './storage-coordinator.js';
-import { TabContextStore } from './tab-context.js';
+import type { SessionStore } from './session-store.js';
+import type { SpendersService } from './spenders-service.js';
+import type { StorageCoordinator } from './storage-coordinator.js';
+import type { TabContextStore } from './tab-context.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 

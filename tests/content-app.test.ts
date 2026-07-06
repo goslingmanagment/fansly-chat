@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any --
+   legacy suite pokes ChatGooseContentApp privates via `as any` throughout;
+   typed access is a Stage 32 Task 3 rewrite concern (the app surface changes
+   there anyway). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {

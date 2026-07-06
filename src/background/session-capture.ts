@@ -1,5 +1,6 @@
 import type { RouteKey } from '../shared/types.js';
-import { SessionStore, type SessionCaptureResult } from './session-store.js';
+import type { SessionStore} from './session-store.js';
+import { type SessionCaptureResult } from './session-store.js';
 
 function decodeLegacyAccountKey(authorization: string): string | null {
   try {

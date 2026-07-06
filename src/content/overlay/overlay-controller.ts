@@ -4,7 +4,6 @@ import type {
   LlmUsageMetrics,
   FanSummarySyncStatus,
   FeatureType,
-  OperationProgressPayload,
   OverlayInsertPart,
   OverlayRerunActionLabel,
   OverlayViewModel,
