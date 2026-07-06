@@ -12,6 +12,8 @@ export default tseslint.config(
       '**/node_modules/**',
       'dist/**',
       'dist-ts/**',
+      // Generated artifact (core scripts/vendor-sdk.mjs) — never hand-edited.
+      'vendor/**',
       'coverage/**',
       'docs/**',
     ],

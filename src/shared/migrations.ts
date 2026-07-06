@@ -16,6 +16,7 @@ export function createDefaultSettings(): Settings {
     openRouterApiKey: '',
     agencyHubBaseUrl: '',
     agencyHubApiKey: '',
+    agencyHubDeviceToken: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
     improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
@@ -57,6 +58,10 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
     agencyHubApiKey:
       typeof raw?.agencyHubApiKey === 'string' ? raw.agencyHubApiKey : defaults.agencyHubApiKey,
+    agencyHubDeviceToken:
+      typeof raw?.agencyHubDeviceToken === 'string'
+        ? raw.agencyHubDeviceToken
+        : defaults.agencyHubDeviceToken,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
     pingMessageCount: Number(raw?.pingMessageCount ?? raw?.quickMessageCount ?? defaults.pingMessageCount),
     improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),

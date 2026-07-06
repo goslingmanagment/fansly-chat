@@ -1,7 +1,7 @@
+import { KernelApiError, createClient } from '@kernel/sdk';
 import {
   AGENCY_HUB_PROFILE_MAX_BYTES,
   buildAgencyHubOriginPattern,
-  buildAgencyHubUrl,
   hasAgencyHubSyncMetadata,
   measureUtf8Bytes,
   normalizeAgencyHubBaseUrl,
@@ -31,7 +31,7 @@ interface AgencyHubPageSummary {
 interface AgencyHubProfileRecord {
   version: number;
   body: string;
-  source: 'chatgoose';
+  source: 'chatmuse';
   createdAt: string;
   createdByUserId: number | null;
 }
@@ -43,11 +43,21 @@ interface AgencyHubConversationProfileResponse {
     username: string | null;
     displayName: string | null;
     createdAtExternal: string | null;
+    pageAlias: string | null;
   };
   profile: AgencyHubProfileRecord | null;
 }
 
 type FetchLike = typeof fetch;
+
+/** Hub bearer: device token preferred, legacy chatter key fallback
+ * (kernel dual-acceptance holds through the Stage 32 rollout window). */
+export function resolveHubBearer(
+  settings: Pick<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+): string {
+  const deviceToken = settings.agencyHubDeviceToken.trim();
+  return deviceToken || settings.agencyHubApiKey.trim();
+}
 
 interface AgencyHubResultBase {
   reason: string;
@@ -85,7 +95,7 @@ export interface AgencyHubFetchFanProfileResult extends AgencyHubResultBase {
 }
 
 export interface AgencyHubSubmitAiUsageBatchInput {
-  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>;
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>;
   events: AgencyHubAiUsageEvent[];
   signal: AbortSignal;
 }
@@ -93,14 +103,6 @@ export interface AgencyHubSubmitAiUsageBatchInput {
 export interface AgencyHubSubmitAiUsageBatchResult extends AgencyHubResultBase {
   status: 'submitted' | 'skipped' | 'failed';
   response?: AgencyHubAiUsageBatchResponse;
-}
-
-async function readResponseSnippet(response: Response): Promise<string> {
-  try {
-    return (await response.text()).slice(0, 400);
-  } catch {
-    return '';
-  }
 }
 
 function hubError(
@@ -120,7 +122,7 @@ export class AgencyHubClient {
   isConfigured(settings: Settings): boolean {
     return Boolean(
       normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl) &&
-      settings.agencyHubApiKey.trim(),
+      resolveHubBearer(settings),
     );
   }
 
@@ -141,40 +143,60 @@ export class AgencyHubClient {
     }
   }
 
-  private async createHubResponseError(
-    response: Response,
-    fallbackKey: 'hub_request_failed' | 'hub_invalid_api_key' = 'hub_request_failed',
-  ): Promise<ChatGooseError> {
-    const snippet = await readResponseSnippet(response);
-    const key = response.status === 401 || response.status === 403
-      ? 'hub_invalid_api_key'
-      : fallbackKey;
-    return new ChatGooseError(key, {
+  /** SDK client bound to one call: bearer + abort signal ride the fetch seam
+   * (the vendored SDK has no per-operation signal parameter). Responses are
+   * contract-validated by the SDK — the old `as` casts are gone. */
+  private sdkFor(baseUrl: string, bearer: string, signal: AbortSignal) {
+    return createClient({
+      baseUrl: baseUrl.replace(/\/+$/, ''),
+      auth: { mode: 'bearer', token: () => bearer },
+      fetch: (input, init) => this.fetchImpl(input, { ...init, signal }),
+    });
+  }
+
+  /** Map SDK failures back onto the public contract the callers already
+   * handle: HTTP errors become ChatGooseError keys, aborts resurface as
+   * AbortError DOMExceptions, and plain network failures rethrow as bare
+   * Errors so their message survives into the result's `reason`. */
+  private toHubError(error: unknown): ChatGooseError {
+    if (error instanceof KernelApiError) {
+      if (error.category === 'network') {
+        if (error.code === 'aborted') {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        throw new Error(error.message);
+      }
+      const key = error.status === 401 || error.status === 403
+        ? 'hub_invalid_api_key'
+        : 'hub_request_failed';
+      return new ChatGooseError(key, {
+        details: {
+          status: error.status ?? 0,
+          responseSnippet: error.message.slice(0, 400),
+        },
+      });
+    }
+    if (error instanceof ChatGooseError || (error instanceof DOMException && error.name === 'AbortError')) {
+      throw error;
+    }
+    return new ChatGooseError('hub_request_failed', {
       details: {
-        status: response.status,
-        responseSnippet: snippet,
+        status: 0,
+        responseSnippet: error instanceof Error ? error.message.slice(0, 400) : '',
       },
     });
   }
 
   private async listVisiblePages(
     baseUrl: string,
-    apiKey: string,
+    bearer: string,
     signal: AbortSignal,
   ): Promise<AgencyHubPageSummary[]> {
-    const response = await this.fetchImpl(buildAgencyHubUrl(baseUrl, 'api/v1/pages'), {
-      method: 'GET',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-      },
-      signal,
-    });
-
-    if (!response.ok) {
-      throw await this.createHubResponseError(response);
+    try {
+      return await this.sdkFor(baseUrl, bearer, signal).pages();
+    } catch (error) {
+      throw this.toHubError(error);
     }
-
-    return await response.json() as AgencyHubPageSummary[];
   }
 
   private resolvePageLabel(
@@ -206,29 +228,17 @@ export class AgencyHubClient {
     conversationId: string,
     signal: AbortSignal,
   ): Promise<AgencyHubConversationProfileResponse | null> {
-    const response = await this.fetchImpl(
-      buildAgencyHubUrl(
-        baseUrl,
-        `api/v1/pages/${encodeURIComponent(pageLabel)}/conversations/${encodeURIComponent(conversationId)}/profile`,
-      ),
-      {
-        method: 'GET',
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-        },
-        signal,
-      },
-    );
-
-    if (response.status === 404) {
-      return null;
+    try {
+      return await this.sdkFor(baseUrl, apiKey, signal).pageConversationProfile({
+        params: { pageLabel, conversationId },
+      });
+    } catch (error) {
+      // 404 is a domain result (fan/profile unknown to the hub), not an error.
+      if (error instanceof KernelApiError && error.status === 404) {
+        return null;
+      }
+      throw this.toHubError(error);
     }
-
-    if (!response.ok) {
-      throw await this.createHubResponseError(response);
-    }
-
-    return await response.json() as AgencyHubConversationProfileResponse;
   }
 
   private async putFanProfile(
@@ -239,24 +249,13 @@ export class AgencyHubClient {
     body: string,
     signal: AbortSignal,
   ): Promise<void> {
-    const response = await this.fetchImpl(
-      buildAgencyHubUrl(
-        baseUrl,
-        `api/v1/pages/${encodeURIComponent(pageLabel)}/fans/${encodeURIComponent(platformUserId)}/profile`,
-      ),
-      {
-        method: 'PUT',
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ body }),
-        signal,
-      },
-    );
-
-    if (!response.ok) {
-      throw await this.createHubResponseError(response);
+    try {
+      await this.sdkFor(baseUrl, apiKey, signal).upsertFanProfile({
+        params: { pageLabel, platformUserId },
+        body: { body },
+      });
+    } catch (error) {
+      throw this.toHubError(error);
     }
   }
 
@@ -266,28 +265,17 @@ export class AgencyHubClient {
     events: AgencyHubAiUsageEvent[],
     signal: AbortSignal,
   ): Promise<AgencyHubAiUsageBatchResponse> {
-    const response = await this.fetchImpl(
-      buildAgencyHubUrl(baseUrl, 'api/v1/ai-usage/batch'),
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ events }),
-        signal,
-      },
-    );
-
-    if (!response.ok) {
-      throw await this.createHubResponseError(response);
+    try {
+      return await this.sdkFor(baseUrl, apiKey, signal).aiUsageBatch({
+        body: { events },
+      });
+    } catch (error) {
+      throw this.toHubError(error);
     }
-
-    return await response.json() as AgencyHubAiUsageBatchResponse;
   }
 
   async testConnection(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
   ): Promise<AgencyHubConnectionTestResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);

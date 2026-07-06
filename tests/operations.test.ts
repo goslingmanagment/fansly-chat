@@ -215,6 +215,33 @@ function advanceNow(ms: number): number {
   return currentNow;
 }
 
+/** Contract-valid fixtures — the SDK validates hub responses (Stage 32). */
+function hubPageRow() {
+  return {
+    id: 1,
+    label: 'creator-fs',
+    platform: 'fansly',
+    modelSlug: 'creator',
+    modelName: 'Creator',
+    username: 'creator',
+    displayName: null,
+    followerCount: { value: null, available: false },
+    subscriberCount: { value: null, available: false },
+    lastLightSyncAt: null,
+    lastFollowerSyncAt: null,
+  };
+}
+
+function hubProfileRecord(version: number) {
+  return {
+    version,
+    body: '# fan summary',
+    source: 'chatmuse',
+    createdAt: '2026-03-20T12:00:00.000Z',
+    createdByUserId: null,
+  };
+}
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -358,6 +385,7 @@ describe('OperationCoordinator', () => {
         claudeApiKey: 'sk-test',
         agencyHubBaseUrl: '',
         agencyHubApiKey: '',
+        agencyHubDeviceToken: '',
         quickMessageCount: 100,
         pingMessageCount: 100,
         improveMessageCount: 100,
@@ -2909,6 +2937,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const agencyHubClient = {
@@ -2954,6 +2983,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const createdAtMs = Date.parse('2026-03-20T12:00:00.000Z');
@@ -3034,6 +3064,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const agencyHubClient = {
@@ -3088,6 +3119,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const agencyHubClient = {
@@ -3136,6 +3168,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
       featureModels: {
         ...DEFAULT_FEATURE_MODELS,
         'fan-summary': 'claude-haiku-4-5',
@@ -3191,6 +3224,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const agencyHubClient = {
@@ -3243,6 +3277,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const createdAtMs = Date.parse('2026-03-20T12:00:00.000Z');
@@ -3313,16 +3348,15 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
     const fetchMock = vi.fn(async (url: URL | string) => {
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPageRow()]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
-        return jsonResponse({ version: 1 });
+        return jsonResponse(hubProfileRecord(1));
       }
       throw new Error(`Unexpected URL: ${href}`);
     });
@@ -3387,6 +3421,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',
@@ -3401,12 +3436,10 @@ describe('OperationCoordinator', () => {
     const fetchMock = vi.fn(async (url: URL | string) => {
       const href = String(url);
       if (href === 'http://localhost:3000/api/v1/pages') {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPageRow()]);
       }
       if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
-        return jsonResponse({ version: 1 });
+        return jsonResponse(hubProfileRecord(1));
       }
       throw new Error(`Unexpected URL: ${href}`);
     });
@@ -3475,6 +3508,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
     (browser as Record<string, unknown>).permissions = {
       contains: vi.fn(async () => false),
@@ -3529,6 +3563,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
 
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'bad gateway' }, 503));
@@ -3578,6 +3613,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://hub-a.test',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',
@@ -3602,12 +3638,10 @@ describe('OperationCoordinator', () => {
         href === 'http://hub-a.test/api/v1/pages' ||
         href === 'http://hub-b.test/api/v1/pages'
       ) {
-        return jsonResponse([
-          { label: 'creator-fs', platform: 'fansly', username: 'creator' },
-        ]);
+        return jsonResponse([hubPageRow()]);
       }
       if (href === 'http://hub-b.test/api/v1/pages/creator-fs/fans/fan-1/profile') {
-        return jsonResponse({ version: 2 });
+        return jsonResponse(hubProfileRecord(2));
       }
       throw new Error(`Unexpected URL: ${href}`);
     });
@@ -4961,6 +4995,7 @@ describe('OperationCoordinator', () => {
       expect.objectContaining({
         agencyHubBaseUrl: '',
         agencyHubApiKey: '',
+        agencyHubDeviceToken: '',
         debugMode: false,
       }),
       expect.objectContaining({
@@ -5117,6 +5152,7 @@ describe('OperationCoordinator', () => {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
     const agencyHubUsageReporter = { enqueue: vi.fn() };
     const { coordinator } = await createCoordinatorHarness({

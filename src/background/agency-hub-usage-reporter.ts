@@ -175,6 +175,9 @@ export class AgencyHubUsageReporter {
             settings: {
               agencyHubBaseUrl: state.baseUrl,
               agencyHubApiKey: state.apiKey,
+              // Reporter state predates device tokens; the whole self-report
+              // lane dies in Stage 32 Task 3 (gateway ledger authoritative).
+              agencyHubDeviceToken: '',
             },
             events: batch.map((queued) => queued.event),
             signal: controller.signal,

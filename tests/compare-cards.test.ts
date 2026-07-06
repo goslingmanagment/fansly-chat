@@ -14,6 +14,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
       quickMessageCount: 100,
       pingMessageCount: 100,
       improveMessageCount: 100,

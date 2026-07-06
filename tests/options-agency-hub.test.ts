@@ -41,6 +41,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       openRouterApiKey: '',
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
       quickMessageCount: 30,
       pingMessageCount: 30,
       improveMessageCount: 45,
@@ -216,7 +217,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]');
-    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"]');
+    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]');
 
     expect(urlInput?.value).toBe('http://localhost:3000');
     expect(keyInput?.value).toBe('hub-key');
@@ -229,11 +230,12 @@ describe('Options page - Agency Hub section', () => {
     await loadOptionsPage(makeState({
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
     }));
 
     const section = getSectionByTitle('Agency Hub');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
-    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
 
     urlInput.value = ' http://localhost:3000/ ';
     urlInput.dispatchEvent(new Event('input'));
@@ -249,6 +251,7 @@ describe('Options page - Agency Hub section', () => {
     expect(savedSettings).toMatchObject({
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     });
   });
 
@@ -367,6 +370,7 @@ describe('Options page - Agency Hub section', () => {
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: '',
       },
     });
   });
@@ -415,6 +419,7 @@ describe('Options page - Agency Hub section', () => {
     await loadOptionsPage(makeState({
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
     }), {
       permissionsContainsImpl: async () => true,
       runtimeSendMessageImpl: runtimeSendMessage,
@@ -489,6 +494,7 @@ describe('Options page - Agency Hub section', () => {
     await loadOptionsPage(makeState({
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
     }), {
       permissionsContainsImpl: async () => true,
       runtimeSendMessageImpl: runtimeSendMessage,
@@ -496,7 +502,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
-    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
     const button = getTestConnectionButton(section);
 
     urlInput.value = ' http://localhost:3000/ ';
@@ -509,6 +515,7 @@ describe('Options page - Agency Hub section', () => {
       expect(savedSettings).toMatchObject({
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'invalid-key',
+        agencyHubDeviceToken: '',
       });
       expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
@@ -520,6 +527,7 @@ describe('Options page - Agency Hub section', () => {
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'invalid-key',
+        agencyHubDeviceToken: '',
       },
     });
   });

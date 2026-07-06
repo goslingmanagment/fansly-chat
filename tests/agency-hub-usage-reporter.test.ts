@@ -30,6 +30,7 @@ function makeSettings(overrides?: Partial<{
   return {
     agencyHubBaseUrl: 'http://hub.test',
     agencyHubApiKey: 'hub-key',
+    agencyHubDeviceToken: '',
     debugMode: false,
     ...overrides,
   };
@@ -69,6 +70,7 @@ describe('AgencyHubUsageReporter', () => {
         settings: {
           agencyHubBaseUrl: 'http://hub.test',
           agencyHubApiKey: 'hub-key',
+          agencyHubDeviceToken: '',
         },
         events: [makeUsageEvent(1), makeUsageEvent(2)],
         signal: expect.any(AbortSignal),

@@ -23,7 +23,7 @@ import {
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 7;
+export const STORAGE_SCHEMA_VERSION = 8;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -192,6 +192,7 @@ export const DEFAULT_SETTINGS: Settings = {
   openRouterApiKey: '',
   agencyHubBaseUrl: '',
   agencyHubApiKey: '',
+  agencyHubDeviceToken: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
   improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,

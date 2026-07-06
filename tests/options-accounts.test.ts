@@ -21,6 +21,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       openRouterApiKey: '',
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
       quickMessageCount: 30,
       pingMessageCount: 30,
       improveMessageCount: 45,

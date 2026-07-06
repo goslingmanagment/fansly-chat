@@ -364,6 +364,7 @@ describe('runtime-api testAgencyHubConnection', () => {
     const settings = {
       agencyHubBaseUrl: 'http://hub.test',
       agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
     };
     const result = await onMessageListener?.({
       type: 'testAgencyHubConnection',

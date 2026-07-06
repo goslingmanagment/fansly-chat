@@ -1,7 +1,7 @@
 {
   "name": "chatgoose",
   "version": "1.5.6",
-  "description": "ChatGoose — Fansly chat workspace extension with kernel-served AI assistance",
+  "description": "ChatGoose \u2014 Fansly chat workspace extension with kernel-served AI assistance",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.1",
@@ -32,5 +32,9 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@kernel/sdk": "link:./vendor/kernel-sdk",
+    "zod": "^4.1.5"
   }
 }

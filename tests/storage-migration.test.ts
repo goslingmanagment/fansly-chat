@@ -139,6 +139,25 @@ describe('migrateState', () => {
     expect(result.settings.featureReasoning).toEqual(DEFAULT_FEATURE_REASONING);
   });
 
+  it('adds agencyHubDeviceToken on migration from pre-v8 records and keeps a stored one (idempotent)', () => {
+    // Pre-v8 record: no token field at all → defaults to ''.
+    const legacy = migrateState({
+      schemaVersion: 7,
+      settings: { agencyHubBaseUrl: 'http://localhost:3000', agencyHubApiKey: 'legacy-key' },
+    });
+    expect(legacy.settings.agencyHubDeviceToken).toBe('');
+    expect(legacy.settings.agencyHubApiKey).toBe('legacy-key');
+
+    // v8 record with a token survives re-migration byte-for-byte.
+    const migratedOnce = migrateState({
+      schemaVersion: 8,
+      settings: { agencyHubDeviceToken: 'agency_hub_device_x' },
+    });
+    const migratedTwice = migrateState(migratedOnce as unknown as Record<string, unknown>);
+    expect(migratedOnce.settings.agencyHubDeviceToken).toBe('agency_hub_device_x');
+    expect(migratedTwice.settings.agencyHubDeviceToken).toBe('agency_hub_device_x');
+  });
+
   it('seeds pingMessageCount from quickMessageCount when migrating legacy settings', () => {
     const result = migrateState({
       schemaVersion: 4,
@@ -334,6 +353,7 @@ describe('sanitizeSettings', () => {
     const result = storage.sanitizeSettings({
       agencyHubBaseUrl: ' https://hub.example.com/base/ ',
       agencyHubApiKey: '  hub-key  ',
+      agencyHubDeviceToken: '',
     });
     expect(result.agencyHubBaseUrl).toBe('https://hub.example.com/base');
     expect(result.agencyHubApiKey).toBe('hub-key');

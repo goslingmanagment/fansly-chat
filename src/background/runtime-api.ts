@@ -14,6 +14,10 @@ import {
   isObjectRecord,
 } from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
+import { saveSettings } from '../shared/storage.js';
+import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
+import { ChatGooseError } from '../shared/errors.js';
+import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
 } from '../shared/types.js';
@@ -210,6 +214,43 @@ export function registerRuntimeApi({
           return await agencyHubClient.testConnection(settings, controller.signal);
         } finally {
           globalThis.clearTimeout(timeout);
+        }
+      }
+
+      if (requestType === 'issueAgencyHubDeviceToken') {
+        const input = isObjectRecord(message) &&
+          typeof message.baseUrl === 'string' &&
+          typeof message.username === 'string' &&
+          typeof message.password === 'string'
+          ? { baseUrl: message.baseUrl, username: message.username, password: message.password }
+          : null;
+        const baseUrl = input ? normalizeAgencyHubBaseUrl(input.baseUrl) : null;
+        if (!input || !baseUrl || !input.username.trim() || !input.password) {
+          return { ok: false, error: createUserError('hub_request_failed') };
+        }
+        try {
+          const issued = await issueAgencyHubDeviceToken({
+            baseUrl,
+            username: input.username,
+            password: input.password,
+            label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
+          });
+          // The token never crosses the runtime-message boundary — it lands
+          // straight in settings storage (same custody class as the key).
+          await saveSettings({ agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token });
+          return {
+            ok: true,
+            keyPrefix: issued.keyPrefix,
+            label: issued.label,
+            expiresAt: issued.expiresAt,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof ChatGooseError
+              ? toUserError(error)
+              : createUserError('hub_request_failed'),
+          };
         }
       }
 
