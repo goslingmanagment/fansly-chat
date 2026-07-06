@@ -55,12 +55,22 @@ export function buildAgencyHubPermissionScopeNote(
   return `Firefox grants host access per host rather than per port, so ${originPattern} covers the configured URL ${normalized}.`;
 }
 
-export function buildAgencyHubConnectionSignature(baseUrl: string, apiKey: string): string {
-  return `${normalizeAgencyHubBaseUrl(baseUrl)}|${apiKey.trim()}`;
+export function buildAgencyHubConnectionSignature(
+  baseUrl: string,
+  apiKey: string,
+  deviceToken = '',
+): string {
+  return `${normalizeAgencyHubBaseUrl(baseUrl)}|${apiKey.trim()}|${deviceToken.trim()}`;
 }
 
-export function hasAgencyHubConnectionInputs(baseUrl: string, apiKey: string): boolean {
-  return Boolean(baseUrl.trim() && apiKey.trim());
+/** A hub connection is testable with EITHER credential: the device token
+ * (preferred since 1.7.0) or the legacy chatter key. */
+export function hasAgencyHubConnectionInputs(
+  baseUrl: string,
+  apiKey: string,
+  deviceToken = '',
+): boolean {
+  return Boolean(baseUrl.trim() && (apiKey.trim() || deviceToken.trim()));
 }
 
 export async function getAgencyHubPermissionCheck(

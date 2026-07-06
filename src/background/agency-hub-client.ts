@@ -56,8 +56,9 @@ type FetchLike = typeof fetch;
 export function resolveHubBearer(
   settings: Pick<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
 ): string {
-  const deviceToken = settings.agencyHubDeviceToken.trim();
-  return deviceToken || settings.agencyHubApiKey.trim();
+  // Null-safe: legacy runtime message shapes may omit the token field.
+  const deviceToken = (settings.agencyHubDeviceToken ?? '').trim();
+  return deviceToken || (settings.agencyHubApiKey ?? '').trim();
 }
 
 interface AgencyHubResultBase {
