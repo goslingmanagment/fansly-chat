@@ -1,6 +1,6 @@
 # CLAUDE.md — ChatGoose (Fansly extension)
 
-Firefox extension (MV2, gecko ≥142) for OnlyFans-agency chatters working
+Firefox extension (MV3, gecko ≥142) for OnlyFans-agency chatters working
 Fansly.com: it injects an AI assistant into the live Fansly DOM — reply
 generation, coaching, fan summaries, reactivation pings, a spenders board —
 plus quality-of-life chat tooling. It is a **kernel client**: the Agency Hub
@@ -24,11 +24,11 @@ legacy chatter-key path. Toolchain: TS 6 / vitest 4 / pnpm@10.33.1; CI runs
 | Doc | What it answers |
 |---|---|
 | `docs/decisions.md` | This repo's decision log (E1–E7 quick-ref) + the family law; cross-repo rulings live in core's `docs/decisions.md`, referenced by number |
-| `docs/generated/` | Regenerated post-migration codebase maps (Stage 35) — machine-generated, banner says how to regenerate |
+| `docs/generated/` | Regenerated post-migration codebase maps (Stage 35) — start at `00-overview.md` (index); `boundaries.md` is the external-contract catalog (hosts, gates, data crossings). Machine-generated, banner says how to regenerate |
 | `docs/project-kernel/` | The Pass 1 (pre-migration) maps — superseded history, banners say so |
 | `SPEC_FINAL.md` | The original product spec — HISTORICAL (v1.3, pre-kernel): normative for product behavior/UX intent, wrong about architecture (it predates the kernel cutover — trust `docs/decisions.md` E2/E3 over it) |
 | `CHANGELOG.md` / `TODO.md` | Release history; owner's live worklist |
-| `~/code/core/docs/ai-gateway-contract.md` | The feature-lane contract this extension consumes (frames, gates, quota) |
+| `~/code/core/docs/ai-gateway-contract.md` | The kernel AI contract — PARTIALLY STALE: it documents the V1 raw gateway (prompt blocks); frames/quota/gates carry over, but this extension uses the LATER feature lane (`/api/v1/ai/features/:feature`, refs+clientContext) — request shape lives in `docs/generated/05-background-kernel-ai.md` + `boundaries.md` |
 
 ## Hard rules
 
