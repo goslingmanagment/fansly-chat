@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SpendersService } from '../src/background/spenders-service.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
@@ -49,66 +49,9 @@ function makeClient(overrides: StubOverrides) {
   return { client, listFanAccounts, getEarnings, getAccountNames };
 }
 
-describe('SpendersService', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('ranks payers by lifetime gross and drops $0 fans', async () => {
-    const { client } = makeClient({});
-    const service = new SpendersService(client);
-
-    const result = await service.getList(session(), new AbortController().signal);
-
-    expect(result.entries.map((e) => e.fanAccountId)).toEqual(['f1', 'f2']);
-    expect(result.entries[0]).toMatchObject({
-      fanAccountId: 'f1',
-      groupId: 'g1',
-      displayName: 'Fan f1',
-      lifetimeMills: 1078000,
-      lifetimeUsd: 1078,
-    });
-    expect(result.fanCount).toBe(2);
-    expect(result.scannedCount).toBe(3);
-  });
-
-  it('caches the result and refetches only on refresh', async () => {
-    const { client, listFanAccounts } = makeClient({});
-    const service = new SpendersService(client);
-    const sess = session();
-
-    await service.getList(sess, new AbortController().signal);
-    await service.getList(sess, new AbortController().signal);
-    expect(listFanAccounts).toHaveBeenCalledTimes(1);
-
-    await service.getList(sess, new AbortController().signal, { refresh: true });
-    expect(listFanAccounts).toHaveBeenCalledTimes(2);
-  });
-
-  it('counts a per-fan earnings failure as $0', async () => {
-    const { client } = makeClient({ earnings: { f1: 500000, f2: 'throw', f3: 250000 } });
-    const service = new SpendersService(client);
-
-    const result = await service.getList(session(), new AbortController().signal);
-
-    expect(result.entries.map((e) => e.fanAccountId)).toEqual(['f1', 'f3']);
-  });
-
-  it('throws (does not cache) when the build is aborted', async () => {
-    const { client, listFanAccounts } = makeClient({});
-    const service = new SpendersService(client);
-    const controller = new AbortController();
-    controller.abort();
-
-    await expect(service.getList(session(), controller.signal)).rejects.toMatchObject({
-      name: 'AbortError',
-    });
-
-    // A subsequent (non-aborted) call rebuilds rather than serving a poisoned cache.
-    await service.getList(session(), new AbortController().signal);
-    expect(listFanAccounts).toHaveBeenCalledTimes(2);
-  });
-});
+// 1.7.0: the legacy per-fan sweep tests died with the code path (E9). The
+// service-level behaviors they pinned — caching and abort hygiene — are
+// re-expressed against the kernel path below.
 
 // ── Stage 32 Task 4: the kernel board query ────────────────────────────────
 
@@ -149,7 +92,6 @@ describe('SpendersService (kernel source)', () => {
       ...createDefaultSettings(),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
-      spendersLegacyRebuild: overrides.legacyRebuild ?? false,
     };
     const service = new SpendersService(client, kernelSource, async () => settings);
     return { service, kernelSource, listFanAccounts, getEarnings };
@@ -192,13 +134,39 @@ describe('SpendersService (kernel source)', () => {
     expect(result.fanCount).toBe(2);
   });
 
-  it('the hidden spendersLegacyRebuild flip forces the legacy sweep', async () => {
-    const { service, kernelSource, getEarnings } = makeKernelHarness({ legacyRebuild: true });
-    const result = await service.getList(kernelSession(), new AbortController().signal);
+  it('1.7.0: no legacy fallback — an unwired kernel source fails loudly', async () => {
+    const { service } = makeKernelHarness();
+    const bare = new SpendersService(
+      (service as unknown as { fanslyClient: FanslyClient }).fanslyClient,
+    );
+    await expect(
+      bare.getList(kernelSession(), new AbortController().signal),
+    ).rejects.toMatchObject({ key: 'hub_request_failed' });
+  });
 
-    expect(kernelSource.fetchTopSpenders).not.toHaveBeenCalled();
-    expect(getEarnings).toHaveBeenCalled(); // the per-fan sweep ran
-    expect(result.entries[0]?.fanAccountId).toBe('f1');
+  it('caches the kernel result and refetches only on refresh', async () => {
+    const { service, kernelSource } = makeKernelHarness();
+    const sess = kernelSession();
+
+    await service.getList(sess, new AbortController().signal);
+    await service.getList(sess, new AbortController().signal);
+    expect(kernelSource.fetchTopSpenders).toHaveBeenCalledTimes(1);
+
+    await service.getList(sess, new AbortController().signal, { refresh: true });
+    expect(kernelSource.fetchTopSpenders).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws (does not cache) when the kernel build is aborted', async () => {
+    const { service, kernelSource } = makeKernelHarness();
+    kernelSource.fetchTopSpenders.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
+
+    await expect(
+      service.getList(kernelSession(), new AbortController().signal),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    // A subsequent call rebuilds rather than serving a poisoned cache.
+    await service.getList(kernelSession(), new AbortController().signal);
+    expect(kernelSource.fetchTopSpenders).toHaveBeenCalledTimes(2);
   });
 
   it('fails loudly when the page label cannot be resolved', async () => {

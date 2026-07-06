@@ -18,7 +18,6 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       agencyHubBaseUrl: '',
       agencyHubApiKey: '',
       agencyHubDeviceToken: '',
-      spendersLegacyRebuild: false,
       quickMessageCount: 30,
       pingMessageCount: 30,
       improveMessageCount: 45,

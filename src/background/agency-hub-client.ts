@@ -340,7 +340,7 @@ export class AgencyHubClient {
     signal: AbortSignal,
   ): Promise<AgencyHubConnectionTestResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    const apiKey = settings.agencyHubApiKey.trim();
+    const apiKey = resolveHubBearer(settings);
 
     if (!settings.agencyHubBaseUrl.trim() || !baseUrl) {
       return { ok: false, error: hubError('hub_invalid_url') };
@@ -375,7 +375,7 @@ export class AgencyHubClient {
     signal,
   }: AgencyHubSubmitAiUsageBatchInput): Promise<AgencyHubSubmitAiUsageBatchResult> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    const apiKey = settings.agencyHubApiKey.trim();
+    const apiKey = resolveHubBearer(settings);
 
     if (!baseUrl) {
       return {
@@ -457,7 +457,7 @@ export class AgencyHubClient {
     generatedAt,
   }: AgencyHubPushFanProfileInput): Promise<AgencyHubPushFanProfileResult> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    const apiKey = settings.agencyHubApiKey.trim();
+    const apiKey = resolveHubBearer(settings);
 
     if (!baseUrl) {
       return {
@@ -585,7 +585,7 @@ export class AgencyHubClient {
     signal,
   }: AgencyHubFetchFanProfileInput): Promise<AgencyHubFetchFanProfileResult> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    const apiKey = settings.agencyHubApiKey.trim();
+    const apiKey = resolveHubBearer(settings);
 
     if (!baseUrl) {
       return {

@@ -7,7 +7,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 10;
+export const STORAGE_SCHEMA_VERSION = 11;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -43,7 +43,6 @@ export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
 /** Most-recent conversations to fetch lifetime spend for before ranking. */
 export const SPENDERS_MAX_FANS = 150;
 /** Concurrent per-fan earnings fetches (matches the monthly-breakdown fan-out). */
-export const SPENDERS_EARNINGS_CONCURRENCY = 4;
 /** Reuse a built board for this long before a fresh scan is allowed. */
 export const SPENDERS_CACHE_TTL_MS = 10 * 60 * 1000;
 /** Overall budget for one board build (enumerate + per-fan earnings fan-out). */
@@ -136,7 +135,6 @@ export const DEFAULT_SETTINGS: Settings = {
   agencyHubBaseUrl: '',
   agencyHubApiKey: '',
   agencyHubDeviceToken: '',
-  spendersLegacyRebuild: false,
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
   improveMessageCount: IMPROVE_DEFAULT_MESSAGE_COUNT,
