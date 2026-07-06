@@ -200,7 +200,7 @@ async function render(): Promise<void> {
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
-    const hasInputs = hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value);
+    const hasInputs = hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken);
 
     agencyHubConnectionButton.disabled =
       agencyHubConnectionFeedback.kind === 'testing' || !hasInputs;
@@ -240,7 +240,7 @@ async function render(): Promise<void> {
 
   const markAgencyHubConnectionPending = (): void => {
     agencyHubConnectionVersion += 1;
-    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value)) {
+    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
     } else {
@@ -266,9 +266,10 @@ async function render(): Promise<void> {
     const signature = buildAgencyHubConnectionSignature(
       agencyHubUrlInput.value,
       agencyHubKeyInput.value,
+      state.settings.agencyHubDeviceToken,
     );
 
-    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value)) {
+    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
       renderAgencyHubConnectionState();
@@ -311,6 +312,7 @@ async function render(): Promise<void> {
       lastAgencyHubConnectionSignature = buildAgencyHubConnectionSignature(
         agencyHubUrlInput.value,
         agencyHubKeyInput.value,
+        state.settings.agencyHubDeviceToken,
       );
     } catch (error) {
       console.error('Agency Hub connection test failed', error);
@@ -335,7 +337,7 @@ async function render(): Promise<void> {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
     const originPattern = buildAgencyHubOriginPattern(normalizedBaseUrl);
     const permissionScopeNote = buildAgencyHubPermissionScopeNote(normalizedBaseUrl);
-    const hasApiKey = agencyHubKeyInput.value.trim().length > 0;
+    const hasApiKey = agencyHubKeyInput.value.trim().length > 0 || state.settings.agencyHubDeviceToken.trim().length > 0;
     const permissionCheck = await getAgencyHubPermissionCheck(originPattern);
     const permissionGranted = permissionCheck.granted;
 
@@ -421,9 +423,9 @@ async function render(): Promise<void> {
     }
 
     if (!hasApiKey) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub API key missing.';
+      agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub credential missing.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Host access is granted for ${originPattern}, but ChatGoose still needs an Agency Hub API key.`,
+        `Host access is granted for ${originPattern}, but ChatGoose still needs a credential — sign in or add the hub key.`,
         permissionScopeNote,
       );
       return;
@@ -563,7 +565,10 @@ async function render(): Promise<void> {
           password,
         });
         if (response.ok) {
-          state.settings.agencyHubDeviceToken = 'set';
+          // Re-read the real stored settings — the background deliberately
+          // returns only metadata; a placeholder here would later be SENT as
+          // the bearer by the connection test (1.7.0 audit finding).
+          state.settings = (await loadStorageState()).settings;
           hubSignInPasswordInput.value = '';
           hubSignInMeta.textContent =
             `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
@@ -630,6 +635,7 @@ async function render(): Promise<void> {
     const hubSignature = buildAgencyHubConnectionSignature(
       savedSettings.agencyHubBaseUrl,
       savedSettings.agencyHubApiKey,
+      savedSettings.agencyHubDeviceToken,
     );
     if (hubSignature !== lastAgencyHubConnectionSignature) {
       await refreshAgencyHubPermissionState();
