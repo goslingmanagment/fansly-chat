@@ -154,15 +154,18 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_missing_api_key: {
     key: 'hub_missing_api_key',
     code: 'CG-HUB-02',
-    message: 'Agency Hub API key is missing.',
-    description: 'Add the Hub API key in Settings before testing or syncing.',
+    // Fires when NEITHER credential exists (resolveHubBearer came up empty).
+    message: 'Agency Hub credential is missing.',
+    description: 'Sign in to issue a device token, or add the Hub API key in Settings.',
     settingsLink: true,
   },
   hub_invalid_api_key: {
     key: 'hub_invalid_api_key',
     code: 'CG-HUB-03',
-    message: 'Agency Hub API key is invalid.',
-    description: 'Check the Hub API key in Settings and test the connection again.',
+    // Credential-neutral: outside the connection test we don't know whether
+    // the rejected bearer was the device token or the legacy key.
+    message: 'Agency Hub rejected the credential.',
+    description: 'Check the device token or Hub API key in Settings and test the connection again.',
     settingsLink: true,
   },
   hub_missing_permission: {
