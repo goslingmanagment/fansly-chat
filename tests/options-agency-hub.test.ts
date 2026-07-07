@@ -288,7 +288,10 @@ describe('Options page - Agency Hub section', () => {
     storageDeferred.resolve();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Sync ready: ChatGoose can push fan summaries.');
+      expect(section.textContent).toContain('Host access granted.');
+      // Readiness is claimed only by the live connection test, never by the
+      // local permission check (they contradicted each other on screen).
+      expect(section.textContent).not.toContain('Sync ready');
     }, { timeout: 2000 });
   });
 
@@ -479,6 +482,8 @@ describe('Options page - Agency Hub section', () => {
             code: 'CG-HUB-03',
             message: 'Agency Hub API key is invalid.',
             description: 'Check the key in Agency Hub settings and try again.',
+            httpStatus: 401,
+            serverDetail: '{"message":"Unauthorized"}',
           },
         };
       }
@@ -514,6 +519,7 @@ describe('Options page - Agency Hub section', () => {
       expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
       expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
+      expect(section.textContent).toContain('Hub responded 401: {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
     expect(runtimeSendMessage).toHaveBeenLastCalledWith({

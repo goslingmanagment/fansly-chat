@@ -28,6 +28,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E9 | 2026-07-07 | 1.7.0: device-token preferred in all hub ops; legacy board rebuild deleted (v11); chatter-key path deferred one release |
 | E10 | 2026-07-07 | Pre-ship audit: Bearer-"set" poisoning, key-gated token flow, null-unsafe bearer — all fixed + pinned |
 | E11 | 2026-07-07 | 1.7.0 RELEASED (feed asserts ran in anger); watch device-token adoption + kernel-only board |
+| E12 | 2026-07-07 | Hub connection failures made self-diagnosing: HTTP status + server body reach the options UI, rejection copy names the actual bearer, hub failures always logged (redacted) |
 
 ## Entries
 
@@ -129,3 +130,22 @@ signing; served==1.7.0 after upload). Watch items: device-token sign-in now
 actually works from the options page — expect device_tokens rows on the
 kernel as chatters re-auth; the board must serve from the kernel only
 (legacy sweep is gone).
+
+**E12 (2026-07-07).** A field report (CG-HUB-03 on a live install, undebuggable
+from the screen) exposed that hub diagnostics were collected and then thrown
+away: `toHubError` captured the HTTP status and response snippet in
+`ChatGooseError.details`, but `toUserError` dropped them, and the options page
+showed a bare error code under a contradictory "Sync ready" banner. Decisions:
+(a) `UserFacingError` carries optional `httpStatus`/`serverDetail`; the
+connection-test failure line now renders "Hub responded NNN: <body>" — the
+snippet prefers `KernelApiError.body` (the server's actual response) over the
+SDK's synthetic message; (b) CG-HUB-03 copy names the credential that was
+actually sent (resolveHubBearer prefers the device token, so "check the API
+key" was a lie whenever a stale token was stored) and points key users at
+device-token sign-in; (c) the permission block never claims sync readiness —
+that's the live test's job ("Host access granted" replaced "Sync ready");
+(d) every hub op failure logs to the background console via a new redaction-
+aware `logWarn` (NOT debug-gated: failures must leave a trace on default
+chatter setups), tagged with the operation name. Server-side distinguishable
+401 reasons (revoked vs unknown vs non-chatter role — `roleCanUseApiKey` is
+chatter-only, so an owner's key reads as "invalid") stay a core-repo follow-up.

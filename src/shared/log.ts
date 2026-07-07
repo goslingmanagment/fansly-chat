@@ -69,6 +69,17 @@ export function logDebug(enabled: boolean, label: string, payload?: unknown): vo
   console.debug(`[ChatGoose] ${label}`, redactValue(payload));
 }
 
+/** Failure logging is not debug-gated: a broken hub credential must leave a
+ * trace in the background console even on a chatter's default setup. */
+export function logWarn(label: string, payload?: unknown): void {
+  if (payload === undefined) {
+    console.warn(`[ChatGoose] ${label}`);
+    return;
+  }
+
+  console.warn(`[ChatGoose] ${label}`, redactValue(payload));
+}
+
 export function isDebugEnabled(settings: Settings | null | undefined): boolean {
   return Boolean(settings?.debugMode);
 }

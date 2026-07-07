@@ -596,6 +596,10 @@ export interface UserFacingError {
   settingsLink?: boolean;
   retryAtMs?: number;
   retryAfterMs?: number;
+  /** HTTP status of the upstream failure, when one reached a server. */
+  httpStatus?: number;
+  /** Excerpt of the upstream response body, for settings-surface diagnostics. */
+  serverDetail?: string;
 }
 
 // ─── Operation Profiling ─────────────────────────────────────────────────
