@@ -227,12 +227,18 @@ async function render(): Promise<void> {
         agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
-        const description = getUserErrorDescription(agencyHubConnectionFeedback.error);
-        agencyHubConnectionStatus.textContent = `Connection failed: ${agencyHubConnectionFeedback.error.code}`;
+        const failedError = agencyHubConnectionFeedback.error;
+        const description = getUserErrorDescription(failedError);
+        agencyHubConnectionStatus.textContent = `Connection failed: ${failedError.code}`;
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-danger)';
-        agencyHubConnectionMeta.textContent = description
-          ? `${agencyHubConnectionFeedback.error.message} ${description}`
-          : agencyHubConnectionFeedback.error.message;
+        const serverEcho = typeof failedError.httpStatus === 'number'
+          ? `Hub responded ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
+          : null;
+        agencyHubConnectionMeta.textContent = [
+          failedError.message,
+          description,
+          serverEcho,
+        ].filter(Boolean).join(' ');
         return;
       }
     }
@@ -431,9 +437,11 @@ async function render(): Promise<void> {
       return;
     }
 
-    agencyHubPermissionStatus.textContent = 'Sync ready: ChatGoose can push fan summaries.';
+    // Never claim readiness here: this is a local check (permission + a
+    // non-empty credential) — only the live connection test below proves sync.
+    agencyHubPermissionStatus.textContent = 'Host access granted.';
     agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-      `Host access granted for ${originPattern}.`,
+      `ChatGoose can reach ${originPattern}. Sync goes live once the connection test below passes.`,
       permissionScopeNote,
     );
   };
@@ -544,7 +552,7 @@ async function render(): Promise<void> {
     if (!hubSignInMeta.textContent) {
       hubSignInMeta.textContent = hasToken
         ? 'Hub requests use the device token; the legacy API key is the fallback.'
-        : 'Sign in once to issue a device-bound token — it replaces sharing the team API key.';
+        : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
     }
   };
 

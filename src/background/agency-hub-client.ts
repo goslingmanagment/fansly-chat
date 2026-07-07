@@ -14,6 +14,7 @@ import {
   createUserError,
   toUserError,
 } from '../shared/errors.js';
+import { logWarn } from '../shared/log.js';
 import type {
   AgencyHubAiUsageBatchResponse,
   AgencyHubAiUsageEvent,
@@ -114,6 +115,22 @@ function hubError(
   return createUserError(key, overrides);
 }
 
+/** The server's actual response body beats the SDK's synthetic
+ * "GET /path failed with NNN" message as diagnostic material. */
+function hubResponseSnippet(error: KernelApiError): string {
+  if (typeof error.body === 'string' && error.body.trim()) {
+    return error.body.slice(0, 400);
+  }
+  if (error.body && typeof error.body === 'object') {
+    try {
+      return JSON.stringify(error.body).slice(0, 400);
+    } catch {
+      // Fall through to the SDK message.
+    }
+  }
+  return error.message.slice(0, 400);
+}
+
 export class AgencyHubClient {
   private readonly fetchImpl: FetchLike;
 
@@ -161,27 +178,36 @@ export class AgencyHubClient {
    * handle: HTTP errors become ChatGooseError keys, aborts resurface as
    * AbortError DOMExceptions, and plain network failures rethrow as bare
    * Errors so their message survives into the result's `reason`. */
-  private toHubError(error: unknown): ChatGooseError {
+  private toHubError(error: unknown, op: string): ChatGooseError {
     if (error instanceof KernelApiError) {
       if (error.category === 'network') {
         if (error.code === 'aborted') {
           throw new DOMException('The operation was aborted.', 'AbortError');
         }
+        logWarn(`Agency Hub ${op} failed`, { network: error.message });
         throw new Error(error.message);
       }
+      const responseSnippet = hubResponseSnippet(error);
+      logWarn(`Agency Hub ${op} failed`, {
+        status: error.status ?? 0,
+        response: responseSnippet,
+      });
       const key = error.status === 401 || error.status === 403
         ? 'hub_invalid_api_key'
         : 'hub_request_failed';
       return new ChatGooseError(key, {
         details: {
           status: error.status ?? 0,
-          responseSnippet: error.message.slice(0, 400),
+          responseSnippet,
         },
       });
     }
     if (error instanceof ChatGooseError || (error instanceof DOMException && error.name === 'AbortError')) {
       throw error;
     }
+    logWarn(`Agency Hub ${op} failed`, {
+      error: error instanceof Error ? error.message.slice(0, 400) : String(error),
+    });
     return new ChatGooseError('hub_request_failed', {
       details: {
         status: 0,
@@ -198,7 +224,7 @@ export class AgencyHubClient {
     try {
       return await this.sdkFor(baseUrl, bearer, signal).pages();
     } catch (error) {
-      throw this.toHubError(error);
+      throw this.toHubError(error, 'pages list');
     }
   }
 
@@ -240,7 +266,7 @@ export class AgencyHubClient {
       if (error instanceof KernelApiError && error.status === 404) {
         return null;
       }
-      throw this.toHubError(error);
+      throw this.toHubError(error, 'conversation profile fetch');
     }
   }
 
@@ -258,7 +284,7 @@ export class AgencyHubClient {
         body: { body },
       });
     } catch (error) {
-      throw this.toHubError(error);
+      throw this.toHubError(error, 'fan profile push');
     }
   }
 
@@ -273,7 +299,7 @@ export class AgencyHubClient {
         body: { events },
       });
     } catch (error) {
-      throw this.toHubError(error);
+      throw this.toHubError(error, 'AI usage batch');
     }
   }
 
@@ -332,7 +358,7 @@ export class AgencyHubClient {
         })),
       };
     } catch (error) {
-      throw this.toHubError(error);
+      throw this.toHubError(error, 'top spenders fetch');
     }
   }
 
@@ -361,13 +387,38 @@ export class AgencyHubClient {
         return { ok: false, error: hubError('hub_timeout') };
       }
 
+      const userError = error instanceof ChatGooseError
+        ? toUserError(error)
+        : hubError('hub_request_failed');
       return {
         ok: false,
-        error: error instanceof ChatGooseError
-          ? toUserError(error)
-          : hubError('hub_request_failed'),
+        error: userError.key === 'hub_invalid_api_key'
+          ? this.describeRejectedBearer(settings, userError)
+          : userError,
       };
     }
+  }
+
+  /** The rejection copy must name the credential that was actually sent:
+   * resolveHubBearer prefers the device token, so with a stale token stored
+   * the legacy-key advice would point the user at the wrong field. */
+  private describeRejectedBearer(
+    settings: Pick<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    userError: UserFacingError,
+  ): UserFacingError {
+    const usedDeviceToken = Boolean((settings.agencyHubDeviceToken ?? '').trim());
+    return {
+      ...userError,
+      ...(usedDeviceToken
+        ? {
+            message: 'Agency Hub rejected the device token.',
+            description: 'The token may be revoked or expired. Sign in again in Settings to issue a fresh device token, then retest.',
+          }
+        : {
+            message: 'Agency Hub rejected the API key.',
+            description: 'The key may be mistyped, rotated away by a newer key, revoked, or not a chatter key. Fix it — or sign in above to issue a device token instead.',
+          }),
+    };
   }
 
   async submitAiUsageBatch({

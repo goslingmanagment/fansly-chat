@@ -51,6 +51,24 @@ describe('toUserError', () => {
     expect(toUserError(null).key).toBe('unknown_error');
     expect(toUserError(null).code).toBe('CG-APP-01');
   });
+
+  it('carries upstream HTTP diagnostics into the user error', () => {
+    const err = new ChatGooseError('hub_invalid_api_key', {
+      details: { status: 401, responseSnippet: '{"message":"Unauthorized"}' },
+    });
+    const result = toUserError(err);
+    expect(result.httpStatus).toBe(401);
+    expect(result.serverDetail).toBe('{"message":"Unauthorized"}');
+  });
+
+  it('omits HTTP diagnostics when the failure never reached the server', () => {
+    const err = new ChatGooseError('hub_request_failed', {
+      details: { status: 0, responseSnippet: '' },
+    });
+    const result = toUserError(err);
+    expect(result.httpStatus).toBeUndefined();
+    expect(result.serverDetail).toBeUndefined();
+  });
 });
 
 describe('getErrorMessage', () => {

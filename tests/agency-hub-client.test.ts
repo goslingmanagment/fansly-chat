@@ -362,6 +362,7 @@ describe('AgencyHubClient', () => {
   });
 
   it('maps unauthorized live connection tests to the invalid Hub key code', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));
     (globalThis as Record<string, unknown>).browser = {
       permissions: {
@@ -384,8 +385,44 @@ describe('AgencyHubClient', () => {
       error: {
         key: 'hub_invalid_api_key',
         code: 'CG-HUB-03',
+        httpStatus: 401,
       },
     });
+    // Copy names the credential that was actually sent (legacy key here) and
+    // points at the preferred fix — issuing a device token.
+    expect(result.error?.message).toContain('API key');
+    expect(result.error?.description).toContain('device token');
+    expect(result.error?.serverDetail).toContain('unauthorized');
+    // The failure is also visible in the background console.
+    expect(consoleWarn).toHaveBeenCalledWith(
+      expect.stringContaining('Agency Hub'),
+      expect.objectContaining({ status: 401 }),
+    );
+  });
+
+  it('blames the device token, not the key, when the token was the bearer', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: {
+        contains: vi.fn(async () => true),
+      },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.testConnection(
+      {
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: 'agency_hub_device_stale',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe('CG-HUB-03');
+    expect(result.error?.message).toContain('device token');
+    expect(result.error?.message).not.toContain('API key');
   });
 
   it('returns a failed result on non-ok or network failures without throwing', async () => {

@@ -294,7 +294,7 @@ export function getErrorMessage(key: UserErrorKey): UserFacingError {
 
 export function createUserError(
   key: UserErrorKey,
-  overrides?: Partial<Pick<UserFacingError, 'message' | 'description' | 'retryAtMs' | 'retryAfterMs'>>,
+  overrides?: Partial<Pick<UserFacingError, 'message' | 'description' | 'retryAtMs' | 'retryAfterMs' | 'httpStatus' | 'serverDetail'>>,
 ): UserFacingError {
   const base = getErrorMessage(key);
   return {
@@ -303,6 +303,8 @@ export function createUserError(
     ...(overrides?.description ? { description: overrides.description } : {}),
     ...(typeof overrides?.retryAtMs === 'number' ? { retryAtMs: overrides.retryAtMs } : {}),
     ...(typeof overrides?.retryAfterMs === 'number' ? { retryAfterMs: overrides.retryAfterMs } : {}),
+    ...(typeof overrides?.httpStatus === 'number' && overrides.httpStatus > 0 ? { httpStatus: overrides.httpStatus } : {}),
+    ...(overrides?.serverDetail ? { serverDetail: overrides.serverDetail } : {}),
   };
 }
 
@@ -357,6 +359,8 @@ export function toUserError(error: unknown): UserFacingError {
       ...providerOverrides,
       retryAtMs: error.retryAtMs,
       retryAfterMs: error.retryAfterMs,
+      httpStatus: error.details?.status,
+      serverDetail: error.details?.responseSnippet,
     });
   }
 
