@@ -223,3 +223,16 @@ first generation of the day and goes red exactly on CG-HUB-09 denials;
 (c) chatter feedback on the dark/light default ('system') inside Fansly's
 dark UI; (d) click-to-insert does not produce accidental inserts (the
 selection guard holds on real chatter copy-flows).
+
+**E16 (2026-07-11).** Release hygiene remainder (core plan W9.1/A19): deploy.sh
+now refuses to sign unless branch == main, `git status --porcelain` is empty,
+HEAD is an ancestor of origin/main, no `v<version>` tag exists yet, and the
+served feed's version is strictly older (semver) than the release — all
+asserted BEFORE `web-ext sign`, because signing is the irreversible step. A
+green deploy ends with `git tag -a v<version>` (annotated with the served base
+URL + xpi sha256 — the tag records what was actually signed and served) and a
+tag push. Retro-tags for the untagged history (v1.7.0=5bd719c, v1.7.1=021f7e9,
+v1.8.0=363ef32, provenance evidence in each tag message) are owner-run — this
+change only ships the commands; authoritative in-script tagging starts at
+1.8.1. The dead `bar-tone-menu` branch entry left ci.yml (the branch was
+retired in E15's release-process correction).
