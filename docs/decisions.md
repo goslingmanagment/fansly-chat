@@ -31,6 +31,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E12 | 2026-07-07 | Hub connection failures made self-diagnosing: HTTP status + server body reach the options UI, rejection copy names the actual bearer, hub failures always logged (redacted) |
 | E13 | 2026-07-10 | Family restyle: injected UI = desktop dark-twin tokens, popup/options = family light; terracotta accent, green = money-only, serif AI text, mono numbers |
 | E14 | 2026-07-10 | uiTheme setting (system/light/dark, storage v12) supersedes E13's fixed split; click-to-insert draft cards + streaming caret; popup AI-quota indicator off the meta frame |
+| E15 | 2026-07-10 | 1.8.0 RELEASED (E13/E14 scope); releases now go from main — bar-tone-menu retired, CLAUDE.md updated; watch theme adoption + quota row + v12 migration |
 
 ## Entries
 
@@ -207,3 +208,18 @@ quiet count → amber ≤20 → red "used up, resets 00:00 UTC". Rejected:
 Reply-as-split-button with tone dropdown (owner: less convenient than the
 tone pill row). Pinned: storage-migration (v12 uiTheme), overlay
 click-to-insert, quota-tracker day-scoping tests.
+
+**E15 (2026-07-10).** 1.8.0 RELEASED — signed and live on
+https://ext.gosling-agency.ru (sha256:84395f6fdd…), served-feed assert green
+(updates.json == manifest == package.json == 1.8.0). Scope = E13 + E14: the
+family restyle, switchable light/dark on all surfaces (storage v12), draft
+click-to-insert + streaming caret, popup AI-quota indicator. Release-process
+correction recorded in CLAUDE.md in this change: the `bar-tone-menu` release
+branch no longer exists — 1.7.x and 1.8.0 shipped straight from `main`, so
+the documented flow now says main + version bump + CHANGELOG/changelog.html +
+deploy.sh. §5 watch items for the week: (a) the v12 migration lands silently
+on the fleet (no settings resets); (b) the quota row populates after the
+first generation of the day and goes red exactly on CG-HUB-09 denials;
+(c) chatter feedback on the dark/light default ('system') inside Fansly's
+dark UI; (d) click-to-insert does not produce accidental inserts (the
+selection guard holds on real chatter copy-flows).
