@@ -1,4 +1,6 @@
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   KNOWN_ACCOUNTS_KEY,
   STORAGE_SCHEMA_VERSION,
   SUMMARY_EVICTION_COUNT,
@@ -20,9 +22,22 @@ function applyRawStoragePatch(
   setItems: Record<string, unknown>,
   removeKeys: string[] = [],
 ): PersistedState {
-  const raw: Record<string, unknown> = { ...state, ...setItems };
+  // v13 (A41/I116-4): the in-memory state keeps credentials inside settings,
+  // but storage keeps them in their own keys — seed those keys from memory
+  // so a settings-blob-only change (which carries no secrets by design)
+  // cannot erase the token from the coordinator's view. A patch that DOES
+  // name a custody key (token issuance, key edit) overrides the seed.
+  const raw: Record<string, unknown> = {
+    [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: state.settings.agencyHubDeviceToken,
+    [AGENCY_HUB_API_KEY_STORAGE_KEY]: state.settings.agencyHubApiKey,
+    ...state,
+    ...setItems,
+  };
   for (const key of removeKeys) {
     delete raw[key];
+    if (key === AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY || key === AGENCY_HUB_API_KEY_STORAGE_KEY) {
+      raw[key] = ''; // an explicit custody-key removal means "credential gone"
+    }
   }
 
   const nextState = migrateState(raw);

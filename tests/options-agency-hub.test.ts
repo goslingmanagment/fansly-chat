@@ -8,6 +8,8 @@ import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shar
 
 let dom: InstanceType<typeof JSDOM>;
 let savedSettings: Record<string, unknown> | null;
+// v13 (A41): credentials ride their own storage keys, never the blob.
+let savedCustody: Record<string, unknown>;
 let permissionGranted = false;
 let permissionsContains: ReturnType<typeof vi.fn>;
 let permissionsRequest: ReturnType<typeof vi.fn>;
@@ -137,6 +139,7 @@ async function loadOptionsPage(
   options: LoadOptionsPageOptions = {},
 ): Promise<{ permissionsOnAdded: MockPermissionsEvent; permissionsOnRemoved: MockPermissionsEvent }> {
   savedSettings = null;
+  savedCustody = {};
   permissionGranted = false;
   permissionsContains = vi.fn(options.permissionsContainsImpl ?? (async () => permissionGranted));
   permissionsRequest = vi.fn(options.permissionsRequestImpl ?? (async () => {
@@ -154,6 +157,11 @@ async function loadOptionsPage(
         set: vi.fn(async (data: Record<string, unknown>) => {
           if (data.settings) {
             savedSettings = data.settings as Record<string, unknown>;
+          }
+          for (const custodyKey of ['agencyHubApiKey', 'agencyHubDeviceToken']) {
+            if (Object.prototype.hasOwnProperty.call(data, custodyKey)) {
+              savedCustody[custodyKey] = data[custodyKey];
+            }
           }
           await options.storageSetImpl?.(data);
         }),
@@ -243,11 +251,12 @@ describe('Options page - Agency Hub section', () => {
       }
     }, { timeout: 2000 });
 
-    expect(savedSettings).toMatchObject({
-      agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
-    });
+    // v13 custody: the blob carries no credentials; the edited key rides its
+    // own storage key, and the untouched token key is not written at all.
+    expect(savedSettings).toMatchObject({ agencyHubBaseUrl: 'http://localhost:3000' });
+    expect(savedSettings).not.toHaveProperty('agencyHubApiKey');
+    expect(savedSettings).not.toHaveProperty('agencyHubDeviceToken');
+    expect(savedCustody).toEqual({ agencyHubApiKey: 'hub-key' });
   });
 
   it('requests host access before storage writes and refreshes the status', async () => {
@@ -514,9 +523,8 @@ describe('Options page - Agency Hub section', () => {
     await vi.waitFor(() => {
       expect(savedSettings).toMatchObject({
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'invalid-key',
-        agencyHubDeviceToken: '',
       });
+      expect(savedCustody).toEqual({ agencyHubApiKey: 'invalid-key' });
       expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
       expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');

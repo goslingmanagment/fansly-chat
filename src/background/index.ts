@@ -76,6 +76,10 @@ browser.tabs.onRemoved.addListener((tabId) => {
 
 const UI_RELEVANT_KEYS = new Set([
   'settings',
+  // v13 (A41): credentials live in their own keys — a token issuance changes
+  // hub readiness (hasApiKey/isConfigured) without touching the blob.
+  'agencyHubDeviceToken',
+  'agencyHubApiKey',
   'personalities',
   'accountMappings',
   'accountAliases',
