@@ -9,7 +9,7 @@ import { logDebug } from '../shared/log.js';
 import { normalizeReplyParts } from '../shared/reply-output.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
-  formatTranscript,
+  formatTranscriptForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
 import type {
@@ -911,10 +911,13 @@ export async function executeCompare(
     }
 
     startStage('prompt-build', 'Build compare prompts');
-    const formattedTranscript = formatTranscript(transcriptMessages);
+    // W9.4/A26: same 300k oldest-first cap as the main lane — compare cards
+    // ride the identical kernel clientContext schema.
+    const { transcript: formattedTranscript, messageCount: keptMessageCount } =
+      formatTranscriptForKernel(transcriptMessages);
     const promptInputs = {
       transcript: formattedTranscript,
-      messageCount: transcriptMessages.length,
+      messageCount: keptMessageCount,
       fanSpendingData: spendingData,
       fanSubscriptionData: subscriptionData,
       fanDisplayName,

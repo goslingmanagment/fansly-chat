@@ -300,3 +300,15 @@ second half, unchanged): moving credentials out of content-script-readable
 storage entirely — still tracked for the chatter-key-deletion release.
 Pinned in tests/storage-v13-token-custody.test.ts (10 cases, incl. the
 interleaved stale-save race verbatim).
+
+**E20 (2026-07-11).** Client-side transcript cap (core plan W9.4/A26). The
+kernel rejects `clientContext.transcript` above 300k chars (core routes.ts
+aiFeatureStreamBodySchema) — a giant live-read chat previously 400-ed the
+whole generation at the boundary. `formatTranscriptForKernel` (mirrored
+constant KERNEL_TRANSCRIPT_MAX_CHARS = 300_000) truncates OLDEST-first —
+newest context is what a reply needs — reports `messageCount` as the KEPT
+count (never claim more messages than the transcript carries), keeps the
+tail of a single over-budget newest message, and is applied on BOTH lanes
+(operations + compare cards, same clientContext schema). Acceptance pinned
+against the VENDORED schema: 3000 long messages → ≤300k AND
+`routeSchemas.aiFeatureStream.body.safeParse` passes.

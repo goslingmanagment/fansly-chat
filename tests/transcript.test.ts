@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { routeSchemas } from '@kernel/sdk';
 import {
   normalizeTranscript,
   formatTranscript,
+  formatTranscriptForKernel,
   analyzePingSegment,
   resolvePingSegment,
   buildTranscriptWindowStart,
   estimateTargetPages,
   extractOldestMessageId,
 } from '../src/shared/transcript.js';
+import { KERNEL_TRANSCRIPT_MAX_CHARS } from '../src/shared/constants.js';
 import type { FanslyMessagePageResponse, NormalizedTranscriptMessage } from '../src/shared/types.js';
 
 const MODEL_ID = 'model-1';
@@ -804,6 +807,95 @@ describe('formatTranscript', () => {
     const messages = [makeNormalized({ senderId: MODEL_ID, senderLabel: 'Model', text: 'hey' })];
     const result = formatTranscript(messages);
     expect(result).toContain('Model: hey');
+  });
+});
+
+// ─── formatTranscriptForKernel (W9.4/A26: 300k cap, oldest-first) ────────
+
+describe('formatTranscriptForKernel', () => {
+  it('is identical to formatTranscript while under the cap, with a true count', () => {
+    const messages = [
+      makeNormalized({ id: '1', createdAt: 100, text: 'first' }),
+      makeNormalized({ id: '2', createdAt: 200, text: 'second' }),
+    ];
+    const { transcript, messageCount } = formatTranscriptForKernel(messages);
+    expect(transcript).toBe(formatTranscript(messages));
+    expect(messageCount).toBe(2);
+  });
+
+  it('returns the empty sentinel with count 0', () => {
+    expect(formatTranscriptForKernel([])).toEqual({
+      transcript: 'No conversation history.',
+      messageCount: 0,
+    });
+  });
+
+  it('drops OLDEST messages first and reports the kept count', () => {
+    const messages = [
+      makeNormalized({ id: '1', createdAt: 100, text: 'oldest '.repeat(10) }),
+      makeNormalized({ id: '2', createdAt: 200, text: 'middle '.repeat(10) }),
+      makeNormalized({ id: '3', createdAt: 300, text: 'newest '.repeat(10) }),
+    ];
+    // Budget for roughly two lines only.
+    const lineLength = formatTranscript([messages[2]!]).length;
+    const { transcript, messageCount } = formatTranscriptForKernel(messages, lineLength * 2 + 1);
+    expect(messageCount).toBe(2);
+    expect(transcript).toContain('middle');
+    expect(transcript).toContain('newest');
+    expect(transcript).not.toContain('oldest');
+    // Chronological order preserved among kept lines.
+    expect(transcript.indexOf('middle')).toBeLessThan(transcript.indexOf('newest'));
+  });
+
+  it('keeps the TAIL of a single over-budget newest message', () => {
+    const messages = [
+      makeNormalized({ id: '1', createdAt: 100, text: 'older' }),
+      makeNormalized({ id: '2', createdAt: 200, text: `start-marker ${'x'.repeat(500)} end-marker` }),
+    ];
+    const { transcript, messageCount } = formatTranscriptForKernel(messages, 40);
+    expect(messageCount).toBe(1);
+    expect(transcript).toHaveLength(40);
+    expect(transcript).toContain('end-marker');
+    expect(transcript).not.toContain('start-marker');
+  });
+
+  it('A26 acceptance: 3000 long messages stay under 300k AND pass the VENDORED kernel schema', () => {
+    const messages = Array.from({ length: 3000 }, (_, index) =>
+      makeNormalized({
+        id: `msg-${index}`,
+        createdAt: 1700000000 + index,
+        text: `message ${index} ${'lorem ipsum dolor sit amet '.repeat(20)}`,
+      }),
+    );
+    // Uncapped, this transcript is far beyond the kernel's limit.
+    expect(formatTranscript(messages).length).toBeGreaterThan(KERNEL_TRANSCRIPT_MAX_CHARS);
+
+    const { transcript, messageCount } = formatTranscriptForKernel(messages);
+    expect(transcript.length).toBeLessThanOrEqual(KERNEL_TRANSCRIPT_MAX_CHARS);
+    expect(messageCount).toBeLessThan(3000);
+    expect(messageCount).toBeGreaterThan(0);
+    // The newest message always survives; the oldest is the first to go.
+    expect(transcript).toContain('message 2999');
+    expect(transcript).not.toContain('message 0 ');
+
+    // The exact body the background sends, validated against the VENDORED
+    // schema — the same contract object the SDK enforces at runtime.
+    const body = {
+      clientRequestId: '4c1f2f6e-3f4a-4b1c-9c2d-8e7f6a5b4c3d',
+      pageLabel: 'lilly-1',
+      platform: 'fansly',
+      conversationRef: 'fan-1',
+      personaKey: 'personality-1',
+      clientContext: {
+        transcript,
+        messageCount,
+        fanDisplayName: 'Fan',
+        fanSpendingData: '',
+        fanSubscriptionData: '',
+      },
+    };
+    const parsed = routeSchemas.aiFeatureStream.body!.safeParse(body);
+    expect(parsed.success).toBe(true);
   });
 });
 

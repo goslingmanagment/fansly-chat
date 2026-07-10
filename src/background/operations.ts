@@ -54,7 +54,7 @@ import {
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   analyzePingSegment,
-  formatTranscript,
+  formatTranscriptForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
@@ -2054,7 +2054,10 @@ export class OperationCoordinator {
       }
 
       startStage('prompt-build', 'Build context');
-      const formattedTranscript = formatTranscript(transcriptMessages);
+      // W9.4/A26: oldest-first truncation to the kernel's 300k transcript cap
+      // — messageCount is the KEPT count, matching what the kernel receives.
+      const { transcript: formattedTranscript, messageCount: keptMessageCount } =
+        formatTranscriptForKernel(transcriptMessages);
       // Stage 32: prompt ASSEMBLY is kernel-side (templates, personas,
       // platform wording, budgets, capture). The client ships context VALUES
       // because Fansly has no webhook lane — the kernel archive is
@@ -2080,7 +2083,7 @@ export class OperationCoordinator {
         isRegeneration: Boolean(payload.forceRegenerate),
         clientContext: {
           transcript: formattedTranscript,
-          messageCount: transcriptMessages.length,
+          messageCount: keptMessageCount,
           fanDisplayName,
           fanSpendingData: spendingData,
           fanSubscriptionData: subscriptionData,
@@ -2090,8 +2093,8 @@ export class OperationCoordinator {
       } as const;
       completeStage(
         'prompt-build',
-        `Built context: ${transcriptMessages.length} transcript messages`,
-        `${transcriptMessages.length} transcript messages`,
+        `Built context: ${keptMessageCount} transcript messages`,
+        `${keptMessageCount} transcript messages`,
       );
 
       const sendDebugPromptSnapshot = (modelId: string): void => {

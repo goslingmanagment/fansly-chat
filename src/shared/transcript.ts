@@ -10,7 +10,7 @@ import type {
   PingSegmentAnalysis,
   PingSegment,
 } from './types.js';
-import { PING_MIN_FAN_MESSAGES } from './constants.js';
+import { KERNEL_TRANSCRIPT_MAX_CHARS, PING_MIN_FAN_MESSAGES } from './constants.js';
 import { millsToUsd } from './earnings.js';
 
 const PING_ACTIVE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
@@ -528,18 +528,57 @@ function formatLocalTime(createdAtSeconds: number): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function formatTranscriptLine(message: NormalizedTranscriptMessage): string {
+  const labels = message.labels.join(' ').trim();
+  const payload = [labels, message.text].filter(Boolean).join(' ').trim();
+  return `[${formatLocalTime(message.createdAt)}] ${message.senderLabel}: ${payload}`;
+}
+
 export function formatTranscript(messages: NormalizedTranscriptMessage[]): string {
   if (messages.length === 0) {
     return 'No conversation history.';
   }
 
-  return messages
-    .map((message) => {
-      const labels = message.labels.join(' ').trim();
-      const payload = [labels, message.text].filter(Boolean).join(' ').trim();
-      return `[${formatLocalTime(message.createdAt)}] ${message.senderLabel}: ${payload}`;
-    })
-    .join('\n');
+  return messages.map(formatTranscriptLine).join('\n');
+}
+
+/** W9.4/A26 — the kernel-bound transcript. The kernel rejects
+ * clientContext.transcript above KERNEL_TRANSCRIPT_MAX_CHARS (core
+ * routes.ts), so a giant chat must be truncated CLIENT-side: oldest lines
+ * drop first (the newest context is what a reply needs), and messageCount
+ * reports the KEPT count — the kernel must never be told it received more
+ * messages than the transcript carries. */
+export function formatTranscriptForKernel(
+  messages: NormalizedTranscriptMessage[],
+  maxChars = KERNEL_TRANSCRIPT_MAX_CHARS,
+): { transcript: string; messageCount: number } {
+  if (messages.length === 0) {
+    return { transcript: 'No conversation history.', messageCount: 0 };
+  }
+
+  const keptLines: string[] = [];
+  let totalChars = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const line = formatTranscriptLine(messages[index]!);
+    const cost = line.length + (keptLines.length > 0 ? 1 : 0); // +1 = '\n' joiner
+    if (totalChars + cost > maxChars) {
+      break;
+    }
+    keptLines.push(line);
+    totalChars += cost;
+  }
+
+  if (keptLines.length === 0) {
+    // Even the newest message alone exceeds the cap: keep its TAIL (the most
+    // recent content) so the generation still sees something real.
+    const newest = formatTranscriptLine(messages[messages.length - 1]!);
+    return { transcript: newest.slice(-maxChars), messageCount: 1 };
+  }
+
+  return {
+    transcript: keptLines.reverse().join('\n'),
+    messageCount: keptLines.length,
+  };
 }
 
 export function buildTranscriptWindowStart(messages: NormalizedTranscriptMessage[], nowMs: number): number {
