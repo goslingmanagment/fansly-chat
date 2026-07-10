@@ -396,7 +396,7 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.4.1</span>
+      <span class="nav-version">v1.7.1</span>
     </div>
   </div>
 </nav>
@@ -412,11 +412,95 @@
 
 <div class="timeline">
 
+  <!-- 1.7.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.7.1</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Честные ошибки: дневной лимит ИИ и проблемы соединения с хабом теперь называют себя по имени.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Изменено</div>
+        <ul class="changes-list">
+          <li><strong>Дневной лимит ИИ — своя карточка.</strong> Когда страница выбирает дневную квоту генераций агентства, расширение больше не пишет «лимит запросов — попробуйте чуть позже»: новая ошибка <code>CG-HUB-09</code> честно говорит, что лимит на сегодня исчерпан и сбросится в полночь UTC</li>
+          <li><strong>Ошибки соединения с хабом диагностируют себя сами.</strong> В настройках видно HTTP-статус и ответ сервера («Hub responded 401: …»), текст ошибки называет, какой именно credential отклонён (токен устройства или общий ключ), а каждый неудачный запрос к хабу пишется в консоль фона с именем операции</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Продуктовые гейты ядра (мало сообщений, лимит Hi, пинг активному фану, нужен черновик) маппятся по машинным кодам ядра (<code>gate_*</code>), а не по тексту сообщений; текстовый матчинг остался фолбэком для старых ядер</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.7.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.7.0</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Починен вход по логину и дочищен легаси-код борда.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li><strong>Вход по логину заработал.</strong> В 1.6.0 кнопка «Войти» в настройках молча не работала (сообщение не доходило до обработчика). Теперь устройство честно получает свой токен</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Изменено</div>
+        <ul class="changes-list">
+          <li><strong>Токен устройства — везде.</strong> Проверка соединения, профили фанов и телеметрия теперь тоже предпочитают токен устройства; общий API-ключ остаётся запасным входом ещё на один релиз</li>
+          <li><strong>Легаси-пересборка борда удалена.</strong> Скрытый флаг <code>spendersLegacyRebuild</code> и старый путь «~150 запросов к Fansly» вырезаны — рейтинг только из ядра</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.6.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.6.0</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Большое обновление под капотом: весь ИИ теперь работает через ядро агентства, а борд топ-спендеров стал мгновенным.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Изменено</div>
+        <ul class="changes-list">
+          <li><strong>ИИ через ядро.</strong> <code>Reply</code>/<code>Polish</code>/<code>Hi</code>/<code>Ping</code>/<code>Scan</code> и остальные фичи больше не ходят к Anthropic/OpenRouter напрямую — генерация идёт через сервер агентства. Локальные API-ключи больше не нужны: их поля исчезли из настроек, а сохранённые значения удаляются при обновлении</li>
+          <li><strong>Вход по логину.</strong> В настройках появился вход по логину/паролю (устройство получает свой токен). Старый общий API-ключ хаба пока работает как запасной вариант</li>
+          <li><strong>Борд топ-спендеров — из ядра.</strong> Рейтинг приходит одним запросом с честной отметкой «данные на …» вместо пересборки из ~150 запросов к Fansly. Открывается сразу, квоту Fansly почти не тратит</li>
+          <li><strong>Персоналии живут в ядре.</strong> Список и правки персон синхронизируются с сервером; привязки аккаунтов остаются локальными</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Разрешения на <code>api.anthropic.com</code> и <code>openrouter.ai</code> удалены из манифеста</li>
+          <li>Выбор модели и «reasoning» на клиенте убраны — моделями управляет ядро</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.5.6 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.6</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -1478,7 +1562,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.4.0 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
+  <p>v1.7.1 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
 </footer>
 
 </body>
