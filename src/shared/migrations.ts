@@ -1,4 +1,6 @@
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   DEEP_DEFAULT_MESSAGE_COUNT,
   IMPROVE_DEFAULT_MESSAGE_COUNT,
   PING_DEFAULT_MESSAGE_COUNT,
@@ -34,7 +36,15 @@ export function createSeedState(): PersistedState {
   };
 }
 
-function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined): Settings {
+interface SecretCustody {
+  deviceToken: unknown;
+  apiKey: unknown;
+}
+
+function migrateSettingsRecord(
+  raw: Record<string, unknown> | null | undefined,
+  custody: SecretCustody,
+): Settings {
   const defaults = createDefaultSettings();
   // Stage 32 (v9): vendor keys and model/reasoning selections are DROPPED —
   // AI rides the kernel; models are kernel config. Old fields fall away here.
@@ -42,15 +52,26 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
   // deleted; the kernel query is the only ranking source.
   // 1.8.0 (v12): uiTheme ADDED (system | light | dark) — the family restyle
   // ships switchable light/dark; pre-v12 installs default to 'system'.
+  // 1.8.1 (v13, A41/I116-4): hub credentials MOVED to their own top-level
+  // storage keys. Hydration precedence: the custody key wins whenever it is
+  // a string (post-migration truth — a stale v12-shaped settings blob must
+  // never resurrect an old token); the blob value is the one-release
+  // fallback read for pre-v13 data.
   return {
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
     agencyHubApiKey:
-      typeof raw?.agencyHubApiKey === 'string' ? raw.agencyHubApiKey : defaults.agencyHubApiKey,
+      typeof custody.apiKey === 'string'
+        ? custody.apiKey
+        : typeof raw?.agencyHubApiKey === 'string'
+          ? raw.agencyHubApiKey
+          : defaults.agencyHubApiKey,
     agencyHubDeviceToken:
-      typeof raw?.agencyHubDeviceToken === 'string'
-        ? raw.agencyHubDeviceToken
-        : defaults.agencyHubDeviceToken,
+      typeof custody.deviceToken === 'string'
+        ? custody.deviceToken
+        : typeof raw?.agencyHubDeviceToken === 'string'
+          ? raw.agencyHubDeviceToken
+          : defaults.agencyHubDeviceToken,
     quickMessageCount: Number(raw?.quickMessageCount ?? defaults.quickMessageCount),
     pingMessageCount: Number(raw?.pingMessageCount ?? raw?.quickMessageCount ?? defaults.pingMessageCount),
     improveMessageCount: Number(raw?.improveMessageCount ?? defaults.improveMessageCount),
@@ -68,6 +89,34 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
 
 type MigrationRecord = Record<string, unknown>;
 
+/** The persisted `settings` blob (v13+): everything EXCEPT the credentials,
+ * which live in their own storage keys (per-key custody, A41/I116-4). */
+export function stripSecretSettings(
+  settings: Settings,
+): Omit<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'> {
+  const {
+    agencyHubApiKey: _apiKey,
+    agencyHubDeviceToken: _deviceToken,
+    ...persisted
+  } = settings;
+  return persisted;
+}
+
+/** In-memory PersistedState → the v13 storage.local layout: credentials as
+ * their own keys, settings blob stripped of them. Every full-state persist
+ * MUST go through this — writing the in-memory shape verbatim would put
+ * secrets back into the blob and reopen the RMW clobber. */
+export function serializePersistedState(
+  state: PersistedState,
+): Record<string, unknown> {
+  return {
+    ...state,
+    settings: stripSecretSettings(state.settings),
+    [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: state.settings.agencyHubDeviceToken,
+    [AGENCY_HUB_API_KEY_STORAGE_KEY]: state.settings.agencyHubApiKey,
+  };
+}
+
 export interface MigrationStep {
   toVersion: number;
   migrate: (record: MigrationRecord) => MigrationRecord;
@@ -78,9 +127,13 @@ function normalizePersistedRecord(
   schemaVersion: number,
 ): PersistedState {
   const defaults = createSeedState();
+  const custody: SecretCustody = {
+    deviceToken: record[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY],
+    apiKey: record[AGENCY_HUB_API_KEY_STORAGE_KEY],
+  };
   const settings = record.settings && typeof record.settings === 'object'
-    ? migrateSettingsRecord(record.settings as Record<string, unknown>)
-    : defaults.settings;
+    ? migrateSettingsRecord(record.settings as Record<string, unknown>, custody)
+    : migrateSettingsRecord(null, custody);
 
   const personalities = Array.isArray(record.personalities) ? record.personalities : defaults.personalities;
   const accountMappings = record.accountMappings && typeof record.accountMappings === 'object'

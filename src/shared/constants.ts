@@ -7,9 +7,16 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 12;
+export const STORAGE_SCHEMA_VERSION = 13;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
+// 1.8.1 (v13, A41/I116-4): hub credentials live in their OWN storage.local
+// keys (per-key custody, atomic single-key set) — the options page's
+// read-modify-write of the `settings` blob can no longer clobber a token
+// issued mid-edit. The in-memory Settings shape still carries both fields
+// (hydrated at load); only the PERSISTED layout changed.
+export const AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY = 'agencyHubDeviceToken';
+export const AGENCY_HUB_API_KEY_STORAGE_KEY = 'agencyHubApiKey';
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,

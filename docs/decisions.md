@@ -277,3 +277,26 @@ re-vendor anywhere (plan's cross-review contract-law note therefore moot).
 No legacy-fallback resurrection (deleted in 1.7.0/storage v11 — would
 restore the ~150-calls-per-10-min pattern the migration killed). Pinned in
 the spenders-service and spenders-board-controller suites.
+
+**E19 (2026-07-11).** Storage v13 — per-key credential custody (core plan
+W9.4 / A41/I116-4, the E10 "future hardening" note's first half). The v12
+layout kept `agencyHubDeviceToken` (and the legacy key) inside the `settings`
+blob while every `saveSettings` was a whole-blob read-modify-write — an
+options-page debounced save racing a token issuance could persist the stale
+token over the fresh one. v13 moves BOTH hub credentials to their own
+storage.local keys: the persisted blob never carries them
+(`stripSecretSettings` / `serializePersistedState` — every full-state persist
+goes through the serializer), `saveSettings` writes a custody key only when
+the patch names it as an own property (callers state intent per key; the
+options page never names the token), and hydration precedence is custody-key-
+wins-when-string so a stale v12-shaped blob write can never resurrect an old
+token. One-release fallback READ of v12 blobs kept (the migration write is
+the move). In-memory `Settings` shape is unchanged — consumers still read
+`settings.agencyHub*`; the StorageCoordinator seeds custody keys from memory
+when replaying storage changes so a secret-free blob change cannot blank the
+token in its view. The custody keys joined UI_RELEVANT_KEYS (a token
+issuance changes hub readiness without touching the blob). NOT done (E10's
+second half, unchanged): moving credentials out of content-script-readable
+storage entirely — still tracked for the chatter-key-deletion release.
+Pinned in tests/storage-v13-token-custody.test.ts (10 cases, incl. the
+interleaved stale-save race verbatim).

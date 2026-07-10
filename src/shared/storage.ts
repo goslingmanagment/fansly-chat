@@ -1,4 +1,6 @@
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   IMPROVE_MAX_MESSAGE_COUNT,
@@ -16,7 +18,12 @@ import {
   resolveCanonicalAccountId,
 } from './account-aliases.js';
 import { normalizeAgencyHubBaseUrl } from './agency-hub.js';
-import { createDefaultSettings, migrateState } from './migrations.js';
+import {
+  createDefaultSettings,
+  migrateState,
+  serializePersistedState,
+  stripSecretSettings,
+} from './migrations.js';
 import {
   normalizeSavedPersonality,
   reconcileBundledPersonalities,
@@ -67,7 +74,10 @@ export async function loadStorageState(): Promise<PersistedState> {
     (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION ||
     personalitiesChanged
   ) {
-    await browser.storage.local.set(state);
+    // v13 (A41/I116-4): full-state persists go through the serializer —
+    // credentials land in their own keys, never back into the blob. The
+    // v12→v13 pass IS this write: it moves the secrets out of the blob.
+    await browser.storage.local.set(serializePersistedState(state));
   }
 
   return state;
@@ -108,10 +118,24 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   };
 }
 
+/** v13 (A41/I116-4) custody contract: the credentials are written ONLY when
+ * the patch names them as own properties — callers state intent per key. The
+ * settings blob itself never carries them, so a read-modify-write racing a
+ * token issuance can no longer clobber the fresh token (the pre-v13 bug:
+ * options-page debounced saves rewrote the whole blob, stale token included). */
 export async function saveSettings(settingsPatch: Partial<Settings>): Promise<Settings> {
   const state = await loadStorageState();
   const nextSettings = sanitizeSettings({ ...state.settings, ...settingsPatch });
-  await browser.storage.local.set({ settings: nextSettings });
+  const items: Record<string, unknown> = {
+    settings: stripSecretSettings(nextSettings),
+  };
+  if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubDeviceToken')) {
+    items[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = nextSettings.agencyHubDeviceToken;
+  }
+  if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubApiKey')) {
+    items[AGENCY_HUB_API_KEY_STORAGE_KEY] = nextSettings.agencyHubApiKey;
+  }
+  await browser.storage.local.set(items);
   return nextSettings;
 }
 
