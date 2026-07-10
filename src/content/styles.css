@@ -1,30 +1,117 @@
 /* ============================================================
-   ChatGoose — Fansly-native theme
-   Dark navy UI that blends with Fansly's design language.
+   ChatGoose — family theme (desktop + core design language)
+   Warm paper + terracotta, with a dark twin behind one class
+   (.chatgoose-theme-dark on <html>) as a pure variable swap —
+   the desktop app's theming discipline. Terracotta is the one
+   accent; green is reserved for money; AI-authored text is
+   serif; numbers are mono.
    All classes prefixed with chatgoose- to avoid collisions.
    ============================================================ */
 
 :root {
-  --chatgoose-bg: rgba(27, 30, 46, 0.97);
-  --chatgoose-panel: #1f2236;
-  --chatgoose-panel-soft: #252840;
-  --chatgoose-panel-elevated: #2a2d4a;
-  --chatgoose-text: #e8e8f0;
-  --chatgoose-muted: #7a7d95;
-  --chatgoose-accent: #5b8af5;
-  --chatgoose-accent-hover: #4a7ae3;
-  --chatgoose-accent-soft: #8bb0ff;
-  --chatgoose-danger: #f87171;
-  --chatgoose-success: #34d399;
-  --chatgoose-warning: #fbbf24;
-  --chatgoose-border: rgba(255, 255, 255, 0.05);
-  --chatgoose-border-accent: rgba(91, 138, 245, 0.18);
-  --chatgoose-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  --chatgoose-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  color-scheme: dark;
+  /* Surfaces — desktop light ladder */
+  --chatgoose-bg0: #efece4;
+  --chatgoose-bg1: #faf9f5;
+  --chatgoose-bg2: #f2f0e9;
+  --chatgoose-bg3: #e8e5da;
+  --chatgoose-line: #e2dfd3;
+  --chatgoose-line-strong: #cfcaba;
+  --chatgoose-field: #ffffff;
+  /* Text tiers */
+  --chatgoose-ink: #1f1e1d;
+  --chatgoose-ink-mid: #5d5a52;
+  --chatgoose-ink-low: #97928a;
+  /* Terracotta — the family accent, identical in light and dark */
+  --chatgoose-clay: #d97757;
+  --chatgoose-clay-deep: #c2603f;
+  /* Text-on-clay-tint: deep in light, bright in dark (legibility). */
+  --chatgoose-clay-ink: #c2603f;
+  --chatgoose-clay-bg: #f7e8e1;
+  --chatgoose-clay-line: #e8c3b3;
+  /* Money green (the only other color voice) */
+  --chatgoose-green: #3a7d44;
+  --chatgoose-green-bg: #e9f1e5;
+  --chatgoose-green-line: #c9dcc2;
+  --chatgoose-green-fill: #3a7d44;
+  /* Pending money / attention amber */
+  --chatgoose-amber: #96691c;
+  --chatgoose-amber-bg: #f6efdc;
+  --chatgoose-amber-line: #e4d4a8;
+  /* Semantics */
+  --chatgoose-bad: #bb4430;
+  --chatgoose-warn: #b45309;
+  --chatgoose-online: #3f9e54;
+  /* AI draft fill — warm, slightly lifted */
+  --chatgoose-draft-bg: #f7f1e8;
+  --chatgoose-draft-hover: #f9f3ea;
+  /* Shape */
+  --chatgoose-radius-card: 9px;
+  --chatgoose-radius-chip: 7px;
+  --chatgoose-radius-menu: 11px;
+  --chatgoose-radius-flat: 5px;
+  /* Depth — two soft shadows, no glass */
+  --chatgoose-shadow: 0 2px 6px rgba(31, 30, 29, 0.05);
+  --chatgoose-shadow-pop: 0 10px 28px rgba(31, 30, 29, 0.14);
+  --chatgoose-scrim: rgba(31, 30, 29, 0.2);
+  /* Type — UI sans, serif for AI-authored text, mono for numbers */
+  --chatgoose-font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --chatgoose-font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --chatgoose-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+/* Dark twin — pure token swap (terracotta unchanged; greens/ambers lifted
+   for legibility; green-fill NOT lifted, it carries white text). */
+:root.chatgoose-theme-dark {
+  --chatgoose-bg0: #1b1a17;
+  --chatgoose-bg1: #262420;
+  --chatgoose-bg2: #21201c;
+  --chatgoose-bg3: #33302a;
+  --chatgoose-line: #38352e;
+  --chatgoose-line-strong: #4d4940;
+  --chatgoose-field: #1b1a17;
+  --chatgoose-ink: #e9e6df;
+  --chatgoose-ink-mid: #a39e93;
+  --chatgoose-ink-low: #6f6a60;
+  --chatgoose-clay-ink: #d97757;
+  --chatgoose-clay-bg: #3f2b21;
+  --chatgoose-clay-line: #61412f;
+  --chatgoose-green: #54a263;
+  --chatgoose-green-bg: #233a28;
+  --chatgoose-green-line: #38583f;
+  --chatgoose-amber: #cda04b;
+  --chatgoose-amber-bg: #3a3220;
+  --chatgoose-amber-line: #5c4c29;
+  --chatgoose-bad: #e25549;
+  --chatgoose-warn: #d0863e;
+  --chatgoose-online: #4fb066;
+  --chatgoose-draft-bg: #2e2a21;
+  --chatgoose-draft-hover: #363126;
+  --chatgoose-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  --chatgoose-shadow-pop: 0 10px 28px rgba(0, 0, 0, 0.65);
+  --chatgoose-scrim: rgba(0, 0, 0, 0.5);
 }
 
 /* ─── Root Container ─────────────────────────────────────────── */
+
+/* Scoped to our roots (not the host :root) so Fansly's own scheme is
+   untouched while our selects/inputs get matching UA widgets. */
+#chatgoose-root,
+#chatgoose-overlay-root,
+#chatgoose-toast-root,
+#chatgoose-board-root,
+#chatgoose-cheatsheet-root,
+#chatgoose-launcher-root {
+  color-scheme: light;
+}
+
+:root.chatgoose-theme-dark #chatgoose-root,
+:root.chatgoose-theme-dark #chatgoose-overlay-root,
+:root.chatgoose-theme-dark #chatgoose-toast-root,
+:root.chatgoose-theme-dark #chatgoose-board-root,
+:root.chatgoose-theme-dark #chatgoose-cheatsheet-root,
+:root.chatgoose-theme-dark #chatgoose-launcher-root {
+  color-scheme: dark;
+}
 
 #chatgoose-root {
   margin: 10px 0 8px;
@@ -53,9 +140,9 @@
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--chatgoose-border);
-  border-radius: 14px;
-  background: var(--chatgoose-panel);
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg1);
   box-shadow: var(--chatgoose-shadow);
 }
 
@@ -67,13 +154,13 @@
 }
 
 .chatgoose-pill {
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-muted);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
   display: inline-flex;
   align-items: center;
   padding: 5px 10px;
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
@@ -83,24 +170,25 @@
 /* ─── Base Button ────────────────────────────────────────────── */
 
 .chatgoose-button {
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--chatgoose-text);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink);
   padding: 7px 12px;
-  border-radius: 10px;
+  border-radius: var(--chatgoose-radius-chip);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
 }
 
 .chatgoose-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-button:active:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--chatgoose-clay-bg);
 }
 
 .chatgoose-button:disabled {
@@ -109,21 +197,22 @@
 }
 
 .chatgoose-button-secondary {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: var(--chatgoose-border);
+  background: transparent;
+  border-color: var(--chatgoose-line);
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-button-danger {
-  background: rgba(248, 113, 113, 0.1);
-  border-color: rgba(248, 113, 113, 0.2);
-  color: #fca5a5;
+  background: color-mix(in srgb, var(--chatgoose-bad) 10%, transparent);
+  border-color: color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+  color: var(--chatgoose-bad);
 }
 
 /* ─── Personality Pill ───────────────────────────────────────── */
 
 .chatgoose-personality {
   align-self: center;
-  color: var(--chatgoose-accent-soft);
+  color: var(--chatgoose-ink-mid);
 }
 
 /* ─── Toolbar Layout ─────────────────────────────────────────── */
@@ -136,9 +225,9 @@
   overflow-y: hidden;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 14px;
-  background: var(--chatgoose-panel);
-  border-color: var(--chatgoose-border);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg1);
+  border-color: var(--chatgoose-line);
   box-shadow: var(--chatgoose-shadow);
   scrollbar-width: thin;
 }
@@ -160,13 +249,15 @@
 .chatgoose-toolbar-pill {
   min-height: 30px;
   padding: 0 12px;
-  border-radius: 8px;
-  border-color: var(--chatgoose-border);
-  background: rgba(91, 138, 245, 0.08);
-  color: var(--chatgoose-accent-soft);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  border-radius: 999px;
+  border-color: var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .chatgoose-toolbar-button {
@@ -174,10 +265,10 @@
   min-height: 30px;
   padding: 0 11px;
   flex: 0 0 auto;
-  border-color: var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
-  color: var(--chatgoose-text);
+  border-color: var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  border-radius: var(--chatgoose-radius-chip);
+  color: var(--chatgoose-ink);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -201,8 +292,8 @@
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: #4ade80;
-  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+  background: var(--chatgoose-online);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--chatgoose-online) 18%, transparent);
   transition: opacity 120ms ease;
 }
 
@@ -212,20 +303,21 @@
 }
 
 .chatgoose-toolbar-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-toolbar-button-secondary {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: var(--chatgoose-border);
-  color: var(--chatgoose-muted);
+  background: transparent;
+  border-color: var(--chatgoose-line);
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-toolbar-button-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg2);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-toolbar-button:disabled {
@@ -233,30 +325,31 @@
 }
 
 .chatgoose-toolbar-button-primary {
-  background: rgba(91, 138, 245, 0.14);
-  border-color: var(--chatgoose-border-accent);
-  color: var(--chatgoose-accent-soft);
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-toolbar-button-primary:hover:not(:disabled) {
-  background: rgba(91, 138, 245, 0.22);
-  border-color: rgba(91, 138, 245, 0.28);
+  border-color: var(--chatgoose-clay-ink);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-toolbar-toggle {
   min-height: 28px;
   padding: 0 10px;
   flex: 0 0 auto;
-  border-color: var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--chatgoose-line);
+  background: transparent;
   border-radius: 999px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
   box-shadow: none;
-  transition: all 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-toolbar-button .chatgoose-spinner {
@@ -273,8 +366,8 @@
   right: 4px;
   padding: 0 4px;
   border-bottom-width: 1px;
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--chatgoose-accent-soft);
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink-mid);
   font-size: 9.5px;
   line-height: 1.25;
   pointer-events: none;
@@ -291,15 +384,15 @@
 }
 
 .chatgoose-toolbar-toggle:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg2);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-toolbar-toggle-active {
-  background: rgba(52, 211, 153, 0.12);
-  border-color: rgba(52, 211, 153, 0.24);
-  color: #6ee7b7;
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 /* ─── Personality (pinned right) ─────────────────────────── */
@@ -329,20 +422,20 @@
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-tone-pill:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-tone-pill-active {
-  background: rgba(91, 138, 245, 0.14);
-  border-color: rgba(91, 138, 245, 0.24);
-  color: var(--chatgoose-accent-soft);
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-tone-pill:disabled {
@@ -355,9 +448,9 @@
 .chatgoose-inline-panel {
   display: grid;
   gap: 0;
-  border: 1px solid var(--chatgoose-border);
-  border-radius: 14px;
-  background: var(--chatgoose-panel);
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg1);
   box-shadow: var(--chatgoose-shadow);
   contain: layout style;
   overflow: hidden;
@@ -369,7 +462,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--chatgoose-border);
+  border-bottom: 1px solid var(--chatgoose-line);
   min-height: 36px;
 }
 
@@ -383,7 +476,7 @@
 .chatgoose-inline-panel-title {
   font-size: 12px;
   font-weight: 700;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -395,9 +488,11 @@
 }
 
 .chatgoose-inline-panel-meta-primary {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
-  font-weight: 700;
-  color: var(--chatgoose-text);
+  font-weight: 600;
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-inline-panel-meta-primary[title] {
@@ -413,21 +508,21 @@
 .chatgoose-inline-panel-action {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-muted);
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
   font-size: 13px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-inline-panel-action:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-inline-panel-body {
@@ -442,7 +537,7 @@
 /* ─── Inline Panel — Compact Overrides ──────────────────────── */
 
 .chatgoose-inline-panel {
-  border-radius: 12px;
+  border-radius: var(--chatgoose-radius-card);
 }
 
 .chatgoose-inline-panel .chatgoose-inline-panel-header {
@@ -480,7 +575,7 @@
 }
 
 .chatgoose-inline-panel .chatgoose-compare-summary {
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -501,22 +596,22 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-muted);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-inline-panel .chatgoose-compare-tab:hover:not(.chatgoose-compare-tab-active) {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-inline-panel .chatgoose-compare-tab:focus-visible {
-  outline: 2px solid rgba(91, 138, 245, 0.6);
+  outline: 2px solid var(--chatgoose-clay);
   outline-offset: 2px;
 }
 
@@ -525,18 +620,20 @@
 }
 
 .chatgoose-inline-panel .chatgoose-compare-tab-active {
-  border-color: rgba(91, 138, 245, 0.3);
-  background: rgba(91, 138, 245, 0.12);
-  color: var(--chatgoose-accent-soft);
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-inline-panel .chatgoose-compare-tab-badge {
   padding: 1px 5px;
   border-radius: 999px;
-  background: rgba(52, 211, 153, 0.14);
-  color: #6ee7b7;
+  background: var(--chatgoose-green-bg);
+  color: var(--chatgoose-green);
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .chatgoose-inline-panel .chatgoose-compare-tab .chatgoose-spinner {
@@ -552,7 +649,7 @@
 .chatgoose-inline-panel .chatgoose-card {
   padding: 8px 10px;
   gap: 6px;
-  border-radius: 10px;
+  border-radius: var(--chatgoose-radius-card);
 }
 
 .chatgoose-inline-panel .chatgoose-card-header-row {
@@ -575,7 +672,7 @@
 }
 
 .chatgoose-inline-panel .chatgoose-card-title {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .chatgoose-inline-panel .chatgoose-card-hint,
@@ -584,7 +681,7 @@
 }
 
 .chatgoose-inline-panel .chatgoose-card-text {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -595,19 +692,19 @@
 .chatgoose-inline-panel .chatgoose-button {
   padding: 4px 9px;
   font-size: 12px;
-  border-radius: 7px;
+  border-radius: 6px;
 }
 
 .chatgoose-inline-panel .chatgoose-stream {
   padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--chatgoose-radius-card);
+  font-size: 14px;
   line-height: 1.5;
 }
 
 .chatgoose-inline-panel .chatgoose-inline-error {
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--chatgoose-radius-chip);
   font-size: 11px;
 }
 
@@ -625,9 +722,9 @@
   display: grid;
   gap: 8px;
   padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(251, 191, 36, 0.2);
-  background: var(--chatgoose-panel);
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
   box-shadow: var(--chatgoose-shadow);
 }
 
@@ -639,12 +736,12 @@
 .chatgoose-banner-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-banner-text {
   font-size: 12px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-banner-actions {
@@ -659,11 +756,11 @@
 .chatgoose-input,
 .chatgoose-textarea {
   width: 100%;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--chatgoose-text);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
   padding: 9px 12px;
-  border-radius: 10px;
+  border-radius: var(--chatgoose-radius-chip);
   font-size: 13px;
   transition: border-color 150ms ease;
 }
@@ -672,7 +769,12 @@
 .chatgoose-input:focus,
 .chatgoose-textarea:focus {
   outline: none;
-  border-color: var(--chatgoose-border-accent);
+  border-color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-input::placeholder,
+.chatgoose-textarea::placeholder {
+  color: var(--chatgoose-ink-low);
 }
 
 /* ─── Toast ──────────────────────────────────────────────────── */
@@ -690,12 +792,12 @@
 .chatgoose-toast {
   min-width: 240px;
   max-width: 320px;
-  background: var(--chatgoose-panel);
-  border: 1px solid var(--chatgoose-border);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg1);
+  border: 1px solid var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink);
   padding: 10px 12px;
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  border-radius: var(--chatgoose-radius-menu);
+  box-shadow: var(--chatgoose-shadow-pop);
   display: grid;
   gap: 8px;
   font-size: 13px;
@@ -707,23 +809,32 @@
 }
 
 .chatgoose-toast-secondary {
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
   line-height: 1.45;
 }
 
 .chatgoose-toast-error {
-  border-color: rgba(248, 113, 113, 0.24);
-  background: rgba(34, 17, 21, 0.96);
+  border-color: color-mix(in srgb, var(--chatgoose-bad) 45%, transparent);
+}
+
+.chatgoose-toast-error .chatgoose-toast-primary {
+  color: var(--chatgoose-bad);
 }
 
 .chatgoose-toast-success {
-  border-color: rgba(52, 211, 153, 0.24);
-  background: rgba(14, 28, 24, 0.96);
+  border-color: var(--chatgoose-green-line);
+}
+
+.chatgoose-toast-success .chatgoose-toast-primary {
+  color: var(--chatgoose-green);
 }
 
 .chatgoose-toast-warning {
-  border-color: rgba(251, 191, 36, 0.24);
-  background: rgba(35, 28, 12, 0.96);
+  border-color: var(--chatgoose-amber-line);
+}
+
+.chatgoose-toast-warning .chatgoose-toast-primary {
+  color: var(--chatgoose-amber);
 }
 
 .chatgoose-toast button {
@@ -757,12 +868,11 @@
   overscroll-behavior: contain;
 }
 
+/* Flat scrim — the family refuses decorative blur. */
 .chatgoose-overlay-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: var(--chatgoose-scrim);
   pointer-events: auto;
 }
 
@@ -776,12 +886,10 @@
   max-height: min(84vh, 860px);
   pointer-events: auto;
   padding: 20px;
-  border-radius: 14px;
-  border: 1px solid var(--chatgoose-border);
-  background: var(--chatgoose-panel);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow-pop);
   display: grid;
   gap: 14px;
   overflow-x: hidden;
@@ -810,7 +918,7 @@
 }
 
 .chatgoose-overlay-panel::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--chatgoose-line-strong);
   border-radius: 3px;
 }
 
@@ -828,63 +936,84 @@
   gap: 3px;
 }
 
+/* Micro-caps label — the family "cap" treatment. */
 .chatgoose-eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
+/* Headings speak serif in this family. */
 .chatgoose-title {
+  font-family: var(--chatgoose-font-serif);
   font-size: 20px;
-  font-weight: 700;
-  color: var(--chatgoose-text);
+  font-weight: 600;
+  color: var(--chatgoose-ink);
   letter-spacing: -0.01em;
 }
 
 .chatgoose-subtitle {
   font-size: 13px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-close {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-muted);
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
   font-size: 16px;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background 150ms ease, color 150ms ease;
   flex-shrink: 0;
 }
 
 .chatgoose-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--chatgoose-text);
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
 }
 
 /* ─── Status ─────────────────────────────────────────────────── */
 
 .chatgoose-overlay-status {
   font-size: 13px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 /* ─── Stream Text ────────────────────────────────────────────── */
 
+/* Streaming AI text — the family draft treatment: serif voice inside a
+   dashed terracotta frame on a warm fill. */
 .chatgoose-stream {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.6;
-  font-size: 14px;
-  color: var(--chatgoose-text);
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--chatgoose-border);
+  line-height: 1.55;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 15px;
+  color: var(--chatgoose-ink);
+  background: var(--chatgoose-draft-bg);
+  border: 1px dashed var(--chatgoose-clay-line);
   border-radius: 12px;
   padding: 14px;
+}
+
+/* The streaming tail carries a blinking terracotta caret — the family's
+   "AI is typing" signature. The class lives only on the loading view, so
+   raw-text fallbacks in completed views never blink. */
+.chatgoose-stream-live::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--chatgoose-clay);
+  animation: chatgoose-caret-blink 1s steps(2) infinite;
 }
 
 /* ─── Cards & Parts ──────────────────────────────────────────── */
@@ -894,49 +1023,73 @@
   gap: 10px;
 }
 
+/* AI part card = draft bubble: dashed clay border, warm fill, serif body. */
 .chatgoose-card {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border-radius: 14px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  border: 1px dashed var(--chatgoose-clay-line);
+  background: var(--chatgoose-draft-bg);
+  transition: border-color 150ms ease, background 150ms ease;
 }
 
+.chatgoose-card:hover {
+  border-color: var(--chatgoose-clay-ink);
+  background: var(--chatgoose-draft-hover);
+}
+
+/* The recommended pick borrows the money-green frame. */
 .chatgoose-card-recommended {
-  border-color: rgba(52, 211, 153, 0.2);
-  background: rgba(52, 211, 153, 0.04);
+  border-color: var(--chatgoose-green-line);
+  background: var(--chatgoose-draft-bg);
+}
+
+.chatgoose-card-recommended:hover {
+  border-color: var(--chatgoose-green);
+}
+
+.chatgoose-card-recommended .chatgoose-card-title {
+  color: var(--chatgoose-green);
 }
 
 .chatgoose-card-followup {
-  border-color: rgba(91, 138, 245, 0.15);
-  background: rgba(91, 138, 245, 0.04);
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-draft-bg);
 }
 
 .chatgoose-card-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-card-hint {
   font-size: 12px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-card-status {
   font-size: 12px;
-  color: var(--chatgoose-accent-soft);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-card-text {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.6;
-  font-size: 14px;
-  color: var(--chatgoose-text);
+  line-height: 1.55;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 15px;
+  color: var(--chatgoose-ink);
+}
+
+/* Clicking the draft text inserts it (the Insert button stays for keyboard
+   flow); selection is respected — see the controllers' click guards. */
+.chatgoose-card-text-insertable {
+  cursor: pointer;
 }
 
 .chatgoose-card-actions,
@@ -949,7 +1102,7 @@
 
 .chatgoose-overlay-action-status {
   font-size: 12px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 /* ─── Rating ─────────────────────────────────────────────────── */
@@ -959,17 +1112,19 @@
   align-items: center;
   gap: 12px;
   padding: 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 14px;
-  border: 1px solid var(--chatgoose-border);
+  background: var(--chatgoose-bg2);
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
 }
 
 .chatgoose-rating-badge {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 600;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--chatgoose-radius-card);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -978,45 +1133,45 @@
 }
 
 .chatgoose-rating-excellent {
-  background: rgba(52, 211, 153, 0.2);
-  color: #34d399;
+  background: var(--chatgoose-green-fill);
+  color: #ffffff;
 }
 
 .chatgoose-rating-good {
-  background: rgba(110, 231, 183, 0.2);
-  color: #6ee7b7;
+  background: var(--chatgoose-green-bg);
+  color: var(--chatgoose-green);
 }
 
 .chatgoose-rating-average {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
 }
 
 .chatgoose-rating-below {
-  background: rgba(251, 146, 60, 0.2);
-  color: #fb923c;
+  background: color-mix(in srgb, var(--chatgoose-warn) 16%, transparent);
+  color: var(--chatgoose-warn);
 }
 
 .chatgoose-rating-poor {
-  background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  background: color-mix(in srgb, var(--chatgoose-bad) 16%, transparent);
+  color: var(--chatgoose-bad);
 }
 
 .chatgoose-rating-label {
   font-size: 14px;
   font-weight: 500;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 /* ─── Errors ─────────────────────────────────────────────────── */
 
 .chatgoose-inline-error {
-  border: 1px solid rgba(248, 113, 113, 0.2);
-  background: rgba(248, 113, 113, 0.06);
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+  background: color-mix(in srgb, var(--chatgoose-bad) 8%, transparent);
+  border-radius: var(--chatgoose-radius-chip);
   padding: 10px 12px;
   font-size: 13px;
-  color: #fca5a5;
+  color: var(--chatgoose-bad);
   display: grid;
   gap: 4px;
 }
@@ -1026,17 +1181,17 @@
 }
 
 .chatgoose-error-secondary {
-  color: rgba(252, 165, 165, 0.86);
+  color: color-mix(in srgb, var(--chatgoose-bad) 70%, var(--chatgoose-ink));
   line-height: 1.45;
 }
 
 .chatgoose-inline-note {
-  border: 1px solid rgba(52, 211, 153, 0.18);
-  background: rgba(52, 211, 153, 0.06);
-  border-radius: 10px;
+  border: 1px solid var(--chatgoose-green-line);
+  background: var(--chatgoose-green-bg);
+  border-radius: var(--chatgoose-radius-chip);
   padding: 10px 12px;
   font-size: 13px;
-  color: #6ee7b7;
+  color: var(--chatgoose-green);
 }
 
 /* ─── Layout Helpers ─────────────────────────────────────────── */
@@ -1048,6 +1203,7 @@
 
 /* ─── Spend Strip ────────────────────────────────────────────── */
 
+/* Money speaks mono, tabular. */
 .chatgoose-spend-strip {
   display: grid;
   gap: 1px;
@@ -1058,27 +1214,31 @@
 }
 
 .chatgoose-spend-strip-primary {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 600;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
   line-height: 1.3;
 }
 
 .chatgoose-spend-strip-secondary {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
   line-height: 1.3;
 }
 
-.chatgoose-spend-cache-saved { color: #34d399; }
-.chatgoose-spend-cache-overhead { color: #fbbf24; }
+.chatgoose-spend-cache-saved { color: var(--chatgoose-green); }
+.chatgoose-spend-cache-overhead { color: var(--chatgoose-amber); }
 
 /* ─── Profiling ───────────────────────────────────────────────── */
 
 .chatgoose-profiling {
-  border: 1px solid var(--chatgoose-border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg2);
   overflow: hidden;
 }
 
@@ -1098,18 +1258,19 @@
   display: grid;
   grid-template-columns: minmax(68px, auto) 1fr;
   gap: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   line-height: 1.5;
 }
 
 .chatgoose-profiling-elapsed {
-  color: var(--chatgoose-accent-soft);
+  color: var(--chatgoose-clay-ink);
   font-weight: 600;
 }
 
 .chatgoose-profiling-message {
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-profiling-stage {
@@ -1122,20 +1283,21 @@
 .chatgoose-profiling-stage-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-profiling-stage-duration {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: var(--chatgoose-accent-soft);
+  color: var(--chatgoose-clay-ink);
   white-space: nowrap;
 }
 
 .chatgoose-profiling-stage-detail {
   grid-column: 1 / -1;
   font-size: 11px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
   word-break: break-word;
 }
 
@@ -1154,7 +1316,7 @@
 }
 
 .chatgoose-profiling-reasoning-summary:hover .chatgoose-profiling-stage-label {
-  color: var(--chatgoose-accent-soft);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-profiling-reasoning-summary::-webkit-details-marker {
@@ -1168,9 +1330,9 @@
 /* ─── Debug Inspector ────────────────────────────────────────── */
 
 .chatgoose-debug-inspector {
-  border: 1px solid var(--chatgoose-border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg2);
   overflow: hidden;
 }
 
@@ -1178,16 +1340,17 @@
   cursor: pointer;
   list-style: none;
   padding: 12px 14px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
   transition: color 150ms ease;
 }
 
 .chatgoose-debug-summary:hover {
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-debug-summary::-webkit-details-marker {
@@ -1206,11 +1369,12 @@
 }
 
 .chatgoose-debug-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-debug-text {
@@ -1218,12 +1382,12 @@
   word-break: break-word;
   line-height: 1.5;
   font-size: 12px;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
   padding: 10px;
-  border-radius: 10px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(0, 0, 0, 0.2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-field);
+  font-family: var(--chatgoose-font-mono);
   max-height: 280px;
   overflow-y: auto;
 }
@@ -1237,7 +1401,7 @@
 }
 
 .chatgoose-debug-text::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--chatgoose-line-strong);
   border-radius: 3px;
 }
 
@@ -1253,10 +1417,25 @@ body.chatgoose-scroll-lock {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 1.5px solid rgba(255, 255, 255, 0.1);
-  border-top-color: var(--chatgoose-accent);
+  border: 1.5px solid color-mix(in srgb, var(--chatgoose-ink) 12%, transparent);
+  border-top-color: var(--chatgoose-clay-ink);
   border-radius: 50%;
   animation: chatgoose-spin 0.7s linear infinite;
+}
+
+/* ─── Focus (quality floor: keyboard focus is always visible) ── */
+
+.chatgoose-button:focus-visible,
+.chatgoose-toolbar-button:focus-visible,
+.chatgoose-toolbar-toggle:focus-visible,
+.chatgoose-tone-pill:focus-visible,
+.chatgoose-inline-panel-action:focus-visible,
+.chatgoose-close:focus-visible,
+.chatgoose-board-action:focus-visible,
+.chatgoose-board-chip:focus-visible,
+.chatgoose-launcher:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
 }
 
 /* ─── Animations ─────────────────────────────────────────────── */
@@ -1292,6 +1471,20 @@ body.chatgoose-scroll-lock {
   to { transform: rotate(360deg); }
 }
 
+@keyframes chatgoose-caret-blink {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [id^='chatgoose-'],
+  [id^='chatgoose-'] *,
+  [class*='chatgoose-'] {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ─── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 720px) {
@@ -1314,7 +1507,6 @@ body.chatgoose-scroll-lock {
   .chatgoose-overlay-panel {
     padding: 14px;
     max-height: 92vh;
-    border-radius: 12px;
   }
 
   .chatgoose-title {
@@ -1338,9 +1530,7 @@ body.chatgoose-scroll-lock {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: var(--chatgoose-scrim);
   pointer-events: auto;
   font-family: var(--chatgoose-font);
 }
@@ -1350,17 +1540,19 @@ body.chatgoose-scroll-lock {
   max-height: min(80vh, 720px);
   overflow-y: auto;
   padding: 18px 20px;
-  border-radius: 14px;
-  border: 1px solid var(--chatgoose-border);
-  background: var(--chatgoose-panel);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  color: var(--chatgoose-text);
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow-pop);
+  color: var(--chatgoose-ink);
   animation: chatgoose-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chatgoose-cheatsheet-title {
-  font-size: 14px;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   margin-bottom: 12px;
 }
 
@@ -1386,22 +1578,22 @@ body.chatgoose-scroll-lock {
 
 .chatgoose-cheatsheet-desc {
   font-size: 12.5px;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
 }
 
-/* Reusable key-cap chip — shortcut surfaces and hover-only toolbar hints. */
+/* Reusable key-cap chip — mono, with the 2px bottom edge of a real keycap. */
 .chatgoose-kbd {
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
   padding: 1px 5px;
-  border-radius: 5px;
-  border: 1px solid var(--chatgoose-border);
+  border-radius: var(--chatgoose-radius-flat);
+  border: 1px solid var(--chatgoose-line-strong);
   border-bottom-width: 2px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--chatgoose-accent-soft);
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-ink-mid);
   font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--chatgoose-font-mono);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -1409,7 +1601,7 @@ body.chatgoose-scroll-lock {
 .chatgoose-cheatsheet-footer {
   margin-top: 14px;
   font-size: 11px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
 /* ─── Spenders board ($ / ⌘⇧M) ───────────────────────────────────────────── */
@@ -1428,9 +1620,7 @@ body.chatgoose-scroll-lock {
   align-items: flex-start;
   justify-content: center;
   padding: 28px 20px;
-  background: rgba(0, 0, 0, 0.62);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  background: var(--chatgoose-scrim);
   pointer-events: auto;
   overflow-y: auto;
   font-family: var(--chatgoose-font);
@@ -1441,11 +1631,11 @@ body.chatgoose-scroll-lock {
   flex-direction: column;
   width: min(940px, 100%);
   max-height: 88vh;
-  border-radius: 16px;
-  border: 1px solid var(--chatgoose-border);
-  background: var(--chatgoose-panel);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  color: var(--chatgoose-text);
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow-pop);
+  color: var(--chatgoose-ink);
   overflow: hidden;
   animation: chatgoose-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1456,18 +1646,20 @@ body.chatgoose-scroll-lock {
   justify-content: space-between;
   gap: 16px;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--chatgoose-border);
+  border-bottom: 1px solid var(--chatgoose-line);
 }
 
 .chatgoose-board-title {
-  font-size: 16px;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 17px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .chatgoose-board-subtitle {
   margin-top: 3px;
   font-size: 11.5px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-board-actions {
@@ -1478,18 +1670,19 @@ body.chatgoose-scroll-lock {
 
 .chatgoose-board-action {
   padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--chatgoose-text);
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
   font-size: 12px;
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-board-action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-board-action:disabled {
@@ -1509,41 +1702,45 @@ body.chatgoose-scroll-lock {
   flex-wrap: wrap;
   gap: 6px;
   padding: 12px 20px;
-  border-bottom: 1px solid var(--chatgoose-border);
+  border-bottom: 1px solid var(--chatgoose-line);
 }
 
+/* Filter chips: the family's ink-inversion marks the selected filter. */
 .chatgoose-board-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-text);
+  border: 1px solid transparent;
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-board-chip:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-board-chip-active {
-  background: rgba(91, 138, 245, 0.18);
-  border-color: var(--chatgoose-border-accent);
-  color: var(--chatgoose-accent-soft);
+  background: var(--chatgoose-ink);
+  border-color: var(--chatgoose-ink);
+  color: var(--chatgoose-bg1);
 }
 
 .chatgoose-board-chip-count {
+  font-family: var(--chatgoose-font-mono);
   font-size: 10.5px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
   font-variant-numeric: tabular-nums;
 }
 
 .chatgoose-board-chip-active .chatgoose-board-chip-count {
-  color: var(--chatgoose-accent-soft);
+  color: var(--chatgoose-bg1);
 }
 
 .chatgoose-board-list {
@@ -1558,22 +1755,24 @@ body.chatgoose-scroll-lock {
   align-items: baseline;
   gap: 8px;
   padding: 14px 10px 6px;
-  font-size: 11px;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--chatgoose-muted);
+  letter-spacing: 0.12em;
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-board-section-title {
+  font-family: var(--chatgoose-font);
   font-weight: 600;
-  color: var(--chatgoose-text);
+  color: var(--chatgoose-ink);
   letter-spacing: 0;
   text-transform: none;
   font-size: 12.5px;
 }
 
 .chatgoose-board-section-band {
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-board-section-count {
@@ -1587,29 +1786,30 @@ body.chatgoose-scroll-lock {
   align-items: center;
   gap: 12px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--chatgoose-radius-chip);
   cursor: pointer;
   transition: background 120ms ease;
 }
 
 .chatgoose-board-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--chatgoose-bg2);
 }
 
+/* Selected row: quiet wash + the family's 3px terracotta left bar. */
 .chatgoose-board-row-active {
-  background: rgba(91, 138, 245, 0.14);
-  outline: 1px solid var(--chatgoose-border-accent);
+  background: var(--chatgoose-bg2);
+  box-shadow: inset 3px 0 0 var(--chatgoose-clay);
 }
 
 .chatgoose-board-avatar {
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: var(--chatgoose-radius-menu);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--chatgoose-panel-elevated);
-  color: var(--chatgoose-accent-soft);
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink-mid);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1628,17 +1828,19 @@ body.chatgoose-scroll-lock {
 
 .chatgoose-board-row-handle {
   font-size: 11px;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Money is mono, tabular, green — the row's single color accent. */
 .chatgoose-board-row-amount {
+  font-family: var(--chatgoose-font-mono);
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--chatgoose-success);
+  color: var(--chatgoose-green);
 }
 
 .chatgoose-board-state {
@@ -1648,16 +1850,16 @@ body.chatgoose-scroll-lock {
   gap: 12px;
   padding: 48px 24px;
   text-align: center;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-mid);
   font-size: 13px;
 }
 
 .chatgoose-board-footer {
   padding: 10px 20px;
-  border-top: 1px solid var(--chatgoose-border);
+  border-top: 1px solid var(--chatgoose-line);
   font-size: 11px;
   line-height: 1.6;
-  color: var(--chatgoose-muted);
+  color: var(--chatgoose-ink-low);
 }
 
 /* ─── Floating $ launcher ────────────────────────────────────────────────── */
@@ -1673,20 +1875,20 @@ body.chatgoose-scroll-lock {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  border: 1px solid var(--chatgoose-border-accent);
-  background: var(--chatgoose-panel);
-  color: var(--chatgoose-accent-soft);
-  font-size: 17px;
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-green);
+  font-size: 16px;
   font-weight: 600;
-  font-family: var(--chatgoose-font);
+  font-family: var(--chatgoose-font-mono);
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--chatgoose-shadow);
   opacity: 0.55;
-  transition: opacity 150ms ease, transform 150ms ease, background 150ms ease;
+  transition: opacity 150ms ease, transform 150ms ease, border-color 150ms ease;
 }
 
 .chatgoose-launcher:hover {
   opacity: 1;
   transform: translateY(-1px);
-  background: var(--chatgoose-panel-elevated);
+  border-color: var(--chatgoose-green-line);
 }

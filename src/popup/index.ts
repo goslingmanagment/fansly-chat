@@ -1,5 +1,7 @@
 import popupStyles from './styles.css';
 import { sendRuntimeRequest } from '../shared/protocol.js';
+import { loadStorageState } from '../shared/storage.js';
+import { installUiTheme } from '../shared/theme.js';
 import type { PopupStatus } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatgoose-popup-root');
@@ -34,19 +36,14 @@ function createVersionTag(): HTMLDivElement {
 
 function renderUnavailable(): void {
   root.replaceChildren();
-  root.style.padding = '18px';
-  root.style.display = 'grid';
-  root.style.gap = '14px';
-  root.style.position = 'relative';
 
   const title = document.createElement('div');
   title.textContent = 'ChatGoose';
-  title.style.fontSize = '22px';
-  title.style.fontWeight = '800';
+  title.className = 'chatgoose-popup-name';
 
   const message = document.createElement('div');
   message.textContent = "Couldn't reach ChatGoose. Reopen this popup after it reconnects.";
-  message.style.color = 'var(--chatgoose-muted)';
+  message.className = 'chatgoose-popup-sub';
 
   const button = createButton('Open Settings');
   button.addEventListener('click', () => {
@@ -68,43 +65,50 @@ async function render(): Promise<void> {
   }
 
   root.replaceChildren();
-  root.style.padding = '18px';
-  root.style.display = 'grid';
-  root.style.gap = '14px';
-  root.style.position = 'relative';
 
   const title = document.createElement('div');
-  title.style.display = 'grid';
-  title.style.gap = '4px';
+  title.className = 'chatgoose-popup-title';
   const eyebrow = document.createElement('div');
   eyebrow.textContent = 'ChatGoose';
-  eyebrow.style.fontSize = '12px';
-  eyebrow.style.textTransform = 'uppercase';
-  eyebrow.style.letterSpacing = '0.08em';
-  eyebrow.style.color = 'var(--chatgoose-accent-soft)';
+  eyebrow.className = 'chatgoose-popup-eyebrow';
   const name = document.createElement('div');
   name.textContent = status.accountLabel;
-  name.style.fontSize = '22px';
-  name.style.fontWeight = '800';
+  name.className = 'chatgoose-popup-name';
   const sub = document.createElement('div');
   sub.textContent = status.connected ? 'Fansly session connected' : 'Connection not established';
-  sub.style.color = 'var(--chatgoose-muted)';
+  sub.className = 'chatgoose-popup-sub';
   title.append(eyebrow, name, sub);
 
   const panel = document.createElement('div');
-  panel.style.display = 'grid';
-  panel.style.gap = '8px';
-  panel.style.padding = '14px';
-  panel.style.borderRadius = '18px';
-  panel.style.border = '1px solid var(--chatgoose-border)';
-  panel.style.background = 'rgba(255,255,255,0.04)';
+  panel.className = 'chatgoose-popup-panel';
 
   const row1 = document.createElement('div');
   row1.textContent = `Account: ${status.accountId ?? 'Not connected'}`;
   const row2 = document.createElement('div');
   row2.textContent = `Conversation: ${status.groupId ?? 'No active chat'}`;
-  row2.style.color = 'var(--chatgoose-muted)';
+  row2.className = 'chatgoose-popup-meta';
   panel.append(row1, row2);
+
+  // Quota row: only when this UTC day produced an observation (a generation's
+  // meta frame or a denial) — no row beats a stale or made-up number.
+  const quota = status.aiQuota;
+  if (quota && (quota.exhausted || quota.remainingRequestsToday !== null)) {
+    const quotaRow = document.createElement('div');
+    quotaRow.className = 'chatgoose-popup-quota';
+    if (quota.exhausted) {
+      quotaRow.classList.add('chatgoose-popup-quota-exhausted');
+      quotaRow.textContent = 'AI quota used up for today — resets at 00:00 UTC';
+    } else {
+      const count = document.createElement('span');
+      count.className = 'chatgoose-popup-quota-num';
+      count.textContent = String(quota.remainingRequestsToday);
+      quotaRow.append('AI quota: ', count, ' requests left today');
+      if ((quota.remainingRequestsToday ?? 0) <= 20) {
+        quotaRow.classList.add('chatgoose-popup-quota-low');
+      }
+    }
+    panel.append(quotaRow);
+  }
 
   const button = createButton('Open Settings');
   button.addEventListener('click', () => {
@@ -115,4 +119,9 @@ async function render(): Promise<void> {
 }
 
 injectStyles();
+// Theme must never block the popup: without readable settings it stays on
+// the light default.
+void loadStorageState()
+  .then((state) => installUiTheme(state.settings.uiTheme))
+  .catch(() => {});
 void render();

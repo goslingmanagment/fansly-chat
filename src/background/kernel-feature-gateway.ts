@@ -14,6 +14,7 @@ import { clientVersionHeaders } from '../shared/client-version.js';
 import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { resolveHubBearer } from './agency-hub-client.js';
+import { recordQuotaDenied, recordQuotaSnapshot } from './quota-tracker.js';
 
 export interface KernelFeatureClientContext {
   transcript: string;
@@ -169,6 +170,12 @@ export function createKernelFeatureGateway(
       const handleFrame = (frame: AiGatewayStreamFrame): void => {
         switch (frame.type) {
           case 'meta':
+            // The meta frame's quota snapshot feeds the popup indicator —
+            // fire-and-forget so a storage hiccup can't stall the stream.
+            void recordQuotaSnapshot(
+              frame.pageLabel,
+              frame.quota.remainingRequestsToday,
+            );
             callbacks.onMeta?.({
               requestId: frame.requestId,
               clientRequestId: frame.clientRequestId,
@@ -242,7 +249,11 @@ export function createKernelFeatureGateway(
       try {
         await handle.done;
       } catch (error) {
-        throw toChatGooseError(error);
+        const mapped = toChatGooseError(error);
+        if (mapped.key === 'hub_quota_exceeded') {
+          void recordQuotaDenied(request.pageLabel);
+        }
+        throw mapped;
       }
       if (!done) {
         // Stream ended without the terminal frame — fail closed, never

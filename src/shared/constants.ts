@@ -7,7 +7,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 11;
+export const STORAGE_SCHEMA_VERSION = 12;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const SUMMARY_EVICTION_COUNT = 10;
@@ -141,6 +141,7 @@ export const DEFAULT_SETTINGS: Settings = {
   deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
   debugMode: false,
   promptCachingEnabled: true,
+  uiTheme: 'system',
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

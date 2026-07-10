@@ -17,6 +17,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       deepMessageCount: 500,
       debugMode: false,
       promptCachingEnabled: true,
+      uiTheme: 'system',
     },
     personalities: [],
     accountMappings: {},

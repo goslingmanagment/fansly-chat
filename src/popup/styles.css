@@ -1,34 +1,153 @@
+/* ChatGoose popup — family theme (desktop / core "warm paper"); dark is a
+   pure token swap behind .chatgoose-theme-dark on <html>. */
+
 :root {
-  --chatgoose-bg: #1b1e2e;
-  --chatgoose-panel: #1f2236;
-  --chatgoose-text: #e8e8f0;
-  --chatgoose-muted: #7a7d95;
-  --chatgoose-accent: #5b8af5;
-  --chatgoose-accent-soft: #8bb0ff;
-  --chatgoose-success: #34d399;
-  --chatgoose-danger: #f87171;
-  --chatgoose-border: rgba(255, 255, 255, 0.05);
-  --chatgoose-border-accent: rgba(91, 138, 245, 0.18);
+  --chatgoose-bg0: #efece4;
+  --chatgoose-bg1: #faf9f5;
+  --chatgoose-bg2: #f2f0e9;
+  --chatgoose-bg3: #e8e5da;
+  --chatgoose-line: #e2dfd3;
+  --chatgoose-line-strong: #cfcaba;
+  --chatgoose-ink: #1f1e1d;
+  --chatgoose-ink-mid: #5d5a52;
+  --chatgoose-ink-low: #97928a;
+  --chatgoose-clay: #d97757;
+  --chatgoose-clay-deep: #c2603f;
+  --chatgoose-clay-ink: #c2603f;
+  --chatgoose-clay-bg: #f7e8e1;
+  --chatgoose-clay-line: #e8c3b3;
+  --chatgoose-green: #3a7d44;
+  --chatgoose-green-bg: #e9f1e5;
+  --chatgoose-green-line: #c9dcc2;
+  --chatgoose-amber: #96691c;
+  --chatgoose-amber-bg: #f6efdc;
+  --chatgoose-amber-line: #e4d4a8;
+  --chatgoose-bad: #bb4430;
+  --chatgoose-radius-card: 9px;
+  --chatgoose-radius-chip: 7px;
+  --chatgoose-radius-menu: 11px;
+  --chatgoose-shadow: 0 2px 6px rgba(31, 30, 29, 0.05);
+  --chatgoose-font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --chatgoose-font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --chatgoose-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+
+:root.chatgoose-theme-dark {
+  --chatgoose-bg0: #1b1a17;
+  --chatgoose-bg1: #262420;
+  --chatgoose-bg2: #21201c;
+  --chatgoose-bg3: #33302a;
+  --chatgoose-line: #38352e;
+  --chatgoose-line-strong: #4d4940;
+  --chatgoose-ink: #e9e6df;
+  --chatgoose-ink-mid: #a39e93;
+  --chatgoose-ink-low: #6f6a60;
+  --chatgoose-clay-ink: #d97757;
+  --chatgoose-clay-bg: #3f2b21;
+  --chatgoose-clay-line: #61412f;
+  --chatgoose-green: #54a263;
+  --chatgoose-green-bg: #233a28;
+  --chatgoose-green-line: #38583f;
+  --chatgoose-amber: #cda04b;
+  --chatgoose-amber-bg: #3a3220;
+  --chatgoose-amber-line: #5c4c29;
+  --chatgoose-bad: #e25549;
+  --chatgoose-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
 body {
   margin: 0;
-  background: var(--chatgoose-bg);
-  color: var(--chatgoose-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--chatgoose-bg0);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font);
   font-size: 14px;
   min-width: 320px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+#chatgoose-popup-root {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  position: relative;
+}
+
+/* Brand eyebrow: terracotta micro-caps. */
+.chatgoose-popup-eyebrow {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-popup-title {
+  display: grid;
+  gap: 4px;
+}
+
+/* The account name is a heading — headings speak serif. */
+.chatgoose-popup-name {
+  font-family: var(--chatgoose-font-serif);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.chatgoose-popup-sub {
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-popup-panel {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow);
+  font-size: 13px;
+}
+
+.chatgoose-popup-meta {
+  color: var(--chatgoose-ink-mid);
+}
+
+/* AI-quota row: quiet by default; amber when the day's budget runs low,
+   red once the kernel has denied. The count is mono — numbers always are. */
+.chatgoose-popup-quota {
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-popup-quota-num {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-popup-quota-low,
+.chatgoose-popup-quota-low .chatgoose-popup-quota-num {
+  color: var(--chatgoose-amber);
+}
+
+.chatgoose-popup-quota-exhausted {
+  color: var(--chatgoose-bad);
+  font-weight: 600;
+}
+
+/* Primary action: the family terracotta button. */
 .chatgoose-button {
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--chatgoose-text);
-  padding: 7px 12px;
-  border-radius: 10px;
+  border: 1px solid var(--chatgoose-clay);
+  background: var(--chatgoose-clay);
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: var(--chatgoose-radius-chip);
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -37,8 +156,13 @@ body {
 }
 
 .chatgoose-button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--chatgoose-clay-deep);
+  border-color: var(--chatgoose-clay-deep);
+}
+
+.chatgoose-button:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
 }
 
 .chatgoose-version-tag {
@@ -46,12 +170,13 @@ body {
   top: 12px;
   right: 12px;
   padding: 4px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--chatgoose-line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-muted);
-  font-size: 11px;
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-low);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
   line-height: 1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   pointer-events: none;
 }

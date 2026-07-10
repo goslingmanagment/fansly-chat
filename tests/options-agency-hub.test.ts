@@ -44,6 +44,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       deepMessageCount: 200,
       debugMode: false,
       promptCachingEnabled: true,
+      uiTheme: 'system',
       ...overrides,
     },
     personalities: [

@@ -19,6 +19,7 @@ export function createDefaultSettings(): Settings {
     deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT,
     debugMode: false,
     promptCachingEnabled: true,
+    uiTheme: 'system',
   };
 }
 
@@ -39,6 +40,8 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
   // AI rides the kernel; models are kernel config. Old fields fall away here.
   // 1.7.0 (v11): spendersLegacyRebuild DROPPED — the legacy board rebuild is
   // deleted; the kernel query is the only ranking source.
+  // 1.8.0 (v12): uiTheme ADDED (system | light | dark) — the family restyle
+  // ships switchable light/dark; pre-v12 installs default to 'system'.
   return {
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
@@ -56,6 +59,10 @@ function migrateSettingsRecord(raw: Record<string, unknown> | null | undefined):
     promptCachingEnabled: Boolean(
       raw?.promptCachingEnabled ?? defaults.promptCachingEnabled,
     ),
+    uiTheme:
+      raw?.uiTheme === 'light' || raw?.uiTheme === 'dark' || raw?.uiTheme === 'system'
+        ? raw.uiTheme
+        : defaults.uiTheme,
   };
 }
 

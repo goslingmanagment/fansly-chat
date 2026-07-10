@@ -56,6 +56,7 @@ import {
   normalizeVariantReplyParts,
 } from '../shared/reply-output.js';
 import { loadStorageState } from '../shared/storage.js';
+import { installUiTheme } from '../shared/theme.js';
 import type {
   LlmSpendSummary,
   BackgroundPortMessage,
@@ -348,6 +349,13 @@ export class ChatGooseContentApp {
 
   init(): void {
     installContentStyles(contentStyles);
+    // Theme rides one class on <html>; resolved from settings + OS scheme,
+    // kept live via storage.onChanged / matchMedia inside installUiTheme.
+    // Never blocks boot: without readable settings it stays on the light
+    // default.
+    void loadStorageState()
+      .then((state) => installUiTheme(state.settings.uiTheme))
+      .catch(() => {});
     this.port.connect();
     startRouteWatcher((groupId) => this.handleRouteChange(groupId));
     this.installKeymap();

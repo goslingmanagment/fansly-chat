@@ -20,6 +20,7 @@ import type {
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
+import { getLatestQuotaSnapshot } from './quota-tracker.js';
 import type { SessionStore } from './session-store.js';
 import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
@@ -85,6 +86,7 @@ export function registerRuntimeApi({
             compareCardCount: 0,
             compareDraftCount: 0,
             accountLabel: 'Not connected',
+            aiQuota: null,
           } satisfies PopupStatus;
         }
 
@@ -134,6 +136,10 @@ export function registerRuntimeApi({
           accountLabel:
             mappedPersonalityName ??
             (accountId ? 'Unmapped account' : 'Not connected'),
+          // Freshest same-day observation across pages: chatters run one
+          // page per browser session, and resolving the exact label would
+          // cost a hub round-trip the popup can't afford.
+          aiQuota: await getLatestQuotaSnapshot(),
         } satisfies PopupStatus;
       }
 
