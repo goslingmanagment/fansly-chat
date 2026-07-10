@@ -200,6 +200,14 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Hub sync failed, summary remains available locally.',
     description: 'ChatGoose kept the local result so the workflow can continue.',
   },
+  hub_quota_exceeded: {
+    key: 'hub_quota_exceeded',
+    code: 'CG-HUB-09',
+    // Kernel AI gateway daily cap (429 quota_denied) — per page per UTC day,
+    // so "try again shortly" would be wrong advice until midnight UTC.
+    message: 'Daily AI generation limit reached.',
+    description: 'This page used up its Agency Hub AI quota for today. It resets at midnight UTC. Ask a manager to raise the cap if this blocks work.',
+  },
   hi_too_many_messages: {
     key: 'hi_too_many_messages',
     code: 'CG-FLOW-09',

@@ -583,6 +583,7 @@ export type UserErrorKey =
   | 'hub_timeout'
   | 'hub_request_failed'
   | 'hub_sync_failed'
+  | 'hub_quota_exceeded'
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
   | 'insertion_failed'
