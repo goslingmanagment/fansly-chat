@@ -59,14 +59,30 @@ export interface KernelFeatureCallbacks {
   onStopReason?: (stopReason: string | null) => void;
 }
 
-/** Kernel product-gate wordings → the extension's CG error keys. Mapped
+/** Kernel product-gate structured codes (#120) → the extension's CG error
+ * keys — matched on the error body's machine code, no message parsing. */
+const KERNEL_GATE_KEYS: Record<string, 'not_enough_history' | 'hi_too_many_messages' | 'ping_blocked' | 'unknown_error'> = {
+  gate_min_messages: 'not_enough_history',
+  gate_hi_greeting_limit: 'hi_too_many_messages',
+  gate_ping_active: 'ping_blocked',
+  gate_draft_required: 'unknown_error',
+};
+
+/** Kernel product-gate denials → the extension's CG error keys. Mapped
  * BEFORE the generic HTTP mapping so gate messages stay user-meaningful
- * (the desktop adapter's recorded pattern). */
+ * (the desktop adapter's recorded pattern). Structured code first; the
+ * wording match stays as a fallback for pre-#120 kernels. */
 function mapKernelGateError(error: KernelApiError): ChatGooseError | null {
   if (error.status !== 400) {
     return null;
   }
   const message = error.message;
+  if (error.code !== null) {
+    const key = KERNEL_GATE_KEYS[error.code];
+    if (key !== undefined) {
+      return new ChatGooseError(key, { message });
+    }
+  }
   if (message.includes('requires at least')) {
     return new ChatGooseError('not_enough_history', { message });
   }
@@ -89,7 +105,12 @@ function toChatGooseError(error: unknown): ChatGooseError {
       return gate;
     }
     if (error.status === 429) {
-      return new ChatGooseError('rate_limited', { message: error.message });
+      // The AI gateway's daily-cap denial ships code "quota_denied" (its
+      // gateway_outcome ledger value) — a day-scoped budget, not a transient
+      // rate limit, so it gets its own card instead of "try again shortly".
+      return error.code === 'quota_denied'
+        ? new ChatGooseError('hub_quota_exceeded', { message: error.message })
+        : new ChatGooseError('rate_limited', { message: error.message });
     }
     if (error.status === 503 || error.status === 502) {
       return new ChatGooseError('service_unavailable', { message: error.message });

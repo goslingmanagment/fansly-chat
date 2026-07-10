@@ -151,6 +151,29 @@ describe('kernel feature gateway', () => {
       .toBe('ping_blocked');
   });
 
+  it('maps kernel gate codes structurally, independent of the message wording (#120)', async () => {
+    const gateByCode = async (code: string): Promise<ChatGooseError> => {
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify({ error: code, message: 'reworded upstream', statusCode: 400 }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }));
+      const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+      try {
+        await gateway.streamFeature(settings(), request(), { onText: () => {} }, new AbortController().signal);
+        throw new Error('expected a throw');
+      } catch (error) {
+        if (error instanceof ChatGooseError) return error;
+        throw error;
+      }
+    };
+
+    expect((await gateByCode('gate_min_messages')).key).toBe('not_enough_history');
+    expect((await gateByCode('gate_hi_greeting_limit')).key).toBe('hi_too_many_messages');
+    expect((await gateByCode('gate_ping_active')).key).toBe('ping_blocked');
+    expect((await gateByCode('gate_draft_required')).key).toBe('unknown_error');
+  });
+
   it('maps quota/provider/auth failures and fails closed on a truncated stream', async () => {
     const failWith = async (response: Response): Promise<ChatGooseError> => {
       const gateway = createKernelFeatureGateway(
@@ -166,6 +189,14 @@ describe('kernel feature gateway', () => {
     };
 
     expect((await failWith(new Response('{"message":"quota"}', { status: 429 }))).key).toBe('rate_limited');
+    // The daily-cap denial carries code "quota_denied" — its own card, not
+    // the transient "try again shortly" rate-limit one (#120).
+    const quotaDenied = await failWith(new Response(
+      '{"error":"quota_denied","message":"ChatMuse AI gateway daily quota exceeded","statusCode":429}',
+      { status: 429 },
+    ));
+    expect(quotaDenied.key).toBe('hub_quota_exceeded');
+    expect(quotaDenied.code).toBe('CG-HUB-09');
     expect((await failWith(new Response('{"message":"down"}', { status: 503 }))).key).toBe('service_unavailable');
     expect((await failWith(new Response('{"message":"nope"}', { status: 401 }))).key).toBe('hub_invalid_api_key');
 
