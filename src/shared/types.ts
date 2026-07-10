@@ -760,8 +760,10 @@ export interface SpenderListEntry {
 
 export interface SpendersListResult {
   entries: SpenderListEntry[];
-  /** When this snapshot was built (epoch ms). */
-  builtAt: number;
+  /** When this snapshot was built (epoch ms). Null = the kernel has never
+   * walked this page's fan earnings (page not ramped) — there IS no
+   * snapshot; W9.3/A20 renders that honestly instead of "updated just now". */
+  builtAt: number | null;
   /** Spenders with lifetime spend > 0 in this snapshot. */
   fanCount: number;
   /** Conversations scanned for spend before ranking. */

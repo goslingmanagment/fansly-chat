@@ -90,7 +90,10 @@ export class SpendersBoardController {
   async show(): Promise<void> {
     this.open = true;
     document.body.classList.add('chatgoose-scroll-lock');
-    if (this.result) {
+    // W9.3/A20: a not-ramped result (builtAt null) is a live question, not a
+    // snapshot — re-ask on every open so the board flips the moment rankings
+    // are enabled kernel-side (the background skips its 10-min cache too).
+    if (this.result && this.result.builtAt !== null) {
       this.renderBoard();
     } else {
       await this.load(false);
@@ -181,6 +184,11 @@ export class SpendersBoardController {
   }
 
   private metaLine(result: SpendersListResult): string {
+    // W9.3/A20: builtAt === null = the kernel never built a snapshot for
+    // this page — claiming a spender count or an "updated …" time would lie.
+    if (result.builtAt === null) {
+      return 'Rankings not enabled for this page yet';
+    }
     const parts = [
       `${result.fanCount} spender${result.fanCount === 1 ? '' : 's'}`,
       `scanned ${result.scannedCount}`,
@@ -234,7 +242,15 @@ export class SpendersBoardController {
     this.rowEls = [];
     this.visibleEntries = [];
 
-    if (result.entries.length === 0) {
+    if (result.builtAt === null) {
+      // Not ramped ≠ zero spenders: the kernel has never walked this page's
+      // earnings, so "no paying fans" would be false. Honest copy instead.
+      const notRamped = document.createElement('div');
+      notRamped.className = 'chatgoose-board-state';
+      notRamped.textContent =
+        "Spender rankings aren't enabled for this page yet. Ask the owner to enable it in the Agency Hub — until then the board has no data to show.";
+      listHost.append(notRamped);
+    } else if (result.entries.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'chatgoose-board-state';
       empty.textContent = 'No paying fans found in the scanned conversations yet.';

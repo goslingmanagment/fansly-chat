@@ -169,6 +169,45 @@ describe('SpendersService (kernel source)', () => {
     expect(kernelSource.fetchTopSpenders).toHaveBeenCalledTimes(2);
   });
 
+  // ── W9.3/A20: not-ramped pages (kernel builtAt null) ─────────────────────
+
+  it('propagates a null builtAt verbatim instead of inventing "now"', async () => {
+    const { service } = makeKernelHarness({
+      snapshot: { builtAt: null, fanCount: 0, entries: [] },
+    });
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.builtAt).toBeNull();
+    expect(result.entries).toEqual([]);
+    expect(result.fanCount).toBe(0);
+  });
+
+  it('never caches a not-ramped result — every open re-asks the kernel', async () => {
+    const { service, kernelSource } = makeKernelHarness({
+      snapshot: { builtAt: null, fanCount: 0, entries: [] },
+    });
+    const sess = kernelSession();
+
+    await service.getList(sess, new AbortController().signal);
+    await service.getList(sess, new AbortController().signal);
+    // No 10-minute pin: both non-refresh calls hit the kernel.
+    expect(kernelSource.fetchTopSpenders).toHaveBeenCalledTimes(2);
+
+    // The moment the kernel starts serving a real snapshot, it lands (and
+    // caches again like any ramped page).
+    kernelSource.fetchTopSpenders.mockResolvedValue({
+      builtAt: '2026-07-10T00:00:00.000Z',
+      fanCount: 1,
+      entries: [
+        { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 1_000 },
+      ],
+    });
+    const ramped = await service.getList(sess, new AbortController().signal);
+    expect(ramped.builtAt).toBe(Date.parse('2026-07-10T00:00:00.000Z'));
+    await service.getList(sess, new AbortController().signal);
+    expect(kernelSource.fetchTopSpenders).toHaveBeenCalledTimes(3);
+  });
+
   it('fails loudly when the page label cannot be resolved', async () => {
     const { service, kernelSource } = makeKernelHarness();
     kernelSource.resolvePageLabelForUsername.mockResolvedValue(null as never);
