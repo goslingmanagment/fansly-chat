@@ -103,6 +103,11 @@ export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 export const AGENCY_HUB_PREFETCH_TIMEOUT_MS = 5_000;
 export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
 export const AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS = 100;
+// W9.4/A26: mirrors the kernel's clientContext.transcript cap (core
+// routes.ts aiFeatureStreamBodySchema: z.string().max(300_000)). A giant
+// live-read transcript must be truncated OLDEST-FIRST client-side instead
+// of 400-ing the whole generation at the kernel boundary.
+export const KERNEL_TRANSCRIPT_MAX_CHARS = 300_000;
 export const AGENCY_HUB_AI_USAGE_REPORT_DEBOUNCE_MS = 1_000;
 export const AGENCY_HUB_AI_USAGE_REPORT_TIMEOUT_MS = 5_000;
 export const AGENCY_HUB_AI_USAGE_REPORT_MAX_ATTEMPTS = 3;
