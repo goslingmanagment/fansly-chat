@@ -790,8 +790,26 @@ async function render(): Promise<void> {
     contentInput.value = personality.content;
     contentInput.rows = 12;
 
+    // W9.2/A7 (E17): built-in personas are read-only — the kernel owns the
+    // builtin voice, and a local edit was silently ignored at generation time
+    // (the kernel assembles from ITS builtin:lora, not from this textarea).
+    // Locking the card ends that silent drift; custom personas sync instead.
+    if (personality.builtin) {
+      nameInput.readOnly = true;
+      contentInput.readOnly = true;
+      nameInput.title = 'Built-in personality — read-only';
+      contentInput.title = 'Built-in personality — read-only. Add a personality to customize a voice.';
+    }
+
     const actions = document.createElement('div');
     actions.className = 'chatgoose-card-actions';
+    if (personality.builtin) {
+      const builtinNote = document.createElement('div');
+      builtinNote.textContent = 'Built-in personality — read-only. Add a personality to customize a voice.';
+      builtinNote.style.fontSize = '12px';
+      builtinNote.style.color = 'var(--chatgoose-ink-mid)';
+      actions.append(builtinNote);
+    }
     if (!personality.builtin) {
       const deleteButton = createButton('Delete', false, true);
       deleteButton.addEventListener('click', async () => {

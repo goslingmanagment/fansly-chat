@@ -362,6 +362,72 @@ export class AgencyHubClient {
     }
   }
 
+  /** W9.2/A7: persona custody is kernel-side (`ai_personas`, Stage 31 — the
+   * same store the desktop picker reads). These three calls are the whole
+   * sync surface; resolution of WHAT to sync lives in persona-sync.ts. */
+  private async resolvePersonaCallContext(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+  ): Promise<{ baseUrl: string; bearer: string }> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl || !bearer) {
+      throw new ChatGooseError('hub_missing_api_key');
+    }
+    if (!await this.hasHostPermission(baseUrl)) {
+      throw new ChatGooseError('hub_missing_permission');
+    }
+    return { baseUrl, bearer };
+  }
+
+  async listAiPersonas(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<Array<{ key: string; displayName: string; systemBlock: string; updatedAt: string }>> {
+    const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
+    try {
+      const response = await this.sdkFor(baseUrl, bearer, signal).aiPersonasList();
+      return response.personas;
+    } catch (error) {
+      throw this.toHubError(error, 'personas list');
+    }
+  }
+
+  async upsertAiPersona(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    key: string,
+    body: { displayName: string; systemBlock: string },
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
+    try {
+      await this.sdkFor(baseUrl, bearer, signal).aiPersonaUpsert({
+        params: { key },
+        body,
+      });
+    } catch (error) {
+      throw this.toHubError(error, 'persona upsert');
+    }
+  }
+
+  async archiveAiPersona(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    key: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
+    try {
+      await this.sdkFor(baseUrl, bearer, signal).aiPersonaArchive({ params: { key } });
+    } catch (error) {
+      // 404 = the kernel never knew this persona — the desired end state
+      // (absent) already holds; deleting an unsynced local persona is not
+      // an error.
+      if (error instanceof KernelApiError && error.status === 404) {
+        return;
+      }
+      throw this.toHubError(error, 'persona archive');
+    }
+  }
+
   async testConnection(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
