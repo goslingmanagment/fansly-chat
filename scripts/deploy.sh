@@ -209,6 +209,96 @@ stamp_changelog_page_version() {
   ' "$CHANGELOG_PAGE_FILE" "$version"
 }
 
+# ── Release hygiene (W9.1/A19): refuse to sign from a wrong tree ──────────
+# Every assert here runs BEFORE `web-ext sign` — a dirty tree, a side branch,
+# an unpushed HEAD, or a version that would downgrade the served feed must
+# fail the deploy before anything irreversible (AMO signing) happens.
+
+semver_lt() {
+  # exit 0 iff $1 < $2 (dot-separated numeric semver)
+  node --input-type=module -e '
+    const [left, right] = process.argv.slice(1);
+    const parse = (value) => value.split(".").map((part) => {
+      const n = Number(part);
+      if (!Number.isInteger(n) || n < 0) throw new Error(`not a semver: ${value}`);
+      return n;
+    });
+    const a = parse(left);
+    const b = parse(right);
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+      const l = a[i] ?? 0;
+      const r = b[i] ?? 0;
+      if (l !== r) process.exit(l < r ? 0 : 1);
+    }
+    process.exit(1);
+  ' "$1" "$2"
+}
+
+read_served_feed_version() {
+  # Prints the currently served feed version, or nothing when the feed is
+  # absent/unreadable (first deploy) — the caller decides what that means.
+  curl --silent --location --fail "${BASE_URL}/updates.json" 2>/dev/null \
+    | node --input-type=module -e '
+        import { readFileSync } from "node:fs";
+        try {
+          const feed = JSON.parse(readFileSync(0, "utf8"));
+          const updates = feed.addons?.["'"$EXTENSION_ID"'"]?.updates ?? [];
+          const version = updates[0]?.version;
+          if (typeof version === "string") process.stdout.write(version);
+        } catch {
+          // unreadable feed — print nothing
+        }
+      ' || true
+}
+
+assert_release_preconditions() {
+  local version="$1"
+
+  log "Release preconditions for ${version}"
+
+  local branch
+  branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+  if [[ "$branch" != "main" ]]; then
+    fail "Releases ship from main; current branch is '$branch'"
+  fi
+
+  if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+    fail "Working tree is dirty — commit (or stash) before deploying; what gets signed must be what is committed"
+  fi
+
+  git -C "$ROOT_DIR" fetch origin main --quiet \
+    || fail "Could not fetch origin/main to verify HEAD is pushed"
+  if ! git -C "$ROOT_DIR" merge-base --is-ancestor HEAD origin/main; then
+    fail "HEAD is not on origin/main — push the release commit before deploying"
+  fi
+
+  if git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+    fail "Tag v${version} already exists — bump the version (tags are release evidence, never reused)"
+  fi
+
+  local served_version
+  served_version="$(read_served_feed_version)"
+  if [[ -n "$served_version" ]]; then
+    if ! semver_lt "$served_version" "$version"; then
+      fail "Served feed already at ${served_version}; ${version} is not newer — no downgrades/re-releases"
+    fi
+    log "Served feed at ${served_version} < ${version} — ok"
+  else
+    log "No readable served feed at ${BASE_URL}/updates.json (first deploy?) — skipping no-downgrade assert"
+  fi
+}
+
+tag_release() {
+  local version="$1"
+  local sha256="$2"
+  local head_commit
+  head_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+
+  log "Tagging v${version} at ${head_commit}"
+  git -C "$ROOT_DIR" tag -a "v${version}" -m "ChatGoose ${version} — signed and served from ${BASE_URL} (xpi sha256:${sha256}); deployed from ${head_commit}" "$head_commit"
+  git -C "$ROOT_DIR" push origin "v${version}"
+}
+
 stamp_release_pages() {
   local version="$1"
 
@@ -264,6 +354,7 @@ main() {
   require_command scp
   require_command curl
   require_command shasum
+  require_command git
 
   require_file "$INSTALL_PAGE_FILE"
   require_file "$GUIDE_PAGE_FILE"
@@ -272,9 +363,6 @@ main() {
 
   load_env
   cd "$ROOT_DIR"
-
-  log "Building extension"
-  pnpm build
 
   local version
   version="$(read_manifest_version "$ROOT_DIR/manifest.json")"
@@ -288,6 +376,12 @@ main() {
   if [[ "$package_version" != "$version" ]]; then
     fail "Version mismatch: package.json=$package_version manifest.json=$version — bump them together"
   fi
+
+  # W9.1/A19: branch/clean-tree/pushed-HEAD/no-downgrade — all before signing.
+  assert_release_preconditions "$version"
+
+  log "Building extension"
+  pnpm build
 
   artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/chatgoose-web-ext.XXXXXX")"
   updates_file="$(mktemp "${TMPDIR:-/tmp}/chatgoose-updates.XXXXXX.json")"
@@ -404,6 +498,10 @@ EOF
   if [[ "$served_version" != "$version" ]]; then
     fail "Served feed version ($served_version) != release version ($version) — the upload did not take"
   fi
+
+  # W9.1/A19: releases carry a tag — the annotated message records what was
+  # actually signed and served, not just what the commit message claims.
+  tag_release "$version" "$sha256"
 
   log "Install page: ${BASE_URL}/"
   log "Install link: $latest_xpi_url"
