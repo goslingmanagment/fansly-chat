@@ -412,11 +412,42 @@
 
 <div class="timeline">
 
+  <!-- 1.8.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.8.0</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Новый фирменный вид со светлой и тёмной темой, вставка ответа кликом и индикатор дневного лимита ИИ.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Изменено</div>
+        <ul class="changes-list">
+          <li><strong>Новый вид.</strong> Расширение переехало на общий стиль инструментов агентства: тёплая палитра с терракотовым акцентом, ответы ИИ — серифом в терракотовой рамке, деньги — моноширинным зелёным. Панель в чате, борд, тосты, попап и настройки — всё в одном языке</li>
+          <li><strong>Светлая и тёмная тема.</strong> В настройках появился выбор: System (по умолчанию, следует за ОС), Light, Dark — действует на все поверхности расширения</li>
+          <li><strong>Вставка кликом.</strong> Клик по тексту черновика вставляет его в поле ответа (кнопка Insert осталась); выделение текста мышью вставку не вызывает. При генерации по тексту бежит терракотовая каретка</li>
+          <li><strong>Лимит ИИ виден заранее.</strong> Попап показывает, сколько генераций осталось на сегодня: тихий счётчик → янтарный при ≤20 → красный, когда лимит исчерпан (сброс в полночь UTC)</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
+        <ul class="changes-list">
+          <li>Настройки: схема v12 (<code>uiTheme</code>); тёмная тема — чистый свап CSS-токенов под одним классом</li>
+          <li>Снапшот квоты из meta-фрейма ядра сохраняется вместо выбрасывания; попап отдаёт свежайший за текущий UTC-день</li>
+          <li>Инъекция стилей не трогает <code>color-scheme</code> хост-страницы; анимации уважают <code>prefers-reduced-motion</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.7.1 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.7.1</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">

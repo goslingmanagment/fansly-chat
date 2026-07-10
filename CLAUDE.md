@@ -10,14 +10,16 @@ to the kernel's SDK + feature lane on the other. The OnlyFans sibling is the
 ChatGoose desktop app (`~/code/chatgoose_desktop_fable`) — separate repo,
 shared kernel.
 
-**Current state (2026-07-07): release 1.6.0 is LIVE on the self-hosted feed
-(https://ext.gosling-agency.ru, AMO-unlisted signing) — the Stage 32 kernel
-cutover shipped: kernel-only AI over the feature lane (SSE), device-token
-sign-in, kernel spenders board, acceptance telemetry, vendor host permissions
-gone from the manifest. The §5 week-watch is running (E7 in the decision
-log). The NEXT release deletes the `spendersLegacyRebuild` fallback and the
-legacy chatter-key path. Toolchain: TS 6 / vitest 4 / pnpm@10.33.1; CI runs
-`pnpm check` on every PR.**
+**Current state (2026-07-10): release 1.8.0 is shipping on the self-hosted
+feed (https://ext.gosling-agency.ru, AMO-unlisted signing) — kernel-only AI
+over the feature lane (SSE), device-token sign-in preferred everywhere,
+kernel-only spenders board (legacy rebuild deleted in 1.7.0), and the E13/E14
+family restyle: shared desktop/core design tokens, switchable light/dark
+(`uiTheme`, storage v12), click-to-insert draft cards, popup AI-quota
+indicator. Releases go from `main` (the old `bar-tone-menu` release branch is
+gone). The legacy chatter-key path is still dual-accepted — delete it only
+once the fleet demonstrably holds device tokens (E9d). Toolchain: TS 6 /
+vitest 4 / pnpm@10.33.1; CI runs `pnpm check` on every PR.**
 
 ## Read these before designing or building anything
 
@@ -51,10 +53,12 @@ legacy chatter-key path. Toolchain: TS 6 / vitest 4 / pnpm@10.33.1; CI runs
 - **Storage migrations are numbered and forward-only** (`createDefaultSettings`
   / migrations — currently v10, `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`
   is the source of truth); every settings shape change ships a migration.
-- **Releases:** merge to `bar-tone-menu` (the release branch), bump
-  `package.json` + `manifest.json` versions together, `scripts/deploy.sh`
-  (web-ext AMO signing → updates.json + sha256 → scp). The deploy script
-  asserts served version == manifest == package.json — don't bypass it.
+- **Releases:** from `main` (the `bar-tone-menu` release branch was retired;
+  1.7.x+ ship straight from main): bump `package.json` + `manifest.json`
+  versions together, update CHANGELOG.md + changelog.html, then
+  `scripts/deploy.sh` (web-ext AMO signing → updates.json + sha256 → scp).
+  The deploy script asserts served version == manifest == package.json —
+  don't bypass it.
 - Keep `docs/decisions.md` current: decisions are recorded in the same change
   that implements them; deletions need tombstones (family law).
 
