@@ -369,7 +369,7 @@ export class InlinePanelController {
     status.append(statusText);
 
     const stream = document.createElement('div');
-    stream.className = 'chatgoose-stream';
+    stream.className = 'chatgoose-stream chatgoose-stream-live';
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
@@ -595,7 +595,7 @@ export class InlinePanelController {
       status.className = 'chatgoose-overlay-status';
       status.textContent = model.progress?.message ?? 'Generating…';
       const stream = document.createElement('div');
-      stream.className = 'chatgoose-stream';
+      stream.className = 'chatgoose-stream chatgoose-stream-live';
       stream.textContent = tab.rawText || 'Waiting for AI…';
       section.append(status, stream);
       return section;
@@ -717,8 +717,16 @@ export class InlinePanelController {
     headerRow.append(actions);
 
     const text = document.createElement('div');
-    text.className = 'chatgoose-card-text';
+    text.className = 'chatgoose-card-text chatgoose-card-text-insertable';
     text.textContent = part.text;
+    text.title = 'Click to insert';
+    text.addEventListener('click', () => {
+      // Selecting draft text (to copy a fragment) must not fire an insert.
+      if (window.getSelection()?.toString()) {
+        return;
+      }
+      void this.insertPart(part);
+    });
 
     card.append(headerRow, text);
     return card;

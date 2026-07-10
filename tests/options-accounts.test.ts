@@ -24,6 +24,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       deepMessageCount: 200,
       debugMode: false,
       promptCachingEnabled: true,
+      uiTheme: 'system',
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     accountMappings: {},

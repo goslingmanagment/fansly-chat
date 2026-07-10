@@ -29,6 +29,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E10 | 2026-07-07 | Pre-ship audit: Bearer-"set" poisoning, key-gated token flow, null-unsafe bearer — all fixed + pinned |
 | E11 | 2026-07-07 | 1.7.0 RELEASED (feed asserts ran in anger); watch device-token adoption + kernel-only board |
 | E12 | 2026-07-07 | Hub connection failures made self-diagnosing: HTTP status + server body reach the options UI, rejection copy names the actual bearer, hub failures always logged (redacted) |
+| E13 | 2026-07-10 | Family restyle: injected UI = desktop dark-twin tokens, popup/options = family light; terracotta accent, green = money-only, serif AI text, mono numbers |
+| E14 | 2026-07-10 | uiTheme setting (system/light/dark, storage v12) supersedes E13's fixed split; click-to-insert draft cards + streaming caret; popup AI-quota indicator off the meta frame |
 
 ## Entries
 
@@ -149,3 +151,59 @@ aware `logWarn` (NOT debug-gated: failures must leave a trace on default
 chatter setups), tagged with the operation name. Server-side distinguishable
 401 reasons (revoked vs unknown vs non-chatter role — `roleCanUseApiKey` is
 chatter-only, so an owner's key reads as "invalid") stay a core-repo follow-up.
+
+**E13 (2026-07-10).** Visual restyle to the family design language (style
+only, no behavior): the extension drops its Fansly-native navy/periwinkle
+theme for the desktop app's palette (which core's dashboard shares).
+Split by surface: the INJECTED UI (toolbar, overlay, inline panel, board,
+toasts, cheatsheet) uses the desktop's dark-twin tokens (`#1b1a17`/`#262420`
+warm charcoal ladder) because it lives inside Fansly's dark page — a cream
+panel there would glare on night shifts; popup + options use the family
+light theme (cream `#efece4` / ivory `#faf9f5`), matching core's dashboard
+and the public pages. Family invariants adopted: terracotta `#d97757` is
+the ONLY accent (constant across themes); green is reserved for money
+(board amounts/tips — mono, tabular); amber = pending/attention; AI-authored
+text renders serif inside dashed-terracotta draft cards ("the machine speaks
+in serif"); numbers/timestamps/keycaps are mono; micro-caps labels
+(10px/0.12em) replace ad-hoc eyebrows; radius scale 9/7/11; two soft
+shadows, backdrop blur removed (family anti-goal); `prefers-reduced-motion`
+respected; `color-scheme` no longer set on the host page's `:root` (scoped
+to chatgoose roots). Token layer: full `--chatgoose-*` custom-property set
+per entry CSS (content dark twin; options/popup light) — popup/options
+inline styles in TS now reference tokens only (no color literals left in
+TS). Fonts: Hanken Grotesk / Source Serif 4 / IBM Plex Mono via Google
+Fonts on extension pages, font-stack fallbacks (Georgia, ui-monospace) in
+the injected UI — no fonts are shipped into Fansly. The dead Outfit font
+link was replaced. Static pages (install/guide/changelog) were already in
+the warm family and are untouched.
+
+**E14 (2026-07-10).** Three owner-approved follow-ups to E13, one change-set:
+(a) **Both themes everywhere** — E13's fixed per-surface split (injected
+dark, pages light) is superseded by a `uiTheme` setting (`system | light |
+dark`, default `system`; storage v11→v12) applied to ALL surfaces. Light is
+the base token set in each entry CSS; dark is a pure variable swap under
+`.chatgoose-theme-dark` on `<html>` (the desktop's theming discipline —
+components read tokens only, no per-component dark styling). Terracotta and
+`green-fill` stay constant across themes; a `--chatgoose-clay-ink` token
+carries text-on-clay-tint (deep in light, bright in dark). Resolution lives
+in `src/shared/theme.ts` (mirrors desktop `resolveUiTheme`), kept live via
+`storage.onChanged` + `matchMedia`; selector in Options → Appearance.
+Content color-scheme is scoped to chatgoose roots, never the host `:root`.
+(b) **Click-to-insert + streaming caret** (desktop UX parity): clicking a
+draft card's text inserts it (guarded — an active text selection never
+fires an insert; the Insert button stays for keyboard flow), and the
+loading stream carries a blinking terracotta caret (`chatgoose-stream-live`,
+loading views only, so raw-text fallbacks never blink). Insert ≠ send —
+the no-send-without-human-action law is untouched.
+(c) **Popup AI-quota indicator**: the kernel's meta frame ships a quota
+snapshot (`remainingRequestsToday`/`remainingMicroUsdToday`) that the
+gateway previously dropped; a new background quota-tracker records it per
+page (storage.session, memory fallback) plus 429 `quota_denied` denials,
+and `getPopupStatus` serves the freshest same-UTC-day snapshot (day-scoped:
+never served across the kernel's 00:00 UTC reset; the popup shows requests
+only — remaining micro-USD is deliberately NOT rendered to keep money
+formatting kernel-side per the no-local-money-math rule). Popup states:
+quiet count → amber ≤20 → red "used up, resets 00:00 UTC". Rejected:
+Reply-as-split-button with tone dropdown (owner: less convenient than the
+tone pill row). Pinned: storage-migration (v12 uiTheme), overlay
+click-to-insert, quota-tracker day-scoping tests.

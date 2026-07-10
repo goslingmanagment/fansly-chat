@@ -102,6 +102,7 @@ describe('isDebugEnabled', () => {
       deepMessageCount: 500,
       debugMode: true,
       promptCachingEnabled: true,
+      uiTheme: 'system',
     })).toBe(true);
   });
 
@@ -116,6 +117,7 @@ describe('isDebugEnabled', () => {
       deepMessageCount: 500,
       debugMode: false,
       promptCachingEnabled: true,
+      uiTheme: 'system',
     })).toBe(false);
   });
 

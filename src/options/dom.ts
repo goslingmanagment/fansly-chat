@@ -6,13 +6,7 @@ export function injectStyles(cssText: string): void {
 
 export function createSection(title: string, description?: string): HTMLElement {
   const wrapper = document.createElement('section');
-  wrapper.style.display = 'grid';
-  wrapper.style.gap = '12px';
-  wrapper.style.padding = '20px';
-  wrapper.style.margin = '20px';
-  wrapper.style.borderRadius = '24px';
-  wrapper.style.border = '1px solid rgba(255,255,255,0.08)';
-  wrapper.style.background = 'rgba(12, 21, 29, 0.88)';
+  wrapper.className = 'chatgoose-section';
 
   const heading = document.createElement('div');
   heading.style.display = 'grid';
@@ -26,8 +20,7 @@ export function createSection(title: string, description?: string): HTMLElement 
   if (description) {
     const copy = document.createElement('div');
     copy.textContent = description;
-    copy.style.color = 'var(--chatgoose-muted)';
-    copy.style.fontSize = '14px';
+    copy.className = 'chatgoose-section-desc';
     heading.append(copy);
   }
 
@@ -41,7 +34,7 @@ export function labeledField(labelText: string, input: HTMLElement): HTMLElement
   wrapper.style.gap = '8px';
   const label = document.createElement('span');
   label.textContent = labelText;
-  label.style.fontWeight = '700';
+  label.style.fontWeight = '600';
   wrapper.append(label, input);
   return wrapper;
 }

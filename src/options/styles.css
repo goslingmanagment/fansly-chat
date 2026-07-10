@@ -1,22 +1,71 @@
+/* ChatGoose settings — family theme (desktop / core "warm paper"): cream
+   canvas, ivory section cards, terracotta as the only accent, serif
+   headings, mono for versions and micro-labels. Dark is a pure token swap
+   behind .chatgoose-theme-dark on <html>. */
+
 :root {
-  --chatgoose-bg: #1b1e2e;
-  --chatgoose-panel: #1f2236;
-  --chatgoose-text: #e8e8f0;
-  --chatgoose-muted: #7a7d95;
-  --chatgoose-accent: #5b8af5;
-  --chatgoose-accent-soft: #8bb0ff;
-  --chatgoose-success: #34d399;
-  --chatgoose-danger: #f87171;
-  --chatgoose-border: rgba(255, 255, 255, 0.05);
-  --chatgoose-border-accent: rgba(91, 138, 245, 0.18);
+  --chatgoose-bg0: #efece4;
+  --chatgoose-bg1: #faf9f5;
+  --chatgoose-bg2: #f2f0e9;
+  --chatgoose-bg3: #e8e5da;
+  --chatgoose-line: #e2dfd3;
+  --chatgoose-line-strong: #cfcaba;
+  --chatgoose-field: #ffffff;
+  --chatgoose-ink: #1f1e1d;
+  --chatgoose-ink-mid: #5d5a52;
+  --chatgoose-ink-low: #97928a;
+  --chatgoose-clay: #d97757;
+  --chatgoose-clay-deep: #c2603f;
+  --chatgoose-clay-ink: #c2603f;
+  --chatgoose-clay-bg: #f7e8e1;
+  --chatgoose-clay-line: #e8c3b3;
+  --chatgoose-green: #3a7d44;
+  --chatgoose-green-bg: #e9f1e5;
+  --chatgoose-green-line: #c9dcc2;
+  --chatgoose-amber: #96691c;
+  --chatgoose-amber-bg: #f6efdc;
+  --chatgoose-amber-line: #e4d4a8;
+  --chatgoose-bad: #bb4430;
+  --chatgoose-radius-card: 9px;
+  --chatgoose-radius-chip: 7px;
+  --chatgoose-radius-menu: 11px;
+  --chatgoose-shadow: 0 2px 6px rgba(31, 30, 29, 0.05);
+  --chatgoose-font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --chatgoose-font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --chatgoose-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+
+:root.chatgoose-theme-dark {
+  --chatgoose-bg0: #1b1a17;
+  --chatgoose-bg1: #262420;
+  --chatgoose-bg2: #21201c;
+  --chatgoose-bg3: #33302a;
+  --chatgoose-line: #38352e;
+  --chatgoose-line-strong: #4d4940;
+  --chatgoose-field: #1b1a17;
+  --chatgoose-ink: #e9e6df;
+  --chatgoose-ink-mid: #a39e93;
+  --chatgoose-ink-low: #6f6a60;
+  --chatgoose-clay-ink: #d97757;
+  --chatgoose-clay-bg: #3f2b21;
+  --chatgoose-clay-line: #61412f;
+  --chatgoose-green: #54a263;
+  --chatgoose-green-bg: #233a28;
+  --chatgoose-green-line: #38583f;
+  --chatgoose-amber: #cda04b;
+  --chatgoose-amber-bg: #3a3220;
+  --chatgoose-amber-line: #5c4c29;
+  --chatgoose-bad: #e25549;
+  --chatgoose-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
 body {
   margin: 0;
-  background: var(--chatgoose-bg);
-  color: var(--chatgoose-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--chatgoose-bg0);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font);
   font-size: 14px;
   max-width: 900px;
   margin: 0 auto;
@@ -24,49 +73,89 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Headings speak serif in this family. */
 h1 {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 h2 {
+  font-family: var(--chatgoose-font-serif);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
+input[type='checkbox'] {
+  accent-color: var(--chatgoose-clay);
+}
+
+/* Section card: ivory panel on the cream canvas. */
+.chatgoose-section {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  margin: 20px;
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow);
+}
+
+.chatgoose-section-desc {
+  color: var(--chatgoose-ink-mid);
+  font-size: 14px;
+}
+
+/* Primary action: the family terracotta button. */
 .chatgoose-button {
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--chatgoose-text);
+  border: 1px solid var(--chatgoose-clay);
+  background: var(--chatgoose-clay);
+  color: #ffffff;
   padding: 7px 12px;
-  border-radius: 10px;
+  border-radius: var(--chatgoose-radius-chip);
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .chatgoose-button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--chatgoose-clay-deep);
+  border-color: var(--chatgoose-clay-deep);
 }
 
+.chatgoose-button:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+}
+
+/* Ghost: quiet wash that warms into the clay tint on hover. */
 .chatgoose-button-secondary {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: var(--chatgoose-border);
+  background: var(--chatgoose-bg2);
+  border-color: var(--chatgoose-line);
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-button-secondary:hover {
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-button-danger {
-  background: rgba(248, 113, 113, 0.1);
-  border-color: rgba(248, 113, 113, 0.2);
-  color: #fca5a5;
+  background: var(--chatgoose-bg1);
+  border-color: color-mix(in srgb, var(--chatgoose-bad) 40%, transparent);
+  color: var(--chatgoose-bad);
 }
 
 .chatgoose-button-danger:hover {
-  background: rgba(248, 113, 113, 0.16);
+  background: var(--chatgoose-bad);
+  border-color: var(--chatgoose-bad);
+  color: #ffffff;
 }
 
 .chatgoose-input,
@@ -74,21 +163,26 @@ h2 {
 .chatgoose-textarea {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--chatgoose-text);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
   padding: 9px 12px;
-  border-radius: 10px;
+  border-radius: var(--chatgoose-radius-chip);
   font-family: inherit;
   font-size: 14px;
   transition: border-color 150ms ease;
+}
+
+.chatgoose-input::placeholder,
+.chatgoose-textarea::placeholder {
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-input:focus,
 .chatgoose-select:focus,
 .chatgoose-textarea:focus {
   outline: none;
-  border-color: var(--chatgoose-border-accent);
+  border-color: var(--chatgoose-clay);
 }
 
 .chatgoose-textarea {
@@ -97,13 +191,14 @@ h2 {
   line-height: 1.6;
 }
 
+/* Inner card: a quiet wash inside a section (personality/connection cards). */
 .chatgoose-card {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border-radius: 14px;
-  border: 1px solid var(--chatgoose-border);
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
 }
 
 .chatgoose-card-actions {
@@ -117,13 +212,14 @@ h2 {
   top: 28px;
   right: 20px;
   padding: 5px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--chatgoose-line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--chatgoose-muted);
-  font-size: 11px;
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-low);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
   line-height: 1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   pointer-events: none;
 }
 

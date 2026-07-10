@@ -152,6 +152,23 @@ describe('migrateState', () => {
     expect(migratedTwice.settings.agencyHubDeviceToken).toBe('agency_hub_device_x');
   });
 
+  it('adds uiTheme on migration from pre-v12 records and keeps a stored choice (idempotent)', () => {
+    // Pre-v12 record: no uiTheme field at all → defaults to 'system'.
+    const legacy = migrateState({
+      schemaVersion: 11,
+      settings: { agencyHubBaseUrl: 'http://localhost:3000' },
+    });
+    expect(legacy.settings.uiTheme).toBe('system');
+
+    // A stored choice survives re-migration; junk falls back to the default.
+    const migrated = migrateState({ schemaVersion: 11, settings: { uiTheme: 'dark' } });
+    expect(migrated.settings.uiTheme).toBe('dark');
+    const remigrated = migrateState(migrated as unknown as Record<string, unknown>);
+    expect(remigrated.settings.uiTheme).toBe('dark');
+    const junk = migrateState({ schemaVersion: 11, settings: { uiTheme: 'neon' } });
+    expect(junk.settings.uiTheme).toBe('system');
+  });
+
   it('seeds pingMessageCount from quickMessageCount when migrating legacy settings', () => {
     const result = migrateState({
       schemaVersion: 4,
@@ -293,6 +310,14 @@ describe('sanitizeSettings', () => {
   it('clamps improveMessageCount within bounds', () => {
     const result = storage.sanitizeSettings({ improveMessageCount: 999 });
     expect(result.improveMessageCount).toBe(200);
+  });
+
+  it('keeps valid uiTheme values and falls back to system for junk', () => {
+    expect(storage.sanitizeSettings({ uiTheme: 'dark' }).uiTheme).toBe('dark');
+    expect(storage.sanitizeSettings({ uiTheme: 'light' }).uiTheme).toBe('light');
+    expect(
+      storage.sanitizeSettings({ uiTheme: 'neon' as unknown as 'dark' }).uiTheme,
+    ).toBe('system');
   });
 
   it('trims API key', () => {

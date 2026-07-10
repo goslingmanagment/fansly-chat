@@ -533,7 +533,9 @@ describe('OverlayController', () => {
     expect(Array.from(grid.children).map((element) => element.className)).toEqual([
       'chatgoose-loading-spend-host',
       'chatgoose-overlay-status',
-      'chatgoose-stream',
+      // The loading stream carries the blinking-caret class; completed views
+      // render plain .chatgoose-stream (no caret on static raw text).
+      'chatgoose-stream chatgoose-stream-live',
       'chatgoose-overlay-actions',
     ]);
     expect(setIntervalSpy).not.toHaveBeenCalled();
@@ -1079,6 +1081,28 @@ describe('OverlayController', () => {
     await vi.waitFor(() => {
       const errorEl = document.querySelector('.chatgoose-inline-error');
       expect(errorEl).not.toBeNull();
+    });
+  });
+
+  // ─── Click-to-insert ─────────────────────────────────────────
+
+  it('clicking the draft text inserts that part', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render(createReplyModel(createPart('Hey there!')));
+
+    const text = document.querySelector<HTMLElement>('.chatgoose-card-text-insertable');
+    expect(text).not.toBeNull();
+    text!.click();
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Hey there!');
     });
   });
 

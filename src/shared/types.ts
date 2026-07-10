@@ -10,6 +10,8 @@ export type ReplyMode = 'default' | 'preferSplit';
 export type ReplyTone = 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
 export type ModelSelectableFeatureType = Exclude<FeatureType, 'improve-draft' | 'hi-greeting'>;
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'max';
+/** UI theme: family tokens, dark = pure variable swap (desktop discipline). */
+export type UiThemeSetting = 'system' | 'light' | 'dark';
 
 // ─── Settings & Storage ──────────────────────────────────────────────────
 
@@ -19,15 +21,13 @@ export interface Settings {
   /** Stage 32: device-bound hub credential (agency_hub_device_…); preferred
    * over agencyHubApiKey when present (kernel dual-acceptance). */
   agencyHubDeviceToken: string;
-  /** Stage 32 Task 4: HIDDEN one-release fallback — true forces the legacy
-   * per-fan Fansly earnings sweep instead of the kernel board query. No UI;
-   * flipped via storage. Deleted next release. */
   quickMessageCount: number;
   pingMessageCount: number;
   improveMessageCount: number;
   deepMessageCount: number;
   debugMode: boolean;
   promptCachingEnabled: boolean;
+  uiTheme: UiThemeSetting;
 }
 
 export interface Personality {
@@ -682,8 +682,20 @@ export interface TabUiState {
   compareDraftCount: number;
 }
 
+/** Freshest kernel AI-quota observation for a page (meta-frame snapshot or a
+ * 429 quota denial); day-scoped — never served across a UTC-midnight reset. */
+export interface AiQuotaStatus {
+  pageLabel: string;
+  /** null = kernel reported no request cap. */
+  remainingRequestsToday: number | null;
+  exhausted: boolean;
+  observedAt: number;
+}
+
 export interface PopupStatus extends TabUiState {
   accountLabel: string;
+  /** null until a generation this UTC day produced a quota observation. */
+  aiQuota: AiQuotaStatus | null;
 }
 
 export interface SessionSnapshotEntry {

@@ -544,7 +544,7 @@ export class OverlayController {
     status.append(statusText);
 
     const stream = document.createElement('div');
-    stream.className = 'chatgoose-stream';
+    stream.className = 'chatgoose-stream chatgoose-stream-live';
     const streamText = document.createTextNode('');
     stream.append(streamText);
 
@@ -971,8 +971,16 @@ export class OverlayController {
     }
 
     const text = document.createElement('div');
-    text.className = 'chatgoose-card-text';
+    text.className = 'chatgoose-card-text chatgoose-card-text-insertable';
     text.textContent = part.text;
+    text.title = 'Click to insert';
+    text.addEventListener('click', () => {
+      // Selecting draft text (to copy a fragment) must not fire an insert.
+      if (window.getSelection()?.toString()) {
+        return;
+      }
+      void this.insertPart(part, { autoPassThrough: options.autoPassThrough });
+    });
 
     const actions = document.createElement('div');
     actions.className = 'chatgoose-card-actions';

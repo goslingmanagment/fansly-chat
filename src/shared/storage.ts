@@ -101,6 +101,10 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     deepMessageCount: Math.min(DEEP_MAX_MESSAGE_COUNT, Math.max(DEEP_MIN_MESSAGE_COUNT, deep)),
     debugMode: Boolean(input.debugMode ?? defaults.debugMode),
     promptCachingEnabled: Boolean(input.promptCachingEnabled ?? defaults.promptCachingEnabled),
+    uiTheme:
+      input.uiTheme === 'light' || input.uiTheme === 'dark' || input.uiTheme === 'system'
+        ? input.uiTheme
+        : defaults.uiTheme,
   };
 }
 

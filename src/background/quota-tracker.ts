@@ -1,0 +1,112 @@
+// AI-quota snapshot tracker. The kernel's meta frame carries a per-request
+// quota snapshot (remaining requests / micro-USD for the UTC day); the
+// gateway used to drop it. This module keeps the freshest snapshot per page
+// so the popup can show quota state BEFORE a chatter hits the 429 wall.
+//
+// Custody: storage.session (survives event-page restarts, dies with the
+// browser session, never syncs). Snapshots are day-scoped — a snapshot from
+// a previous UTC day is expired at read time (the kernel resets at 00:00
+// UTC). Falls back to module memory when storage.session is unavailable
+// (unit tests / exotic builds).
+
+import type { AiQuotaStatus } from '../shared/types.js';
+
+export type AiQuotaSnapshot = AiQuotaStatus;
+
+const STORAGE_KEY = 'aiQuotaByPage';
+
+let memoryFallback: Record<string, AiQuotaSnapshot> = {};
+
+function sessionStorageArea(): browser.storage.StorageArea | null {
+  try {
+    return browser.storage?.session ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function readAll(): Promise<Record<string, AiQuotaSnapshot>> {
+  const area = sessionStorageArea();
+  if (!area) {
+    return memoryFallback;
+  }
+  try {
+    const raw = await area.get(STORAGE_KEY);
+    const value = raw[STORAGE_KEY];
+    return value && typeof value === 'object'
+      ? (value as Record<string, AiQuotaSnapshot>)
+      : {};
+  } catch {
+    return memoryFallback;
+  }
+}
+
+async function writeAll(snapshots: Record<string, AiQuotaSnapshot>): Promise<void> {
+  memoryFallback = snapshots;
+  const area = sessionStorageArea();
+  if (!area) {
+    return;
+  }
+  try {
+    await area.set({ [STORAGE_KEY]: snapshots });
+  } catch {
+    // Memory fallback already holds the data; session storage is best-effort.
+  }
+}
+
+function isSameUtcDay(left: number, right: number): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+export async function recordQuotaSnapshot(
+  pageLabel: string,
+  remainingRequestsToday: number | null,
+): Promise<void> {
+  if (!pageLabel) {
+    return;
+  }
+  const snapshots = await readAll();
+  snapshots[pageLabel] = {
+    pageLabel,
+    remainingRequestsToday,
+    exhausted: remainingRequestsToday === 0,
+    observedAt: Date.now(),
+  };
+  await writeAll(snapshots);
+}
+
+export async function recordQuotaDenied(pageLabel: string): Promise<void> {
+  if (!pageLabel) {
+    return;
+  }
+  const snapshots = await readAll();
+  snapshots[pageLabel] = {
+    pageLabel,
+    remainingRequestsToday: 0,
+    exhausted: true,
+    observedAt: Date.now(),
+  };
+  await writeAll(snapshots);
+}
+
+/** Freshest same-UTC-day snapshot across pages (null when none). */
+export async function getLatestQuotaSnapshot(): Promise<AiQuotaSnapshot | null> {
+  const snapshots = await readAll();
+  const now = Date.now();
+  let latest: AiQuotaSnapshot | null = null;
+  for (const snapshot of Object.values(snapshots)) {
+    if (!isSameUtcDay(snapshot.observedAt, now)) {
+      continue;
+    }
+    if (!latest || snapshot.observedAt > latest.observedAt) {
+      latest = snapshot;
+    }
+  }
+  return latest;
+}

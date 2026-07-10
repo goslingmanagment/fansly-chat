@@ -33,8 +33,10 @@ import {
 } from '../shared/errors.js';
 import { sendRuntimeRequest } from '../shared/protocol.js';
 import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
+import { installUiTheme } from '../shared/theme.js';
 import type {
   Personality,
+  UiThemeSetting,
 } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatgoose-options-root');
@@ -49,6 +51,7 @@ const root = rootElement;
 let renderCleanup: (() => void) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
+let uiThemeInstalled = false;
 
 async function render(): Promise<void> {
   renderCleanup?.();
@@ -58,6 +61,13 @@ async function render(): Promise<void> {
   const sessions = await sendRuntimeRequest('getSessionsSnapshot');
   const state = await loadStorageState();
   const sessionsByAccountId = buildSessionLookup(sessions);
+
+  // One-time: reuse this render's state instead of a second storage read;
+  // installUiTheme keeps itself current afterwards (storage + OS listeners).
+  if (!uiThemeInstalled) {
+    uiThemeInstalled = true;
+    installUiTheme(state.settings.uiTheme);
+  }
 
   root.replaceChildren();
   root.style.paddingBottom = '24px';
@@ -72,10 +82,35 @@ async function render(): Promise<void> {
   title.textContent = 'ChatGoose Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure AI providers, personalities, mappings, and live Fansly connections.';
-  subtitle.style.color = 'var(--chatgoose-muted)';
+  subtitle.textContent = 'Configure generation, Agency Hub sync, personalities, mappings, and live Fansly connections.';
+  subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
+
+  // ─── Appearance ─────────────────────────────────────────────
+  const appearanceSection = createSection(
+    'Appearance',
+    'One family look, light and dark. System follows your OS.',
+  );
+  const themeSelect = document.createElement('select');
+  themeSelect.className = 'chatgoose-select';
+  const themeChoices: Array<{ value: UiThemeSetting; label: string }> = [
+    { value: 'system', label: 'System' },
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+  ];
+  for (const choice of themeChoices) {
+    const option = document.createElement('option');
+    option.value = choice.value;
+    option.textContent = choice.label;
+    themeSelect.append(option);
+  }
+  themeSelect.value = state.settings.uiTheme;
+  themeSelect.addEventListener('change', () => {
+    // installUiTheme's storage listener re-applies the theme on save.
+    void saveSettings({ uiTheme: themeSelect.value as UiThemeSetting });
+  });
+  appearanceSection.append(labeledField('Theme', themeSelect));
 
   // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
   const apiSection = createSection('Generation');
@@ -120,14 +155,14 @@ async function render(): Promise<void> {
   debugLabel.style.display = 'flex';
   debugLabel.style.gap = '10px';
   debugLabel.style.alignItems = 'center';
-  debugLabel.style.fontWeight = '700';
+  debugLabel.style.fontWeight = '600';
   debugLabel.append(debugInput, document.createTextNode('Enable debug mode'));
 
   const promptCachingLabel = document.createElement('label');
   promptCachingLabel.style.display = 'flex';
   promptCachingLabel.style.gap = '10px';
   promptCachingLabel.style.alignItems = 'center';
-  promptCachingLabel.style.fontWeight = '700';
+  promptCachingLabel.style.fontWeight = '600';
   promptCachingLabel.append(
     promptCachingInput,
     document.createTextNode('Enable prompt caching'),
@@ -172,20 +207,20 @@ async function render(): Promise<void> {
   agencyHubKeyRow.append(agencyHubKeyInput, agencyHubToggle);
 
   const agencyHubPermissionStatus = document.createElement('div');
-  agencyHubPermissionStatus.style.fontWeight = '700';
+  agencyHubPermissionStatus.style.fontWeight = '600';
   agencyHubPermissionStatus.style.fontSize = '14px';
 
   const agencyHubPermissionMeta = document.createElement('div');
-  agencyHubPermissionMeta.style.color = 'var(--chatgoose-muted)';
+  agencyHubPermissionMeta.style.color = 'var(--chatgoose-ink-mid)';
   agencyHubPermissionMeta.style.fontSize = '13px';
 
   const agencyHubPermissionButton = createButton('Grant Access', true);
   const agencyHubConnectionStatus = document.createElement('div');
-  agencyHubConnectionStatus.style.fontWeight = '700';
+  agencyHubConnectionStatus.style.fontWeight = '600';
   agencyHubConnectionStatus.style.fontSize = '14px';
 
   const agencyHubConnectionMeta = document.createElement('div');
-  agencyHubConnectionMeta.style.color = 'var(--chatgoose-muted)';
+  agencyHubConnectionMeta.style.color = 'var(--chatgoose-ink-mid)';
   agencyHubConnectionMeta.style.fontSize = '13px';
 
   const agencyHubConnectionButton = createButton('Test Connection', true);
@@ -208,29 +243,29 @@ async function render(): Promise<void> {
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
         agencyHubConnectionStatus.textContent = 'Not tested yet.';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-text)';
+        agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
         agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
         return;
       case 'pending':
         agencyHubConnectionStatus.textContent = 'Connection status updating…';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-text)';
+        agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
         agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
         return;
       case 'testing':
         agencyHubConnectionStatus.textContent = 'Testing connection…';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-text)';
+        agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
         agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
         return;
       case 'connected':
         agencyHubConnectionStatus.textContent = 'Connected ✓';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-success)';
+        agencyHubConnectionStatus.style.color = 'var(--chatgoose-green)';
         agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
         agencyHubConnectionStatus.textContent = `Connection failed: ${failedError.code}`;
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-danger)';
+        agencyHubConnectionStatus.style.color = 'var(--chatgoose-bad)';
         const serverEcho = typeof failedError.httpStatus === 'number'
           ? `Hub responded ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
           : null;
@@ -535,10 +570,10 @@ async function render(): Promise<void> {
 
   const hubSignInButton = createButton('Sign in & issue device token', true);
   const hubSignInStatus = document.createElement('div');
-  hubSignInStatus.style.fontWeight = '700';
+  hubSignInStatus.style.fontWeight = '600';
   hubSignInStatus.style.fontSize = '14px';
   const hubSignInMeta = document.createElement('div');
-  hubSignInMeta.style.color = 'var(--chatgoose-muted)';
+  hubSignInMeta.style.color = 'var(--chatgoose-ink-mid)';
   hubSignInMeta.style.fontSize = '13px';
 
   const renderHubSignInState = (): void => {
@@ -547,8 +582,8 @@ async function render(): Promise<void> {
       ? 'Device token active ✓'
       : 'No device token yet.';
     hubSignInStatus.style.color = hasToken
-      ? 'var(--chatgoose-success)'
-      : 'var(--chatgoose-text)';
+      ? 'var(--chatgoose-green)'
+      : 'var(--chatgoose-ink)';
     if (!hubSignInMeta.textContent) {
       hubSignInMeta.textContent = hasToken
         ? 'Hub requests use the device token; the legacy API key is the fallback.'
@@ -701,6 +736,7 @@ async function render(): Promise<void> {
       browser.permissions.onRemoved.removeListener(handlePermissionChanged);
     });
   }
+  root.append(appearanceSection);
   root.append(apiSection);
   root.append(agencyHubSection);
 
@@ -830,9 +866,9 @@ async function render(): Promise<void> {
     row.style.gap = '12px';
     row.style.alignItems = 'center';
     row.style.padding = '12px';
-    row.style.borderRadius = '16px';
-    row.style.background = 'rgba(255,255,255,0.04)';
-    row.style.border = '1px solid rgba(255,255,255,0.08)';
+    row.style.borderRadius = 'var(--chatgoose-radius-card)';
+    row.style.background = 'var(--chatgoose-bg2)';
+    row.style.border = '1px solid var(--chatgoose-line)';
 
     const label = document.createElement('div');
     label.style.display = 'grid';
@@ -840,12 +876,12 @@ async function render(): Promise<void> {
 
     const labelTitle = document.createElement('div');
     labelTitle.textContent = formatAccountHeading(accountId, session);
-    labelTitle.style.fontWeight = '700';
+    labelTitle.style.fontWeight = '600';
 
     const labelMeta = document.createElement('div');
     labelMeta.textContent = formatAccountMeta(accountId, session);
     labelMeta.style.fontSize = '12px';
-    labelMeta.style.color = 'var(--chatgoose-muted)';
+    labelMeta.style.color = 'var(--chatgoose-ink-mid)';
 
     label.append(labelTitle, labelMeta);
 
@@ -869,7 +905,7 @@ async function render(): Promise<void> {
 
     const info = document.createElement('div');
     info.style.fontSize = '12px';
-    info.style.color = 'var(--chatgoose-muted)';
+    info.style.color = 'var(--chatgoose-ink-mid)';
     const mapped = personalitiesById.get(state.accountMappings[accountId] ?? '');
     info.textContent = `${mapped ? personalityOptionLabel(mapped) : 'Unmapped'} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
 
@@ -880,7 +916,7 @@ async function render(): Promise<void> {
   if (state.knownAccounts.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No Fansly accounts detected yet.';
-    empty.style.color = 'var(--chatgoose-muted)';
+    empty.style.color = 'var(--chatgoose-ink-mid)';
     mappingsTable.append(empty);
   }
 
@@ -908,15 +944,15 @@ async function render(): Promise<void> {
       heading.style.alignItems = 'center';
       const left = document.createElement('div');
       left.textContent = formatAccountHeading(accountId, session);
-      left.style.fontWeight = '700';
+      left.style.fontWeight = '600';
       const right = document.createElement('div');
       right.textContent = session?.connected ? 'Connected' : 'Disconnected';
-      right.style.color = session?.connected ? 'var(--chatgoose-success)' : 'var(--chatgoose-danger)';
+      right.style.color = session?.connected ? 'var(--chatgoose-green)' : 'var(--chatgoose-bad)';
       heading.append(left, right);
       const meta = document.createElement('div');
       meta.textContent = formatAccountMeta(accountId, session);
       meta.style.fontSize = '12px';
-      meta.style.color = 'var(--chatgoose-muted)';
+      meta.style.color = 'var(--chatgoose-ink-mid)';
       card.append(heading, meta);
       sessionsGrid.append(card);
     });
@@ -924,7 +960,7 @@ async function render(): Promise<void> {
   if (connectionRows.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No active sessions captured yet.';
-    empty.style.color = 'var(--chatgoose-muted)';
+    empty.style.color = 'var(--chatgoose-ink-mid)';
     sessionsGrid.append(empty);
   }
 
