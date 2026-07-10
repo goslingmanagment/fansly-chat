@@ -312,3 +312,20 @@ tail of a single over-budget newest message, and is applied on BOTH lanes
 (operations + compare cards, same clientContext schema). Acceptance pinned
 against the VENDORED schema: 3000 long messages → ≤300k AND
 `routeSchemas.aiFeatureStream.body.safeParse` passes.
+
+**E21 (2026-07-11).** Acceptance-reporter hardening + revived fan-summary
+cache write (core plan W9.4, A18 + A40 extension halves — the audit's own
+cheap-hardening list). Three gaps closed: (1) the reporter's `onWarn` was
+never wired at the composition root, so 400-batch drops and max-attempt
+exhaustions were SILENT — they now reach the background console; (2) only
+the overflow path fed the persisted dropped counter — the 400 and
+max-attempts drop paths now increment it too, so `stats()` keeps every gap
+visible across restarts; (3) one startup `flushNow()` after storage init —
+events spooled when the previous background instance died no longer wait
+for the next enqueue's debounce. Plus A18 proper: the fan-summary cache
+write was gated on `actualModel === resolvedModel`, but post-cutover
+resolvedModel is the 'kernel' cache sentinel while actualModel becomes the
+meta frame's real vendor model id — in production the equality never held
+and fresh summaries were never cached (the prefetch path masked it). Gate
+removed; the sentinel stays the cache identity. Mutation-checked: the new
+pin fails against the old gate.

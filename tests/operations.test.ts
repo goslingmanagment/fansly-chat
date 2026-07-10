@@ -2993,6 +2993,60 @@ describe('OperationCoordinator', () => {
     });
   });
 
+  it('W9.4/A18: caches a fresh fan summary even when the meta frame names a real vendor model', async () => {
+    // Pre-fix, the write was gated on `actualModel === resolvedModel` — but
+    // resolvedModel is the 'kernel' cache sentinel while the kernel's meta
+    // frame always carries the real vendor model id, so in production the
+    // gate never passed and fresh summaries were never cached.
+    delete mockStorage['summary:group-1'];
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, any>,
+        callbacks: {
+          onText: (text: string) => void;
+          onMeta?: (meta: { requestId: string; clientRequestId: string; model: string }) => void;
+        },
+      ) => {
+        callbacks.onMeta?.({
+          requestId: 'gen-1',
+          clientRequestId: 'summary-op',
+          model: 'claude-sonnet-4-5',
+        });
+        callbacks.onText('Fresh summary');
+        return 'Fresh summary';
+      }),
+    };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, port } = await createCoordinatorHarness({
+      kernelGateway,
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
+    const cacheEntry = mockStorage['summary:group-1'] as SummaryCacheEntry | undefined;
+    expect(cacheEntry).toBeDefined();
+    expect(cacheEntry?.summary).toBe('Fresh summary');
+    // The cache identity stays the kernel sentinel — the pin the read path
+    // (isValidSummaryCacheEntry(..., 'kernel')) checks against.
+    expect(cacheEntry?.modelId).toBe('kernel');
+    expect(cacheEntry?.spendingDataVerified).toBe(true);
+    expect(cacheEntry?.subscriptionLookupVerified).toBe(true);
+  });
+
   it('backfills cached summaries only once for the same Hub configuration', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
