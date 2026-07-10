@@ -10,16 +10,20 @@ to the kernel's SDK + feature lane on the other. The OnlyFans sibling is the
 ChatGoose desktop app (`~/code/chatgoose_desktop_fable`) — separate repo,
 shared kernel.
 
-**Current state (2026-07-10): release 1.8.0 is shipping on the self-hosted
-feed (https://ext.gosling-agency.ru, AMO-unlisted signing) — kernel-only AI
-over the feature lane (SSE), device-token sign-in preferred everywhere,
-kernel-only spenders board (legacy rebuild deleted in 1.7.0), and the E13/E14
-family restyle: shared desktop/core design tokens, switchable light/dark
-(`uiTheme`, storage v12), click-to-insert draft cards, popup AI-quota
-indicator. Releases go from `main` (the old `bar-tone-menu` release branch is
-gone). The legacy chatter-key path is still dual-accepted — delete it only
-once the fleet demonstrably holds device tokens (E9d). Toolchain: TS 6 /
-vitest 4 / pnpm@10.33.1; CI runs `pnpm check` on every PR.**
+**Current state (2026-07-11): 1.8.1 is BUILT on branch `ext/w9-1.8.1`
+(core plan W9), owner sign/publish pending; 1.8.0 is live on the self-hosted
+feed (https://ext.gosling-agency.ru, AMO-unlisted signing). The stack:
+kernel-only AI over the feature lane (SSE), device-token sign-in preferred
+everywhere, kernel-only spenders board (legacy rebuild deleted in 1.7.0),
+the E13/E14 family restyle (shared tokens, switchable light/dark), and the
+W9 wave: custom personas sync to kernel `ai_personas` (E17, builtin card
+read-only), honest not-ramped board state (E18), storage v13 per-key
+credential custody (E19), 300k client-side transcript cap (E20), acceptance
+spool hardening (E21), deploy.sh preflight asserts + release tagging (E16 —
+retro-tags v1.7.0/v1.7.1/v1.8.0 are owner-run). Releases go from `main`.
+The legacy chatter-key path is still dual-accepted — delete it only once the
+fleet demonstrably holds device tokens (E9d). Toolchain: TS 6 / vitest 4 /
+pnpm@10.33.1; CI runs `pnpm check` on every PR.**
 
 ## Read these before designing or building anything
 
@@ -51,8 +55,11 @@ vitest 4 / pnpm@10.33.1; CI runs `pnpm check` on every PR.**
 - **AI never sends without explicit human action; never auto-retry an
   indeterminate send** (same family law as the desktop).
 - **Storage migrations are numbered and forward-only** (`createDefaultSettings`
-  / migrations — currently v10, `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`
+  / migrations — currently v13, `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`
   is the source of truth); every settings shape change ships a migration.
+  Since v13 the hub credentials live in their OWN storage keys — every
+  full-state persist goes through `serializePersistedState`, and the settings
+  blob must never carry them again (E19).
 - **Releases:** from `main` (the `bar-tone-menu` release branch was retired;
   1.7.x+ ship straight from main): bump `package.json` + `manifest.json`
   versions together, update CHANGELOG.md + changelog.html, then
