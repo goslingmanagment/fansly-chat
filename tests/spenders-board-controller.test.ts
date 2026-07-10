@@ -151,6 +151,59 @@ describe('SpendersBoardController', () => {
     expect(document.querySelectorAll('.chatgoose-board-section')).toHaveLength(1);
   });
 
+  // ── W9.3/A20: not-ramped page (builtAt null) ─────────────────────────────
+
+  it('renders the not-enabled state for a null builtAt, not "no paying fans"', async () => {
+    const notRamped: SpendersListResult = {
+      entries: [],
+      builtAt: null,
+      fanCount: 0,
+      scannedCount: 40,
+      truncated: false,
+    };
+    const board = new SpendersBoardController({
+      fetchList: async () => ({ ok: true, result: notRamped }),
+      openChat: vi.fn(),
+    });
+    await board.show();
+
+    const state = document.querySelector('.chatgoose-board-state');
+    expect(state?.textContent).toContain("Spender rankings aren't enabled for this page yet");
+    expect(state?.textContent).not.toContain('No paying fans');
+    // The header meta must not claim a build time ("updated just now" was the lie).
+    const subtitle = document.querySelector('.chatgoose-board-subtitle');
+    expect(subtitle?.textContent).toContain('not enabled');
+    expect(subtitle?.textContent).not.toContain('updated');
+  });
+
+  it('re-fetches on every open while not ramped (no sticky in-memory result)', async () => {
+    const notRamped: SpendersListResult = {
+      entries: [],
+      builtAt: null,
+      fanCount: 0,
+      scannedCount: 40,
+      truncated: false,
+    };
+    const fetchList = vi.fn<(refresh: boolean) => Promise<SpendersListResponse>>(
+      async () => ({ ok: true, result: notRamped }),
+    );
+    const board = new SpendersBoardController({ fetchList, openChat: vi.fn() });
+
+    await board.show();
+    board.close();
+    await board.show();
+    expect(fetchList).toHaveBeenCalledTimes(2);
+
+    // A ramped result IS kept across open/close (existing behavior).
+    fetchList.mockResolvedValue({ ok: true, result: makeResult() });
+    board.close();
+    await board.show();
+    expect(fetchList).toHaveBeenCalledTimes(3);
+    board.close();
+    await board.show();
+    expect(fetchList).toHaveBeenCalledTimes(3);
+  });
+
   it('renders an error state when the request fails', async () => {
     const board = new SpendersBoardController({
       fetchList: async () => ({ ok: false, error: createUserError('not_connected') }),

@@ -259,3 +259,21 @@ edit was silently ignored at assembly anyway, which was the drift). Archive
 appear in the desktop picker, hence the displayName hygiene above. Pinned in
 tests/persona-sync.test.ts (17 cases: exact key/body, archive-on-delete,
 builtin never syncs, reconcile skips in-sync + kernel-only, queue ordering).
+
+**E18 (2026-07-11).** Top-spenders board honest empty state (core plan
+W9.3/A20, MINIMAL variant). The kernel's "page not ramped" signal
+(`pageTopSpenders.builtAt: null`) already reached the extension and was
+destroyed at spenders-service.ts: null was rewritten to `Date.now()`, so a
+never-walked page showed "No paying fans found… updated just now" — false on
+both counts — and cached it for 10 minutes. Now: `SpendersListResult.builtAt`
+is `number | null`, null passes through verbatim, the board renders a
+distinct "Spender rankings aren't enabled for this page yet" state (header
+meta says "Rankings not enabled…", never "updated …"), and a null-builtAt
+result is never cached (neither the background's 10-min cache nor the
+board's in-memory across open/close) so the board flips the moment the
+kernel ramps the page. NOT taken: the richer 3-state copy consuming W8.1's
+`source.streamState` — W8 has not shipped, so this wave does no SDK
+re-vendor anywhere (plan's cross-review contract-law note therefore moot).
+No legacy-fallback resurrection (deleted in 1.7.0/storage v11 — would
+restore the ~150-calls-per-10-min pattern the migration killed). Pinned in
+the spenders-service and spenders-board-controller suites.

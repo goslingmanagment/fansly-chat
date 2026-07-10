@@ -85,9 +85,16 @@ export class SpendersService {
       throw new ChatGooseError('hub_request_failed');
     }
 
-    const result = await this.buildFromKernel(session, settings, signal, now);
+    const result = await this.buildFromKernel(session, settings, signal);
 
-    this.cache.set(key, { builtAt: now, result });
+    // W9.3/A20: builtAt === null means the kernel has never walked this
+    // page (not ramped) — caching would pin a "not enabled" board for
+    // 10 minutes past the moment rankings actually turn on.
+    if (result.builtAt !== null) {
+      this.cache.set(key, { builtAt: now, result });
+    } else {
+      this.cache.delete(key);
+    }
     return result;
   }
 
@@ -95,7 +102,6 @@ export class SpendersService {
     session: SessionTemplate,
     settings: Settings,
     signal: AbortSignal,
-    nowMs: number,
   ): Promise<SpendersListResult> {
     const pageUsername = session.resolvedUsername?.trim() || null;
     const pageLabel = await this.kernelSource!.resolvePageLabelForUsername(
@@ -137,7 +143,9 @@ export class SpendersService {
     return {
       entries,
       // Honest staleness: the projection's freshest observation, not "now".
-      builtAt: snapshot.builtAt !== null ? Date.parse(snapshot.builtAt) : nowMs,
+      // Null passes through verbatim (W9.3/A20): rewriting it to Date.now()
+      // made a never-walked page claim "no paying fans … updated just now".
+      builtAt: snapshot.builtAt !== null ? Date.parse(snapshot.builtAt) : null,
       fanCount: entries.length,
       scannedCount: fans.length,
       truncated,
