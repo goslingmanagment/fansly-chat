@@ -2358,7 +2358,13 @@ export class OperationCoordinator {
           cached: false,
           syncStatus: initialSyncStatus,
         };
-        if (spendingDataVerified && subscriptionLookupVerified && actualModel === resolvedModel) {
+        // W9.4/A18: the old `actualModel === resolvedModel` gate made this
+        // write DEAD post-cutover — resolvedModel is the 'kernel' cache
+        // sentinel while actualModel becomes the meta frame's real vendor
+        // model id, so the equality never held and no fresh summary was ever
+        // cached. Model choice is kernel config now; the sentinel pin below
+        // is the cache identity, and the equality gate is gone.
+        if (spendingDataVerified && subscriptionLookupVerified) {
           await this.storageCoordinator.saveSummaryCache(validated.urlGroupId, {
             summary: rawText,
             personalityId: personality.id,

@@ -134,7 +134,44 @@ describe('acceptance reporter', () => {
     await reporter.flushNow();
     stats = await reporter.stats();
     expect(stats.pending).toBe(0); // 400 = dropped, loudly, batch by batch
+    // W9.4/A18: the 400 path feeds the persisted counter too — 10 overflow
+    // drops + 300 contract-rejected events stay visible after a restart.
+    expect(stats.dropped).toBe(310);
     expect(warns.some((warning) => warning.includes('dropping 100 events'))).toBe(true);
+    reporter.dispose();
+    vi.useRealTimers();
+  });
+
+  it('counts max-attempts drops in the persisted counter (W9.4/A18)', async () => {
+    vi.useFakeTimers(); // hold the debounce; flushes are driven manually
+    const storage = memoryStorage();
+    const warns: string[] = [];
+    const fetchMock = vi.fn(async () =>
+      new Response('{"message":"down"}', { status: 503 }));
+    const reporter = createAcceptanceReporter({
+      storage,
+      getSettings: async () => hubSettings(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onWarn: (message) => warns.push(message),
+    });
+
+    reporter.enqueue(event());
+    await drainMicrotasks();
+
+    // MAX_ATTEMPTS = 5: four transient failures retain the event…
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await reporter.flushNow();
+    }
+    let stats = await reporter.stats();
+    expect(stats.pending).toBe(1);
+    expect(stats.dropped).toBe(0);
+
+    // …the fifth exhausts it: dropped, warned, and COUNTED.
+    await reporter.flushNow();
+    stats = await reporter.stats();
+    expect(stats.pending).toBe(0);
+    expect(stats.dropped).toBe(1);
+    expect(warns.some((warning) => warning.includes('after 5 attempts'))).toBe(true);
     reporter.dispose();
     vi.useRealTimers();
   });

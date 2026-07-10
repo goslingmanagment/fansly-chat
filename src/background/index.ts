@@ -34,6 +34,9 @@ const kernelGateway = createKernelFeatureGateway();
 const acceptanceReporter = createAcceptanceReporter({
   storage: browser.storage.local,
   getSettings: async () => (await storageCoordinator.getState()).settings,
+  // W9.4/A18+A40: drops were silent — the reporter's warnings now reach the
+  // background console.
+  onWarn: (message) => console.warn(message),
 });
 // W9.2/A7: keep kernel ai_personas in step with local personalities — saves
 // diff via storage.onChanged below, boot reconcile heals pre-1.8.1 gaps.
@@ -106,4 +109,9 @@ void storageCoordinator.init().then((state) => {
   // W9.2/A7 boot reconcile: heal kernel personas for accounts whose custom
   // personality predates the sync (the pre-1.8.1 "Unknown persona" 400s).
   void personaSync.reconcile(state.personalities);
+  // W9.4/A40: one startup flush — events spooled when the previous background
+  // instance died must not wait for the NEXT enqueue's debounce to deliver.
+  void acceptanceReporter.flushNow().catch((error) => {
+    console.warn('[acceptance] startup flush failed', error);
+  });
 });

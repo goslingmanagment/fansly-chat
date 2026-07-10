@@ -145,7 +145,7 @@ export function createAcceptanceReporter(options: AcceptanceReporterOptions): Ac
         return;
       }
       for (;;) {
-        const { spool } = await load();
+        const { spool, dropped } = await load();
         if (spool.length === 0) {
           return;
         }
@@ -155,21 +155,31 @@ export function createAcceptanceReporter(options: AcceptanceReporterOptions): Ac
           await options.storage.set({ [ACCEPTANCE_SPOOL_KEY]: spool.slice(batch.length) });
         } catch (error) {
           if (error instanceof KernelApiError && error.status === 400) {
-            // Contract bug: never retriable verbatim — drop loudly.
+            // Contract bug: never retriable verbatim — drop loudly. W9.4/A18:
+            // every drop path feeds the persisted counter, not just overflow —
+            // the gap must stay visible in stats() after a restart.
             onWarn(`[acceptance] batch rejected (${error.message.slice(0, 200)}); dropping ${batch.length} events`);
-            await options.storage.set({ [ACCEPTANCE_SPOOL_KEY]: spool.slice(batch.length) });
+            await options.storage.set({
+              [ACCEPTANCE_SPOOL_KEY]: spool.slice(batch.length),
+              [ACCEPTANCE_DROPPED_KEY]: dropped + batch.length,
+            });
             continue;
           }
+          let exhausted = 0;
           const retained = spool.map((event, index) =>
             index < batch.length ? { ...event, attempts: event.attempts + 1 } : event,
           ).filter((event) => {
             if (event.attempts >= MAX_ATTEMPTS) {
               onWarn(`[acceptance] dropping event after ${event.attempts} attempts (${event.action})`);
+              exhausted += 1;
               return false;
             }
             return true;
           });
-          await options.storage.set({ [ACCEPTANCE_SPOOL_KEY]: retained });
+          await options.storage.set({
+            [ACCEPTANCE_SPOOL_KEY]: retained,
+            ...(exhausted > 0 ? { [ACCEPTANCE_DROPPED_KEY]: dropped + exhausted } : {}),
+          });
           schedule(); // transient — try again later
           return;
         }
