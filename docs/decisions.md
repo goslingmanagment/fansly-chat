@@ -236,3 +236,26 @@ v1.8.0=363ef32, provenance evidence in each tag message) are owner-run — this
 change only ships the commands; authoritative in-script tagging starts at
 1.8.1. The dead `bar-tone-menu` branch entry left ci.yml (the branch was
 retired in E15's release-process correction).
+
+**E17 (2026-07-11).** Custom personas sync to the kernel (core plan W9.2/A7).
+Since Stage 32 every generation has sent `personaKey: personality.id`, but
+"Add personality" minted raw UUIDs the kernel's `ai_personas` never learned —
+generations on custom-persona accounts died with an opaque 400 (the 1.6.0
+changelog's "personas sync with server" was false in code). Zero kernel work:
+the Stage 31 routes (aiPersonasList/Upsert/Archive) and the vendored SDK
+already suffice — no contracts change, no re-vendor. Design:
+`src/background/persona-sync.ts` diffs `personalities` storage changes
+(options saves upsert changed customs with key = the LOCAL id, body
+{displayName ≤120, systemBlock ≤50k — kernel schema mirrored client-side};
+deletes archive), plus ONE boot reconcile that lists kernel personas and
+upserts local customs that are missing or differ (local text wins for
+extension-owned keys; kernel-only keys — e.g. desktop personas — are never
+archived or touched). Sync is best-effort: hub failures warn and wait for the
+next change/boot; a save never fails on hub unreachability. Builtin
+`builtin:lora`: options card locked READ-ONLY (owner default per plan —
+upserting it would mutate the persona the desktop picker shares; the local
+edit was silently ignored at assembly anyway, which was the drift). Archive
+404 = already absent = success. Blast radius accepted: extension personas
+appear in the desktop picker, hence the displayName hygiene above. Pinned in
+tests/persona-sync.test.ts (17 cases: exact key/body, archive-on-delete,
+builtin never syncs, reconcile skips in-sync + kernel-only, queue ordering).

@@ -1,6 +1,7 @@
 import { AgencyHubClient } from './agency-hub-client.js';
 import { createAcceptanceReporter } from './acceptance-reporter.js';
 import { createKernelFeatureGateway } from './kernel-feature-gateway.js';
+import { createPersonaSync } from './persona-sync.js';
 import { FanslyClient } from './fansly-client.js';
 import { OperationCoordinator } from './operations.js';
 import { registerRuntimeApi } from './runtime-api.js';
@@ -33,6 +34,13 @@ const kernelGateway = createKernelFeatureGateway();
 const acceptanceReporter = createAcceptanceReporter({
   storage: browser.storage.local,
   getSettings: async () => (await storageCoordinator.getState()).settings,
+});
+// W9.2/A7: keep kernel ai_personas in step with local personalities — saves
+// diff via storage.onChanged below, boot reconcile heals pre-1.8.1 gaps.
+const personaSync = createPersonaSync({
+  hub: agencyHubClient,
+  getSettings: async () => (await storageCoordinator.getState()).settings,
+  onWarn: (message) => console.warn(message),
 });
 const coordinator = new OperationCoordinator(
   sessionStore,
@@ -78,10 +86,20 @@ const UI_RELEVANT_KEYS = new Set([
 browser.storage.onChanged.addListener((changes, areaName) => {
   storageCoordinator.applyStorageChanges(changes, areaName);
   if (areaName !== 'local') return;
+  if (changes.personalities) {
+    void personaSync.handlePersonalitiesChange(
+      changes.personalities.oldValue,
+      changes.personalities.newValue,
+    );
+  }
   const hasRelevantKey = Object.keys(changes).some((k) => UI_RELEVANT_KEYS.has(k));
   if (hasRelevantKey) {
     void coordinator.refreshAllTabs('settings:changed');
   }
 });
 
-void storageCoordinator.init();
+void storageCoordinator.init().then((state) => {
+  // W9.2/A7 boot reconcile: heal kernel personas for accounts whose custom
+  // personality predates the sync (the pre-1.8.1 "Unknown persona" 400s).
+  void personaSync.reconcile(state.personalities);
+});
