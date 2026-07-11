@@ -395,7 +395,7 @@ describe('ChatGooseContentApp', () => {
     }));
   });
 
-  it('picks a tone from the tone pills, sends it with the fast-reply, and resets after dispatch', async () => {
+  it('arming a tone never generates by itself; Reply rides it and resets after dispatch (E24)', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
@@ -404,9 +404,17 @@ describe('ChatGooseContentApp', () => {
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
 
-    // Clicking a tone pill arms the tone AND starts the reply in one step.
-    app.startTonedReply('flirty');
+    // A tone segment click ARMS only — the trigger is Reply itself.
+    app.armReplyTone('flirty');
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(app.nextReplyTone).toBe('flirty');
 
+    // Clicking the armed segment again disarms it.
+    app.armReplyTone('flirty');
+    expect(app.nextReplyTone).toBe('none');
+
+    app.armReplyTone('flirty');
+    app.startFeature('fast-reply', false);
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'operation:start',
       feature: 'fast-reply',
@@ -414,6 +422,49 @@ describe('ChatGooseContentApp', () => {
       replyTone: 'flirty',
     }));
     expect(app.nextReplyTone).toBe('none');
+  });
+
+  it('keeps Split armed across generations and reuses the tone on Regenerate (E24)', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn();
+
+    app.port.send = sendSpy.mockReturnValue(true);
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+
+    app.toggleNextFastReplyMode();
+    app.armReplyTone('spicy');
+    app.startFeature('fast-reply', false);
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      replyMode: 'preferSplit',
+      replyTone: 'spicy',
+    }));
+    // Split is a sticky flag — it does NOT silently reset after the send
+    // (the pre-E24 reset made a Regenerate quietly lose the split).
+    expect(app.nextFastReplyMode).toBe('preferSplit');
+    // The tone is one-shot…
+    expect(app.nextReplyTone).toBe('none');
+
+    // …but a Regenerate re-rolls the same ask: same mode, same tone.
+    sendSpy.mockClear();
+    app.clearOperationState(true);
+    app.startFeature('fast-reply', true);
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      forceRegenerate: true,
+      replyMode: 'preferSplit',
+      replyTone: 'spicy',
+    }));
+
+    // A fresh (non-regenerate) reply does NOT inherit the old tone.
+    sendSpy.mockClear();
+    app.clearOperationState(true);
+    app.startFeature('fast-reply', false);
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      replyMode: 'preferSplit',
+      replyTone: 'none',
+    }));
   });
 
   it('sends the current composer draft with improve-draft operations', async () => {
@@ -1107,7 +1158,7 @@ describe('ChatGooseContentApp', () => {
     app.port.send = sendSpy.mockReturnValue(true);
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
-    // Compare uses whatever tone is armed (now via the ⌘⇧O cycle, not a tone pill).
+    // Compare uses whatever tone is armed (a tone segment or the ⌘⇧O cycle).
     app.nextReplyTone = 'upsell';
 
     await app.startCompare(false);

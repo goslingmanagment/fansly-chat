@@ -40,6 +40,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E21 | 2026-07-11 | Acceptance-reporter hardening (onWarn wired, all drop paths counted, startup flush) + fan-summary cache write revived |
 | E22 | 2026-07-11 | Opportunistic hub re-push of a ready Scan on chat open (preflight-classified, cooldown-bounded, generatedAtMs) |
 | E23 | 2026-07-11 | Spenders board v2: enumeration = map not membership gate (lazy inbox-search chat resolve), kernel limit 500, month +$N column + NEW badge, board search, two-timestamp meta, SPA chat-open with verified fallback, storage.session cache |
+| E24 | 2026-07-11 | Action bar v2: tone groove (radio, arm-only, 😌😏💰🔥 + casual back) + Split flag (sticky) + regen keeps mode/tone; renames Fix/Recap/Split; tolerant [NEXT]; meaning-group seams |
 
 ## Entries
 
@@ -411,3 +412,31 @@ badges (the vendored spender-retention module + auto-list ops need verified
 Fansly-side data first), quick-look chat preview (egress question), net/gross
 display. Pinned in spenders-service / spenders-board-controller / protocol /
 runtime-api / fansly-client suites.
+
+**E24 (2026-07-11).** Action bar v2 — the Reply cluster becomes OPTIONS + one
+trigger (owner-driven redesign, mockup-iterated). (a) **Tones are radio
+options in a sunken groove**, not buttons: segments 😌 casual / 😏 flirty /
+💰 upsell / 🔥 spicy (emoji = the chatters' own language; precedent — the
+Spenders tier chips), Russian hover hints, the armed segment surfaces as a
+thumb and expands with its word (label appears exactly when the choice
+matters). Clicking ARMS (or disarms) — the pre-1.5.5 one-shot
+click-generates is deliberately gone; only Reply fires. `casual` returned to
+the bar and to the ⌘⇧O cycle (dropped in 1.5.5 only to keep pills⇄cycle
+lock-step — the groove restores both). (b) **Split (ex-Multi) is a
+checkbox-flag, orthogonal to tone** (a flirty reply can be split): square-dot
+pill OUTSIDE the groove — one groove per dimension, the merged-track draft
+read as "a fourth tone" and was rejected. Split is now STICKY: the old
+after-send reset made Regenerate silently lose the split — one of the two
+real causes behind "сплит иногда не делает перенос". Regenerate now re-rolls
+the same ask: sticky mode + a per-conversation memo of the last sent tone
+(cleared on route change). (c) **Renames** (result-naming rule): Multi→Split
+(the mode's real name — preferSplit), Polish→Fix (the bar had drifted from
+FEATURE_LABELS), Scan→Recap (names the dossier, not the process;
+FEATURE_LABELS updated — one name everywhere). Hotkey descriptions follow.
+(d) **The other split cause** — the kernel prompt's opt-out ("if a split
+would feel forced, return one clean message") — is fixed kernel-side (core
+branch, split = ALWAYS ≥2 parts, ≤3); client-side, splitByNext is now
+tolerant of marker drift (`[next]`, `[ NEXT ]` — bracket forms only; the old
+case-sensitivity pin reversed). (e) Bar regrouped by meaning with hairline
+seams: Reply+options │ Fix │ Hi·Ping │ → Recap+persona (right-pinned).
+Pinned in button-bar / content-app / split suites.
