@@ -352,12 +352,19 @@
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
+/* Loading spinner overlays the dimmed label instead of flowing after it:
+   the button keeps its width, so the toolbar never reflows mid-generation. */
 .chatgoose-toolbar-button .chatgoose-spinner {
-  width: 10px;
-  height: 10px;
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 11px;
+  height: 11px;
   border-width: 1.5px;
-  margin-left: 6px;
-  vertical-align: middle;
+}
+
+.chatgoose-toolbar-button-loading .chatgoose-toolbar-label {
+  opacity: 0.35;
 }
 
 .chatgoose-toolbar-hotkey {

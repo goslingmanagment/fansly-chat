@@ -151,7 +151,10 @@ export class ButtonBar {
     label: string,
     loading: boolean,
   ): void {
-    button.replaceChildren(document.createTextNode(label));
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'chatgoose-toolbar-label';
+    labelSpan.textContent = label;
+    button.replaceChildren(labelSpan);
     const hotkey = featureHotkeyLabel(feature, this.platform);
     if (hotkey) {
       button.setAttribute(
@@ -164,6 +167,7 @@ export class ButtonBar {
     } else {
       button.removeAttribute('aria-keyshortcuts');
     }
+    button.classList.toggle('chatgoose-toolbar-button-loading', loading);
     if (loading) {
       const spinner = document.createElement('span');
       spinner.className = 'chatgoose-spinner';

@@ -144,6 +144,11 @@ describe('ButtonBar toolbar visibility', () => {
     const reply = buttonByLabel(bar.root, 'Reply');
     expect(reply?.querySelector('.chatgoose-toolbar-hotkey')).not.toBeNull();
     expect(reply?.querySelector('.chatgoose-spinner')).not.toBeNull();
+    expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(true);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+    expect(reply?.querySelector('.chatgoose-spinner')).toBeNull();
+    expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(false);
   });
 
   it('marks a ready summary on the Scan button', () => {
