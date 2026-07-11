@@ -417,11 +417,32 @@
 
 <div class="timeline">
 
+  <!-- 1.9.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.2</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Доска больше не зависает на «Building the board…».
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li><strong>Загрузка имён не блокирует доску.</strong> В 1.9.1 подгрузка кастомных имён могла застрять на повторных запросах при рейт-лимите Fansly. Теперь у имён жёсткий лимит времени: что успели получить — показываем, остальное остаётся платформенными именами</li>
+          <li><strong>Имена кэшируются на 6 часов.</strong> Повторные открытия доски и Refresh больше не перезагружают имена — подгружаются только новые фаны</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.9.1 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.1</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
