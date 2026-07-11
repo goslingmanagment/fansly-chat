@@ -156,7 +156,7 @@ function isCompareStartMessage(record: Record<string, unknown>): boolean {
     isOptionalReplyTone(record);
 }
 
-/** E26: the prompt echo's status message may carry the viewer token and the
+/** E27: the prompt echo's status message may carry the viewer token and the
  * counts projection — and NOTHING else. Rebuilding it field by field (rather
  * than passing an object through) is what keeps prompt text out of the Fansly
  * DOM structurally: an unmodelled key cannot survive this function. */
@@ -321,6 +321,10 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return isString(message.groupId) &&
         isNumber(message.generatedAt) &&
         isObjectRecord(message.syncStatus);
+    case 'spenders:progress':
+      return (message.phase === 'ranking' || message.phase === 'names') &&
+        isOptionalNumber(message, 'done') &&
+        isOptionalNumber(message, 'total');
     case 'operation:progress':
       return hasOperationProgressShape(message) && isFeatureType(message.feature);
     case 'compare:progress':

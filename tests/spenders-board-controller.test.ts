@@ -366,6 +366,52 @@ describe('SpendersBoardController', () => {
     );
   });
 
+  // ── E26: cold-build progress ──────────────────────────────────────────────
+
+  it('shows name-sweep progress while building, then the board', async () => {
+    let resolveList: ((response: SpendersListResponse) => void) | null = null;
+    const board = new SpendersBoardController(
+      makeDeps({
+        fetchList: () =>
+          new Promise<SpendersListResponse>((resolve) => {
+            resolveList = resolve;
+          }),
+      }),
+    );
+    void board.show();
+
+    // Ranking phase: honest copy, empty bar.
+    board.setBuildProgress({ type: 'spenders:progress', phase: 'ranking' });
+    expect(document.querySelector('.chatgoose-board-progress-label')!.textContent).toContain(
+      'top-spenders snapshot',
+    );
+    expect(
+      document.querySelector<HTMLElement>('.chatgoose-board-progress-bar')!.style.width,
+    ).toBe('0%');
+
+    // Name sweep: counted, and the bar tracks it.
+    board.setBuildProgress({ type: 'spenders:progress', phase: 'names', done: 250, total: 500 });
+    expect(document.querySelector('.chatgoose-board-progress-label')!.textContent).toBe(
+      'Resolving fan names — 250 of 500…',
+    );
+    expect(
+      document.querySelector<HTMLElement>('.chatgoose-board-progress-bar')!.style.width,
+    ).toBe('50%');
+
+    resolveList!({ ok: true, result: makeResult() });
+    await vi.waitFor(() => expect(rows()).toHaveLength(4));
+    expect(document.querySelector('.chatgoose-board-progress-bar')).toBeNull();
+  });
+
+  it('ignores progress frames when no build is on screen', async () => {
+    const board = new SpendersBoardController(makeDeps());
+    await board.show();
+
+    board.setBuildProgress({ type: 'spenders:progress', phase: 'names', done: 1, total: 2 });
+    expect(document.querySelector('.chatgoose-board-progress-label')).toBeNull();
+    expect(rows()).toHaveLength(4);
+  });
+
   // ── Meta line ─────────────────────────────────────────────────────────────
 
   it('meta line reports data-as-of + fetched, and the truncated total honestly', async () => {

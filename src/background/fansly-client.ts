@@ -623,10 +623,18 @@ export class FanslyClient {
     ids: string[],
     session: SessionTemplate,
     signal: AbortSignal,
+    retryPolicy: 'default' | 'none' = 'default',
   ): Promise<FanslyAccountResponse[]> {
     const url = new URL('https://apiv3.fansly.com/api/v1/account');
     url.searchParams.set('ids', ids.join(','));
-    const response = await this.fetchEnvelope<unknown>(url, session, 'account', signal, true);
+    const response = await this.fetchEnvelope<unknown>(
+      url,
+      session,
+      'account',
+      signal,
+      true,
+      retryPolicy,
+    );
 
     if (Array.isArray(response)) {
       return response as FanslyAccountResponse[];

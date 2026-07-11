@@ -39,7 +39,7 @@ export interface KernelFeatureRequest {
   draftText?: string;
   isRegeneration?: boolean;
   clientContext: KernelFeatureClientContext;
-  /** Debug mode only (E26): ask the kernel to echo the prompt it assembled.
+  /** Debug mode only (E27): ask the kernel to echo the prompt it assembled.
    * Rides a capability HEADER, never the request body — an old kernel ignores
    * it, so a kernel rollback can never break a generation from a new client.
    * The kernel still answers only inside an owner-set, time-bounded window. */

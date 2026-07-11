@@ -207,7 +207,7 @@ describe('kernel feature gateway', () => {
   });
 });
 
-// E26 — the prompt echo. The capability rides a HEADER, never the body: an old
+// E27 — the prompt echo. The capability rides a HEADER, never the body: an old
 // kernel ignores an unknown header, so a kernel rollback after a client release
 // cannot 400 a generation. And the echo is only ever asked for, never assumed.
 describe('kernel feature gateway prompt echo', () => {

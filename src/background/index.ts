@@ -72,6 +72,9 @@ registerRuntimeApi({
   tabContexts,
   storageCoordinator,
   debugPrompts: coordinator.debugPrompts,
+  // The board rides a one-shot runtime request; its cold-build progress goes
+  // back over the tab's existing content port.
+  emitToTab: (tabId, message) => coordinator.sendToTab(tabId, message),
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {
