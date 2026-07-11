@@ -26,6 +26,7 @@ import type {
   SpenderListEntry,
   SpendersListResponse,
   SpendersListResult,
+  SpendersProgressPayload,
 } from '../../shared/types.js';
 import { formatUserFacingError } from '../../shared/errors.js';
 import { makeKbd } from '../ui/kbd.js';
@@ -95,6 +96,9 @@ export class SpendersBoardController {
   private rowEls: HTMLElement[] = [];
   private listHost: HTMLElement | null = null;
   private searchInput: HTMLInputElement | null = null;
+  private buildProgress: SpendersProgressPayload | null = null;
+  private progressLabel: HTMLElement | null = null;
+  private progressBar: HTMLElement | null = null;
   private readonly chatStateChips = new Map<string, HTMLElement>();
   private resolvingFanId: string | null = null;
 
@@ -132,18 +136,32 @@ export class SpendersBoardController {
     this.cursorIndex = -1;
     this.listHost = null;
     this.searchInput = null;
+    this.buildProgress = null;
+    this.progressLabel = null;
+    this.progressBar = null;
     this.chatStateChips.clear();
     document.body.classList.remove('chatgoose-scroll-lock');
     this.root.replaceChildren();
   }
 
+  /** Cold-build progress pushed from the background over the content port
+   * (the board's own request is one-shot, so it has no channel). Ignored
+   * unless a build is actually on screen. */
+  setBuildProgress(progress: SpendersProgressPayload): void {
+    if (!this.open || !this.loading) return;
+    this.buildProgress = progress;
+    this.renderProgress();
+  }
+
   private async load(refresh: boolean): Promise<void> {
     this.loading = true;
+    this.buildProgress = null;
     this.renderLoading(refresh);
     try {
       const response = await this.deps.fetchList(refresh);
       if (!this.open) return;
       this.loading = false;
+      this.buildProgress = null;
       if (response.ok) {
         this.result = response.result;
         this.activeTier = 'all';
@@ -155,6 +173,7 @@ export class SpendersBoardController {
     } catch (error) {
       if (!this.open) return;
       this.loading = false;
+      this.buildProgress = null;
       this.renderError(error instanceof Error ? error.message : 'Could not load spenders.');
     }
   }
@@ -241,10 +260,49 @@ export class SpendersBoardController {
   private renderLoading(refresh: boolean): void {
     const body = document.createElement('div');
     body.className = 'chatgoose-board-state';
-    body.textContent = refresh
-      ? 'Rebuilding the board…'
-      : 'Building the board — fetching the top-spenders snapshot…';
+
+    const label = document.createElement('div');
+    label.className = 'chatgoose-board-progress-label';
+    label.textContent = refresh ? 'Rebuilding the board…' : 'Building the board…';
+    this.progressLabel = label;
+
+    // A determinate hairline, filled only once the name sweep reports counts
+    // (the kernel snapshot has no honest percentage to show).
+    const track = document.createElement('div');
+    track.className = 'chatgoose-board-progress-track';
+    const bar = document.createElement('div');
+    bar.className = 'chatgoose-board-progress-bar';
+    bar.style.width = '0%';
+    track.append(bar);
+    this.progressBar = bar;
+
+    body.append(label, track);
     this.shell(body);
+    this.renderProgress();
+  }
+
+  /** Repaint the loading copy + bar for the current progress frame. */
+  private renderProgress(): void {
+    const label = this.progressLabel;
+    const bar = this.progressBar;
+    if (!label || !bar) return;
+
+    const progress = this.buildProgress;
+    if (!progress || progress.phase === 'ranking') {
+      label.textContent = 'Building the board — fetching the top-spenders snapshot…';
+      bar.style.width = '0%';
+      return;
+    }
+
+    const total = progress.total ?? 0;
+    const done = Math.min(progress.done ?? 0, total);
+    if (total === 0) {
+      label.textContent = 'Building the board — resolving fan names…';
+      bar.style.width = '0%';
+      return;
+    }
+    label.textContent = `Resolving fan names — ${done} of ${total}…`;
+    bar.style.width = `${Math.round((done / total) * 100)}%`;
   }
 
   private renderError(message: string): void {
