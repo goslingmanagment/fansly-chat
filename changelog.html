@@ -412,11 +412,52 @@
 
 <div class="timeline">
 
+  <!-- 1.9.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.0</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Панель действий пересобрана — тоны стали переключателями с эмодзи, Split не слетает при регенерации; доска Spenders видит всех китов ядра, месячный приток и поиск.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Изменилось поведение</div>
+        <ul class="changes-list">
+          <li><strong>Тоны больше не стреляют сразу.</strong> Клик по тону только армирует его для следующего Reply (повторный клик — снимает); запускает генерацию только кнопка Reply. Тонированный ответ — два клика: тон → Reply</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Панель действий</div>
+        <ul class="changes-list">
+          <li><strong>Тоны — эмодзи-переключатели в жёлобе у Reply.</strong> 😌 Casual · 😏 Flirt · 💰 Sell · 🔥 Spice — тон выбирается один, армированный подсвечивается и подписывается словом, наведение показывает описание по-русски. Casual вернулся на панель и в цикл ⌘⇧O</li>
+          <li><strong>Split вместо Multi — и он больше не слетает.</strong> Переключатель с квадратной точкой: включён — ответы идут серией, пока не выключишь сам. Раньше режим молча сбрасывался после каждой генерации, и Regenerate терял разбивку; теперь реген повторяет и режим, и тон исходного запроса</li>
+          <li><strong>Сплит надёжнее.</strong> Маркер разбивки распознаётся в любом написании ([next], [ NEXT ] — раньше склеивались в одно сообщение), а ядро после ближайшего обновления хаба будет обязано вернуть 2–3 сообщения при включённом Split</li>
+          <li><strong>Переименования.</strong> Polish → Fix, Scan → Recap, Multi → Split — панель, оверлей и шпаргалка «?» теперь называют фичи одинаково</li>
+          <li><strong>Панель сгруппирована по смыслу.</strong> Reply со своими опциями │ Fix │ Hi · Ping │ справа — Recap и персона</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Доска Spenders</div>
+        <ul class="changes-list">
+          <li><strong>Видны все спендеры ядра.</strong> Раньше кит, не писавший последние 150 чатов, молча выпадал из рейтинга. Теперь в списке все (до 500); у фанов без недавнего чата — пометка «no recent chat», при открытии расширение само находит чат через поиск инбокса</li>
+          <li><strong>Месячный приток и бейдж NEW.</strong> Зелёное «+$N» под лайфтаймом — сколько фан принёс в этом месяце; NEW — у тех, чья первая трата случилась в этом месяце</li>
+          <li><strong>Поиск по доске.</strong> «/» фокусирует поле, ввод фильтрует по имени и хендлу</li>
+          <li><strong>Честная свежесть.</strong> Шапка различает «data as of …» (свежесть данных ядра) и «fetched …» (когда список получен); Refresh забирает последний снапшот хаба</li>
+          <li><strong>Чат открывается без перезагрузки страницы.</strong> Enter по строке переключает роут внутри Fansly; если роутер не отреагировал — обычная полная загрузка, как раньше</li>
+          <li><strong>Доска не пересобирается после простоя.</strong> Кэш переживает рестарт фонового процесса</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.8.3 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.8.3</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
