@@ -792,9 +792,12 @@ export class OperationCoordinator {
   }
 
   /** Re-push a valid-but-unsaved cached summary to the hub. Bounded: dedup
-   * while a push is in flight, cooldown after a failure, key cleared once the
-   * hub confirms the save. The push itself is the same dedup-guarded
-   * `syncAgencyHubSummary` the generation path uses. */
+   * while an attempt is in flight, cooldown after a failure, key cleared once
+   * the hub confirms the save. The push is NOT blind — a preflight read of
+   * the hub's current profile resolves the ambiguous cases first: an
+   * identical body just gets its saved status recorded (lost ack), and a
+   * hub profile that is not older than ours is never superseded by a stale
+   * local re-push (another device may have re-scanned). */
   private async retrySummaryHubSync(tabId: number): Promise<void> {
     const storage = await this.storageCoordinator.getState();
     const context = this.tabContexts.getOrCreate(tabId);
@@ -840,6 +843,48 @@ export class OperationCoordinator {
     });
 
     try {
+      const preflight = await this.preflightSummaryHubState(
+        groupId,
+        storage.settings,
+        session,
+        cached.summary,
+        cached.generatedAt,
+      );
+      if (preflight.verdict === 'already-stored') {
+        // The hub already holds this exact dossier (a previous push whose ack
+        // was lost) — record the save, never append a duplicate version.
+        const syncStatus = createFanSummarySyncStatus('saved', cached.generatedAt, {
+          baseUrl: preflight.baseUrl ?? baseUrl,
+          pageLabel: preflight.pageLabel ?? null,
+          syncedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        await this.persistSummarySyncStatus(
+          groupId,
+          cached.generatedAt,
+          syncStatus,
+          cached.fanAccountId ?? null,
+        );
+        this.sendSummarySyncStatus(tabId, groupId, syncStatus);
+        this.summarySyncRetryByKey.delete(key);
+        return;
+      }
+      if (preflight.verdict === 'hub-newer') {
+        // The hub holds a DIFFERENT dossier that is not older than ours —
+        // another device re-scanned. Never supersede it with a stale body;
+        // park the key for this service-worker lifetime.
+        const parked = this.summarySyncRetryByKey.get(key);
+        if (parked) {
+          parked.nextAttemptAt = Number.MAX_SAFE_INTEGER;
+        }
+        return;
+      }
+      if (preflight.verdict === 'inconclusive') {
+        // The hub state is unknown (fetch failed/skipped) — do not push
+        // blind; the cooldown already set governs the next attempt.
+        return;
+      }
+
       await this.syncAgencyHubSummary({
         tabId,
         groupId,
@@ -862,6 +907,62 @@ export class OperationCoordinator {
       if (isAgencyHubSummarySavedForBaseUrl(afterSync, baseUrl, cached.generatedAt)) {
         this.summarySyncRetryByKey.delete(key);
       }
+    }
+  }
+
+  /** Read the hub's current profile for the conversation and classify it
+   * against the local cached summary. 'push' = hub is empty or holds a
+   * STRICTLY older dossier (source generation time preferred, append time
+   * fallback) — safe to append ours. */
+  private async preflightSummaryHubState(
+    groupId: string,
+    settings: Settings,
+    session: SessionTemplate,
+    localSummary: string,
+    localGeneratedAt: number,
+  ): Promise<{
+    verdict: 'push' | 'already-stored' | 'hub-newer' | 'inconclusive';
+    baseUrl?: string | null;
+    pageLabel?: string | null;
+  }> {
+    const timeoutController = new AbortController();
+    const timeoutHandle = globalThis.setTimeout(
+      () => timeoutController.abort(),
+      AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+    );
+    try {
+      const pageUsername = await this.resolveCreatorUsername(
+        session,
+        timeoutController.signal,
+      );
+      const hub = await this.agencyHubClient.fetchFanProfileByConversation({
+        settings,
+        pageUsername,
+        conversationId: groupId,
+        signal: timeoutController.signal,
+      });
+      if (hub.status === 'not-found') {
+        return { verdict: 'push', baseUrl: hub.baseUrl, pageLabel: hub.pageLabel ?? null };
+      }
+      if (hub.status !== 'fetched') {
+        return { verdict: 'inconclusive' };
+      }
+      if ((hub.body ?? '') === localSummary.trim()) {
+        return {
+          verdict: 'already-stored',
+          baseUrl: hub.baseUrl,
+          pageLabel: hub.pageLabel ?? null,
+        };
+      }
+      const hubGeneratedAtMs = hub.sourceGeneratedAtMs ?? hub.createdAtMs;
+      if (hubGeneratedAtMs !== undefined && hubGeneratedAtMs >= localGeneratedAt) {
+        return { verdict: 'hub-newer' };
+      }
+      return { verdict: 'push', baseUrl: hub.baseUrl, pageLabel: hub.pageLabel ?? null };
+    } catch {
+      return { verdict: 'inconclusive' };
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   }
 
