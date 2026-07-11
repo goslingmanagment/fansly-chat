@@ -265,6 +265,10 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return isString(message.groupId) &&
         isNumber(message.generatedAt) &&
         isObjectRecord(message.syncStatus);
+    case 'spenders:progress':
+      return (message.phase === 'ranking' || message.phase === 'names') &&
+        isOptionalNumber(message, 'done') &&
+        isOptionalNumber(message, 'total');
     case 'operation:progress':
       return hasOperationProgressShape(message) && isFeatureType(message.feature);
     case 'compare:progress':

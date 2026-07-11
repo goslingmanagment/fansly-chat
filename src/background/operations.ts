@@ -970,6 +970,13 @@ export class OperationCoordinator {
     this.portsByTabId.get(tabId)?.postMessage(message);
   }
 
+  /** Push a message to a tab's content port — used by the runtime API for
+   * board-build progress (the board rides a one-shot runtime request, so it
+   * has no channel of its own). No-op when that tab has no live port. */
+  sendToTab(tabId: number, message: BackgroundPortMessage): void {
+    this.send(tabId, message);
+  }
+
   private sendSummarySyncStatus(
     tabId: number,
     groupId: string,

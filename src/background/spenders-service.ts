@@ -26,6 +26,7 @@ import {
   SPENDERS_MAX_FANS,
   SPENDERS_NAME_LOOKUP_BATCH,
   SPENDERS_NAME_SWEEP_BUDGET_MS,
+  SPENDERS_NAMES_CACHE_MAX,
   SPENDERS_NAMES_CACHE_TTL_MS,
 } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
@@ -36,6 +37,7 @@ import type {
   Settings,
   SpenderListEntry,
   SpendersListResult,
+  SpendersProgressPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -156,13 +158,22 @@ async function writeSessionCache(key: string, entry: CacheEntry | null): Promise
   }
 }
 
-// Fan names get their OWN session cache with a much longer TTL than the
-// board: renames are rare, and re-sweeping /account?ids= on every 10-minute
-// rebuild is what froze the 1.9.1 board. Later builds fetch only unknown ids.
+// Fan names get their OWN cache, in storage.LOCAL (not session): renames are
+// rare, and a browser restart must not re-buy 10 batched /account?ids=
+// requests per creator. TTL 6h, size-capped. Later builds — including a
+// Refresh — fetch only ids the cache does not know.
 const NAMES_CACHE_STORAGE_KEY = 'spendersNames';
 
+function localStorageArea(): browser.storage.StorageArea | null {
+  try {
+    return browser.storage?.local ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
-  const area = sessionStorageArea();
+  const area = localStorageArea();
   if (!area) return null;
   try {
     const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
@@ -181,7 +192,7 @@ async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
 }
 
 async function writeNamesCache(key: string, entry: NamesCacheEntry): Promise<void> {
-  const area = sessionStorageArea();
+  const area = localStorageArea();
   if (!area) return;
   try {
     const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
@@ -234,7 +245,10 @@ export class SpendersService {
   async getList(
     session: SessionTemplate,
     signal: AbortSignal,
-    options?: { refresh?: boolean },
+    options?: {
+      refresh?: boolean;
+      onProgress?: (progress: SpendersProgressPayload) => void;
+    },
   ): Promise<SpendersListResult> {
     const key = this.cacheKey(session);
     const now = Date.now();
@@ -264,7 +278,7 @@ export class SpendersService {
       throw new ChatGooseError('hub_request_failed');
     }
 
-    const result = await this.buildFromKernel(session, settings, signal);
+    const result = await this.buildFromKernel(session, settings, signal, options?.onProgress);
 
     // W9.3/A20: builtAt === null means the kernel has never walked this
     // page (not ramped) — caching would pin a "not enabled" board for
@@ -284,7 +298,9 @@ export class SpendersService {
     session: SessionTemplate,
     settings: Settings,
     signal: AbortSignal,
+    onProgress?: (progress: SpendersProgressPayload) => void,
   ): Promise<SpendersListResult> {
+    onProgress?.({ type: 'spenders:progress', phase: 'ranking' });
     const pageUsername = session.resolvedUsername?.trim() || null;
     const pageLabel = await this.kernelSource!.resolvePageLabelForUsername(
       settings,
@@ -331,6 +347,7 @@ export class SpendersService {
       lifetime.entries.map((entry) => entry.platformUserId),
       session,
       signal,
+      onProgress,
     );
 
     const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
@@ -369,6 +386,7 @@ export class SpendersService {
     fanAccountIds: string[],
     session: SessionTemplate,
     signal: AbortSignal,
+    onProgress?: (progress: SpendersProgressPayload) => void,
   ): Promise<Map<string, FanNames>> {
     const cacheKey = this.cacheKey(session);
     const namesById = new Map<string, FanNames>();
@@ -386,6 +404,15 @@ export class SpendersService {
     if (missing.length === 0) {
       return namesById;
     }
+
+    // The sweep is the part a chatter actually waits on (a warm cache skips
+    // it entirely) — so it is the part that reports counts.
+    onProgress?.({
+      type: 'spenders:progress',
+      phase: 'names',
+      done: 0,
+      total: missing.length,
+    });
 
     const sweepStart = Date.now();
     let fetchedAny = false;
@@ -416,20 +443,32 @@ export class SpendersService {
           throw error;
         }
       }
+      // Honest count: batches that failed still advance the bar (their fans
+      // are done being tried — they keep platform names).
+      onProgress?.({
+        type: 'spenders:progress',
+        phase: 'names',
+        done: Math.min(start + batch.length, missing.length),
+        total: missing.length,
+      });
     }
 
     if (fetchedAny) {
-      // Merge-write: keep whatever the cache already knew (stale entries
-      // roll off with the TTL as a whole).
+      // Merge-write: keep whatever the cache already knew (stale entries roll
+      // off with the TTL as a whole). Over the cap, this build's names win —
+      // storage.local outlives the browser, so the map must stay bounded.
       const merged: Record<string, FanNames> = {
         ...(cached && cacheFresh ? cached.byId : {}),
       };
       for (const [id, names] of namesById) {
         merged[id] = names;
       }
+      const capped = Object.keys(merged).length > SPENDERS_NAMES_CACHE_MAX
+        ? Object.fromEntries(namesById)
+        : merged;
       void writeNamesCache(cacheKey, {
         savedAt: cached && cacheFresh ? cached.savedAt : Date.now(),
-        byId: merged,
+        byId: capped,
       });
     }
     return namesById;

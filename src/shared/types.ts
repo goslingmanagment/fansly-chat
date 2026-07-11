@@ -1069,8 +1069,19 @@ export interface CompareProgressEnvelope extends PortEnvelopeBase, CompareProgre
   type: 'compare:progress';
 }
 
+/** Cold-build progress for the Spenders board: the kernel snapshot is fast,
+ * the name sweep is the part a chatter waits on — so it reports counts. */
+export interface SpendersProgressPayload {
+  type: 'spenders:progress';
+  phase: 'ranking' | 'names';
+  /** names phase: fans named so far / fans this build must name. */
+  done?: number;
+  total?: number;
+}
+
 export type BackgroundPortMessage =
   | ChunkPayload
+  | SpendersProgressPayload
   | CompareReadyPayload
   | CompareChunkPayload
   | DebugPromptPayload
