@@ -417,11 +417,32 @@
 
 <div class="timeline">
 
+  <!-- 1.9.5 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.5</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          В режиме отладки видно настоящий промпт, который сервер отправил ИИ.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Добавлено</div>
+        <ul class="changes-list">
+          <li><strong>Отладка показывает реальный промпт.</strong> Раньше в панели «LLM Input» на месте системного и финального промпта стояли заглушки «assembled kernel-side». Теперь при включённом режиме отладки расширение просит у сервера точный собранный промпт (персона, шаблоны, досье фана) и открывает его на отдельной странице расширения. Работает, только пока владелец держит открытым временное окно доступа на сервере</li>
+          <li><strong>Промпт не попадает на страницу Fansly.</strong> В оверлей уходит только сводка (счётчики досье, версия, что отброшено) и одноразовый токен; полный текст живёт в памяти расширения и показывается на своей странице расширения</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.9.4 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.4</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
