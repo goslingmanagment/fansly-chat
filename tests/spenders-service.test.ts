@@ -97,6 +97,7 @@ describe('SpendersService (kernel source)', () => {
   function makeKernelHarness(overrides: StubOverrides & {
     snapshot?: KernelSnapshot;
     monthSnapshot?: KernelSnapshot | 'throw';
+    tuning?: { nameSweepBudgetMs?: number };
   } = {}) {
     const { client, listFanAccounts, getEarnings, getAccountNames } = makeClient(overrides);
     const snapshot = overrides.snapshot ?? LIFETIME_SNAPSHOT;
@@ -123,7 +124,7 @@ describe('SpendersService (kernel source)', () => {
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
     };
-    const service = new SpendersService(client, kernelSource, async () => settings);
+    const service = new SpendersService(client, kernelSource, async () => settings, overrides.tuning);
     return { service, kernelSource, fetchTopSpenders, listFanAccounts, getEarnings, getAccountNames };
   }
 
@@ -252,6 +253,61 @@ describe('SpendersService (kernel source)', () => {
     const result = await failing.service.getList(kernelSession(), new AbortController().signal);
     expect(result.entries).toHaveLength(3);
     expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
+  });
+
+  it('sweeps names without a retry budget (1.9.1 freeze fix)', async () => {
+    const { service, getAccountNames } = makeKernelHarness({ accounts: [] });
+    await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.anything(),
+      expect.anything(),
+      'none',
+    );
+  });
+
+  it('an exhausted sweep budget ships the board on platform names', async () => {
+    const { service, getAccountNames } = makeKernelHarness({
+      accounts: [
+        { id: 'f1', username: 'alice', displayName: 'Alice', notes: [{ contentType: 12002, note: 'Max' }] },
+      ],
+      tuning: { nameSweepBudgetMs: 0 },
+    });
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).not.toHaveBeenCalled();
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
+  });
+
+  it('caches resolved names — a refresh build does not re-sweep', async () => {
+    const store = new Map<string, unknown>();
+    const sessionArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+
+    const { service, getAccountNames } = makeKernelHarness({
+      accounts: [
+        { id: 'f1', username: 'alice', displayName: 'Alice', notes: [{ contentType: 12002, note: 'Max/Canada/45' }] },
+        { id: 'f2', username: 'bob', displayName: 'Bob', notes: [] },
+        { id: 'f-unknown', username: 'ghost', displayName: null, notes: [] },
+      ],
+    });
+    const first = await service.getList(kernelSession(), new AbortController().signal);
+    expect(first.entries[0]!.customName).toBe('Max/Canada/45');
+    expect(getAccountNames).toHaveBeenCalledTimes(1);
+
+    // Refresh bypasses the BOARD cache but the NAME cache holds: no re-sweep.
+    const second = await service.getList(kernelSession(), new AbortController().signal, {
+      refresh: true,
+    });
+    expect(second.entries[0]!.customName).toBe('Max/Canada/45');
+    expect(getAccountNames).toHaveBeenCalledTimes(1);
   });
 
   it('degrades the month column to unknown when the month query fails', async () => {
