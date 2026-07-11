@@ -1254,7 +1254,11 @@ export class OperationCoordinator {
         return null;
       }
 
-      const generatedAt = result.createdAtMs ?? Date.now();
+      // The SOURCE generation time is the dossier's identity/age (core #136);
+      // createdAtMs is only the hub APPEND time — hydrating with it would make
+      // an old dossier look freshly generated, and a later retarget/re-push
+      // would propagate that wrong stamp back as generatedAtMs.
+      const generatedAt = result.sourceGeneratedAtMs ?? result.createdAtMs ?? Date.now();
       return {
         summary: result.body,
         generatedAt,
