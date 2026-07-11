@@ -352,6 +352,20 @@ describe('SpendersBoardController', () => {
     expect(rows()[2]!.querySelector('.chatgoose-board-row-delta')).toBeNull();
   });
 
+  it('does not display a rounded tier boundary inside the lower tier', async () => {
+    const result = makeResult({
+      entries: [entry('fan-boundary', 'group-boundary', 'Almost Whale', 599.6)],
+      fanCount: 1,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+    );
+    await board.show();
+
+    expect(document.querySelector('.chatgoose-board-section-title')?.textContent).toContain('Top');
+    expect(document.querySelector('.chatgoose-board-row-amount')?.textContent).toBe('$599.60');
+  });
+
   it('shows neither delta nor NEW when the month window is unknown', async () => {
     const board = new SpendersBoardController(makeDeps());
     await board.show();
@@ -608,7 +622,7 @@ describe('SpendersBoardController', () => {
 
   // ── Meta line ─────────────────────────────────────────────────────────────
 
-  it('meta line reports data-as-of + fetched, and the truncated total honestly', async () => {
+  it('scopes truncated search/counts and describes projection freshness honestly', async () => {
     const result = makeResult({
       builtAt: Date.now() - 7 * 60 * 60 * 1000,
       fetchedAt: Date.now(),
@@ -621,11 +635,66 @@ describe('SpendersBoardController', () => {
 
     const subtitle = document.querySelector('.chatgoose-board-subtitle')!;
     expect(subtitle.textContent).toContain('top 4 of 480 spenders');
-    expect(subtitle.textContent).toContain('freshest data 7h ago');
+    expect(subtitle.textContent).toContain('newest Hub observation 7h ago');
     expect(subtitle.textContent).toContain('fetched just now');
     expect(subtitle.textContent).not.toContain('scanned');
-    // The freshness story lives in the tooltip.
+    expect(subtitle.textContent).toContain('shown rows may be older');
     expect(subtitle.getAttribute('title')).toContain('Agency Hub');
+
+    const chips = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-board-chip'),
+    );
+    expect(chips[0]?.textContent).toContain('All');
+    expect(chips[0]?.getAttribute('aria-label')).toContain('loaded top 4 of 480 total');
+    expect(chips[1]?.getAttribute('title')).toContain('loaded top 4 of 480 total');
+    expect(document.querySelector('.chatgoose-board-scope')?.textContent).toBe(
+      'Top 4 loaded of 480; search and tier counts use these fans.',
+    );
+    expect(searchInput().placeholder).toBe('Search loaded 4 fans…');
+    expect(searchInput().getAttribute('aria-label')).toContain('loaded top 4 of 480 total');
+
+    typeSearch('does-not-exist');
+    await vi.waitFor(() => expect(rows()).toHaveLength(0));
+    expect(document.querySelector('.chatgoose-board-state')?.textContent).toBe(
+      'No fans match in the loaded top 4.',
+    );
+  });
+
+  it('keeps positive below-$1 spenders visible inside the loaded scope', async () => {
+    const result = makeResult({
+      entries: [
+        entry('fan-whale', 'group-whale', 'Whale', 700),
+        entry('fan-small', 'group-small', 'Small', 0.5),
+      ],
+      fanCount: 694,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+    );
+    await board.show();
+
+    expect(rows()).toHaveLength(2);
+    expect(document.querySelectorAll('.chatgoose-board-section-title')[1]?.textContent).toBe(
+      'Below $1',
+    );
+    expect(rows()[1]?.querySelector('.chatgoose-board-row-amount')?.textContent).toBe('$0.50');
+    expect(document.querySelector('.chatgoose-board-chip-count')?.textContent).toBe('2');
+
+    typeSearch('small');
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]?.querySelector('.chatgoose-board-row-name')?.textContent).toBe('Small');
+  });
+
+  it('keeps untruncated controls labelled as the complete list', async () => {
+    const board = new SpendersBoardController(makeDeps());
+    await board.show();
+
+    const firstChip = document.querySelector<HTMLButtonElement>('.chatgoose-board-chip')!;
+    expect(firstChip.textContent).toContain('All');
+    expect(firstChip.textContent).not.toContain('Shown');
+    expect(firstChip.title).toBe('');
+    expect(document.querySelector('.chatgoose-board-scope')).toBeNull();
+    expect(searchInput().placeholder).toBe('Search fans…');
   });
 
   // ── W9.3/A20: not-ramped page (builtAt null) ─────────────────────────────

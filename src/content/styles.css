@@ -1907,6 +1907,12 @@ body.chatgoose-scroll-lock {
   color: var(--chatgoose-bg1);
 }
 
+.chatgoose-board-scope {
+  align-self: center;
+  color: var(--chatgoose-ink-low);
+  font-size: 11px;
+}
+
 /* Client-side name filter; sits at the right end of the chip row. */
 .chatgoose-board-search {
   margin-left: auto;

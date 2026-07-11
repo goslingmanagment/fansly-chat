@@ -353,7 +353,8 @@ export class AgencyHubClient {
   }
 
   /** Stage 32 Task 4: one kernel query replaces the board's Fansly earnings
-   * sweep. Snapshot-honest: builtAt = the projection's freshest observation.
+   * sweep. Observation-honest: builtAt = the newest observation across the
+   * page/window projection, not a coherent timestamp shared by returned rows.
    * `window` is 'lifetime' or a 'YYYY-MM' calendar month (kernel contract). */
   async fetchTopSpenders(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,

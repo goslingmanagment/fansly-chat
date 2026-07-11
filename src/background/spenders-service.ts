@@ -15,8 +15,10 @@
 //
 // The legacy rebuild (and its hidden `spendersLegacyRebuild` setting) died in
 // 1.7.0 as planned (E6/E9): the kernel query is the ONLY ranking source.
-// Kernel snapshots carry an honest as-of timestamp: builtAt =
-// max(observed_at) of the projection window, not "now".
+// Kernel results carry an honest projection timestamp: builtAt =
+// max(observed_at) across the page/window projection, not "now", not
+// necessarily one of the returned top N, and not a coherent timestamp shared
+// by every returned row.
 
 import {
   FANSLY_CUSTOM_NAME_NOTE_TYPE,
@@ -627,7 +629,9 @@ export class SpendersService {
 
     return {
       entries,
-      // Honest staleness: the projection's freshest observation, not "now".
+      // Honest staleness: the projection's newest observation, not "now",
+      // not necessarily one of the returned top N, and not a coherent
+      // timestamp shared by every returned row.
       // Source state, not builtAt alone, distinguishes disabled/pending/empty.
       builtAt: parseKernelTimestamp(lifetime.builtAt),
       source: {
