@@ -12,6 +12,7 @@ import type {
   UserFacingError,
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
+import { renderSummaryMarkdown } from './summary-markdown.js';
 import {
   formatLlmCostSummary,
   formatCacheEffectInline,
@@ -1205,6 +1206,11 @@ export class OverlayController {
         recSection.append(recTitle, recText);
         section.append(recSection);
       }
+    } else if (model.feature === 'fan-summary' && model.rawText.trim()) {
+      const body = document.createElement('div');
+      body.className = 'chatgoose-stream chatgoose-md';
+      body.append(renderSummaryMarkdown(model.rawText));
+      section.append(body);
     } else {
       const body = document.createElement('div');
       body.className = 'chatgoose-stream';
