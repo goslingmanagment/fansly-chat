@@ -156,7 +156,7 @@ function isCompareStartMessage(record: Record<string, unknown>): boolean {
     isOptionalReplyTone(record);
 }
 
-/** E27: the prompt echo's status message may carry the viewer token and the
+/** E28: the prompt echo's status message may carry the viewer token and the
  * counts projection — and NOTHING else.
  *
  * EXACT key match, not "has at least these". A validator that merely checks the

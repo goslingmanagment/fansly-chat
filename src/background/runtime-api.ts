@@ -43,7 +43,7 @@ export interface RuntimeApiDeps {
   emitToTab?: (tabId: number, message: SpendersProgressPayload) => void;
 }
 
-/** E27. The prompt echo is readable by ONE caller: our own viewer page. The
+/** E28. The prompt echo is readable by ONE caller: our own viewer page. The
  * content script running inside fansly.com must not be able to ask for it — it
  * shares a document with the site's JS, and a compromised page could otherwise
  * walk the runtime API to the persona and the dossier. Compare the sender's
@@ -226,7 +226,7 @@ export function registerRuntimeApi({
         return snapshot;
       }
 
-      // E27 viewer handshake. `openDebugPrompt` may come from the content script
+      // E28 viewer handshake. `openDebugPrompt` may come from the content script
       // (it holds the token but has no tabs API); `getDebugPromptSnapshot` — the
       // one call that hands over the assembled prompt — may come ONLY from the
       // viewer page itself.

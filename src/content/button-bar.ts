@@ -21,8 +21,10 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
 // Tone segments live in a sunken groove next to Reply: OPTIONS of the next
 // Reply, not standalone buttons (E24). Clicking a segment ARMS the tone
 // (radio — one at a time; clicking the armed one disarms); only Reply fires.
-// The armed segment expands to show its word. ⌘⇧O cycles the same set —
-// kept in lock-step with the cycle-tone order in content/index.ts.
+// The armed segment is highlighted without changing width. The label remains
+// available through aria-label + the hover hint, while the fixed geometry keeps
+// the narrow Fansly composer from scrolling when a tone is armed (E27). ⌘⇧O
+// cycles the same set — kept in lock-step with content/index.ts.
 const TONE_OPTIONS: Array<{
   tone: Exclude<ReplyTone, 'none'>;
   emoji: string;
@@ -200,9 +202,9 @@ export class ButtonBar {
     }
   }
 
-  /** (Re)build the tone segments: emoji always; the armed segment expands
-   *  with its word — the label appears exactly when the choice matters
-   *  (right before Reply fires). */
+  /** (Re)build the fixed-width tone segments. The armed segment is expressed
+   *  through aria-checked + its active class; changing tone never reflows the
+   *  toolbar (E27). */
   private renderToneSegments(nextReplyTone: ReplyTone, disabled: boolean): void {
     for (const entry of TONE_OPTIONS) {
       const segment = this.toneSegments.get(entry.tone)!;
@@ -213,14 +215,7 @@ export class ButtonBar {
       const emoji = document.createElement('span');
       emoji.className = 'chatgoose-tone-seg-emoji';
       emoji.textContent = entry.emoji;
-      if (isActive) {
-        const word = document.createElement('span');
-        word.className = 'chatgoose-tone-seg-word';
-        word.textContent = entry.word;
-        segment.replaceChildren(emoji, word);
-      } else {
-        segment.replaceChildren(emoji);
-      }
+      segment.replaceChildren(emoji);
     }
   }
 

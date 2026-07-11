@@ -231,7 +231,7 @@ export interface PromptDebugSnapshot {
   user: string;
 }
 
-// ─── Kernel prompt echo (E27) ────────────────────────────────────────────
+// ─── Kernel prompt echo (E28) ────────────────────────────────────────────
 
 /** What the kernel says it injected — the ONLY shape allowed into the Fansly
  * DOM. Counts and labels, never prompt text: the page shares our DOM, so a
@@ -776,7 +776,7 @@ export interface RuntimeResponseMap {
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
 }
 
-/** E27 viewer handshake. The token is the whole authority — it is minted per
+/** E28 viewer handshake. The token is the whole authority — it is minted per
  * echo, expires with it, and never touches the page's DOM. */
 export interface DebugPromptTokenRequest {
   viewerToken: string;
@@ -1032,7 +1032,7 @@ export interface DebugPromptPayload extends PortEnvelopeBase {
   snapshot: PromptDebugSnapshot;
 }
 
-/** E27. A SEPARATE message from `operation:debugPrompt` on purpose: that one's
+/** E28. A SEPARATE message from `operation:debugPrompt` on purpose: that one's
  * validator accepts any object as its snapshot, which is exactly the hole a
  * prompt body would slip through on its way to the Fansly DOM. This type cannot
  * carry prompt text — only the token and the counts projection. */

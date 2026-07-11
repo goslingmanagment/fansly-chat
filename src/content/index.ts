@@ -147,7 +147,7 @@ export class ChatGooseContentApp {
   private activeOperationId: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
-  /** E27: the kernel echo's fate + its viewer token. Closure-only, never DOM. */
+  /** E28: the kernel echo's fate + its viewer token. Closure-only, never DOM. */
   private activeDebugEcho: DebugPromptEchoStatus | null = null;
   private activeLlmSpend: LlmSpendSummary | null = null;
   private activeProfiling: OperationProfilingSnapshot | null = null;
@@ -1410,7 +1410,7 @@ export class ChatGooseContentApp {
     // Rebuilt, not adopted: only the modelled fields cross into this process,
     // whatever the port handed us. The token then lives here in the content
     // script's own heap — never in an attribute, a dataset entry, or anything
-    // else the Fansly page can read out of the shared DOM (E27).
+    // else the Fansly page can read out of the shared DOM (E28).
     this.activeDebugEcho = projectDebugPromptEcho(message.echo);
     this.scheduleLoadingRender();
   }
