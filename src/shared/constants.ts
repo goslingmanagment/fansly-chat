@@ -42,18 +42,25 @@ export const FANSLY_MEDIA_PURCHASE_VERIFICATION_TIMEOUT_MS = 3_000;
 export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 // ─── Spenders board ──────────────────────────────────────────────────────
-// A ranked top-spenders list has no single Fansly endpoint: it enumerates
-// conversations, then fetches lifetime earnings per fan (one call each). To
-// keep the burst bounded and avoid hammering Fansly, the scan is capped, runs
-// at low concurrency, and the result is cached per creator for a short window.
+// Rankings come from the kernel top-spenders query (lifetime window, plus a
+// best-effort month-window twin for the +$N column). The only Fansly read is
+// one bounded conversation enumeration — the fan→groupId map for opening
+// chats; it does NOT gate board membership (kernel spenders outside it get a
+// lazy inbox-search resolve on open).
 
-/** Most-recent conversations to fetch lifetime spend for before ranking. */
+/** Most-recent conversations to enumerate for the fan→groupId map. */
 export const SPENDERS_MAX_FANS = 150;
-/** Concurrent per-fan earnings fetches (matches the monthly-breakdown fan-out). */
-/** Reuse a built board for this long before a fresh scan is allowed. */
+/** Kernel top-spenders query size (the kernel caps limit at 500). */
+export const SPENDERS_KERNEL_LIMIT = 500;
+/** Reuse a built board for this long before re-asking the kernel. */
 export const SPENDERS_CACHE_TTL_MS = 10 * 60 * 1000;
-/** Overall budget for one board build (enumerate + per-fan earnings fan-out). */
+/** Overall budget for one board build. */
 export const SPENDERS_BUILD_TIMEOUT_MS = 120_000;
+/** Budget for lazily resolving a fan's chat via one inbox search on open. */
+export const SPENDERS_RESOLVE_TIMEOUT_MS = 15_000;
+/** How long the Fansly SPA router gets to react to a board chat-open before
+ * the extension falls back to a full page load. */
+export const SPENDERS_SPA_NAV_VERIFY_MS = 2_000;
 
 // ─── Message Counts ──────────────────────────────────────────────────────
 

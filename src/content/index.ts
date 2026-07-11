@@ -1,6 +1,6 @@
 import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
-import { getActiveConversationDisplayName } from './conversation-dom.js';
+import { getActiveConversationDisplayName, getActiveConversationDom } from './conversation-dom.js';
 import { ConversationMountController } from './conversation-mount-controller.js';
 import { installContentStyles } from './dom-anchor.js';
 import { CompletedCompareCache } from './inline-panel/completed-compare-cache.js';
@@ -29,6 +29,7 @@ import {
   type HotkeyAction,
 } from '../shared/hotkeys.js';
 import { createKeymap } from '../shared/keymap.js';
+import { SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
 import { sendRuntimeRequest } from '../shared/protocol.js';
 import {
   getCompareCardsFingerprintForPersonality,
@@ -314,6 +315,12 @@ export class ChatGooseContentApp {
     fetchList: (refresh) =>
       sendRuntimeRequest('getSpendersList', refresh ? { refresh: true } : undefined),
     openChat: (groupId) => this.openFanChat(groupId),
+    resolveChat: (entry) =>
+      sendRuntimeRequest('resolveFanChat', {
+        fanAccountId: entry.fanAccountId,
+        username: entry.username,
+        displayName: entry.displayName,
+      }),
   });
   private readonly launcher = new BoardLauncher(() => this.board.toggle());
 
@@ -445,9 +452,40 @@ export class ChatGooseContentApp {
     }
   }
 
+  // Opening a chat from the board rides Fansly's own SPA router (pushState +
+  // popstate is what Angular's Location listens for) instead of a full page
+  // load. The send surface is untouched — this only routes to the NATIVE
+  // chat faster. Because a router that ignored the popstate leaves the URL
+  // and the view disagreeing (which would also poison our route tracking),
+  // the navigation is verified and falls back to a hard load.
   private openFanChat(groupId: string): void {
     this.board.close();
-    window.location.assign(`/messages/${groupId}`);
+    if (this.currentGroupId === groupId) return;
+    const target = `/messages/${groupId}`;
+    const before = getActiveConversationDom();
+    try {
+      window.history.pushState(null, '', target);
+      window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    } catch {
+      window.location.assign(target);
+      return;
+    }
+    window.setTimeout(() => {
+      // The user may have navigated elsewhere meanwhile — never hijack that.
+      if (window.location.pathname !== target) return;
+      const after = getActiveConversationDom();
+      // From no-conversation: any conversation appearing = success. From
+      // conversation A: Angular may reuse the component, so a replaced
+      // container OR a changed header name counts (two fans with the same
+      // display name would false-trigger one hard load — today's behavior).
+      const navigated = before === null
+        ? after !== null
+        : after !== null &&
+          (after.container !== before.container || after.displayName !== before.displayName);
+      if (!navigated) {
+        window.location.assign(target);
+      }
+    }, SPENDERS_SPA_NAV_VERIFY_MS);
   }
 
   // ─── Surface Rendering ──────────────────────────────────────────────

@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   assignSpenderTier,
   countByTier,
+  filterSpendersByQuery,
+  formatMonthDelta,
   formatSpenderAmount,
   groupSpendersByTier,
+  isNewSpender,
+  monthWindowFor,
   SPENDER_TIERS,
   sortByLifetimeDesc,
 } from '../src/shared/spenders.js';
@@ -89,5 +93,59 @@ describe('formatSpenderAmount', () => {
     expect(formatSpenderAmount(0)).toBe('');
     expect(formatSpenderAmount(-5)).toBe('');
     expect(formatSpenderAmount(Number.NaN)).toBe('');
+  });
+});
+
+// ── E23 additions: month column, NEW badge, search, month window ────────────
+
+describe('isNewSpender', () => {
+  it('is true only when the lifetime landed inside the month window', () => {
+    expect(isNewSpender(700, 700)).toBe(true);
+    expect(isNewSpender(700.5, 700)).toBe(true); // within the $1 epsilon
+    expect(isNewSpender(1078, 120)).toBe(false);
+    expect(isNewSpender(700, 0)).toBe(false);
+    expect(isNewSpender(700, null)).toBe(false); // unknown month ≠ new
+  });
+});
+
+describe('formatMonthDelta', () => {
+  it('prefixes a plus and reuses the whole-dollar format', () => {
+    expect(formatMonthDelta(120)).toBe('+$120');
+    expect(formatMonthDelta(1078.4)).toBe('+$1,078');
+  });
+
+  it('renders nothing for unknown, zero, or sub-dollar amounts', () => {
+    expect(formatMonthDelta(null)).toBe('');
+    expect(formatMonthDelta(0)).toBe('');
+    expect(formatMonthDelta(0.4)).toBe('');
+    expect(formatMonthDelta(Number.NaN)).toBe('');
+  });
+});
+
+describe('filterSpendersByQuery', () => {
+  const fans = [
+    { displayName: 'Jonathan', username: 'jony' },
+    { displayName: null, username: 'ghost_99' },
+    { displayName: 'Ricky', username: null },
+  ];
+
+  it('matches case-insensitive substrings on either name field', () => {
+    expect(filterSpendersByQuery(fans, 'JON')).toHaveLength(1);
+    expect(filterSpendersByQuery(fans, 'ghost')).toHaveLength(1);
+    expect(filterSpendersByQuery(fans, 'rick')).toHaveLength(1);
+    expect(filterSpendersByQuery(fans, 'zzz')).toHaveLength(0);
+  });
+
+  it('keeps everything on a blank query', () => {
+    expect(filterSpendersByQuery(fans, '')).toHaveLength(3);
+    expect(filterSpendersByQuery(fans, '   ')).toHaveLength(3);
+  });
+});
+
+describe('monthWindowFor', () => {
+  it('produces the kernel YYYY-MM key in UTC', () => {
+    expect(monthWindowFor(Date.UTC(2026, 6, 11))).toBe('2026-07');
+    expect(monthWindowFor(Date.UTC(2026, 0, 1))).toBe('2026-01');
+    expect(monthWindowFor(Date.UTC(2025, 11, 31, 23, 59))).toBe('2025-12');
   });
 });

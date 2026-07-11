@@ -725,6 +725,43 @@ export class FanslyClient {
     return { fans, truncated: true };
   }
 
+  /**
+   * Resolve the messaging groupId for a fan who is NOT among the enumerated
+   * most-recent conversations: ONE bounded inbox-search request — the same
+   * /messaging/groups endpoint (and its `search` param) the page's own inbox
+   * search box issues, so no new Fansly egress class (E23) — matched by
+   * partnerAccountId. Null = the search returned no conversation for the fan.
+   */
+  async findGroupIdForFan(
+    fanAccountId: string,
+    searchTerm: string,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
+    url.searchParams.set('sortOrder', '1');
+    url.searchParams.set('flags', '0');
+    url.searchParams.set('subscriptionTierId', '');
+    url.searchParams.set('listIds', '');
+    url.searchParams.set('search', searchTerm);
+    url.searchParams.set('limit', String(MESSAGING_GROUPS_PAGE_SIZE));
+    url.searchParams.set('offset', '0');
+
+    const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(
+      url,
+      session,
+      'messagingGroups',
+      signal,
+    );
+    const groups = Array.isArray(response.data) ? response.data : [];
+    for (const entry of groups) {
+      if (entry.partnerAccountId === fanAccountId && entry.groupId) {
+        return entry.groupId;
+      }
+    }
+    return null;
+  }
+
   async getMonthlyEarnings(
     fanAccountId: string,
     windowStartMs: number,
