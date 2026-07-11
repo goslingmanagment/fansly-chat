@@ -281,15 +281,34 @@ describe('SpendersService (kernel source)', () => {
     expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
   });
 
-  it('caches resolved names — a refresh build does not re-sweep', async () => {
+  it('emits ranking + counted name-sweep progress', async () => {
+    const { service } = makeKernelHarness({
+      accounts: [{ id: 'f1', username: 'alice', displayName: 'Alice', notes: [] }],
+    });
+    const frames: Array<{ phase: string; done?: number; total?: number }> = [];
+    await service.getList(kernelSession(), new AbortController().signal, {
+      onProgress: (progress) => frames.push(progress),
+    });
+
+    expect(frames[0]).toMatchObject({ phase: 'ranking' });
+    expect(frames.at(-1)).toMatchObject({ phase: 'names', done: 3, total: 3 });
+    // The sweep announces its size before doing any work.
+    expect(frames.some((frame) => frame.phase === 'names' && frame.done === 0)).toBe(true);
+  });
+
+  it('caches resolved names in storage.local — a refresh build does not re-sweep', async () => {
     const store = new Map<string, unknown>();
-    const sessionArea = {
+    const localArea = {
       get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
       set: vi.fn(async (items: Record<string, unknown>) => {
         for (const [key, value] of Object.entries(items)) store.set(key, value);
       }),
     };
-    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+    const sessionArea = {
+      get: vi.fn(async () => ({})),
+      set: vi.fn(async () => undefined),
+    };
+    vi.stubGlobal('browser', { storage: { local: localArea, session: sessionArea } });
 
     const { service, getAccountNames } = makeKernelHarness({
       accounts: [
@@ -308,6 +327,14 @@ describe('SpendersService (kernel source)', () => {
     });
     expect(second.entries[0]!.customName).toBe('Max/Canada/45');
     expect(getAccountNames).toHaveBeenCalledTimes(1);
+
+    // The names live in storage.local — they survive a worker/browser restart
+    // (a brand-new service instance re-reads them without sweeping).
+    const restarted = makeKernelHarness({ accounts: [] });
+    const third = await restarted.service.getList(kernelSession(), new AbortController().signal);
+    expect(third.entries[0]!.customName).toBe('Max/Canada/45');
+    expect(restarted.getAccountNames).not.toHaveBeenCalled();
+    expect(localArea.set).toHaveBeenCalled();
   });
 
   it('degrades the month column to unknown when the month query fails', async () => {

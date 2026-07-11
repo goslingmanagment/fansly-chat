@@ -58,9 +58,13 @@ export const SPENDERS_NAME_LOOKUP_BATCH = 50;
  * decoration — the board must never hang on them (1.9.1 field report:
  * retrying batches stacked into a "Building the board…" freeze). */
 export const SPENDERS_NAME_SWEEP_BUDGET_MS = 12_000;
-/** Resolved fan names live this long in storage.session (renames are rare);
- * later builds fetch only ids the cache does not know. */
+/** Resolved fan names live this long in storage.LOCAL (renames are rare, and
+ * a browser restart must not re-buy every name); later builds fetch only ids
+ * the cache does not know. */
 export const SPENDERS_NAMES_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+/** Hard cap on cached names per creator — the cache must never grow without
+ * bound across a long-lived profile. */
+export const SPENDERS_NAMES_CACHE_MAX = 2_000;
 /** Fansly account-note contentType that stores the creator's custom display
  * name for a fan (the native "change display names — it's for your eyes
  * only" feature; the note text IS the name). */

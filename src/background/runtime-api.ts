@@ -17,6 +17,7 @@ import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
+  SpendersProgressPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -36,6 +37,8 @@ export interface RuntimeApiDeps {
   spendersService: SpendersService;
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
+  /** Pushes board-build progress to the requesting tab's content port. */
+  emitToTab?: (tabId: number, message: SpendersProgressPayload) => void;
 }
 
 export function registerRuntimeApi({
@@ -45,6 +48,7 @@ export function registerRuntimeApi({
   spendersService,
   tabContexts,
   storageCoordinator,
+  emitToTab,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: unknown, sender: browser.runtime.MessageSender) => {
@@ -316,7 +320,12 @@ export function registerRuntimeApi({
           SPENDERS_BUILD_TIMEOUT_MS,
         );
         try {
-          const result = await spendersService.getList(session, controller.signal, { refresh });
+          const result = await spendersService.getList(session, controller.signal, {
+            refresh,
+            onProgress: emitToTab && tabId !== undefined
+              ? (progress) => emitToTab(tabId, progress)
+              : undefined,
+          });
           return { ok: true, result };
         } catch (error) {
           const timedOut = error instanceof DOMException && error.name === 'AbortError';

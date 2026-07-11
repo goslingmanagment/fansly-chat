@@ -1107,6 +1107,9 @@ export class ChatGooseContentApp {
       case 'summary:syncStatus':
         this.handleSummarySyncStatus(message);
         break;
+      case 'spenders:progress':
+        this.board.setBuildProgress(message);
+        break;
       case 'operation:progress':
         this.handleProgress(message);
         break;
