@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { projectKernelContext } from '../src/shared/kernel-context.js';
+import { projectDebugPromptEcho, projectKernelContext } from '../src/shared/kernel-context.js';
 import { isBackgroundPortMessage } from '../src/shared/protocol.js';
+import type { DebugPromptEchoStatus } from '../src/shared/types.js';
 
 // E27. This projection is the boundary: it is the only thing derived from the
 // kernel's manifest that is allowed to reach the Fansly DOM. If a new manifest
@@ -107,5 +108,87 @@ describe('operation:debugPromptStatus validator', () => {
         kernelContext: { dossier: { version: 'v1', droppedSections: [] }, transcript: null, otherKeys: [] },
       },
     })).toBe(false);
+  });
+
+  // The leak this boundary exists to prevent is a PRODUCER bug: a future edit to
+  // the background bolting prompt blocks onto a message that also happens to
+  // validate. Extra keys are therefore rejected, not ignored — at every level.
+  it('rejects prompt blocks riding beside the modelled fields', () => {
+    expect(isBackgroundPortMessage({
+      ...base,
+      echo: { state: 'available', viewerToken: 'tok', kernelContext },
+      systemBlocks: [{ text: 'SECRET persona', cache: '1h' }],
+    })).toBe(false);
+    expect(isBackgroundPortMessage({
+      ...base,
+      echo: {
+        state: 'available',
+        viewerToken: 'tok',
+        kernelContext,
+        systemBlocks: [{ text: 'SECRET persona', cache: '1h' }],
+      },
+    })).toBe(false);
+    expect(isBackgroundPortMessage({
+      ...base,
+      echo: {
+        state: 'available',
+        viewerToken: 'tok',
+        kernelContext: { ...kernelContext, userBlocks: [{ text: 'SECRET dossier' }] },
+      },
+    })).toBe(false);
+    expect(isBackgroundPortMessage({
+      ...base,
+      echo: { state: 'unavailable', viewerToken: 'tok', kernelContext },
+    })).toBe(false);
+  });
+});
+
+// Belt and braces: even if a validator were loosened later, what reaches the
+// page's process is a freshly BUILT object — a constructor cannot copy a field
+// it never names.
+describe('projectDebugPromptEcho', () => {
+  it('rebuilds the echo and drops anything unmodelled', () => {
+    const contaminated = {
+      state: 'available',
+      viewerToken: 'tok',
+      systemBlocks: [{ text: 'SECRET persona', cache: '1h' }],
+      kernelContext: {
+        dossier: {
+          version: 2,
+          ageDays: 1,
+          chars: 8110,
+          truncated: false,
+          droppedSections: ['STRATEGY'],
+          body: 'SECRET dossier text',
+        },
+        transcript: null,
+        otherKeys: ['loaderVersion'],
+        userBlocks: [{ text: 'SECRET prompt' }],
+      },
+    } as unknown as DebugPromptEchoStatus;
+
+    const safe = projectDebugPromptEcho(contaminated);
+
+    expect(JSON.stringify(safe)).not.toContain('SECRET');
+    expect(safe).toEqual({
+      state: 'available',
+      viewerToken: 'tok',
+      kernelContext: {
+        dossier: {
+          version: 2,
+          ageDays: 1,
+          chars: 8110,
+          truncated: false,
+          droppedSections: ['STRATEGY'],
+        },
+        transcript: null,
+        otherKeys: ['loaderVersion'],
+      },
+    });
+  });
+
+  it('reduces the token-less states to their bare state', () => {
+    expect(projectDebugPromptEcho({ state: 'unavailable' })).toEqual({ state: 'unavailable' });
+    expect(projectDebugPromptEcho({ state: 'cache-hit' })).toEqual({ state: 'cache-hit' });
   });
 });

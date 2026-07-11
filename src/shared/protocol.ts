@@ -157,16 +157,27 @@ function isCompareStartMessage(record: Record<string, unknown>): boolean {
 }
 
 /** E27: the prompt echo's status message may carry the viewer token and the
- * counts projection — and NOTHING else. Rebuilding it field by field (rather
- * than passing an object through) is what keeps prompt text out of the Fansly
- * DOM structurally: an unmodelled key cannot survive this function. */
+ * counts projection — and NOTHING else.
+ *
+ * EXACT key match, not "has at least these". A validator that merely checks the
+ * fields it knows lets an unmodelled `systemBlocks` ride along beside them — and
+ * this message ends up in the Fansly DOM's neighbourhood. Extra keys are a
+ * producer bug, and a producer bug here is a prompt leak, so they are rejected
+ * rather than ignored. (The content script rebuilds the object anyway, in
+ * projectDebugPromptEcho — belt AND braces.) */
+function hasExactKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(record);
+  return actual.length === keys.length && keys.every((key) => key in record);
+}
+
 function isKernelContextProjection(value: unknown): boolean {
-  if (!isObjectRecord(value)) {
+  if (!isObjectRecord(value) || !hasExactKeys(value, ['dossier', 'transcript', 'otherKeys'])) {
     return false;
   }
   const dossier = value.dossier;
   const dossierOk = dossier === null || (
     isObjectRecord(dossier) &&
+    hasExactKeys(dossier, ['version', 'ageDays', 'chars', 'truncated', 'droppedSections']) &&
     (dossier.version === null || isNumber(dossier.version)) &&
     (dossier.ageDays === null || isNumber(dossier.ageDays)) &&
     (dossier.chars === null || isNumber(dossier.chars)) &&
@@ -177,6 +188,7 @@ function isKernelContextProjection(value: unknown): boolean {
   const transcript = value.transcript;
   const transcriptOk = transcript === null || (
     isObjectRecord(transcript) &&
+    hasExactKeys(transcript, ['source', 'mode', 'archiveCount', 'unionCount', 'stale']) &&
     isNullableString(transcript.source) &&
     isNullableString(transcript.mode) &&
     (transcript.archiveCount === null || isNumber(transcript.archiveCount)) &&
@@ -195,10 +207,12 @@ function isDebugPromptEchoStatus(value: unknown): boolean {
   }
   switch (value.state) {
     case 'available':
-      return isString(value.viewerToken) && isKernelContextProjection(value.kernelContext);
+      return hasExactKeys(value, ['state', 'viewerToken', 'kernelContext']) &&
+        isString(value.viewerToken) &&
+        isKernelContextProjection(value.kernelContext);
     case 'unavailable':
     case 'cache-hit':
-      return true;
+      return hasExactKeys(value, ['state']);
     default:
       return false;
   }
@@ -287,7 +301,10 @@ export function isBackgroundPortMessage(message: unknown): message is Background
         isFeatureType(message.feature) &&
         isObjectRecord(message.snapshot);
     case 'operation:debugPromptStatus':
-      return hasOperationId(message) &&
+      // Exact envelope too: an extra top-level key on THIS message would be a
+      // prompt block riding beside the projection into the page's process.
+      return hasExactKeys(message, ['type', 'operationId', 'feature', 'echo']) &&
+        hasOperationId(message) &&
         isFeatureType(message.feature) &&
         isDebugPromptEchoStatus(message.echo);
     case 'operation:complete':
