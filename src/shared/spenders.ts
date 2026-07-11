@@ -159,15 +159,16 @@ export function formatMonthDelta(monthUsd: number | null): string {
   return `+${formatSpenderAmount(monthUsd)}`;
 }
 
-/** Case-insensitive substring match over display name and username. An
- * empty/blank query keeps every entry. */
+/** Case-insensitive substring match over the chatter's custom name, display
+ * name, and username. An empty/blank query keeps every entry. */
 export function filterSpendersByQuery<
-  T extends { displayName: string | null; username: string | null },
+  T extends { displayName: string | null; username: string | null; customName?: string | null },
 >(entries: readonly T[], query: string): T[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...entries];
   return entries.filter(
     (entry) =>
+      (entry.customName ?? '').toLowerCase().includes(needle) ||
       (entry.displayName ?? '').toLowerCase().includes(needle) ||
       (entry.username ?? '').toLowerCase().includes(needle),
   );

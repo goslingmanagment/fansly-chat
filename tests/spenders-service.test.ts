@@ -3,7 +3,7 @@ import { SpendersService } from '../src/background/spenders-service.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import { monthWindowFor } from '../src/shared/spenders.js';
-import type { SessionTemplate } from '../src/shared/types.js';
+import type { FanslyAccountResponse, SessionTemplate } from '../src/shared/types.js';
 
 function session(accountId = 'creator-1'): SessionTemplate {
   return {
@@ -25,6 +25,7 @@ function session(accountId = 'creator-1'): SessionTemplate {
 interface StubOverrides {
   fans?: Array<{ groupId: string; fanAccountId: string }>;
   truncated?: boolean;
+  accounts?: FanslyAccountResponse[] | 'throw';
 }
 
 function makeClient(overrides: StubOverrides) {
@@ -36,9 +37,14 @@ function makeClient(overrides: StubOverrides) {
 
   const listFanAccounts = vi.fn(async () => ({ fans, truncated: overrides.truncated ?? false }));
   const getEarnings = vi.fn(async () => null);
+  const getAccountNames = vi.fn(async (ids: string[]) => {
+    if (overrides.accounts === 'throw') throw new Error('account lookup failed');
+    const known = overrides.accounts ?? [];
+    return known.filter((account) => ids.includes(account.id));
+  });
 
-  const client = { listFanAccounts, getEarnings } as unknown as FanslyClient;
-  return { client, listFanAccounts, getEarnings };
+  const client = { listFanAccounts, getEarnings, getAccountNames } as unknown as FanslyClient;
+  return { client, listFanAccounts, getEarnings, getAccountNames };
 }
 
 interface KernelSnapshot {
@@ -92,7 +98,7 @@ describe('SpendersService (kernel source)', () => {
     snapshot?: KernelSnapshot;
     monthSnapshot?: KernelSnapshot | 'throw';
   } = {}) {
-    const { client, listFanAccounts, getEarnings } = makeClient(overrides);
+    const { client, listFanAccounts, getEarnings, getAccountNames } = makeClient(overrides);
     const snapshot = overrides.snapshot ?? LIFETIME_SNAPSHOT;
     const monthSnapshot = overrides.monthSnapshot ?? MONTH_SNAPSHOT;
     const fetchTopSpenders = vi.fn(
@@ -118,7 +124,7 @@ describe('SpendersService (kernel source)', () => {
       agencyHubApiKey: 'hub-key',
     };
     const service = new SpendersService(client, kernelSource, async () => settings);
-    return { service, kernelSource, fetchTopSpenders, listFanAccounts, getEarnings };
+    return { service, kernelSource, fetchTopSpenders, listFanAccounts, getEarnings, getAccountNames };
   }
 
   it('builds from the kernel: every spender listed, unmapped fans get groupId null', async () => {
@@ -148,6 +154,7 @@ describe('SpendersService (kernel source)', () => {
       {
         fanAccountId: 'f1',
         groupId: 'g1',
+        customName: null,
         displayName: 'Alice',
         username: 'alice',
         lifetimeMills: 1_078_000,
@@ -158,6 +165,7 @@ describe('SpendersService (kernel source)', () => {
       {
         fanAccountId: 'f2',
         groupId: 'g2',
+        customName: null,
         displayName: null,
         username: null,
         lifetimeMills: 700_000,
@@ -171,6 +179,7 @@ describe('SpendersService (kernel source)', () => {
         // outside the most-recent chats stays on the board.
         fanAccountId: 'f-unknown',
         groupId: null,
+        customName: null,
         displayName: null,
         username: 'ghost',
         lifetimeMills: 500_000,
@@ -185,6 +194,64 @@ describe('SpendersService (kernel source)', () => {
     expect(result.fanCount).toBe(3);
     expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
     expect(typeof result.fetchedAt).toBe('number');
+  });
+
+  // ── E25: chatter custom names (Fansly rename notes) ──────────────────────
+
+  it('overlays custom names from account notes and backfills platform names', async () => {
+    const { service } = makeKernelHarness({
+      accounts: [
+        {
+          id: 'f1',
+          username: 'alice',
+          displayName: 'Alice',
+          notes: [
+            { contentType: 12000, note: 'CRM sync blob' },
+            { contentType: 12002, note: 'Max/Canada/45' },
+          ],
+        },
+        // The projection knows f2 only by id — the account payload backfills.
+        { id: 'f2', username: 'bob_real', displayName: 'Bob', notes: [] },
+      ],
+    });
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.entries[0]).toMatchObject({
+      fanAccountId: 'f1',
+      customName: 'Max/Canada/45',
+      displayName: 'Alice',
+    });
+    expect(result.entries[1]).toMatchObject({
+      fanAccountId: 'f2',
+      customName: null,
+      displayName: 'Bob',
+      username: 'bob_real',
+    });
+    // Note type 12000 (CRM blobs) is never mistaken for a name.
+    expect(result.entries[0]!.customName).not.toContain('CRM');
+  });
+
+  it('batches the account lookup and degrades to platform names on failure', async () => {
+    const manyEntries = Array.from({ length: 120 }, (_, index) => ({
+      platformUserId: `fan-${index}`,
+      username: `u${index}`,
+      displayName: null,
+      grossMills: 1_000_000 - index,
+    }));
+    const { service, getAccountNames } = makeKernelHarness({
+      snapshot: { builtAt: '2026-07-05T00:00:00.000Z', fanCount: 120, entries: manyEntries },
+      monthSnapshot: { builtAt: null, fanCount: 0, entries: [] },
+    });
+    await service.getList(kernelSession(), new AbortController().signal);
+
+    // 120 fans → 3 batches of ≤50.
+    expect(getAccountNames).toHaveBeenCalledTimes(3);
+    expect(getAccountNames.mock.calls.every(([ids]) => (ids as string[]).length <= 50)).toBe(true);
+
+    const failing = makeKernelHarness({ accounts: 'throw' });
+    const result = await failing.service.getList(kernelSession(), new AbortController().signal);
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
   });
 
   it('degrades the month column to unknown when the month query fails', async () => {

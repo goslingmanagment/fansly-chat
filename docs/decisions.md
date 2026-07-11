@@ -41,6 +41,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E22 | 2026-07-11 | Opportunistic hub re-push of a ready Scan on chat open (preflight-classified, cooldown-bounded, generatedAtMs) |
 | E23 | 2026-07-11 | Spenders board v2: enumeration = map not membership gate (lazy inbox-search chat resolve), kernel limit 500, month +$N column + NEW badge, board search, two-timestamp meta, SPA chat-open with verified fallback, storage.session cache |
 | E24 | 2026-07-11 | Action bar v2: tone groove (radio, arm-only, 😌😏💰🔥 + casual back) + Split flag (sticky) + regen keeps mode/tone; renames Fix/Recap/Split; tolerant [NEXT]; meaning-group seams |
+| E25 | 2026-07-11 | Board rows show the chatter's custom fan names (Fansly rename = account note contentType 12002; batched /account?ids= overlay, best-effort); chatter-eyes-only — never into prompts |
 
 ## Entries
 
@@ -440,3 +441,27 @@ tolerant of marker drift (`[next]`, `[ NEXT ]` — bracket forms only; the old
 case-sensitivity pin reversed). (e) Bar regrouped by meaning with hairline
 seams: Reply+options │ Fix │ Hi·Ping │ → Recap+persona (right-pinned).
 Pinned in button-bar / content-app / split suites.
+
+**E25 (2026-07-11).** Spenders board rows carry the chatter's OWN names for
+fans. The board showed platform display names (mostly == username, sometimes
+a bare numeric id), while the team recognizes fans by the names they set via
+Fansly's native rename ("change display names — it's for your eyes only").
+Mechanism, established from the fbuddy-analysis clean-room docs: the rename
+is stored as a creator-visible ACCOUNT NOTE with contentType 12002 whose
+note text IS the name (the [FB] CRM tool reads the same field; its own CRM
+blobs use contentType 12000 and are never confused for names). The service
+overlays names in buildFromKernel via batched `GET /account?ids=`
+(SPENDERS_NAME_LOOKUP_BATCH=50 → ≤10 extra requests per build, 10-min
+cached; the endpoint is already in this client's surface — no new egress
+class), best-effort per batch: a failed batch degrades its fans to platform
+names, never the board; abort still aborts. The same payload backfills
+displayName/username for fans the projection knows only by id (fixes the
+"?"-avatar numeric rows). Row name precedence customName > displayName >
+username > id; search matches all three; the @handle stays as the stable
+identity line. BOUNDARY: custom names are CHATTER-EYES-ONLY UI — they are
+never sent into prompts/clientContext (fanDisplayName stays the live-DOM
+platform name; a model addressing the fan as "Max/Canada/45" would be a
+product incident). §5 watch: contentType 12002 is pinned from the clean-room
+analysis, not a live capture — verify on the first walkthrough that names
+appear; if they don't, that constant is the first suspect. Pinned in
+spenders-service / spenders-board-controller / spenders suites.

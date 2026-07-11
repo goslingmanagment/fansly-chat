@@ -61,14 +61,16 @@ function ensureBoardRoot(): HTMLElement {
 }
 
 function initials(entry: SpenderListEntry): string {
-  const source = entry.displayName || entry.username || '?';
+  const source = entry.customName || entry.displayName || entry.username || '?';
   const parts = source.trim().split(/\s+/).slice(0, 2);
   const letters = parts.map((part) => part.charAt(0)).join('');
   return (letters || source.charAt(0) || '?').toUpperCase();
 }
 
+/** The chatter's own name for the fan wins — it is the name the team
+ * actually recognizes (E25); platform names are the fallback. */
 function entryName(entry: SpenderListEntry): string {
-  return entry.displayName || entry.username || entry.fanAccountId;
+  return entry.customName || entry.displayName || entry.username || entry.fanAccountId;
 }
 
 function relativeTime(builtAt: number): string {

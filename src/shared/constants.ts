@@ -52,6 +52,12 @@ export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
 export const SPENDERS_MAX_FANS = 150;
 /** Kernel top-spenders query size (the kernel caps limit at 500). */
 export const SPENDERS_KERNEL_LIMIT = 500;
+/** Fans per /account?ids= batch when resolving board-row names. */
+export const SPENDERS_NAME_LOOKUP_BATCH = 50;
+/** Fansly account-note contentType that stores the creator's custom display
+ * name for a fan (the native "change display names — it's for your eyes
+ * only" feature; the note text IS the name). */
+export const FANSLY_CUSTOM_NAME_NOTE_TYPE = 12002;
 /** Reuse a built board for this long before re-asking the kernel. */
 export const SPENDERS_CACHE_TTL_MS = 10 * 60 * 1000;
 /** Overall budget for one board build. */
