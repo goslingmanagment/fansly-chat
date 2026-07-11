@@ -22,8 +22,8 @@ const spendersService = new SpendersService(
   {
     resolvePageLabelForUsername: (settings, pageUsername, signal) =>
       agencyHubClient.resolvePageLabelForUsername(settings, pageUsername, signal),
-    fetchTopSpenders: (settings, pageLabel, limit, signal) =>
-      agencyHubClient.fetchTopSpenders(settings, pageLabel, limit, signal),
+    fetchTopSpenders: (settings, pageLabel, window, limit, signal) =>
+      agencyHubClient.fetchTopSpenders(settings, pageLabel, window, limit, signal),
   },
   async () => (await storageCoordinator.getState()).settings,
 );

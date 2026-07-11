@@ -22,9 +22,39 @@ describe('protocol boundary guards', () => {
       }),
     ).toBe('issueAgencyHubDeviceToken');
 
+    // E23: the board's lazy chat resolve — same E8 lesson: a request type
+    // without its protocol case dies silently before the handler.
+    expect(
+      getRuntimeRequestType({
+        type: 'resolveFanChat',
+        fanAccountId: 'fan-1',
+        username: 'ghost',
+        displayName: null,
+      }),
+    ).toBe('resolveFanChat');
+    expect(
+      getRuntimeRequestType({
+        type: 'resolveFanChat',
+        fanAccountId: 'fan-1',
+        username: null,
+        displayName: null,
+      }),
+    ).toBe('resolveFanChat');
+
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: '12' })).toBeNull();
     expect(getRuntimeRequestType({ type: 'unknown' })).toBeNull();
     expect(getRuntimeRequestType(null)).toBeNull();
+    expect(
+      getRuntimeRequestType({ type: 'resolveFanChat', username: 'ghost', displayName: null }),
+    ).toBeNull();
+    expect(
+      getRuntimeRequestType({
+        type: 'resolveFanChat',
+        fanAccountId: 'fan-1',
+        username: 42,
+        displayName: null,
+      }),
+    ).toBeNull();
   });
 
   it('accepts valid content port messages at the background boundary', () => {

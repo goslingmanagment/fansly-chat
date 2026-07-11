@@ -1826,6 +1826,28 @@ body.chatgoose-scroll-lock {
   color: var(--chatgoose-bg1);
 }
 
+/* Client-side name filter; sits at the right end of the chip row. */
+.chatgoose-board-search {
+  margin-left: auto;
+  width: 190px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font);
+  font-size: 12px;
+}
+
+.chatgoose-board-search::placeholder {
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-board-search:focus {
+  outline: none;
+  border-color: var(--chatgoose-clay-line);
+}
+
 .chatgoose-board-list {
   flex: 1;
   min-height: 0;
@@ -1901,12 +1923,43 @@ body.chatgoose-scroll-lock {
   min-width: 0;
 }
 
+.chatgoose-board-row-nameline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .chatgoose-board-row-name {
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* First spend landed this month — the row's one terracotta note. */
+.chatgoose-board-row-new {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+/* No enumerated conversation — opening runs an inbox search (E23). */
+.chatgoose-board-row-chatstate {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px dashed var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink-low);
+  font-size: 9.5px;
+  white-space: nowrap;
 }
 
 .chatgoose-board-row-handle {
@@ -1918,12 +1971,28 @@ body.chatgoose-scroll-lock {
 }
 
 /* Money is mono, tabular, green — the row's single color accent. */
+.chatgoose-board-row-amounts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
 .chatgoose-board-row-amount {
   font-family: var(--chatgoose-font-mono);
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--chatgoose-green);
+}
+
+/* Month-to-date movement under the lifetime figure. */
+.chatgoose-board-row-delta {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-green);
+  opacity: 0.85;
 }
 
 .chatgoose-board-state {

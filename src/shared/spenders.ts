@@ -136,3 +136,47 @@ export function formatSpenderAmount(usd: number): string {
   const withSeparators = String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return `$${withSeparators}`;
 }
+
+/** First purchase landed inside the month window: lifetime ≈ month spend.
+ * (Desktop reference: isNewSpender over its 30-day retained window.) */
+export const NEW_SPENDER_EPSILON_USD = 1;
+
+export function isNewSpender(lifetimeUsd: number, monthUsd: number | null): boolean {
+  return (
+    monthUsd !== null &&
+    monthUsd > 0 &&
+    Number.isFinite(lifetimeUsd) &&
+    lifetimeUsd - monthUsd < NEW_SPENDER_EPSILON_USD
+  );
+}
+
+/** '+$123' for a positive month-to-date figure; '' when unknown or when the
+ * amount rounds below a whole dollar (a "+$0" chip would be noise). */
+export function formatMonthDelta(monthUsd: number | null): string {
+  if (monthUsd === null || !Number.isFinite(monthUsd) || Math.round(monthUsd) < 1) {
+    return '';
+  }
+  return `+${formatSpenderAmount(monthUsd)}`;
+}
+
+/** Case-insensitive substring match over display name and username. An
+ * empty/blank query keeps every entry. */
+export function filterSpendersByQuery<
+  T extends { displayName: string | null; username: string | null },
+>(entries: readonly T[], query: string): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...entries];
+  return entries.filter(
+    (entry) =>
+      (entry.displayName ?? '').toLowerCase().includes(needle) ||
+      (entry.username ?? '').toLowerCase().includes(needle),
+  );
+}
+
+/** The kernel's month-window key ('YYYY-MM', UTC calendar month) for a
+ * timestamp — the projection buckets monthly earnings by calendar month. */
+export function monthWindowFor(epochMs: number): string {
+  const date = new Date(epochMs);
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${month}`;
+}

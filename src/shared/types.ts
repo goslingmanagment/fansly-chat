@@ -715,6 +715,7 @@ export interface RuntimeRequestMap {
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getSpendersList: GetSpendersListRequest | undefined;
+  resolveFanChat: ResolveFanChatRequest;
 }
 
 export interface RuntimeResponseMap {
@@ -723,6 +724,7 @@ export interface RuntimeResponseMap {
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getSpendersList: SpendersListResponse;
+  resolveFanChat: ResolveFanChatResponse;
 }
 
 /** Stage 32: one-time options-page sign-in → device-bound hub credential. */
@@ -748,14 +750,22 @@ export interface GetSpendersListRequest {
 
 export interface SpenderListEntry {
   fanAccountId: string;
-  /** Fansly messaging group id — the route target for opening the chat. */
-  groupId: string;
+  /** Fansly messaging group id — the route target for opening the chat.
+   * Null = the fan is not among the most-recent enumerated conversations;
+   * the board resolves the chat lazily (one inbox search) on open. */
+  groupId: string | null;
   displayName: string | null;
   username: string | null;
   /** Lifetime gross spend with this creator, in Fansly mills. */
   lifetimeMills: number;
   /** Lifetime gross spend with this creator, in USD. */
   lifetimeUsd: number;
+  /** Calendar-month-to-date gross spend, in Fansly mills. Null = the month
+   * window is unavailable for this build (fetch failed or no monthly
+   * observations kernel-side) — unknown, not zero. */
+  monthMills: number | null;
+  /** Calendar-month-to-date gross spend, in USD (null = unknown). */
+  monthUsd: number | null;
 }
 
 export interface SpendersListResult {
@@ -764,16 +774,32 @@ export interface SpendersListResult {
    * walked this page's fan earnings (page not ramped) — there IS no
    * snapshot; W9.3/A20 renders that honestly instead of "updated just now". */
   builtAt: number | null;
-  /** Spenders with lifetime spend > 0 in this snapshot. */
+  /** Total spenders with lifetime spend > 0 in the kernel snapshot — may
+   * exceed entries.length when the query limit truncates the list. */
   fanCount: number;
-  /** Conversations scanned for spend before ranking. */
-  scannedCount: number;
-  /** True when more conversations exist than were scanned (bounded scan). */
-  truncated: boolean;
+  /** The 'YYYY-MM' window the month column was read from; null = month
+   * data unavailable for this build. */
+  monthWindow: string | null;
+  /** When the extension assembled this list (epoch ms) — cache age; data
+   * freshness is builtAt. */
+  fetchedAt: number;
 }
 
 export type SpendersListResponse =
   | { ok: true; result: SpendersListResult }
+  | { ok: false; error: UserFacingError };
+
+/** Lazily resolve the chat for a board entry with no enumerated
+ * conversation: one bounded inbox search by username/display name. */
+export interface ResolveFanChatRequest {
+  fanAccountId: string;
+  username: string | null;
+  displayName: string | null;
+}
+
+/** ok with groupId null = the search ran but found no conversation. */
+export type ResolveFanChatResponse =
+  | { ok: true; groupId: string | null }
   | { ok: false; error: UserFacingError };
 
 export interface AgencyHubConnectionTestRequest {

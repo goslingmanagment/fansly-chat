@@ -332,10 +332,12 @@ export class AgencyHubClient {
   }
 
   /** Stage 32 Task 4: one kernel query replaces the board's Fansly earnings
-   * sweep. Snapshot-honest: builtAt = the projection's freshest observation. */
+   * sweep. Snapshot-honest: builtAt = the projection's freshest observation.
+   * `window` is 'lifetime' or a 'YYYY-MM' calendar month (kernel contract). */
   async fetchTopSpenders(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     pageLabel: string,
+    window: string,
     limit: number,
     signal: AbortSignal,
   ): Promise<{
@@ -356,7 +358,7 @@ export class AgencyHubClient {
     try {
       const snapshot = await this.sdkFor(baseUrl, bearer, signal).pageTopSpenders({
         params: { pageLabel },
-        query: { window: 'lifetime', limit },
+        query: { window, limit },
       });
       return {
         builtAt: snapshot.builtAt,

@@ -109,8 +109,8 @@ async function installRuntimeApiHarness(fanslyClient: {
       entries: [],
       builtAt: 0,
       fanCount: 0,
-      scannedCount: 0,
-      truncated: false,
+      monthWindow: null,
+      fetchedAt: 0,
     })),
   };
   registerRuntimeApi({
@@ -414,12 +414,14 @@ describe('runtime-api getSpendersList', () => {
           username: 'whalebob',
           lifetimeMills: 1078000,
           lifetimeUsd: 1078,
+          monthMills: null,
+          monthUsd: null,
         },
       ],
       builtAt: 123,
       fanCount: 1,
-      scannedCount: 1,
-      truncated: false,
+      monthWindow: null,
+      fetchedAt: 456,
     };
     const spendersService = { getList: vi.fn(async () => result) };
 
@@ -456,5 +458,91 @@ describe('runtime-api getSpendersList', () => {
 
     expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
     expect(spendersService.getList).not.toHaveBeenCalled();
+  });
+});
+
+// ── E23: lazy chat resolve for board entries without an enumerated chat ─────
+
+describe('runtime-api resolveFanChat', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('searches the inbox by username for the sender tab session', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      findGroupIdForFan: vi.fn(async () => 'group-42'),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'resolveFanChat', fanAccountId: 'fan-9', username: 'ghost', displayName: null },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, groupId: 'group-42' });
+    expect(fanslyClient.findGroupIdForFan).toHaveBeenCalledWith(
+      'fan-9',
+      'ghost',
+      expect.objectContaining({ accountId: 'creator-1' }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('falls back to the display name and reports an honest not-found', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      findGroupIdForFan: vi.fn(async () => null),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'resolveFanChat', fanAccountId: 'fan-9', username: null, displayName: 'Ghost Fan' },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, groupId: null });
+    expect(fanslyClient.findGroupIdForFan).toHaveBeenCalledWith(
+      'fan-9',
+      'Ghost Fan',
+      expect.anything(),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('answers not-found without searching when there is no term to search by', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      findGroupIdForFan: vi.fn(async () => 'never'),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'resolveFanChat', fanAccountId: 'fan-9', username: null, displayName: null },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, groupId: null });
+    expect(fanslyClient.findGroupIdForFan).not.toHaveBeenCalled();
+  });
+
+  it('returns not_connected when the sender tab has no session', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      findGroupIdForFan: vi.fn(async () => 'never'),
+    };
+    await installRuntimeApiHarness(fanslyClient);
+
+    const response = await onMessageListener?.(
+      { type: 'resolveFanChat', fanAccountId: 'fan-9', username: 'ghost', displayName: null },
+      { tab: { id: 999 } },
+    );
+
+    expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
+    expect(fanslyClient.findGroupIdForFan).not.toHaveBeenCalled();
   });
 });

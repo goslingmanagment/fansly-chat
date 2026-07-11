@@ -32,6 +32,14 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E13 | 2026-07-10 | Family restyle: injected UI = desktop dark-twin tokens, popup/options = family light; terracotta accent, green = money-only, serif AI text, mono numbers |
 | E14 | 2026-07-10 | uiTheme setting (system/light/dark, storage v12) supersedes E13's fixed split; click-to-insert draft cards + streaming caret; popup AI-quota indicator off the meta frame |
 | E15 | 2026-07-10 | 1.8.0 RELEASED (E13/E14 scope); releases now go from main — bar-tone-menu retired, CLAUDE.md updated; watch theme adoption + quota row + v12 migration |
+| E16 | 2026-07-11 | deploy.sh preflight asserts (branch/clean/ancestor/tag/served-older) + in-script release tagging; retro-tags owner-run |
+| E17 | 2026-07-11 | Custom personas sync to kernel ai_personas (diff on save + boot reconcile); builtin card read-only |
+| E18 | 2026-07-11 | Honest not-ramped board state: builtAt null passes through, never cached, distinct copy |
+| E19 | 2026-07-11 | Storage v13: hub credentials in own storage keys (per-key custody; blob never carries them) |
+| E20 | 2026-07-11 | Client-side 300k transcript cap, oldest-first truncation, both lanes |
+| E21 | 2026-07-11 | Acceptance-reporter hardening (onWarn wired, all drop paths counted, startup flush) + fan-summary cache write revived |
+| E22 | 2026-07-11 | Opportunistic hub re-push of a ready Scan on chat open (preflight-classified, cooldown-bounded, generatedAtMs) |
+| E23 | 2026-07-11 | Spenders board v2: enumeration = map not membership gate (lazy inbox-search chat resolve), kernel limit 500, month +$N column + NEW badge, board search, two-timestamp meta, SPA chat-open with verified fallback, storage.session cache |
 
 ## Entries
 
@@ -357,3 +365,42 @@ on delayed re-pushes — needs the re-vendored SDK (core @ ai/scan-dossier);
 old kernels ignore the extra key (non-strict schema), so deploy order is
 free. No UI change; the existing sync-status pill picks up the result
 message.
+
+**E23 (2026-07-11).** Spenders board v2 — completeness, month movement, and
+workflow speed (owner-approved scope a/b/d/e; recency/retention deferred).
+(a) **The conversation enumeration is a MAP, not a membership gate.** Since
+E6 the board filtered kernel spenders to those present in the most-recent-150
+fan→groupId map — a whale who hadn't messaged recently silently vanished, and
+the header counted the survivors. Now every kernel entry is listed;
+`SpenderListEntry.groupId` is nullable, unmapped rows carry a "no recent
+chat" chip, and opening one resolves the chat lazily: a new `resolveFanChat`
+runtime request (protocol case pinned — the E8 lesson) runs ONE bounded
+`/messaging/groups?search=<username|displayName>` request, matched by
+partnerAccountId. Egress note: that is the same endpoint+param the page's own
+inbox search box issues — no new Fansly egress class. The kernel query limit
+rose to SPENDERS_KERNEL_LIMIT=500 (kernel max); the enumeration stays at 150
+and only bounds direct-open coverage. `fanCount` now carries the kernel's
+total (meta says "top N of M spenders" when truncated). (b) **Month-to-date
+column:** a second, best-effort kernel query over the current 'YYYY-MM'
+window feeds a green "+$N" per row and a NEW badge
+(lifetime−month < $1 ∧ month > 0, the desktop's isNewSpender ported); a
+failed or empty month window degrades the column to unknown (null, never a
+misleading $0) and the board renders without it. Board search: client-side
+substring filter over name/handle ('/' focuses it; typing never moves the
+J/K cursor; the list re-renders apart from the input so focus survives).
+Honest freshness meta: "data as of <builtAt> · fetched <fetchedAt>" — the
+tooltip explains the hub walks Fansly on its own cadence and Refresh only
+re-reads the snapshot. (d) **SPA chat-open:** the board navigates via
+pushState + a synthesized popstate (what Fansly's Angular Location listens
+for) instead of location.assign; the route is verified after
+SPENDERS_SPA_NAV_VERIFY_MS (conversation DOM appears / container replaced /
+header name changed) with a hard-load fallback, and a user who navigated
+elsewhere meanwhile is never hijacked. Send surfaces untouched — this only
+reaches the NATIVE chat faster. (e) **Cache custody:** the 10-minute board
+cache is write-through to storage.session (quota-tracker pattern; memory
+fallback), so an MV3 worker restart stops costing a rebuild; not-ramped
+results stay uncacheable (E18) in both layers. NOT taken: recency/retention
+badges (the vendored spender-retention module + auto-list ops need verified
+Fansly-side data first), quick-look chat preview (egress question), net/gross
+display. Pinned in spenders-service / spenders-board-controller / protocol /
+runtime-api / fansly-client suites.
