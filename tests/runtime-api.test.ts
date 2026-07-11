@@ -410,6 +410,7 @@ describe('runtime-api getSpendersList', () => {
         {
           fanAccountId: 'fan-1',
           groupId: 'group-1',
+          customName: null,
           displayName: 'Whale Bob',
           username: 'whalebob',
           lifetimeMills: 1078000,
