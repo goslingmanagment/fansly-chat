@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDebugPromptStore } from '../src/background/debug-prompt-store.js';
 
-// E27. The store is the only place a real assembled prompt lives client-side.
+// E28. The store is the only place a real assembled prompt lives client-side.
 // Its bounds ARE the security posture: a token stops working, and old prompts
 // stop existing.
 describe('debug prompt store', () => {

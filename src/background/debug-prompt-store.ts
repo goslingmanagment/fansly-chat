@@ -1,4 +1,4 @@
-// E27 — custody for the kernel's prompt echo (`debug_input_v1`).
+// E28 — custody for the kernel's prompt echo (`debug_input_v1`).
 //
 // The echo carries the agency's crown jewels: the safety preamble, the persona,
 // the templates, the fan dossier, and the whole transcript. Two rules follow,

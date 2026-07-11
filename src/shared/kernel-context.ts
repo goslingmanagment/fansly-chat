@@ -1,4 +1,4 @@
-// E27 — the kernel's `contextManifest`, narrowed to what may safely cross into
+// E28 — the kernel's `contextManifest`, narrowed to what may safely cross into
 // the Fansly page.
 //
 // The manifest is an open bag: the kernel adds keys as it adds context lanes

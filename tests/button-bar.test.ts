@@ -210,7 +210,7 @@ describe('ButtonBar tone groove (E24)', () => {
     expect(toneSegment(bar.root, '🔥')?.title).toContain('Горячо');
   });
 
-  it('the armed segment surfaces as a thumb and expands with its word', () => {
+  it('the armed segment surfaces as a fixed-width thumb without adding a word', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -221,9 +221,11 @@ describe('ButtonBar tone groove (E24)', () => {
 
     expect(flirty.classList.contains('chatgoose-tone-seg-active')).toBe(true);
     expect(flirty.getAttribute('aria-checked')).toBe('true');
-    expect(flirty.querySelector('.chatgoose-tone-seg-word')?.textContent).toBe('Flirt');
+    expect(flirty.textContent).toBe('😏');
+    expect(flirty.querySelector('.chatgoose-tone-seg-word')).toBeNull();
     expect(spicy.classList.contains('chatgoose-tone-seg-active')).toBe(false);
     expect(spicy.getAttribute('aria-checked')).toBe('false');
+    expect(spicy.textContent).toBe('🔥');
     expect(spicy.querySelector('.chatgoose-tone-seg-word')).toBeNull();
   });
 

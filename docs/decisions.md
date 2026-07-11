@@ -43,7 +43,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E24 | 2026-07-11 | Action bar v2: tone groove (radio, arm-only, 😌😏💰🔥 + casual back) + Split flag (sticky) + regen keeps mode/tone; renames Fix/Recap/Split; tolerant [NEXT]; meaning-group seams |
 | E25 | 2026-07-11 | Board rows show the chatter's custom fan names (Fansly rename = account note contentType 12002; batched /account?ids= overlay, best-effort); chatter-eyes-only — never into prompts |
 | E26 | 2026-07-11 | Name cache → storage.local (survives browser restart, 6h TTL, size-capped); cold-build progress reported over the content port (counted name sweep + hairline bar) |
-| E27 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
+| E27 | 2026-07-12 | Armed tone stays emoji-only: fixed-width highlight replaces the expanding word so the narrow composer never shifts or scrolls |
+| E28 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
 
 ## Entries
 
@@ -501,7 +502,17 @@ bar can never stall. A warm cache skips the sweep entirely and the board
 opens with no bar at all. Pinned in spenders-service / board-controller /
 protocol suites.
 
-**E27 (2026-07-11).** Debug mode shows what the model ACTUALLY received. Since
+**E27 (2026-07-12).** The armed tone no longer expands with its English word.
+That E24 detail added ~40px exactly when a tone was selected, pushing the
+right-pinned persona out of the narrow Fansly composer and introducing a
+horizontal jump/scroll. The four segments now keep identical emoji-only
+geometry in idle and armed states; selection remains explicit through the
+light thumb, terracotta border, and `aria-checked`, while the full name and
+Russian explanation remain available through `aria-label` and the hover hint.
+No behavior changed: a tone still arms/disarms, Reply remains the only trigger,
+and ⌘⇧O still cycles the same four options. Pinned in the button-bar suite.
+
+**E28 (2026-07-11).** Debug mode shows what the model ACTUALLY received. Since
 the kernel cutover the prompt is assembled server-side, so the "LLM Input" panel
 could only ever show the client's own context plus two `[assembled kernel-side]`
 placeholders — the persona, the templates and the fan dossier the kernel injects

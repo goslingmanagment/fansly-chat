@@ -457,8 +457,8 @@
 /* ─── Tone groove: sunken radio track of Reply OPTIONS (E24) ─────────────────
    Actions are raised chips; options lie in a sunken groove pressed against
    Reply. Segments are emoji glyphs (the chatters' own language — precedent:
-   the Spenders tier chips); the armed one surfaces as a light thumb and
-   expands with its word, exactly when the choice matters. */
+   the Spenders tier chips); the armed one surfaces as a light thumb without
+   changing width, so the narrow composer never shifts or starts scrolling. */
 .chatgoose-tone-track {
   display: inline-flex;
   align-items: center;
@@ -503,14 +503,6 @@
   box-shadow: 0 1px 2px rgba(31, 30, 29, 0.1);
   filter: grayscale(0);
   opacity: 1;
-  padding: 0 10px 0 7px;
-}
-
-.chatgoose-tone-seg-word {
-  font-family: var(--chatgoose-font);
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-tone-seg:disabled {
