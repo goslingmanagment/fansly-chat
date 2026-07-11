@@ -564,7 +564,11 @@ describe('OperationCoordinator', () => {
           baseUrl: 'http://hub.test',
           pageLabel: 'creator-fs',
           body: 'Hub summary',
-          createdAtMs: 1234,
+          // The SOURCE generation time must win over the hub append time —
+          // hydrating with createdAtMs would make an old dossier look fresh
+          // (core #136 age policy) and later re-push the wrong stamp.
+          createdAtMs: 999_999,
+          sourceGeneratedAtMs: 1234,
           fanAccountId: 'fan-1',
         })),
         pushFanProfile: vi.fn(async () => ({
