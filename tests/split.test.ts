@@ -38,14 +38,34 @@ describe('splitByNext', () => {
     expect(splitByNext('  hello world  ')).toEqual(['hello world']);
   });
 
-  it('is case sensitive: [next] is NOT a separator', () => {
-    expect(splitByNext('hello[next]world')).toEqual(['hello[next]world']);
-  });
+  // The old "case sensitive: [next] is NOT a separator" pin was reversed in
+  // E24: real model output drifts in case/whitespace, and a literal split
+  // silently glued a requested split back into one message. The tolerance
+  // suite below pins the new behavior (bracket forms only).
 
   it('handles [NEXT] with surrounding newlines', () => {
     expect(splitByNext('line one\n[NEXT]\nline two')).toEqual([
       'line one',
       'line two',
     ]);
+  });
+});
+
+// ── E24: marker drift tolerance ─────────────────────────────────────────────
+
+describe('splitByNext marker tolerance', () => {
+  it('splits on lowercase and mixed-case markers', () => {
+    expect(splitByNext('hello[next]world')).toEqual(['hello', 'world']);
+    expect(splitByNext('hello[Next]world')).toEqual(['hello', 'world']);
+  });
+
+  it('splits on markers with inner whitespace', () => {
+    expect(splitByNext('hello[ NEXT ]world')).toEqual(['hello', 'world']);
+    expect(splitByNext('hello[  next]world')).toEqual(['hello', 'world']);
+  });
+
+  it('never splits on a bare NEXT in prose', () => {
+    expect(splitByNext('see you NEXT week')).toEqual(['see you NEXT week']);
+    expect(splitByNext('the next one')).toEqual(['the next one']);
   });
 });
