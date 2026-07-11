@@ -416,3 +416,56 @@ describe('FanslyClient media purchase verification', () => {
     expect(result.verificationIncomplete).toBe(true);
   });
 });
+
+// ── E23: lazy chat resolve via the inbox-search param ───────────────────────
+
+describe('FanslyClient findGroupIdForFan', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('searches /messaging/groups and matches by partnerAccountId', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async (_url: URL | string) =>
+      jsonSuccessResponse({
+        data: [
+          { groupId: 'group-other', partnerAccountId: 'fan-other' },
+          { groupId: 'group-42', partnerAccountId: 'fan-42' },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const groupId = await client.findGroupIdForFan(
+      'fan-42',
+      'ghost',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(groupId).toBe('group-42');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = new URL(String(fetchMock.mock.calls[0]![0]));
+    expect(requestedUrl.pathname).toBe('/api/v1/messaging/groups');
+    expect(requestedUrl.searchParams.get('search')).toBe('ghost');
+    expect(requestedUrl.searchParams.get('offset')).toBe('0');
+  });
+
+  it('returns null when the search has no row for the fan', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () =>
+      jsonSuccessResponse({ data: [{ groupId: 'group-other', partnerAccountId: 'fan-other' }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const groupId = await client.findGroupIdForFan(
+      'fan-42',
+      'ghost',
+      session,
+      new AbortController().signal,
+    );
+
+    expect(groupId).toBeNull();
+  });
+});

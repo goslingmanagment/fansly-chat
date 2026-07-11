@@ -7,6 +7,12 @@
 // stays free to read Fansly for conversation context; it just never rebuilds
 // rankings from quota-expensive sweeps).
 //
+// E23: the enumeration is a MAP, not a membership gate — every kernel
+// spender is listed even without an enumerated conversation (groupId null;
+// the board resolves the chat lazily on open). A second, best-effort kernel
+// query over the current 'YYYY-MM' window feeds the month-to-date column;
+// its failure degrades the column to unknown, never the board.
+//
 // The legacy rebuild (and its hidden `spendersLegacyRebuild` setting) died in
 // 1.7.0 as planned (E6/E9): the kernel query is the ONLY ranking source.
 // Kernel snapshots carry an honest as-of timestamp: builtAt =
@@ -14,9 +20,11 @@
 
 import {
   SPENDERS_CACHE_TTL_MS,
+  SPENDERS_KERNEL_LIMIT,
   SPENDERS_MAX_FANS,
 } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
+import { monthWindowFor } from '../shared/spenders.js';
 import type {
   SessionTemplate,
   Settings,
@@ -27,8 +35,65 @@ import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
 
 interface CacheEntry {
-  builtAt: number;
+  cachedAt: number;
   result: SpendersListResult;
+}
+
+// MV3 event-page workers die between board opens; storage.session keeps the
+// 10-minute cache useful across restarts (dies with the browser session,
+// never syncs). Module memory is the fallback for unit tests/exotic builds —
+// mirrors quota-tracker's custody pattern.
+const SESSION_CACHE_STORAGE_KEY = 'spendersCache';
+
+function sessionStorageArea(): browser.storage.StorageArea | null {
+  try {
+    return browser.storage?.session ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function readSessionCache(key: string): Promise<CacheEntry | null> {
+  const area = sessionStorageArea();
+  if (!area) return null;
+  try {
+    const raw = await area.get(SESSION_CACHE_STORAGE_KEY);
+    const all = raw[SESSION_CACHE_STORAGE_KEY];
+    if (!all || typeof all !== 'object') return null;
+    const entry = (all as Record<string, unknown>)[key];
+    if (!entry || typeof entry !== 'object') return null;
+    const candidate = entry as CacheEntry;
+    if (
+      typeof candidate.cachedAt !== 'number' ||
+      !candidate.result ||
+      !Array.isArray(candidate.result.entries)
+    ) {
+      return null;
+    }
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSessionCache(key: string, entry: CacheEntry | null): Promise<void> {
+  const area = sessionStorageArea();
+  if (!area) return;
+  try {
+    const raw = await area.get(SESSION_CACHE_STORAGE_KEY);
+    const all =
+      raw[SESSION_CACHE_STORAGE_KEY] && typeof raw[SESSION_CACHE_STORAGE_KEY] === 'object'
+        ? { ...(raw[SESSION_CACHE_STORAGE_KEY] as Record<string, CacheEntry>) }
+        : {};
+    if (entry === null) {
+      delete all[key];
+    } else {
+      all[key] = entry;
+    }
+    await area.set({ [SESSION_CACHE_STORAGE_KEY]: all });
+  } catch {
+    // Best-effort persistence; the in-memory cache already holds the data.
+  }
 }
 
 export interface SpendersKernelSource {
@@ -36,6 +101,7 @@ export interface SpendersKernelSource {
   fetchTopSpenders(
     settings: Settings,
     pageLabel: string,
+    window: string,
     limit: number,
     signal: AbortSignal,
   ): Promise<{
@@ -73,8 +139,19 @@ export class SpendersService {
 
     if (!options?.refresh) {
       const cached = this.cache.get(key);
-      if (cached && now - cached.builtAt < SPENDERS_CACHE_TTL_MS) {
+      if (cached && now - cached.cachedAt < SPENDERS_CACHE_TTL_MS) {
         return cached.result;
+      }
+      // Worker restarted since the last build? The session-storage copy is
+      // still fresh for up to the same TTL.
+      const persisted = await readSessionCache(key);
+      if (
+        persisted &&
+        now - persisted.cachedAt < SPENDERS_CACHE_TTL_MS &&
+        persisted.result.builtAt !== null
+      ) {
+        this.cache.set(key, persisted);
+        return persisted.result;
       }
     }
 
@@ -91,9 +168,12 @@ export class SpendersService {
     // page (not ramped) — caching would pin a "not enabled" board for
     // 10 minutes past the moment rankings actually turn on.
     if (result.builtAt !== null) {
-      this.cache.set(key, { builtAt: now, result });
+      const entry: CacheEntry = { cachedAt: now, result };
+      this.cache.set(key, entry);
+      void writeSessionCache(key, entry);
     } else {
       this.cache.delete(key);
+      void writeSessionCache(key, null);
     }
     return result;
   }
@@ -113,48 +193,64 @@ export class SpendersService {
       throw new ChatGooseError('hub_page_match_failed');
     }
 
-    // The one Fansly read that remains: conversation enumeration = the
-    // fan→groupId map for opening chats from the board.
-    const { fans, truncated } = await this.fanslyClient.listFanAccounts(
-      SPENDERS_MAX_FANS,
-      session,
-      signal,
-    );
+    const monthWindow = monthWindowFor(Date.now());
+    const [{ fans }, lifetime, month] = await Promise.all([
+      // The one Fansly read that remains: conversation enumeration = the
+      // fan→groupId map for opening chats. It does NOT gate membership.
+      this.fanslyClient.listFanAccounts(SPENDERS_MAX_FANS, session, signal),
+      this.kernelSource!.fetchTopSpenders(
+        settings,
+        pageLabel,
+        'lifetime',
+        SPENDERS_KERNEL_LIMIT,
+        signal,
+      ),
+      // Best-effort month column: a failed or empty month window degrades
+      // the +$N column to unknown, never the board.
+      this.kernelSource!
+        .fetchTopSpenders(settings, pageLabel, monthWindow, SPENDERS_KERNEL_LIMIT, signal)
+        .catch(() => null),
+    ]);
+
     const groupByFanId = new Map(fans.map((fan) => [fan.fanAccountId, fan.groupId]));
-
-    const snapshot = await this.kernelSource!.fetchTopSpenders(
-      settings,
-      pageLabel,
-      SPENDERS_MAX_FANS,
-      signal,
+    // builtAt null = no monthly observations in the window. That is
+    // indistinguishable from "monthly stream not collected", so the column
+    // reads unknown (null), never a misleading $0.
+    const monthReady = month !== null && month.builtAt !== null;
+    const monthByFanId = new Map(
+      monthReady ? month.entries.map((entry) => [entry.platformUserId, entry.grossMills]) : [],
     );
 
-    const entries: SpenderListEntry[] = snapshot.entries
-      .filter((entry) => groupByFanId.has(entry.platformUserId))
-      .map((entry) => ({
+    const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
+      const monthMills = monthReady ? (monthByFanId.get(entry.platformUserId) ?? 0) : null;
+      return {
         fanAccountId: entry.platformUserId,
-        groupId: groupByFanId.get(entry.platformUserId)!,
+        groupId: groupByFanId.get(entry.platformUserId) ?? null,
         displayName: entry.displayName,
         username: entry.username,
         lifetimeMills: entry.grossMills,
         lifetimeUsd: entry.grossMills / 1000,
-      }));
+        monthMills,
+        monthUsd: monthMills !== null ? monthMills / 1000 : null,
+      };
+    });
 
     return {
       entries,
       // Honest staleness: the projection's freshest observation, not "now".
       // Null passes through verbatim (W9.3/A20): rewriting it to Date.now()
       // made a never-walked page claim "no paying fans … updated just now".
-      builtAt: snapshot.builtAt !== null ? Date.parse(snapshot.builtAt) : null,
-      fanCount: entries.length,
-      scannedCount: fans.length,
-      truncated,
+      builtAt: lifetime.builtAt !== null ? Date.parse(lifetime.builtAt) : null,
+      fanCount: lifetime.fanCount,
+      monthWindow: monthReady ? monthWindow : null,
+      fetchedAt: Date.now(),
     };
   }
 
-  /** Pre-cutover rebuild (~SPENDERS_MAX_FANS Fansly calls) — hidden-setting
-   * fallback for one release, then deleted. */
+  /** Drop the cached board for this creator (memory + session storage). */
   invalidate(session: SessionTemplate): void {
-    this.cache.delete(this.cacheKey(session));
+    const key = this.cacheKey(session);
+    this.cache.delete(key);
+    void writeSessionCache(key, null);
   }
 }

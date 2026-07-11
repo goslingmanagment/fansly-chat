@@ -174,6 +174,12 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'issueAgencyHubDeviceToken';
     case 'getSpendersList':
       return isOptionalBoolean(message, 'refresh') ? 'getSpendersList' : null;
+    case 'resolveFanChat':
+      return isString(message.fanAccountId) &&
+        isNullableString(message.username) &&
+        isNullableString(message.displayName)
+        ? 'resolveFanChat'
+        : null;
     default:
       return null;
   }
