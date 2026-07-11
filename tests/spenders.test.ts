@@ -102,6 +102,7 @@ describe('isNewSpender', () => {
   it('is true only when the lifetime landed inside the month window', () => {
     expect(isNewSpender(700, 700)).toBe(true);
     expect(isNewSpender(700.5, 700)).toBe(true); // within the $1 epsilon
+    expect(isNewSpender(700, 701)).toBe(false); // inconsistent month > lifetime
     expect(isNewSpender(1078, 120)).toBe(false);
     expect(isNewSpender(700, 0)).toBe(false);
     expect(isNewSpender(700, null)).toBe(false); // unknown month ≠ new
@@ -124,10 +125,10 @@ describe('formatMonthDelta', () => {
 
 describe('filterSpendersByQuery', () => {
   const fans = [
-    { displayName: 'Jonathan', username: 'jony' },
-    { displayName: null, username: 'ghost_99' },
-    { displayName: 'Ricky', username: null },
-    { displayName: 'BseriesGod', username: 'bseriesgod', customName: 'Max/Canada/45' },
+    { fanAccountId: 'fan-1', displayName: 'Jonathan', username: 'jony' },
+    { fanAccountId: '779456912931430401', displayName: null, username: 'ghost_99' },
+    { fanAccountId: 'fan-3', displayName: 'Ricky', username: null },
+    { fanAccountId: 'fan-4', displayName: 'BseriesGod', username: 'bseriesgod', customName: 'Max/Canada/45' },
   ];
 
   it('matches case-insensitive substrings on any name field', () => {
@@ -135,6 +136,7 @@ describe('filterSpendersByQuery', () => {
     expect(filterSpendersByQuery(fans, 'ghost')).toHaveLength(1);
     expect(filterSpendersByQuery(fans, 'rick')).toHaveLength(1);
     expect(filterSpendersByQuery(fans, 'canada')).toHaveLength(1);
+    expect(filterSpendersByQuery(fans, '2931430401')).toHaveLength(1);
     expect(filterSpendersByQuery(fans, 'zzz')).toHaveLength(0);
   });
 

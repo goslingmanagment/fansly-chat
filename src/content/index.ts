@@ -141,6 +141,7 @@ function getMessageLlmSpend(
 
 export class ChatGooseContentApp {
   private routeNonce = 0;
+  private boardContextGeneration = 0;
   private currentGroupId: string | null = null;
   private tabState: TabUiState | null = null;
   private activeFeature: FeatureType | null = null;
@@ -322,8 +323,12 @@ export class ChatGooseContentApp {
   private readonly keymap = createKeymap(this.hotkeyBindings);
   private readonly cheatsheet = new CheatsheetController(this.hotkeyBindings);
   private readonly board = new SpendersBoardController({
-    fetchList: (refresh) =>
-      sendRuntimeRequest('getSpendersList', refresh ? { refresh: true } : undefined),
+    fetchList: (refresh, buildId) =>
+      sendRuntimeRequest('getSpendersList', { refresh, buildId }),
+    getContextKey: () => {
+      const accountId = this.tabState?.accountId;
+      return accountId ? `${accountId}:${this.boardContextGeneration}` : null;
+    },
     openChat: (groupId) => this.openFanChat(groupId),
     resolveChat: (entry) =>
       sendRuntimeRequest('resolveFanChat', {
@@ -1109,6 +1114,13 @@ export class ChatGooseContentApp {
       case 'tab:state':
       case 'settings:changed':
       case 'mapping:changed':
+        if (
+          message.type === 'settings:changed' ||
+          this.tabState?.accountId !== message.state.accountId
+        ) {
+          this.boardContextGeneration += 1;
+          this.board.invalidateContext();
+        }
         this.tabState = message.state;
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
         this.renderButtonBar();

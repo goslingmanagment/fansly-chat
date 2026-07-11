@@ -814,6 +814,8 @@ export interface GetPopupStatusRequest {
 export interface GetSpendersListRequest {
   /** Force a rebuild, bypassing the per-creator cache. */
   refresh?: boolean;
+  /** Correlates out-of-band progress frames with this board request. */
+  buildId?: string;
 }
 
 export interface SpenderListEntry {
@@ -841,12 +843,29 @@ export interface SpenderListEntry {
   monthUsd: number | null;
 }
 
+/** Why the kernel's fan-earnings projection is (or is not) being fed for the
+ * current page. This is distinct from `builtAt`: a ramped page can have a
+ * successful empty snapshot, while a disabled page can retain older rows. */
+export type SpendersStreamState =
+  | 'ramped'
+  | 'flag_off'
+  | 'not_allowlisted'
+  | 'unsupported_platform';
+
+export interface SpendersSourceStatus {
+  streamState: SpendersStreamState;
+  /** Last successful fan-earnings sync for this page (epoch ms). */
+  lastSyncedAt: number | null;
+  /** Null means the page has no fan-earnings sync-state row yet. */
+  consecutiveFailures: number | null;
+}
+
 export interface SpendersListResult {
   entries: SpenderListEntry[];
-  /** When this snapshot was built (epoch ms). Null = the kernel has never
-   * walked this page's fan earnings (page not ramped) — there IS no
-   * snapshot; W9.3/A20 renders that honestly instead of "updated just now". */
+  /** When the freshest spend observation in this window was built (epoch
+   * ms). Null alone does not identify an unramped page; consult `source`. */
   builtAt: number | null;
+  source: SpendersSourceStatus;
   /** Total spenders with lifetime spend > 0 in the kernel snapshot — may
    * exceed entries.length when the query limit truncates the list. */
   fanCount: number;
@@ -1142,6 +1161,8 @@ export interface CompareProgressEnvelope extends PortEnvelopeBase, CompareProgre
  * the name sweep is the part a chatter waits on — so it reports counts. */
 export interface SpendersProgressPayload {
   type: 'spenders:progress';
+  /** Optional for mixed-version extension contexts; new callers always set it. */
+  buildId?: string;
   phase: 'ranking' | 'names';
   /** names phase: fans named so far / fans this build must name. */
   done?: number;

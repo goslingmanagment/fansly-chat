@@ -144,8 +144,10 @@ export const NEW_SPENDER_EPSILON_USD = 1;
 export function isNewSpender(lifetimeUsd: number, monthUsd: number | null): boolean {
   return (
     monthUsd !== null &&
+    Number.isFinite(monthUsd) &&
     monthUsd > 0 &&
     Number.isFinite(lifetimeUsd) &&
+    monthUsd <= lifetimeUsd &&
     lifetimeUsd - monthUsd < NEW_SPENDER_EPSILON_USD
   );
 }
@@ -162,7 +164,12 @@ export function formatMonthDelta(monthUsd: number | null): string {
 /** Case-insensitive substring match over the chatter's custom name, display
  * name, and username. An empty/blank query keeps every entry. */
 export function filterSpendersByQuery<
-  T extends { displayName: string | null; username: string | null; customName?: string | null },
+  T extends {
+    fanAccountId?: string;
+    displayName: string | null;
+    username: string | null;
+    customName?: string | null;
+  },
 >(entries: readonly T[], query: string): T[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...entries];
@@ -170,7 +177,8 @@ export function filterSpendersByQuery<
     (entry) =>
       (entry.customName ?? '').toLowerCase().includes(needle) ||
       (entry.displayName ?? '').toLowerCase().includes(needle) ||
-      (entry.username ?? '').toLowerCase().includes(needle),
+      (entry.username ?? '').toLowerCase().includes(needle) ||
+      (entry.fanAccountId ?? '').toLowerCase().includes(needle),
   );
 }
 

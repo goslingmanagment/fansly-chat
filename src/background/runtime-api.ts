@@ -376,6 +376,9 @@ export function registerRuntimeApi({
         }
 
         const refresh = isObjectRecord(message) && message.refresh === true;
+        const buildId = isObjectRecord(message) && typeof message.buildId === 'string'
+          ? message.buildId
+          : undefined;
         const controller = new AbortController();
         const timeout = globalThis.setTimeout(
           () => controller.abort(),
@@ -385,7 +388,10 @@ export function registerRuntimeApi({
           const result = await spendersService.getList(session, controller.signal, {
             refresh,
             onProgress: emitToTab && tabId !== undefined
-              ? (progress) => emitToTab(tabId, progress)
+              ? (progress) => emitToTab(
+                  tabId,
+                  buildId === undefined ? progress : { ...progress, buildId },
+                )
               : undefined,
           });
           return { ok: true, result };

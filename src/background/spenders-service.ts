@@ -29,6 +29,10 @@ import {
   SPENDERS_NAMES_CACHE_MAX,
   SPENDERS_NAMES_CACHE_TTL_MS,
 } from '../shared/constants.js';
+import {
+  normalizeAgencyHubBaseUrl,
+  normalizeAgencyHubUsername,
+} from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { monthWindowFor } from '../shared/spenders.js';
 import type {
@@ -38,6 +42,7 @@ import type {
   SpenderListEntry,
   SpendersListResult,
   SpendersProgressPayload,
+  SpendersStreamState,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -58,6 +63,42 @@ interface FanNames {
   customName: string | null;
   displayName: string | null;
   username: string | null;
+}
+
+interface KernelSpendersSourceStatus {
+  streamState: SpendersStreamState;
+  lastSyncedAt: string | null;
+  consecutiveFailures: number | null;
+}
+
+interface KernelSpendersSnapshot {
+  builtAt: string | null;
+  fanCount: number;
+  source: KernelSpendersSourceStatus;
+  entries: Array<{
+    platformUserId: string;
+    username: string | null;
+    displayName: string | null;
+    grossMills: number;
+  }>;
+}
+
+function parseKernelTimestamp(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parentAbortError(signal: AbortSignal): DOMException {
+  return signal.reason instanceof DOMException && signal.reason.name === 'AbortError'
+    ? signal.reason
+    : new DOMException('Aborted', 'AbortError');
+}
+
+function throwIfParentAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw parentAbortError(signal);
+  }
 }
 
 interface NamesCacheEntry {
@@ -101,11 +142,24 @@ interface CacheEntry {
   result: SpendersListResult;
 }
 
+/** Conversation enumeration only accelerates direct chat-open; never let it
+ * consume the 30-second generic Fansly request timeout before the board can
+ * fall back to lazy inbox search. */
+const SPENDERS_CHAT_MAP_BUDGET_MS = 12_000;
+const SPENDERS_MONTH_BUDGET_MS = 12_000;
+
 // MV3 event-page workers die between board opens; storage.session keeps the
 // 10-minute cache useful across restarts (dies with the browser session,
 // never syncs). Module memory is the fallback for unit tests/exotic builds —
 // mirrors quota-tracker's custody pattern.
-const SESSION_CACHE_STORAGE_KEY = 'spendersCache';
+// V2 adds source health and scopes each entry to its Hub origin. Old session
+// entries deliberately miss rather than being trusted as the new shape.
+const SESSION_CACHE_STORAGE_KEY = 'spendersCacheV2';
+
+// storage.session updates replace the whole aggregate object. Serialize every
+// mutation so two overlapping creator builds cannot both read the same
+// snapshot and let the later writer erase the earlier creator's entry.
+let sessionCacheMutationQueue: Promise<void> = Promise.resolve();
 
 function sessionStorageArea(): browser.storage.StorageArea | null {
   try {
@@ -116,6 +170,9 @@ function sessionStorageArea(): browser.storage.StorageArea | null {
 }
 
 async function readSessionCache(key: string): Promise<CacheEntry | null> {
+  // An invalidate triggered by a settings/token change must land before a new
+  // board is allowed to trust the persisted snapshot.
+  await sessionCacheMutationQueue;
   const area = sessionStorageArea();
   if (!area) return null;
   try {
@@ -128,7 +185,10 @@ async function readSessionCache(key: string): Promise<CacheEntry | null> {
     if (
       typeof candidate.cachedAt !== 'number' ||
       !candidate.result ||
-      !Array.isArray(candidate.result.entries)
+      !Array.isArray(candidate.result.entries) ||
+      !candidate.result.source ||
+      typeof candidate.result.source !== 'object' ||
+      typeof candidate.result.source.streamState !== 'string'
     ) {
       return null;
     }
@@ -138,24 +198,46 @@ async function readSessionCache(key: string): Promise<CacheEntry | null> {
   }
 }
 
-async function writeSessionCache(key: string, entry: CacheEntry | null): Promise<void> {
-  const area = sessionStorageArea();
-  if (!area) return;
-  try {
+async function mutateSessionCache(
+  mutate: (all: Record<string, CacheEntry>) => void,
+): Promise<void> {
+  const run = sessionCacheMutationQueue.then(async () => {
+    const area = sessionStorageArea();
+    if (!area) return;
     const raw = await area.get(SESSION_CACHE_STORAGE_KEY);
     const all =
       raw[SESSION_CACHE_STORAGE_KEY] && typeof raw[SESSION_CACHE_STORAGE_KEY] === 'object'
         ? { ...(raw[SESSION_CACHE_STORAGE_KEY] as Record<string, CacheEntry>) }
         : {};
-    if (entry === null) {
-      delete all[key];
-    } else {
-      all[key] = entry;
-    }
+    mutate(all);
     await area.set({ [SESSION_CACHE_STORAGE_KEY]: all });
-  } catch {
-    // Best-effort persistence; the in-memory cache already holds the data.
-  }
+  });
+
+  // Persistence is best-effort, but keep the queue usable after a storage
+  // failure and let each caller await its own ordered attempt.
+  sessionCacheMutationQueue = run.catch(() => undefined);
+  await sessionCacheMutationQueue;
+}
+
+async function writeSessionCache(key: string, entry: CacheEntry | null): Promise<void> {
+  await mutateSessionCache((all) => {
+    if (entry === null) delete all[key];
+    else all[key] = entry;
+  });
+}
+
+async function deleteSessionCachesWithPrefix(prefix: string): Promise<void> {
+  await mutateSessionCache((all) => {
+    for (const key of Object.keys(all)) {
+      if (key.startsWith(prefix)) delete all[key];
+    }
+  });
+}
+
+async function clearSessionCache(): Promise<void> {
+  await mutateSessionCache((all) => {
+    for (const key of Object.keys(all)) delete all[key];
+  });
 }
 
 // Fan names get their OWN cache, in storage.LOCAL (not session): renames are
@@ -163,6 +245,11 @@ async function writeSessionCache(key: string, entry: CacheEntry | null): Promise
 // requests per creator. TTL 6h, size-capped. Later builds — including a
 // Refresh — fetch only ids the cache does not know.
 const NAMES_CACHE_STORAGE_KEY = 'spendersNames';
+
+// storage.local updates replace the whole `spendersNames` object. Serialize
+// read/merge/write across creators and service instances so overlapping board
+// builds cannot lose entries or start a redundant sweep behind a queued write.
+let namesCacheWriteQueue: Promise<void> = Promise.resolve();
 
 function localStorageArea(): browser.storage.StorageArea | null {
   try {
@@ -173,6 +260,7 @@ function localStorageArea(): browser.storage.StorageArea | null {
 }
 
 async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
+  await namesCacheWriteQueue;
   const area = localStorageArea();
   if (!area) return null;
   try {
@@ -182,7 +270,12 @@ async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
     const entry = (all as Record<string, unknown>)[key];
     if (!entry || typeof entry !== 'object') return null;
     const candidate = entry as NamesCacheEntry;
-    if (typeof candidate.savedAt !== 'number' || typeof candidate.byId !== 'object') {
+    if (
+      typeof candidate.savedAt !== 'number' ||
+      candidate.byId === null ||
+      typeof candidate.byId !== 'object' ||
+      Array.isArray(candidate.byId)
+    ) {
       return null;
     }
     return candidate;
@@ -191,20 +284,67 @@ async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
   }
 }
 
-async function writeNamesCache(key: string, entry: NamesCacheEntry): Promise<void> {
-  const area = localStorageArea();
-  if (!area) return;
-  try {
+async function updateNamesCache(
+  key: string,
+  priorityIds: readonly string[],
+  patch: ReadonlyMap<string, FanNames>,
+): Promise<void> {
+  const run = namesCacheWriteQueue.then(async () => {
+    const area = localStorageArea();
+    if (!area) return;
+
     const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
     const all =
       raw[NAMES_CACHE_STORAGE_KEY] && typeof raw[NAMES_CACHE_STORAGE_KEY] === 'object'
         ? { ...(raw[NAMES_CACHE_STORAGE_KEY] as Record<string, NamesCacheEntry>) }
         : {};
-    all[key] = entry;
+    const existing = all[key];
+    const now = Date.now();
+    const existingFresh =
+      existing !== undefined &&
+      typeof existing.savedAt === 'number' &&
+      existing.byId !== null &&
+      typeof existing.byId === 'object' &&
+      !Array.isArray(existing.byId) &&
+      now - existing.savedAt < SPENDERS_NAMES_CACHE_TTL_MS;
+    const merged: Record<string, FanNames> = existingFresh
+      ? { ...existing.byId }
+      : {};
+    for (const [id, names] of patch) {
+      merged[id] = names;
+    }
+
+    // Current board ids win eviction; fill the rest from the latest merged
+    // cache until the exact per-creator cap is reached.
+    const capped: Record<string, FanNames> = {};
+    let count = 0;
+    for (const id of priorityIds) {
+      const names = merged[id];
+      if (names === undefined || Object.hasOwn(capped, id)) continue;
+      capped[id] = names;
+      count += 1;
+      if (count >= SPENDERS_NAMES_CACHE_MAX) break;
+    }
+    if (count < SPENDERS_NAMES_CACHE_MAX) {
+      for (const [id, names] of Object.entries(merged)) {
+        if (Object.hasOwn(capped, id)) continue;
+        capped[id] = names;
+        count += 1;
+        if (count >= SPENDERS_NAMES_CACHE_MAX) break;
+      }
+    }
+
+    all[key] = {
+      savedAt: existingFresh ? existing.savedAt : now,
+      byId: capped,
+    };
     await area.set({ [NAMES_CACHE_STORAGE_KEY]: all });
-  } catch {
-    // Best-effort persistence.
-  }
+  });
+
+  // Keep the queue usable after storage failures. Persistence is best-effort,
+  // but each caller awaits its queued attempt before the worker may go idle.
+  namesCacheWriteQueue = run.catch(() => undefined);
+  await namesCacheWriteQueue;
 }
 
 export interface SpendersKernelSource {
@@ -215,31 +355,44 @@ export interface SpendersKernelSource {
     window: string,
     limit: number,
     signal: AbortSignal,
-  ): Promise<{
-    builtAt: string | null;
-    fanCount: number;
-    entries: Array<{
-      platformUserId: string;
-      username: string | null;
-      displayName: string | null;
-      grossMills: number;
-    }>;
-  }>;
+  ): Promise<KernelSpendersSnapshot>;
+}
+
+function isCacheableResult(result: SpendersListResult): boolean {
+  return result.source.streamState === 'ramped' &&
+    (result.builtAt !== null || result.source.lastSyncedAt !== null);
 }
 
 export class SpendersService {
   private readonly cache = new Map<string, CacheEntry>();
+  private cacheGeneration = 0;
+  private buildSequence = 0;
+  private readonly latestBuildByKey = new Map<string, number>();
 
   constructor(
     private readonly fanslyClient: FanslyClient,
     private readonly kernelSource?: SpendersKernelSource,
     private readonly getSettings?: () => Promise<Settings>,
     /** Test seam — production uses the constants. */
-    private readonly tuning?: { nameSweepBudgetMs?: number },
+    private readonly tuning?: {
+      nameSweepBudgetMs?: number;
+      chatMapBudgetMs?: number;
+      monthBudgetMs?: number;
+    },
   ) {}
 
-  private cacheKey(session: SessionTemplate): string {
+  private creatorKey(session: SessionTemplate): string {
     return session.resolvedAccountId ?? session.accountId;
+  }
+
+  private boardCachePrefix(session: SessionTemplate): string {
+    return `${encodeURIComponent(this.creatorKey(session))}|`;
+  }
+
+  private boardCacheKey(session: SessionTemplate, settings: Settings): string {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const username = normalizeAgencyHubUsername(session.resolvedUsername) ?? '';
+    return `${this.boardCachePrefix(session)}${encodeURIComponent(baseUrl)}|${encodeURIComponent(username)}`;
   }
 
   async getList(
@@ -250,27 +403,6 @@ export class SpendersService {
       onProgress?: (progress: SpendersProgressPayload) => void;
     },
   ): Promise<SpendersListResult> {
-    const key = this.cacheKey(session);
-    const now = Date.now();
-
-    if (!options?.refresh) {
-      const cached = this.cache.get(key);
-      if (cached && now - cached.cachedAt < SPENDERS_CACHE_TTL_MS) {
-        return cached.result;
-      }
-      // Worker restarted since the last build? The session-storage copy is
-      // still fresh for up to the same TTL.
-      const persisted = await readSessionCache(key);
-      if (
-        persisted &&
-        now - persisted.cachedAt < SPENDERS_CACHE_TTL_MS &&
-        persisted.result.builtAt !== null
-      ) {
-        this.cache.set(key, persisted);
-        return persisted.result;
-      }
-    }
-
     const settings = await this.getSettings?.();
     if (this.kernelSource === undefined || settings === undefined) {
       // The legacy per-fan rebuild died in 1.7.0 — a board without the kernel
@@ -278,20 +410,115 @@ export class SpendersService {
       throw new ChatGooseError('hub_request_failed');
     }
 
+    const key = this.boardCacheKey(session, settings);
+    const now = Date.now();
+    const generation = this.cacheGeneration;
+
+    if (!options?.refresh) {
+      const cached = this.cache.get(key);
+      if (
+        cached &&
+        now - cached.cachedAt < SPENDERS_CACHE_TTL_MS &&
+        isCacheableResult(cached.result)
+      ) {
+        return cached.result;
+      }
+      // Worker restarted since the last build? The session-storage copy is
+      // still fresh for up to the same TTL.
+      const persisted = await readSessionCache(key);
+      if (
+        persisted &&
+        generation === this.cacheGeneration &&
+        now - persisted.cachedAt < SPENDERS_CACHE_TTL_MS &&
+        isCacheableResult(persisted.result)
+      ) {
+        this.cache.set(key, persisted);
+        return persisted.result;
+      }
+    }
+
+    const buildSequence = ++this.buildSequence;
+    this.latestBuildByKey.set(key, buildSequence);
     const result = await this.buildFromKernel(session, settings, signal, options?.onProgress);
 
-    // W9.3/A20: builtAt === null means the kernel has never walked this
-    // page (not ramped) — caching would pin a "not enabled" board for
-    // 10 minutes past the moment rankings actually turn on.
-    if (result.builtAt !== null) {
-      const entry: CacheEntry = { cachedAt: now, result };
+    // A token/settings invalidation may race an already-running build. Return
+    // that caller's completed response, but never repopulate the cleared cache
+    // with a snapshot fetched under the old source identity.
+    if (
+      generation !== this.cacheGeneration ||
+      this.latestBuildByKey.get(key) !== buildSequence
+    ) return result;
+
+    // Disabled or still-pending sources stay live questions; a ramped source
+    // with a successful empty sync is authoritative and may be cached.
+    if (isCacheableResult(result)) {
+      const entry: CacheEntry = { cachedAt: Date.now(), result };
       this.cache.set(key, entry);
-      void writeSessionCache(key, entry);
+      await writeSessionCache(key, entry);
     } else {
       this.cache.delete(key);
-      void writeSessionCache(key, null);
+      await writeSessionCache(key, null);
     }
     return result;
+  }
+
+  private async listFanAccountsBestEffort(
+    session: SessionTemplate,
+    parentSignal: AbortSignal,
+    requestSignal: AbortSignal = parentSignal,
+  ): Promise<{ fans: Array<{ groupId: string; fanAccountId: string }>; truncated: boolean }> {
+    const deadlineController = new AbortController();
+    const deadline = globalThis.setTimeout(
+      () => deadlineController.abort(),
+      this.tuning?.chatMapBudgetMs ?? SPENDERS_CHAT_MAP_BUDGET_MS,
+    );
+    const mapSignal = AbortSignal.any([requestSignal, deadlineController.signal]);
+    try {
+      return await this.fanslyClient.listFanAccounts(
+        SPENDERS_MAX_FANS,
+        session,
+        mapSignal,
+      );
+    } catch (error) {
+      throwIfParentAborted(parentSignal);
+      if (error instanceof ChatGooseError && error.key === 'session_expired') {
+        throw error;
+      }
+      return { fans: [], truncated: false };
+    } finally {
+      globalThis.clearTimeout(deadline);
+    }
+  }
+
+  /** The month column is optional. Give it its own deadline so a wedged second
+   * Hub request cannot hold an already-ready lifetime board until the global
+   * 120-second runtime timeout. */
+  private async fetchMonthBestEffort(
+    settings: Settings,
+    pageLabel: string,
+    monthWindow: string,
+    parentSignal: AbortSignal,
+  ): Promise<KernelSpendersSnapshot | null> {
+    const deadlineController = new AbortController();
+    const deadline = globalThis.setTimeout(
+      () => deadlineController.abort(),
+      this.tuning?.monthBudgetMs ?? SPENDERS_MONTH_BUDGET_MS,
+    );
+    const monthSignal = AbortSignal.any([parentSignal, deadlineController.signal]);
+    try {
+      return await this.kernelSource!.fetchTopSpenders(
+        settings,
+        pageLabel,
+        monthWindow,
+        SPENDERS_KERNEL_LIMIT,
+        monthSignal,
+      );
+    } catch {
+      throwIfParentAborted(parentSignal);
+      return null;
+    } finally {
+      globalThis.clearTimeout(deadline);
+    }
   }
 
   private async buildFromKernel(
@@ -312,10 +539,20 @@ export class SpendersService {
     }
 
     const monthWindow = monthWindowFor(Date.now());
-    const [{ fans }, lifetime, month] = await Promise.all([
-      // The one Fansly read that remains: conversation enumeration = the
-      // fan→groupId map for opening chats. It does NOT gate membership.
-      this.fanslyClient.listFanAccounts(SPENDERS_MAX_FANS, session, signal),
+    const chatMapController = new AbortController();
+    const chatMapSignal = AbortSignal.any([signal, chatMapController.signal]);
+    // Convert the speculative map to an explicitly-settled outcome at once:
+    // a fast fatal rejection must never sit unhandled while the Hub requests
+    // are still in flight.
+    const chatMapOutcome = this.listFanAccountsBestEffort(
+      session,
+      signal,
+      chatMapSignal,
+    ).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    const [lifetime, month] = await Promise.all([
       this.kernelSource!.fetchTopSpenders(
         settings,
         pageLabel,
@@ -323,18 +560,37 @@ export class SpendersService {
         SPENDERS_KERNEL_LIMIT,
         signal,
       ),
-      // Best-effort month column: a failed or empty month window degrades
-      // the +$N column to unknown, never the board.
-      this.kernelSource!
-        .fetchTopSpenders(settings, pageLabel, monthWindow, SPENDERS_KERNEL_LIMIT, signal)
-        .catch(() => null),
-    ]);
+      this.fetchMonthBestEffort(settings, pageLabel, monthWindow, signal),
+    ]).catch((error: unknown) => {
+      chatMapController.abort();
+      throw error;
+    });
+
+    if (lifetime.entries.length === 0) {
+      // Disabled, pending, and authoritatively-empty sources have no chat to
+      // open and no names to decorate. Cancel the speculative Fansly request
+      // instead of making the board wait for its 12-second deadline.
+      chatMapController.abort();
+    }
+
+    const mapOutcome = await chatMapOutcome;
+    if (!mapOutcome.ok) throw mapOutcome.error;
+    const { fans } = mapOutcome.value;
 
     const groupByFanId = new Map(fans.map((fan) => [fan.fanAccountId, fan.groupId]));
-    // builtAt null = no monthly observations in the window. That is
-    // indistinguishable from "monthly stream not collected", so the column
-    // reads unknown (null), never a misleading $0.
-    const monthReady = month !== null && month.builtAt !== null;
+    // Source health distinguishes a successful empty month from an unramped
+    // stream. Even when usable, entries may be a bounded top-500 subset: only
+    // a complete response makes an absent lifetime fan a known $0.
+    const monthLastSyncedAt = month === null
+      ? null
+      : parseKernelTimestamp(month.source.lastSyncedAt);
+    const monthReady = month !== null &&
+      month.source.streamState === 'ramped' &&
+      (
+        month.builtAt !== null ||
+        (monthLastSyncedAt !== null && monthWindowFor(monthLastSyncedAt) === monthWindow)
+      );
+    const monthComplete = monthReady && month.fanCount === month.entries.length;
     const monthByFanId = new Map(
       monthReady ? month.entries.map((entry) => [entry.platformUserId, entry.grossMills]) : [],
     );
@@ -343,15 +599,18 @@ export class SpendersService {
     // notes + platform-name backfill). Cached long and hard-budgeted —
     // names are decoration, the board must never hang on them (the 1.9.1
     // freeze was this sweep retrying through rate limits).
-    const namesByFanId = await this.resolveFanNames(
-      lifetime.entries.map((entry) => entry.platformUserId),
-      session,
-      signal,
-      onProgress,
-    );
+    const namesByFanId = lifetime.entries.length === 0
+      ? new Map<string, FanNames>()
+      : await this.resolveFanNames(
+          lifetime.entries.map((entry) => entry.platformUserId),
+          session,
+          signal,
+          onProgress,
+        );
 
     const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
-      const monthMills = monthReady ? (monthByFanId.get(entry.platformUserId) ?? 0) : null;
+      const knownMonthMills = monthReady ? monthByFanId.get(entry.platformUserId) : undefined;
+      const monthMills = knownMonthMills ?? (monthComplete ? 0 : null);
       const names = namesByFanId.get(entry.platformUserId);
       return {
         fanAccountId: entry.platformUserId,
@@ -369,9 +628,13 @@ export class SpendersService {
     return {
       entries,
       // Honest staleness: the projection's freshest observation, not "now".
-      // Null passes through verbatim (W9.3/A20): rewriting it to Date.now()
-      // made a never-walked page claim "no paying fans … updated just now".
-      builtAt: lifetime.builtAt !== null ? Date.parse(lifetime.builtAt) : null,
+      // Source state, not builtAt alone, distinguishes disabled/pending/empty.
+      builtAt: parseKernelTimestamp(lifetime.builtAt),
+      source: {
+        streamState: lifetime.source.streamState,
+        lastSyncedAt: parseKernelTimestamp(lifetime.source.lastSyncedAt),
+        consecutiveFailures: lifetime.source.consecutiveFailures,
+      },
       fanCount: lifetime.fanCount,
       monthWindow: monthReady ? monthWindow : null,
       fetchedAt: Date.now(),
@@ -388,20 +651,28 @@ export class SpendersService {
     signal: AbortSignal,
     onProgress?: (progress: SpendersProgressPayload) => void,
   ): Promise<Map<string, FanNames>> {
-    const cacheKey = this.cacheKey(session);
+    const cacheKey = this.creatorKey(session);
+    const requestedIds = [...new Set(fanAccountIds)];
+    const requestedIdSet = new Set(requestedIds);
     const namesById = new Map<string, FanNames>();
 
     const cached = await readNamesCache(cacheKey);
+    throwIfParentAborted(signal);
     const cacheFresh =
       cached !== null && Date.now() - cached.savedAt < SPENDERS_NAMES_CACHE_TTL_MS;
     if (cached && cacheFresh) {
-      for (const [id, names] of Object.entries(cached.byId)) {
-        namesById.set(id, names);
+      for (const id of requestedIds) {
+        const names = cached.byId[id];
+        if (names !== undefined) namesById.set(id, names);
       }
     }
 
-    const missing = fanAccountIds.filter((id) => !namesById.has(id));
+    const cachedSize = cached === null ? 0 : Object.keys(cached.byId).length;
+    const missing = requestedIds.filter((id) => !namesById.has(id));
     if (missing.length === 0) {
+      if (cachedSize > SPENDERS_NAMES_CACHE_MAX) {
+        await updateNamesCache(cacheKey, requestedIds, namesById);
+      }
       return namesById;
     }
 
@@ -414,70 +685,89 @@ export class SpendersService {
       total: missing.length,
     });
 
+    const sweepBudgetMs = this.tuning?.nameSweepBudgetMs ?? SPENDERS_NAME_SWEEP_BUDGET_MS;
     const sweepStart = Date.now();
+    const deadlineController = new AbortController();
+    const deadlineTimer = globalThis.setTimeout(
+      () => deadlineController.abort(),
+      Math.max(0, sweepBudgetMs),
+    );
+    const sweepSignal = AbortSignal.any([signal, deadlineController.signal]);
     let fetchedAny = false;
-    for (let start = 0; start < missing.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
-      if (Date.now() - sweepStart >= (this.tuning?.nameSweepBudgetMs ?? SPENDERS_NAME_SWEEP_BUDGET_MS)) {
-        break; // Out of budget — ship the board with what we have.
-      }
-      const batch = missing.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
-      try {
-        if (start > 0) {
-          await pause(FANSLY_PAGINATION_DELAY_MS, signal);
+    try {
+      for (let start = 0; start < missing.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
+        if (Date.now() - sweepStart >= sweepBudgetMs) {
+          break; // Out of budget — ship the board with what we have.
         }
-        const accounts = await this.fanslyClient.getAccountNames(
-          batch,
-          session,
-          signal,
-          'none',
-        );
-        for (const account of accounts) {
-          if (account?.id) {
-            namesById.set(account.id, namesFromAccount(account));
-            fetchedAny = true;
+        const batch = missing.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
+        try {
+          if (start > 0) {
+            await pause(FANSLY_PAGINATION_DELAY_MS, sweepSignal);
           }
+          const accounts = await this.fanslyClient.getAccountNames(
+            batch,
+            session,
+            sweepSignal,
+            'none',
+          );
+          for (const account of accounts) {
+            if (account?.id && requestedIdSet.has(account.id)) {
+              namesById.set(account.id, namesFromAccount(account));
+              fetchedAny = true;
+            }
+          }
+        } catch (error) {
+          // Only the caller's cancellation aborts the whole board. The sweep's
+          // deadline and FanslyClient's request-local timeout are decoration
+          // failures and ship the names already in hand.
+          throwIfParentAborted(signal);
+          if (error instanceof ChatGooseError && error.key === 'session_expired') {
+            throw error;
+          }
+          if (deadlineController.signal.aborted) break;
+          // A 429 applies to the sweep, not just one batch. Continuing would
+          // issue more requests into an explicit rate limit.
+          if (error instanceof ChatGooseError && error.key === 'rate_limited') break;
         }
-      } catch (error) {
-        // An aborted build must still abort; anything else is best-effort.
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          throw error;
-        }
+        // Honest count: batches that failed still advance the bar (their fans
+        // are done being tried — they keep platform names).
+        onProgress?.({
+          type: 'spenders:progress',
+          phase: 'names',
+          done: Math.min(start + batch.length, missing.length),
+          total: missing.length,
+        });
       }
-      // Honest count: batches that failed still advance the bar (their fans
-      // are done being tried — they keep platform names).
-      onProgress?.({
-        type: 'spenders:progress',
-        phase: 'names',
-        done: Math.min(start + batch.length, missing.length),
-        total: missing.length,
-      });
+    } finally {
+      globalThis.clearTimeout(deadlineTimer);
     }
+    throwIfParentAborted(signal);
 
-    if (fetchedAny) {
-      // Merge-write: keep whatever the cache already knew (stale entries roll
-      // off with the TTL as a whole). Over the cap, this build's names win —
-      // storage.local outlives the browser, so the map must stay bounded.
-      const merged: Record<string, FanNames> = {
-        ...(cached && cacheFresh ? cached.byId : {}),
-      };
-      for (const [id, names] of namesById) {
-        merged[id] = names;
-      }
-      const capped = Object.keys(merged).length > SPENDERS_NAMES_CACHE_MAX
-        ? Object.fromEntries(namesById)
-        : merged;
-      void writeNamesCache(cacheKey, {
-        savedAt: cached && cacheFresh ? cached.savedAt : Date.now(),
-        byId: capped,
-      });
+    if (fetchedAny || cachedSize > SPENDERS_NAMES_CACHE_MAX) {
+      await updateNamesCache(cacheKey, requestedIds, namesById);
     }
     return namesById;
   }
 
   /** Drop the cached board for this creator (memory + session storage). */
-  invalidate(session: SessionTemplate): void {
-    const key = this.cacheKey(session);
-    this.cache.delete(key);
-    void writeSessionCache(key, null);
+  async invalidate(session: SessionTemplate): Promise<void> {
+    this.cacheGeneration += 1;
+    const prefix = this.boardCachePrefix(session);
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) this.cache.delete(key);
+    }
+    for (const key of this.latestBuildByKey.keys()) {
+      if (key.startsWith(prefix)) this.latestBuildByKey.delete(key);
+    }
+    await deleteSessionCachesWithPrefix(prefix);
+  }
+
+  /** Source identity changed (Hub settings or credential): no persisted board
+   * is safe to reuse, including a build that was already in flight. */
+  async invalidateAll(): Promise<void> {
+    this.cacheGeneration += 1;
+    this.cache.clear();
+    this.latestBuildByKey.clear();
+    await clearSessionCache();
   }
 }

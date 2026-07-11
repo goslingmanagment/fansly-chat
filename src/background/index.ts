@@ -97,6 +97,11 @@ const UI_RELEVANT_KEYS = new Set([
 browser.storage.onChanged.addListener((changes, areaName) => {
   storageCoordinator.applyStorageChanges(changes, areaName);
   if (areaName !== 'local') return;
+  if (changes.settings || changes.agencyHubDeviceToken || changes.agencyHubApiKey) {
+    // The board cache is source-scoped. A same-URL credential replacement can
+    // still change data visibility, so clear both memory and storage.session.
+    void spendersService.invalidateAll();
+  }
   if (changes.personalities) {
     void personaSync.handlePersonalitiesChange(
       changes.personalities.oldValue,
