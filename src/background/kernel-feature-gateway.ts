@@ -8,7 +8,7 @@
 // `clientContext` VALUES; prompt ASSEMBLY (templates, personas, platform
 // wording, budgets, capture, ledger) is kernel-side.
 
-import { KernelApiError, streamAiFeature, type AiGatewayStreamFrame } from '@kernel/sdk';
+import { KernelApiError, streamAiFeature, type AiFeatureStreamFrame } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
 import { clientVersionHeaders } from '../shared/client-version.js';
 import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
@@ -39,6 +39,18 @@ export interface KernelFeatureRequest {
   draftText?: string;
   isRegeneration?: boolean;
   clientContext: KernelFeatureClientContext;
+  /** Debug mode only (E26): ask the kernel to echo the prompt it assembled.
+   * Rides a capability HEADER, never the request body — an old kernel ignores
+   * it, so a kernel rollback can never break a generation from a new client.
+   * The kernel still answers only inside an owner-set, time-bounded window. */
+  debugPromptEcho?: boolean;
+}
+
+/** The kernel's `debug_input_v1` echo: the EXACT blocks it sent to the model. */
+export interface KernelFeatureDebugInput {
+  systemBlocks: Array<{ text: string; cache: string }>;
+  userBlocks: Array<{ text: string; cache: string }>;
+  contextManifest: Record<string, unknown> | null;
 }
 
 export interface KernelFeatureUsage {
@@ -58,6 +70,9 @@ export interface KernelFeatureCallbacks {
   onUsage?: (usage: KernelFeatureUsage) => void;
   onReasoningDelta?: (text: string) => void;
   onStopReason?: (stopReason: string | null) => void;
+  /** Arrives right after meta, and only when the echo was requested AND the
+   * kernel's window allows it. Silence means "not allowed", never an error. */
+  onDebugInput?: (input: KernelFeatureDebugInput) => void;
 }
 
 /** Kernel product-gate structured codes (#120) → the extension's CG error
@@ -167,8 +182,15 @@ export function createKernelFeatureGateway(
       let text = '';
       let done = false;
 
-      const handleFrame = (frame: AiGatewayStreamFrame): void => {
+      const handleFrame = (frame: AiFeatureStreamFrame): void => {
         switch (frame.type) {
+          case 'debug_input_v1':
+            callbacks.onDebugInput?.({
+              systemBlocks: frame.systemBlocks,
+              userBlocks: frame.userBlocks,
+              contextManifest: frame.contextManifest,
+            });
+            return;
           case 'meta':
             // The meta frame's quota snapshot feeds the popup indicator —
             // fire-and-forget so a storage hiccup can't stall the stream.
@@ -241,6 +263,7 @@ export function createKernelFeatureGateway(
                 : {}),
             },
           },
+          ...(request.debugPromptEcho ? { debugPromptEcho: true } : {}),
           onFrame: handleFrame,
           signal,
         },

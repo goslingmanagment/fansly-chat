@@ -71,6 +71,7 @@ registerRuntimeApi({
   spendersService,
   tabContexts,
   storageCoordinator,
+  debugPrompts: coordinator.debugPrompts,
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {

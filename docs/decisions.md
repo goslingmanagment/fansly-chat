@@ -42,6 +42,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E23 | 2026-07-11 | Spenders board v2: enumeration = map not membership gate (lazy inbox-search chat resolve), kernel limit 500, month +$N column + NEW badge, board search, two-timestamp meta, SPA chat-open with verified fallback, storage.session cache |
 | E24 | 2026-07-11 | Action bar v2: tone groove (radio, arm-only, 😌😏💰🔥 + casual back) + Split flag (sticky) + regen keeps mode/tone; renames Fix/Recap/Split; tolerant [NEXT]; meaning-group seams |
 | E25 | 2026-07-11 | Board rows show the chatter's custom fan names (Fansly rename = account note contentType 12002; batched /account?ids= overlay, best-effort); chatter-eyes-only — never into prompts |
+| E26 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
 
 ## Entries
 
@@ -465,3 +466,30 @@ product incident). §5 watch: contentType 12002 is pinned from the clean-room
 analysis, not a live capture — verify on the first walkthrough that names
 appear; if they don't, that constant is the first suspect. Pinned in
 spenders-service / spenders-board-controller / spenders suites.
+
+**E26 (2026-07-11).** Debug mode shows what the model ACTUALLY received. Since
+the kernel cutover the prompt is assembled server-side, so the "LLM Input" panel
+could only ever show the client's own context plus two `[assembled kernel-side]`
+placeholders — the persona, the templates and the fan dossier the kernel injects
+(#136) were invisible precisely to the person debugging a bad reply. Now, with
+debug mode on, the request advertises `x-kernel-ai-capabilities: debug-input-v1`
+and the kernel — inside an owner-set, ≤24h window naming this chatter (core
+#140) — answers with a `debug_input_v1` frame carrying the exact prompt blocks
+plus its `contextManifest`. Silence means "window closed", never an error: the
+panel says so, and generation is untouched. The capability rides a HEADER, so an
+old kernel simply ignores it — a kernel rollback can never 400 a generation from
+a new client.
+
+The custody rule is the design: **the echo never enters the Fansly DOM.** The
+page shares its document with Fansly's own JS, and the echo is agency IP. So the
+background keeps it in memory only (`debug-prompt-store.ts`: 12-min TTL, 10
+entries, random viewer token — never storage, never a log), the content script
+gets a SEPARATE strict message (`operation:debugPromptStatus`, whose validator
+cannot carry prompt text) with an opaque token and a typed counts projection
+(`kernel-context.ts` — dossier version/age/chars/dropped, transcript-union
+counts, and unknown manifest keys reduced to their NAMES), and the token lives
+only in the content script's own heap, never in an attribute. The full prompt
+opens in `debug-prompt.html`, an extension-origin tab; the background hands over
+a snapshot only to a sender whose origin AND path match that page (exact match,
+not a prefix), so the Fansly content script cannot spend the token it carries. A
+cached Scan reports "no LLM call" rather than an empty inspector.

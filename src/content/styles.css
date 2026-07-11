@@ -1556,6 +1556,24 @@ ol.chatgoose-md-list {
   border-radius: 3px;
 }
 
+.chatgoose-debug-open {
+  margin-top: 8px;
+  align-self: flex-start;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chatgoose-ink);
+  background: var(--chatgoose-field);
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  cursor: pointer;
+}
+
+.chatgoose-debug-open:hover {
+  border-color: var(--chatgoose-accent);
+  color: var(--chatgoose-accent);
+}
+
 /* ─── Scroll Lock ────────────────────────────────────────────── */
 
 body.chatgoose-scroll-lock {
