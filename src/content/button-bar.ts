@@ -5,27 +5,38 @@ import { makeKbd } from './ui/kbd.js';
 type ToolbarAction = FeatureType | 'compare';
 
 // Buttons rendered directly in the bar row — all as plain labelled buttons
-// (Scan included; no overflow ⋯ menu).
+// (Recap included; no overflow ⋯ menu). Bar v2 (E24) groups by meaning:
+// Reply + its options │ Fix │ Hi · Ping │ → Recap · persona.
 const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'fast-reply', label: 'Reply' },
-  { feature: 'improve-draft', label: 'Polish' },
+  // 'Fix' is the feature's FEATURE_LABELS name — the bar's old 'Polish' had
+  // drifted from the overlay (E24 rename).
+  { feature: 'improve-draft', label: 'Fix' },
   { feature: 'hi-greeting', label: 'Hi' },
   { feature: 'ping', label: 'Ping' },
-  { feature: 'fan-summary', label: 'Scan' },
+  // 'Recap' names the dossier the chatter gets, not the scanning process.
+  { feature: 'fan-summary', label: 'Recap' },
 ];
 
-// Tone pills sit in their own muted row and modify the next Reply. Clicking a
-// pill arms the tone AND immediately starts a fast-reply in it (one click = one
-// generation); ⌘⇧O cycles the same set, and the active pill mirrors the armed
-// tone. Kept in lock-step with the cycle-tone order in content/index.ts.
-const TONE_OPTIONS: Array<{ tone: Exclude<ReplyTone, 'none'>; label: string }> = [
-  { tone: 'flirty', label: 'Flirty' },
-  { tone: 'upsell', label: 'Upsell' },
-  { tone: 'spicy', label: 'Horny' },
+// Tone segments live in a sunken groove next to Reply: OPTIONS of the next
+// Reply, not standalone buttons (E24). Clicking a segment ARMS the tone
+// (radio — one at a time; clicking the armed one disarms); only Reply fires.
+// The armed segment expands to show its word. ⌘⇧O cycles the same set —
+// kept in lock-step with the cycle-tone order in content/index.ts.
+const TONE_OPTIONS: Array<{
+  tone: Exclude<ReplyTone, 'none'>;
+  emoji: string;
+  word: string;
+  hint: string;
+}> = [
+  { tone: 'casual', emoji: '😌', word: 'Casual', hint: 'Спокойный дружеский тон — без флирта и продаж' },
+  { tone: 'flirty', emoji: '😏', word: 'Flirt', hint: 'Флирт — тепло, игра, притяжение' },
+  { tone: 'upsell', emoji: '💰', word: 'Sell', hint: 'Мягкая продажа контента — без давления' },
+  { tone: 'spicy', emoji: '🔥', word: 'Spice', hint: 'Горячо и прямо — телесный, заряженный тон' },
 ];
 
 // The letter bound to cycle-tone in the hotkey table — only used to enrich the
-// tone pills' tooltip with the combo that cycles them.
+// tone segments' tooltip with the combo that cycles them.
 const TONE_CYCLE_LETTER = 'O';
 
 interface ButtonBarCallbacks {
@@ -33,9 +44,16 @@ interface ButtonBarCallbacks {
   onCompareClick: () => void;
   onCompareRestoreClick: () => void;
   onReplyModeToggle: () => void;
-  /** A tone pill was clicked — arm the tone AND immediately start a fast-reply in
-   *  it (one click = one generation), mirroring the desktop tone control. */
+  /** A tone segment was clicked — ARM the tone for the next Reply (or disarm
+   *  the already-armed one). Never generates by itself (E24 options model). */
   onToneSelect: (tone: ReplyTone) => void;
+}
+
+function makeSeparator(): HTMLElement {
+  const sep = document.createElement('span');
+  sep.className = 'chatgoose-toolbar-sep';
+  sep.setAttribute('aria-hidden', 'true');
+  return sep;
 }
 
 export class ButtonBar {
@@ -43,10 +61,13 @@ export class ButtonBar {
   private readonly platform = detectLabelPlatform();
   private readonly personalityLabel: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
-  // Multi-message reply mode (preferSplit) — a plain labelled toggle next to Reply.
+  // Split — multi-message reply mode (preferSplit). A checkbox-style flag,
+  // ORTHOGONAL to the tone radio (a flirty reply can also be split), hence
+  // its own form: square dot, outside the tone groove. Sticky until toggled
+  // off (E24) — it no longer silently resets after each generation.
   private readonly replyModeToggle: HTMLButtonElement;
-  private readonly toneRow: HTMLElement;
-  private readonly tonePills = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
+  private readonly toneTrack: HTMLElement;
+  private readonly toneSegments = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
 
   constructor(private readonly callbacks: ButtonBarCallbacks) {
@@ -66,12 +87,16 @@ export class ButtonBar {
 
     const replyButton = this.buttons.get('fast-reply')!;
     replyButton.classList.add('chatgoose-toolbar-button-primary');
-    const improveButton = this.buttons.get('improve-draft')!;
+    const fixButton = this.buttons.get('improve-draft')!;
     const hiButton = this.buttons.get('hi-greeting')!;
     const pingButton = this.buttons.get('ping')!;
     const summaryButton = this.buttons.get('fan-summary')!;
-    // Scan carries a "ready" dot when a cached summary can be opened.
-    summaryButton.classList.add('chatgoose-toolbar-button-summary');
+    // Recap carries a "ready" dot when a cached summary can be opened, and
+    // opens the right-hand "about the fan" cluster (margin-left: auto).
+    summaryButton.classList.add(
+      'chatgoose-toolbar-button-summary',
+      'chatgoose-toolbar-right-start',
+    );
 
     const compareButton = document.createElement('button');
     compareButton.type = 'button';
@@ -87,49 +112,49 @@ export class ButtonBar {
     this.compareRestoreButton.textContent = 'Reopen';
     this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
 
-    // Multi — multi-message reply-mode toggle, pinned next to Reply (the mode it
-    // changes). A plain labelled pill; aria-pressed + the green active style
-    // carry the armed state.
     this.replyModeToggle = document.createElement('button');
     this.replyModeToggle.type = 'button';
-    this.replyModeToggle.className = 'chatgoose-button chatgoose-toolbar-toggle';
-    this.replyModeToggle.textContent = 'Multi';
+    this.replyModeToggle.className = 'chatgoose-button chatgoose-toolbar-flag';
+    this.replyModeToggle.textContent = 'Split';
     this.replyModeToggle.setAttribute('aria-pressed', 'false');
-    this.replyModeToggle.title = 'Reply as multiple messages';
+    this.replyModeToggle.title =
+      'Ответ серией из 2–3 сообщений — переключатель, действует пока включён';
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
     this.personalityLabel = document.createElement('div');
     this.personalityLabel.className = 'chatgoose-pill chatgoose-personality chatgoose-toolbar-pill chatgoose-toolbar-personality-end';
 
-    // Tone pills — a compact, muted cluster distinct from the solid action
-    // buttons. Click = one generation in that tone; the active pill mirrors the
-    // armed tone (incl. the ⌘⇧O cycle).
-    this.toneRow = document.createElement('div');
-    this.toneRow.className = 'chatgoose-toolbar-tone-row';
-    this.toneRow.setAttribute('role', 'group');
-    this.toneRow.setAttribute('aria-label', 'Reply tone');
+    // Tone groove — a sunken radio track pressed against Reply.
+    this.toneTrack = document.createElement('div');
+    this.toneTrack.className = 'chatgoose-tone-track';
+    this.toneTrack.setAttribute('role', 'radiogroup');
+    this.toneTrack.setAttribute('aria-label', 'Reply tone');
     const toneCombo = comboLabel(TONE_CYCLE_LETTER, this.platform);
     for (const entry of TONE_OPTIONS) {
-      const pill = document.createElement('button');
-      pill.type = 'button';
-      pill.className = 'chatgoose-tone-pill';
-      pill.textContent = entry.label;
-      pill.setAttribute('aria-pressed', 'false');
-      pill.title = `${entry.label} tone — ${toneCombo} cycles tone`;
-      pill.addEventListener('click', () => this.callbacks.onToneSelect(entry.tone));
-      this.tonePills.set(entry.tone, pill);
-      this.toneRow.append(pill);
+      const segment = document.createElement('button');
+      segment.type = 'button';
+      segment.className = 'chatgoose-tone-seg';
+      segment.setAttribute('role', 'radio');
+      segment.setAttribute('aria-checked', 'false');
+      segment.setAttribute('aria-label', `${entry.word} tone`);
+      segment.title = `${entry.hint} · клик армирует следующий Reply · ${toneCombo} циклирует`;
+      segment.addEventListener('click', () => this.callbacks.onToneSelect(entry.tone));
+      this.toneSegments.set(entry.tone, segment);
+      this.toneTrack.append(segment);
     }
+    this.renderToneSegments('none', false);
 
-    // Main actions first, secondary controls later so narrow layouts degrade
-    // gracefully. Reply carries its Multi mode-toggle; tone pills follow Polish;
-    // Scan sits at the end of the actions before the personality pill (pinned right).
-    // Help / Review / Compare stay implemented but are intentionally hidden for now.
+    // Bar v2 order (E24): the Reply cluster (trigger + tone groove + Split
+    // flag), then draft tools, then situational openers, then — pinned right —
+    // the "about the fan" side (Recap + persona). Hairline seams mark the
+    // group boundaries. Help / Review / Compare stay implemented but hidden.
     this.root.append(
       replyButton,
+      this.toneTrack,
       this.replyModeToggle,
-      improveButton,
-      this.toneRow,
+      makeSeparator(),
+      fixButton,
+      makeSeparator(),
       hiButton,
       pingButton,
       summaryButton,
@@ -175,6 +200,30 @@ export class ButtonBar {
     }
   }
 
+  /** (Re)build the tone segments: emoji always; the armed segment expands
+   *  with its word — the label appears exactly when the choice matters
+   *  (right before Reply fires). */
+  private renderToneSegments(nextReplyTone: ReplyTone, disabled: boolean): void {
+    for (const entry of TONE_OPTIONS) {
+      const segment = this.toneSegments.get(entry.tone)!;
+      const isActive = nextReplyTone === entry.tone;
+      segment.disabled = disabled;
+      segment.setAttribute('aria-checked', isActive ? 'true' : 'false');
+      segment.classList.toggle('chatgoose-tone-seg-active', isActive);
+      const emoji = document.createElement('span');
+      emoji.className = 'chatgoose-tone-seg-emoji';
+      emoji.textContent = entry.emoji;
+      if (isActive) {
+        const word = document.createElement('span');
+        word.className = 'chatgoose-tone-seg-word';
+        word.textContent = entry.word;
+        segment.replaceChildren(emoji, word);
+      } else {
+        segment.replaceChildren(emoji);
+      }
+    }
+  }
+
   render(
     state: TabUiState | null,
     activeAction: ToolbarAction | null,
@@ -209,15 +258,15 @@ export class ButtonBar {
       this.renderFeatureButton(button, entry.feature, entry.label, isActive && activeLoading);
     }
 
-    // Scan shows a "ready" dot + tooltip when a cached summary can be opened.
+    // Recap shows a "ready" dot + tooltip when a cached summary can be opened.
     const summaryButton = this.buttons.get('fan-summary')!;
     summaryButton.classList.toggle(
       'chatgoose-toolbar-button-summary-ready',
       state.hasAvailableSummary,
     );
     summaryButton.title = state.hasAvailableSummary
-      ? 'Scan ready to open'
-      : this.featureTitle('fan-summary', 'Scan');
+      ? 'Recap ready to open'
+      : this.featureTitle('fan-summary', 'Recap');
 
     const compareButton = this.buttons.get('compare')!;
     const compareActive = activeAction === 'compare';
@@ -226,24 +275,22 @@ export class ButtonBar {
     this.compareRestoreButton.classList.add('chatgoose-hidden');
     this.compareRestoreButton.disabled = true;
 
-    // ─── Multi (reply-mode toggle) ────────────────────────────────────────────
-    const multiArmed = nextReplyMode === 'preferSplit';
+    // ─── Split (reply-mode flag) ──────────────────────────────────────────────
+    const splitArmed = nextReplyMode === 'preferSplit';
     this.replyModeToggle.disabled = Boolean(activeAction) || !state.connected || !state.hasApiKey;
-    this.replyModeToggle.setAttribute('aria-pressed', multiArmed ? 'true' : 'false');
-    this.replyModeToggle.classList.toggle('chatgoose-toolbar-toggle-active', multiArmed);
+    this.replyModeToggle.setAttribute('aria-pressed', splitArmed ? 'true' : 'false');
+    this.replyModeToggle.classList.toggle('chatgoose-toolbar-flag-active', splitArmed);
 
-    // ─── Tone pills ───────────────────────────────────────────────────────────
-    // Hide the whole row when there's nothing to reply with (not connected / no
-    // key); when connected but unmapped, keep the pills visible-but-disabled so
-    // they track Reply's own disabled state (clicking a pill generates a reply).
-    const hideToneRow = !state.connected || !state.hasApiKey;
-    this.toneRow.classList.toggle('chatgoose-hidden', hideToneRow);
-    for (const entry of TONE_OPTIONS) {
-      const pill = this.tonePills.get(entry.tone)!;
-      const isActive = nextReplyTone === entry.tone;
-      pill.disabled = Boolean(activeAction) || disableForPrereqs;
-      pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      pill.classList.toggle('chatgoose-tone-pill-active', isActive);
-    }
+    // ─── Tone groove ──────────────────────────────────────────────────────────
+    // Hide the groove (and the Split flag rides the same rule) when there's
+    // nothing to reply with (not connected / no key); when connected but
+    // unmapped, keep it visible-but-disabled so it tracks Reply's own state.
+    const hideToneTrack = !state.connected || !state.hasApiKey;
+    this.toneTrack.classList.toggle('chatgoose-hidden', hideToneTrack);
+    this.replyModeToggle.classList.toggle('chatgoose-hidden', hideToneTrack);
+    this.renderToneSegments(
+      nextReplyTone,
+      Boolean(activeAction) || disableForPrereqs,
+    );
   }
 }

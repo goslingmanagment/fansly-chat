@@ -42,16 +42,18 @@ function buttonByLabel(root: ParentNode, label: string): HTMLButtonElement | und
   );
 }
 
-function multiToggle(root: ParentNode): HTMLButtonElement | null {
-  return root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-toggle');
+function splitFlag(root: ParentNode): HTMLButtonElement | null {
+  return root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-flag');
 }
 
-function tonePills(root: ParentNode): HTMLButtonElement[] {
-  return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-pill'));
+function toneSegments(root: ParentNode): HTMLButtonElement[] {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-seg'));
 }
 
-function tonePill(root: ParentNode, label: string): HTMLButtonElement | undefined {
-  return tonePills(root).find((pill) => pill.textContent === label);
+function toneSegment(root: ParentNode, emoji: string): HTMLButtonElement | undefined {
+  return toneSegments(root).find((segment) =>
+    segment.querySelector('.chatgoose-tone-seg-emoji')?.textContent === emoji,
+  );
 }
 
 const noop = () => undefined;
@@ -88,13 +90,13 @@ describe('ButtonBar toolbar visibility', () => {
     expect(compare).toBeUndefined();
   });
 
-  it('renders Scan as a row button (no overflow ⋯ menu)', () => {
+  it('renders Recap as a row button (no overflow ⋯ menu)', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    expect(buttonByLabel(bar.root, 'Scan')).toBeDefined();
+    expect(buttonByLabel(bar.root, 'Recap')).toBeDefined();
     expect(bar.root.querySelector('.chatgoose-more')).toBeNull();
     expect(bar.root.querySelector('.chatgoose-more-menu')).toBeNull();
   });
@@ -107,7 +109,7 @@ describe('ButtonBar toolbar visibility', () => {
 
     const platform = detectLabelPlatform();
     const replyHotkey = featureHotkeyLabel('fast-reply', platform)!;
-    const scanHotkey = featureHotkeyLabel('fan-summary', platform)!;
+    const recapHotkey = featureHotkeyLabel('fan-summary', platform)!;
 
     const reply = buttonByLabel(bar.root, 'Reply');
     const replyChip = reply?.querySelector('.chatgoose-toolbar-hotkey');
@@ -118,21 +120,21 @@ describe('ButtonBar toolbar visibility', () => {
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
-    const scan = buttonByLabel(bar.root, 'Scan');
-    const scanChip = scan?.querySelector('.chatgoose-toolbar-hotkey');
-    expect(scanChip?.textContent).toBe(scanHotkey.short);
-    expect(scanChip?.getAttribute('aria-hidden')).toBe('true');
-    expect(scan?.title).toContain(scanHotkey.full);
-    expect(scan?.getAttribute('aria-keyshortcuts')).toBe(
-      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${scanHotkey.short}`,
+    const recap = buttonByLabel(bar.root, 'Recap');
+    const recapChip = recap?.querySelector('.chatgoose-toolbar-hotkey');
+    expect(recapChip?.textContent).toBe(recapHotkey.short);
+    expect(recapChip?.getAttribute('aria-hidden')).toBe('true');
+    expect(recap?.title).toContain(recapHotkey.full);
+    expect(recap?.getAttribute('aria-keyshortcuts')).toBe(
+      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${recapHotkey.short}`,
     );
 
-    // The Multi reply-mode toggle is a labelled pill with no bound key — no chip,
+    // The Split reply-mode flag is a labelled pill with no bound key — no chip,
     // no keyshortcuts.
-    const multi = multiToggle(bar.root);
-    expect(multi?.textContent).toBe('Multi');
-    expect(multi?.querySelector('.chatgoose-kbd')).toBeNull();
-    expect(multi?.getAttribute('aria-keyshortcuts')).toBeNull();
+    const split = splitFlag(bar.root);
+    expect(split?.textContent).toBe('Split');
+    expect(split?.querySelector('.chatgoose-kbd')).toBeNull();
+    expect(split?.getAttribute('aria-keyshortcuts')).toBeNull();
   });
 
   it('keeps the hover-only hotkey through the active loading spinner', () => {
@@ -151,15 +153,15 @@ describe('ButtonBar toolbar visibility', () => {
     expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(false);
   });
 
-  it('marks a ready summary on the Scan button', () => {
+  it('marks a ready summary on the Recap button', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({ hasAvailableSummary: true }), null, 'default', 'none', true, false, false);
 
-    const scan = buttonByLabel(bar.root, 'Scan');
-    expect(scan?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
-    expect(scan?.title).toContain('Scan ready to open');
+    const recap = buttonByLabel(bar.root, 'Recap');
+    expect(recap?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
+    expect(recap?.title).toContain('Recap ready to open');
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
@@ -178,8 +180,7 @@ describe('ButtonBar toolbar visibility', () => {
   });
 });
 
-// Additional compare button behavior coverage remains skipped for now.
-describe.skip('ButtonBar compare button', () => {
+describe('ButtonBar tone groove (E24)', () => {
   beforeEach(() => {
     installDom();
   });
@@ -189,135 +190,66 @@ describe.skip('ButtonBar compare button', () => {
     vi.restoreAllMocks();
   });
 
-  it('enables Compare when two compare cards are available even without a mapped personality', () => {
-    const bar = makeBar();
-    document.body.append(bar.root);
-
-    bar.render(buildState({
-      hasPersonalities: false,
-      mappedPersonalityId: null,
-      mappedPersonalityName: null,
-      compareCardCount: 2,
-      compareDraftCount: 2,
-    }), null, 'default', 'none', true, false, false);
-
-    const reply = buttonByLabel(bar.root, 'Reply');
-    const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Compare');
-
-    expect(reply?.disabled).toBe(true);
-    expect(compare?.disabled).toBe(false);
-  });
-
-  it('disables Compare when fewer than two compare cards are available', () => {
-    const bar = makeBar();
-    document.body.append(bar.root);
-
-    bar.render(buildState({
-      compareCardCount: 1,
-      compareDraftCount: 1,
-    }), null, 'default', 'none', true, false, false);
-
-    const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Compare');
-
-    expect(compare?.disabled).toBe(true);
-  });
-
-  it('hides Reopen when there is no completed compare cache to restore', () => {
+  it('renders four emoji segments in a radio groove with Russian hints', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const reopen = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Reopen');
-
-    expect(reopen?.classList.contains('chatgoose-hidden')).toBe(true);
+    const track = bar.root.querySelector('.chatgoose-tone-track');
+    expect(track?.getAttribute('role')).toBe('radiogroup');
+    const segments = toneSegments(bar.root);
+    expect(segments.map((s) => s.querySelector('.chatgoose-tone-seg-emoji')?.textContent))
+      .toEqual(['😌', '😏', '💰', '🔥']);
+    // Idle segments carry the glyph only — no word.
+    expect(bar.root.querySelector('.chatgoose-tone-seg-word')).toBeNull();
+    // Hover hint is Russian and mentions the cycle combo.
+    expect(toneSegment(bar.root, '😏')?.title).toContain('Флирт');
+    expect(toneSegment(bar.root, '💰')?.title).toContain('продажа');
+    expect(toneSegment(bar.root, '😌')?.title).toContain('дружеский');
+    expect(toneSegment(bar.root, '🔥')?.title).toContain('Горячо');
   });
 
-  it('shows enabled Reopen when a completed compare can be restored even without connection or API key', () => {
-    const restoreSpy = vi.fn();
-    const bar = makeBar({ onCompareRestoreClick: restoreSpy });
-    document.body.append(bar.root);
-
-    bar.render(buildState({
-      connected: false,
-      hasApiKey: false,
-    }), null, 'default', 'none', true, false, true);
-
-    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
-    const compare = buttons.find((button) => button.textContent === 'Compare');
-    const reopen = buttons.find((button) => button.textContent === 'Reopen');
-
-    expect(compare?.disabled).toBe(true);
-    expect(reopen?.classList.contains('chatgoose-hidden')).toBe(false);
-    expect(reopen?.disabled).toBe(false);
-
-    reopen?.click();
-    expect(restoreSpy).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('ButtonBar tone pills', () => {
-  beforeEach(() => {
-    installDom();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('renders the three tone pills', () => {
-    const bar = makeBar();
-    document.body.append(bar.root);
-
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    expect(tonePills(bar.root).map((pill) => pill.textContent)).toEqual([
-      'Flirty',
-      'Upsell',
-      'Horny',
-    ]);
-  });
-
-  it('marks the armed tone pill active', () => {
+  it('the armed segment surfaces as a thumb and expands with its word', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'flirty', true, false, false);
 
-    const flirty = tonePill(bar.root, 'Flirty');
-    const horny = tonePill(bar.root, 'Horny');
+    const flirty = toneSegment(bar.root, '😏')!;
+    const spicy = toneSegment(bar.root, '🔥')!;
 
-    expect(flirty?.classList.contains('chatgoose-tone-pill-active')).toBe(true);
-    expect(flirty?.getAttribute('aria-pressed')).toBe('true');
-    expect(horny?.classList.contains('chatgoose-tone-pill-active')).toBe(false);
-    expect(horny?.getAttribute('aria-pressed')).toBe('false');
+    expect(flirty.classList.contains('chatgoose-tone-seg-active')).toBe(true);
+    expect(flirty.getAttribute('aria-checked')).toBe('true');
+    expect(flirty.querySelector('.chatgoose-tone-seg-word')?.textContent).toBe('Flirt');
+    expect(spicy.classList.contains('chatgoose-tone-seg-active')).toBe(false);
+    expect(spicy.getAttribute('aria-checked')).toBe('false');
+    expect(spicy.querySelector('.chatgoose-tone-seg-word')).toBeNull();
   });
 
-  it('clicking a tone pill fires onToneSelect with that tone (one click = one generation)', () => {
+  it('clicking a segment fires onToneSelect with that tone (arming only — no generation here)', () => {
     const toneSpy = vi.fn();
     const bar = makeBar({ onToneSelect: toneSpy });
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    tonePill(bar.root, 'Upsell')?.click();
+    toneSegment(bar.root, '💰')?.click();
     expect(toneSpy).toHaveBeenCalledWith('upsell');
+    toneSegment(bar.root, '😌')?.click();
+    expect(toneSpy).toHaveBeenCalledWith('casual');
   });
 
-  it('disables the tone pills during an active operation', () => {
+  it('disables the segments during an active operation', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
-    expect(tonePills(bar.root).every((pill) => pill.disabled)).toBe(true);
+    expect(toneSegments(bar.root).every((segment) => segment.disabled)).toBe(true);
   });
 
-  it('disables the tone pills when connected and keyed but unmapped', () => {
+  it('disables the segments when connected and keyed but unmapped', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -331,25 +263,26 @@ describe('ButtonBar tone pills', () => {
       false,
     );
 
-    const row = bar.root.querySelector('.chatgoose-toolbar-tone-row');
-    // The row stays visible (tracks Reply, which is also visible-but-disabled)…
-    expect(row?.classList.contains('chatgoose-hidden')).toBe(false);
-    // …but the pills can't generate without a mapped personality.
-    expect(tonePills(bar.root).every((pill) => pill.disabled)).toBe(true);
+    const track = bar.root.querySelector('.chatgoose-tone-track');
+    // The groove stays visible (tracks Reply, which is also visible-but-disabled)…
+    expect(track?.classList.contains('chatgoose-hidden')).toBe(false);
+    // …but arming a tone is pointless without a mapped personality.
+    expect(toneSegments(bar.root).every((segment) => segment.disabled)).toBe(true);
   });
 
-  it('hides the tone row when not connected', () => {
+  it('hides the groove and the Split flag when not connected', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
 
-    const row = bar.root.querySelector('.chatgoose-toolbar-tone-row');
-    expect(row?.classList.contains('chatgoose-hidden')).toBe(true);
+    const track = bar.root.querySelector('.chatgoose-tone-track');
+    expect(track?.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(splitFlag(bar.root)?.classList.contains('chatgoose-hidden')).toBe(true);
   });
 });
 
-describe('ButtonBar multi toggle', () => {
+describe('ButtonBar Split flag', () => {
   beforeEach(() => {
     installDom();
   });
@@ -359,49 +292,49 @@ describe('ButtonBar multi toggle', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders a labelled Multi toggle, unpressed by default', () => {
+  it('renders a labelled Split flag, unpressed by default', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    const multi = multiToggle(bar.root)!;
-    expect(multi.textContent).toBe('Multi');
-    expect(multi.getAttribute('aria-pressed')).toBe('false');
-    expect(multi.classList.contains('chatgoose-toolbar-toggle-active')).toBe(false);
+    const split = splitFlag(bar.root)!;
+    expect(split.textContent).toBe('Split');
+    expect(split.getAttribute('aria-pressed')).toBe('false');
+    expect(split.classList.contains('chatgoose-toolbar-flag-active')).toBe(false);
   });
 
-  it('reflects an armed Multi mode with aria-pressed and the active style', () => {
+  it('reflects an armed Split mode with aria-pressed and the active style', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
 
-    const multi = multiToggle(bar.root)!;
-    expect(multi.getAttribute('aria-pressed')).toBe('true');
-    expect(multi.classList.contains('chatgoose-toolbar-toggle-active')).toBe(true);
+    const split = splitFlag(bar.root)!;
+    expect(split.getAttribute('aria-pressed')).toBe('true');
+    expect(split.classList.contains('chatgoose-toolbar-flag-active')).toBe(true);
   });
 
-  it('clicking the Multi toggle fires onReplyModeToggle', () => {
+  it('clicking the Split flag fires onReplyModeToggle', () => {
     const toggleSpy = vi.fn();
     const bar = makeBar({ onReplyModeToggle: toggleSpy });
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
-    multiToggle(bar.root)!.click();
+    splitFlag(bar.root)!.click();
     expect(toggleSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('disables the Multi toggle during an active operation and when not connected', () => {
+  it('disables the Split flag during an active operation and when not connected', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
-    expect(multiToggle(bar.root)!.disabled).toBe(true);
+    expect(splitFlag(bar.root)!.disabled).toBe(true);
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
-    expect(multiToggle(bar.root)!.disabled).toBe(true);
+    expect(splitFlag(bar.root)!.disabled).toBe(true);
   });
 });
 
@@ -415,16 +348,16 @@ describe('ButtonBar improve draft state', () => {
     vi.restoreAllMocks();
   });
 
-  it('disables Polish when the composer draft is empty', () => {
+  it('disables Fix when the composer draft is empty', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', false, false, false);
 
-    expect(buttonByLabel(bar.root, 'Polish')?.disabled).toBe(true);
+    expect(buttonByLabel(bar.root, 'Fix')?.disabled).toBe(true);
   });
 
-  it('orders Reply, Multi, Polish, tone row, Hi, Ping, Scan, then the personality pill', () => {
+  it('orders Reply, tone groove, Split, Fix, Hi, Ping, Recap, then the personality pill', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -434,27 +367,35 @@ describe('ButtonBar improve draft state', () => {
     const replyIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-button-primary'),
     );
-    const multiIndex = children.findIndex((child) =>
-      child.classList.contains('chatgoose-toolbar-toggle'),
-    );
-    const polishIndex = children.findIndex((child) => labelOf(child) === 'Polish');
     const toneIndex = children.findIndex((child) =>
-      child.classList.contains('chatgoose-toolbar-tone-row'),
+      child.classList.contains('chatgoose-tone-track'),
     );
+    const splitIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-flag'),
+    );
+    const fixIndex = children.findIndex((child) => labelOf(child) === 'Fix');
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
-    const scanIndex = children.findIndex((child) => labelOf(child) === 'Scan');
+    const recapIndex = children.findIndex((child) => labelOf(child) === 'Recap');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
     );
 
+    // Reply cluster (trigger + options) → draft tool → openers → fan side.
     expect(replyIndex).toBe(0);
-    expect(multiIndex).toBe(replyIndex + 1);
-    expect(polishIndex).toBe(multiIndex + 1);
-    expect(toneIndex).toBe(polishIndex + 1);
-    expect(hiIndex).toBe(toneIndex + 1);
+    expect(toneIndex).toBe(replyIndex + 1);
+    expect(splitIndex).toBe(toneIndex + 1);
+    expect(fixIndex).toBeGreaterThan(splitIndex);
+    expect(hiIndex).toBeGreaterThan(fixIndex);
     expect(pingIndex).toBe(hiIndex + 1);
-    expect(scanIndex).toBe(pingIndex + 1);
-    expect(personalityIndex).toBe(scanIndex + 1);
+    expect(recapIndex).toBe(pingIndex + 1);
+    expect(personalityIndex).toBe(recapIndex + 1);
+
+    // Meaning-groups are seamed with hairlines, and Recap opens the
+    // right-pinned cluster.
+    expect(bar.root.querySelectorAll('.chatgoose-toolbar-sep')).toHaveLength(2);
+    expect(
+      children[recapIndex]!.classList.contains('chatgoose-toolbar-right-start'),
+    ).toBe(true);
   });
 });

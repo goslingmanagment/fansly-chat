@@ -336,10 +336,16 @@
   color: var(--chatgoose-clay-ink);
 }
 
-.chatgoose-toolbar-toggle {
+/* Split — the one checkbox in the bar. A square dot marks it as an
+   INDEPENDENT flag (a flirty reply can also be split), a different form
+   from the tone radio groove on purpose (E24). */
+.chatgoose-toolbar-flag {
   min-height: 28px;
-  padding: 0 10px;
+  padding: 0 10px 0 8px;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border-color: var(--chatgoose-line);
   background: transparent;
   border-radius: 999px;
@@ -350,6 +356,17 @@
   white-space: nowrap;
   box-shadow: none;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.chatgoose-toolbar-flag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 2.5px;
+  border: 1.5px solid var(--chatgoose-line-strong);
+  background: transparent;
+  transition: background 150ms ease, border-color 150ms ease;
 }
 
 /* Loading spinner overlays the dimmed label instead of flowing after it:
@@ -390,16 +407,41 @@
   transform: translateY(0) scale(1);
 }
 
-.chatgoose-toolbar-toggle:hover:not(:disabled) {
+.chatgoose-toolbar-flag:hover:not(:disabled) {
   background: var(--chatgoose-bg2);
   border-color: var(--chatgoose-clay-line);
   color: var(--chatgoose-ink);
 }
 
-.chatgoose-toolbar-toggle-active {
+.chatgoose-toolbar-flag-active {
   background: var(--chatgoose-clay-bg);
   border-color: var(--chatgoose-clay-line);
   color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-toolbar-flag-active::before {
+  background: var(--chatgoose-clay);
+  border-color: var(--chatgoose-clay);
+}
+
+.chatgoose-toolbar-flag:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Hairline seams between the bar's meaning-groups (E24). */
+.chatgoose-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  flex: 0 0 auto;
+  background: var(--chatgoose-line-strong);
+  opacity: 0.6;
+  margin: 0 2px;
+}
+
+/* Recap opens the right-hand "about the fan" cluster (Recap + persona). */
+.chatgoose-toolbar-right-start {
+  margin-left: auto;
 }
 
 /* ─── Personality (pinned right) ─────────────────────────── */
@@ -412,40 +454,66 @@
   flex: 0 0 auto;
 }
 
-/* ─── Tone pills: a compact, muted cluster that modifies the next Reply ────── */
-.chatgoose-toolbar-tone-row {
-  display: flex;
+/* ─── Tone groove: sunken radio track of Reply OPTIONS (E24) ─────────────────
+   Actions are raised chips; options lie in a sunken groove pressed against
+   Reply. Segments are emoji glyphs (the chatters' own language — precedent:
+   the Spenders tier chips); the armed one surfaces as a light thumb and
+   expands with its word, exactly when the choice matters. */
+.chatgoose-tone-track {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  padding: 3px;
   flex: 0 0 auto;
-  min-width: max-content;
+  background: var(--chatgoose-bg3);
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(31, 30, 29, 0.07);
 }
 
-.chatgoose-tone-pill {
-  min-height: 26px;
-  padding: 0 9px;
-  font-size: 12px;
-  font-weight: 600;
+.chatgoose-tone-seg {
+  min-height: 22px;
+  min-width: 30px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  color: var(--chatgoose-ink-low);
+  color: var(--chatgoose-ink-mid);
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  filter: grayscale(0.35);
+  opacity: 0.8;
+  transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease,
+    filter 150ms ease, opacity 150ms ease;
 }
 
-.chatgoose-tone-pill:hover:not(:disabled) {
-  background: var(--chatgoose-bg2);
-  color: var(--chatgoose-ink);
+.chatgoose-tone-seg:hover:not(:disabled) {
+  filter: grayscale(0);
+  opacity: 1;
 }
 
-.chatgoose-tone-pill-active {
-  background: var(--chatgoose-clay-bg);
+.chatgoose-tone-seg-active {
+  background: var(--chatgoose-bg1);
   border-color: var(--chatgoose-clay-line);
+  box-shadow: 0 1px 2px rgba(31, 30, 29, 0.1);
+  filter: grayscale(0);
+  opacity: 1;
+  padding: 0 10px 0 7px;
+}
+
+.chatgoose-tone-seg-word {
+  font-family: var(--chatgoose-font);
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--chatgoose-clay-ink);
 }
 
-.chatgoose-tone-pill:disabled {
+.chatgoose-tone-seg:disabled {
   opacity: 0.3;
   cursor: default;
 }

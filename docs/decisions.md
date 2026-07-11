@@ -32,6 +32,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E13 | 2026-07-10 | Family restyle: injected UI = desktop dark-twin tokens, popup/options = family light; terracotta accent, green = money-only, serif AI text, mono numbers |
 | E14 | 2026-07-10 | uiTheme setting (system/light/dark, storage v12) supersedes E13's fixed split; click-to-insert draft cards + streaming caret; popup AI-quota indicator off the meta frame |
 | E15 | 2026-07-10 | 1.8.0 RELEASED (E13/E14 scope); releases now go from main — bar-tone-menu retired, CLAUDE.md updated; watch theme adoption + quota row + v12 migration |
+| E24 | 2026-07-11 | Action bar v2: tone groove (radio, arm-only, 😌😏💰🔥 + casual back) + Split flag (sticky) + regen keeps mode/tone; renames Fix/Recap/Split; tolerant [NEXT]; meaning-group seams (E23 = spenders v2, on its own branch) |
 
 ## Entries
 
@@ -364,3 +365,32 @@ the write race the client preflight can't close is closed ATOMICALLY
 kernel-side (core 103ce92, appendFanProfile under its advisory lock:
 identical body no-ops, a non-newer sourced write no-ops), so the preflight
 here is an optimization, not the guarantee.
+
+**E24 (2026-07-11).** Action bar v2 — the Reply cluster becomes OPTIONS + one
+trigger (owner-driven redesign, mockup-iterated). (a) **Tones are radio
+options in a sunken groove**, not buttons: segments 😌 casual / 😏 flirty /
+💰 upsell / 🔥 spicy (emoji = the chatters' own language; precedent — the
+Spenders tier chips), Russian hover hints, the armed segment surfaces as a
+thumb and expands with its word (label appears exactly when the choice
+matters). Clicking ARMS (or disarms) — the pre-1.5.5 one-shot
+click-generates is deliberately gone; only Reply fires. `casual` returned to
+the bar and to the ⌘⇧O cycle (dropped in 1.5.5 only to keep pills⇄cycle
+lock-step — the groove restores both). (b) **Split (ex-Multi) is a
+checkbox-flag, orthogonal to tone** (a flirty reply can be split): square-dot
+pill OUTSIDE the groove — one groove per dimension, the merged-track draft
+read as "a fourth tone" and was rejected. Split is now STICKY: the old
+after-send reset made Regenerate silently lose the split — one of the two
+real causes behind "сплит иногда не делает перенос". Regenerate now re-rolls
+the same ask: sticky mode + a per-conversation memo of the last sent tone
+(cleared on route change). (c) **Renames** (result-naming rule): Multi→Split
+(the mode's real name — preferSplit), Polish→Fix (the bar had drifted from
+FEATURE_LABELS), Scan→Recap (names the dossier, not the process;
+FEATURE_LABELS updated — one name everywhere). Hotkey descriptions follow.
+(d) **The other split cause** — the kernel prompt's opt-out ("if a split
+would feel forced, return one clean message") — is fixed kernel-side (core
+branch, split = ALWAYS ≥2 parts, ≤3); client-side, splitByNext is now
+tolerant of marker drift (`[next]`, `[ NEXT ]` — bracket forms only; the old
+case-sensitivity pin reversed). (e) Bar regrouped by meaning with hairline
+seams: Reply+options │ Fix │ Hi·Ping │ → Recap+persona (right-pinned).
+Pinned in button-bar / content-app / split suites. Numbering note: E23 is
+the Spenders board v2 decision on branch ext/spenders-board-v2.
