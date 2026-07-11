@@ -16,6 +16,7 @@ import {
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
+  SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../shared/constants.js';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
@@ -374,6 +375,13 @@ export class OperationCoordinator {
   private readonly lifecycle =
     new OperationRegistry<ActiveOperation, ActiveCompareOperation>();
   private readonly pendingSummaryAvailabilityByKey = new Map<string, Promise<void>>();
+  /** Hub-sync retry bookkeeping, keyed `groupId|generatedAt|baseUrl` — a new
+   * Scan (new generatedAt) or a hub retarget gets a fresh key. Entries clear
+   * once saved; failures wait out SUMMARY_SYNC_RETRY_COOLDOWN_MS. */
+  private readonly summarySyncRetryByKey = new Map<
+    string,
+    { inFlight: boolean; nextAttemptAt: number }
+  >();
   private readonly pendingIdentityResolutionByLegacyAccountId = new Map<
     string,
     {
@@ -463,6 +471,11 @@ export class OperationCoordinator {
     } satisfies TabStatePayload);
     if (!state.hasAvailableSummary) {
       void this.prefetchAvailableSummary(tabId);
+    } else {
+      // Core #136: the kernel injects the HUB copy of a ready Scan into other
+      // features' prompts — so an unsaved local summary gets an opportunistic
+      // re-push here, not only when the chatter reopens Scan.
+      void this.retrySummaryHubSync(tabId);
     }
   }
 
@@ -776,6 +789,80 @@ export class OperationCoordinator {
 
     this.pendingSummaryAvailabilityByKey.set(key, task);
     await task;
+  }
+
+  /** Re-push a valid-but-unsaved cached summary to the hub. Bounded: dedup
+   * while a push is in flight, cooldown after a failure, key cleared once the
+   * hub confirms the save. The push itself is the same dedup-guarded
+   * `syncAgencyHubSummary` the generation path uses. */
+  private async retrySummaryHubSync(tabId: number): Promise<void> {
+    const storage = await this.storageCoordinator.getState();
+    const context = this.tabContexts.getOrCreate(tabId);
+    const groupId = context.groupId?.trim() ?? '';
+    if (!groupId) {
+      return;
+    }
+    const session = this.sessionStore.getSessionForTab(tabId);
+    if (!session?.connected) {
+      return;
+    }
+    const cached = await this.storageCoordinator.getSummaryCache(groupId);
+    if (!cached) {
+      return;
+    }
+    const baseUrl = normalizeAgencyHubBaseUrl(storage.settings.agencyHubBaseUrl);
+    if (!baseUrl) {
+      return;
+    }
+    const existingSync = normalizeAgencyHubSummarySyncMetadata(cached.agencyHubSync);
+    if (isAgencyHubSummarySavedForBaseUrl(existingSync, baseUrl, cached.generatedAt)) {
+      return;
+    }
+    if (!shouldAttemptAgencyHubSummarySync(this.agencyHubClient, storage.settings, cached.summary)) {
+      return;
+    }
+    const legacyAccountId =
+      this.sessionStore.getAccountIdForTab(tabId) ?? context.accountId;
+    const resolvedAccountId = session.resolvedAccountId ?? legacyAccountId;
+    if (!resolvedAccountId) {
+      return;
+    }
+
+    const key = [groupId, cached.generatedAt, baseUrl].join('|');
+    const now = Date.now();
+    const entry = this.summarySyncRetryByKey.get(key);
+    if (entry && (entry.inFlight || now < entry.nextAttemptAt)) {
+      return;
+    }
+    this.summarySyncRetryByKey.set(key, {
+      inFlight: true,
+      nextAttemptAt: now + SUMMARY_SYNC_RETRY_COOLDOWN_MS,
+    });
+
+    try {
+      await this.syncAgencyHubSummary({
+        tabId,
+        groupId,
+        settings: storage.settings,
+        summary: cached.summary,
+        generatedAt: cached.generatedAt,
+        existingSync: cached.agencyHubSync,
+        fanAccountId: cached.fanAccountId ?? null,
+        session,
+        resolvedAccountId,
+        debugEnabled: storage.settings.debugMode,
+      });
+    } finally {
+      const current = this.summarySyncRetryByKey.get(key);
+      if (current) {
+        current.inFlight = false;
+      }
+      const after = await this.storageCoordinator.getSummaryCache(groupId);
+      const afterSync = normalizeAgencyHubSummarySyncMetadata(after?.agencyHubSync);
+      if (isAgencyHubSummarySavedForBaseUrl(afterSync, baseUrl, cached.generatedAt)) {
+        this.summarySyncRetryByKey.delete(key);
+      }
+    }
   }
 
   private send(tabId: number, message: BackgroundPortMessage): void {

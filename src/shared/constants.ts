@@ -102,6 +102,10 @@ export const PING_MIN_FAN_MESSAGES = 3;
 export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 export const AGENCY_HUB_PREFETCH_TIMEOUT_MS = 5_000;
 export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
+// The hub copy of a ready Scan feeds other features' prompts (core #136),
+// so an unsaved summary gets an opportunistic re-push on chat open — but a
+// persistently failing hub must not be hammered on every tab refresh.
+export const SUMMARY_SYNC_RETRY_COOLDOWN_MS = 3 * 60_000;
 export const AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS = 100;
 // W9.4/A26: mirrors the kernel's clientContext.transcript cap (core
 // routes.ts aiFeatureStreamBodySchema: z.string().max(300_000)). A giant

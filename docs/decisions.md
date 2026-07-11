@@ -329,3 +329,20 @@ meta frame's real vendor model id — in production the equality never held
 and fresh summaries were never cached (the prefetch path masked it). Gate
 removed; the sentinel stays the cache identity. Mutation-checked: the new
 pin fails against the old gate.
+
+**E22 (2026-07-11).** Opportunistic hub re-push of a ready Scan on chat open
+(companion to core #136 — the kernel now injects the HUB copy of the fan
+dossier into fast-reply/improve-draft/help-me/ping prompts, kernel-side,
+zero wire change; compare inherits via fast-reply). The extension's summary
+sync was fire-and-forget after generation with a retry only when the
+chatter reopened Scan — a failed push could leave the hub without the
+dossier indefinitely while every other feature wanted it. `refreshTabState`
+now branches: no available summary → the existing availability prefetch;
+available summary whose `agencyHubSync` is not `saved` for the current
+(baseUrl, generatedAt) → `retrySummaryHubSync`, which reuses the same
+`syncAgencyHubSummary` path the generation uses. Bounded on purpose:
+in-flight dedup + `SUMMARY_SYNC_RETRY_COOLDOWN_MS` (3 min) per
+`groupId|generatedAt|baseUrl` key (a NEW Scan or hub retarget gets a fresh
+key; the key clears once saved), and the hub side already dedups
+`already-synced` by (baseUrl, pageLabel, generatedAt). No UI change; the
+existing sync-status pill picks up the result message.
