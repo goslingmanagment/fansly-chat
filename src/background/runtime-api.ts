@@ -1,6 +1,7 @@
 import {
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_MS,
+  SPENDERS_RESOLVE_TIMEOUT_MS,
 } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError, toUserError } from '../shared/errors.js';
@@ -255,6 +256,49 @@ export function registerRuntimeApi({
               ? toUserError(error)
               : createUserError('hub_request_failed'),
           };
+        }
+      }
+
+      if (requestType === 'resolveFanChat') {
+        const tabId = sender.tab?.id;
+        const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
+        if (!session || !session.connected) {
+          return { ok: false, error: createUserError('not_connected') };
+        }
+
+        // Shape already validated by getRuntimeRequestType.
+        const record = message as unknown as {
+          fanAccountId: string;
+          username: string | null;
+          displayName: string | null;
+        };
+        const searchTerm = record.username?.trim() || record.displayName?.trim() || '';
+        if (!searchTerm) {
+          // Nothing to search by — an honest "not found", not an error.
+          return { ok: true, groupId: null };
+        }
+
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          SPENDERS_RESOLVE_TIMEOUT_MS,
+        );
+        try {
+          const groupId = await fanslyClient.findGroupIdForFan(
+            record.fanAccountId,
+            searchTerm,
+            session,
+            controller.signal,
+          );
+          return { ok: true, groupId };
+        } catch (error) {
+          const timedOut = error instanceof DOMException && error.name === 'AbortError';
+          return {
+            ok: false,
+            error: timedOut ? createUserError('timed_out') : toUserError(error),
+          };
+        } finally {
+          globalThis.clearTimeout(timeout);
         }
       }
 

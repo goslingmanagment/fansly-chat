@@ -4,19 +4,25 @@
 // grouped into client-side tiers, and opens a fan's chat on click/Enter.
 //
 // Data comes from the background `getSpendersList` request (injected as
-// `fetchList` for testability); navigation is injected as `openChat`.
+// `fetchList` for testability); navigation is injected as `openChat`. Entries
+// without an enumerated conversation (groupId null, E23) resolve their chat
+// lazily through the injected `resolveChat` when opened.
 
 import {
   assignSpenderTier,
   countByTier,
+  filterSpendersByQuery,
+  formatMonthDelta,
   formatSpenderAmount,
   getSpenderTier,
   groupSpendersByTier,
+  isNewSpender,
   SPENDER_TIERS,
   sortByLifetimeDesc,
   type SpenderTierId,
 } from '../../shared/spenders.js';
 import type {
+  ResolveFanChatResponse,
   SpenderListEntry,
   SpendersListResponse,
   SpendersListResult,
@@ -27,9 +33,22 @@ import { makeKbd } from '../ui/kbd.js';
 export interface SpendersBoardDeps {
   fetchList: (refresh: boolean) => Promise<SpendersListResponse>;
   openChat: (groupId: string) => void;
+  resolveChat: (entry: SpenderListEntry) => Promise<ResolveFanChatResponse>;
 }
 
 type ActiveTier = 'all' | SpenderTierId;
+
+// The board can only re-read the hub's latest snapshot; the hub itself walks
+// Fansly on its own schedule. Said once, in the meta line's tooltip, so a
+// stale "data as of" never reads as a broken Refresh button.
+const FRESHNESS_TOOLTIP =
+  'Spend data comes from the Agency Hub, which re-reads Fansly earnings on ' +
+  'a schedule (roughly hourly to daily). Refresh re-fetches the latest hub ' +
+  'snapshot — it cannot make the hub re-walk Fansly.';
+
+const NO_CHAT_TOOLTIP =
+  'Not among your most-recent conversations — opening will search the inbox ' +
+  'for this fan.';
 
 function ensureBoardRoot(): HTMLElement {
   let root = document.getElementById('chatgoose-board-root');
@@ -58,7 +77,8 @@ function relativeTime(builtAt: number): string {
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.round(mins / 60);
-  return `${hours}h ago`;
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 export class SpendersBoardController {
@@ -67,9 +87,14 @@ export class SpendersBoardController {
   private loading = false;
   private result: SpendersListResult | null = null;
   private activeTier: ActiveTier = 'all';
+  private searchQuery = '';
   private cursorIndex = -1;
   private visibleEntries: SpenderListEntry[] = [];
   private rowEls: HTMLElement[] = [];
+  private listHost: HTMLElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
+  private readonly chatStateChips = new Map<string, HTMLElement>();
+  private resolvingFanId: string | null = null;
 
   constructor(private readonly deps: SpendersBoardDeps) {
     document.addEventListener('keydown', (event) => this.handleKeydown(event));
@@ -103,6 +128,9 @@ export class SpendersBoardController {
   close(): void {
     this.open = false;
     this.cursorIndex = -1;
+    this.listHost = null;
+    this.searchInput = null;
+    this.chatStateChips.clear();
     document.body.classList.remove('chatgoose-scroll-lock');
     this.root.replaceChildren();
   }
@@ -117,6 +145,7 @@ export class SpendersBoardController {
       if (response.ok) {
         this.result = response.result;
         this.activeTier = 'all';
+        this.searchQuery = '';
         this.renderBoard();
       } else {
         this.renderError(formatUserFacingError(response.error));
@@ -158,6 +187,9 @@ export class SpendersBoardController {
     sub.textContent = this.result
       ? this.metaLine(this.result)
       : 'Top spenders by lifetime spend';
+    if (this.result && this.result.builtAt !== null) {
+      sub.title = FRESHNESS_TOOLTIP;
+    }
     titleWrap.append(title, sub);
 
     const actions = document.createElement('div');
@@ -167,6 +199,7 @@ export class SpendersBoardController {
     refresh.type = 'button';
     refresh.className = 'chatgoose-board-action';
     refresh.textContent = '↻ Refresh';
+    refresh.title = FRESHNESS_TOOLTIP;
     refresh.disabled = this.loading;
     refresh.addEventListener('click', () => {
       void this.load(true);
@@ -189,15 +222,18 @@ export class SpendersBoardController {
     if (result.builtAt === null) {
       return 'Rankings not enabled for this page yet';
     }
-    const parts = [
-      `${result.fanCount} spender${result.fanCount === 1 ? '' : 's'}`,
-      `scanned ${result.scannedCount}`,
-      `updated ${relativeTime(result.builtAt)}`,
-    ];
-    if (result.truncated) {
-      parts.push(`among most-recent ${result.scannedCount} chats`);
-    }
-    return parts.join(' · ');
+    const shown = result.entries.length;
+    // fanCount is the kernel's full spender total; when the query limit
+    // truncates the list, say so instead of passing the cut off as the total.
+    const head =
+      result.fanCount > shown
+        ? `top ${shown} of ${result.fanCount} spenders`
+        : `${shown} spender${shown === 1 ? '' : 's'}`;
+    return [
+      head,
+      `data as of ${relativeTime(result.builtAt)}`,
+      `fetched ${relativeTime(result.fetchedAt)}`,
+    ].join(' · ');
   }
 
   private renderLoading(refresh: boolean): void {
@@ -205,7 +241,7 @@ export class SpendersBoardController {
     body.className = 'chatgoose-board-state';
     body.textContent = refresh
       ? 'Rebuilding the board…'
-      : 'Building the board — fetching lifetime spend per fan. This can take a moment.';
+      : 'Building the board — fetching the top-spenders snapshot…';
     this.shell(body);
   }
 
@@ -238,9 +274,41 @@ export class SpendersBoardController {
 
     const listHost = document.createElement('div');
     listHost.className = 'chatgoose-board-list';
+    this.listHost = listHost;
+    body.append(listHost);
+
+    const footer = document.createElement('div');
+    footer.className = 'chatgoose-board-footer';
+    footer.append(
+      makeKbd('J'),
+      document.createTextNode(' '),
+      makeKbd('K'),
+      document.createTextNode(' move · '),
+      makeKbd('Enter'),
+      document.createTextNode(' open chat · '),
+      makeKbd('/'),
+      document.createTextNode(' search · '),
+      makeKbd('Esc'),
+      document.createTextNode(' close'),
+    );
+    body.append(footer);
+
+    this.shell(body);
+    this.renderList();
+  }
+
+  /** (Re)fill the list host for the current tier + search query. Kept apart
+   * from renderBoard so typing in the search box never rebuilds the input
+   * it is typing into. */
+  private renderList(): void {
+    const result = this.result;
+    const listHost = this.listHost;
+    if (!result || !listHost) return;
 
     this.rowEls = [];
     this.visibleEntries = [];
+    this.chatStateChips.clear();
+    listHost.replaceChildren();
 
     if (result.builtAt === null) {
       // Not ramped ≠ zero spenders: the kernel has never walked this page's
@@ -253,44 +321,35 @@ export class SpendersBoardController {
     } else if (result.entries.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'chatgoose-board-state';
-      empty.textContent = 'No paying fans found in the scanned conversations yet.';
+      empty.textContent = 'No paying fans in the hub data for this page yet.';
       listHost.append(empty);
-    } else if (this.activeTier === 'all') {
-      for (const group of groupSpendersByTier(result.entries)) {
-        listHost.append(this.buildSectionHeader(group.tier.emoji, group.tier.title, group.tier.band, group.entries.length));
-        for (const entry of group.entries) {
+    } else {
+      const matched = filterSpendersByQuery(result.entries, this.searchQuery);
+      if (matched.length === 0) {
+        const none = document.createElement('div');
+        none.className = 'chatgoose-board-state';
+        none.textContent = 'No fans match the search.';
+        listHost.append(none);
+      } else if (this.activeTier === 'all') {
+        for (const group of groupSpendersByTier(matched)) {
+          listHost.append(this.buildSectionHeader(group.tier.emoji, group.tier.title, group.tier.band, group.entries.length));
+          for (const entry of group.entries) {
+            listHost.append(this.buildRow(entry));
+          }
+        }
+      } else {
+        const tier = getSpenderTier(this.activeTier);
+        const activeTier = this.activeTier;
+        const entries = sortByLifetimeDesc(
+          matched.filter((entry) => assignSpenderTier(entry.lifetimeUsd) === activeTier),
+        );
+        listHost.append(this.buildSectionHeader(tier.emoji, tier.title, tier.band, entries.length));
+        for (const entry of entries) {
           listHost.append(this.buildRow(entry));
         }
       }
-    } else {
-      const tier = getSpenderTier(this.activeTier);
-      const activeTier = this.activeTier;
-      const entries = sortByLifetimeDesc(
-        result.entries.filter((entry) => assignSpenderTier(entry.lifetimeUsd) === activeTier),
-      );
-      listHost.append(this.buildSectionHeader(tier.emoji, tier.title, tier.band, entries.length));
-      for (const entry of entries) {
-        listHost.append(this.buildRow(entry));
-      }
     }
 
-    body.append(listHost);
-
-    const footer = document.createElement('div');
-    footer.className = 'chatgoose-board-footer';
-    footer.append(
-      makeKbd('J'),
-      document.createTextNode(' '),
-      makeKbd('K'),
-      document.createTextNode(' move · '),
-      makeKbd('Enter'),
-      document.createTextNode(' open chat · '),
-      makeKbd('Esc'),
-      document.createTextNode(' close'),
-    );
-    body.append(footer);
-
-    this.shell(body);
     this.cursorIndex = this.visibleEntries.length > 0 ? 0 : -1;
     this.applyCursor(false);
   }
@@ -306,6 +365,22 @@ export class SpendersBoardController {
       if (count > 0) {
         chips.append(this.buildChip(tier.id, `${tier.emoji} ${tier.title}`, count));
       }
+    }
+
+    this.searchInput = null;
+    if (entries.length > 0) {
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'chatgoose-board-search';
+      search.placeholder = 'Search fans…';
+      search.setAttribute('aria-label', 'Search fans by name or username');
+      search.value = this.searchQuery;
+      search.addEventListener('input', () => {
+        this.searchQuery = search.value;
+        this.renderList();
+      });
+      this.searchInput = search;
+      chips.append(search);
     }
     return chips;
   }
@@ -368,33 +443,142 @@ export class SpendersBoardController {
 
     const main = document.createElement('div');
     main.className = 'chatgoose-board-row-main';
+    const nameLine = document.createElement('div');
+    nameLine.className = 'chatgoose-board-row-nameline';
     const name = document.createElement('div');
     name.className = 'chatgoose-board-row-name';
     name.textContent = entryName(entry);
+    nameLine.append(name);
+    if (isNewSpender(entry.lifetimeUsd, entry.monthUsd)) {
+      const fresh = document.createElement('span');
+      fresh.className = 'chatgoose-board-row-new';
+      fresh.textContent = 'NEW';
+      fresh.title = 'First spend this month';
+      nameLine.append(fresh);
+    }
+    if (entry.groupId === null) {
+      const chatState = document.createElement('span');
+      chatState.className = 'chatgoose-board-row-chatstate';
+      chatState.textContent = 'no recent chat';
+      chatState.title = NO_CHAT_TOOLTIP;
+      this.chatStateChips.set(entry.fanAccountId, chatState);
+      nameLine.append(chatState);
+    }
     const handle = document.createElement('div');
     handle.className = 'chatgoose-board-row-handle';
     handle.textContent = entry.username ? `@${entry.username}` : '';
-    main.append(name, handle);
+    main.append(nameLine, handle);
 
+    const amounts = document.createElement('div');
+    amounts.className = 'chatgoose-board-row-amounts';
     const amount = document.createElement('div');
     amount.className = 'chatgoose-board-row-amount';
     amount.textContent = formatSpenderAmount(entry.lifetimeUsd);
+    amounts.append(amount);
+    const delta = formatMonthDelta(entry.monthUsd);
+    if (delta) {
+      const deltaEl = document.createElement('div');
+      deltaEl.className = 'chatgoose-board-row-delta';
+      deltaEl.textContent = delta;
+      deltaEl.title = this.result?.monthWindow
+        ? `This month (${this.result.monthWindow})`
+        : 'This month';
+      amounts.append(deltaEl);
+    }
 
-    row.append(avatar, main, amount);
+    row.append(avatar, main, amounts);
     row.addEventListener('click', () => {
       this.cursorIndex = index;
       this.applyCursor(false);
-      this.deps.openChat(entry.groupId);
+      this.openEntry(entry);
     });
 
     this.rowEls.push(row);
     return row;
   }
 
+  // ─── Opening chats ──────────────────────────────────────────────────────
+
+  private openEntry(entry: SpenderListEntry): void {
+    if (entry.groupId) {
+      this.deps.openChat(entry.groupId);
+      return;
+    }
+    // E23 lazy resolve: one inbox search per open, one at a time.
+    if (this.resolvingFanId !== null) return;
+    this.resolvingFanId = entry.fanAccountId;
+    this.setChatState(entry.fanAccountId, 'locating…', null);
+    void this.deps
+      .resolveChat(entry)
+      .then((response) => {
+        if (!this.open) return;
+        if (response.ok && response.groupId) {
+          // Memoize on the entry so a second open skips the search (the
+          // content-side result is this board's own structured-clone copy).
+          entry.groupId = response.groupId;
+          this.deps.openChat(response.groupId);
+          return;
+        }
+        this.setChatState(
+          entry.fanAccountId,
+          'not found',
+          response.ok
+            ? 'The inbox search found no conversation with this fan.'
+            : formatUserFacingError(response.error),
+        );
+      })
+      .catch(() => {
+        if (!this.open) return;
+        this.setChatState(entry.fanAccountId, 'not found', 'Could not search the inbox.');
+      })
+      .finally(() => {
+        this.resolvingFanId = null;
+      });
+  }
+
+  private setChatState(fanAccountId: string, label: string, title: string | null): void {
+    const chip = this.chatStateChips.get(fanAccountId);
+    if (!chip) return;
+    chip.textContent = label;
+    if (title !== null) {
+      chip.title = title;
+    }
+  }
+
   // ─── Cursor / keyboard ──────────────────────────────────────────────────
 
   private handleKeydown(event: KeyboardEvent): void {
     if (!this.open) return;
+
+    // Typing in the search box: letters filter (j/k must not move the
+    // cursor); Esc clears-then-closes; Enter opens the top match; arrows
+    // still steer the cursor.
+    if (this.searchInput !== null && event.target === this.searchInput) {
+      switch (event.key) {
+        case 'Escape':
+          event.preventDefault();
+          if (this.searchInput.value) {
+            this.searchInput.value = '';
+            this.searchQuery = '';
+            this.renderList();
+          } else {
+            this.close();
+          }
+          return;
+        case 'Enter':
+          event.preventDefault();
+          this.openCursorEntry();
+          return;
+        case 'ArrowDown':
+        case 'ArrowUp':
+          event.preventDefault();
+          this.moveCursor(event.key === 'ArrowDown' ? 1 : -1);
+          return;
+        default:
+          return;
+      }
+    }
+
     switch (event.key) {
       case 'Escape':
         event.preventDefault();
@@ -414,9 +598,15 @@ export class SpendersBoardController {
         event.preventDefault();
         this.moveCursor(-1);
         return;
+      case '/':
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        event.preventDefault();
+        this.searchInput?.focus();
+        return;
       case 'Enter':
         if (event.metaKey || event.ctrlKey || event.altKey) return;
-        this.openCursor(event);
+        event.preventDefault();
+        this.openCursorEntry();
         return;
       default:
         return;
@@ -432,11 +622,10 @@ export class SpendersBoardController {
     this.applyCursor(true);
   }
 
-  private openCursor(event: KeyboardEvent): void {
+  private openCursorEntry(): void {
     const entry = this.visibleEntries[this.cursorIndex];
     if (!entry) return;
-    event.preventDefault();
-    this.deps.openChat(entry.groupId);
+    this.openEntry(entry);
   }
 
   private applyCursor(scroll: boolean): void {
