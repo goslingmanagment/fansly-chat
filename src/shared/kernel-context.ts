@@ -8,7 +8,7 @@
 // whatever else showed up, which is enough to notice a new lane without leaking
 // its contents. The full manifest still reaches the extension-origin viewer.
 
-import type { KernelContextProjection } from './types.js';
+import type { DebugPromptEchoStatus, KernelContextProjection } from './types.js';
 
 const MODELLED_KEYS = new Set([
   'fanProfile',
@@ -80,4 +80,42 @@ export function projectKernelContext(
     .sort();
 
   return { dossier, transcript, otherKeys };
+}
+
+/** The content script's LAST word on what enters the page's process: whatever
+ * arrived over the port, this returns a FRESHLY BUILT object carrying only the
+ * modelled fields. The protocol validator already rejects extra keys — but
+ * validation is a check, and a check can be loosened by a later edit, while a
+ * constructor cannot accidentally copy a field it never mentions. Prompt text
+ * has no path through this function. */
+export function projectDebugPromptEcho(echo: DebugPromptEchoStatus): DebugPromptEchoStatus {
+  if (echo.state !== 'available') {
+    return { state: echo.state };
+  }
+  const { dossier, transcript, otherKeys } = echo.kernelContext;
+  return {
+    state: 'available',
+    viewerToken: echo.viewerToken,
+    kernelContext: {
+      dossier: dossier
+        ? {
+            version: dossier.version,
+            ageDays: dossier.ageDays,
+            chars: dossier.chars,
+            truncated: dossier.truncated,
+            droppedSections: [...dossier.droppedSections],
+          }
+        : null,
+      transcript: transcript
+        ? {
+            source: transcript.source,
+            mode: transcript.mode,
+            archiveCount: transcript.archiveCount,
+            unionCount: transcript.unionCount,
+            stale: transcript.stale,
+          }
+        : null,
+      otherKeys: [...otherKeys],
+    },
+  };
 }

@@ -31,6 +31,7 @@ import {
 import { createKeymap } from '../shared/keymap.js';
 import { SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
 import { sendRuntimeRequest } from '../shared/protocol.js';
+import { projectDebugPromptEcho } from '../shared/kernel-context.js';
 import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
@@ -1406,10 +1407,11 @@ export class ChatGooseContentApp {
     if (this.activeOperationId !== message.operationId) {
       return;
     }
-    // The token lives here, in the content script's own heap — never in an
-    // attribute, a dataset entry, or anything else the Fansly page can read
-    // out of the shared DOM (E27).
-    this.activeDebugEcho = message.echo;
+    // Rebuilt, not adopted: only the modelled fields cross into this process,
+    // whatever the port handed us. The token then lives here in the content
+    // script's own heap — never in an attribute, a dataset entry, or anything
+    // else the Fansly page can read out of the shared DOM (E27).
+    this.activeDebugEcho = projectDebugPromptEcho(message.echo);
     this.scheduleLoadingRender();
   }
 

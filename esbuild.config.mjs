@@ -14,7 +14,7 @@ const entryPoints = {
   content: path.join(root, 'src/content/index.ts'),
   options: path.join(root, 'src/options/index.ts'),
   popup: path.join(root, 'src/popup/index.ts'),
-  // E26: the extension-origin viewer for the kernel's assembled prompt.
+  // E27: the extension-origin viewer for the kernel's assembled prompt.
   'debug-prompt': path.join(root, 'src/debug-prompt/index.ts'),
 };
 
