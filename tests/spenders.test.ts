@@ -5,6 +5,7 @@ import {
   filterSpendersByQuery,
   formatMonthDelta,
   formatSpenderAmount,
+  formatTierAwareSpenderAmount,
   groupSpendersByTier,
   isNewSpender,
   monthWindowFor,
@@ -72,9 +73,14 @@ describe('groupSpendersByTier', () => {
 });
 
 describe('countByTier', () => {
-  it('tallies per tier and the grand total, ignoring untiered', () => {
-    const result = countByTier([row('a', 700), row('b', 400), row('c', 0)]);
-    expect(result.all).toBe(2);
+  it('tallies tiers and includes positive below-tier spenders in All', () => {
+    const result = countByTier([
+      row('a', 700),
+      row('b', 400),
+      row('c', 0.5),
+      row('zero', 0),
+    ]);
+    expect(result.all).toBe(3);
     expect(result.byTier.whale).toBe(1);
     expect(result.byTier.top).toBe(1);
     expect(result.byTier.micro).toBe(0);
@@ -93,6 +99,37 @@ describe('formatSpenderAmount', () => {
     expect(formatSpenderAmount(0)).toBe('');
     expect(formatSpenderAmount(-5)).toBe('');
     expect(formatSpenderAmount(Number.NaN)).toBe('');
+  });
+});
+
+describe('formatTierAwareSpenderAmount', () => {
+  it('keeps exact mills visible when whole-dollar rounding crosses a tier boundary', () => {
+    expect(formatTierAwareSpenderAmount(599_600)).toBe('$599.60');
+    expect(formatTierAwareSpenderAmount(599_999)).toBe('$599.999');
+    expect(formatTierAwareSpenderAmount(349_600)).toBe('$349.60');
+    expect(formatTierAwareSpenderAmount(24_999)).toBe('$24.999');
+  });
+
+  it('keeps compact whole-dollar output away from a boundary', () => {
+    expect(formatTierAwareSpenderAmount(1_078_000)).toBe('$1,078');
+    expect(formatTierAwareSpenderAmount(600_000)).toBe('$600');
+    expect(formatTierAwareSpenderAmount(0)).toBe('');
+  });
+
+  it('shows positive sub-dollar mills without rounding them to zero', () => {
+    expect(formatTierAwareSpenderAmount(1)).toBe('$0.001');
+    expect(formatTierAwareSpenderAmount(10)).toBe('$0.01');
+    expect(formatTierAwareSpenderAmount(500)).toBe('$0.50');
+  });
+
+  it('never displays the next tier boundary for one mill below it', () => {
+    for (const boundaryUsd of [1, 25, 50, 150, 350, 600]) {
+      const belowBoundaryMills = boundaryUsd * 1000 - 1;
+      expect(formatTierAwareSpenderAmount(belowBoundaryMills)).toBe(
+        `$${boundaryUsd - 1}.999`,
+      );
+      expect(formatTierAwareSpenderAmount(boundaryUsd * 1000)).toBe(`$${boundaryUsd}`);
+    }
   });
 });
 

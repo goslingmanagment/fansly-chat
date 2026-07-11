@@ -46,6 +46,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E27 | 2026-07-12 | Armed tone stays emoji-only: fixed-width highlight replaces the expanding word so the narrow composer never shifts or scrolls |
 | E28 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
 | E29 | 2026-07-12 | Spenders correctness/performance hardening: source-aware empty states, correlated builds, race-safe async UI, bounded optional reads, serialized scoped caches, incremental DOM updates |
+| E30 | 2026-07-12 | Spenders scope/amount/freshness honesty: truncated controls name the loaded slice, sub-$1 spenders remain visible, tier-boundary amounts retain mills, builtAt is explicitly newest-projection freshness |
 
 ## Entries
 
@@ -578,3 +579,22 @@ virtualization — the bounded 500-row DOM is now linear and covered by a real
 500-row structural test, while virtualization would add focus/scroll risk
 without measured need. Pinned across spenders-service, agency-hub-client,
 shared spenders/protocol, runtime-api, and board-controller suites.
+
+**E30 (2026-07-12).** Spenders presentation no longer over-claims what the
+bounded kernel response means. `pageTopSpenders` accepts only `window` plus
+`limit <= 500` and has no cursor/offset, so `fanCount=694` alongside 500 rows
+cannot be completed by repeating the request — rows 501–694 require a
+Core-first contract change and an SDK re-vendor. Until then a truncated board
+visibly names the loaded top-N scope, scopes search copy and tier-count
+accessibility to it, and keeps empty-search copy inside that same boundary.
+Positive spenders below the named `$1+` tiers remain visible in a Below-$1
+section, so loaded/searchable never falsely means silently discarded.
+Tier membership still uses exact kernel mills; only amounts whose whole-dollar
+rounding would visually cross a boundary retain two or three decimal digits
+(`$599.60` remains Top instead of appearing as a `$600` Whale). `builtAt`
+remains `max(observed_at)` across the page/window projection (not necessarily a
+returned top-N row), so the UI now calls it the newest Hub observation and
+states that shown rows do not share that timestamp — never a coherent
+`data as of` claim. Full list virtualization remains deferred until a Firefox
+profile finds a measured long task; it cannot recover rows the API did not
+return. Pinned in the shared spenders and board-controller suites.

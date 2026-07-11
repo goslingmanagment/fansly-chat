@@ -31,6 +31,10 @@ const TIER_BY_ID = new Map<SpenderTierId, SpenderTier>(
   SPENDER_TIERS.map((tier) => [tier.id, tier]),
 );
 
+const USD_WHOLE_FORMATTER = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0,
+});
+
 export function getSpenderTier(id: SpenderTierId): SpenderTier {
   const tier = TIER_BY_ID.get(id);
   if (tier === undefined) {
@@ -106,7 +110,9 @@ export function groupSpendersByTier<T extends SpenderLike & { fanAccountId?: str
   return groups;
 }
 
-/** Count entries per tier (for chip badges), including a 'all' total. */
+/** Count entries per tier (for chip badges). `all` includes every positive
+ * finite loaded spender, including the below-$1 rows shown outside the named
+ * tiers. */
 export function countByTier(entries: readonly SpenderLike[]): {
   all: number;
   byTier: Record<SpenderTierId, number>;
@@ -121,10 +127,11 @@ export function countByTier(entries: readonly SpenderLike[]): {
   };
   let all = 0;
   for (const entry of entries) {
+    if (!Number.isFinite(entry.lifetimeUsd) || entry.lifetimeUsd <= 0) continue;
+    all += 1;
     const tierId = assignSpenderTier(entry.lifetimeUsd);
     if (tierId === null) continue;
     byTier[tierId] += 1;
-    all += 1;
   }
   return { all, byTier };
 }
@@ -133,8 +140,33 @@ export function countByTier(entries: readonly SpenderLike[]): {
 export function formatSpenderAmount(usd: number): string {
   if (!Number.isFinite(usd) || usd <= 0) return '';
   const rounded = Math.round(usd);
-  const withSeparators = String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `$${withSeparators}`;
+  return `$${USD_WHOLE_FORMATTER.format(rounded)}`;
+}
+
+function formatExactMills(mills: number): string {
+  const wholeDollars = Math.floor(mills / 1000);
+  const exactMills = String(mills % 1000).padStart(3, '0');
+  const fraction = exactMills.replace(/0+$/, '').padEnd(2, '0');
+  return `$${USD_WHOLE_FORMATTER.format(wholeDollars)}.${fraction}`;
+}
+
+/** Compact lifetime amount without visually crossing a tier boundary.
+ *
+ * Tiers are assigned from the exact kernel mills. Most rows still use the
+ * whole-dollar display, but a value such as 599_600 mills must not render as
+ * "$600" while correctly remaining in Top. In that narrow boundary case we
+ * retain two or three decimal digits from the integer mills. */
+export function formatTierAwareSpenderAmount(lifetimeMills: number): string {
+  if (!Number.isFinite(lifetimeMills) || lifetimeMills <= 0) return '';
+  const mills = Math.round(lifetimeMills);
+  if (mills < 1000) return formatExactMills(mills);
+  const usd = mills / 1000;
+  const roundedUsd = Math.round(usd);
+  if (assignSpenderTier(usd) === assignSpenderTier(roundedUsd)) {
+    return formatSpenderAmount(usd);
+  }
+
+  return formatExactMills(mills);
 }
 
 /** First purchase landed inside the month window: lifetime ≈ month spend.

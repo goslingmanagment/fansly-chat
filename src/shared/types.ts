@@ -862,8 +862,10 @@ export interface SpendersSourceStatus {
 
 export interface SpendersListResult {
   entries: SpenderListEntry[];
-  /** When the freshest spend observation in this window was built (epoch
-   * ms). Null alone does not identify an unramped page; consult `source`. */
+  /** Newest observation across this page/window projection (epoch ms). It is
+   * not necessarily one of the returned top N; returned rows may be older and
+   * this is not a coherent snapshot watermark. Null alone does not identify
+   * an unramped page; consult `source`. */
   builtAt: number | null;
   source: SpendersSourceStatus;
   /** Total spenders with lifetime spend > 0 in the kernel snapshot — may
@@ -872,8 +874,8 @@ export interface SpendersListResult {
   /** The 'YYYY-MM' window the month column was read from; null = month
    * data unavailable for this build. */
   monthWindow: string | null;
-  /** When the extension assembled this list (epoch ms) — cache age; data
-   * freshness is builtAt. */
+  /** When the extension assembled this list (epoch ms) — cache age; newest
+   * projection observation is builtAt. */
   fetchedAt: number;
 }
 

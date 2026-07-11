@@ -13,7 +13,7 @@ import {
   countByTier,
   filterSpendersByQuery,
   formatMonthDelta,
-  formatSpenderAmount,
+  formatTierAwareSpenderAmount,
   getSpenderTier,
   groupSpendersByTier,
   isNewSpender,
@@ -43,11 +43,15 @@ type ActiveTier = 'all' | SpenderTierId;
 
 // The board can only re-read the hub's latest snapshot; the hub itself walks
 // Fansly on its own schedule. Said once, in the meta line's tooltip, so a
-// stale "data as of" never reads as a broken Refresh button.
+// stale freshness never reads as a broken Refresh button. `builtAt` is the
+// newest observation in the page/window projection, not a coherent timestamp
+// for every shown row (and not necessarily one of the returned top N).
 const FRESHNESS_TOOLTIP =
   'Spend data comes from the Agency Hub, which re-reads Fansly earnings on ' +
   'a schedule (roughly hourly to daily). Refresh re-fetches the latest hub ' +
-  'snapshot — it cannot make the hub re-walk Fansly.';
+  'snapshot — it cannot make the hub re-walk Fansly. The freshness value is ' +
+  'the newest Hub observation for this page and window, not a timestamp shared ' +
+  'by the shown rows; individual rows may be older.';
 
 const NO_CHAT_TOOLTIP =
   'A direct chat link is unavailable — opening will search the inbox for this fan.';
@@ -353,9 +357,12 @@ export class SpendersBoardController {
       head,
       result.builtAt === null
         ? 'no spend observation timestamp'
-        : `freshest data ${relativeTime(result.builtAt)}`,
-      `fetched ${relativeTime(result.fetchedAt)}`,
+        : `newest Hub observation ${relativeTime(result.builtAt)}`,
     ];
+    if (result.builtAt !== null) {
+      parts.push('shown rows may be older');
+    }
+    parts.push(`fetched ${relativeTime(result.fetchedAt)}`);
     if (result.source.streamState !== 'ramped') {
       parts.push('source paused');
     } else if ((result.source.consecutiveFailures ?? 0) > 0) {
@@ -437,7 +444,7 @@ export class SpendersBoardController {
 
     const body = document.createElement('div');
     body.className = 'chatgoose-board-body';
-    body.append(this.buildChips(result.entries));
+    body.append(this.buildChips(result));
 
     const listHost = document.createElement('div');
     listHost.className = 'chatgoose-board-list';
@@ -526,20 +533,40 @@ export class SpendersBoardController {
       fragment.append(empty);
     } else {
       const matched = filterSpendersByQuery(result.entries, this.searchQuery);
+      const truncated = result.fanCount > result.entries.length;
+      const searchScope = truncated ? `loaded top ${result.entries.length}` : null;
       if (matched.length === 0) {
-        appendNoMatch('No fans match the search.');
+        appendNoMatch(
+          searchScope ? `No fans match in the ${searchScope}.` : 'No fans match the search.',
+        );
       } else if (this.activeTier === 'all') {
         const groups = groupSpendersByTier(matched);
-        if (groups.length === 0) {
+        const belowTier = sortByLifetimeDesc(
+          matched.filter(
+            (entry) =>
+              Number.isFinite(entry.lifetimeUsd) &&
+              entry.lifetimeUsd > 0 &&
+              assignSpenderTier(entry.lifetimeUsd) === null,
+          ),
+        );
+        if (groups.length === 0 && belowTier.length === 0) {
           appendNoMatch(
             this.searchQuery.trim()
-              ? 'No fans match the search.'
+              ? searchScope
+                ? `No fans match in the ${searchScope}.`
+                : 'No fans match the search.'
               : 'No fans fall within the displayed spend tiers.',
           );
         }
         for (const group of groups) {
           fragment.append(this.buildSectionHeader(group.tier.emoji, group.tier.title, group.tier.band, group.entries.length));
           for (const entry of group.entries) {
+            appendEntry(entry);
+          }
+        }
+        if (belowTier.length > 0) {
+          fragment.append(this.buildSectionHeader('', 'Below $1', '<$1', belowTier.length));
+          for (const entry of belowTier) {
             appendEntry(entry);
           }
         }
@@ -552,7 +579,9 @@ export class SpendersBoardController {
         if (entries.length === 0) {
           appendNoMatch(
             this.searchQuery.trim()
-              ? 'No fans in this tier match the search.'
+              ? searchScope
+                ? `No fans in this tier match within the ${searchScope}.`
+                : 'No fans in this tier match the search.'
               : 'No fans in this tier.',
           );
         } else {
@@ -571,18 +600,30 @@ export class SpendersBoardController {
     this.setCursor(this.visibleEntries.length > 0 ? 0 : -1, false);
   }
 
-  private buildChips(entries: readonly SpenderListEntry[]): HTMLElement {
+  private buildChips(result: SpendersListResult): HTMLElement {
+    const entries = result.entries;
     const chips = document.createElement('div');
     chips.className = 'chatgoose-board-chips';
     this.tierChips.clear();
 
     const counts = countByTier(entries);
-    chips.append(this.buildChip('all', 'All', counts.all));
+    const truncated = result.fanCount > entries.length;
+    const scope = truncated
+      ? { loaded: entries.length, total: result.fanCount }
+      : null;
+    chips.append(this.buildChip('all', 'All', counts.all, scope));
     for (const tier of SPENDER_TIERS) {
       const count = counts.byTier[tier.id];
       if (count > 0) {
-        chips.append(this.buildChip(tier.id, `${tier.emoji} ${tier.title}`, count));
+        chips.append(this.buildChip(tier.id, `${tier.emoji} ${tier.title}`, count, scope));
       }
+    }
+    if (scope !== null) {
+      const scopeNote = document.createElement('span');
+      scopeNote.className = 'chatgoose-board-scope';
+      scopeNote.textContent =
+        `Top ${scope.loaded} loaded of ${scope.total}; search and tier counts use these fans.`;
+      chips.append(scopeNote);
     }
 
     this.searchInput = null;
@@ -590,8 +631,18 @@ export class SpendersBoardController {
       const search = document.createElement('input');
       search.type = 'search';
       search.className = 'chatgoose-board-search';
-      search.placeholder = 'Search fans…';
-      search.setAttribute('aria-label', 'Search fans by name or username');
+      search.placeholder = truncated
+        ? `Search loaded ${entries.length} fans…`
+        : 'Search fans…';
+      search.setAttribute(
+        'aria-label',
+        truncated
+          ? `Search the loaded top ${entries.length} of ${result.fanCount} total by name, username, or ID`
+          : 'Search fans by name, username, or ID',
+      );
+      if (truncated) {
+        search.title = `Search covers the loaded top ${entries.length} of ${result.fanCount} total spenders.`;
+      }
       search.value = this.searchQuery;
       search.addEventListener('compositionstart', () => this.cancelSearchRender());
       search.addEventListener('input', (event) => {
@@ -609,7 +660,12 @@ export class SpendersBoardController {
     return chips;
   }
 
-  private buildChip(tier: ActiveTier, label: string, count: number): HTMLButtonElement {
+  private buildChip(
+    tier: ActiveTier,
+    label: string,
+    count: number,
+    scope: { loaded: number; total: number } | null,
+  ): HTMLButtonElement {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chatgoose-board-chip';
@@ -618,6 +674,13 @@ export class SpendersBoardController {
       chip.classList.add('chatgoose-board-chip-active');
     }
     chip.setAttribute('aria-pressed', String(active));
+    const countDescription = scope === null
+      ? String(count)
+      : `${count} within the loaded top ${scope.loaded} of ${scope.total} total`;
+    chip.setAttribute('aria-label', `${label}: ${countDescription}`);
+    if (scope !== null) {
+      chip.title = `${label}: ${countDescription}`;
+    }
 
     const text = document.createElement('span');
     text.textContent = label;
@@ -652,7 +715,7 @@ export class SpendersBoardController {
 
     const left = document.createElement('span');
     left.className = 'chatgoose-board-section-title';
-    left.textContent = `${emoji} ${title}`;
+    left.textContent = emoji ? `${emoji} ${title}` : title;
 
     const mid = document.createElement('span');
     mid.className = 'chatgoose-board-section-band';
@@ -709,7 +772,7 @@ export class SpendersBoardController {
     amounts.className = 'chatgoose-board-row-amounts';
     const amount = document.createElement('div');
     amount.className = 'chatgoose-board-row-amount';
-    amount.textContent = formatSpenderAmount(entry.lifetimeUsd);
+    amount.textContent = formatTierAwareSpenderAmount(entry.lifetimeMills);
     amounts.append(amount);
     const delta = formatMonthDelta(entry.monthUsd);
     if (delta) {
