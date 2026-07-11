@@ -3704,6 +3704,35 @@ export declare const aiGatewayPromptBlockSchema: z.ZodObject<{
         "5m": "5m";
     }>;
 }, z.core.$strict>;
+export declare const AI_FEATURE_DEBUG_PROMPT_BLOCK_MAX_CHARS = 2500000;
+export declare const aiFeatureDebugPromptBlockSchema: z.ZodObject<{
+    text: z.ZodString;
+    cache: z.ZodEnum<{
+        none: "none";
+        "1h": "1h";
+        "5m": "5m";
+    }>;
+}, z.core.$strict>;
+export declare const aiFeatureDebugInputFrameSchema: z.ZodObject<{
+    type: z.ZodLiteral<"debug_input_v1">;
+    systemBlocks: z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        cache: z.ZodEnum<{
+            none: "none";
+            "1h": "1h";
+            "5m": "5m";
+        }>;
+    }, z.core.$strict>>;
+    userBlocks: z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        cache: z.ZodEnum<{
+            none: "none";
+            "1h": "1h";
+            "5m": "5m";
+        }>;
+    }, z.core.$strict>>;
+    contextManifest: z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strict>;
 export declare const aiGatewayStreamBodySchema: z.ZodObject<{
     clientRequestId: z.ZodString;
     feature: z.ZodEnum<{
@@ -3821,6 +3850,79 @@ export declare const aiGatewayStreamFrameSchema: z.ZodDiscriminatedUnion<[z.ZodO
     type: z.ZodLiteral<"done">;
     stopReason: z.ZodNullable<z.ZodString>;
 }, z.core.$strict>], "type">;
+export declare const aiFeatureStreamFrameSchema: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
+    type: z.ZodLiteral<"meta">;
+    requestId: z.ZodString;
+    clientRequestId: z.ZodString;
+    feature: z.ZodEnum<{
+        "fast-reply": "fast-reply";
+        "improve-draft": "improve-draft";
+        "help-me": "help-me";
+        "fan-summary": "fan-summary";
+        "chat-review": "chat-review";
+        scan: "scan";
+        ping: "ping";
+        "hi-greeting": "hi-greeting";
+        "workboard-closing": "workboard-closing";
+    }>;
+    pageLabel: z.ZodString;
+    model: z.ZodString;
+    provider: z.ZodEnum<{
+        anthropic: "anthropic";
+        openrouter: "openrouter";
+    }>;
+    providerResponseId: z.ZodNullable<z.ZodString>;
+    quota: z.ZodObject<{
+        accepted: z.ZodBoolean;
+        remainingRequestsToday: z.ZodNullable<z.ZodNumber>;
+        remainingMicroUsdToday: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strip>;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"content_delta">;
+    text: z.ZodString;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"reasoning_delta">;
+    text: z.ZodString;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"usage">;
+    usage: z.ZodObject<{
+        inputTokens: z.ZodNumber;
+        outputTokens: z.ZodNumber;
+        cacheWriteTokens: z.ZodNumber;
+        cacheReadTokens: z.ZodNumber;
+        costMicroUsd: z.ZodNumber;
+        costApproximate: z.ZodBoolean;
+    }, z.core.$strip>;
+    providerResponseId: z.ZodNullable<z.ZodString>;
+    cacheHit: z.ZodBoolean;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"error">;
+    code: z.ZodString;
+    message: z.ZodString;
+    retryAfterMs: z.ZodNullable<z.ZodNumber>;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"done">;
+    stopReason: z.ZodNullable<z.ZodString>;
+}, z.core.$strict>], "type">, z.ZodObject<{
+    type: z.ZodLiteral<"debug_input_v1">;
+    systemBlocks: z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        cache: z.ZodEnum<{
+            none: "none";
+            "1h": "1h";
+            "5m": "5m";
+        }>;
+    }, z.core.$strict>>;
+    userBlocks: z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        cache: z.ZodEnum<{
+            none: "none";
+            "1h": "1h";
+            "5m": "5m";
+        }>;
+    }, z.core.$strict>>;
+    contextManifest: z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strict>]>;
 export declare const aiPersonaSchema: z.ZodObject<{
     key: z.ZodString;
     displayName: z.ZodString;
@@ -20122,10 +20224,13 @@ export type IngestObservationsResponse = z.infer<typeof ingestObservationsRespon
 export type AiGatewayPromptCacheTtl = z.infer<typeof aiGatewayPromptCacheTtlSchema>;
 export type AiGatewayReasoningEffort = z.infer<typeof aiGatewayReasoningEffortSchema>;
 export type AiGatewayPromptBlock = z.infer<typeof aiGatewayPromptBlockSchema>;
+export type AiFeatureDebugPromptBlock = z.infer<typeof aiFeatureDebugPromptBlockSchema>;
+export type AiFeatureDebugInputFrame = z.infer<typeof aiFeatureDebugInputFrameSchema>;
 export type AiGatewayStreamBody = z.infer<typeof aiGatewayStreamBodySchema>;
 export type AiGatewayUsage = z.infer<typeof aiGatewayUsageSchema>;
 export type AiGatewayQuota = z.infer<typeof aiGatewayQuotaSchema>;
 export type AiGatewayStreamFrame = z.infer<typeof aiGatewayStreamFrameSchema>;
+export type AiFeatureStreamFrame = z.infer<typeof aiFeatureStreamFrameSchema>;
 export type SyncEvent = z.infer<typeof syncEventSchema>;
 export type NormalizedSyncMessage = z.infer<typeof normalizedSyncMessageSchema>;
 export type OfapiWebhookAckResponse = z.infer<typeof ofapiWebhookAckResponseSchema>;

@@ -14,6 +14,8 @@ const entryPoints = {
   content: path.join(root, 'src/content/index.ts'),
   options: path.join(root, 'src/options/index.ts'),
   popup: path.join(root, 'src/popup/index.ts'),
+  // E26: the extension-origin viewer for the kernel's assembled prompt.
+  'debug-prompt': path.join(root, 'src/debug-prompt/index.ts'),
 };
 
 function compareDraftNames(left, right) {
@@ -69,10 +71,12 @@ async function ensureStaticFiles() {
 
   const optionsHtml = await readFile(path.join(root, 'src/options/index.html'), 'utf8');
   const popupHtml = await readFile(path.join(root, 'src/popup/index.html'), 'utf8');
+  const debugPromptHtml = await readFile(path.join(root, 'src/debug-prompt/index.html'), 'utf8');
   const manifest = await readFile(path.join(root, 'manifest.json'), 'utf8');
 
   await writeFile(path.join(outdir, 'options.html'), optionsHtml);
   await writeFile(path.join(outdir, 'popup.html'), popupHtml);
+  await writeFile(path.join(outdir, 'debug-prompt.html'), debugPromptHtml);
   await writeFile(path.join(outdir, 'manifest.json'), manifest);
   await cp(path.join(root, 'icons'), path.join(outdir, 'icons'), { recursive: true });
 }

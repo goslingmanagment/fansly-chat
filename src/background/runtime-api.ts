@@ -19,6 +19,7 @@ import type {
   PopupStatus,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
+import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { getLatestQuotaSnapshot } from './quota-tracker.js';
@@ -36,6 +37,28 @@ export interface RuntimeApiDeps {
   spendersService: SpendersService;
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
+  debugPrompts: DebugPromptStore;
+}
+
+/** E26. The prompt echo is readable by ONE caller: our own viewer page. The
+ * content script running inside fansly.com must not be able to ask for it — it
+ * shares a document with the site's JS, and a compromised page could otherwise
+ * walk the runtime API to the persona and the dossier. Compare the sender's
+ * origin AND path (not a prefix — `debug-prompt.html.evil` starts with it too);
+ * the query string is where the token rides, so it is excluded from the match. */
+export const DEBUG_PROMPT_PAGE_PATH = 'debug-prompt.html';
+
+function isDebugPromptViewer(sender: browser.runtime.MessageSender): boolean {
+  if (typeof sender.url !== 'string') {
+    return false;
+  }
+  try {
+    const senderUrl = new URL(sender.url);
+    const viewerUrl = new URL(browser.runtime.getURL(DEBUG_PROMPT_PAGE_PATH));
+    return senderUrl.origin === viewerUrl.origin && senderUrl.pathname === viewerUrl.pathname;
+  } catch {
+    return false;
+  }
 }
 
 export function registerRuntimeApi({
@@ -45,6 +68,7 @@ export function registerRuntimeApi({
   spendersService,
   tabContexts,
   storageCoordinator,
+  debugPrompts,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: unknown, sender: browser.runtime.MessageSender) => {
@@ -196,6 +220,44 @@ export function registerRuntimeApi({
         );
 
         return snapshot;
+      }
+
+      // E26 viewer handshake. `openDebugPrompt` may come from the content script
+      // (it holds the token but has no tabs API); `getDebugPromptSnapshot` — the
+      // one call that hands over the assembled prompt — may come ONLY from the
+      // viewer page itself.
+      if (requestType === 'openDebugPrompt') {
+        const { viewerToken } = message as unknown as { viewerToken: string };
+        if (!debugPrompts.has(viewerToken)) {
+          // Expired or from a dead service worker: don't open a tab that would
+          // only greet the user with an error.
+          return { opened: false };
+        }
+        await browser.tabs.create({
+          url: browser.runtime.getURL(
+            `${DEBUG_PROMPT_PAGE_PATH}?token=${encodeURIComponent(viewerToken)}`,
+          ),
+        });
+        return { opened: true };
+      }
+
+      if (requestType === 'getDebugPromptSnapshot') {
+        if (!isDebugPromptViewer(sender)) {
+          return undefined;
+        }
+        const { viewerToken } = message as unknown as { viewerToken: string };
+        const snapshot = debugPrompts.get(viewerToken);
+        if (!snapshot) {
+          return undefined;
+        }
+        return {
+          feature: snapshot.feature,
+          modelId: snapshot.modelId,
+          capturedAtMs: snapshot.capturedAt,
+          systemBlocks: snapshot.systemBlocks,
+          userBlocks: snapshot.userBlocks,
+          contextManifest: snapshot.contextManifest,
+        };
       }
 
       if (requestType === 'testAgencyHubConnection') {

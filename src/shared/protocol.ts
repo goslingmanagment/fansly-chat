@@ -156,6 +156,54 @@ function isCompareStartMessage(record: Record<string, unknown>): boolean {
     isOptionalReplyTone(record);
 }
 
+/** E26: the prompt echo's status message may carry the viewer token and the
+ * counts projection — and NOTHING else. Rebuilding it field by field (rather
+ * than passing an object through) is what keeps prompt text out of the Fansly
+ * DOM structurally: an unmodelled key cannot survive this function. */
+function isKernelContextProjection(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  const dossier = value.dossier;
+  const dossierOk = dossier === null || (
+    isObjectRecord(dossier) &&
+    (dossier.version === null || isNumber(dossier.version)) &&
+    (dossier.ageDays === null || isNumber(dossier.ageDays)) &&
+    (dossier.chars === null || isNumber(dossier.chars)) &&
+    (dossier.truncated === null || isBoolean(dossier.truncated)) &&
+    Array.isArray(dossier.droppedSections) &&
+    dossier.droppedSections.every(isString)
+  );
+  const transcript = value.transcript;
+  const transcriptOk = transcript === null || (
+    isObjectRecord(transcript) &&
+    isNullableString(transcript.source) &&
+    isNullableString(transcript.mode) &&
+    (transcript.archiveCount === null || isNumber(transcript.archiveCount)) &&
+    (transcript.unionCount === null || isNumber(transcript.unionCount)) &&
+    (transcript.stale === null || isBoolean(transcript.stale))
+  );
+  return dossierOk &&
+    transcriptOk &&
+    Array.isArray(value.otherKeys) &&
+    value.otherKeys.every(isString);
+}
+
+function isDebugPromptEchoStatus(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  switch (value.state) {
+    case 'available':
+      return isString(value.viewerToken) && isKernelContextProjection(value.kernelContext);
+    case 'unavailable':
+    case 'cache-hit':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function getRuntimeRequestType(message: unknown): RuntimeRequestType | null {
   if (!isObjectRecord(message)) {
     return null;
@@ -166,6 +214,10 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return message.tabId === undefined || isNumber(message.tabId)
         ? 'getPopupStatus'
         : null;
+    case 'openDebugPrompt':
+      return isString(message.viewerToken) ? 'openDebugPrompt' : null;
+    case 'getDebugPromptSnapshot':
+      return isString(message.viewerToken) ? 'getDebugPromptSnapshot' : null;
     case 'getSessionsSnapshot':
       return 'getSessionsSnapshot';
     case 'testAgencyHubConnection':
@@ -234,6 +286,10 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return hasOperationId(message) &&
         isFeatureType(message.feature) &&
         isObjectRecord(message.snapshot);
+    case 'operation:debugPromptStatus':
+      return hasOperationId(message) &&
+        isFeatureType(message.feature) &&
+        isDebugPromptEchoStatus(message.echo);
     case 'operation:complete':
       return hasOperationId(message) &&
         hasFeatureResult(message) &&

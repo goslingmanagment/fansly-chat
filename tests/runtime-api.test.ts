@@ -4,7 +4,7 @@ import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { SessionTemplate } from '../src/shared/types.js';
 
-type MessageSenderLike = { tab?: { id?: number } };
+type MessageSenderLike = { tab?: { id?: number }; url?: string };
 let mockStorage: Record<string, unknown> = {};
 let onMessageListener:
   | ((message: unknown, sender?: MessageSenderLike) => Promise<unknown>)
@@ -43,6 +43,12 @@ async function installRuntimeApiHarness(fanslyClient: {
   spendersService?: {
     getList: ReturnType<typeof vi.fn>;
   };
+  debugPrompts?: {
+    put: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    has: ReturnType<typeof vi.fn>;
+    clear: ReturnType<typeof vi.fn>;
+  };
 }) {
   vi.resetModules();
   onMessageListener = undefined;
@@ -52,6 +58,9 @@ async function installRuntimeApiHarness(fanslyClient: {
   );
   const tabsGet = vi.fn<(tabId: number) => Promise<{ id: number; url?: string }>>(
     async (tabId: number) => ({ id: tabId, url: undefined }),
+  );
+  const tabsCreate = vi.fn<(info: { url: string }) => Promise<{ id: number }>>(
+    async () => ({ id: 7 }),
   );
 
   (globalThis as Record<string, unknown>).browser = {
@@ -85,10 +94,12 @@ async function installRuntimeApiHarness(fanslyClient: {
           onMessageListener = listener;
         }),
       },
+      getURL: (path: string) => `moz-extension://cg-test-uuid/${path}`,
     },
     tabs: {
       query: tabsQuery,
       get: tabsGet,
+      create: tabsCreate,
     },
   };
 
@@ -113,6 +124,12 @@ async function installRuntimeApiHarness(fanslyClient: {
       fetchedAt: 0,
     })),
   };
+  const debugPrompts = options?.debugPrompts ?? {
+    put: vi.fn(() => 'token'),
+    get: vi.fn(() => null),
+    has: vi.fn(() => false),
+    clear: vi.fn(),
+  };
   registerRuntimeApi({
     agencyHubClient: agencyHubClient as never,
     fanslyClient: fanslyClient as never,
@@ -120,13 +137,23 @@ async function installRuntimeApiHarness(fanslyClient: {
     spendersService: spendersService as never,
     tabContexts: new TabContextStore(),
     storageCoordinator,
+    debugPrompts: debugPrompts as never,
   });
 
   if (!onMessageListener) {
     throw new Error('Runtime listener was not registered');
   }
 
-  return { sessionStore, tabsQuery, tabsGet, agencyHubClient, spendersService };
+  return {
+    sessionStore,
+    tabsQuery,
+    tabsGet,
+    tabsCreate,
+    agencyHubClient,
+    spendersService,
+    debugPrompts,
+    send: (message: unknown, sender?: MessageSenderLike) => onMessageListener!(message, sender),
+  };
 }
 
 describe('runtime-api getSessionsSnapshot', () => {
@@ -545,5 +572,94 @@ describe('runtime-api resolveFanChat', () => {
 
     expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
     expect(fanslyClient.findGroupIdForFan).not.toHaveBeenCalled();
+  });
+});
+
+// E26. The prompt echo carries the persona, the templates and the fan dossier —
+// the agency's own IP. These tests pin the two rules that keep it out of
+// fansly.com: only our viewer page may read a snapshot, and a token that no
+// longer resolves never opens a tab.
+describe('runtime-api debug prompt viewer (E26)', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  const snapshot = {
+    operationId: 'op-1',
+    feature: 'fast-reply' as const,
+    modelId: 'claude-x',
+    capturedAt: 1_000,
+    systemBlocks: [{ text: 'safety + persona', cache: '1h' }],
+    userBlocks: [{ text: '## Fan Dossier\nsecret', cache: '5m' }],
+    contextManifest: { fanProfile: { version: 2 } },
+  };
+
+  function debugStore(stored: typeof snapshot | null) {
+    return {
+      put: vi.fn(() => 'tok'),
+      get: vi.fn(() => stored),
+      has: vi.fn(() => stored !== null),
+      clear: vi.fn(),
+    };
+  }
+
+  it('hands the assembled prompt only to the viewer page', async () => {
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => undefined) },
+      { debugPrompts: debugStore(snapshot) },
+    );
+
+    const forViewer = await harness.send(
+      { type: 'getDebugPromptSnapshot', viewerToken: 'tok' },
+      { url: 'moz-extension://cg-test-uuid/debug-prompt.html?token=tok' },
+    );
+    expect(forViewer).toMatchObject({
+      feature: 'fast-reply',
+      modelId: 'claude-x',
+      userBlocks: [{ text: '## Fan Dossier\nsecret', cache: '5m' }],
+    });
+
+    // The Fansly content script holds the token, but must not be able to spend
+    // it: it shares a document with the site's own JS.
+    const forContentScript = await harness.send(
+      { type: 'getDebugPromptSnapshot', viewerToken: 'tok' },
+      { tab: { id: 3 }, url: 'https://fansly.com/messages/123' },
+    );
+    expect(forContentScript).toBeUndefined();
+
+    // A page that merely STARTS with our path is a different page.
+    const forLookalike = await harness.send(
+      { type: 'getDebugPromptSnapshot', viewerToken: 'tok' },
+      { url: 'moz-extension://cg-test-uuid/debug-prompt.html.evil?token=tok' },
+    );
+    expect(forLookalike).toBeUndefined();
+    expect(harness.debugPrompts.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the viewer tab for a live token and refuses a dead one', async () => {
+    const live = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => undefined) },
+      { debugPrompts: debugStore(snapshot) },
+    );
+    const opened = await live.send(
+      { type: 'openDebugPrompt', viewerToken: 'tok' },
+      { tab: { id: 3 }, url: 'https://fansly.com/messages/123' },
+    );
+    expect(opened).toEqual({ opened: true });
+    expect(live.tabsCreate).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/debug-prompt.html?token=tok',
+    });
+
+    const expired = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => undefined) },
+      { debugPrompts: debugStore(null) },
+    );
+    const refused = await expired.send(
+      { type: 'openDebugPrompt', viewerToken: 'gone' },
+      { tab: { id: 3 }, url: 'https://fansly.com/messages/123' },
+    );
+    expect(refused).toEqual({ opened: false });
+    expect(expired.tabsCreate).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { toUserError } from '../../shared/errors.js';
 import type {
+  DebugPromptEchoStatus,
   LlmSpendSummary,
   LlmUsageMetrics,
   FanSummarySyncStatus,
@@ -49,6 +50,10 @@ interface OverlayCallbacks {
   onCollapse: () => void;
   /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry). */
   onAcceptance?: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
+  /** E26: open the kernel's real prompt on the extension's own page. The token
+   * stays with the caller — this surface never learns it, so it cannot leak it
+   * into the Fansly DOM it renders into. */
+  onOpenDebugPrompt?: () => void;
 }
 
 interface PartCardOptions {
@@ -82,6 +87,7 @@ interface LoadingViewState {
   debugHost: HTMLDivElement;
   actions: HTMLDivElement;
   debugSnapshot: PromptDebugSnapshot | null;
+  debugEcho: DebugPromptEchoStatus | null;
   liveElapsedBaseMs: number | null;
   liveElapsedStartedAt: number | null;
 }
@@ -584,6 +590,7 @@ export class OverlayController {
       debugHost,
       actions,
       debugSnapshot: null,
+      debugEcho: null,
       liveElapsedBaseMs: null,
       liveElapsedStartedAt: null,
     };
@@ -858,15 +865,20 @@ export class OverlayController {
         view.debugHost.remove();
       }
       view.debugSnapshot = null;
+      view.debugEcho = null;
       return;
     }
 
     if (!view.debugHost.isConnected) {
       view.root.insertBefore(view.debugHost, view.actions);
     }
-    if (view.debugSnapshot !== snapshot) {
-      view.debugHost.replaceChildren(this.renderDebugPrompt(snapshot));
+    // The echo lands mid-stream, after the client snapshot — so a changed echo
+    // must repaint too, not just a changed snapshot.
+    const echo = model.debugEcho ?? null;
+    if (view.debugSnapshot !== snapshot || view.debugEcho !== echo) {
+      view.debugHost.replaceChildren(this.renderDebugPrompt(snapshot, echo ?? undefined));
       view.debugSnapshot = snapshot;
+      view.debugEcho = echo;
     }
   }
 
@@ -1080,7 +1092,7 @@ export class OverlayController {
     }
 
     if (model.debugPrompt) {
-      section.append(this.renderDebugPrompt(model.debugPrompt));
+      section.append(this.renderDebugPrompt(model.debugPrompt, model.debugEcho));
     }
 
     section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
@@ -1133,7 +1145,7 @@ export class OverlayController {
     }
 
     if (model.debugPrompt) {
-      section.append(this.renderDebugPrompt(model.debugPrompt));
+      section.append(this.renderDebugPrompt(model.debugPrompt, model.debugEcho));
     }
 
     section.append(this.renderCompletedActions(model.feature, model.rerunActionLabel));
@@ -1219,7 +1231,7 @@ export class OverlayController {
     }
 
     if (model.debugPrompt) {
-      section.append(this.renderDebugPrompt(model.debugPrompt));
+      section.append(this.renderDebugPrompt(model.debugPrompt, model.debugEcho));
     }
 
     section.append(
@@ -1329,7 +1341,7 @@ export class OverlayController {
     }
 
     if (model.debugPrompt) {
-      section.append(this.renderDebugPrompt(model.debugPrompt));
+      section.append(this.renderDebugPrompt(model.debugPrompt, model.debugEcho));
     }
 
     return section;
@@ -1605,7 +1617,10 @@ export class OverlayController {
 
   // ─── Debug Prompt Inspector ─────────────────────────────────────────
 
-  private renderDebugPrompt(snapshot: PromptDebugSnapshot): HTMLElement {
+  private renderDebugPrompt(
+    snapshot: PromptDebugSnapshot,
+    echo?: DebugPromptEchoStatus,
+  ): HTMLElement {
     const details = document.createElement('details');
     details.className = 'chatgoose-debug-inspector';
     details.open = this.debugPromptOpen;
@@ -1621,14 +1636,89 @@ export class OverlayController {
     const content = document.createElement('div');
     content.className = 'chatgoose-debug-content';
     content.append(
+      // What the CLIENT sent. The kernel's own additions — persona, templates,
+      // dossier — are never rendered here: this panel lives in Fansly's DOM,
+      // which Fansly's own JS can read. They live one click away, on our page.
       this.createDebugSection('System Prompt', snapshot.system),
       this.createDebugSection('Transcript Sent to LLM', snapshot.transcript),
       this.createDebugSection('Fan Spending Data', snapshot.fanSpendingData.trim() || 'Not included'),
       this.createDebugSection('Fan Subscription Data', snapshot.fanSubscriptionData.trim() || 'Not included'),
       this.createDebugSection('Final User Prompt', snapshot.user),
     );
+    if (echo) {
+      content.append(this.renderKernelEcho(echo));
+    }
     details.append(content);
     return details;
+  }
+
+  /** E26: the echo's status — and, when it exists, the counts projection plus
+   * the button that opens the real prompt on the extension's own page. */
+  private renderKernelEcho(echo: DebugPromptEchoStatus): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'chatgoose-debug-section';
+
+    const label = document.createElement('div');
+    label.className = 'chatgoose-debug-label';
+    label.textContent = 'Kernel Context';
+    section.append(label);
+
+    if (echo.state !== 'available') {
+      const text = document.createElement('div');
+      text.className = 'chatgoose-debug-text';
+      text.textContent = echo.state === 'cache-hit'
+        ? 'Served from cache — no LLM call, so there is no prompt to show.'
+        : 'Prompt echo is off on the kernel (owner opens a time-boxed window).';
+      section.append(text);
+      return section;
+    }
+
+    const { dossier, transcript, otherKeys } = echo.kernelContext;
+    const lines: string[] = [];
+    if (dossier) {
+      const parts = [
+        `v${dossier.version ?? '?'}`,
+        dossier.ageDays !== null ? `${dossier.ageDays}d old` : null,
+        dossier.chars !== null ? `${dossier.chars} chars` : null,
+        dossier.truncated ? 'truncated' : null,
+      ].filter((part): part is string => part !== null);
+      lines.push(`Fan dossier: ${parts.join(' · ')}`);
+      if (dossier.droppedSections.length > 0) {
+        lines.push(`Dropped sections: ${dossier.droppedSections.join(', ')}`);
+      }
+    } else {
+      lines.push('Fan dossier: not injected');
+    }
+    if (transcript) {
+      const parts = [
+        transcript.source ? `source ${transcript.source}` : null,
+        transcript.mode ? `mode ${transcript.mode}` : null,
+        transcript.archiveCount !== null ? `archive ${transcript.archiveCount}` : null,
+        transcript.unionCount !== null ? `union ${transcript.unionCount}` : null,
+        transcript.stale ? 'stale' : null,
+      ].filter((part): part is string => part !== null);
+      if (parts.length > 0) {
+        lines.push(`Kernel transcript: ${parts.join(' · ')}`);
+      }
+    }
+    if (otherKeys.length > 0) {
+      lines.push(`Other manifest keys: ${otherKeys.join(', ')}`);
+    }
+
+    const text = document.createElement('div');
+    text.className = 'chatgoose-debug-text';
+    text.textContent = lines.join('\n');
+    section.append(text);
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'chatgoose-debug-open';
+    open.textContent = 'Open the real prompt →';
+    open.addEventListener('click', () => {
+      this.callbacks.onOpenDebugPrompt?.();
+    });
+    section.append(open);
+    return section;
   }
 
   private createDebugSection(title: string, content: string): HTMLElement {

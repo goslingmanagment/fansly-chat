@@ -59,6 +59,7 @@ import {
 import { loadStorageState } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  DebugPromptEchoStatus,
   LlmSpendSummary,
   BackgroundPortMessage,
   CompareInlineTabState,
@@ -145,6 +146,8 @@ export class ChatGooseContentApp {
   private activeOperationId: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
+  /** E26: the kernel echo's fate + its viewer token. Closure-only, never DOM. */
+  private activeDebugEcho: DebugPromptEchoStatus | null = null;
   private activeLlmSpend: LlmSpendSummary | null = null;
   private activeProfiling: OperationProfilingSnapshot | null = null;
   private activeProgress: OperationProgressPayload | null = null;
@@ -280,6 +283,9 @@ export class ChatGooseContentApp {
   private readonly overlay = new OverlayController({
     onAcceptance: (operationId, action, partIndex) => {
       this.port.send({ type: 'operation:acceptance', operationId, action, partIndex });
+    },
+    onOpenDebugPrompt: () => {
+      void this.openDebugPromptViewer();
     },
     onClose: () => {
       this.deepOverlayModel = null;
@@ -596,6 +602,7 @@ export class ChatGooseContentApp {
       progress: this.activeProgress,
       rawText: this.overlayRawText,
       debugPrompt: this.activeDebugPrompt ?? undefined,
+      debugEcho: this.activeDebugEcho ?? undefined,
       llmSpend: this.activeLlmSpend ?? undefined,
       profiling: this.activeProfiling ?? undefined,
       canCancel: true,
@@ -761,6 +768,7 @@ export class ChatGooseContentApp {
   ): void {
     this.cancelScheduledLoadingRender();
     this.activeDebugPrompt = null;
+    this.activeDebugEcho = null;
     this.activeLlmSpend = null;
     this.activeProfiling = null;
     this.activeProgress = null;
@@ -1135,6 +1143,9 @@ export class ChatGooseContentApp {
       case 'operation:debugPrompt':
         this.handleDebugPrompt(message);
         break;
+      case 'operation:debugPromptStatus':
+        this.handleDebugPromptStatus(message);
+        break;
       case 'operation:chunk':
         this.handleChunk(message.operationId, message.text);
         break;
@@ -1386,6 +1397,35 @@ export class ChatGooseContentApp {
     this.scheduleLoadingRender();
   }
 
+  private handleDebugPromptStatus(
+    message: Extract<BackgroundPortMessage, { type: 'operation:debugPromptStatus' }>,
+  ): void {
+    if (this.activeOperationId !== message.operationId) {
+      return;
+    }
+    // The token lives here, in the content script's own heap — never in an
+    // attribute, a dataset entry, or anything else the Fansly page can read
+    // out of the shared DOM (E26).
+    this.activeDebugEcho = message.echo;
+    this.scheduleLoadingRender();
+  }
+
+  private async openDebugPromptViewer(): Promise<void> {
+    const echo = this.activeDebugEcho;
+    if (echo?.state !== 'available') {
+      return;
+    }
+    try {
+      await browser.runtime.sendMessage({
+        type: 'openDebugPrompt',
+        viewerToken: echo.viewerToken,
+      });
+    } catch {
+      // The worker restarted and dropped the snapshot; the panel already says
+      // the echo can expire, so there is nothing useful to add here.
+    }
+  }
+
   private handleChunk(operationId: string, text: string): void {
     if (this.activeOperationId !== operationId) {
       return;
@@ -1481,6 +1521,7 @@ export class ChatGooseContentApp {
         fanDisplayName: this.currentFanDisplayName(),
         operationId: message.operationId,
         debugPrompt: this.activeDebugPrompt ?? undefined,
+      debugEcho: this.activeDebugEcho ?? undefined,
         llmSpend:
           getMessageLlmSpend(message) ?? this.activeLlmSpend ?? undefined,
         profiling: message.profiling ?? this.activeProfiling ?? undefined,
@@ -1520,6 +1561,7 @@ export class ChatGooseContentApp {
     this.activeImproveDraftCacheKey = null;
     if (fullReset) {
       this.activeDebugPrompt = null;
+      this.activeDebugEcho = null;
       this.deepOverlayModel = null;
     }
   }
@@ -1663,6 +1705,7 @@ export class ChatGooseContentApp {
           flirtyParts: parsed?.flirty ? createParts(normalizeReplyParts(parsed.flirty)) : [],
           parseFallback: !parsed?.valid,
           debugPrompt: this.activeDebugPrompt ?? undefined,
+          debugEcho: this.activeDebugEcho ?? undefined,
           llmSpend,
           profiling,
           rerunActionLabel: 'Regenerate',
@@ -1677,6 +1720,7 @@ export class ChatGooseContentApp {
           rawText,
           summaryMeta: result.summaryMeta,
           debugPrompt: this.activeDebugPrompt ?? undefined,
+          debugEcho: this.activeDebugEcho ?? undefined,
           llmSpend,
           profiling,
           rerunActionLabel: 'Refresh',
@@ -1696,6 +1740,7 @@ export class ChatGooseContentApp {
             parseFallback: !result.chatReview?.valid,
           },
           debugPrompt: this.activeDebugPrompt ?? undefined,
+          debugEcho: this.activeDebugEcho ?? undefined,
           llmSpend,
           profiling,
           rerunActionLabel: 'Refresh',
@@ -1712,6 +1757,7 @@ export class ChatGooseContentApp {
       rawText: partTexts.length > 0 ? rawText : '',
       splitModeRequested: Boolean(result.splitModeRequested),
       debugPrompt: this.activeDebugPrompt ?? undefined,
+      debugEcho: this.activeDebugEcho ?? undefined,
       llmSpend,
       profiling,
       rerunActionLabel: 'Regenerate',

@@ -231,6 +231,40 @@ export interface PromptDebugSnapshot {
   user: string;
 }
 
+// ─── Kernel prompt echo (E26) ────────────────────────────────────────────
+
+/** What the kernel says it injected — the ONLY shape allowed into the Fansly
+ * DOM. Counts and labels, never prompt text: the page shares our DOM, so a
+ * raw-manifest passthrough would leak the next context key we add. */
+export interface KernelContextProjection {
+  dossier: {
+    version: number | null;
+    ageDays: number | null;
+    chars: number | null;
+    truncated: boolean | null;
+    droppedSections: string[];
+  } | null;
+  /** Transcript-union manifest (kernel-loaded lanes; null on the Fansly path). */
+  transcript: {
+    source: string | null;
+    mode: string | null;
+    archiveCount: number | null;
+    unionCount: number | null;
+    stale: boolean | null;
+  } | null;
+  /** Manifest keys we do not model yet — NAMES only, so new kernel keys show up
+   * as "there is more here" without their values reaching the page. */
+  otherKeys: string[];
+}
+
+/** The echo's fate for one operation. `available` carries the viewer token that
+ * unlocks the full prompt on the extension-origin page — the prompt body itself
+ * never travels to the content script. */
+export type DebugPromptEchoStatus =
+  | { state: 'available'; viewerToken: string; kernelContext: KernelContextProjection }
+  | { state: 'unavailable' }
+  | { state: 'cache-hit' };
+
 // ─── Transcript & Ping ──────────────────────────────────────────────────
 
 export interface PingSegmentAnalysis {
@@ -727,6 +761,8 @@ export interface RuntimeRequestMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
+  openDebugPrompt: DebugPromptTokenRequest;
+  getDebugPromptSnapshot: DebugPromptTokenRequest;
 }
 
 export interface RuntimeResponseMap {
@@ -736,6 +772,27 @@ export interface RuntimeResponseMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
+  openDebugPrompt: OpenDebugPromptResponse;
+  getDebugPromptSnapshot: DebugPromptSnapshotResponse;
+}
+
+/** E26 viewer handshake. The token is the whole authority — it is minted per
+ * echo, expires with it, and never touches the page's DOM. */
+export interface DebugPromptTokenRequest {
+  viewerToken: string;
+}
+
+export interface OpenDebugPromptResponse {
+  opened: boolean;
+}
+
+export interface DebugPromptSnapshotResponse {
+  feature: FeatureType;
+  modelId: string;
+  capturedAtMs: number;
+  systemBlocks: Array<{ text: string; cache: string }>;
+  userBlocks: Array<{ text: string; cache: string }>;
+  contextManifest: Record<string, unknown> | null;
 }
 
 /** Stage 32: one-time options-page sign-in → device-bound hub credential. */
@@ -859,6 +916,7 @@ export interface PortEnvelopeBase {
     | 'operation:cancel'
     | 'operation:acceptance'
     | 'operation:debugPrompt'
+    | 'operation:debugPromptStatus'
     | 'operation:progress'
     | 'operation:chunk'
     | 'operation:complete'
@@ -974,6 +1032,17 @@ export interface DebugPromptPayload extends PortEnvelopeBase {
   snapshot: PromptDebugSnapshot;
 }
 
+/** E26. A SEPARATE message from `operation:debugPrompt` on purpose: that one's
+ * validator accepts any object as its snapshot, which is exactly the hole a
+ * prompt body would slip through on its way to the Fansly DOM. This type cannot
+ * carry prompt text — only the token and the counts projection. */
+export interface DebugPromptStatusPayload extends PortEnvelopeBase {
+  type: 'operation:debugPromptStatus';
+  operationId: string;
+  feature: FeatureType;
+  echo: DebugPromptEchoStatus;
+}
+
 export interface CompletePayload extends PortEnvelopeBase {
   type: 'operation:complete';
   operationId: string;
@@ -1074,6 +1143,7 @@ export type BackgroundPortMessage =
   | CompareReadyPayload
   | CompareChunkPayload
   | DebugPromptPayload
+  | DebugPromptStatusPayload
   | CompletePayload
   | ErrorPayload
   | DiscardedPayload
@@ -1131,6 +1201,7 @@ export type OverlayViewModel =
       progress: OperationProgressPayload | null;
       rawText: string;
       debugPrompt?: PromptDebugSnapshot;
+      debugEcho?: DebugPromptEchoStatus;
       llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       canCancel: boolean;
@@ -1146,6 +1217,7 @@ export type OverlayViewModel =
       rawText: string;
       splitModeRequested?: boolean;
       debugPrompt?: PromptDebugSnapshot;
+      debugEcho?: DebugPromptEchoStatus;
       llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
@@ -1165,6 +1237,7 @@ export type OverlayViewModel =
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       debugPrompt?: PromptDebugSnapshot;
+      debugEcho?: DebugPromptEchoStatus;
       error?: UserFacingError;
     }
   | {
@@ -1184,6 +1257,7 @@ export type OverlayViewModel =
       profiling?: OperationProfilingSnapshot;
       rerunActionLabel?: OverlayRerunActionLabel;
       debugPrompt?: PromptDebugSnapshot;
+      debugEcho?: DebugPromptEchoStatus;
       error?: UserFacingError;
     }
   | {
@@ -1192,6 +1266,7 @@ export type OverlayViewModel =
       fanDisplayName: string;
       operationId: string | null;
       debugPrompt?: PromptDebugSnapshot;
+      debugEcho?: DebugPromptEchoStatus;
       llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       error: UserFacingError;

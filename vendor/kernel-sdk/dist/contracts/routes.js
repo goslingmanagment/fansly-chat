@@ -1523,6 +1523,24 @@ export const aiGatewayPromptBlockSchema = z.object({
     text: z.string().min(1).max(100_000),
     cache: aiGatewayPromptCacheTtlSchema,
 }).strict();
+// Feature-lane-only debug echo. Deliberately separate from the raw gateway
+// prompt-block schema (100k): an assembled block is much larger than the wire
+// values it carries. clientContext admits a 300k transcript, the builder places
+// the WHOLE transcript in one dynamic block, and escapeForPrompt expands the
+// worst case fivefold ("&" → "&amp;"). Bound = (transcript 300k + spending 20k
+// + subscription 20k + draft 20k) × 5 + dossier 20k + template framing, rounded
+// up. Echo contract only — never accepted in an AI request body.
+export const AI_FEATURE_DEBUG_PROMPT_BLOCK_MAX_CHARS = 2_500_000;
+export const aiFeatureDebugPromptBlockSchema = z.object({
+    text: z.string().min(1).max(AI_FEATURE_DEBUG_PROMPT_BLOCK_MAX_CHARS),
+    cache: aiGatewayPromptCacheTtlSchema,
+}).strict();
+export const aiFeatureDebugInputFrameSchema = z.object({
+    type: z.literal("debug_input_v1"),
+    systemBlocks: z.array(aiFeatureDebugPromptBlockSchema).min(1).max(64),
+    userBlocks: z.array(aiFeatureDebugPromptBlockSchema).min(1).max(64),
+    contextManifest: z.record(z.string(), z.unknown()).nullable(),
+}).strict();
 export const aiGatewayStreamBodySchema = z.object({
     clientRequestId: z.string().uuid(),
     feature: aiUsageFeatureEnum,
@@ -1589,6 +1607,13 @@ export const aiGatewayStreamFrameSchema = z.discriminatedUnion("type", [
         type: z.literal("done"),
         stopReason: z.string().nullable(),
     }).strict(),
+]);
+// Unknown frames remain fatal for the raw gateway. Only streamAiFeature uses
+// this additive union, and the server emits debug_input_v1 only when the
+// caller advertised the matching capability header.
+export const aiFeatureStreamFrameSchema = z.union([
+    aiGatewayStreamFrameSchema,
+    aiFeatureDebugInputFrameSchema,
 ]);
 // Stage 29 restricted capture class (DP 6-A): owner-only reads.
 // Stage 31: personas are kernel config (DP 9-A single-tenant) — the desktop

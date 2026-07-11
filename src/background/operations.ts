@@ -77,6 +77,7 @@ import type {
   OperationProgressPayload,
   OperationStartPayload,
   PingSegment,
+  DebugPromptEchoStatus,
   PersistedState,
   Settings,
   SubscriptionLookupMode,
@@ -102,9 +103,12 @@ import {
   formatKernelUsageLog,
 } from '../shared/spend.js';
 import {
+  type KernelFeatureDebugInput,
   type KernelFeatureGateway,
   type KernelFeatureUsage,
 } from './kernel-feature-gateway.js';
+import { createDebugPromptStore, type DebugPromptStore } from './debug-prompt-store.js';
+import { projectKernelContext } from '../shared/kernel-context.js';
 import {
   cancelCompareOperation,
   executeCompare,
@@ -398,6 +402,9 @@ export class OperationCoordinator {
     private readonly storageCoordinator: StorageCoordinator,
     private readonly agencyHubClient: AgencyHubClient,
     private readonly acceptance?: Pick<AcceptanceReporter, 'enqueue'>,
+    /** E26 prompt-echo custody; shared with the runtime API, which serves the
+     * viewer page. In-memory by construction — see debug-prompt-store.ts. */
+    readonly debugPrompts: DebugPromptStore = createDebugPromptStore(),
   ) {}
 
   /** Correlation for post-settle copy/insert signals (bounded, newest-wins). */
@@ -1513,6 +1520,21 @@ export class OperationCoordinator {
         sendOperationProgress(updates);
       };
 
+      // E26: the echo's fate for this operation. Carries the counts projection
+      // and an opaque viewer token — never a byte of the assembled prompt, which
+      // stays in the service worker (this message lands in the Fansly DOM).
+      const sendDebugEchoStatus = (echo: DebugPromptEchoStatus): void => {
+        if (!profiler.enabled) {
+          return;
+        }
+        this.send(tabId, {
+          type: 'operation:debugPromptStatus',
+          operationId: payload.operationId,
+          feature: payload.feature,
+          echo,
+        });
+      };
+
       const startStage = (
         key: Parameters<OperationProfiler['startStage']>[0],
         label: string,
@@ -1719,6 +1741,9 @@ export class OperationCoordinator {
           'Summary cache hit',
           'cache hit',
         );
+        // No kernel call happened, so there is no prompt to echo — say that
+        // outright instead of showing an empty inspector (E26).
+        sendDebugEchoStatus({ state: 'cache-hit' });
         const zeroSpend = createZeroLlmSpendSummary();
         this.sendComplete(tabId, {
           type: 'operation:complete',
@@ -2273,6 +2298,9 @@ export class OperationCoordinator {
         replyMode: payload.replyMode,
         draftText: payload.draftText,
         isRegeneration: Boolean(payload.forceRegenerate),
+        // E26: ask only in debug mode. The kernel answers only inside an
+        // owner-set time-bounded window, so this is a request, not a right.
+        debugPromptEcho: profiler.enabled,
         clientContext: {
           transcript: formattedTranscript,
           messageCount: keptMessageCount,
@@ -2369,6 +2397,31 @@ export class OperationCoordinator {
         return false;
       };
 
+      let debugEchoSeen = false;
+      const handleDebugInput = (input: KernelFeatureDebugInput): void => {
+        // A frame belonging to an operation the tab has already moved past must
+        // not repaint the inspector — same staleness guard as onText/onUsage.
+        const current = this.getActive(tabId);
+        if (!current || current.operationId !== payload.operationId) {
+          return;
+        }
+        debugEchoSeen = true;
+        const viewerToken = this.debugPrompts.put({
+          operationId: payload.operationId,
+          feature: payload.feature,
+          modelId: actualModel,
+          capturedAt: Date.now(),
+          systemBlocks: input.systemBlocks,
+          userBlocks: input.userBlocks,
+          contextManifest: input.contextManifest,
+        });
+        sendDebugEchoStatus({
+          state: 'available',
+          viewerToken,
+          kernelContext: projectKernelContext(input.contextManifest),
+        });
+      };
+
       const streamCallbacks = {
         onText: (chunk: string) => {
           const current = this.getActive(tabId);
@@ -2435,6 +2488,7 @@ export class OperationCoordinator {
         onStopReason: (stopReason: string | null) => {
           latestLlmStopReason = stopReason;
         },
+        onDebugInput: handleDebugInput,
       } as const;
 
       let serviceUnavailableRetried = false;
@@ -2493,6 +2547,12 @@ export class OperationCoordinator {
         }
       }
       clearLlmTimeouts();
+
+      if (!debugEchoSeen) {
+        // Asked and not answered: the kernel's echo window is closed for this
+        // chatter. Say so, rather than leaving the inspector looking broken.
+        sendDebugEchoStatus({ state: 'unavailable' });
+      }
 
       if (sawProviderActivity) {
         completeStage(

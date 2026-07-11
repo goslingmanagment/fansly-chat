@@ -206,3 +206,60 @@ describe('kernel feature gateway', () => {
     expect(truncated.message).toContain('without completing');
   });
 });
+
+// E26 — the prompt echo. The capability rides a HEADER, never the body: an old
+// kernel ignores an unknown header, so a kernel rollback after a client release
+// cannot 400 a generation. And the echo is only ever asked for, never assumed.
+describe('kernel feature gateway prompt echo', () => {
+  const DEBUG_FRAME = {
+    type: 'debug_input_v1',
+    systemBlocks: [{ text: 'safety + persona', cache: '1h' }],
+    userBlocks: [{ text: '## Fan Dossier\nred Ducati', cache: '5m' }],
+    contextManifest: { fanProfile: { version: 2, ageDays: 1 } },
+  };
+
+  it('advertises the capability only when asked, and hands the echo to the callback', async () => {
+    const calls: Array<RequestInit | undefined> = [];
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      calls.push(init);
+      return sseResponse([META, DEBUG_FRAME, { type: 'content_delta', text: 'hi' }, { type: 'done', stopReason: 'end_turn' }]);
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    const echoes: unknown[] = [];
+
+    await gateway.streamFeature(
+      settings(),
+      request({ debugPromptEcho: true }),
+      { onText: () => undefined, onDebugInput: (input) => echoes.push(input) },
+      new AbortController().signal,
+    );
+
+    expect(new Headers(calls[0]?.headers).get('x-kernel-ai-capabilities')).toBe('debug-input-v1');
+    expect(JSON.parse(String(calls[0]?.body))).not.toHaveProperty('debugPrompt');
+    expect(echoes).toEqual([{
+      systemBlocks: DEBUG_FRAME.systemBlocks,
+      userBlocks: DEBUG_FRAME.userBlocks,
+      contextManifest: DEBUG_FRAME.contextManifest,
+    }]);
+  });
+
+  it('does not advertise the capability when debug mode is off', async () => {
+    const calls: Array<RequestInit | undefined> = [];
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      calls.push(init);
+      return sseResponse([META, { type: 'content_delta', text: 'hi' }, { type: 'done', stopReason: 'end_turn' }]);
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    const echoes: unknown[] = [];
+
+    await gateway.streamFeature(
+      settings(),
+      request(),
+      { onText: () => undefined, onDebugInput: (input) => echoes.push(input) },
+      new AbortController().signal,
+    );
+
+    expect(new Headers(calls[0]?.headers).get('x-kernel-ai-capabilities')).toBeNull();
+    expect(echoes).toEqual([]);
+  });
+});
