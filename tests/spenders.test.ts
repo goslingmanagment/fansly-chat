@@ -127,18 +127,20 @@ describe('filterSpendersByQuery', () => {
     { displayName: 'Jonathan', username: 'jony' },
     { displayName: null, username: 'ghost_99' },
     { displayName: 'Ricky', username: null },
+    { displayName: 'BseriesGod', username: 'bseriesgod', customName: 'Max/Canada/45' },
   ];
 
-  it('matches case-insensitive substrings on either name field', () => {
+  it('matches case-insensitive substrings on any name field', () => {
     expect(filterSpendersByQuery(fans, 'JON')).toHaveLength(1);
     expect(filterSpendersByQuery(fans, 'ghost')).toHaveLength(1);
     expect(filterSpendersByQuery(fans, 'rick')).toHaveLength(1);
+    expect(filterSpendersByQuery(fans, 'canada')).toHaveLength(1);
     expect(filterSpendersByQuery(fans, 'zzz')).toHaveLength(0);
   });
 
   it('keeps everything on a blank query', () => {
-    expect(filterSpendersByQuery(fans, '')).toHaveLength(3);
-    expect(filterSpendersByQuery(fans, '   ')).toHaveLength(3);
+    expect(filterSpendersByQuery(fans, '')).toHaveLength(4);
+    expect(filterSpendersByQuery(fans, '   ')).toHaveLength(4);
   });
 });
 
