@@ -11,6 +11,7 @@ import {
   FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
   QUICK_OPERATION_TIMEOUT_MS,
   STORAGE_SCHEMA_VERSION,
+  SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../src/shared/constants.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import {
@@ -609,6 +610,117 @@ describe('OperationCoordinator', () => {
       generatedAt: 1234,
       modelId: 'kernel',
       fanAccountId: 'fan-1',
+    });
+  });
+
+  // Core #136: the kernel injects the HUB copy of a ready Scan into other
+  // features' prompts, so a valid-but-unsaved local summary is re-pushed
+  // opportunistically on chat open — bounded by in-flight dedup + cooldown.
+  describe('summary hub-sync retry on chat open', () => {
+    function hubConfiguredSettings(): void {
+      mockStorage.settings = {
+        ...(mockStorage.settings as Record<string, unknown>),
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+      };
+    }
+
+    function retryHubClient(pushResult: Record<string, unknown>) {
+      return {
+        isConfigured: vi.fn(() => true),
+        resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+        fetchFanProfileByConversation: vi.fn(async () => ({
+          status: 'skipped',
+          reason: 'disabled',
+          baseUrl: null,
+        })),
+        pushFanProfile: vi.fn(async () => pushResult),
+      };
+    }
+
+    const tabInit = (coordinator: any, routeNonce: number) =>
+      coordinator.handlePortMessage(1, {
+        type: 'tab:init',
+        groupId: 'group-1',
+        routeNonce,
+      });
+
+    it('re-pushes a ready-but-unsaved summary and stops once the hub confirms the save', async () => {
+      hubConfiguredSettings();
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      await tabInit(coordinator, 1);
+      await vi.waitFor(() => {
+        expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(1);
+        expect(mockStorage['summary:group-1']).toMatchObject({
+          agencyHubSync: expect.objectContaining({ state: 'saved' }),
+        });
+      });
+
+      // Saved → the next chat open does not push again.
+      await tabInit(coordinator, 2);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not push when the summary is already saved for the current hub target', async () => {
+      hubConfiguredSettings();
+      mockStorage['summary:group-1'] = {
+        ...(mockStorage['summary:group-1'] as Record<string, unknown>),
+        agencyHubSync: {
+          state: 'saved',
+          generatedAt: 2000,
+          baseUrl: 'http://localhost:3000',
+          pageLabel: 'creator-fs',
+          syncedAt: 1,
+          updatedAt: 1,
+        },
+      };
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      await tabInit(coordinator, 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
+    it('waits out the cooldown after a failed push instead of hammering the hub', async () => {
+      hubConfiguredSettings();
+      const agencyHubClient = retryHubClient({
+        status: 'failed',
+        reason: 'network',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: null,
+      });
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      await tabInit(coordinator, 1);
+      await vi.waitFor(() => {
+        expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(1);
+      });
+
+      // Inside the cooldown window: refresh does not re-push.
+      await tabInit(coordinator, 2);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(1);
+
+      // Past the cooldown: the retry fires again.
+      advanceNow(SUMMARY_SYNC_RETRY_COOLDOWN_MS + 1_000);
+      await tabInit(coordinator, 3);
+      await vi.waitFor(() => {
+        expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(2);
+      });
     });
   });
 
