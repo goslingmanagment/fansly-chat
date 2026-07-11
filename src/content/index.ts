@@ -151,6 +151,10 @@ export class ChatGooseContentApp {
   private lastFeature: FeatureType | null = null;
   private nextFastReplyMode: ReplyMode = 'default';
   private nextReplyTone: ReplyTone = 'none';
+  /** Tone the LAST fast-reply/compare was generated with — a Regenerate
+   * re-rolls the same ask, so it reuses this when nothing new is armed
+   * (E24; tones are one-shot, so nextReplyTone is already 'none' by then). */
+  private lastSentReplyTone: ReplyTone = 'none';
   private hasSentInit = false;
   private overlayRawText = '';
   private activeCompareModel: CompareInlineViewModel | null = null;
@@ -207,7 +211,7 @@ export class ChatGooseContentApp {
       void this.reopenCompletedCompare();
     },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
-    onToneSelect: (tone) => this.startTonedReply(tone),
+    onToneSelect: (tone) => this.armReplyTone(tone),
   });
   private readonly mappingBanner = new MappingBanner({
     onOpenSettings: () => {
@@ -284,7 +288,7 @@ export class ChatGooseContentApp {
         !usesInlineFeatureSurface(this.activeFeature)
       ) {
         this.clearOperationState(true);
-        this.resetNextFastReplyMode();
+        // E24: Split is sticky — closing a surface disarms the tone only.
         this.resetNextReplyTone();
       }
       this.renderAll();
@@ -293,7 +297,6 @@ export class ChatGooseContentApp {
       this.port.send({ type: 'operation:cancel', operationId });
       this.quickInlineVisible = false;
       this.clearOperationState(true);
-      this.resetNextFastReplyMode();
       this.resetNextReplyTone();
       this.renderAll();
     },
@@ -419,9 +422,10 @@ export class ChatGooseContentApp {
 
   private cycleNextReplyTone(): void {
     if (this.activeFeature || this.activeCompareModel?.operationId) return;
-    // Mirrors the bar's tone pills (Flirty / Upsell / Horny) so the cycle and the
-    // visible pills stay in lock-step — 'casual' is intentionally not surfaced.
-    const order: ReplyTone[] = ['none', 'flirty', 'upsell', 'spicy'];
+    // Mirrors the bar's tone groove (😌 Casual / 😏 Flirt / 💰 Sell / 🔥 Spice)
+    // so the cycle and the visible segments stay in lock-step — casual
+    // returned to the bar in E24.
+    const order: ReplyTone[] = ['none', 'casual', 'flirty', 'upsell', 'spicy'];
     const index = order.indexOf(this.nextReplyTone);
     this.nextReplyTone = order[(index + 1) % order.length]!;
     this.renderButtonBar();
@@ -445,7 +449,7 @@ export class ChatGooseContentApp {
       this.quickInlineVisible = false;
       this.clearOperationState(true);
       if (isOverlayFeature) {
-        this.resetNextFastReplyMode();
+        // E24: Split is sticky — cancelling disarms the tone only.
         this.resetNextReplyTone();
       }
       this.renderAll();
@@ -735,9 +739,18 @@ export class ChatGooseContentApp {
         ? this.nextFastReplyMode
         : undefined,
       replyTone: featureSupportsReplyTone(feature)
-        ? this.nextReplyTone
+        ? this.resolveReplyToneForSend(forceRegenerate)
         : undefined,
     };
+  }
+
+  /** The tone a generation should ride: the armed one, or — on a Regenerate
+   * with nothing armed — the tone the original was generated with. */
+  private resolveReplyToneForSend(forceRegenerate: boolean): ReplyTone {
+    if (this.nextReplyTone !== 'none') {
+      return this.nextReplyTone;
+    }
+    return forceRegenerate ? this.lastSentReplyTone : 'none';
   }
 
   private initializeFeatureOperation(
@@ -875,15 +888,14 @@ export class ChatGooseContentApp {
       improveDraftCacheKey,
     );
 
-    const sent = this.port.send(
-      this.buildOperationStartPayload(
-        feature,
-        operationId,
-        domFanDisplayName,
-        draftText,
-        forceRegenerate,
-      ),
+    const payload = this.buildOperationStartPayload(
+      feature,
+      operationId,
+      domFanDisplayName,
+      draftText,
+      forceRegenerate,
     );
+    const sent = this.port.send(payload);
     if (!sent) {
       // The port is mid-reconnect; the start never reached the background, so
       // no terminal message will arrive. Tear down the loading state and ask
@@ -894,10 +906,11 @@ export class ChatGooseContentApp {
       this.renderButtonBar();
       return;
     }
-    if (featureSupportsReplyMode(feature)) {
-      this.resetNextFastReplyMode();
-    }
+    // E24: Split (replyMode) is a sticky flag — it survives generations and
+    // only its own click turns it off. Tones stay one-shot: consumed by this
+    // send, remembered for a potential Regenerate of the same ask.
     if (featureSupportsReplyTone(feature)) {
+      this.lastSentReplyTone = payload.replyTone ?? 'none';
       this.resetNextReplyTone();
     }
     this.renderButtonBar();
@@ -956,6 +969,7 @@ export class ChatGooseContentApp {
     this.comparePanelVisible = false;
     this.renderButtonBar();
 
+    const compareReplyTone = this.resolveReplyToneForSend(forceRegenerate);
     const sent = this.port.send({
       type: 'compare:start',
       operationId,
@@ -964,7 +978,7 @@ export class ChatGooseContentApp {
       domFanDisplayName,
       forceRegenerate,
       replyMode: this.nextFastReplyMode,
-      replyTone: this.nextReplyTone,
+      replyTone: compareReplyTone,
     });
     if (!sent) {
       // The port is mid-reconnect; the compare start was dropped, so tear down
@@ -976,7 +990,8 @@ export class ChatGooseContentApp {
       this.renderButtonBar();
       return;
     }
-    this.resetNextFastReplyMode();
+    // E24: Split stays armed (sticky flag); the tone is consumed + remembered.
+    this.lastSentReplyTone = compareReplyTone;
     this.resetNextReplyTone();
   }
 
@@ -996,12 +1011,14 @@ export class ChatGooseContentApp {
     this.nextFastReplyMode = 'default';
   }
 
-  private startTonedReply(tone: ReplyTone): void {
+  private armReplyTone(tone: ReplyTone): void {
     if (this.activeFeature || this.activeCompareModel?.operationId) return;
-    // Mirror the desktop tone menu: arm the tone, then immediately run the reply
-    // in it. startFeature reads nextReplyTone for the payload and resets it after.
-    this.nextReplyTone = tone;
-    this.startFeature('fast-reply', false);
+    // Options model (E24): a tone segment ARMS the next Reply — the only
+    // trigger is Reply itself. Clicking the armed segment disarms it. The
+    // pre-E24 one-shot (click = immediate generation) is gone on purpose:
+    // tones and Split now share one toggle model.
+    this.nextReplyTone = this.nextReplyTone === tone ? 'none' : tone;
+    this.renderButtonBar();
   }
 
   private resetNextReplyTone(): void {
@@ -1015,6 +1032,11 @@ export class ChatGooseContentApp {
     const previousGroupId = this.currentGroupId;
     this.routeNonce += 1;
     this.currentGroupId = groupId;
+    if (changed) {
+      // The regen-tone memo is per-conversation — never bleed a tone from
+      // one fan's chat into a Regenerate in another's.
+      this.lastSentReplyTone = 'none';
+    }
     this.completedOverlayCache.setActiveGroup(groupId);
     this.completedCompareCache.setActiveGroup(groupId);
     this.mountController.setActiveRoute(groupId);

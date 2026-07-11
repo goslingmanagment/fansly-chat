@@ -146,7 +146,9 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   'fast-reply': 'Reply',
   'improve-draft': 'Fix',
   'help-me': 'Help',
-  'fan-summary': 'Summary',
+  // E24: one name per feature everywhere — the bar used to say 'Scan' while
+  // this map said 'Summary'; 'Recap' names the dossier the chatter gets.
+  'fan-summary': 'Recap',
   'chat-review': 'Review',
   'ping': 'Ping',
   'hi-greeting': 'Hi',
