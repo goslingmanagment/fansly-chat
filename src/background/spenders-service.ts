@@ -20,10 +20,14 @@
 
 import {
   FANSLY_CUSTOM_NAME_NOTE_TYPE,
+  FANSLY_PAGINATION_DELAY_MS,
   SPENDERS_CACHE_TTL_MS,
   SPENDERS_KERNEL_LIMIT,
   SPENDERS_MAX_FANS,
   SPENDERS_NAME_LOOKUP_BATCH,
+  SPENDERS_NAME_SWEEP_BUDGET_MS,
+  SPENDERS_NAMES_CACHE_MAX,
+  SPENDERS_NAMES_CACHE_TTL_MS,
 } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { monthWindowFor } from '../shared/spenders.js';
@@ -33,6 +37,7 @@ import type {
   Settings,
   SpenderListEntry,
   SpendersListResult,
+  SpendersProgressPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -46,6 +51,49 @@ function customNameFromAccount(account: FanslyAccountResponse): string | null {
   );
   const text = note?.note?.trim();
   return text ? text : null;
+}
+
+/** What a board row needs to know about a fan's names. */
+interface FanNames {
+  customName: string | null;
+  displayName: string | null;
+  username: string | null;
+}
+
+interface NamesCacheEntry {
+  savedAt: number;
+  byId: Record<string, FanNames>;
+}
+
+function namesFromAccount(account: FanslyAccountResponse): FanNames {
+  return {
+    customName: customNameFromAccount(account),
+    displayName: account.displayName ?? null,
+    username: account.username ?? null,
+  };
+}
+
+/** Abort-aware sleep for pacing the name sweep between batches. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = globalThis.setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const cleanup = () => {
+      globalThis.clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+    };
+    signal.addEventListener('abort', onAbort);
+  });
 }
 
 interface CacheEntry {
@@ -110,6 +158,55 @@ async function writeSessionCache(key: string, entry: CacheEntry | null): Promise
   }
 }
 
+// Fan names get their OWN cache, in storage.LOCAL (not session): renames are
+// rare, and a browser restart must not re-buy 10 batched /account?ids=
+// requests per creator. TTL 6h, size-capped. Later builds — including a
+// Refresh — fetch only ids the cache does not know.
+const NAMES_CACHE_STORAGE_KEY = 'spendersNames';
+
+function localStorageArea(): browser.storage.StorageArea | null {
+  try {
+    return browser.storage?.local ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
+  const area = localStorageArea();
+  if (!area) return null;
+  try {
+    const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
+    const all = raw[NAMES_CACHE_STORAGE_KEY];
+    if (!all || typeof all !== 'object') return null;
+    const entry = (all as Record<string, unknown>)[key];
+    if (!entry || typeof entry !== 'object') return null;
+    const candidate = entry as NamesCacheEntry;
+    if (typeof candidate.savedAt !== 'number' || typeof candidate.byId !== 'object') {
+      return null;
+    }
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+async function writeNamesCache(key: string, entry: NamesCacheEntry): Promise<void> {
+  const area = localStorageArea();
+  if (!area) return;
+  try {
+    const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
+    const all =
+      raw[NAMES_CACHE_STORAGE_KEY] && typeof raw[NAMES_CACHE_STORAGE_KEY] === 'object'
+        ? { ...(raw[NAMES_CACHE_STORAGE_KEY] as Record<string, NamesCacheEntry>) }
+        : {};
+    all[key] = entry;
+    await area.set({ [NAMES_CACHE_STORAGE_KEY]: all });
+  } catch {
+    // Best-effort persistence.
+  }
+}
+
 export interface SpendersKernelSource {
   resolvePageLabelForUsername: AgencyHubClient['resolvePageLabelForUsername'];
   fetchTopSpenders(
@@ -137,6 +234,8 @@ export class SpendersService {
     private readonly fanslyClient: FanslyClient,
     private readonly kernelSource?: SpendersKernelSource,
     private readonly getSettings?: () => Promise<Settings>,
+    /** Test seam — production uses the constants. */
+    private readonly tuning?: { nameSweepBudgetMs?: number },
   ) {}
 
   private cacheKey(session: SessionTemplate): string {
@@ -146,7 +245,10 @@ export class SpendersService {
   async getList(
     session: SessionTemplate,
     signal: AbortSignal,
-    options?: { refresh?: boolean },
+    options?: {
+      refresh?: boolean;
+      onProgress?: (progress: SpendersProgressPayload) => void;
+    },
   ): Promise<SpendersListResult> {
     const key = this.cacheKey(session);
     const now = Date.now();
@@ -176,7 +278,7 @@ export class SpendersService {
       throw new ChatGooseError('hub_request_failed');
     }
 
-    const result = await this.buildFromKernel(session, settings, signal);
+    const result = await this.buildFromKernel(session, settings, signal, options?.onProgress);
 
     // W9.3/A20: builtAt === null means the kernel has never walked this
     // page (not ramped) — caching would pin a "not enabled" board for
@@ -196,7 +298,9 @@ export class SpendersService {
     session: SessionTemplate,
     settings: Settings,
     signal: AbortSignal,
+    onProgress?: (progress: SpendersProgressPayload) => void,
   ): Promise<SpendersListResult> {
+    onProgress?.({ type: 'spenders:progress', phase: 'ranking' });
     const pageUsername = session.resolvedUsername?.trim() || null;
     const pageLabel = await this.kernelSource!.resolvePageLabelForUsername(
       settings,
@@ -235,27 +339,26 @@ export class SpendersService {
       monthReady ? month.entries.map((entry) => [entry.platformUserId, entry.grossMills]) : [],
     );
 
-    // Best-effort: the names chatters actually recognize. One batched
-    // /account?ids= sweep (an endpoint this client already uses) brings the
-    // creator-session account payloads, whose notes carry Fansly's native
-    // custom display names; the same payload backfills platform names for
-    // fans the projection knows only by id. Failure degrades to platform
-    // names, never the board.
-    const accountById = await this.resolveFanAccounts(
+    // Best-effort: the names chatters actually recognize (custom rename
+    // notes + platform-name backfill). Cached long and hard-budgeted —
+    // names are decoration, the board must never hang on them (the 1.9.1
+    // freeze was this sweep retrying through rate limits).
+    const namesByFanId = await this.resolveFanNames(
       lifetime.entries.map((entry) => entry.platformUserId),
       session,
       signal,
+      onProgress,
     );
 
     const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
       const monthMills = monthReady ? (monthByFanId.get(entry.platformUserId) ?? 0) : null;
-      const account = accountById.get(entry.platformUserId);
+      const names = namesByFanId.get(entry.platformUserId);
       return {
         fanAccountId: entry.platformUserId,
         groupId: groupByFanId.get(entry.platformUserId) ?? null,
-        customName: account ? customNameFromAccount(account) : null,
-        displayName: entry.displayName ?? account?.displayName ?? null,
-        username: entry.username ?? account?.username ?? null,
+        customName: names?.customName ?? null,
+        displayName: entry.displayName ?? names?.displayName ?? null,
+        username: entry.username ?? names?.username ?? null,
         lifetimeMills: entry.grossMills,
         lifetimeUsd: entry.grossMills / 1000,
         monthMills,
@@ -275,21 +378,63 @@ export class SpendersService {
     };
   }
 
-  /** Batched creator-session account lookup for the listed fans. Best-effort:
-   * a failed batch drops only its own fans' names (platform names remain). */
-  private async resolveFanAccounts(
+  /** Names for the listed fans: session-cached first (6h TTL — renames are
+   * rare), then ONE paced sweep for unknown ids only: no retry budget, an
+   * inter-batch pause, and a hard wall-clock budget. Best-effort throughout:
+   * whatever the sweep did not reach stays on platform names. */
+  private async resolveFanNames(
     fanAccountIds: string[],
     session: SessionTemplate,
     signal: AbortSignal,
-  ): Promise<Map<string, FanslyAccountResponse>> {
-    const accountById = new Map<string, FanslyAccountResponse>();
-    for (let start = 0; start < fanAccountIds.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
-      const batch = fanAccountIds.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
+    onProgress?: (progress: SpendersProgressPayload) => void,
+  ): Promise<Map<string, FanNames>> {
+    const cacheKey = this.cacheKey(session);
+    const namesById = new Map<string, FanNames>();
+
+    const cached = await readNamesCache(cacheKey);
+    const cacheFresh =
+      cached !== null && Date.now() - cached.savedAt < SPENDERS_NAMES_CACHE_TTL_MS;
+    if (cached && cacheFresh) {
+      for (const [id, names] of Object.entries(cached.byId)) {
+        namesById.set(id, names);
+      }
+    }
+
+    const missing = fanAccountIds.filter((id) => !namesById.has(id));
+    if (missing.length === 0) {
+      return namesById;
+    }
+
+    // The sweep is the part a chatter actually waits on (a warm cache skips
+    // it entirely) — so it is the part that reports counts.
+    onProgress?.({
+      type: 'spenders:progress',
+      phase: 'names',
+      done: 0,
+      total: missing.length,
+    });
+
+    const sweepStart = Date.now();
+    let fetchedAny = false;
+    for (let start = 0; start < missing.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
+      if (Date.now() - sweepStart >= (this.tuning?.nameSweepBudgetMs ?? SPENDERS_NAME_SWEEP_BUDGET_MS)) {
+        break; // Out of budget — ship the board with what we have.
+      }
+      const batch = missing.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
       try {
-        const accounts = await this.fanslyClient.getAccountNames(batch, session, signal);
+        if (start > 0) {
+          await pause(FANSLY_PAGINATION_DELAY_MS, signal);
+        }
+        const accounts = await this.fanslyClient.getAccountNames(
+          batch,
+          session,
+          signal,
+          'none',
+        );
         for (const account of accounts) {
           if (account?.id) {
-            accountById.set(account.id, account);
+            namesById.set(account.id, namesFromAccount(account));
+            fetchedAny = true;
           }
         }
       } catch (error) {
@@ -298,8 +443,35 @@ export class SpendersService {
           throw error;
         }
       }
+      // Honest count: batches that failed still advance the bar (their fans
+      // are done being tried — they keep platform names).
+      onProgress?.({
+        type: 'spenders:progress',
+        phase: 'names',
+        done: Math.min(start + batch.length, missing.length),
+        total: missing.length,
+      });
     }
-    return accountById;
+
+    if (fetchedAny) {
+      // Merge-write: keep whatever the cache already knew (stale entries roll
+      // off with the TTL as a whole). Over the cap, this build's names win —
+      // storage.local outlives the browser, so the map must stay bounded.
+      const merged: Record<string, FanNames> = {
+        ...(cached && cacheFresh ? cached.byId : {}),
+      };
+      for (const [id, names] of namesById) {
+        merged[id] = names;
+      }
+      const capped = Object.keys(merged).length > SPENDERS_NAMES_CACHE_MAX
+        ? Object.fromEntries(namesById)
+        : merged;
+      void writeNamesCache(cacheKey, {
+        savedAt: cached && cacheFresh ? cached.savedAt : Date.now(),
+        byId: capped,
+      });
+    }
+    return namesById;
   }
 
   /** Drop the cached board for this creator (memory + session storage). */

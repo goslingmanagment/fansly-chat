@@ -1,4 +1,4 @@
-// E26 — the LLM-input viewer.
+// E27 — the LLM-input viewer.
 //
 // This is the ONLY surface that shows the prompt the kernel actually assembled:
 // safety preamble, persona, templates, the fan dossier, the lot. It lives on an

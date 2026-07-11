@@ -575,11 +575,11 @@ describe('runtime-api resolveFanChat', () => {
   });
 });
 
-// E26. The prompt echo carries the persona, the templates and the fan dossier —
+// E27. The prompt echo carries the persona, the templates and the fan dossier —
 // the agency's own IP. These tests pin the two rules that keep it out of
 // fansly.com: only our viewer page may read a snapshot, and a token that no
 // longer resolves never opens a tab.
-describe('runtime-api debug prompt viewer (E26)', () => {
+describe('runtime-api debug prompt viewer (E27)', () => {
   beforeEach(() => {
     mockStorage = {};
     vi.clearAllMocks();

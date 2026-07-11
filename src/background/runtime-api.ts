@@ -17,6 +17,7 @@ import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
+  SpendersProgressPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
@@ -38,9 +39,11 @@ export interface RuntimeApiDeps {
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
   debugPrompts: DebugPromptStore;
+  /** Pushes board-build progress to the requesting tab's content port. */
+  emitToTab?: (tabId: number, message: SpendersProgressPayload) => void;
 }
 
-/** E26. The prompt echo is readable by ONE caller: our own viewer page. The
+/** E27. The prompt echo is readable by ONE caller: our own viewer page. The
  * content script running inside fansly.com must not be able to ask for it — it
  * shares a document with the site's JS, and a compromised page could otherwise
  * walk the runtime API to the persona and the dossier. Compare the sender's
@@ -69,6 +72,7 @@ export function registerRuntimeApi({
   tabContexts,
   storageCoordinator,
   debugPrompts,
+  emitToTab,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: unknown, sender: browser.runtime.MessageSender) => {
@@ -222,7 +226,7 @@ export function registerRuntimeApi({
         return snapshot;
       }
 
-      // E26 viewer handshake. `openDebugPrompt` may come from the content script
+      // E27 viewer handshake. `openDebugPrompt` may come from the content script
       // (it holds the token but has no tabs API); `getDebugPromptSnapshot` — the
       // one call that hands over the assembled prompt — may come ONLY from the
       // viewer page itself.
@@ -378,7 +382,12 @@ export function registerRuntimeApi({
           SPENDERS_BUILD_TIMEOUT_MS,
         );
         try {
-          const result = await spendersService.getList(session, controller.signal, { refresh });
+          const result = await spendersService.getList(session, controller.signal, {
+            refresh,
+            onProgress: emitToTab && tabId !== undefined
+              ? (progress) => emitToTab(tabId, progress)
+              : undefined,
+          });
           return { ok: true, result };
         } catch (error) {
           const timedOut = error instanceof DOMException && error.name === 'AbortError';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { projectKernelContext } from '../src/shared/kernel-context.js';
 import { isBackgroundPortMessage } from '../src/shared/protocol.js';
 
-// E26. This projection is the boundary: it is the only thing derived from the
+// E27. This projection is the boundary: it is the only thing derived from the
 // kernel's manifest that is allowed to reach the Fansly DOM. If a new manifest
 // key can walk through it unmodelled, the boundary has a hole.
 describe('kernel context projection', () => {

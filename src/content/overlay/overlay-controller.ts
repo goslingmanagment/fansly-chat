@@ -50,7 +50,7 @@ interface OverlayCallbacks {
   onCollapse: () => void;
   /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry). */
   onAcceptance?: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
-  /** E26: open the kernel's real prompt on the extension's own page. The token
+  /** E27: open the kernel's real prompt on the extension's own page. The token
    * stays with the caller — this surface never learns it, so it cannot leak it
    * into the Fansly DOM it renders into. */
   onOpenDebugPrompt?: () => void;
@@ -1652,7 +1652,7 @@ export class OverlayController {
     return details;
   }
 
-  /** E26: the echo's status — and, when it exists, the counts projection plus
+  /** E27: the echo's status — and, when it exists, the counts projection plus
    * the button that opens the real prompt on the extension's own page. */
   private renderKernelEcho(echo: DebugPromptEchoStatus): HTMLElement {
     const section = document.createElement('div');

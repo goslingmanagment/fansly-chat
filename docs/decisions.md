@@ -42,7 +42,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E23 | 2026-07-11 | Spenders board v2: enumeration = map not membership gate (lazy inbox-search chat resolve), kernel limit 500, month +$N column + NEW badge, board search, two-timestamp meta, SPA chat-open with verified fallback, storage.session cache |
 | E24 | 2026-07-11 | Action bar v2: tone groove (radio, arm-only, 😌😏💰🔥 + casual back) + Split flag (sticky) + regen keeps mode/tone; renames Fix/Recap/Split; tolerant [NEXT]; meaning-group seams |
 | E25 | 2026-07-11 | Board rows show the chatter's custom fan names (Fansly rename = account note contentType 12002; batched /account?ids= overlay, best-effort); chatter-eyes-only — never into prompts |
-| E26 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
+| E26 | 2026-07-11 | Name cache → storage.local (survives browser restart, 6h TTL, size-capped); cold-build progress reported over the content port (counted name sweep + hairline bar) |
+| E27 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
 
 ## Entries
 
@@ -466,8 +467,41 @@ product incident). §5 watch: contentType 12002 is pinned from the clean-room
 analysis, not a live capture — verify on the first walkthrough that names
 appear; if they don't, that constant is the first suspect. Pinned in
 spenders-service / spenders-board-controller / spenders suites.
+SAME-DAY HOTFIX (field report: board froze on "Building the board…"): the
+sweep ran up to 10 back-to-back batches, each with the DEFAULT retry budget
+(4 × 30s timeouts + backoff) — rate-limited batches stacked toward the
+120s build abort. Now: per-batch retryPolicy 'none', an inter-batch
+FANSLY_PAGINATION_DELAY_MS pause, a hard SPENDERS_NAME_SWEEP_BUDGET_MS=12s
+wall-clock budget (out of budget → ship the board with the names in hand),
+and a SEPARATE session name cache (SPENDERS_NAMES_CACHE_TTL_MS=6h,
+merge-write) so later builds — including Refresh — fetch only unknown ids.
+Names are decoration; the board never hangs on them again.
 
-**E26 (2026-07-11).** Debug mode shows what the model ACTUALLY received. Since
+**E26 (2026-07-11).** Board cold-build: cheaper and no longer silent.
+(a) **Name cache moved from storage.session to storage.LOCAL** (E25's hotfix
+put it in session): a browser restart re-bought all ~10 batched
+`/account?ids=` requests per creator, which is exactly the load the owner
+questioned. Local + 6h TTL means the sweep is paid roughly once per 6h per
+machine; the map is size-capped (SPENDERS_NAMES_CACHE_MAX = 2000, this
+build's names win on overflow) because storage.local outlives the browser
+and must not grow without bound. NOT taken (owner's call): lazily sweeping
+only the top tiers — the full sweep stays, it is now cheap enough.
+(b) **Cold-build progress.** The board rides a one-shot runtime request and
+therefore had no channel to report anything, so a cold build sat on
+"Building the board…" with no signal. The background now pushes
+`spenders:progress` frames over the tab's EXISTING content port (a new
+`OperationCoordinator.sendToTab`, wired at the composition root; protocol
+case + guard pinned — the E8 lesson), and the board renders them: the
+ranking phase keeps honest prose (no fake percentage — the kernel query has
+no progress to report), and the name sweep, which is the part a chatter
+actually waits on, reports counts ("Resolving fan names — 250 of 500…")
+behind a determinate terracotta hairline. Failed batches still advance the
+count (their fans are done being tried — they keep platform names), so the
+bar can never stall. A warm cache skips the sweep entirely and the board
+opens with no bar at all. Pinned in spenders-service / board-controller /
+protocol suites.
+
+**E27 (2026-07-11).** Debug mode shows what the model ACTUALLY received. Since
 the kernel cutover the prompt is assembled server-side, so the "LLM Input" panel
 could only ever show the client's own context plus two `[assembled kernel-side]`
 placeholders — the persona, the templates and the fan dossier the kernel injects

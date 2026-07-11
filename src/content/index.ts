@@ -146,7 +146,7 @@ export class ChatGooseContentApp {
   private activeOperationId: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
-  /** E26: the kernel echo's fate + its viewer token. Closure-only, never DOM. */
+  /** E27: the kernel echo's fate + its viewer token. Closure-only, never DOM. */
   private activeDebugEcho: DebugPromptEchoStatus | null = null;
   private activeLlmSpend: LlmSpendSummary | null = null;
   private activeProfiling: OperationProfilingSnapshot | null = null;
@@ -1115,6 +1115,9 @@ export class ChatGooseContentApp {
       case 'summary:syncStatus':
         this.handleSummarySyncStatus(message);
         break;
+      case 'spenders:progress':
+        this.board.setBuildProgress(message);
+        break;
       case 'operation:progress':
         this.handleProgress(message);
         break;
@@ -1405,7 +1408,7 @@ export class ChatGooseContentApp {
     }
     // The token lives here, in the content script's own heap — never in an
     // attribute, a dataset entry, or anything else the Fansly page can read
-    // out of the shared DOM (E26).
+    // out of the shared DOM (E27).
     this.activeDebugEcho = message.echo;
     this.scheduleLoadingRender();
   }

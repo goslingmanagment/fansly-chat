@@ -402,7 +402,7 @@ export class OperationCoordinator {
     private readonly storageCoordinator: StorageCoordinator,
     private readonly agencyHubClient: AgencyHubClient,
     private readonly acceptance?: Pick<AcceptanceReporter, 'enqueue'>,
-    /** E26 prompt-echo custody; shared with the runtime API, which serves the
+    /** E27 prompt-echo custody; shared with the runtime API, which serves the
      * viewer page. In-memory by construction — see debug-prompt-store.ts. */
     readonly debugPrompts: DebugPromptStore = createDebugPromptStore(),
   ) {}
@@ -977,6 +977,13 @@ export class OperationCoordinator {
     this.portsByTabId.get(tabId)?.postMessage(message);
   }
 
+  /** Push a message to a tab's content port — used by the runtime API for
+   * board-build progress (the board rides a one-shot runtime request, so it
+   * has no channel of its own). No-op when that tab has no live port. */
+  sendToTab(tabId: number, message: BackgroundPortMessage): void {
+    this.send(tabId, message);
+  }
+
   private sendSummarySyncStatus(
     tabId: number,
     groupId: string,
@@ -1520,7 +1527,7 @@ export class OperationCoordinator {
         sendOperationProgress(updates);
       };
 
-      // E26: the echo's fate for this operation. Carries the counts projection
+      // E27: the echo's fate for this operation. Carries the counts projection
       // and an opaque viewer token — never a byte of the assembled prompt, which
       // stays in the service worker (this message lands in the Fansly DOM).
       const sendDebugEchoStatus = (echo: DebugPromptEchoStatus): void => {
@@ -1742,7 +1749,7 @@ export class OperationCoordinator {
           'cache hit',
         );
         // No kernel call happened, so there is no prompt to echo — say that
-        // outright instead of showing an empty inspector (E26).
+        // outright instead of showing an empty inspector (E27).
         sendDebugEchoStatus({ state: 'cache-hit' });
         const zeroSpend = createZeroLlmSpendSummary();
         this.sendComplete(tabId, {
@@ -2298,7 +2305,7 @@ export class OperationCoordinator {
         replyMode: payload.replyMode,
         draftText: payload.draftText,
         isRegeneration: Boolean(payload.forceRegenerate),
-        // E26: ask only in debug mode. The kernel answers only inside an
+        // E27: ask only in debug mode. The kernel answers only inside an
         // owner-set time-bounded window, so this is a request, not a right.
         debugPromptEcho: profiler.enabled,
         clientContext: {
