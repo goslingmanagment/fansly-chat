@@ -742,6 +742,27 @@ describe('OverlayController', () => {
     });
   });
 
+  it('renders the Fan Summary dossier as formatted markdown blocks', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render({
+      ...createSummaryReadOnlyModel(),
+      rawText: '# ПРОФИЛЬ ФАНАТА: Michael\n\n## 1. ДОСЬЕ\n\nИмя: Michael.\n\n- Рыбалка\n- Садоводство',
+    });
+
+    const body = requireElement<HTMLDivElement>('.chatgoose-stream.chatgoose-md');
+    expect(body.querySelector('.chatgoose-md-h1')?.textContent).toBe('ПРОФИЛЬ ФАНАТА: Michael');
+    expect(body.querySelector('.chatgoose-md-h2')?.textContent).toBe('1. ДОСЬЕ');
+    expect(body.querySelector('.chatgoose-md-label')?.textContent).toBe('Имя:');
+    expect(body.querySelectorAll('ul.chatgoose-md-list li')).toHaveLength(2);
+    expect(body.textContent).not.toContain('#');
+  });
+
   it('renders the exact Fan Summary server sync status labels', () => {
     const controller = new OverlayController({
       onClose: () => undefined,

@@ -1023,6 +1023,82 @@
   animation: chatgoose-caret-blink 1s steps(2) infinite;
 }
 
+/* ─── Fan Summary dossier (rendered kernel markdown) ─────────── */
+
+/* The .chatgoose-md modifier switches the stream frame from pre-wrap raw
+   text to formatted blocks. List/heading properties are explicit because
+   the overlay lives in Fansly's DOM and inherits the host page's resets. */
+.chatgoose-md {
+  white-space: normal;
+  display: grid;
+  gap: 10px;
+}
+
+.chatgoose-md-h {
+  margin: 0;
+}
+
+.chatgoose-md-h1 {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.chatgoose-md-h2 {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--chatgoose-line);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-md-h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.chatgoose-md-h3 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.chatgoose-md-p {
+  margin: 0;
+}
+
+.chatgoose-md-label {
+  font-weight: 700;
+}
+
+.chatgoose-md-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  list-style: disc;
+}
+
+ol.chatgoose-md-list {
+  list-style: decimal;
+}
+
+.chatgoose-md-list li {
+  margin: 0;
+  padding: 0;
+}
+
+.chatgoose-md code {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 0.85em;
+  background: var(--chatgoose-bg3);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
 /* ─── Cards & Parts ──────────────────────────────────────────── */
 
 .chatgoose-parts {
