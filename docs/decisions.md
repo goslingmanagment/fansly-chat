@@ -465,3 +465,12 @@ product incident). §5 watch: contentType 12002 is pinned from the clean-room
 analysis, not a live capture — verify on the first walkthrough that names
 appear; if they don't, that constant is the first suspect. Pinned in
 spenders-service / spenders-board-controller / spenders suites.
+SAME-DAY HOTFIX (field report: board froze on "Building the board…"): the
+sweep ran up to 10 back-to-back batches, each with the DEFAULT retry budget
+(4 × 30s timeouts + backoff) — rate-limited batches stacked toward the
+120s build abort. Now: per-batch retryPolicy 'none', an inter-batch
+FANSLY_PAGINATION_DELAY_MS pause, a hard SPENDERS_NAME_SWEEP_BUDGET_MS=12s
+wall-clock budget (out of budget → ship the board with the names in hand),
+and a SEPARATE session name cache (SPENDERS_NAMES_CACHE_TTL_MS=6h,
+merge-write) so later builds — including Refresh — fetch only unknown ids.
+Names are decoration; the board never hangs on them again.

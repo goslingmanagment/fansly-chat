@@ -20,10 +20,13 @@
 
 import {
   FANSLY_CUSTOM_NAME_NOTE_TYPE,
+  FANSLY_PAGINATION_DELAY_MS,
   SPENDERS_CACHE_TTL_MS,
   SPENDERS_KERNEL_LIMIT,
   SPENDERS_MAX_FANS,
   SPENDERS_NAME_LOOKUP_BATCH,
+  SPENDERS_NAME_SWEEP_BUDGET_MS,
+  SPENDERS_NAMES_CACHE_TTL_MS,
 } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { monthWindowFor } from '../shared/spenders.js';
@@ -46,6 +49,49 @@ function customNameFromAccount(account: FanslyAccountResponse): string | null {
   );
   const text = note?.note?.trim();
   return text ? text : null;
+}
+
+/** What a board row needs to know about a fan's names. */
+interface FanNames {
+  customName: string | null;
+  displayName: string | null;
+  username: string | null;
+}
+
+interface NamesCacheEntry {
+  savedAt: number;
+  byId: Record<string, FanNames>;
+}
+
+function namesFromAccount(account: FanslyAccountResponse): FanNames {
+  return {
+    customName: customNameFromAccount(account),
+    displayName: account.displayName ?? null,
+    username: account.username ?? null,
+  };
+}
+
+/** Abort-aware sleep for pacing the name sweep between batches. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = globalThis.setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const cleanup = () => {
+      globalThis.clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+    };
+    signal.addEventListener('abort', onAbort);
+  });
 }
 
 interface CacheEntry {
@@ -110,6 +156,46 @@ async function writeSessionCache(key: string, entry: CacheEntry | null): Promise
   }
 }
 
+// Fan names get their OWN session cache with a much longer TTL than the
+// board: renames are rare, and re-sweeping /account?ids= on every 10-minute
+// rebuild is what froze the 1.9.1 board. Later builds fetch only unknown ids.
+const NAMES_CACHE_STORAGE_KEY = 'spendersNames';
+
+async function readNamesCache(key: string): Promise<NamesCacheEntry | null> {
+  const area = sessionStorageArea();
+  if (!area) return null;
+  try {
+    const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
+    const all = raw[NAMES_CACHE_STORAGE_KEY];
+    if (!all || typeof all !== 'object') return null;
+    const entry = (all as Record<string, unknown>)[key];
+    if (!entry || typeof entry !== 'object') return null;
+    const candidate = entry as NamesCacheEntry;
+    if (typeof candidate.savedAt !== 'number' || typeof candidate.byId !== 'object') {
+      return null;
+    }
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+async function writeNamesCache(key: string, entry: NamesCacheEntry): Promise<void> {
+  const area = sessionStorageArea();
+  if (!area) return;
+  try {
+    const raw = await area.get(NAMES_CACHE_STORAGE_KEY);
+    const all =
+      raw[NAMES_CACHE_STORAGE_KEY] && typeof raw[NAMES_CACHE_STORAGE_KEY] === 'object'
+        ? { ...(raw[NAMES_CACHE_STORAGE_KEY] as Record<string, NamesCacheEntry>) }
+        : {};
+    all[key] = entry;
+    await area.set({ [NAMES_CACHE_STORAGE_KEY]: all });
+  } catch {
+    // Best-effort persistence.
+  }
+}
+
 export interface SpendersKernelSource {
   resolvePageLabelForUsername: AgencyHubClient['resolvePageLabelForUsername'];
   fetchTopSpenders(
@@ -137,6 +223,8 @@ export class SpendersService {
     private readonly fanslyClient: FanslyClient,
     private readonly kernelSource?: SpendersKernelSource,
     private readonly getSettings?: () => Promise<Settings>,
+    /** Test seam — production uses the constants. */
+    private readonly tuning?: { nameSweepBudgetMs?: number },
   ) {}
 
   private cacheKey(session: SessionTemplate): string {
@@ -235,13 +323,11 @@ export class SpendersService {
       monthReady ? month.entries.map((entry) => [entry.platformUserId, entry.grossMills]) : [],
     );
 
-    // Best-effort: the names chatters actually recognize. One batched
-    // /account?ids= sweep (an endpoint this client already uses) brings the
-    // creator-session account payloads, whose notes carry Fansly's native
-    // custom display names; the same payload backfills platform names for
-    // fans the projection knows only by id. Failure degrades to platform
-    // names, never the board.
-    const accountById = await this.resolveFanAccounts(
+    // Best-effort: the names chatters actually recognize (custom rename
+    // notes + platform-name backfill). Cached long and hard-budgeted —
+    // names are decoration, the board must never hang on them (the 1.9.1
+    // freeze was this sweep retrying through rate limits).
+    const namesByFanId = await this.resolveFanNames(
       lifetime.entries.map((entry) => entry.platformUserId),
       session,
       signal,
@@ -249,13 +335,13 @@ export class SpendersService {
 
     const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
       const monthMills = monthReady ? (monthByFanId.get(entry.platformUserId) ?? 0) : null;
-      const account = accountById.get(entry.platformUserId);
+      const names = namesByFanId.get(entry.platformUserId);
       return {
         fanAccountId: entry.platformUserId,
         groupId: groupByFanId.get(entry.platformUserId) ?? null,
-        customName: account ? customNameFromAccount(account) : null,
-        displayName: entry.displayName ?? account?.displayName ?? null,
-        username: entry.username ?? account?.username ?? null,
+        customName: names?.customName ?? null,
+        displayName: entry.displayName ?? names?.displayName ?? null,
+        username: entry.username ?? names?.username ?? null,
         lifetimeMills: entry.grossMills,
         lifetimeUsd: entry.grossMills / 1000,
         monthMills,
@@ -275,21 +361,53 @@ export class SpendersService {
     };
   }
 
-  /** Batched creator-session account lookup for the listed fans. Best-effort:
-   * a failed batch drops only its own fans' names (platform names remain). */
-  private async resolveFanAccounts(
+  /** Names for the listed fans: session-cached first (6h TTL — renames are
+   * rare), then ONE paced sweep for unknown ids only: no retry budget, an
+   * inter-batch pause, and a hard wall-clock budget. Best-effort throughout:
+   * whatever the sweep did not reach stays on platform names. */
+  private async resolveFanNames(
     fanAccountIds: string[],
     session: SessionTemplate,
     signal: AbortSignal,
-  ): Promise<Map<string, FanslyAccountResponse>> {
-    const accountById = new Map<string, FanslyAccountResponse>();
-    for (let start = 0; start < fanAccountIds.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
-      const batch = fanAccountIds.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
+  ): Promise<Map<string, FanNames>> {
+    const cacheKey = this.cacheKey(session);
+    const namesById = new Map<string, FanNames>();
+
+    const cached = await readNamesCache(cacheKey);
+    const cacheFresh =
+      cached !== null && Date.now() - cached.savedAt < SPENDERS_NAMES_CACHE_TTL_MS;
+    if (cached && cacheFresh) {
+      for (const [id, names] of Object.entries(cached.byId)) {
+        namesById.set(id, names);
+      }
+    }
+
+    const missing = fanAccountIds.filter((id) => !namesById.has(id));
+    if (missing.length === 0) {
+      return namesById;
+    }
+
+    const sweepStart = Date.now();
+    let fetchedAny = false;
+    for (let start = 0; start < missing.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
+      if (Date.now() - sweepStart >= (this.tuning?.nameSweepBudgetMs ?? SPENDERS_NAME_SWEEP_BUDGET_MS)) {
+        break; // Out of budget — ship the board with what we have.
+      }
+      const batch = missing.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
       try {
-        const accounts = await this.fanslyClient.getAccountNames(batch, session, signal);
+        if (start > 0) {
+          await pause(FANSLY_PAGINATION_DELAY_MS, signal);
+        }
+        const accounts = await this.fanslyClient.getAccountNames(
+          batch,
+          session,
+          signal,
+          'none',
+        );
         for (const account of accounts) {
           if (account?.id) {
-            accountById.set(account.id, account);
+            namesById.set(account.id, namesFromAccount(account));
+            fetchedAny = true;
           }
         }
       } catch (error) {
@@ -299,7 +417,22 @@ export class SpendersService {
         }
       }
     }
-    return accountById;
+
+    if (fetchedAny) {
+      // Merge-write: keep whatever the cache already knew (stale entries
+      // roll off with the TTL as a whole).
+      const merged: Record<string, FanNames> = {
+        ...(cached && cacheFresh ? cached.byId : {}),
+      };
+      for (const [id, names] of namesById) {
+        merged[id] = names;
+      }
+      void writeNamesCache(cacheKey, {
+        savedAt: cached && cacheFresh ? cached.savedAt : Date.now(),
+        byId: merged,
+      });
+    }
+    return namesById;
   }
 
   /** Drop the cached board for this creator (memory + session storage). */
