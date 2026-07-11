@@ -364,7 +364,14 @@ Scan actually ran) so the kernel's dossier age policy (#136) doesn't reset
 on delayed re-pushes — needs the re-vendored SDK (core @ ai/scan-dossier);
 old kernels ignore the extra key (non-strict schema), so deploy order is
 free. No UI change; the existing sync-status pill picks up the result
-message.
+message. Round-3 review: hub-prefetch hydration now records the SOURCE
+generation time (`sourceGeneratedAtMs ?? createdAtMs ?? now`) — hydrating
+with the append time made an old dossier look locally fresh and would
+re-propagate that wrong stamp as `generatedAtMs` on a later re-push; and
+the write race the client preflight can't close is closed ATOMICALLY
+kernel-side (core 103ce92, appendFanProfile under its advisory lock:
+identical body no-ops, a non-newer sourced write no-ops), so the preflight
+here is an optimization, not the guarantee.
 
 **E23 (2026-07-11).** Spenders board v2 — completeness, month movement, and
 workflow speed (owner-approved scope a/b/d/e; recency/retention deferred).
