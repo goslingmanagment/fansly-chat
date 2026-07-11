@@ -16,10 +16,12 @@ function entry(
   displayName: string | null,
   lifetimeUsd: number,
   monthUsd: number | null = null,
+  customName: string | null = null,
 ): SpenderListEntry {
   return {
     fanAccountId,
     groupId,
+    customName,
     displayName,
     username: displayName ? displayName.toLowerCase() : null,
     lifetimeMills: lifetimeUsd * 1000,
@@ -322,6 +324,46 @@ describe('SpendersBoardController', () => {
 
     input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(board.isOpen()).toBe(false);
+  });
+
+  // ── E25: chatter custom names ─────────────────────────────────────────────
+
+  it('renders the custom name as the row name and keeps the handle', async () => {
+    const result = makeResult({
+      entries: [entry('fan-1', 'group-1', 'BseriesGod', 1744, null, 'Max/Canada/45')],
+      fanCount: 1,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+    );
+    await board.show();
+
+    expect(rows()[0]!.querySelector('.chatgoose-board-row-name')!.textContent).toBe(
+      'Max/Canada/45',
+    );
+    expect(rows()[0]!.querySelector('.chatgoose-board-row-handle')!.textContent).toBe(
+      '@bseriesgod',
+    );
+  });
+
+  it('search matches the custom name too', async () => {
+    const result = makeResult({
+      entries: [
+        entry('fan-1', 'group-1', 'BseriesGod', 1744, null, 'Max/Canada/45'),
+        entry('fan-2', 'group-2', 'Charles', 700),
+      ],
+      fanCount: 2,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+    );
+    await board.show();
+
+    typeSearch('canada');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]!.querySelector('.chatgoose-board-row-name')!.textContent).toBe(
+      'Max/Canada/45',
+    );
   });
 
   // ── Meta line ─────────────────────────────────────────────────────────────

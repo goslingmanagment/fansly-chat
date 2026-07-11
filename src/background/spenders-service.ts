@@ -19,13 +19,16 @@
 // max(observed_at) of the projection window, not "now".
 
 import {
+  FANSLY_CUSTOM_NAME_NOTE_TYPE,
   SPENDERS_CACHE_TTL_MS,
   SPENDERS_KERNEL_LIMIT,
   SPENDERS_MAX_FANS,
+  SPENDERS_NAME_LOOKUP_BATCH,
 } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { monthWindowFor } from '../shared/spenders.js';
 import type {
+  FanslyAccountResponse,
   SessionTemplate,
   Settings,
   SpenderListEntry,
@@ -33,6 +36,17 @@ import type {
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
+
+/** The creator's custom display name for a fan — Fansly's native rename,
+ * stored as an account note whose text is the name. */
+function customNameFromAccount(account: FanslyAccountResponse): string | null {
+  if (!Array.isArray(account.notes)) return null;
+  const note = account.notes.find(
+    (entry) => entry?.contentType === FANSLY_CUSTOM_NAME_NOTE_TYPE,
+  );
+  const text = note?.note?.trim();
+  return text ? text : null;
+}
 
 interface CacheEntry {
   cachedAt: number;
@@ -221,13 +235,27 @@ export class SpendersService {
       monthReady ? month.entries.map((entry) => [entry.platformUserId, entry.grossMills]) : [],
     );
 
+    // Best-effort: the names chatters actually recognize. One batched
+    // /account?ids= sweep (an endpoint this client already uses) brings the
+    // creator-session account payloads, whose notes carry Fansly's native
+    // custom display names; the same payload backfills platform names for
+    // fans the projection knows only by id. Failure degrades to platform
+    // names, never the board.
+    const accountById = await this.resolveFanAccounts(
+      lifetime.entries.map((entry) => entry.platformUserId),
+      session,
+      signal,
+    );
+
     const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
       const monthMills = monthReady ? (monthByFanId.get(entry.platformUserId) ?? 0) : null;
+      const account = accountById.get(entry.platformUserId);
       return {
         fanAccountId: entry.platformUserId,
         groupId: groupByFanId.get(entry.platformUserId) ?? null,
-        displayName: entry.displayName,
-        username: entry.username,
+        customName: account ? customNameFromAccount(account) : null,
+        displayName: entry.displayName ?? account?.displayName ?? null,
+        username: entry.username ?? account?.username ?? null,
         lifetimeMills: entry.grossMills,
         lifetimeUsd: entry.grossMills / 1000,
         monthMills,
@@ -245,6 +273,33 @@ export class SpendersService {
       monthWindow: monthReady ? monthWindow : null,
       fetchedAt: Date.now(),
     };
+  }
+
+  /** Batched creator-session account lookup for the listed fans. Best-effort:
+   * a failed batch drops only its own fans' names (platform names remain). */
+  private async resolveFanAccounts(
+    fanAccountIds: string[],
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<Map<string, FanslyAccountResponse>> {
+    const accountById = new Map<string, FanslyAccountResponse>();
+    for (let start = 0; start < fanAccountIds.length; start += SPENDERS_NAME_LOOKUP_BATCH) {
+      const batch = fanAccountIds.slice(start, start + SPENDERS_NAME_LOOKUP_BATCH);
+      try {
+        const accounts = await this.fanslyClient.getAccountNames(batch, session, signal);
+        for (const account of accounts) {
+          if (account?.id) {
+            accountById.set(account.id, account);
+          }
+        }
+      } catch (error) {
+        // An aborted build must still abort; anything else is best-effort.
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw error;
+        }
+      }
+    }
+    return accountById;
   }
 
   /** Drop the cached board for this creator (memory + session storage). */

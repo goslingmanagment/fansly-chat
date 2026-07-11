@@ -361,11 +361,22 @@ export interface FanslyGroupResponse {
   users: Array<{ userId: string }>;
 }
 
+export interface FanslyAccountNote {
+  id?: string;
+  contentType?: number;
+  title?: string | null;
+  note?: string | null;
+}
+
 export interface FanslyAccountResponse {
   id: string;
   username?: string | null;
   displayName?: string | null;
   about?: string | null;
+  /** Creator-session account notes. contentType 12002 carries the creator's
+   * custom display name for this fan (Fansly's native "change display names —
+   * it's for your eyes only" rename); the note text IS the name. */
+  notes?: FanslyAccountNote[] | null;
 }
 
 // ─── Earnings ────────────────────────────────────────────────────────────
@@ -754,6 +765,11 @@ export interface SpenderListEntry {
    * Null = the fan is not among the most-recent enumerated conversations;
    * the board resolves the chat lazily (one inbox search) on open. */
   groupId: string | null;
+  /** The creator's own name for this fan (Fansly's native rename, stored as
+   * an account note) — the name chatters actually recognize. CHATTER-EYES
+   * ONLY: never sent into prompts/clientContext (the model must address the
+   * fan by the fan's real name, not "Max/Canada/45"). */
+  customName: string | null;
   displayName: string | null;
   username: string | null;
   /** Lifetime gross spend with this creator, in Fansly mills. */
