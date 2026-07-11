@@ -625,15 +625,19 @@ describe('OperationCoordinator', () => {
       };
     }
 
-    function retryHubClient(pushResult: Record<string, unknown>) {
+    function retryHubClient(
+      pushResult: Record<string, unknown>,
+      fetchResult: Record<string, unknown> = {
+        status: 'not-found',
+        reason: 'profile_missing',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      },
+    ) {
       return {
         isConfigured: vi.fn(() => true),
         resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
-        fetchFanProfileByConversation: vi.fn(async () => ({
-          status: 'skipped',
-          reason: 'disabled',
-          baseUrl: null,
-        })),
+        fetchFanProfileByConversation: vi.fn(async () => fetchResult),
         pushFanProfile: vi.fn(async () => pushResult),
       };
     }
@@ -721,6 +725,67 @@ describe('OperationCoordinator', () => {
       await vi.waitFor(() => {
         expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(2);
       });
+    });
+
+    it('records "saved" without a duplicate append when the hub already holds this body', async () => {
+      hubConfiguredSettings();
+      const agencyHubClient = retryHubClient(
+        { status: 'pushed', reason: 'pushed', baseUrl: 'http://localhost:3000', pageLabel: 'creator-fs' },
+        {
+          status: 'fetched',
+          reason: 'fetched',
+          baseUrl: 'http://localhost:3000',
+          pageLabel: 'creator-fs',
+          body: 'Old summary',
+          createdAtMs: 5000,
+          fanAccountId: 'fan-1',
+        },
+      );
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      await tabInit(coordinator, 1);
+      await vi.waitFor(() => {
+        expect(mockStorage['summary:group-1']).toMatchObject({
+          agencyHubSync: expect.objectContaining({ state: 'saved' }),
+        });
+      });
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
+    it('never supersedes a newer hub dossier with a stale local re-push', async () => {
+      hubConfiguredSettings();
+      const agencyHubClient = retryHubClient(
+        { status: 'pushed', reason: 'pushed', baseUrl: 'http://localhost:3000', pageLabel: 'creator-fs' },
+        {
+          status: 'fetched',
+          reason: 'fetched',
+          baseUrl: 'http://localhost:3000',
+          pageLabel: 'creator-fs',
+          // Another device re-scanned: different body, generated AFTER our
+          // local summary (generatedAt 2000).
+          body: 'Newer dossier from another device',
+          createdAtMs: 999_999,
+          sourceGeneratedAtMs: 888_888,
+          fanAccountId: 'fan-1',
+        },
+      );
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      await tabInit(coordinator, 1);
+      await vi.waitFor(() => {
+        expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+      expect(mockStorage['summary:group-1']).not.toMatchObject({
+        agencyHubSync: expect.objectContaining({ state: 'saved' }),
+      });
+
+      // Parked for this worker lifetime: another chat open changes nothing.
+      await tabInit(coordinator, 2);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
   });
 

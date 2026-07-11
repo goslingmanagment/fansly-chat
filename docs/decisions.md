@@ -344,5 +344,16 @@ available summary whose `agencyHubSync` is not `saved` for the current
 in-flight dedup + `SUMMARY_SYNC_RETRY_COOLDOWN_MS` (3 min) per
 `groupId|generatedAt|baseUrl` key (a NEW Scan or hub retarget gets a fresh
 key; the key clears once saved), and the hub side already dedups
-`already-synced` by (baseUrl, pageLabel, generatedAt). No UI change; the
-existing sync-status pill picks up the result message.
+`already-synced` by (baseUrl, pageLabel, generatedAt). REVIEW HARDENING
+(same day): the re-push is not blind — a preflight GET of the hub's current
+profile classifies first: identical body → just record "saved" (a lost
+ack), no duplicate version append; a DIFFERENT hub profile that is not
+older than ours (by `sourceGeneratedAtMs` when present, upload time
+fallback) → never superseded by our stale local body, the key parks for
+the worker lifetime (another device re-scanned); inconclusive fetch → no
+blind push, cooldown governs. Pushes now carry `generatedAtMs` (when the
+Scan actually ran) so the kernel's dossier age policy (#136) doesn't reset
+on delayed re-pushes — needs the re-vendored SDK (core @ ai/scan-dossier);
+old kernels ignore the extra key (non-strict schema), so deploy order is
+free. No UI change; the existing sync-status pill picks up the result
+message.

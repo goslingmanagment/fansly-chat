@@ -35,6 +35,9 @@ interface AgencyHubProfileRecord {
   body: string;
   source: 'chatmuse';
   createdAt: string;
+  /** Scan generation time (core #136); absent/null on rows written before
+   * the kernel learned the field. */
+  sourceGeneratedAt?: string | null;
   createdByUserId: number | null;
 }
 
@@ -94,6 +97,10 @@ export interface AgencyHubFetchFanProfileResult extends AgencyHubResultBase {
   status: 'fetched' | 'not-found' | 'skipped' | 'failed';
   body?: string;
   createdAtMs?: number;
+  /** When the stored profile's Scan actually ran (core #136); absent on rows
+   * written before the kernel learned the field. createdAtMs is only the hub
+   * APPEND time. */
+  sourceGeneratedAtMs?: number;
   fanAccountId?: string;
 }
 
@@ -277,11 +284,15 @@ export class AgencyHubClient {
     platformUserId: string,
     body: string,
     signal: AbortSignal,
+    generatedAtMs?: number,
   ): Promise<void> {
     try {
       await this.sdkFor(baseUrl, apiKey, signal).upsertFanProfile({
         params: { pageLabel, platformUserId },
-        body: { body },
+        // generatedAtMs = when the Scan ran (core #136): without it a delayed
+        // re-push would reset the dossier's age kernel-side (created_at is the
+        // append time). Old kernels ignore the extra key (non-strict schema).
+        body: { body, ...(generatedAtMs ? { generatedAtMs } : {}) },
       });
     } catch (error) {
       throw this.toHubError(error, 'fan profile push');
@@ -668,6 +679,7 @@ export class AgencyHubClient {
         trimmedPlatformUserId,
         body,
         signal,
+        generatedAt,
       );
       return {
         status: 'pushed',
@@ -803,6 +815,9 @@ export class AgencyHubClient {
       }
 
       const createdAtMs = Date.parse(profileResponse.profile.createdAt);
+      const sourceGeneratedAtMs = profileResponse.profile.sourceGeneratedAt
+        ? Date.parse(profileResponse.profile.sourceGeneratedAt)
+        : Number.NaN;
       const fanAccountId = profileResponse.fan.platformUserId.trim();
 
       return {
@@ -812,6 +827,7 @@ export class AgencyHubClient {
         pageLabel,
         body,
         ...(Number.isFinite(createdAtMs) ? { createdAtMs } : {}),
+        ...(Number.isFinite(sourceGeneratedAtMs) ? { sourceGeneratedAtMs } : {}),
         ...(fanAccountId ? { fanAccountId } : {}),
       };
     } catch (error) {
