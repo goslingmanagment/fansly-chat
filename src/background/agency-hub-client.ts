@@ -21,6 +21,7 @@ import type {
   AgencyHubConnectionTestResponse,
   AgencyHubSummarySyncMetadata,
   Settings,
+  SpendersStreamState,
   UserFacingError,
 } from '../shared/types.js';
 
@@ -316,7 +317,8 @@ export class AgencyHubClient {
 
   /** Stage 32: the feature lane needs the kernel page label for the signed-in
    * Fansly creator. Exact-match rule over the SDK pages list (the profile
-   * push's resolvePageLabel, exposed). Null = unmapped (caller surfaces it). */
+   * push's resolvePageLabel, exposed). Null means a configured, reachable Hub
+   * had no page match; preflight failures keep their own actionable codes. */
   async resolvePageLabelForUsername(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     pageUsername: string | null,
@@ -324,10 +326,29 @@ export class AgencyHubClient {
   ): Promise<string | null> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
-    if (!baseUrl || !bearer || !await this.hasHostPermission(baseUrl)) {
-      return null;
+    if (!baseUrl) throw new ChatGooseError('hub_invalid_url');
+    if (!bearer) throw new ChatGooseError('hub_missing_api_key');
+    if (!await this.hasHostPermission(baseUrl)) {
+      throw new ChatGooseError('hub_missing_permission');
     }
-    const pages = await this.listVisiblePages(baseUrl, bearer, signal);
+    let pages: AgencyHubPageSummary[];
+    try {
+      pages = await this.listVisiblePages(baseUrl, bearer, signal);
+    } catch (error) {
+      if (
+        error instanceof ChatGooseError ||
+        (error instanceof DOMException && error.name === 'AbortError')
+      ) throw error;
+      // Wrapper-style Hub operations retain raw network reasons, but this is a
+      // throwing feature-lane preflight: keep it inside the Hub error domain so
+      // runtime UI cannot collapse it to CG-UNK-01.
+      throw new ChatGooseError('hub_request_failed', {
+        details: {
+          status: 0,
+          responseSnippet: error instanceof Error ? error.message.slice(0, 400) : '',
+        },
+      });
+    }
     return this.resolvePageLabel(pages, pageUsername);
   }
 
@@ -343,6 +364,11 @@ export class AgencyHubClient {
   ): Promise<{
     builtAt: string | null;
     fanCount: number;
+    source: {
+      streamState: SpendersStreamState;
+      lastSyncedAt: string | null;
+      consecutiveFailures: number | null;
+    };
     entries: Array<{
       platformUserId: string;
       username: string | null;
@@ -363,6 +389,11 @@ export class AgencyHubClient {
       return {
         builtAt: snapshot.builtAt,
         fanCount: snapshot.fanCount,
+        source: {
+          streamState: snapshot.source.streamState,
+          lastSyncedAt: snapshot.source.lastSyncedAt,
+          consecutiveFailures: snapshot.source.consecutiveFailures,
+        },
         entries: snapshot.entries.map((entry) => ({
           platformUserId: entry.platformUserId,
           username: entry.username,

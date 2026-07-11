@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SpendersService } from '../src/background/spenders-service.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
+import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import { monthWindowFor } from '../src/shared/spenders.js';
-import type { FanslyAccountResponse, SessionTemplate } from '../src/shared/types.js';
+import type {
+  FanslyAccountResponse,
+  SessionTemplate,
+  Settings,
+  SpendersStreamState,
+} from '../src/shared/types.js';
 
 function session(accountId = 'creator-1'): SessionTemplate {
   return {
@@ -35,9 +41,18 @@ function makeClient(overrides: StubOverrides) {
     { groupId: 'g3', fanAccountId: 'f3' },
   ];
 
-  const listFanAccounts = vi.fn(async () => ({ fans, truncated: overrides.truncated ?? false }));
+  const listFanAccounts = vi.fn(async (
+    _maxFans: number,
+    _session: SessionTemplate,
+    _signal: AbortSignal,
+  ) => ({ fans, truncated: overrides.truncated ?? false }));
   const getEarnings = vi.fn(async () => null);
-  const getAccountNames = vi.fn(async (ids: string[]) => {
+  const getAccountNames = vi.fn(async (
+    ids: string[],
+    _session: SessionTemplate,
+    _signal: AbortSignal,
+    _retryPolicy: 'default' | 'none' = 'default',
+  ) => {
     if (overrides.accounts === 'throw') throw new Error('account lookup failed');
     const known = overrides.accounts ?? [];
     return known.filter((account) => ids.includes(account.id));
@@ -50,6 +65,11 @@ function makeClient(overrides: StubOverrides) {
 interface KernelSnapshot {
   builtAt: string | null;
   fanCount: number;
+  source: {
+    streamState: SpendersStreamState;
+    lastSyncedAt: string | null;
+    consecutiveFailures: number | null;
+  };
   entries: Array<{
     platformUserId: string;
     username: string | null;
@@ -57,6 +77,14 @@ interface KernelSnapshot {
     grossMills: number;
   }>;
 }
+
+const CURRENT_MONTH_SYNC_AT = `${monthWindowFor(Date.now())}-05T01:00:00.000Z`;
+
+const RAMPED_SOURCE: KernelSnapshot['source'] = {
+  streamState: 'ramped',
+  lastSyncedAt: CURRENT_MONTH_SYNC_AT,
+  consecutiveFailures: 0,
+};
 
 // 1.7.0: the legacy per-fan sweep tests died with the code path (E9). The
 // service-level behaviors they pinned — caching and abort hygiene — are
@@ -66,6 +94,7 @@ interface KernelSnapshot {
 
 describe('SpendersService (kernel source)', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -77,6 +106,7 @@ describe('SpendersService (kernel source)', () => {
   const LIFETIME_SNAPSHOT: KernelSnapshot = {
     builtAt: '2026-07-05T00:00:00.000Z',
     fanCount: 3,
+    source: RAMPED_SOURCE,
     entries: [
       { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 1_078_000 },
       { platformUserId: 'f2', username: null, displayName: null, grossMills: 700_000 },
@@ -88,6 +118,7 @@ describe('SpendersService (kernel source)', () => {
   const MONTH_SNAPSHOT: KernelSnapshot = {
     builtAt: '2026-07-05T00:00:00.000Z',
     fanCount: 2,
+    source: RAMPED_SOURCE,
     entries: [
       { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 120_000 },
       { platformUserId: 'f-unknown', username: 'ghost', displayName: null, grossMills: 500_000 },
@@ -97,7 +128,8 @@ describe('SpendersService (kernel source)', () => {
   function makeKernelHarness(overrides: StubOverrides & {
     snapshot?: KernelSnapshot;
     monthSnapshot?: KernelSnapshot | 'throw';
-    tuning?: { nameSweepBudgetMs?: number };
+    tuning?: { nameSweepBudgetMs?: number; chatMapBudgetMs?: number; monthBudgetMs?: number };
+    settings?: Partial<Settings>;
   } = {}) {
     const { client, listFanAccounts, getEarnings, getAccountNames } = makeClient(overrides);
     const snapshot = overrides.snapshot ?? LIFETIME_SNAPSHOT;
@@ -123,9 +155,18 @@ describe('SpendersService (kernel source)', () => {
       ...createDefaultSettings(),
       agencyHubBaseUrl: 'http://localhost:3000',
       agencyHubApiKey: 'hub-key',
+      ...overrides.settings,
     };
     const service = new SpendersService(client, kernelSource, async () => settings, overrides.tuning);
-    return { service, kernelSource, fetchTopSpenders, listFanAccounts, getEarnings, getAccountNames };
+    return {
+      service,
+      settings,
+      kernelSource,
+      fetchTopSpenders,
+      listFanAccounts,
+      getEarnings,
+      getAccountNames,
+    };
   }
 
   it('builds from the kernel: every spender listed, unmapped fans get groupId null', async () => {
@@ -191,10 +232,138 @@ describe('SpendersService (kernel source)', () => {
     ]);
     // Snapshot honesty: the projection's freshest observation, not "now".
     expect(result.builtAt).toBe(Date.parse('2026-07-05T00:00:00.000Z'));
+    expect(result.source).toEqual({
+      streamState: 'ramped',
+      lastSyncedAt: Date.parse(CURRENT_MONTH_SYNC_AT),
+      consecutiveFailures: 0,
+    });
     // fanCount = the kernel's total, not the shown slice.
     expect(result.fanCount).toBe(3);
     expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
     expect(typeof result.fetchedAt).toBe('number');
+  });
+
+  it('degrades a failed optional conversation map to lazy chat resolution', async () => {
+    const { service, listFanAccounts } = makeKernelHarness();
+    listFanAccounts.mockRejectedValueOnce(new Error('inbox temporarily unavailable'));
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries.every((entry) => entry.groupId === null)).toBe(true);
+  });
+
+  it('cuts off a hanging optional conversation map at its focused deadline', async () => {
+    vi.useFakeTimers();
+    const { service, listFanAccounts } = makeKernelHarness({
+      tuning: { chatMapBudgetMs: 25 },
+    });
+    let started!: () => void;
+    const mapStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    listFanAccounts.mockImplementationOnce(async (
+      _limit: number,
+      _session: SessionTemplate,
+      signal: AbortSignal,
+    ) => await new Promise<{ fans: Array<{ groupId: string; fanAccountId: string }>; truncated: boolean }>(
+      (_resolve, reject) => {
+        started();
+        signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      },
+    ));
+
+    const build = service.getList(kernelSession(), new AbortController().signal);
+    await mapStarted;
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await build;
+
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries.every((entry) => entry.groupId === null)).toBe(true);
+  });
+
+  it('does not make an empty kernel board wait for the optional conversation map', async () => {
+    const { service, listFanAccounts, getAccountNames } = makeKernelHarness({
+      snapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+    let mapSignal: AbortSignal | undefined;
+    listFanAccounts.mockImplementationOnce(async (
+      _limit: number,
+      _session: SessionTemplate,
+      signal: AbortSignal,
+    ) => {
+      mapSignal = signal;
+      return await new Promise<{
+        fans: Array<{ groupId: string; fanAccountId: string }>;
+        truncated: boolean;
+      }>((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.entries).toEqual([]);
+    expect(mapSignal?.aborted).toBe(true);
+    expect(getAccountNames).not.toHaveBeenCalled();
+  });
+
+  it('keeps session expiry from the conversation map fatal', async () => {
+    const { service, listFanAccounts } = makeKernelHarness();
+    listFanAccounts.mockRejectedValueOnce(new ChatGooseError('session_expired'));
+
+    await expect(
+      service.getList(kernelSession(), new AbortController().signal),
+    ).rejects.toMatchObject({ key: 'session_expired' });
+  });
+
+  it('observes an early session expiry from the conversation map even for an empty board', async () => {
+    const { service, listFanAccounts } = makeKernelHarness({
+      snapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+    listFanAccounts.mockRejectedValueOnce(new ChatGooseError('session_expired'));
+
+    await expect(
+      service.getList(kernelSession(), new AbortController().signal),
+    ).rejects.toMatchObject({ key: 'session_expired' });
+  });
+
+  it('keeps a parent abort from the conversation map fatal', async () => {
+    const { service, listFanAccounts } = makeKernelHarness();
+    const controller = new AbortController();
+    let started!: () => void;
+    const mapStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    listFanAccounts.mockImplementationOnce(async (
+      _limit: number,
+      _session: SessionTemplate,
+      signal: AbortSignal,
+    ) => await new Promise<{ fans: Array<{ groupId: string; fanAccountId: string }>; truncated: boolean }>(
+      (_resolve, reject) => {
+        started();
+        signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      },
+    ));
+
+    const build = service.getList(kernelSession(), controller.signal);
+    await mapStarted;
+    controller.abort();
+    await expect(build).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   // ── E25: chatter custom names (Fansly rename notes) ──────────────────────
@@ -240,8 +409,13 @@ describe('SpendersService (kernel source)', () => {
       grossMills: 1_000_000 - index,
     }));
     const { service, getAccountNames } = makeKernelHarness({
-      snapshot: { builtAt: '2026-07-05T00:00:00.000Z', fanCount: 120, entries: manyEntries },
-      monthSnapshot: { builtAt: null, fanCount: 0, entries: [] },
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 120,
+        source: RAMPED_SOURCE,
+        entries: manyEntries,
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
     });
     await service.getList(kernelSession(), new AbortController().signal);
 
@@ -267,6 +441,30 @@ describe('SpendersService (kernel source)', () => {
     );
   });
 
+  it('stops the remaining name batches after a rate-limit response', async () => {
+    const manyEntries = Array.from({ length: 120 }, (_, index) => ({
+      platformUserId: `fan-${index}`,
+      username: `u${index}`,
+      displayName: null,
+      grossMills: 1_000_000 - index,
+    }));
+    const { service, getAccountNames } = makeKernelHarness({
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 120,
+        source: RAMPED_SOURCE,
+        entries: manyEntries,
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+    getAccountNames.mockRejectedValueOnce(new ChatGooseError('rate_limited'));
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.entries).toHaveLength(120);
+    expect(getAccountNames).toHaveBeenCalledTimes(1);
+  });
+
   it('an exhausted sweep budget ships the board on platform names', async () => {
     const { service, getAccountNames } = makeKernelHarness({
       accounts: [
@@ -279,6 +477,96 @@ describe('SpendersService (kernel source)', () => {
     expect(getAccountNames).not.toHaveBeenCalled();
     expect(result.entries).toHaveLength(3);
     expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
+  });
+
+  it('aborts an in-flight name request at the sweep deadline and ships the board', async () => {
+    vi.useFakeTimers();
+    const { service, getAccountNames } = makeKernelHarness({
+      tuning: { nameSweepBudgetMs: 25 },
+    });
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    getAccountNames.mockImplementationOnce(async (
+      _ids: string[],
+      _session: SessionTemplate,
+      signal: AbortSignal,
+    ) => await new Promise<FanslyAccountResponse[]>((_resolve, reject) => {
+      started();
+      signal.addEventListener(
+        'abort',
+        () => reject(new DOMException('Aborted', 'AbortError')),
+        { once: true },
+      );
+    }));
+
+    const build = service.getList(kernelSession(), new AbortController().signal);
+    await requestStarted;
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await build;
+
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
+  });
+
+  it('treats a request-local name AbortError as cosmetic while the parent is live', async () => {
+    const { service, getAccountNames } = makeKernelHarness();
+    getAccountNames.mockRejectedValueOnce(new DOMException('Request timed out', 'AbortError'));
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.entries).toHaveLength(3);
+    expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
+  });
+
+  it('propagates a parent abort during the name sweep', async () => {
+    const { service, getAccountNames } = makeKernelHarness();
+    const controller = new AbortController();
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    getAccountNames.mockImplementationOnce(async (
+      _ids: string[],
+      _session: SessionTemplate,
+      signal: AbortSignal,
+    ) => await new Promise<FanslyAccountResponse[]>((_resolve, reject) => {
+      started();
+      signal.addEventListener(
+        'abort',
+        () => reject(new DOMException('Aborted', 'AbortError')),
+        { once: true },
+      );
+    }));
+
+    const build = service.getList(kernelSession(), controller.signal);
+    await requestStarted;
+    controller.abort();
+    await expect(build).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('keeps session expiry from the name sweep fatal and stops later batches', async () => {
+    const manyEntries = Array.from({ length: 120 }, (_, index) => ({
+      platformUserId: `f${index}`,
+      username: `fan${index}`,
+      displayName: `Fan ${index}`,
+      grossMills: 1_000_000 - index,
+    }));
+    const { service, getAccountNames } = makeKernelHarness({
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: manyEntries.length,
+        source: RAMPED_SOURCE,
+        entries: manyEntries,
+      },
+    });
+    getAccountNames.mockRejectedValueOnce(new ChatGooseError('session_expired'));
+
+    await expect(
+      service.getList(kernelSession(), new AbortController().signal),
+    ).rejects.toMatchObject({ key: 'session_expired' });
+    expect(getAccountNames).toHaveBeenCalledTimes(1);
   });
 
   it('emits ranking + counted name-sweep progress', async () => {
@@ -337,6 +625,95 @@ describe('SpendersService (kernel source)', () => {
     expect(localArea.set).toHaveBeenCalled();
   });
 
+  it('compacts an oversized warm name cache to the exact cap without a sweep', async () => {
+    const currentNames = {
+      f1: { customName: 'Current One', displayName: 'Alice', username: 'alice' },
+      f2: { customName: null, displayName: 'Bob', username: 'bob' },
+      'f-unknown': { customName: null, displayName: 'Ghost', username: 'ghost' },
+    };
+    const oldNames = Object.fromEntries(
+      Array.from({ length: 2_100 }, (_, index) => [
+        `old-${index}`,
+        { customName: null, displayName: `Old ${index}`, username: `old${index}` },
+      ]),
+    );
+    const store = new Map<string, unknown>([
+      ['spendersNames', {
+        'creator-1': {
+          savedAt: Date.now(),
+          byId: { ...oldNames, ...currentNames },
+        },
+      }],
+    ]);
+    const localArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', {
+      storage: {
+        local: localArea,
+        session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) },
+      },
+    });
+    const { service, getAccountNames } = makeKernelHarness();
+
+    await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).not.toHaveBeenCalled();
+    const all = store.get('spendersNames') as Record<string, { byId: Record<string, unknown> }>;
+    const capped = all['creator-1']!.byId;
+    expect(Object.keys(capped)).toHaveLength(2_000);
+    expect(capped).toHaveProperty('f1');
+    expect(capped).toHaveProperty('f2');
+    expect(capped).toHaveProperty('f-unknown');
+  });
+
+  it('serializes and awaits concurrent name-cache writes across creators', async () => {
+    const store = new Map<string, unknown>();
+    let setCount = 0;
+    const localArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        setCount += 1;
+        if (setCount === 1) {
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 5));
+        }
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', {
+      storage: {
+        local: localArea,
+        session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) },
+      },
+    });
+    const accounts: FanslyAccountResponse[] = [
+      { id: 'f1', username: 'alice', displayName: 'Alice', notes: [] },
+      { id: 'f2', username: 'bob', displayName: 'Bob', notes: [] },
+      { id: 'f-unknown', username: 'ghost', displayName: 'Ghost', notes: [] },
+    ];
+    const first = makeKernelHarness({ accounts });
+    const second = makeKernelHarness({ accounts });
+
+    await Promise.all([
+      first.service.getList(
+        { ...kernelSession(), accountId: 'creator-a' },
+        new AbortController().signal,
+      ),
+      second.service.getList(
+        { ...kernelSession(), accountId: 'creator-b' },
+        new AbortController().signal,
+      ),
+    ]);
+
+    const all = store.get('spendersNames') as Record<string, unknown>;
+    expect(all).toHaveProperty('creator-a');
+    expect(all).toHaveProperty('creator-b');
+    expect(localArea.set).toHaveBeenCalledTimes(2);
+  });
+
   it('degrades the month column to unknown when the month query fails', async () => {
     const { service } = makeKernelHarness({ monthSnapshot: 'throw' });
     const result = await service.getList(kernelSession(), new AbortController().signal);
@@ -348,14 +725,133 @@ describe('SpendersService (kernel source)', () => {
     expect(result.builtAt).not.toBeNull();
   });
 
-  it('treats an empty month window (builtAt null) as unknown, not $0', async () => {
+  it('cuts off a hanging optional month query without consuming the global build timeout', async () => {
+    vi.useFakeTimers();
+    const { service, fetchTopSpenders } = makeKernelHarness({
+      tuning: { monthBudgetMs: 25 },
+    });
+    let started!: () => void;
+    const monthStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+      _limit: number,
+      signal: AbortSignal,
+    ) => {
+      if (window === 'lifetime') return LIFETIME_SNAPSHOT;
+      return await new Promise<KernelSnapshot>((_resolve, reject) => {
+        started();
+        signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const build = service.getList(kernelSession(), new AbortController().signal);
+    await monthStarted;
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await build;
+
+    expect(result.entries).toHaveLength(3);
+    expect(result.monthWindow).toBeNull();
+    expect(result.entries.every((entry) => entry.monthUsd === null)).toBe(true);
+  });
+
+  it('treats an enabled-but-not-yet-synced empty month as unknown', async () => {
     const { service } = makeKernelHarness({
-      monthSnapshot: { builtAt: null, fanCount: 0, entries: [] },
+      monthSnapshot: {
+        builtAt: null,
+        fanCount: 0,
+        source: { ...RAMPED_SOURCE, lastSyncedAt: null },
+        entries: [],
+      },
     });
     const result = await service.getList(kernelSession(), new AbortController().signal);
 
     expect(result.monthWindow).toBeNull();
     expect(result.entries.map((entry) => entry.monthUsd)).toEqual([null, null, null]);
+  });
+
+  it('treats a successfully synced empty month as known zero', async () => {
+    const { service } = makeKernelHarness({
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
+    expect(result.entries.map((entry) => entry.monthUsd)).toEqual([0, 0, 0]);
+  });
+
+  it('does not treat a prior-month page sync as proof the current month is complete', async () => {
+    const now = new Date();
+    const currentMonthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    const previousMonthSync = new Date(currentMonthStart - 1).toISOString();
+    const { service } = makeKernelHarness({
+      monthSnapshot: {
+        builtAt: null,
+        fanCount: 0,
+        source: { ...RAMPED_SOURCE, lastSyncedAt: previousMonthSync },
+        entries: [],
+      },
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.monthWindow).toBeNull();
+    expect(result.entries.map((entry) => entry.monthUsd)).toEqual([null, null, null]);
+  });
+
+  it('keeps absence unknown when the monthly top-spenders response is truncated', async () => {
+    const { service } = makeKernelHarness({
+      monthSnapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 501,
+        source: RAMPED_SOURCE,
+        entries: [
+          { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 120_000 },
+        ],
+      },
+    });
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.entries.map((entry) => entry.monthUsd)).toEqual([120, null, null]);
+    expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
+  });
+
+  it('does not swallow a parent abort from the best-effort month query', async () => {
+    const { service, fetchTopSpenders } = makeKernelHarness();
+    const controller = new AbortController();
+    let started!: () => void;
+    const monthStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+      _limit: number,
+      signal: AbortSignal,
+    ) => {
+      if (window === 'lifetime') return LIFETIME_SNAPSHOT;
+      return await new Promise<KernelSnapshot>((_resolve, reject) => {
+        started();
+        signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const build = service.getList(kernelSession(), controller.signal);
+    await monthStarted;
+    controller.abort();
+    await expect(build).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('1.7.0: no legacy fallback — an unwired kernel source fails loudly', async () => {
@@ -375,6 +871,22 @@ describe('SpendersService (kernel source)', () => {
     expect(fetchTopSpenders).toHaveBeenCalledTimes(2); // lifetime + month, once
 
     await service.getList(sess, new AbortController().signal, { refresh: true });
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(4);
+  });
+
+  it('scopes the board cache to the normalized Hub base URL', async () => {
+    const { service, settings, fetchTopSpenders } = makeKernelHarness({
+      settings: { agencyHubBaseUrl: ' http://localhost:3000/ ' },
+    });
+    const sess = kernelSession();
+
+    await service.getList(sess, new AbortController().signal);
+    settings.agencyHubBaseUrl = 'http://localhost:3000';
+    await service.getList(sess, new AbortController().signal);
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(2);
+
+    settings.agencyHubBaseUrl = 'https://other-hub.example';
+    await service.getList(sess, new AbortController().signal);
     expect(fetchTopSpenders).toHaveBeenCalledTimes(4);
   });
 
@@ -419,24 +931,173 @@ describe('SpendersService (kernel source)', () => {
     expect(second.fetchTopSpenders).toHaveBeenCalledTimes(2);
   });
 
+  it('serializes concurrent session-cache writes across creators', async () => {
+    const store = new Map<string, unknown>();
+    const sessionArea = {
+      get: vi.fn(async (key: string) => {
+        const snapshot = store.get(key);
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1));
+        return { [key]: snapshot };
+      }),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1));
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+    const first = makeKernelHarness();
+    const second = makeKernelHarness();
+
+    await Promise.all([
+      first.service.getList(
+        { ...kernelSession(), accountId: 'creator-a' },
+        new AbortController().signal,
+      ),
+      second.service.getList(
+        { ...kernelSession(), accountId: 'creator-b' },
+        new AbortController().signal,
+      ),
+    ]);
+
+    const all = store.get('spendersCacheV2') as Record<string, unknown>;
+    expect(Object.keys(all)).toHaveLength(2);
+    expect(Object.keys(all).some((key) => key.startsWith('creator-a|'))).toBe(true);
+    expect(Object.keys(all).some((key) => key.startsWith('creator-b|'))).toBe(true);
+  });
+
+  it('does not let an older same-creator build overwrite a newer cached snapshot', async () => {
+    const store = new Map<string, unknown>();
+    const sessionArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+    const harness = makeKernelHarness();
+    let releaseOld!: () => void;
+    const oldBlocked = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let lifetimeCall = 0;
+    const oldSnapshot: KernelSnapshot = {
+      ...LIFETIME_SNAPSHOT,
+      entries: LIFETIME_SNAPSHOT.entries.map((entry, index) =>
+        index === 0 ? { ...entry, displayName: 'Old snapshot' } : entry),
+    };
+    const newSnapshot: KernelSnapshot = {
+      ...LIFETIME_SNAPSHOT,
+      entries: LIFETIME_SNAPSHOT.entries.map((entry, index) =>
+        index === 0 ? { ...entry, displayName: 'New snapshot' } : entry),
+    };
+    harness.fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+    ) => {
+      if (window !== 'lifetime') return MONTH_SNAPSHOT;
+      lifetimeCall += 1;
+      if (lifetimeCall === 1) {
+        await oldBlocked;
+        return oldSnapshot;
+      }
+      return newSnapshot;
+    });
+
+    const older = harness.service.getList(kernelSession(), new AbortController().signal);
+    await vi.waitFor(() => expect(lifetimeCall).toBe(1));
+    const newer = await harness.service.getList(
+      kernelSession(),
+      new AbortController().signal,
+      { refresh: true },
+    );
+    expect(newer.entries[0]!.displayName).toBe('New snapshot');
+
+    releaseOld();
+    const oldResult = await older;
+    expect(oldResult.entries[0]!.displayName).toBe('Old snapshot');
+
+    const restarted = makeKernelHarness();
+    const cached = await restarted.service.getList(
+      kernelSession(),
+      new AbortController().signal,
+    );
+    expect(restarted.fetchTopSpenders).not.toHaveBeenCalled();
+    expect(cached.entries[0]!.displayName).toBe('New snapshot');
+  });
+
+  it('invalidates persisted data and prevents an old in-flight build from restoring it', async () => {
+    const store = new Map<string, unknown>();
+    const sessionArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+    const first = makeKernelHarness();
+    let releaseLifetime!: () => void;
+    const lifetimeBlocked = new Promise<void>((resolve) => {
+      releaseLifetime = resolve;
+    });
+    first.fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+    ) => {
+      if (window === 'lifetime') await lifetimeBlocked;
+      return window === 'lifetime' ? LIFETIME_SNAPSHOT : MONTH_SNAPSHOT;
+    });
+
+    const oldBuild = first.service.getList(kernelSession(), new AbortController().signal);
+    await vi.waitFor(() => expect(first.fetchTopSpenders).toHaveBeenCalledTimes(2));
+    await first.service.invalidateAll();
+    releaseLifetime();
+    await oldBuild;
+
+    expect(store.get('spendersCacheV2')).toEqual({});
+    const restarted = makeKernelHarness();
+    await restarted.service.getList(kernelSession(), new AbortController().signal);
+    expect(restarted.fetchTopSpenders).toHaveBeenCalledTimes(2);
+  });
+
   // ── W9.3/A20: not-ramped pages (kernel builtAt null) ─────────────────────
 
   it('propagates a null builtAt verbatim instead of inventing "now"', async () => {
     const { service } = makeKernelHarness({
-      snapshot: { builtAt: null, fanCount: 0, entries: [] },
-      monthSnapshot: { builtAt: null, fanCount: 0, entries: [] },
+      snapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
     });
     const result = await service.getList(kernelSession(), new AbortController().signal);
 
     expect(result.builtAt).toBeNull();
     expect(result.entries).toEqual([]);
     expect(result.fanCount).toBe(0);
+    expect(result.source.streamState).toBe('ramped');
   });
 
-  it('never caches a not-ramped result — every open re-asks the kernel', async () => {
+  it('caches a ramped, successfully synced empty snapshot', async () => {
+    const { service, fetchTopSpenders } = makeKernelHarness({
+      snapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+    const sess = kernelSession();
+
+    await service.getList(sess, new AbortController().signal);
+    await service.getList(sess, new AbortController().signal);
+
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(2);
+  });
+
+  it('never caches a disabled result — every open re-asks the kernel', async () => {
     const { service, kernelSource, fetchTopSpenders } = makeKernelHarness({
-      snapshot: { builtAt: null, fanCount: 0, entries: [] },
-      monthSnapshot: { builtAt: null, fanCount: 0, entries: [] },
+      snapshot: {
+        builtAt: null,
+        fanCount: 0,
+        source: { ...RAMPED_SOURCE, streamState: 'flag_off', lastSyncedAt: null },
+        entries: [],
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
     });
     const sess = kernelSession();
 
@@ -450,6 +1111,7 @@ describe('SpendersService (kernel source)', () => {
     kernelSource.fetchTopSpenders.mockResolvedValue({
       builtAt: '2026-07-10T00:00:00.000Z',
       fanCount: 1,
+      source: RAMPED_SOURCE,
       entries: [
         { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 1_000 },
       ],

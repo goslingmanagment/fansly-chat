@@ -32,6 +32,14 @@ describe('protocol boundary guards', () => {
         displayName: null,
       }),
     ).toBe('resolveFanChat');
+
+    expect(
+      getRuntimeRequestType({
+        type: 'getSpendersList',
+        refresh: true,
+        buildId: 'board-build-1',
+      }),
+    ).toBe('getSpendersList');
     expect(
       getRuntimeRequestType({
         type: 'resolveFanChat',
@@ -46,6 +54,9 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType(null)).toBeNull();
     expect(
       getRuntimeRequestType({ type: 'resolveFanChat', username: 'ghost', displayName: null }),
+    ).toBeNull();
+    expect(
+      getRuntimeRequestType({ type: 'getSpendersList', buildId: 42 }),
     ).toBeNull();
     expect(
       getRuntimeRequestType({
@@ -96,6 +107,14 @@ describe('protocol boundary guards', () => {
       type: 'operation:chunk',
       operationId: 'op-1',
       text: 'hello',
+    })).toBe(true);
+
+    expect(isBackgroundPortMessage({
+      type: 'spenders:progress',
+      buildId: 'board-build-1',
+      phase: 'names',
+      done: 250,
+      total: 500,
     })).toBe(true);
 
     expect(isBackgroundPortMessage({

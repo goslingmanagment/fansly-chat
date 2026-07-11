@@ -32,7 +32,9 @@ import { formatUserFacingError } from '../../shared/errors.js';
 import { makeKbd } from '../ui/kbd.js';
 
 export interface SpendersBoardDeps {
-  fetchList: (refresh: boolean) => Promise<SpendersListResponse>;
+  fetchList: (refresh: boolean, buildId: string) => Promise<SpendersListResponse>;
+  /** Stable only while the connected creator + Hub source context is unchanged. */
+  getContextKey: () => string | null;
   openChat: (groupId: string) => void;
   resolveChat: (entry: SpenderListEntry) => Promise<ResolveFanChatResponse>;
 }
@@ -48,8 +50,15 @@ const FRESHNESS_TOOLTIP =
   'snapshot — it cannot make the hub re-walk Fansly.';
 
 const NO_CHAT_TOOLTIP =
-  'Not among your most-recent conversations — opening will search the inbox ' +
-  'for this fan.';
+  'A direct chat link is unavailable — opening will search the inbox for this fan.';
+
+const SEARCH_RENDER_DELAY_MS = 150;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+function firstGrapheme(value: string): string {
+  const iterator = GRAPHEME_SEGMENTER.segment(value)[Symbol.iterator]();
+  return iterator.next().value?.segment ?? '';
+}
 
 function ensureBoardRoot(): HTMLElement {
   let root = document.getElementById('chatgoose-board-root');
@@ -64,8 +73,8 @@ function ensureBoardRoot(): HTMLElement {
 function initials(entry: SpenderListEntry): string {
   const source = entry.customName || entry.displayName || entry.username || '?';
   const parts = source.trim().split(/\s+/).slice(0, 2);
-  const letters = parts.map((part) => part.charAt(0)).join('');
-  return (letters || source.charAt(0) || '?').toUpperCase();
+  const letters = parts.map(firstGrapheme).join('');
+  return (letters || firstGrapheme(source) || '?').toUpperCase();
 }
 
 /** The chatter's own name for the fan wins — it is the name the team
@@ -94,13 +103,25 @@ export class SpendersBoardController {
   private cursorIndex = -1;
   private visibleEntries: SpenderListEntry[] = [];
   private rowEls: HTMLElement[] = [];
+  private readonly rowCache = new Map<string, HTMLElement>();
   private listHost: HTMLElement | null = null;
   private searchInput: HTMLInputElement | null = null;
   private buildProgress: SpendersProgressPayload | null = null;
   private progressLabel: HTMLElement | null = null;
   private progressBar: HTMLElement | null = null;
   private readonly chatStateChips = new Map<string, HTMLElement>();
+  private readonly tierChips = new Map<ActiveTier, HTMLButtonElement>();
+  private searchRenderTimer: number | null = null;
   private resolvingFanId: string | null = null;
+  private loadGeneration = 0;
+  private resolveGeneration = 0;
+  private buildCounter = 0;
+  private activeBuildId: string | null = null;
+  private pendingListRequest: {
+    buildId: string;
+    contextKey: string;
+    promise: Promise<SpendersListResponse>;
+  } | null = null;
 
   constructor(private readonly deps: SpendersBoardDeps) {
     document.addEventListener('keydown', (event) => this.handleKeydown(event));
@@ -108,6 +129,13 @@ export class SpendersBoardController {
 
   isOpen(): boolean {
     return this.open;
+  }
+
+  /** Account/Hub source changed under this content script. A board from the
+   * previous context must neither remain visible nor be reused on reopen. */
+  invalidateContext(): void {
+    this.pendingListRequest = null;
+    if (this.open) this.close();
   }
 
   toggle(): void {
@@ -121,25 +149,21 @@ export class SpendersBoardController {
   async show(): Promise<void> {
     this.open = true;
     document.body.classList.add('chatgoose-scroll-lock');
-    // W9.3/A20: a not-ramped result (builtAt null) is a live question, not a
-    // snapshot — re-ask on every open so the board flips the moment rankings
-    // are enabled kernel-side (the background skips its 10-min cache too).
-    if (this.result && this.result.builtAt !== null) {
-      this.renderBoard();
-    } else {
-      await this.load(false);
-    }
+    // The background owns the 10-minute cache. Always ask it on open so a
+    // content-script instance cannot pin a result for the lifetime of a tab.
+    await this.load(false);
   }
 
   close(): void {
     this.open = false;
-    this.cursorIndex = -1;
-    this.listHost = null;
-    this.searchInput = null;
+    this.loading = false;
+    this.loadGeneration += 1;
+    this.resolveGeneration += 1;
+    this.activeBuildId = null;
+    this.resolvingFanId = null;
+    this.releaseListReferences();
     this.buildProgress = null;
-    this.progressLabel = null;
-    this.progressBar = null;
-    this.chatStateChips.clear();
+    this.releaseProgressReferences();
     document.body.classList.remove('chatgoose-scroll-lock');
     this.root.replaceChildren();
   }
@@ -148,20 +172,53 @@ export class SpendersBoardController {
    * (the board's own request is one-shot, so it has no channel). Ignored
    * unless a build is actually on screen. */
   setBuildProgress(progress: SpendersProgressPayload): void {
-    if (!this.open || !this.loading) return;
+    if (
+      !this.open ||
+      !this.loading ||
+      progress.buildId === undefined ||
+      progress.buildId !== this.activeBuildId
+    ) return;
     this.buildProgress = progress;
     this.renderProgress();
   }
 
   private async load(refresh: boolean): Promise<void> {
+    const generation = ++this.loadGeneration;
+    // A new result invalidates any lazy lookup started from the old rows.
+    this.resolveGeneration += 1;
+    this.resolvingFanId = null;
+    this.releaseListReferences();
+    this.releaseProgressReferences();
+
+    const contextKey = this.deps.getContextKey();
+    let request = !refresh && contextKey !== null &&
+      this.pendingListRequest?.contextKey === contextKey
+      ? this.pendingListRequest
+      : null;
+    const buildId = request?.buildId ?? `board-${Date.now()}-${++this.buildCounter}`;
+    this.activeBuildId = buildId;
     this.loading = true;
     this.buildProgress = null;
     this.renderLoading(refresh);
     try {
-      const response = await this.deps.fetchList(refresh);
-      if (!this.open) return;
+      if (request === null) {
+        request = {
+          buildId,
+          contextKey: contextKey ?? `unresolved-${buildId}`,
+          promise: this.deps.fetchList(refresh, buildId),
+        };
+        this.pendingListRequest = request;
+      }
+      const response = await request.promise;
+      if (!this.open || generation !== this.loadGeneration) return;
+      if (this.deps.getContextKey() !== contextKey) {
+        this.close();
+        return;
+      }
       this.loading = false;
+      this.activeBuildId = null;
       this.buildProgress = null;
+      this.releaseProgressReferences();
       if (response.ok) {
         this.result = response.result;
         this.activeTier = 'all';
@@ -171,16 +228,41 @@ export class SpendersBoardController {
         this.renderError(formatUserFacingError(response.error));
       }
     } catch (error) {
-      if (!this.open) return;
+      if (!this.open || generation !== this.loadGeneration) return;
       this.loading = false;
+      this.activeBuildId = null;
       this.buildProgress = null;
+      this.releaseProgressReferences();
       this.renderError(error instanceof Error ? error.message : 'Could not load spenders.');
+    } finally {
+      if (request !== null && this.pendingListRequest === request) {
+        this.pendingListRequest = null;
+      }
     }
+  }
+
+  private releaseListReferences(): void {
+    this.cancelSearchRender();
+    this.cursorIndex = -1;
+    this.visibleEntries = [];
+    this.rowEls = [];
+    this.rowCache.clear();
+    this.listHost = null;
+    this.searchInput = null;
+    this.chatStateChips.clear();
+    this.tierChips.clear();
+  }
+
+  private releaseProgressReferences(): void {
+    this.progressLabel = null;
+    this.progressBar = null;
   }
 
   // ─── Rendering ──────────────────────────────────────────────────────────
 
   private shell(body: HTMLElement): void {
+    this.cancelSearchRender();
+    const entering = this.root.childElementCount === 0;
     const backdrop = document.createElement('div');
     backdrop.className = 'chatgoose-board-backdrop';
     backdrop.addEventListener('mousedown', (event) => {
@@ -189,6 +271,9 @@ export class SpendersBoardController {
 
     const panel = document.createElement('div');
     panel.className = 'chatgoose-board-panel';
+    if (entering) {
+      panel.classList.add('chatgoose-board-panel-enter');
+    }
     panel.append(this.buildHeader(), body);
 
     backdrop.append(panel);
@@ -238,10 +323,24 @@ export class SpendersBoardController {
   }
 
   private metaLine(result: SpendersListResult): string {
-    // W9.3/A20: builtAt === null = the kernel never built a snapshot for
-    // this page — claiming a spender count or an "updated …" time would lie.
-    if (result.builtAt === null) {
-      return 'Rankings not enabled for this page yet';
+    if (result.entries.length === 0) {
+      switch (result.source.streamState) {
+        case 'flag_off':
+          return 'Spender rankings are disabled in the Agency Hub';
+        case 'not_allowlisted':
+          return 'Rankings not enabled for this page yet';
+        case 'unsupported_platform':
+          return 'Spender rankings are unavailable for this platform';
+        case 'ramped': {
+          const head = result.source.lastSyncedAt === null
+            ? 'Waiting for the first spender sync'
+            : `0 spenders · synced ${relativeTime(result.source.lastSyncedAt)}`;
+          const failures = result.source.consecutiveFailures ?? 0;
+          return failures > 0
+            ? `${head} · ${failures} failed sync attempt${failures === 1 ? '' : 's'}`
+            : head;
+        }
+      }
     }
     const shown = result.entries.length;
     // fanCount is the kernel's full spender total; when the query limit
@@ -250,11 +349,19 @@ export class SpendersBoardController {
       result.fanCount > shown
         ? `top ${shown} of ${result.fanCount} spenders`
         : `${shown} spender${shown === 1 ? '' : 's'}`;
-    return [
+    const parts = [
       head,
-      `data as of ${relativeTime(result.builtAt)}`,
+      result.builtAt === null
+        ? 'no spend observation timestamp'
+        : `freshest data ${relativeTime(result.builtAt)}`,
       `fetched ${relativeTime(result.fetchedAt)}`,
-    ].join(' · ');
+    ];
+    if (result.source.streamState !== 'ramped') {
+      parts.push('source paused');
+    } else if ((result.source.consecutiveFailures ?? 0) > 0) {
+      parts.push(`${result.source.consecutiveFailures} failed sync attempt${result.source.consecutiveFailures === 1 ? '' : 's'}`);
+    }
+    return parts.join(' · ');
   }
 
   private renderLoading(refresh: boolean): void {
@@ -334,6 +441,7 @@ export class SpendersBoardController {
 
     const listHost = document.createElement('div');
     listHost.className = 'chatgoose-board-list';
+    listHost.addEventListener('click', (event) => this.handleListClick(event));
     this.listHost = listHost;
     body.append(listHost);
 
@@ -353,48 +461,86 @@ export class SpendersBoardController {
     );
     body.append(footer);
 
-    this.shell(body);
     this.renderList();
+    this.shell(body);
   }
 
   /** (Re)fill the list host for the current tier + search query. Kept apart
    * from renderBoard so typing in the search box never rebuilds the input
    * it is typing into. */
   private renderList(): void {
+    this.cancelSearchRender();
     const result = this.result;
     const listHost = this.listHost;
     if (!result || !listHost) return;
 
-    this.rowEls = [];
-    this.visibleEntries = [];
+    const fragment = document.createDocumentFragment();
+    const nextRowEls: HTMLElement[] = [];
+    const nextVisibleEntries: SpenderListEntry[] = [];
     this.chatStateChips.clear();
-    listHost.replaceChildren();
 
-    if (result.builtAt === null) {
-      // Not ramped ≠ zero spenders: the kernel has never walked this page's
-      // earnings, so "no paying fans" would be false. Honest copy instead.
-      const notRamped = document.createElement('div');
-      notRamped.className = 'chatgoose-board-state';
-      notRamped.textContent =
-        "Spender rankings aren't enabled for this page yet. Ask the owner to enable it in the Agency Hub — until then the board has no data to show.";
-      listHost.append(notRamped);
-    } else if (result.entries.length === 0) {
+    const appendEntry = (entry: SpenderListEntry): void => {
+      const index = nextVisibleEntries.length;
+      let row = this.rowCache.get(entry.fanAccountId);
+      if (!row) {
+        row = this.buildRow(entry, index);
+        this.rowCache.set(entry.fanAccountId, row);
+      } else {
+        row.dataset.spenderIndex = String(index);
+        row.classList.remove('chatgoose-board-row-active');
+        const chatState = row.querySelector<HTMLElement>('.chatgoose-board-row-chatstate');
+        if (chatState) this.chatStateChips.set(entry.fanAccountId, chatState);
+      }
+      nextVisibleEntries.push(entry);
+      nextRowEls.push(row);
+      fragment.append(row);
+    };
+
+    const appendNoMatch = (message: string): void => {
+      const none = document.createElement('div');
+      none.className = 'chatgoose-board-state';
+      none.textContent = message;
+      fragment.append(none);
+    };
+
+    if (result.entries.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'chatgoose-board-state';
-      empty.textContent = 'No paying fans in the hub data for this page yet.';
-      listHost.append(empty);
+      switch (result.source.streamState) {
+        case 'flag_off':
+          empty.textContent = 'Spender rankings are disabled in the Agency Hub.';
+          break;
+        case 'not_allowlisted':
+          empty.textContent =
+            "Spender rankings aren't enabled for this page yet. Ask the owner to enable them in the Agency Hub.";
+          break;
+        case 'unsupported_platform':
+          empty.textContent = 'Spender rankings are not supported for this platform.';
+          break;
+        case 'ramped':
+          empty.textContent = result.source.lastSyncedAt === null
+            ? 'Spender rankings are enabled and waiting for their first sync.'
+            : 'No paying fans were found in the latest Hub sync for this page.';
+          break;
+      }
+      fragment.append(empty);
     } else {
       const matched = filterSpendersByQuery(result.entries, this.searchQuery);
       if (matched.length === 0) {
-        const none = document.createElement('div');
-        none.className = 'chatgoose-board-state';
-        none.textContent = 'No fans match the search.';
-        listHost.append(none);
+        appendNoMatch('No fans match the search.');
       } else if (this.activeTier === 'all') {
-        for (const group of groupSpendersByTier(matched)) {
-          listHost.append(this.buildSectionHeader(group.tier.emoji, group.tier.title, group.tier.band, group.entries.length));
+        const groups = groupSpendersByTier(matched);
+        if (groups.length === 0) {
+          appendNoMatch(
+            this.searchQuery.trim()
+              ? 'No fans match the search.'
+              : 'No fans fall within the displayed spend tiers.',
+          );
+        }
+        for (const group of groups) {
+          fragment.append(this.buildSectionHeader(group.tier.emoji, group.tier.title, group.tier.band, group.entries.length));
           for (const entry of group.entries) {
-            listHost.append(this.buildRow(entry));
+            appendEntry(entry);
           }
         }
       } else {
@@ -403,20 +549,32 @@ export class SpendersBoardController {
         const entries = sortByLifetimeDesc(
           matched.filter((entry) => assignSpenderTier(entry.lifetimeUsd) === activeTier),
         );
-        listHost.append(this.buildSectionHeader(tier.emoji, tier.title, tier.band, entries.length));
-        for (const entry of entries) {
-          listHost.append(this.buildRow(entry));
+        if (entries.length === 0) {
+          appendNoMatch(
+            this.searchQuery.trim()
+              ? 'No fans in this tier match the search.'
+              : 'No fans in this tier.',
+          );
+        } else {
+          fragment.append(this.buildSectionHeader(tier.emoji, tier.title, tier.band, entries.length));
+          for (const entry of entries) {
+            appendEntry(entry);
+          }
         }
       }
     }
 
-    this.cursorIndex = this.visibleEntries.length > 0 ? 0 : -1;
-    this.applyCursor(false);
+    listHost.replaceChildren(fragment);
+    this.rowEls = nextRowEls;
+    this.visibleEntries = nextVisibleEntries;
+    this.cursorIndex = -1;
+    this.setCursor(this.visibleEntries.length > 0 ? 0 : -1, false);
   }
 
   private buildChips(entries: readonly SpenderListEntry[]): HTMLElement {
     const chips = document.createElement('div');
     chips.className = 'chatgoose-board-chips';
+    this.tierChips.clear();
 
     const counts = countByTier(entries);
     chips.append(this.buildChip('all', 'All', counts.all));
@@ -435,9 +593,15 @@ export class SpendersBoardController {
       search.placeholder = 'Search fans…';
       search.setAttribute('aria-label', 'Search fans by name or username');
       search.value = this.searchQuery;
-      search.addEventListener('input', () => {
+      search.addEventListener('compositionstart', () => this.cancelSearchRender());
+      search.addEventListener('input', (event) => {
         this.searchQuery = search.value;
-        this.renderList();
+        if ((event as InputEvent).isComposing) return;
+        this.scheduleSearchRender();
+      });
+      search.addEventListener('compositionend', () => {
+        this.searchQuery = search.value;
+        this.scheduleSearchRender();
       });
       this.searchInput = search;
       chips.append(search);
@@ -445,13 +609,15 @@ export class SpendersBoardController {
     return chips;
   }
 
-  private buildChip(tier: ActiveTier, label: string, count: number): HTMLElement {
+  private buildChip(tier: ActiveTier, label: string, count: number): HTMLButtonElement {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chatgoose-board-chip';
-    if (this.activeTier === tier) {
+    const active = this.activeTier === tier;
+    if (active) {
       chip.classList.add('chatgoose-board-chip-active');
     }
+    chip.setAttribute('aria-pressed', String(active));
 
     const text = document.createElement('span');
     text.textContent = label;
@@ -460,12 +626,24 @@ export class SpendersBoardController {
     badge.textContent = String(count);
 
     chip.append(text, badge);
+    this.tierChips.set(tier, chip);
     chip.addEventListener('click', () => {
       if (this.activeTier === tier) return;
       this.activeTier = tier;
-      this.renderBoard();
+      this.updateTierChips();
+      // renderList cancels a pending search render and synchronously applies
+      // both the latest query and the newly-selected tier in one commit.
+      this.renderList();
     });
     return chip;
+  }
+
+  private updateTierChips(): void {
+    for (const [tier, chip] of this.tierChips) {
+      const active = tier === this.activeTier;
+      chip.classList.toggle('chatgoose-board-chip-active', active);
+      chip.setAttribute('aria-pressed', String(active));
+    }
   }
 
   private buildSectionHeader(emoji: string, title: string, band: string, count: number): HTMLElement {
@@ -488,14 +666,12 @@ export class SpendersBoardController {
     return header;
   }
 
-  private buildRow(entry: SpenderListEntry): HTMLElement {
-    const index = this.visibleEntries.length;
-    this.visibleEntries.push(entry);
-
+  private buildRow(entry: SpenderListEntry, index: number): HTMLElement {
     const row = document.createElement('div');
     row.className = 'chatgoose-board-row';
     row.setAttribute('role', 'button');
     row.tabIndex = -1;
+    row.dataset.spenderIndex = String(index);
 
     const avatar = document.createElement('div');
     avatar.className = 'chatgoose-board-avatar';
@@ -519,7 +695,7 @@ export class SpendersBoardController {
     if (entry.groupId === null) {
       const chatState = document.createElement('span');
       chatState.className = 'chatgoose-board-row-chatstate';
-      chatState.textContent = 'no recent chat';
+      chatState.textContent = 'find chat';
       chatState.title = NO_CHAT_TOOLTIP;
       this.chatStateChips.set(entry.fanAccountId, chatState);
       nameLine.append(chatState);
@@ -547,14 +723,43 @@ export class SpendersBoardController {
     }
 
     row.append(avatar, main, amounts);
-    row.addEventListener('click', () => {
-      this.cursorIndex = index;
-      this.applyCursor(false);
-      this.openEntry(entry);
-    });
-
-    this.rowEls.push(row);
     return row;
+  }
+
+  private handleListClick(event: MouseEvent): void {
+    const target = event.target;
+    const listHost = this.listHost;
+    if (!(target instanceof HTMLElement) || !listHost) return;
+    const row = target.closest<HTMLElement>('.chatgoose-board-row');
+    if (!row || !listHost.contains(row)) return;
+    const index = Number(row.dataset.spenderIndex);
+    if (!Number.isInteger(index)) return;
+    const entry = this.visibleEntries[index];
+    if (!entry) return;
+    this.setCursor(index, false);
+    this.openEntry(entry);
+  }
+
+  private scheduleSearchRender(): void {
+    this.cancelSearchRender();
+    this.searchRenderTimer = window.setTimeout(() => {
+      this.searchRenderTimer = null;
+      if (this.open) {
+        this.renderList();
+      }
+    }, SEARCH_RENDER_DELAY_MS);
+  }
+
+  private flushSearchRender(): void {
+    if (this.searchRenderTimer === null) return;
+    this.cancelSearchRender();
+    this.renderList();
+  }
+
+  private cancelSearchRender(): void {
+    if (this.searchRenderTimer === null) return;
+    window.clearTimeout(this.searchRenderTimer);
+    this.searchRenderTimer = null;
   }
 
   // ─── Opening chats ──────────────────────────────────────────────────────
@@ -566,12 +771,13 @@ export class SpendersBoardController {
     }
     // E23 lazy resolve: one inbox search per open, one at a time.
     if (this.resolvingFanId !== null) return;
+    const generation = ++this.resolveGeneration;
     this.resolvingFanId = entry.fanAccountId;
     this.setChatState(entry.fanAccountId, 'locating…', null);
     void this.deps
       .resolveChat(entry)
       .then((response) => {
-        if (!this.open) return;
+        if (!this.open || generation !== this.resolveGeneration) return;
         if (response.ok && response.groupId) {
           // Memoize on the entry so a second open skips the search (the
           // content-side result is this board's own structured-clone copy).
@@ -588,16 +794,23 @@ export class SpendersBoardController {
         );
       })
       .catch(() => {
-        if (!this.open) return;
+        if (!this.open || generation !== this.resolveGeneration) return;
         this.setChatState(entry.fanAccountId, 'not found', 'Could not search the inbox.');
       })
       .finally(() => {
-        this.resolvingFanId = null;
+        if (generation === this.resolveGeneration) {
+          this.resolvingFanId = null;
+        }
       });
   }
 
   private setChatState(fanAccountId: string, label: string, title: string | null): void {
-    const chip = this.chatStateChips.get(fanAccountId);
+    // The row may be temporarily filtered out. Update its cached DOM too so a
+    // completed lookup cannot reappear later with a stale "locating…" label.
+    const chip = this.chatStateChips.get(fanAccountId) ??
+      this.rowCache.get(fanAccountId)?.querySelector<HTMLElement>(
+        '.chatgoose-board-row-chatstate',
+      );
     if (!chip) return;
     chip.textContent = label;
     if (title !== null) {
@@ -608,7 +821,7 @@ export class SpendersBoardController {
   // ─── Cursor / keyboard ──────────────────────────────────────────────────
 
   private handleKeydown(event: KeyboardEvent): void {
-    if (!this.open) return;
+    if (!this.open || event.isComposing) return;
 
     // Typing in the search box: letters filter (j/k must not move the
     // cursor); Esc clears-then-closes; Enter opens the top match; arrows
@@ -626,12 +839,15 @@ export class SpendersBoardController {
           }
           return;
         case 'Enter':
+          if (event.repeat) return;
           event.preventDefault();
+          this.flushSearchRender();
           this.openCursorEntry();
           return;
         case 'ArrowDown':
         case 'ArrowUp':
           event.preventDefault();
+          this.flushSearchRender();
           this.moveCursor(event.key === 'ArrowDown' ? 1 : -1);
           return;
         default:
@@ -639,16 +855,27 @@ export class SpendersBoardController {
       }
     }
 
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.close();
+      return;
+    }
+
+    // Let focused controls keep their native keyboard activation. Without
+    // this guard Enter on Refresh/Close/tier chips opened the cursor row.
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest('button, a, input, textarea, select, [contenteditable="true"]')
+    ) return;
+
     switch (event.key) {
-      case 'Escape':
-        event.preventDefault();
-        this.close();
-        return;
       case 'j':
       case 'J':
       case 'ArrowDown':
         if (event.metaKey || event.ctrlKey || event.altKey) return;
         event.preventDefault();
+        this.flushSearchRender();
         this.moveCursor(1);
         return;
       case 'k':
@@ -656,6 +883,7 @@ export class SpendersBoardController {
       case 'ArrowUp':
         if (event.metaKey || event.ctrlKey || event.altKey) return;
         event.preventDefault();
+        this.flushSearchRender();
         this.moveCursor(-1);
         return;
       case '/':
@@ -664,8 +892,9 @@ export class SpendersBoardController {
         this.searchInput?.focus();
         return;
       case 'Enter':
-        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
         event.preventDefault();
+        this.flushSearchRender();
         this.openCursorEntry();
         return;
       default:
@@ -678,8 +907,7 @@ export class SpendersBoardController {
     const next = this.cursorIndex < 0
       ? (delta > 0 ? 0 : this.visibleEntries.length - 1)
       : (this.cursorIndex + delta + this.visibleEntries.length) % this.visibleEntries.length;
-    this.cursorIndex = next;
-    this.applyCursor(true);
+    this.setCursor(next, true);
   }
 
   private openCursorEntry(): void {
@@ -688,12 +916,15 @@ export class SpendersBoardController {
     this.openEntry(entry);
   }
 
-  private applyCursor(scroll: boolean): void {
-    this.rowEls.forEach((el, index) => {
-      el.classList.toggle('chatgoose-board-row-active', index === this.cursorIndex);
-    });
-    if (scroll && this.cursorIndex >= 0) {
-      this.rowEls[this.cursorIndex]?.scrollIntoView({ block: 'nearest' });
+  private setCursor(nextIndex: number, scroll: boolean): void {
+    const previousIndex = this.cursorIndex;
+    if (previousIndex !== nextIndex) {
+      this.rowEls[previousIndex]?.classList.remove('chatgoose-board-row-active');
+      this.cursorIndex = nextIndex;
+      this.rowEls[nextIndex]?.classList.add('chatgoose-board-row-active');
+    }
+    if (scroll && nextIndex >= 0) {
+      this.rowEls[nextIndex]?.scrollIntoView({ block: 'nearest' });
     }
   }
 }

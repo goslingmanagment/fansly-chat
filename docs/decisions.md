@@ -45,6 +45,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E26 | 2026-07-11 | Name cache → storage.local (survives browser restart, 6h TTL, size-capped); cold-build progress reported over the content port (counted name sweep + hairline bar) |
 | E27 | 2026-07-12 | Armed tone stays emoji-only: fixed-width highlight replaces the expanding word so the narrow composer never shifts or scrolls |
 | E28 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
+| E29 | 2026-07-12 | Spenders correctness/performance hardening: source-aware empty states, correlated builds, race-safe async UI, bounded optional reads, serialized scoped caches, incremental DOM updates |
 
 ## Entries
 
@@ -538,3 +539,42 @@ opens in `debug-prompt.html`, an extension-origin tab; the background hands over
 a snapshot only to a sender whose origin AND path match that page (exact match,
 not a prefix), so the Fansly content script cannot spend the token it carries. A
 cached Scan reports "no LLM call" rather than an empty inspector.
+
+**E29 (2026-07-12).** Spenders hardening after an adversarial data/render
+review. The board now carries the kernel stream status (`flag_off`,
+`not_allowlisted`, `ramped`, `unsupported_platform`) end to end, so disabled,
+pending, successfully-empty, stale, and failed sources no longer collapse into
+the same "No paying fans" state. A missing fan in a bounded monthly top-500 is
+unknown, not `$0`; NEW is allowed only for finite, internally consistent month
+data. Optional reads have focused abort deadlines: a wedged monthly Hub query
+degrades only the `+$N` column, an empty kernel result cancels the speculative
+chat map, and name lookup stops at the first rate limit. Parent abort and
+session expiry remain fatal. A page-wide `lastSyncedAt` proves an empty monthly
+window only when that sync belongs to the requested UTC month.
+
+Every board open gets a `buildId`; background progress frames echo it and the
+content controller ignores older loads, progress, and lazy chat resolutions
+after close/reopen or Refresh. An unfinished close/reopen load is reused rather
+than duplicated only while the connected account + settings generation is the
+same; a context change closes the old board and terminal responses re-check the
+context before rendering. The background remains the owner of the 10-minute
+TTL — the controller asks it on every open instead of pinning an unbounded
+renderer copy.
+Board session-cache keys include Hub origin + creator identity, credential or
+settings changes invalidate all snapshots, in-flight old-source builds cannot
+repopulate them, and a per-key build sequence prevents an older concurrent
+response from overwriting a newer snapshot. Aggregate storage.session/local
+writes are serialized and awaited so concurrent creators cannot erase one
+another. Hub URL/credential/permission failures keep their own error codes
+instead of being mislabeled as a page-mapping miss.
+
+Rendering keeps one shell across tier/search changes, reuses row DOM, commits
+through a DocumentFragment, delegates row clicks once, updates only the old/new
+cursor rows, skips off-screen row paint, and coalesces search input (with
+synchronous keyboard flush and composition-aware IME handling). Tier chips
+expose `aria-pressed`; initials are grapheme-safe; load/close release detached
+row/chip/progress references and timers. Deliberately NOT taken: list
+virtualization — the bounded 500-row DOM is now linear and covered by a real
+500-row structural test, while virtualization would add focus/scroll risk
+without measured need. Pinned across spenders-service, agency-hub-client,
+shared spenders/protocol, runtime-api, and board-controller suites.

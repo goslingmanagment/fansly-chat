@@ -1798,6 +1798,9 @@ body.chatgoose-scroll-lock {
   box-shadow: var(--chatgoose-shadow-pop);
   color: var(--chatgoose-ink);
   overflow: hidden;
+}
+
+.chatgoose-board-panel-enter {
   animation: chatgoose-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1972,6 +1975,10 @@ body.chatgoose-scroll-lock {
   border-radius: var(--chatgoose-radius-chip);
   cursor: pointer;
   transition: background 120ms ease;
+  /* The board is bounded at 500 rows. Keep them in the DOM for predictable
+     keyboard/search semantics, but skip off-screen layout/paint work. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
 }
 
 .chatgoose-board-row:hover {

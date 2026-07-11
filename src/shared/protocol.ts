@@ -239,7 +239,10 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
     case 'issueAgencyHubDeviceToken':
       return 'issueAgencyHubDeviceToken';
     case 'getSpendersList':
-      return isOptionalBoolean(message, 'refresh') ? 'getSpendersList' : null;
+      return isOptionalBoolean(message, 'refresh') &&
+        isOptionalString(message, 'buildId')
+        ? 'getSpendersList'
+        : null;
     case 'resolveFanChat':
       return isString(message.fanAccountId) &&
         isNullableString(message.username) &&
@@ -340,6 +343,7 @@ export function isBackgroundPortMessage(message: unknown): message is Background
         isObjectRecord(message.syncStatus);
     case 'spenders:progress':
       return (message.phase === 'ranking' || message.phase === 'names') &&
+        isOptionalString(message, 'buildId') &&
         isOptionalNumber(message, 'done') &&
         isOptionalNumber(message, 'total');
     case 'operation:progress':

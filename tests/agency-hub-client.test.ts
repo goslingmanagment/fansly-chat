@@ -60,6 +60,123 @@ describe('AgencyHubClient', () => {
     vi.unstubAllGlobals();
   });
 
+  it('preserves top-spenders source health from the validated SDK response', async () => {
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const requestUrl = new URL(String(url));
+      expect(requestUrl.pathname).toBe('/api/v1/pages/creator-fs/top-spenders');
+      expect(requestUrl.searchParams.get('window')).toBe('lifetime');
+      expect(requestUrl.searchParams.get('limit')).toBe('500');
+      return jsonResponse({
+        window: 'lifetime',
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 1,
+        source: {
+          streamState: 'ramped',
+          lastSyncedAt: '2026-07-05T01:00:00.000Z',
+          consecutiveFailures: 2,
+        },
+        entries: [
+          {
+            platformUserId: 'fan-1',
+            username: 'alice',
+            displayName: 'Alice',
+            grossMills: 123_000,
+            netMills: 98_400,
+            currency: 'USD',
+            observedAt: '2026-07-05T00:00:00.000Z',
+          },
+        ],
+      });
+    });
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    const result = await client.fetchTopSpenders(
+      makeSettings(),
+      'creator-fs',
+      'lifetime',
+      500,
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({
+      builtAt: '2026-07-05T00:00:00.000Z',
+      fanCount: 1,
+      source: {
+        streamState: 'ramped',
+        lastSyncedAt: '2026-07-05T01:00:00.000Z',
+        consecutiveFailures: 2,
+      },
+      entries: [
+        {
+          platformUserId: 'fan-1',
+          username: 'alice',
+          displayName: 'Alice',
+          grossMills: 123_000,
+        },
+      ],
+    });
+  });
+
+  it.each([
+    {
+      name: 'invalid Hub URL',
+      settings: { agencyHubBaseUrl: 'not a url' },
+      key: 'hub_invalid_url',
+    },
+    {
+      name: 'missing Hub credential',
+      settings: { agencyHubApiKey: '', agencyHubDeviceToken: '' },
+      key: 'hub_missing_api_key',
+    },
+  ])('keeps $name distinct from a page-mapping miss', async ({ settings, key }) => {
+    const fetchMock = vi.fn();
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(
+      client.resolvePageLabelForUsername(
+        makeSettings(settings),
+        'creator',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ key });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps missing Hub host permission distinct from a page-mapping miss', async () => {
+    const fetchMock = vi.fn();
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => false) },
+    };
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(
+      client.resolvePageLabelForUsername(
+        makeSettings(),
+        'creator',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ key: 'hub_missing_permission' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a page-list network failure inside the Hub error domain', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('socket hang up');
+    });
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+    };
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(
+      client.resolvePageLabelForUsername(
+        makeSettings(),
+        'creator',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ key: 'hub_request_failed' });
+  });
+
   it('matches the Fansly page by username and pushes the raw profile body', async () => {
     const permissionsContains = vi.fn(async () => true);
     const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {

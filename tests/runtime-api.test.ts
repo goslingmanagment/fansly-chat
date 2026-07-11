@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import type { SessionTemplate } from '../src/shared/types.js';
+import type { SessionTemplate, SpendersProgressPayload } from '../src/shared/types.js';
 
 type MessageSenderLike = { tab?: { id?: number }; url?: string };
 let mockStorage: Record<string, unknown> = {};
@@ -49,6 +49,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     has: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
   };
+  emitToTab?: (tabId: number, message: SpendersProgressPayload) => void;
 }) {
   vi.resetModules();
   onMessageListener = undefined;
@@ -138,6 +139,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     tabContexts: new TabContextStore(),
     storageCoordinator,
     debugPrompts: debugPrompts as never,
+    emitToTab: options?.emitToTab,
   });
 
   if (!onMessageListener) {
@@ -486,6 +488,42 @@ describe('runtime-api getSpendersList', () => {
 
     expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
     expect(spendersService.getList).not.toHaveBeenCalled();
+  });
+
+  it('correlates progress frames with the requesting board build', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    };
+    const result = {
+      entries: [],
+      builtAt: null,
+      fanCount: 0,
+      monthWindow: null,
+      fetchedAt: 456,
+    };
+    const spendersService = {
+      getList: vi.fn(async (_session, _signal, options) => {
+        options?.onProgress?.({ type: 'spenders:progress', phase: 'ranking' });
+        return result;
+      }),
+    };
+    const emitToTab = vi.fn();
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, {
+      spendersService,
+      emitToTab,
+    });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    await onMessageListener?.(
+      { type: 'getSpendersList', buildId: 'board-build-7' },
+      { tab: { id: 7 } },
+    );
+
+    expect(emitToTab).toHaveBeenCalledWith(7, {
+      type: 'spenders:progress',
+      buildId: 'board-build-7',
+      phase: 'ranking',
+    });
   });
 });
 
