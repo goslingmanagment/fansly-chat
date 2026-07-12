@@ -948,7 +948,7 @@
     <div class="nav-actions">
       <a href="changelog.html" class="nav-install">Что нового</a>
       <a href="/" class="nav-install">Установить</a>
-      <span class="nav-version">v1.0.1</span>
+      <span class="nav-version">auto-update</span>
     </div>
   </div>
 </nav>
@@ -964,9 +964,14 @@
   </p>
   <div class="hero-badges">
     <span class="badge badge-accent">Firefox Extension</span>
-    <span class="badge">Claude AI</span>
+    <span class="badge">Agency Hub AI</span>
     <span class="badge">Fansly.com</span>
     <span class="badge">Gosling Agency</span>
+  </div>
+  <div style="max-width:760px;margin:24px auto 0;padding:14px 18px;border:2px solid var(--accent);border-radius:12px;background:var(--surface);text-align:left">
+    <strong>Текущая схема:</strong> ChatGoose подключается к Agency Hub. Ключи
+    Anthropic/OpenRouter, выбор модели, промпты, квоты и расчёт стоимости живут
+    только на сервере core. В расширение vendor API-ключи не вводятся.
   </div>
 </section>
 
@@ -1081,7 +1086,7 @@
       </div>
     </div>
 
-    <p>Загружает последние ~100 сообщений из чата, данные о тратах фана и подписке, строит промпт с личностью модели и отправляет в Claude. Ответ стримится в реальном времени — вы видите текст по мере генерации.</p>
+    <p>Загружает последние сообщения и доступный контекст фана, затем отправляет структурированный запрос в Agency Hub. Core собирает промпт, выбирает модель и стримит черновик обратно — вы видите текст по мере генерации.</p>
 
     <p><strong>Мульти-режим:</strong> если включён переключатель <strong>Multi</strong>, Claude может разбить ответ на несколько сообщений маркером <code>[NEXT]</code>. Каждая часть получает свою кнопку Insert, можно вставлять в любом порядке.</p>
 
@@ -1295,7 +1300,7 @@
   <div class="section-header">
     <span class="section-label">Архитектура</span>
     <h2>Как это работает</h2>
-    <p class="section-desc">Расширение перехватывает сессию Fansly, загружает сообщения через API, отправляет в Claude и стримит ответ в оверлей.</p>
+    <p class="section-desc">Расширение читает живой контекст Fansly, отправляет его в feature lane Agency Hub и стримит готовый черновик в оверлей.</p>
   </div>
 
   <div class="flow">
@@ -1305,9 +1310,9 @@
     <div class="flow-arrow">&rarr;</div>
     <div class="flow-step">&#128176; Данные о тратах</div>
     <div class="flow-arrow">&rarr;</div>
-    <div class="flow-step">&#128221; Сборка промпта</div>
+    <div class="flow-step">&#128221; Core: сборка промпта</div>
     <div class="flow-arrow">&rarr;</div>
-    <div class="flow-step">&#129302; AI Provider</div>
+    <div class="flow-step">&#129302; Agency Hub · AI feature lane</div>
     <div class="flow-arrow">&rarr;</div>
     <div class="flow-step">&#128172; Стриминг ответа</div>
     <div class="flow-arrow">&rarr;</div>
@@ -1320,8 +1325,8 @@
       <li><strong>Ничего не отправляется автоматически.</strong> Расширение вставляет текст в поле ввода, но отправляете вы сами через кнопку Fansly.</li>
       <li><strong>Перехват сессии.</strong> Расширение захватывает заголовки авторизации из запросов к Fansly API. Заголовки хранятся только в памяти — при перезагрузке расширения или браузера они теряются.</li>
       <li><strong>Контекст на вкладку.</strong> Каждая вкладка браузера отслеживается отдельно: аккаунт, чат, активная операция. Если переключились на другой чат — старые результаты не применяются.</li>
-      <li><strong>Стриминг через SSE.</strong> Текст от Claude приходит чанками через Server-Sent Events, буферизуется каждые 50 мс и рендерится в оверлее без мерцания.</li>
-      <li><strong>Кэширование промптов.</strong> Системные промпты кэшируются в API Anthropic на 1 час, что значительно снижает стоимость повторных запросов.</li>
+      <li><strong>Стриминг через SSE.</strong> Текст приходит из Agency Hub чанками через Server-Sent Events и рендерится в оверлее без мерцания.</li>
+      <li><strong>Промпты и кэширование.</strong> Системные инструкции, provider-кэш и стоимость управляются сервером core; расширение не хранит промпты и vendor keys.</li>
     </ul>
   </div>
 </section>
@@ -1346,8 +1351,8 @@
         <p>Нажмите на иконку ChatGoose в панели Firefox &rarr; «Open Settings». Или правый клик на иконку &rarr; «Manage Extension» &rarr; «Preferences».</p>
       </li>
       <li>
-        <h4>Введите API-ключи</h4>
-        <p>Для Claude Direct получите ключ на <strong>console.anthropic.com</strong>. Для Gemini/Grok получите OpenRouter key на <strong>openrouter.ai/settings/keys</strong>. Каждый ключ хранится локально и отправляется только своему провайдеру.</p>
+        <h4>Подключитесь к Agency Hub</h4>
+        <p>Укажите адрес хаба агентства и выполните вход устройства под выданной учётной записью чаттера. Vendor API-ключи остаются на сервере и в расширение не вводятся.</p>
       </li>
       <li>
         <h4>Создайте личность</h4>
@@ -1370,24 +1375,24 @@
     <p class="section-desc">Все настройки хранятся локально в browser.storage. Полное описание каждого параметра.</p>
   </div>
 
-  <!-- API -->
+  <!-- Agency Hub -->
   <div class="settings-group">
-    <div class="settings-group-title">&#128273; API</div>
-    <div class="setting-row">
-      <div class="setting-name">Claude API Key</div>
-      <div class="setting-desc">Ключ доступа к Anthropic API для Claude Direct. Хранится локально, отправляется только на <code>api.anthropic.com</code>. Никогда не логируется.</div>
-    </div>
-    <div class="setting-row">
-      <div class="setting-name">OpenRouter API Key</div>
-      <div class="setting-desc">Ключ OpenRouter для Gemini и Grok. Хранится локально, отправляется только на <code>openrouter.ai</code>. Нужен, если выбрана модель из группы OpenRouter.</div>
-    </div>
+    <div class="settings-group-title">&#128273; Agency Hub</div>
     <div class="setting-row">
       <div class="setting-name">Agency Hub URL</div>
-      <div class="setting-desc">Базовый URL внешнего хаба для синхронизации досье фанов. Опционально. Пример: <code>https://hub.example.com</code></div>
+      <div class="setting-desc">Адрес core-сервера вашего агентства.</div>
     </div>
     <div class="setting-row">
-      <div class="setting-name">Agency Hub API Key</div>
-      <div class="setting-desc">Ключ аутентификации для Agency Hub. Требуется только если указан Hub URL.</div>
+      <div class="setting-name">Вход устройства</div>
+      <div class="setting-desc">Введите выданные логин и пароль один раз. После входа расширение использует отзывной device token; пароль и vendor keys локально не хранятся.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Статус подключения</div>
+      <div class="setting-desc">Проверка соединения, назначенных страниц и доступа к kernel feature lane.</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Выход устройства</div>
+      <div class="setting-desc">Удаляет локальный device token. Владелец также может отозвать его на сервере.</div>
     </div>
   </div>
 
@@ -1408,7 +1413,7 @@
     </div>
     <div class="setting-row">
       <div class="setting-name">Deep Features</div>
-      <div class="setting-desc">Summary, Chat Review. По умолчанию: <code>1000</code>. Диапазон: 100–1000. Для полного анализа нужна глубокая история.</div>
+      <div class="setting-desc">Summary, Chat Review. По умолчанию: <code>1500</code>. Диапазон: 100–3000. Для полного анализа нужна глубокая история.</div>
     </div>
   </div>
 
@@ -1433,12 +1438,8 @@
   <div class="settings-group">
     <div class="settings-group-title">&#9881;&#65039; Дополнительно</div>
     <div class="setting-row">
-      <div class="setting-name">Prompt Caching</div>
-      <div class="setting-desc">Включено по умолчанию. Кэширует системные блоки промпта на 1 час, снижая стоимость API на повторных запросах. Рекомендуется не отключать.</div>
-    </div>
-    <div class="setting-row">
       <div class="setting-name">Debug Mode</div>
-      <div class="setting-desc">Включает подробное логирование и инспектор промптов в оверлеях ошибок. Полезно для диагностики проблем.</div>
+      <div class="setting-desc">Включает диагностику запросов и стримов. Пока владелец держит открытым временное окно доступа на core, точный собранный промпт можно открыть на отдельной extension-origin странице; в DOM Fansly он никогда не попадает. Provider secrets не раскрываются.</div>
     </div>
     <div class="setting-row">
       <div class="setting-name">Account Aliases</div>
@@ -1453,71 +1454,17 @@
   <div class="section-header">
     <span class="section-label">AI-модели</span>
     <h2>Выбор AI-модели</h2>
-    <p class="section-desc">Каждую функцию можно настроить на свою модель. Claude Direct использует Anthropic, Gemini и Grok используют OpenRouter.</p>
-  </div>
-
-  <div class="feature-detail">
-    <table class="model-table">
-      <thead>
-        <tr>
-          <th>Модель</th>
-          <th>ID</th>
-          <th>Характеристика</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Claude Sonnet 4.6 <span class="model-rec">default</span></td>
-          <td><code>anthropic:claude-sonnet-4-6</code></td>
-          <td>Рекомендуемая. Оптимальный баланс качества, скорости и стоимости</td>
-        </tr>
-        <tr>
-          <td>Claude Sonnet 4.5</td>
-          <td><code>anthropic:claude-sonnet-4-5</code></td>
-          <td>Сбалансированная. Предыдущая версия Sonnet</td>
-        </tr>
-        <tr>
-          <td>Claude Opus 4.6</td>
-          <td><code>anthropic:claude-opus-4-6</code></td>
-          <td>Лучшее качество. Самая мощная, но дороже и медленнее</td>
-        </tr>
-        <tr>
-          <td>Claude Opus 4.5</td>
-          <td><code>anthropic:claude-opus-4-5</code></td>
-          <td>Лучшее качество (старше). Предыдущая версия Opus</td>
-        </tr>
-        <tr>
-          <td>Claude Haiku 4.5</td>
-          <td><code>anthropic:claude-haiku-4-5</code></td>
-          <td>Самая быстрая и дешёвая. Для простых задач и высокого объёма</td>
-        </tr>
-        <tr>
-          <td>Gemini 3.1 Pro Preview</td>
-          <td><code>openrouter:google/gemini-3.1-pro-preview</code></td>
-          <td>OpenRouter. Ключ OpenRouter обязателен</td>
-        </tr>
-        <tr>
-          <td>Grok 4.20</td>
-          <td><code>openrouter:x-ai/grok-4.20</code></td>
-          <td>OpenRouter. Используйте именно <code>x-ai/grok-4.20</code>, не <code>x-ai/grok-4.2</code></td>
-        </tr>
-        <tr>
-          <td>Grok 4.3</td>
-          <td><code>openrouter:x-ai/grok-4.3</code></td>
-          <td>OpenRouter. Стоимость в ChatGoose считается по base-tier; выше 200k total tokens у OpenRouter может быть дороже</td>
-        </tr>
-      </tbody>
-    </table>
+    <p class="section-desc">Модели и маршрутизация функций динамически управляются владельцем на сервере core. Расширение показывает фактически выбранную модель в метаданных результата, но не держит локальный каталог и не переопределяет серверный выбор.</p>
   </div>
 
   <div class="info-box tip">
-    <strong>Рекомендация</strong>
-    Используйте Sonnet для Reply и Help Me (скорость важна), Opus для Summary и Chat Review (качество важнее), Haiku для Polish (простая задача). Gemini/Grok можно выбрать в группе OpenRouter, если добавлен OpenRouter API key.
+    <strong>Сервер — источник истины</strong>
+    Доступные модели, provider, стоимость и ограничения меняются централизованно в Agency Hub. Если модель для функции нужно изменить, обратитесь к владельцу — обновлять расширение или вводить локальный provider key не требуется.
   </div>
 
   <div class="feature-detail" style="margin-top: 20px;">
     <h4>Какая модель используется для чего</h4>
-    <p>По умолчанию функции используют <strong>Claude Sonnet 4.6</strong> (а Summary — Claude Opus 4.6), но вы можете назначить отдельную модель для Reply, Help Me, Summary, Chat Review и Ping. Polish (Fix) использует ту же модель, что и Reply.</p>
+    <p>Назначение модели на функцию приходит из Agency Hub. Локальные настройки расширения не обходят серверные квоты, allowlist или стоимость.</p>
 
     <div class="cmp-grid" style="margin-top: 16px;">
       <div class="cmp-card quick">
@@ -1555,8 +1502,8 @@
     <div class="security-item">
       <div class="security-icon">&#128274;</div>
       <div>
-        <h4>API-ключ</h4>
-        <p>Хранятся в browser.storage.local. Claude key отправляется только на api.anthropic.com, OpenRouter key — только на openrouter.ai. Ключи не логируются и не передаются в Fansly.</p>
+        <h4>Device token</h4>
+        <p>Расширение предпочитает отзывной device token Agency Hub. На время миграции старый Hub API key ещё принимается как legacy fallback; vendor API-ключи и prompt library находятся на core и не выдаются chatter-машине.</p>
       </div>
     </div>
     <div class="security-item">
@@ -1577,14 +1524,14 @@
       <div class="security-icon">&#128737;&#65039;</div>
       <div>
         <h4>Защита от инъекций</h4>
-        <p>Все пользовательские данные экранируются перед вставкой в промпты. Рендеринг ответов не использует innerHTML для непроверенного контента.</p>
+        <p>Core отделяет пользовательский контекст от системных инструкций, а расширение не использует innerHTML для непроверенного ответа.</p>
       </div>
     </div>
     <div class="security-item">
       <div class="security-icon">&#127760;</div>
       <div>
         <h4>Минимум разрешений</h4>
-        <p>Расширение запрашивает доступ только к fansly.com, apiv3.fansly.com, api.anthropic.com и openrouter.ai. Никаких лишних хостов.</p>
+        <p>Расширение обращается к Fansly в контексте браузерной сессии и к настроенному Agency Hub. Прямых разрешений на vendor AI hosts у него нет.</p>
       </div>
     </div>
     <div class="security-item">
@@ -1642,15 +1589,6 @@
   </div>
 
   <div class="faq-item">
-    <div class="faq-q">Что такое «Prompt Caching» и стоит ли его отключать?</div>
-    <div class="faq-a">
-      <div class="faq-a-inner">
-        Prompt Caching кэширует системные части промпта на стороне Anthropic на 1 час. При повторных запросах с тем же контекстом это значительно снижает стоимость (кэшированные токены дешевле). Отключать не рекомендуется, если нет специфических причин.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
     <div class="faq-q">Можно ли использовать одну личность для нескольких аккаунтов?</div>
     <div class="faq-a">
       <div class="faq-a-inner">
@@ -1660,10 +1598,10 @@
   </div>
 
   <div class="faq-item">
-    <div class="faq-q">Безопасно ли вводить API-ключ?</div>
+    <div class="faq-q">Безопасно ли входить в Agency Hub?</div>
     <div class="faq-a">
       <div class="faq-a-inner">
-        API-ключи хранятся в локальном хранилище браузера и отправляются только соответствующему провайдеру: Claude key на api.anthropic.com, OpenRouter key на openrouter.ai. Они не логируются и не включаются в промпты. Но помните: любой, кто имеет доступ к вашему профилю Firefox, теоретически может прочитать хранилище расширения.
+        Vendor API-ключи в расширение не вводятся. После входа используется отзывной device token Agency Hub; на время миграции также может храниться legacy Hub API key. При потере устройства владелец может отозвать device token на сервере.
       </div>
     </div>
   </div>
@@ -1672,7 +1610,7 @@
     <div class="faq-q">Сколько стоит использование?</div>
     <div class="faq-a">
       <div class="faq-a-inner">
-        Расширение само по себе бесплатно. Оплачивается использование выбранного AI-провайдера: Anthropic для Claude Direct или OpenRouter для Gemini/Grok. Стоимость зависит от выбранной модели и объёма текста. В оверлее после генерации показывается стоимость каждого запроса.
+        Расширение не выставляет отдельный счёт. Использование AI, квоты и стоимость выбранной сервером модели учитываются в Agency Hub; после генерации интерфейс может показать стоимость запроса.
       </div>
     </div>
   </div>
@@ -1687,7 +1625,7 @@
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.0.1 &middot; Gosling Agency &middot; Powered by selected AI providers</p>
+  <p>Gosling Agency &middot; Kernel-served AI &middot; Версию проверяйте по update feed</p>
 </footer>
 
 <!-- ─── FAQ Toggle Script ────────────────────────────────────────────── -->

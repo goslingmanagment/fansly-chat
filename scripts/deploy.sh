@@ -24,7 +24,6 @@ readonly VERIFY_DELAY_SECONDS=10
 artifacts_dir=""
 updates_file=""
 install_page_backup=""
-guide_page_backup=""
 changelog_page_backup=""
 
 cleanup() {
@@ -116,12 +115,6 @@ restore_release_pages() {
     install_page_backup=""
   fi
 
-  if [[ -n "$guide_page_backup" && -f "$guide_page_backup" ]]; then
-    cp "$guide_page_backup" "$GUIDE_PAGE_FILE"
-    rm -f "$guide_page_backup"
-    guide_page_backup=""
-  fi
-
   if [[ -n "$changelog_page_backup" && -f "$changelog_page_backup" ]]; then
     cp "$changelog_page_backup" "$CHANGELOG_PAGE_FILE"
     rm -f "$changelog_page_backup"
@@ -147,37 +140,6 @@ stamp_install_page_version() {
   ' "$INSTALL_PAGE_FILE" "$version"
 }
 
-stamp_guide_page_version() {
-  local version="$1"
-
-  node --input-type=module -e '
-    import { readFileSync, writeFileSync } from "node:fs";
-
-    const [filePath, version] = process.argv.slice(1);
-    const replacements = [
-      {
-        description: "guide nav version",
-        pattern: /(<span class="nav-version">)v[^<]+(<\/span>)/,
-      },
-      {
-        description: "guide footer version",
-        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers<\/p>)/,
-      },
-    ];
-
-    let source = readFileSync(filePath, "utf8");
-
-    for (const { description, pattern } of replacements) {
-      if (!pattern.test(source)) {
-        throw new Error(`Could not find ${description} in ${filePath}`);
-      }
-      source = source.replace(pattern, `$1v${version}$2`);
-    }
-
-    writeFileSync(filePath, source);
-  ' "$GUIDE_PAGE_FILE" "$version"
-}
-
 stamp_changelog_page_version() {
   local version="$1"
 
@@ -192,7 +154,7 @@ stamp_changelog_page_version() {
       },
       {
         description: "changelog footer version",
-        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers<\/p>)/,
+        pattern: /(<p>)v[^<]+( &middot; Gosling Agency &middot; Kernel-served AI<\/p>)/,
       },
     ];
 
@@ -266,10 +228,10 @@ assert_release_preconditions() {
     fail "Working tree is dirty — commit (or stash) before deploying; what gets signed must be what is committed"
   fi
 
-  git -C "$ROOT_DIR" fetch origin main --quiet \
-    || fail "Could not fetch origin/main to verify HEAD is pushed"
-  if ! git -C "$ROOT_DIR" merge-base --is-ancestor HEAD origin/main; then
-    fail "HEAD is not on origin/main — push the release commit before deploying"
+  git -C "$ROOT_DIR" fetch origin main --tags --quiet \
+    || fail "Could not fetch origin/main and tags to verify the release state"
+  if [[ "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$(git -C "$ROOT_DIR" rev-parse origin/main)" ]]; then
+    fail "HEAD does not exactly match origin/main — push the release commit before deploying"
   fi
 
   if git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
@@ -303,15 +265,12 @@ stamp_release_pages() {
   local version="$1"
 
   install_page_backup="$(mktemp "${TMPDIR:-/tmp}/install.html.XXXXXX")"
-  guide_page_backup="$(mktemp "${TMPDIR:-/tmp}/guide.html.XXXXXX")"
   changelog_page_backup="$(mktemp "${TMPDIR:-/tmp}/changelog.html.XXXXXX")"
 
   cp "$INSTALL_PAGE_FILE" "$install_page_backup"
-  cp "$GUIDE_PAGE_FILE" "$guide_page_backup"
   cp "$CHANGELOG_PAGE_FILE" "$changelog_page_backup"
 
   stamp_install_page_version "$version"
-  stamp_guide_page_version "$version"
   stamp_changelog_page_version "$version"
 }
 
@@ -383,6 +342,12 @@ main() {
   log "Building extension"
   pnpm build
 
+  # Validate and stamp every mutable release page before the irreversible AMO
+  # signing request. guide.html is intentionally versionless and is uploaded
+  # unchanged; the served update feed is its source of version truth.
+  log "Validating release pages for version ${version}"
+  stamp_release_pages "$version"
+
   artifacts_dir="$(mktemp -d "${TMPDIR:-/tmp}/chatgoose-web-ext.XXXXXX")"
   updates_file="$(mktemp "${TMPDIR:-/tmp}/chatgoose-updates.XXXXXX.json")"
 
@@ -447,9 +412,6 @@ EOF
   remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
   local remote_tmp_changelog
   remote_tmp_changelog="$REMOTE_DIR/.changelog.html.upload.$$"
-
-  log "Stamping release pages with version ${version}"
-  stamp_release_pages "$version"
 
   log "Uploading signed package to ${VPS_HOST}:${REMOTE_DIR}"
   ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR'"

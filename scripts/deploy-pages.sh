@@ -15,7 +15,6 @@ readonly CHANGELOG_PAGE_FILE="$ROOT_DIR/changelog.html"
 readonly MASCOT_FILE="$ROOT_DIR/mascot.png"
 
 install_page_backup=""
-guide_page_backup=""
 changelog_page_backup=""
 
 cleanup() {
@@ -23,7 +22,6 @@ cleanup() {
   trap - EXIT
 
   [[ -n "$install_page_backup" && -f "$install_page_backup" ]] && cp "$install_page_backup" "$INSTALL_PAGE_FILE" && rm -f "$install_page_backup"
-  [[ -n "$guide_page_backup" && -f "$guide_page_backup" ]] && cp "$guide_page_backup" "$GUIDE_PAGE_FILE" && rm -f "$guide_page_backup"
   [[ -n "$changelog_page_backup" && -f "$changelog_page_backup" ]] && cp "$changelog_page_backup" "$CHANGELOG_PAGE_FILE" && rm -f "$changelog_page_backup"
 
   exit "$exit_code"
@@ -66,23 +64,17 @@ main() {
 
   # Backup originals
   install_page_backup="$(mktemp "${TMPDIR:-/tmp}/install.html.XXXXXX")"
-  guide_page_backup="$(mktemp "${TMPDIR:-/tmp}/guide.html.XXXXXX")"
   changelog_page_backup="$(mktemp "${TMPDIR:-/tmp}/changelog.html.XXXXXX")"
   cp "$INSTALL_PAGE_FILE" "$install_page_backup"
-  cp "$GUIDE_PAGE_FILE" "$guide_page_backup"
   cp "$CHANGELOG_PAGE_FILE" "$changelog_page_backup"
 
   # Stamp versions
   stamp_version "$INSTALL_PAGE_FILE" "$version" \
     '(<p class="footer">ChatGoose )v[^<]+( &middot; Gosling Agency</p>)'
 
-  stamp_version "$GUIDE_PAGE_FILE" "$version" \
-    '(<span class="nav-version">)v[^<]+(</span>)' \
-    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers</p>)'
-
   stamp_version "$CHANGELOG_PAGE_FILE" "$version" \
     '(<span class="nav-version">)v[^<]+(</span>)' \
-    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Powered by selected AI providers</p>)'
+    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Kernel-served AI</p>)'
 
   # Upload
   log "Uploading pages to ${VPS_HOST}"
