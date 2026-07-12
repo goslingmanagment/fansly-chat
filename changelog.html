@@ -417,11 +417,51 @@
 
 <div class="timeline">
 
+  <!-- 1.9.6 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.6</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Spenders показывает до 1000 платящих и устойчиво переживает частичные сбои, обновления и быстрый поиск.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li><strong>Без ложных нулей и NEW.</strong> Неполная или недоступная месячная выборка теперь считается неизвестной, а не нулевой</li>
+          <li><strong>Честные состояния.</strong> Выключенный источник, неразрешённая страница, ещё не готовая проекция, пустой результат и ошибка больше не смешиваются</li>
+          <li><strong>Необязательные данные деградируют отдельно.</strong> Таймаут имён или временный сбой карты чатов не скрывает рейтинг</li>
+          <li><strong>TTL и гонки исправлены.</strong> Старый запрос после Refresh или close/reopen не может перезаписать более свежий результат</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Изменено</div>
+        <ul class="changes-list">
+          <li><strong>До 1000 строк.</strong> С обновлённым Core доска забирает до 1000 spenders одним согласованным bounded read; старый Core получает точный fallback на 500</li>
+          <li><strong>Честный scope.</strong> Заголовок, поиск и tier-счётчики явно относятся к загруженному top-N, если база больше лимита</li>
+          <li><strong>Честные суммы и свежесть.</strong> Пограничное округление не маскирует tier, а время описывает самую новую Hub-проекцию, не общий снимок всех строк</li>
+          <li><strong>Точная подпись чата.</strong> Интерфейс говорит, что чат не найден в загруженной недавней выборке, а не заявляет об отсутствии общения</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Быстрее</div>
+        <ul class="changes-list">
+          <li>Поиск и tier-фильтры переиспользуют оболочку и строки; один delegated listener заменяет сотни row handlers</li>
+          <li>J/K обновляет только две строки, off-screen paint пропускается, close полностью освобождает detached DOM и таймеры</li>
+          <li>Firefox-профиль на 1000 строк не нашёл синхронных операций длиннее 50 мс, поэтому виртуализация пока не нужна</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.9.5 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.5</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
