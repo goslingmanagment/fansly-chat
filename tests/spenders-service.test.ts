@@ -179,14 +179,14 @@ describe('SpendersService (kernel source)', () => {
       expect.objectContaining({ agencyHubApiKey: 'hub-key' }),
       'creator-fs',
       'lifetime',
-      expect.any(Number),
+      1000,
       expect.any(AbortSignal),
     );
     expect(fetchTopSpenders).toHaveBeenCalledWith(
       expect.anything(),
       'creator-fs',
       monthWindowFor(Date.now()),
-      expect.any(Number),
+      1000,
       expect.any(AbortSignal),
     );
     expect(listFanAccounts).toHaveBeenCalledTimes(1);
@@ -241,6 +241,67 @@ describe('SpendersService (kernel source)', () => {
     expect(result.fanCount).toBe(3);
     expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
     expect(typeof result.fetchedAt).toBe('number');
+  });
+
+  it('keeps all 1000 returned rows instead of applying a second client-side cutoff', async () => {
+    const entries = Array.from({ length: 1000 }, (_, index) => ({
+      platformUserId: `fan-${index}`,
+      username: `fan${index}`,
+      displayName: `Fan ${index}`,
+      grossMills: 1_000_000 - index,
+    }));
+    const { service, fetchTopSpenders } = makeKernelHarness({
+      fans: [],
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: entries.length,
+        source: RAMPED_SOURCE,
+        entries,
+      },
+      monthSnapshot: 'throw',
+      tuning: { nameSweepBudgetMs: 0 },
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(fetchTopSpenders).toHaveBeenCalledWith(
+      expect.anything(),
+      'creator-fs',
+      'lifetime',
+      1000,
+      expect.any(AbortSignal),
+    );
+    expect(result.entries).toHaveLength(1000);
+    expect(result.entries[999]!.fanAccountId).toBe('fan-999');
+    expect(result.fanCount).toBe(1000);
+  });
+
+  it('does not cache an old-Core fallback that returned only 500 of 694 rows', async () => {
+    const entries = Array.from({ length: 500 }, (_, index) => ({
+      platformUserId: `fallback-fan-${index}`,
+      username: `fallback${index}`,
+      displayName: `Fallback Fan ${index}`,
+      grossMills: 1_000_000 - index,
+    }));
+    const { service, fetchTopSpenders } = makeKernelHarness({
+      fans: [],
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 694,
+        source: RAMPED_SOURCE,
+        entries,
+      },
+      monthSnapshot: 'throw',
+      tuning: { nameSweepBudgetMs: 0 },
+    });
+    const sess = kernelSession();
+
+    const first = await service.getList(sess, new AbortController().signal);
+    const second = await service.getList(sess, new AbortController().signal);
+
+    expect(first.entries).toHaveLength(500);
+    expect(second.entries).toHaveLength(500);
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(4);
   });
 
   it('degrades a failed optional conversation map to lazy chat resolution', async () => {
@@ -810,7 +871,7 @@ describe('SpendersService (kernel source)', () => {
     const { service } = makeKernelHarness({
       monthSnapshot: {
         builtAt: '2026-07-05T00:00:00.000Z',
-        fanCount: 501,
+        fanCount: 1001,
         source: RAMPED_SOURCE,
         entries: [
           { platformUserId: 'f1', username: 'alice', displayName: 'Alice', grossMills: 120_000 },
@@ -931,6 +992,46 @@ describe('SpendersService (kernel source)', () => {
     expect(second.fetchTopSpenders).toHaveBeenCalledTimes(2);
   });
 
+  it('ignores a fresh V2 top-500 session snapshot and writes a V3 result', async () => {
+    const store = new Map<string, unknown>([
+      ['spendersCacheV2', {
+        'creator-1|legacy': {
+          cachedAt: Date.now(),
+          result: {
+            entries: [],
+            builtAt: null,
+            source: {
+              streamState: 'ramped',
+              lastSyncedAt: null,
+              consecutiveFailures: 0,
+            },
+            fanCount: 500,
+            monthWindow: null,
+            fetchedAt: Date.now(),
+          },
+        },
+      }],
+    ]);
+    const sessionArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+    const harness = makeKernelHarness();
+
+    const result = await harness.service.getList(
+      kernelSession(),
+      new AbortController().signal,
+    );
+
+    expect(harness.fetchTopSpenders).toHaveBeenCalledTimes(2);
+    expect(result.entries).toHaveLength(3);
+    expect(sessionArea.get).not.toHaveBeenCalledWith('spendersCacheV2');
+    expect(store.get('spendersCacheV3')).toBeDefined();
+  });
+
   it('serializes concurrent session-cache writes across creators', async () => {
     const store = new Map<string, unknown>();
     const sessionArea = {
@@ -959,7 +1060,7 @@ describe('SpendersService (kernel source)', () => {
       ),
     ]);
 
-    const all = store.get('spendersCacheV2') as Record<string, unknown>;
+    const all = store.get('spendersCacheV3') as Record<string, unknown>;
     expect(Object.keys(all)).toHaveLength(2);
     expect(Object.keys(all).some((key) => key.startsWith('creator-a|'))).toBe(true);
     expect(Object.keys(all).some((key) => key.startsWith('creator-b|'))).toBe(true);
@@ -1055,7 +1156,7 @@ describe('SpendersService (kernel source)', () => {
     releaseLifetime();
     await oldBuild;
 
-    expect(store.get('spendersCacheV2')).toEqual({});
+    expect(store.get('spendersCacheV3')).toEqual({});
     const restarted = makeKernelHarness();
     await restarted.service.getList(kernelSession(), new AbortController().signal);
     expect(restarted.fetchTopSpenders).toHaveBeenCalledTimes(2);

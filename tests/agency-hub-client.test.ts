@@ -37,6 +37,30 @@ function hubPage(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function topSpendersPayload() {
+  return {
+    window: 'lifetime',
+    builtAt: '2026-07-05T00:00:00.000Z',
+    fanCount: 1,
+    source: {
+      streamState: 'ramped',
+      lastSyncedAt: '2026-07-05T01:00:00.000Z',
+      consecutiveFailures: 2,
+    },
+    entries: [
+      {
+        platformUserId: 'fan-1',
+        username: 'alice',
+        displayName: 'Alice',
+        grossMills: 123_000,
+        netMills: 98_400,
+        currency: 'USD',
+        observedAt: '2026-07-05T00:00:00.000Z',
+      },
+    ],
+  };
+}
+
 function makeUsageEvent(index = 1) {
   return {
     clientEventId: `event-${index}`,
@@ -65,28 +89,8 @@ describe('AgencyHubClient', () => {
       const requestUrl = new URL(String(url));
       expect(requestUrl.pathname).toBe('/api/v1/pages/creator-fs/top-spenders');
       expect(requestUrl.searchParams.get('window')).toBe('lifetime');
-      expect(requestUrl.searchParams.get('limit')).toBe('500');
-      return jsonResponse({
-        window: 'lifetime',
-        builtAt: '2026-07-05T00:00:00.000Z',
-        fanCount: 1,
-        source: {
-          streamState: 'ramped',
-          lastSyncedAt: '2026-07-05T01:00:00.000Z',
-          consecutiveFailures: 2,
-        },
-        entries: [
-          {
-            platformUserId: 'fan-1',
-            username: 'alice',
-            displayName: 'Alice',
-            grossMills: 123_000,
-            netMills: 98_400,
-            currency: 'USD',
-            observedAt: '2026-07-05T00:00:00.000Z',
-          },
-        ],
-      });
+      expect(requestUrl.searchParams.get('limit')).toBe('1000');
+      return jsonResponse(topSpendersPayload());
     });
     const client = new AgencyHubClient(fetchMock as typeof fetch);
 
@@ -94,7 +98,7 @@ describe('AgencyHubClient', () => {
       makeSettings(),
       'creator-fs',
       'lifetime',
-      500,
+      1000,
       new AbortController().signal,
     );
 
@@ -115,6 +119,100 @@ describe('AgencyHubClient', () => {
         },
       ],
     });
+  });
+
+  it('retries exactly once at 500 for the pre-#142 Core limit response', async () => {
+    const limits: string[] = [];
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const limit = new URL(String(url)).searchParams.get('limit') ?? '';
+      limits.push(limit);
+      if (limit === '1000') {
+        return jsonResponse({
+          error: 'Bad Request',
+          message: 'querystring/limit Too big: expected number to be <=500',
+          statusCode: 400,
+        }, 400);
+      }
+      return jsonResponse(topSpendersPayload());
+    });
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    const result = await client.fetchTopSpenders(
+      makeSettings(),
+      'creator-fs',
+      'lifetime',
+      1000,
+      new AbortController().signal,
+    );
+
+    expect(limits).toEqual(['1000', '500']);
+    expect(result.fanCount).toBe(1);
+  });
+
+  it('does not retry an unrelated Hub validation error', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      error: 'Bad Request',
+      message: 'querystring/window Invalid string: must match pattern',
+      statusCode: 400,
+    }, 400));
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(client.fetchTopSpenders(
+      makeSettings(),
+      'creator-fs',
+      'lifetime',
+      1000,
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      key: 'hub_request_failed',
+      details: { status: 400 },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a top-spenders auth failure', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      error: 'Unauthorized',
+      message: 'Invalid token',
+      statusCode: 401,
+    }, 401));
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(client.fetchTopSpenders(
+      makeSettings(),
+      'creator-fs',
+      'lifetime',
+      1000,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ key: 'hub_invalid_api_key' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      name: 'network failure',
+      failure: () => new Error('socket hang up'),
+      expected: { message: expect.stringContaining('socket hang up') },
+    },
+    {
+      name: 'parent abort',
+      failure: () => new DOMException('Aborted', 'AbortError'),
+      expected: { name: 'AbortError' },
+    },
+  ])('does not retry a top-spenders $name', async ({ failure, expected }) => {
+    const fetchMock = vi.fn(async () => {
+      throw failure();
+    });
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(client.fetchTopSpenders(
+      makeSettings(),
+      'creator-fs',
+      'lifetime',
+      1000,
+      new AbortController().signal,
+    )).rejects.toMatchObject(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([

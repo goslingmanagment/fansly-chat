@@ -526,8 +526,8 @@ describe('SpendersBoardController', () => {
     );
   });
 
-  it('keeps 500-row cursor updates O(1) and coalesces a search burst into one commit', async () => {
-    const entries = Array.from({ length: 500 }, (_, index) =>
+  it('keeps 1000-row cursor updates O(1) and coalesces a search burst into one commit', async () => {
+    const entries = Array.from({ length: 1000 }, (_, index) =>
       entry(
         `fan-${String(index).padStart(3, '0')}`,
         `group-${index}`,
@@ -541,9 +541,9 @@ describe('SpendersBoardController', () => {
     );
     await board.show();
 
-    expect(rows()).toHaveLength(500);
-    const fan499Row = rows().find(
-      (row) => row.querySelector('.chatgoose-board-row-name')?.textContent === 'Fan 499',
+    expect(rows()).toHaveLength(1000);
+    const fan999Row = rows().find(
+      (row) => row.querySelector('.chatgoose-board-row-name')?.textContent === 'Fan 999',
     );
     const removeClass = vi.spyOn(window.DOMTokenList.prototype, 'remove');
     const addClass = vi.spyOn(window.DOMTokenList.prototype, 'add');
@@ -554,14 +554,14 @@ describe('SpendersBoardController', () => {
 
     const list = document.querySelector<HTMLElement>('.chatgoose-board-list')!;
     const replaceChildren = vi.spyOn(list, 'replaceChildren');
-    typeSearch('fan 4');
-    typeSearch('fan 49');
-    typeSearch('fan 499');
+    typeSearch('fan 9');
+    typeSearch('fan 99');
+    typeSearch('fan 999');
     expect(replaceChildren).not.toHaveBeenCalled();
 
     await vi.waitFor(() => expect(rows()).toHaveLength(1));
-    expect(rows()[0]).toBe(fan499Row);
-    expect(rows()[0]!.querySelector('.chatgoose-board-row-name')?.textContent).toBe('Fan 499');
+    expect(rows()[0]).toBe(fan999Row);
+    expect(rows()[0]!.querySelector('.chatgoose-board-row-name')?.textContent).toBe('Fan 999');
     expect(replaceChildren).toHaveBeenCalledTimes(1);
     expect(replaceChildren.mock.calls[0]).toHaveLength(1);
     expect(replaceChildren.mock.calls[0]![0]).toBeInstanceOf(window.DocumentFragment);
@@ -596,11 +596,11 @@ describe('SpendersBoardController', () => {
       type: 'spenders:progress',
       buildId: activeBuildId,
       phase: 'names',
-      done: 250,
-      total: 500,
+      done: 500,
+      total: 1000,
     });
     expect(document.querySelector('.chatgoose-board-progress-label')!.textContent).toBe(
-      'Resolving fan names — 250 of 500…',
+      'Resolving fan names — 500 of 1000…',
     );
     expect(
       document.querySelector<HTMLElement>('.chatgoose-board-progress-bar')!.style.width,
@@ -955,7 +955,7 @@ describe('SpendersBoardController', () => {
   });
 
   it('releases detached row and progress references during a failed Refresh', async () => {
-    const entries = Array.from({ length: 500 }, (_, index) =>
+    const entries = Array.from({ length: 1000 }, (_, index) =>
       entry(`fan-${index}`, `group-${index}`, `Fan ${index}`, 1000 - index),
     );
     let resolveRefresh!: (response: SpendersListResponse) => void;
@@ -969,7 +969,7 @@ describe('SpendersBoardController', () => {
     });
     const board = new SpendersBoardController(makeDeps({ fetchList }));
     await board.show();
-    expect(rows()).toHaveLength(500);
+    expect(rows()).toHaveLength(1000);
 
     const refresh = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.includes('Refresh'))!;

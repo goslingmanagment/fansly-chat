@@ -50,8 +50,10 @@ export const FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Most-recent conversations to enumerate for the fan→groupId map. */
 export const SPENDERS_MAX_FANS = 150;
-/** Kernel top-spenders query size (the kernel caps limit at 500). */
-export const SPENDERS_KERNEL_LIMIT = 500;
+/** Kernel top-spenders query size (Core decision #142 caps limit at 1000). */
+export const SPENDERS_KERNEL_LIMIT = 1000;
+/** One-release compatibility fallback for Core versions predating #142. */
+export const SPENDERS_KERNEL_LEGACY_LIMIT = 500;
 /** Fans per /account?ids= batch when resolving board-row names. */
 export const SPENDERS_NAME_LOOKUP_BATCH = 50;
 /** Soft wall-clock budget for the whole name sweep per build. Names are
