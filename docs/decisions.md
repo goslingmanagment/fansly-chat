@@ -48,6 +48,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E29 | 2026-07-12 | Spenders correctness/performance hardening: source-aware empty states, correlated builds, race-safe async UI, bounded optional reads, serialized scoped caches, incremental DOM updates |
 | E30 | 2026-07-12 | Spenders scope/amount/freshness honesty: truncated controls name the loaded slice, sub-$1 spenders remain visible, tier-boundary amounts retain mills, builtAt is explicitly newest-projection freshness |
 | E31 | 2026-07-12 | Spenders current-page completeness: Core #142 cap 1000, V3 bound-aware cache, exact old-Core 500 fallback, measured Firefox 1000-row render gate |
+| E32 | 2026-07-12 | Kernel-only UX truth: dynamic server model catalog, owner-gated prompt debug, inert client prompt-caching control removed |
+| E33 | 2026-07-12 | Release pages are validated and stamped pre-sign; release HEAD must exactly equal fetched origin/main; guide remains versionless |
 
 ## Entries
 
@@ -633,3 +635,22 @@ so the gate uses direct operation/commit timing; none of the measured synchronou
 paths crossed 50 ms. Adding virtualization now would introduce focus/scroll
 state risk without a measured benefit. Structural 1000-row service/render tests
 pin coverage, O(1) cursor work, coalesced search, row reuse, and cleanup.
+
+**E32 (2026-07-12).** Kernel-only ownership is reflected in the operator UI
+instead of preserving dead client controls or a stale provider catalog. The
+Prompt Caching checkbox was inert after the kernel cutover: it only rewrote an
+old storage field and could not affect the server policy, so the control and its
+guide copy are removed while the persisted field remains readable for backward
+compatibility. Model availability, routing, cost, and provider selection are
+described as dynamic server state. Debug documentation follows E28: an exact
+assembled prompt is visible only during an owner-controlled window and only on
+an extension-origin page, never in the Fansly DOM. Device-token preference is
+also stated without hiding the temporarily dual-accepted legacy Hub key.
+
+**E33 (2026-07-12).** Release pages now fail safely before the irreversible AMO request. `deploy.sh`
+fetches `origin/main` plus tags and requires exact commit identity with
+`origin/main`; install/changelog version slots are validated and stamped before
+`web-ext sign`. The guide is intentionally versionless and is uploaded
+unchanged, with the signed update feed as version truth. Changelog copy names
+kernel-served AI rather than the retired client-selected provider model. Offline
+tests pin slot cardinality, substitution, guide versionlessness, and sign order.

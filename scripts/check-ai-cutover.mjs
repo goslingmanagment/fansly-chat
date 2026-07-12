@@ -20,11 +20,29 @@ function grepSrc(pattern) {
   }
 }
 
+function grepUserDocs(pattern) {
+  try {
+    return execFileSync('grep', ['-nE', pattern, 'README.md', 'guide.html'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
 const failures = [];
 
 const vendorEndpoints = grepSrc('api\\.anthropic\\.com|openrouter\\.ai');
 if (vendorEndpoints) {
   failures.push(`vendor endpoints referenced:\n${vendorEndpoints}`);
+}
+
+const staleUserDocs = grepUserDocs(
+  'api\\.anthropic\\.com|openrouter\\.ai|console\\.anthropic\\.com|Claude Direct|Введите API-ключи|OpenRouter API Key|Claude API Key',
+);
+if (staleUserDocs) {
+  failures.push(`pre-kernel instructions in shipped user docs:\n${staleUserDocs}`);
 }
 
 const deadImports = grepSrc(
@@ -38,4 +56,4 @@ if (failures.length > 0) {
   console.error(`AI cutover gates FAILED:\n${failures.join('\n')}`);
   process.exit(1);
 }
-console.log('AI cutover gates: clean (no vendor endpoints, no deleted-module imports).');
+console.log('AI cutover gates: clean (source and shipped user docs match kernel-only AI).');

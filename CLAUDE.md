@@ -10,31 +10,25 @@ to the kernel's SDK + feature lane on the other. The OnlyFans sibling is the
 ChatGoose desktop app (`~/code/chatgoose_desktop_fable`) — separate repo,
 shared kernel.
 
-**Current state (2026-07-11): 1.8.1 is BUILT on branch `ext/w9-1.8.1`
-(core plan W9), owner sign/publish pending; 1.8.0 is live on the self-hosted
-feed (https://ext.gosling-agency.ru, AMO-unlisted signing). The stack:
-kernel-only AI over the feature lane (SSE), device-token sign-in preferred
-everywhere, kernel-only spenders board (legacy rebuild deleted in 1.7.0),
-the E13/E14 family restyle (shared tokens, switchable light/dark), and the
-W9 wave: custom personas sync to kernel `ai_personas` (E17, builtin card
-read-only), honest not-ramped board state (E18), storage v13 per-key
-credential custody (E19), 300k client-side transcript cap (E20), acceptance
-spool hardening (E21), deploy.sh preflight asserts + release tagging (E16 —
-retro-tags v1.7.0/v1.7.1/v1.8.0 are owner-run). Releases go from `main`.
-The legacy chatter-key path is still dual-accepted — delete it only once the
-fleet demonstrably holds device tokens (E9d). Toolchain: TS 6 / vitest 4 /
-pnpm@10.33.1; CI runs `pnpm check` on every PR.**
+**Current architecture:** kernel-only AI over the feature lane (SSE),
+device-token sign-in preferred, kernel-only spenders data, and per-key
+credential custody. Releases go from `main`; CI runs `pnpm check`. Do not record
+a manually maintained "current/live version" here: local source truth is
+`package.json` + `manifest.json`, release history is `CHANGELOG.md` + Git tags,
+and the actually published version must be verified against the self-hosted
+feed. The legacy chatter-key path remains dual-accepted only for fleet migration
+and may be deleted only after device-token adoption is demonstrated (E9d).**
 
 ## Read these before designing or building anything
 
 | Doc | What it answers |
 |---|---|
-| `docs/decisions.md` | This repo's decision log (E1–E7 quick-ref) + the family law; cross-repo rulings live in core's `docs/decisions.md`, referenced by number |
-| `docs/generated/` | Regenerated post-migration codebase maps (Stage 35) — start at `00-overview.md` (index); `boundaries.md` is the external-contract catalog (hosts, gates, data crossings). Machine-generated, banner says how to regenerate |
+| `docs/decisions.md` | This repo's append-only decision log (E1–latest) + the family law; cross-repo rulings live in core's `docs/decisions.md`, referenced by number |
+| `docs/generated/` | Point-in-time code maps. Read each banner's snapshot SHA before relying on a claim or line number; they are supplemental, not current truth until regenerated |
 | `docs/project-kernel/` | The Pass 1 (pre-migration) maps — superseded history, banners say so |
 | `SPEC_FINAL.md` | The original product spec — HISTORICAL (v1.3, pre-kernel): normative for product behavior/UX intent, wrong about architecture (it predates the kernel cutover — trust `docs/decisions.md` E2/E3 over it) |
-| `CHANGELOG.md` / `TODO.md` | Release history; owner's live worklist |
-| `~/code/core/docs/ai-gateway-contract.md` | The kernel AI contract — PARTIALLY STALE: it documents the V1 raw gateway (prompt blocks); frames/quota/gates carry over, but this extension uses the LATER feature lane (`/api/v1/ai/features/:feature`, refs+clientContext) — request shape lives in `docs/generated/05-background-kernel-ai.md` + `boundaries.md` |
+| `CHANGELOG.md` | Release history. The ignored local `TODO.md` is not a portable or authoritative worklist |
+| `~/code/core/docs/ai-gateway-contract.md` | Historical V1 raw-gateway contract. For the current feature-lane request shape, verify `src/background/kernel-feature-gateway.ts`, the vendored SDK, and core contracts; do not rely on the old prose contract |
 
 ## Hard rules
 
@@ -90,7 +84,7 @@ pnpm@10.33.1; CI runs `pnpm check` on every PR.**
 - Plain TS + esbuild (`esbuild.config.mjs`) — no framework in content scripts;
   `src/{background,content,options,popup,shared}`; tests in `tests/` (vitest).
 - `pnpm check` = typecheck + lint + gates + tests + build — green before any
-  commit; CI enforces it on PRs and pushes to `main`/`bar-tone-menu`.
+  commit; CI enforces it on PRs and pushes to `main`.
 - Money display follows the kernel's units (mills arrive pre-formatted from
   kernel responses); don't reintroduce local money math.
 - The self-hosted update feed is the ONLY distribution channel (AMO-unlisted
