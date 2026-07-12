@@ -85,6 +85,13 @@ interface KernelSpendersSnapshot {
   }>;
 }
 
+interface BuiltSpendersResult {
+  result: SpendersListResult;
+  /** False when the server returned fewer rows than the requested bound can
+   * cover (notably the one-release old-Core 1000→500 compatibility path). */
+  hasRequestedCoverage: boolean;
+}
+
 function parseKernelTimestamp(value: string | null): number | null {
   if (value === null) return null;
   const parsed = Date.parse(value);
@@ -154,9 +161,9 @@ const SPENDERS_MONTH_BUDGET_MS = 12_000;
 // 10-minute cache useful across restarts (dies with the browser session,
 // never syncs). Module memory is the fallback for unit tests/exotic builds —
 // mirrors quota-tracker's custody pattern.
-// V2 adds source health and scopes each entry to its Hub origin. Old session
-// entries deliberately miss rather than being trusted as the new shape.
-const SESSION_CACHE_STORAGE_KEY = 'spendersCacheV2';
+// V3 expands ranking coverage to 1000 and puts the requested bound in each
+// cache key. Old top-500 session entries deliberately miss after the upgrade.
+const SESSION_CACHE_STORAGE_KEY = 'spendersCacheV3';
 
 // storage.session updates replace the whole aggregate object. Serialize every
 // mutation so two overlapping creator builds cannot both read the same
@@ -394,7 +401,7 @@ export class SpendersService {
   private boardCacheKey(session: SessionTemplate, settings: Settings): string {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const username = normalizeAgencyHubUsername(session.resolvedUsername) ?? '';
-    return `${this.boardCachePrefix(session)}${encodeURIComponent(baseUrl)}|${encodeURIComponent(username)}`;
+    return `${this.boardCachePrefix(session)}${encodeURIComponent(baseUrl)}|${encodeURIComponent(username)}|limit=${SPENDERS_KERNEL_LIMIT}`;
   }
 
   async getList(
@@ -441,7 +448,8 @@ export class SpendersService {
 
     const buildSequence = ++this.buildSequence;
     this.latestBuildByKey.set(key, buildSequence);
-    const result = await this.buildFromKernel(session, settings, signal, options?.onProgress);
+    const built = await this.buildFromKernel(session, settings, signal, options?.onProgress);
+    const { result } = built;
 
     // A token/settings invalidation may race an already-running build. Return
     // that caller's completed response, but never repopulate the cleared cache
@@ -453,7 +461,7 @@ export class SpendersService {
 
     // Disabled or still-pending sources stay live questions; a ramped source
     // with a successful empty sync is authoritative and may be cached.
-    if (isCacheableResult(result)) {
+    if (built.hasRequestedCoverage && isCacheableResult(result)) {
       const entry: CacheEntry = { cachedAt: Date.now(), result };
       this.cache.set(key, entry);
       await writeSessionCache(key, entry);
@@ -528,7 +536,7 @@ export class SpendersService {
     settings: Settings,
     signal: AbortSignal,
     onProgress?: (progress: SpendersProgressPayload) => void,
-  ): Promise<SpendersListResult> {
+  ): Promise<BuiltSpendersResult> {
     onProgress?.({ type: 'spenders:progress', phase: 'ranking' });
     const pageUsername = session.resolvedUsername?.trim() || null;
     const pageLabel = await this.kernelSource!.resolvePageLabelForUsername(
@@ -581,7 +589,7 @@ export class SpendersService {
 
     const groupByFanId = new Map(fans.map((fan) => [fan.fanAccountId, fan.groupId]));
     // Source health distinguishes a successful empty month from an unramped
-    // stream. Even when usable, entries may be a bounded top-500 subset: only
+    // stream. Even when usable, entries may be a bounded top-N subset: only
     // a complete response makes an absent lifetime fan a known $0.
     const monthLastSyncedAt = month === null
       ? null
@@ -628,20 +636,31 @@ export class SpendersService {
     });
 
     return {
-      entries,
-      // Honest staleness: the projection's newest observation, not "now",
-      // not necessarily one of the returned top N, and not a coherent
-      // timestamp shared by every returned row.
-      // Source state, not builtAt alone, distinguishes disabled/pending/empty.
-      builtAt: parseKernelTimestamp(lifetime.builtAt),
-      source: {
-        streamState: lifetime.source.streamState,
-        lastSyncedAt: parseKernelTimestamp(lifetime.source.lastSyncedAt),
-        consecutiveFailures: lifetime.source.consecutiveFailures,
+      result: {
+        entries,
+        // Honest staleness: the projection's newest observation, not "now",
+        // not necessarily one of the returned top N, and not a coherent
+        // timestamp shared by every returned row.
+        // Source state, not builtAt alone, distinguishes disabled/pending/empty.
+        builtAt: parseKernelTimestamp(lifetime.builtAt),
+        source: {
+          streamState: lifetime.source.streamState,
+          lastSyncedAt: parseKernelTimestamp(lifetime.source.lastSyncedAt),
+          consecutiveFailures: lifetime.source.consecutiveFailures,
+        },
+        fanCount: lifetime.fanCount,
+        monthWindow: monthReady ? monthWindow : null,
+        fetchedAt: Date.now(),
       },
-      fanCount: lifetime.fanCount,
-      monthWindow: monthReady ? monthWindow : null,
-      fetchedAt: Date.now(),
+      // A compatible old Core can return only 500 for the requested 1000.
+      // Do not pin that truncated recovery result for ten minutes after Core
+      // comes back. Legitimate pages above 1000 still satisfy min(total, cap).
+      hasRequestedCoverage:
+        lifetime.entries.length === Math.min(lifetime.fanCount, SPENDERS_KERNEL_LIMIT) &&
+        (
+          month === null ||
+          month.entries.length === Math.min(month.fanCount, SPENDERS_KERNEL_LIMIT)
+        ),
     };
   }
 

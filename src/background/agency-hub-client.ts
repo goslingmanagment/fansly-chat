@@ -8,7 +8,11 @@ import {
   normalizeAgencyHubBaseUrl,
   normalizeAgencyHubUsername,
 } from '../shared/agency-hub.js';
-import { AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS } from '../shared/constants.js';
+import {
+  AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS,
+  SPENDERS_KERNEL_LIMIT,
+  SPENDERS_KERNEL_LEGACY_LIMIT,
+} from '../shared/constants.js';
 import {
   ChatGooseError,
   createUserError,
@@ -137,6 +141,28 @@ function hubResponseSnippet(error: KernelApiError): string {
     }
   }
   return error.message.slice(0, 400);
+}
+
+/** Core versions before decision #142 reject the expanded request with this
+ * exact Fastify/Zod response. Keep the match deliberately strict: this is
+ * rollback compatibility, not a generic retry for validation failures. */
+function isLegacyTopSpendersLimitError(error: unknown, requestedLimit: number): boolean {
+  if (
+    requestedLimit !== SPENDERS_KERNEL_LIMIT ||
+    !(error instanceof KernelApiError) ||
+    error.category !== 'validation' ||
+    error.status !== 400 ||
+    error.code !== 'Bad Request' ||
+    !error.body ||
+    typeof error.body !== 'object'
+  ) {
+    return false;
+  }
+  const body = error.body as Record<string, unknown>;
+  return Object.keys(body).length === 3 &&
+    body.error === 'Bad Request' &&
+    body.message === 'querystring/limit Too big: expected number to be <=500' &&
+    body.statusCode === 400;
 }
 
 export class AgencyHubClient {
@@ -382,10 +408,19 @@ export class AgencyHubClient {
     if (!baseUrl || !bearer) {
       throw new ChatGooseError('hub_missing_api_key');
     }
-    try {
-      const snapshot = await this.sdkFor(baseUrl, bearer, signal).pageTopSpenders({
+    const fetchSnapshot = async (requestLimit: number) =>
+      await this.sdkFor(baseUrl, bearer, signal).pageTopSpenders({
         params: { pageLabel },
-        query: { window, limit },
+        query: { window, limit: requestLimit },
+      });
+    try {
+      const snapshot = await fetchSnapshot(limit).catch(async (error: unknown) => {
+        if (!isLegacyTopSpendersLimitError(error, limit)) throw error;
+        logWarn('Agency Hub top spenders uses the pre-#142 limit; retrying compatibly', {
+          requestedLimit: limit,
+          fallbackLimit: SPENDERS_KERNEL_LEGACY_LIMIT,
+        });
+        return await fetchSnapshot(SPENDERS_KERNEL_LEGACY_LIMIT);
       });
       return {
         builtAt: snapshot.builtAt,

@@ -47,6 +47,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E28 | 2026-07-11 | Debug mode asks the kernel to echo its assembled prompt (core #140 capability header); echo stays in the SW, Fansly DOM gets only a typed counts projection + token, full prompt opens on an extension-origin page |
 | E29 | 2026-07-12 | Spenders correctness/performance hardening: source-aware empty states, correlated builds, race-safe async UI, bounded optional reads, serialized scoped caches, incremental DOM updates |
 | E30 | 2026-07-12 | Spenders scope/amount/freshness honesty: truncated controls name the loaded slice, sub-$1 spenders remain visible, tier-boundary amounts retain mills, builtAt is explicitly newest-projection freshness |
+| E31 | 2026-07-12 | Spenders current-page completeness: Core #142 cap 1000, V3 bound-aware cache, exact old-Core 500 fallback, measured Firefox 1000-row render gate |
 
 ## Entries
 
@@ -598,3 +599,37 @@ states that shown rows do not share that timestamp — never a coherent
 `data as of` claim. Full list virtualization remains deferred until a Firefox
 profile finds a measured long task; it cannot recover rows the API did not
 return. Pinned in the shared spenders and board-controller suites.
+
+**E31 (2026-07-12).** The current 694-spender page is complete in one bounded
+read. Core #142 raises only `pageTopSpenders`'s maximum from 500 to 1000 (default
+150); the extension now asks 1000 for lifetime and current month. Pagination is
+still deliberately absent: splitting a projection that updates in place across
+requests, without a snapshot-bound cursor, would create duplicate/skip races.
+If `fanCount` later exceeds 1000 the existing `top N of M` copy remains honest,
+and that real demand should add snapshot semantics plus keyset pagination rather
+than another unbounded increase.
+
+Normal rollout is Core first. For independent rollback safety, this extension
+recognizes ONLY the old Core's exact Zod/Fastify limit-500 response and retries
+once at 500; unrelated 400s, auth, network, and abort failures are never treated
+as compatibility. That fallback still produces the honest truncated UI and is
+temporary for the compatibility window. The board session namespace moves from
+V2 to V3 and the requested limit is part of each key, so a warm top-500 snapshot
+cannot survive the upgrade. A response shorter than `min(fanCount, 1000)` is not
+cached, so a fallback result cannot remain for ten minutes after Core recovers.
+The vendored SDK intentionally stays pinned: this is
+the same operation and numeric query, its runtime serializes requests without
+request-schema parsing, and the response shape is unchanged; Core alone refreshes
+its generated OpenAPI/SDK/hash.
+
+Virtualization remains deferred by measurement, not assumption. In real Firefox
+152 on macOS, five fresh navigations at 1000 rows measured cold open 19–23 ms,
+search list commits 4–6 ms (166–174 ms end-to-end including the intentional
+150 ms debounce), tier commits 3 ms, 200 consecutive J presses at p95/max 1 ms,
+Refresh 38–39 ms, close 16–17 ms, and reopen 24–29 ms. The current 694-row case
+was at or below those bounds after browser startup. Close left zero DOM rows,
+row references, and cached row nodes. Firefox does not expose the Long Tasks API,
+so the gate uses direct operation/commit timing; none of the measured synchronous
+paths crossed 50 ms. Adding virtualization now would introduce focus/scroll
+state risk without a measured benefit. Structural 1000-row service/render tests
+pin coverage, O(1) cursor work, coalesced search, row reuse, and cleanup.

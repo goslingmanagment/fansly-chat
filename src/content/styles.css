@@ -1981,7 +1981,7 @@ body.chatgoose-scroll-lock {
   border-radius: var(--chatgoose-radius-chip);
   cursor: pointer;
   transition: background 120ms ease;
-  /* The board is bounded at 500 rows. Keep them in the DOM for predictable
+  /* The board is bounded at 1000 rows. Keep them in the DOM for predictable
      keyboard/search semantics, but skip off-screen layout/paint work. */
   content-visibility: auto;
   contain-intrinsic-size: auto 50px;
