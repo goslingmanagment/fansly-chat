@@ -39,7 +39,9 @@ if (vendorEndpoints) {
 }
 
 const staleUserDocs = grepUserDocs(
-  'api\\.anthropic\\.com|openrouter\\.ai|console\\.anthropic\\.com|Claude Direct|Введите API-ключи|OpenRouter API Key|Claude API Key',
+  // bare "Claude" ловит и Claude Direct / Claude API Key: в kernel-only
+  // user-доках модель выбирает сервер, provider-имена в них запрещены целиком.
+  'api\\.anthropic\\.com|openrouter\\.ai|console\\.anthropic\\.com|Введите API-ключи|OpenRouter API Key|Claude',
 );
 if (staleUserDocs) {
   failures.push(`pre-kernel instructions in shipped user docs:\n${staleUserDocs}`);
