@@ -131,14 +131,32 @@ stamp_install_page_version() {
     import { readFileSync, writeFileSync } from "node:fs";
 
     const [filePath, version] = process.argv.slice(1);
-    const pattern = /(<p class="footer">ChatGoose )v[^<]+( &middot; Gosling Agency<\/p>)/;
-    const source = readFileSync(filePath, "utf8");
+    const replacements = [
+      {
+        description: "install hero version",
+        pattern: /(<span class="eyebrow rise d1"><span class="dot"><\/span> Версия )[^<]+( · Firefox<\/span>)/,
+      },
+      {
+        description: "install whats-new link version",
+        pattern: /(<a class="btn-ghost" href="#whatsnew">Что нового в )[^<]+( →<\/a>)/,
+      },
+      {
+        description: "install footer version",
+        pattern: /(<p class="footer">ChatGoose v)[^<]+( &middot; Gosling Agency<\/p>)/,
+      },
+    ];
 
-    if (!pattern.test(source)) {
-      throw new Error(`Could not find install page version slot in ${filePath}`);
+    let source = readFileSync(filePath, "utf8");
+
+    for (const { description, pattern } of replacements) {
+      const matches = source.match(new RegExp(pattern.source, `${pattern.flags}g`)) ?? [];
+      if (matches.length !== 1) {
+        throw new Error(`Expected exactly one ${description} in ${filePath}, found ${matches.length}`);
+      }
+      source = source.replace(pattern, `$1${version}$2`);
     }
 
-    writeFileSync(filePath, source.replace(pattern, `$1v${version}$2`));
+    writeFileSync(filePath, source);
   ' "$INSTALL_PAGE_FILE" "$version"
 }
 
@@ -163,8 +181,9 @@ stamp_changelog_page_version() {
     let source = readFileSync(filePath, "utf8");
 
     for (const { description, pattern } of replacements) {
-      if (!pattern.test(source)) {
-        throw new Error(`Could not find ${description} in ${filePath}`);
+      const matches = source.match(new RegExp(pattern.source, `${pattern.flags}g`)) ?? [];
+      if (matches.length !== 1) {
+        throw new Error(`Expected exactly one ${description} in ${filePath}, found ${matches.length}`);
       }
       source = source.replace(pattern, `$1v${version}$2`);
     }
