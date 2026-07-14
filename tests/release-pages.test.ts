@@ -21,8 +21,18 @@ describe('release page stamping', () => {
     const install = readRepoFile('install.html');
     const changelog = readRepoFile('changelog.html');
 
-    const stampedInstall = replaceExactlyOnce(
+    const stampedInstallHero = replaceExactlyOnce(
       install,
+      /(<span class="eyebrow rise d1"><span class="dot"><\/span> Версия )[^<]+( · Firefox<\/span>)/,
+      '$19.8.7$2',
+    );
+    const stampedInstallLink = replaceExactlyOnce(
+      stampedInstallHero,
+      /(<a class="btn-ghost" href="#whatsnew">Что нового в )[^<]+( →<\/a>)/,
+      '$19.8.7$2',
+    );
+    const stampedInstall = replaceExactlyOnce(
+      stampedInstallLink,
       /(<p class="footer">ChatGoose )v[^<]+( &middot; Gosling Agency<\/p>)/,
       '$1v9.8.7$2',
     );
@@ -37,9 +47,23 @@ describe('release page stamping', () => {
       '$1v9.8.7$2',
     );
 
+    expect(stampedInstall).toContain('Версия 9.8.7 · Firefox');
+    expect(stampedInstall).toContain('Что нового в 9.8.7 →');
     expect(stampedInstall).toContain('ChatGoose v9.8.7');
     expect(stampedChangelog).toContain('<span class="nav-version">v9.8.7</span>');
     expect(stampedChangelog).toContain('<p>v9.8.7 &middot; Gosling Agency');
+  });
+
+  it('makes both deploy scripts fail closed over all three install version slots', () => {
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const deployPages = readRepoFile('scripts/deploy-pages.sh');
+
+    for (const script of [deploy, deployPages]) {
+      expect(script).toContain('Версия )[^<]+( · Firefox');
+      expect(script).toContain('Что нового в )[^<]+( →');
+      expect(script).toContain('ChatGoose v)[^<]+( &middot; Gosling Agency');
+      expect(script).toContain('matches.length !== 1');
+    }
   });
 
   it('keeps the guide intentionally versionless', () => {

@@ -50,8 +50,11 @@ stamp_version() {
     let source = readFileSync(filePath, "utf8");
     for (const ps of patternStrs) {
       const pattern = new RegExp(ps);
-      if (!pattern.test(source)) throw new Error(`Version slot not found in ${filePath}: ${ps}`);
-      source = source.replace(pattern, `$1v${version}$2`);
+      const matches = source.match(new RegExp(pattern.source, `${pattern.flags}g`)) ?? [];
+      if (matches.length !== 1) {
+        throw new Error(`Expected exactly one version slot in ${filePath}, found ${matches.length}: ${ps}`);
+      }
+      source = source.replace(pattern, `$1${version}$2`);
     }
     writeFileSync(filePath, source);
   ' "$file" "$version" "$@"
@@ -70,11 +73,13 @@ main() {
 
   # Stamp versions
   stamp_version "$INSTALL_PAGE_FILE" "$version" \
-    '(<p class="footer">ChatGoose )v[^<]+( &middot; Gosling Agency</p>)'
+    '(<span class="eyebrow rise d1"><span class="dot"></span> Версия )[^<]+( · Firefox</span>)' \
+    '(<a class="btn-ghost" href="#whatsnew">Что нового в )[^<]+( →</a>)' \
+    '(<p class="footer">ChatGoose v)[^<]+( &middot; Gosling Agency</p>)'
 
   stamp_version "$CHANGELOG_PAGE_FILE" "$version" \
-    '(<span class="nav-version">)v[^<]+(</span>)' \
-    '(<p>)v[^<]+( &middot; Gosling Agency &middot; Kernel-served AI</p>)'
+    '(<span class="nav-version">v)[^<]+(</span>)' \
+    '(<p>v)[^<]+( &middot; Gosling Agency &middot; Kernel-served AI</p>)'
 
   # Upload
   log "Uploading pages to ${VPS_HOST}"
