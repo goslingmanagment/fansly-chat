@@ -95,8 +95,8 @@ export function resolveCompareModelCardsForDrafts(
       ? `${personality.displayName} (current)`
       : personality.displayName,
     // Content never enters the client. This internal identity string exists
-    // only so compare fingerprints invalidate when the server revision moves.
-    content: `persona:${storage.personaCatalogSource ?? 'unscoped'}:${personality.key}@${personality.version}`,
+    // only so compare fingerprints invalidate when exact definition bytes move.
+    content: `persona:${storage.personaCatalogSource ?? 'unscoped'}:${personality.key}@${personality.definitionId}`,
     source: 'current',
   };
 

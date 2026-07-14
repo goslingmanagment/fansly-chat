@@ -117,6 +117,7 @@ export function registerRuntimeApi({
             mappedPersonalityId: null,
             mappedPersonalityName: null,
             mappedPersonaVersion: null,
+            mappedPersonaDefinitionId: null,
             mappedPersonaSource: null,
             compareCardCount: 0,
             compareDraftCount: 0,
@@ -149,6 +150,7 @@ export function registerRuntimeApi({
         const mappedPersonalityId = mappedPersonality?.key ?? null;
         const mappedPersonalityName = mappedPersonality?.displayName ?? null;
         const mappedPersonaVersion = mappedPersonality?.version ?? null;
+        const mappedPersonaDefinitionId = mappedPersonality?.definitionId ?? null;
         const mappedPersonaSource = mappedPersonality
           ? state.personaCatalogSource
           : null;
@@ -174,6 +176,7 @@ export function registerRuntimeApi({
           mappedPersonalityId,
           mappedPersonalityName,
           mappedPersonaVersion,
+          mappedPersonaDefinitionId,
           mappedPersonaSource,
           compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
           compareDraftCount,

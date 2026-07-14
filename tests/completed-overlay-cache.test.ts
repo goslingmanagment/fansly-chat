@@ -39,7 +39,7 @@ function createHelpMeModel(): CompletedOverlayViewModel {
 
 const PERSONA_V1 = {
   personaKey: 'persona-a',
-  personaVersion: 1,
+  personaDefinitionId: 'v1:persona-a-definition',
   personaSource: 'source-a',
   variantKey: null,
 };
@@ -131,7 +131,7 @@ describe('CompletedOverlayCache', () => {
     expect(cache.get('group-1', 'fast-reply', PERSONA_V1)).toBeNull();
   });
 
-  it('rejects cached results after a persona revision or remap', () => {
+  it('rejects cached results after a persona definition change or remap', () => {
     const cache = new CompletedOverlayCache();
     const reply = createReplyModel('reply-op');
 
@@ -139,7 +139,7 @@ describe('CompletedOverlayCache', () => {
 
     expect(cache.get('group-1', 'fast-reply', {
       ...PERSONA_V1,
-      personaVersion: 2,
+      personaDefinitionId: 'v1:persona-b-definition',
     })).toBeNull();
     expect(cache.get('group-1', 'fast-reply', {
       ...PERSONA_V1,

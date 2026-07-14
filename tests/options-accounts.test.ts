@@ -70,6 +70,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     personaCatalog: [{
       key: 'p1',
       displayName: 'Closer',
+      definitionId: 'v1:persona-one-definition',
       version: 1,
       status: 'active',
     }],
@@ -457,13 +458,14 @@ describe('Options page settings and read-only personas', () => {
       personaCatalog: [{
         key: 'p1',
         displayName: 'Closer',
+        definitionId: 'v1:persona-one-archived',
         version: 2,
         status: 'archived',
       }],
     };
     emitStorageChanges({
       personaCatalog: {
-        oldValue: [{ key: 'p1', displayName: 'Closer', version: 1, status: 'active' }],
+        oldValue: [{ key: 'p1', displayName: 'Closer', definitionId: 'v1:persona-one-definition', version: 1, status: 'active' }],
         newValue: currentState.personaCatalog,
       },
     });
@@ -502,6 +504,7 @@ describe('Options page settings and read-only personas', () => {
           personaCatalog: [{
             key: 'source-a-persona',
             displayName: 'Source A',
+            definitionId: 'v1:source-a-persona',
             version: 1,
             status: 'active',
           }],
@@ -630,6 +633,49 @@ describe('Options page settings and read-only personas', () => {
     releaseFirstStorageSet?.();
     await flushMicrotasks();
     expect(currentState.settings.quickMessageCount).toBe(99);
+  });
+
+  it('cancels queued and pagehide writes after observing a future storage schema', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+    stallNextStorageSet?.();
+    vi.useFakeTimers();
+
+    const quickInput = document.querySelector<HTMLInputElement>('input[type="number"][max="200"]')!;
+    const storageSet = vi.mocked(browser.storage.local.set);
+    const callsBeforeEdit = storageSet.mock.calls.length;
+
+    quickInput.value = '44';
+    quickInput.dispatchEvent(new Event('input', { bubbles: true }));
+    quickInput.dispatchEvent(new dom.window.FocusEvent('blur'));
+    expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
+
+    // This snapshot is serialized behind the stalled write. The future-schema
+    // event must cancel it when the chain eventually reaches persist().
+    quickInput.value = '99';
+    quickInput.dispatchEvent(new Event('input', { bubbles: true }));
+    quickInput.dispatchEvent(new dom.window.FocusEvent('blur'));
+    currentState = {
+      ...currentState,
+      schemaVersion: STORAGE_SCHEMA_VERSION + 1,
+    };
+    emitStorageChanges({
+      schemaVersion: {
+        oldValue: STORAGE_SCHEMA_VERSION,
+        newValue: STORAGE_SCHEMA_VERSION + 1,
+      },
+    });
+
+    const barrier = document.querySelector<HTMLElement>('[data-future-schema-barrier="true"]');
+    expect(barrier?.getAttribute('role')).toBe('alert');
+    expect(quickInput.disabled).toBe(true);
+
+    releaseFirstStorageSet?.();
+    await flushMicrotasks();
+    expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
+
+    // The synchronous close path is fenced by the same observation.
+    window.dispatchEvent(new Event('pagehide'));
+    expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
   });
 
   it('makes a Hub test wait for the active shared settings save without writing twice', async () => {
@@ -892,8 +938,8 @@ describe('Options page settings and read-only personas', () => {
     await loadOptionsPage({
       state: makeState({
         personaCatalog: [
-          { key: 'aaaaaa11', displayName: 'Luna', version: 1, status: 'active' },
-          { key: 'bbbbbb22', displayName: 'Luna', version: 2, status: 'active' },
+          { key: 'aaaaaa11', displayName: 'Luna', definitionId: 'v1:luna-persona-one', version: 1, status: 'active' },
+          { key: 'bbbbbb22', displayName: 'Luna', definitionId: 'v1:luna-persona-two', version: 2, status: 'active' },
         ],
         knownAccounts: ['acc-1'],
       }),
@@ -911,7 +957,7 @@ describe('Options page settings and read-only personas', () => {
   it('keeps an archived mapping selected and disabled without pruning it', async () => {
     await loadOptionsPage({
       state: makeState({
-        personaCatalog: [{ key: 'p1', displayName: 'Closer', version: 2, status: 'archived' }],
+        personaCatalog: [{ key: 'p1', displayName: 'Closer', definitionId: 'v1:persona-one-archived', version: 2, status: 'archived' }],
         knownAccounts: ['acc-1'],
         accountMappings: { 'acc-1': 'p1' },
       }),

@@ -573,6 +573,7 @@ describe('StorageCoordinator', () => {
       [PERSONA_CATALOG_STORAGE_KEY]: [{
         key: 'source-a-persona',
         displayName: 'Source A',
+        definitionId: 'v1:source-a-persona',
         version: 1,
         status: 'active',
       }],
@@ -619,6 +620,7 @@ describe('StorageCoordinator', () => {
     const summary: SummaryCacheEntry = {
       summary: 'new summary',
       personalityId: 'p1',
+      personaDefinitionId: 'v1:persona-one-definition',
       personalityUpdatedAt: 1,
       personaCatalogSource: null,
       generatedAt: 10,
@@ -632,5 +634,48 @@ describe('StorageCoordinator', () => {
     await loading;
     expect(mockStorage['summary:g1']).toEqual(summary);
     await expect(coordinator.getSummaryCache('g1')).resolves.toEqual(summary);
+  });
+
+  it('fails closed without writes after observing a future storage schema', async () => {
+    mockStorage = createStorage();
+    const { coordinator, storageSet } = await installStorageCoordinatorHarness();
+    await coordinator.getState();
+    storageSet.mockClear();
+
+    coordinator.applyStorageChanges({
+      schemaVersion: {
+        oldValue: STORAGE_SCHEMA_VERSION,
+        newValue: STORAGE_SCHEMA_VERSION + 1,
+      },
+    }, 'local');
+
+    await expect(coordinator.getState()).rejects.toThrow(
+      `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
+    );
+    await expect(coordinator.registerKnownAccount('future-schema-account')).rejects.toThrow(
+      `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
+    );
+    expect(storageSet).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a deferred fresh read discovers a future schema', async () => {
+    mockStorage = createStorage();
+    const { coordinator, storageSet } = await installStorageCoordinatorHarness({
+      disableProbeEvents: true,
+    });
+
+    await expect(coordinator.getState()).resolves.toMatchObject({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+    });
+    storageSet.mockClear();
+    mockStorage.schemaVersion = STORAGE_SCHEMA_VERSION + 1;
+
+    await expect(coordinator.getState()).rejects.toThrow(
+      `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
+    );
+    await expect(coordinator.registerKnownAccount('future-schema-account')).rejects.toThrow(
+      `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
+    );
+    expect(storageSet).not.toHaveBeenCalled();
   });
 });

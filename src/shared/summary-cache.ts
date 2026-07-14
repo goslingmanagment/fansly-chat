@@ -59,6 +59,9 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
   if (
     typeof record.summary !== 'string' ||
     typeof record.personalityId !== 'string' ||
+    typeof record.personaDefinitionId !== 'string' ||
+    record.personaDefinitionId.length < 16 ||
+    record.personaDefinitionId.length > 100 ||
     !isFiniteNumber(record.personalityUpdatedAt) ||
     !Object.prototype.hasOwnProperty.call(record, 'personaCatalogSource') ||
     (typeof record.personaCatalogSource !== 'string' && record.personaCatalogSource !== null) ||
@@ -70,6 +73,7 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
   const entry: SummaryCacheEntry = {
     summary: record.summary,
     personalityId: record.personalityId,
+    personaDefinitionId: record.personaDefinitionId,
     personalityUpdatedAt: record.personalityUpdatedAt,
     personaCatalogSource: record.personaCatalogSource,
     generatedAt: record.generatedAt,
@@ -265,14 +269,14 @@ export class SummaryCacheStore {
 export function isValidSummaryCacheEntry(
   entry: SummaryCacheEntry | null | undefined,
   personalityId: string,
-  personalityUpdatedAt: number,
+  personaDefinitionId: string,
   personaCatalogSource: string | null,
   modelId: string,
 ): entry is SummaryCacheEntry {
   return Boolean(
     entry &&
     entry.personalityId === personalityId &&
-    entry.personalityUpdatedAt === personalityUpdatedAt &&
+    entry.personaDefinitionId === personaDefinitionId &&
     entry.personaCatalogSource === personaCatalogSource &&
     (entry.modelId ?? null) === (modelId ?? null) &&
     entry.spendingDataVerified === true &&
@@ -300,7 +304,7 @@ export function hasAvailableFanSummary(
   return isValidSummaryCacheEntry(
     summaryEntry,
     personality.key,
-    personality.version,
+    personality.definitionId,
     storage.personaCatalogSource,
     'kernel',
   );

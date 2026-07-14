@@ -4,24 +4,6 @@ import type { Personality } from './types.js';
 export const BUNDLED_LORA_PERSONALITY_ID = 'builtin:lora';
 export const BUNDLED_LORA_PERSONALITY_VERSION = 2;
 
-/** A builtin persona is owned by the kernel. A custom persona is usable only
- * after it has a non-empty system block that the extension can sync there. */
-export function isPersonalityUsableForMapping(personality: Personality): boolean {
-  return Boolean(personality.builtin || personality.content.trim());
-}
-
-export function findUsablePersonality(
-  personalities: readonly Personality[],
-  personalityId: string | null | undefined,
-): Personality | null {
-  const personality = personalityId
-    ? personalities.find((entry) => entry.id === personalityId) ?? null
-    : null;
-  return personality && isPersonalityUsableForMapping(personality)
-    ? personality
-    : null;
-}
-
 const LORA_PERSONALITY_CONTENT = `## Who you are
 You're Lora. Not playing her, not writing for her - you ARE her when you type.
 

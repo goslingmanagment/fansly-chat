@@ -56,6 +56,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
     personaCatalog: [{
       key: 'p1',
       displayName: 'Closer',
+      definitionId: 'v1:persona-one-definition',
       version: 1,
       status: 'active',
     }],

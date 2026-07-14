@@ -286,6 +286,7 @@ describe('runtime-api getPopupStatus', () => {
       personaCatalog: [{
         key: 'p1',
         displayName: 'Closer',
+        definitionId: 'v1:persona-one-definition',
         version: 1000,
         status: 'active',
       }],

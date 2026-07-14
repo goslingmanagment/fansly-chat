@@ -27,7 +27,7 @@ export interface PersonaCatalogHub {
 }
 
 export interface PersonaCatalogController {
-  refresh(settings: Settings): Promise<void>;
+  refresh(): Promise<void>;
 }
 
 export function startPersonaCatalogRefreshLoop(options: {
@@ -57,6 +57,8 @@ function describeError(error: unknown): string {
 export function createPersonaCatalogController(options: {
   hub: PersonaCatalogHub;
   storage: PersonaCatalogStorage;
+  /** Must perform a fresh schema-checked read on every invocation. */
+  readSettings: () => Promise<Settings>;
   onWarn?: (message: string) => void;
   timeoutMs?: number;
   now?: () => Date;
@@ -66,33 +68,54 @@ export function createPersonaCatalogController(options: {
   let queue: Promise<void> = Promise.resolve();
   let latestGeneration = 0;
 
-  async function clearForSource(source: string | null): Promise<void> {
-    await options.storage.set({
+  async function commitIfCurrent(
+    generation: number,
+    source: string | null,
+    items: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (generation !== latestGeneration) return false;
+    // This is both a source TOCTOU fence and a future-schema barrier. A newer
+    // schema makes readSettings reject, so no catalog write follows an
+    // observed unsupported layout. A switch after this await is the narrow
+    // already-in-flight browser.storage window documented by E37.
+    const currentSource = personaCatalogSource(await options.readSettings());
+    if (generation !== latestGeneration || currentSource !== source) return false;
+    await options.storage.set(items);
+    return true;
+  }
+
+  async function clearForSource(
+    source: string | null,
+    generation: number,
+  ): Promise<boolean> {
+    return commitIfCurrent(generation, source, {
       [PERSONA_CATALOG_STORAGE_KEY]: [],
       [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: source,
       [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: null,
     });
   }
 
-  async function refreshOne(settings: Settings, generation: number): Promise<void> {
+  async function refreshOne(generation: number): Promise<void> {
     // This barrier is intentionally before even the first GET. If it rejects,
     // no catalog request and no metadata mutation is allowed to proceed.
     await ensureLegacyPersonaSnapshot(options.storage);
 
+    const settings = await options.readSettings();
+    if (generation !== latestGeneration) return;
     const source = personaCatalogSource(settings);
     const stored = await options.storage.get(null);
     const storedSource = typeof stored[PERSONA_CATALOG_SOURCE_STORAGE_KEY] === 'string'
       ? stored[PERSONA_CATALOG_SOURCE_STORAGE_KEY]
       : null;
     if (storedSource !== source && generation === latestGeneration) {
-      await clearForSource(source);
+      if (!await clearForSource(source, generation)) return;
     }
 
     if (!source || !options.hub.isConfigured(settings)) {
       if (generation === latestGeneration && storedSource === source) {
         const catalog = normalizePersonaCatalog(stored[PERSONA_CATALOG_STORAGE_KEY]);
         if (catalog.length > 0 || stored[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY] != null) {
-          await clearForSource(null);
+          await clearForSource(null, generation);
         }
       }
       return;
@@ -113,7 +136,14 @@ export function createPersonaCatalogController(options: {
     }
 
     if (generation !== latestGeneration) return;
-    await options.storage.set({
+    const storedCatalog = normalizePersonaCatalog(stored[PERSONA_CATALOG_STORAGE_KEY]);
+    if (
+      storedSource === source &&
+      JSON.stringify(storedCatalog) === JSON.stringify(catalog)
+    ) {
+      return;
+    }
+    await commitIfCurrent(generation, source, {
       [PERSONA_CATALOG_STORAGE_KEY]: catalog,
       [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: source,
       [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: (options.now?.() ?? new Date()).toISOString(),
@@ -121,12 +151,11 @@ export function createPersonaCatalogController(options: {
   }
 
   return {
-    refresh(settings) {
+    refresh() {
       const generation = ++latestGeneration;
-      const snapshot = { ...settings };
       const task = queue.then(
-        () => refreshOne(snapshot, generation),
-        () => refreshOne(snapshot, generation),
+        () => refreshOne(generation),
+        () => refreshOne(generation),
       );
       queue = task.catch(() => undefined);
       return task;

@@ -380,6 +380,7 @@ async function mockCompareCards(cards: CompareModelCard[]): Promise<void> {
     mockStorage.personaCatalog = [{
       key: personalityId,
       displayName: currentCard.label.replace(/ \(current\)$/, ''),
+      definitionId: 'v1:current-card-definition',
       version: 1000,
       status: 'active',
     }];
@@ -422,6 +423,7 @@ describe('OperationCoordinator', () => {
       personaCatalog: [{
         key: 'personality-1',
         displayName: 'Closer',
+        definitionId: 'v1:personality-one-definition',
         version: 1000,
         status: 'active',
       }],
@@ -435,6 +437,7 @@ describe('OperationCoordinator', () => {
       'summary:group-1': {
         summary: 'Old summary',
         personalityId: 'personality-1',
+        personaDefinitionId: 'v1:personality-one-definition',
         personalityUpdatedAt: 1000,
         personaCatalogSource: null,
         generatedAt: 2000,
@@ -503,6 +506,33 @@ describe('OperationCoordinator', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('retains active Scan commit fences beyond 200 unrelated groups', async () => {
+    const { coordinator } = await createCoordinatorHarness();
+    const fences = coordinator as {
+      reserveSummaryCommitToken(): number;
+      registerSummaryCommit(groupId: string, operationId: string, token: number): void;
+      isLatestSummaryCommit(
+        groupId: string,
+        operationId: string,
+        token: number,
+      ): boolean;
+    };
+
+    const firstToken = fences.reserveSummaryCommitToken();
+    fences.registerSummaryCommit('first-group', 'first-operation', firstToken);
+
+    for (let index = 0; index < 200; index += 1) {
+      const token = fences.reserveSummaryCommitToken();
+      fences.registerSummaryCommit(`other-group-${index}`, `other-operation-${index}`, token);
+    }
+
+    expect(fences.isLatestSummaryCommit(
+      'first-group',
+      'first-operation',
+      firstToken,
+    )).toBe(true);
   });
 
   it('keeps the last-good durable cache until a forced refresh can replace it', async () => {
@@ -840,8 +870,8 @@ describe('OperationCoordinator', () => {
       // queued: mutate the browser-storage backing object only, deliberately
       // leaving StorageCoordinator.state on persona-1.
       mockStorage.personaCatalog = [
-        { key: 'personality-1', displayName: 'Closer', version: 1000, status: 'active' },
-        { key: 'personality-2', displayName: 'Warm', version: 1, status: 'active' },
+        { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:personality-one-definition', version: 1000, status: 'active' },
+        { key: 'personality-2', displayName: 'Warm', definitionId: 'v1:personality-two-definition', version: 1, status: 'active' },
       ];
       mockStorage.accountMappings = { 'account-1': 'personality-2' };
       resolvePreflight!({
@@ -991,6 +1021,7 @@ describe('OperationCoordinator', () => {
       personaCatalog: [{
         key: 'personality-1',
         displayName: 'Archived custom',
+        definitionId: 'v1:personality-one-archived',
         version: 1000,
         status: 'archived',
       }],
@@ -1172,6 +1203,7 @@ describe('OperationCoordinator', () => {
     expect(kernelRequestFromStreamCall(kernelGateway)).toMatchObject({
       feature: 'fast-reply',
       pageLabel: 'creator-fs',
+      expectedPersonaDefinitionId: 'v1:personality-one-definition',
     });
     expect(
       kernelRequestFromStreamCall(kernelGateway).clientContext.fanSubscriptionData,
@@ -1518,6 +1550,7 @@ describe('OperationCoordinator', () => {
     expect(request).toMatchObject({
       feature: 'fast-reply',
       personaKey: 'personality-1',
+      expectedPersonaDefinitionId: 'v1:current-card-definition',
       pageLabel: 'creator-fs',
     });
     expect(request.clientContext.transcript.length).toBeGreaterThan(0);
@@ -1570,7 +1603,7 @@ describe('OperationCoordinator', () => {
 
     // Same key, new revision; direct mutation leaves coordinator state stale.
     mockStorage.personaCatalog = [
-      { key: 'personality-1', displayName: 'Closer', version: 1001, status: 'active' },
+      { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:personality-one-revised', version: 1001, status: 'active' },
     ];
     resolveStream!('Old compare reply');
     await compare;
@@ -2278,7 +2311,7 @@ describe('OperationCoordinator', () => {
 
     // Again reproduce committed storage bytes before onChanged dispatch.
     mockStorage.personaCatalog = [
-      { key: 'personality-1', displayName: 'Closer', version: 1001, status: 'active' },
+      { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:personality-one-revised', version: 1001, status: 'active' },
     ];
     resolveSyncGroup!({ users: [{ userId: 'account-1' }, { userId: 'fan-1' }] });
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -3403,6 +3436,7 @@ describe('OperationCoordinator', () => {
     const newerSummary: SummaryCacheEntry = {
       summary: 'New persona summary',
       personalityId: 'personality-2',
+      personaDefinitionId: 'v1:personality-two-definition',
       personalityUpdatedAt: 1,
       personaCatalogSource: mockStorage.personaCatalogSource as string | null,
       generatedAt: currentNow + 1,
@@ -3413,8 +3447,8 @@ describe('OperationCoordinator', () => {
     // Browser storage has committed P2, but deliberately do not dispatch the
     // change into StorageCoordinator: this reproduces the real event lag.
     mockStorage.personaCatalog = [
-      { key: 'personality-1', displayName: 'Closer', version: 1000, status: 'active' },
-      { key: 'personality-2', displayName: 'Warm', version: 1, status: 'active' },
+      { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:personality-one-definition', version: 1000, status: 'active' },
+      { key: 'personality-2', displayName: 'Warm', definitionId: 'v1:personality-two-definition', version: 1, status: 'active' },
     ];
     mockStorage.accountMappings = { 'account-1': 'personality-2' };
     mockStorage['summary:group-1'] = newerSummary;
@@ -3437,13 +3471,14 @@ describe('OperationCoordinator', () => {
 
   it('replaces a same-millisecond stale P1 cache with a current P2 summary', async () => {
     mockStorage.personaCatalog = [
-      { key: 'personality-1', displayName: 'Closer', version: 1000, status: 'active' },
-      { key: 'personality-2', displayName: 'Warm', version: 1, status: 'active' },
+      { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:personality-one-definition', version: 1000, status: 'active' },
+      { key: 'personality-2', displayName: 'Warm', definitionId: 'v1:personality-two-definition', version: 1, status: 'active' },
     ];
     mockStorage.accountMappings = { 'account-1': 'personality-2' };
     mockStorage['summary:group-1'] = {
       summary: 'Stale P1 summary',
       personalityId: 'personality-1',
+      personaDefinitionId: 'v1:personality-one-definition',
       personalityUpdatedAt: 1000,
       personaCatalogSource: null,
       generatedAt: currentNow,
@@ -3967,6 +4002,7 @@ describe('OperationCoordinator', () => {
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',
       personalityId: 'personality-1',
+      personaDefinitionId: 'v1:personality-one-definition',
       personalityUpdatedAt: 1000,
       personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
       generatedAt: 2000,
@@ -4169,6 +4205,7 @@ describe('OperationCoordinator', () => {
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',
       personalityId: 'personality-1',
+      personaDefinitionId: 'v1:personality-one-definition',
       personalityUpdatedAt: 1000,
       personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
       generatedAt: 2000,
@@ -4638,7 +4675,9 @@ describe('OperationCoordinator', () => {
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Old summary',
       personalityId: 'personality-1',
+      personaDefinitionId: 'v1:personality-one-definition',
       personalityUpdatedAt: 1000,
+      personaCatalogSource: null,
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,

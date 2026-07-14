@@ -45,8 +45,10 @@ export type PersonaCatalogStatus = 'active' | 'archived';
 export interface PersonaCatalogEntry {
   key: string;
   displayName: string;
-  /** Monotonic server CAS revision; also invalidates persona-dependent caches. */
+  /** Opaque per-definition server revision used for equality and cache invalidation. */
   version: number;
+  /** Exact definition identity. Clients compare but never parse this value. */
+  definitionId: string;
   status: PersonaCatalogStatus;
 }
 
@@ -99,6 +101,9 @@ export interface FanSummaryMeta {
 export interface SummaryCacheEntry {
   summary: string;
   personalityId: string;
+  /** Opaque identity of the exact server definition used for this result. */
+  personaDefinitionId: string;
+  /** Retained as metadata; definition identity, not ordering, fences reuse. */
   personalityUpdatedAt: number;
   /** Exact Hub+credential catalog source. Missing legacy entries invalidate. */
   personaCatalogSource: string | null;
@@ -742,6 +747,7 @@ export interface TabUiState {
   mappedPersonalityId: string | null;
   mappedPersonalityName: string | null;
   mappedPersonaVersion: number | null;
+  mappedPersonaDefinitionId: string | null;
   mappedPersonaSource: string | null;
   compareCardCount: number;
   compareDraftCount: number;

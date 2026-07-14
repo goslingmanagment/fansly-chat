@@ -27,6 +27,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',
     mappedPersonaVersion: 1,
+    mappedPersonaDefinitionId: 'v1:persona-one-definition',
     mappedPersonaSource: 'source-a',
     compareCardCount: 2,
     compareDraftCount: 1,

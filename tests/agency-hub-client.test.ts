@@ -93,6 +93,7 @@ describe('AgencyHubClient', () => {
         personas: [{
           key: 'closer',
           displayName: 'Closer',
+          definitionId: 'v1:closer-definition',
           version: 4,
           status: 'active',
           // The generated catalog response schema strips unknown fields, so a
@@ -112,6 +113,7 @@ describe('AgencyHubClient', () => {
     )).resolves.toEqual([{
       key: 'closer',
       displayName: 'Closer',
+      definitionId: 'v1:closer-definition',
       version: 4,
       status: 'active',
     }]);

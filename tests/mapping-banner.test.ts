@@ -29,8 +29,8 @@ function makeState(): PersistedState {
       },
     ],
     personaCatalog: [
-      { key: 'custom-1', displayName: 'Custom', version: 1, status: 'active' },
-      { key: 'builtin:lora', displayName: 'Lora', version: 2, status: 'active' },
+      { key: 'custom-1', displayName: 'Custom', definitionId: 'v1:custom-one-definition', version: 1, status: 'active' },
+      { key: 'builtin:lora', displayName: 'Lora', definitionId: 'v1:built-in-lora-definition', version: 2, status: 'active' },
     ],
     personaCatalogSource: null,
     personaCatalogFetchedAt: null,
@@ -136,6 +136,7 @@ describe('MappingBanner', () => {
     state.personaCatalog[0] = {
       key: 'custom-1',
       displayName: 'Archived custom',
+      definitionId: 'v1:custom-one-archived',
       version: 2,
       status: 'archived',
     };

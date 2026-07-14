@@ -92,8 +92,8 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   chat_changed: {
     key: 'chat_changed',
     code: 'CG-FLOW-06',
-    message: 'Conversation changed.',
-    description: 'The result was discarded because you switched chats.',
+    message: 'Conversation context changed.',
+    description: 'The result was discarded because the chat, mapped personality, or Hub source changed.',
   },
   extension_reloaded: {
     key: 'extension_reloaded',

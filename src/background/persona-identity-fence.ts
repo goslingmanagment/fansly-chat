@@ -9,6 +9,7 @@ export interface PersonaOperationIdentity {
   legacyAccountId: string | null;
   personaKey: string;
   personaVersion: number;
+  personaDefinitionId: string;
   personaCatalogSource: string | null;
 }
 
@@ -24,7 +25,7 @@ export function isPersonaOperationIdentityCurrent(
   );
   const persona = findActivePersona(state.personaCatalog, mappedKey);
   return persona?.key === identity.personaKey &&
-    persona.version === identity.personaVersion &&
+    persona.definitionId === identity.personaDefinitionId &&
     state.personaCatalogSource === identity.personaCatalogSource;
 }
 

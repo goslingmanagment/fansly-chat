@@ -150,7 +150,7 @@ export class ChatGooseContentApp {
   private activeFeature: FeatureType | null = null;
   private activeOperationId: string | null = null;
   private activePersonaKey: string | null = null;
-  private activePersonaVersion: number | null = null;
+  private activePersonaDefinitionId: string | null = null;
   private activePersonaSource: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
@@ -589,12 +589,12 @@ export class ChatGooseContentApp {
   private overlayCacheIdentity(
     variantKey: string | null | undefined,
     personaKey = this.tabState?.mappedPersonalityId ?? null,
-    personaVersion = this.tabState?.mappedPersonaVersion ?? null,
+    personaDefinitionId = this.tabState?.mappedPersonaDefinitionId ?? null,
     personaSource = this.tabState?.mappedPersonaSource ?? null,
   ): CompletedOverlayCacheIdentity {
     return {
       personaKey,
-      personaVersion,
+      personaDefinitionId,
       personaSource,
       variantKey: variantKey ?? null,
     };
@@ -803,7 +803,7 @@ export class ChatGooseContentApp {
     this.activeFeature = feature;
     this.activeOperationId = operationId;
     this.activePersonaKey = this.tabState?.mappedPersonalityId ?? null;
-    this.activePersonaVersion = this.tabState?.mappedPersonaVersion ?? null;
+    this.activePersonaDefinitionId = this.tabState?.mappedPersonaDefinitionId ?? null;
     this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
     this.activeFanDisplayName = domFanDisplayName ?? 'fan';
     this.lastFeature = feature;
@@ -1139,7 +1139,7 @@ export class ChatGooseContentApp {
       this.tabState &&
       (
         this.tabState.mappedPersonalityId !== next.mappedPersonalityId ||
-        this.tabState.mappedPersonaVersion !== next.mappedPersonaVersion ||
+        this.tabState.mappedPersonaDefinitionId !== next.mappedPersonaDefinitionId ||
         this.tabState.mappedPersonaSource !== next.mappedPersonaSource
       )
     );
@@ -1580,7 +1580,7 @@ export class ChatGooseContentApp {
       this.overlayCacheIdentity(
         featureRequiresDraft(feature) ? improveDraftCacheKey : null,
         this.activePersonaKey ?? this.tabState?.mappedPersonalityId ?? null,
-        this.activePersonaVersion ?? this.tabState?.mappedPersonaVersion ?? null,
+        this.activePersonaDefinitionId ?? this.tabState?.mappedPersonaDefinitionId ?? null,
         this.activePersonaSource ?? this.tabState?.mappedPersonaSource ?? null,
       ),
     );
@@ -1645,7 +1645,7 @@ export class ChatGooseContentApp {
     this.activeFeature = null;
     this.activeOperationId = null;
     this.activePersonaKey = null;
-    this.activePersonaVersion = null;
+    this.activePersonaDefinitionId = null;
     this.activePersonaSource = null;
     this.activeFanDisplayName = null;
     this.activeLlmSpend = null;

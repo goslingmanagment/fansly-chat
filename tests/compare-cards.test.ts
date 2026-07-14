@@ -61,6 +61,7 @@ describe('compare cards', () => {
         {
           key: 'personality-1',
           displayName: 'A-card',
+          definitionId: 'v1:persona-one-definition',
           version: 1,
           status: 'active',
         },
@@ -94,6 +95,7 @@ describe('compare cards', () => {
         {
           key: 'personality-1',
           displayName: 'Closer',
+          definitionId: 'v1:persona-one-definition',
           version: 1,
           status: 'active',
         },
@@ -113,8 +115,18 @@ describe('compare cards', () => {
         {
           key: 'personality-1',
           displayName: 'Closer',
+          definitionId: 'v1:persona-two-definition',
           version: 2,
           status: 'active',
+        },
+      ],
+    });
+    const changedVersionOnlyStorage = createStorage({
+      ...baseStorage,
+      personaCatalog: [
+        {
+          ...baseStorage.personaCatalog[0]!,
+          version: 999,
         },
       ],
     });
@@ -132,6 +144,12 @@ describe('compare cards', () => {
     expect(
       compareCards.getCompareCardsFingerprintForPersonality(
         changedSettingsStorage,
+        'personality-1',
+      ),
+    ).toBe(baseFingerprint);
+    expect(
+      compareCards.getCompareCardsFingerprintForPersonality(
+        changedVersionOnlyStorage,
         'personality-1',
       ),
     ).toBe(baseFingerprint);

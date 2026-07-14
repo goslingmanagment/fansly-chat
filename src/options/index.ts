@@ -37,6 +37,7 @@ import {
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
   PERSONA_CATALOG_SOURCE_STORAGE_KEY,
   PERSONA_CATALOG_STORAGE_KEY,
+  STORAGE_SCHEMA_VERSION,
 } from '../shared/constants.js';
 import {
   buildLegacyPersonaExport,
@@ -150,6 +151,8 @@ async function render(): Promise<void> {
 
   const cleanupTasks: Array<() => void> = [];
   let disposed = false;
+  let futureSchemaObserved: number | null = null;
+  let applyFutureSchemaBarrierToUi: ((storedVersion: number) => void) | null = null;
   try {
     // Recovery must be decided before session discovery or a Hub connection
     // test can trigger network traffic. The malformed value remains untouched.
@@ -160,6 +163,34 @@ async function render(): Promise<void> {
       return;
     }
     throw error;
+  }
+  // Install the schema observer before the first Settings state snapshot. A
+  // future-version commit therefore lands either in that snapshot or in this
+  // listener; there is no read->listener gap where a v14 page could miss v15
+  // and later serialize its stale form during pagehide.
+  if (
+    typeof browser.storage.onChanged?.addListener === 'function' &&
+    typeof browser.storage.onChanged?.removeListener === 'function'
+  ) {
+    const handleFutureSchemaChange = (
+      changes: Record<string, browser.storage.StorageChange>,
+      areaName: string,
+    ): void => {
+      const storedVersion = Number(changes.schemaVersion?.newValue);
+      if (
+        areaName !== 'local' ||
+        !Number.isSafeInteger(storedVersion) ||
+        storedVersion <= STORAGE_SCHEMA_VERSION
+      ) {
+        return;
+      }
+      futureSchemaObserved = Math.max(futureSchemaObserved ?? 0, storedVersion);
+      applyFutureSchemaBarrierToUi?.(futureSchemaObserved);
+    };
+    browser.storage.onChanged.addListener(handleFutureSchemaChange);
+    cleanupTasks.push(() => {
+      browser.storage.onChanged.removeListener(handleFutureSchemaChange);
+    });
   }
   // Start live session discovery immediately, but do not put it on the
   // critical path for the local settings UI. getSessionsSnapshot may spend up
@@ -798,6 +829,10 @@ async function render(): Promise<void> {
   let agencyHubApiKeySnapshotVersion = 0;
   let settingsSaveChainSignature: string | null = null;
   const queueSettingsSave = (forceHubSnapshot = false): Promise<void> => {
+    if (futureSchemaObserved !== null) {
+      settingsDirty = false;
+      return Promise.resolve();
+    }
     // Capture the fields now, then serialize storage writes. A slow previous
     // storage read must not be allowed to finish after a newer edit and put an
     // older form snapshot back into storage.
@@ -809,7 +844,14 @@ async function render(): Promise<void> {
     }
     settingsDirty = false;
     const persist = async (): Promise<void> => {
-      const savedSettings = await saveSettings(patch, state.settings);
+      // A snapshot may have waited behind an older write. Recheck the live
+      // observer when the serialized chain actually reaches it.
+      if (futureSchemaObserved !== null) {
+        return;
+      }
+      const savedSettings = await saveSettings(patch, state.settings, {
+        observedSchemaVersion: futureSchemaObserved ?? state.schemaVersion,
+      });
       if (
         Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey') &&
         snapshotVersion === agencyHubApiKeySnapshotVersion &&
@@ -891,6 +933,7 @@ async function render(): Promise<void> {
 
   const saveSettingsDebounced = debounce(queueSettingsSave, 350);
   const scheduleSettingsSave = (): void => {
+    if (futureSchemaObserved !== null) return;
     settingsDirty = true;
     saveSettingsDebounced();
   };
@@ -1040,6 +1083,11 @@ async function render(): Promise<void> {
     // preserving storage.local's last-write-wins order without scheduling the
     // same snapshot through the normal chain a second time.
     saveSettingsDebounced.cancel();
+    if (futureSchemaObserved !== null) {
+      settingsDirty = false;
+      agencyHubApiKeyDirty = false;
+      return;
+    }
     if (settingsDirty || agencyHubApiKeyDirty) {
       settingsDirty = false;
       const patch = collectSettingsPatch();
@@ -1047,7 +1095,9 @@ async function render(): Promise<void> {
       if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
         agencyHubApiKeySnapshotVersion = snapshotVersion;
       }
-      void saveSettings(patch, state.settings)
+      void saveSettings(patch, state.settings, {
+        observedSchemaVersion: futureSchemaObserved ?? state.schemaVersion,
+      })
         .then((savedSettings) => {
           if (
             Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey') &&
@@ -1196,6 +1246,34 @@ async function render(): Promise<void> {
     typeof browser.storage.onChanged?.removeListener === 'function'
   ) {
     let catalogReadGeneration = 0;
+    const activateFutureSchemaBarrier = (storedVersion: number): void => {
+      futureSchemaObserved = Math.max(futureSchemaObserved ?? 0, storedVersion);
+      if (root.querySelector('[data-future-schema-barrier="true"]')) return;
+      settingsDirty = false;
+      agencyHubApiKeyDirty = false;
+      settingsSnapshotVersion += 1;
+      agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
+      saveSettingsDebounced.cancel();
+      for (const control of root.querySelectorAll<
+        HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement
+      >('input, select, button, textarea')) {
+        control.disabled = true;
+      }
+      const warning = document.createElement('div');
+      warning.dataset.futureSchemaBarrier = 'true';
+      warning.setAttribute('role', 'alert');
+      warning.textContent = `Settings were upgraded by a newer ChatGoose build (storage v${storedVersion}). Reload this page before editing.`;
+      warning.style.margin = '16px 20px 0';
+      warning.style.padding = '12px';
+      warning.style.border = '1px solid var(--chatgoose-bad)';
+      warning.style.borderRadius = 'var(--chatgoose-radius-card)';
+      warning.style.color = 'var(--chatgoose-bad)';
+      root.prepend(warning);
+    };
+    applyFutureSchemaBarrierToUi = activateFutureSchemaBarrier;
+    if (futureSchemaObserved !== null) {
+      activateFutureSchemaBarrier(futureSchemaObserved);
+    }
     const handleCatalogStorageChange = (
       changes: Record<string, browser.storage.StorageChange>,
       areaName: string,
@@ -1230,6 +1308,7 @@ async function render(): Promise<void> {
     browser.storage.onChanged.addListener(handleCatalogStorageChange);
     cleanupTasks.push(() => {
       catalogReadGeneration += 1;
+      applyFutureSchemaBarrierToUi = null;
       browser.storage.onChanged.removeListener(handleCatalogStorageChange);
     });
   }

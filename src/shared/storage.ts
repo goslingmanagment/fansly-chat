@@ -23,6 +23,7 @@ import {
   migrateState,
   serializePersistedState,
   stripSecretSettings,
+  UnsupportedFutureStorageSchemaError,
 } from './migrations.js';
 import {
   findActivePersona,
@@ -162,10 +163,23 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
 export async function saveSettings(
   settingsPatch: Partial<Settings>,
   baseSettings?: Settings,
+  options: { observedSchemaVersion?: number | null } = {},
 ): Promise<Settings> {
+  const observedSchemaVersion = options.observedSchemaVersion;
+  if (
+    observedSchemaVersion !== null &&
+    observedSchemaVersion !== undefined &&
+    Number.isSafeInteger(observedSchemaVersion) &&
+    observedSchemaVersion > STORAGE_SCHEMA_VERSION
+  ) {
+    throw new UnsupportedFutureStorageSchemaError(observedSchemaVersion);
+  }
   // Options already owns a normalized snapshot and passes it so pagehide can
   // dispatch storage.set before the document is discarded. Other callers keep
-  // the coordinator-safe read/modify/write path.
+  // the coordinator-safe read/modify/write path. Options installs its schema
+  // observer before taking that snapshot and passes the observed version here;
+  // this branch deliberately has no await before storage.set so pagehide keeps
+  // its synchronous dispatch guarantee.
   const currentSettings = baseSettings ?? (await loadStorageState()).settings;
   const nextSettings = sanitizeSettings({ ...currentSettings, ...settingsPatch });
   const items: Record<string, unknown> = {

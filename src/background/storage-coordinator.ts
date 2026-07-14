@@ -6,7 +6,11 @@ import {
   STORAGE_SCHEMA_VERSION,
   SUMMARY_EVICTION_COUNT,
 } from '../shared/constants.js';
-import { migrateState, serializePersistedState } from '../shared/migrations.js';
+import {
+  migrateState,
+  serializePersistedState,
+  UnsupportedFutureStorageSchemaError,
+} from '../shared/migrations.js';
 import {
   readStorageState,
   readStorageStateSnapshot,
@@ -154,6 +158,7 @@ export class StorageCoordinator {
   private readonly pendingRepairAcks = new Map<string, StorageRepairAck>();
   private repairAckSequence = 0;
   private writeQueue: Promise<void> = Promise.resolve();
+  private unsupportedSchemaVersion: number | null = null;
   private readonly summaryCache = new SummaryCacheStore(
     browser.storage.local,
     () => this.getState(),
@@ -172,7 +177,14 @@ export class StorageCoordinator {
     return this.getState();
   }
 
+  private assertSupportedSchema(): void {
+    if (this.unsupportedSchemaVersion !== null) {
+      throw new UnsupportedFutureStorageSchemaError(this.unsupportedSchemaVersion);
+    }
+  }
+
   async getState(): Promise<PersistedState> {
+    this.assertSupportedSchema();
     if (this.state && !this.loadingState) {
       if (this.deferredRepairNeeded) {
         await this.retryDeferredRepair();
@@ -192,6 +204,7 @@ export class StorageCoordinator {
           // captures writes Firefox may have committed while an early
           // storage.onChanged event was lost during listener registration.
           const { state, repair } = await readStorageStateSnapshot();
+          this.assertSupportedSchema();
           let current = state;
           for (const patch of this.pendingStoragePatches) {
             current = applyRawStoragePatch(current, patch.setItems, patch.removeKeys);
@@ -227,6 +240,10 @@ export class StorageCoordinator {
           this.state = null;
           this.startupLoadInProgress = false;
           this.deferredRepairNeeded = false;
+          if (error instanceof UnsupportedFutureStorageSchemaError) {
+            this.unsupportedSchemaVersion = error.storedVersion;
+            this.pendingStoragePatches.length = 0;
+          }
           throw error;
         })
         .finally(() => {
@@ -242,6 +259,21 @@ export class StorageCoordinator {
     areaName: string,
   ): void {
     if (areaName !== 'local') {
+      return;
+    }
+
+    const nextSchemaVersion = changes.schemaVersion?.newValue;
+    if (
+      typeof nextSchemaVersion === 'number' &&
+      nextSchemaVersion > STORAGE_SCHEMA_VERSION
+    ) {
+      this.unsupportedSchemaVersion = nextSchemaVersion;
+      this.state = null;
+      this.pendingStoragePatches.length = 0;
+      this.deferredRepairNeeded = false;
+      return;
+    }
+    if (this.unsupportedSchemaVersion !== null) {
       return;
     }
 
@@ -443,7 +475,7 @@ export class StorageCoordinator {
       if (
         existing &&
         existing.personalityId === entry.personalityId &&
-        existing.personalityUpdatedAt === entry.personalityUpdatedAt &&
+        existing.personaDefinitionId === entry.personaDefinitionId &&
         existing.personaCatalogSource === entry.personaCatalogSource &&
         existing.generatedAt >= entry.generatedAt &&
         (
@@ -462,7 +494,7 @@ export class StorageCoordinator {
         committed?.generatedAt === entry.generatedAt &&
         committed.summary === entry.summary &&
         committed.personalityId === entry.personalityId &&
-        committed.personalityUpdatedAt === entry.personalityUpdatedAt &&
+        committed.personaDefinitionId === entry.personaDefinitionId &&
         committed.personaCatalogSource === entry.personaCatalogSource;
     });
   }
@@ -495,6 +527,7 @@ export class StorageCoordinator {
   }
 
   private async repairStartupStorage(repair: StorageRepairPlan): Promise<void> {
+    this.assertSupportedSchema();
     if (repair.persistState) {
       const state = this.state;
       if (!state) {
@@ -599,6 +632,7 @@ export class StorageCoordinator {
         // forbidden until the barrier succeeds, but callers never stay pinned
         // to the first fallback snapshot.
         const { state, repair } = await readStorageStateSnapshot();
+        this.assertSupportedSchema();
         let current = state;
         for (const patch of this.pendingStoragePatches) {
           current = applyRawStoragePatch(current, patch.setItems, patch.removeKeys);
@@ -610,9 +644,21 @@ export class StorageCoordinator {
         await this.repairStartupStorage(repair);
         this.pendingStoragePatches.length = 0;
         this.deferredRepairNeeded = false;
-      } catch {
-        // Keep the normalized in-memory state and buffered patches available.
-        // A later getState/storage event retries from another fresh snapshot.
+      } catch (error: unknown) {
+        if (error instanceof UnsupportedFutureStorageSchemaError) {
+          // A fresh snapshot is stronger evidence than the cached v14 view.
+          // Once a newer writer is observed, discard every local projection
+          // and buffered patch so this older worker cannot write into an
+          // unknown layout even if its storage event was delayed or lost.
+          this.unsupportedSchemaVersion = error.storedVersion;
+          this.state = null;
+          this.pendingStoragePatches.length = 0;
+          this.deferredRepairNeeded = false;
+          throw error;
+        }
+        // Keep the normalized in-memory state and buffered patches available
+        // only for ordinary transient failures. A later getState/storage event
+        // retries from another fresh snapshot.
       } finally {
         this.startupLoadInProgress = false;
       }
@@ -665,6 +711,7 @@ export class StorageCoordinator {
   }
 
   private async writeStartupSet(items: Record<string, unknown>): Promise<void> {
+    this.assertSupportedSchema();
     const ack = this.nextRepairAck();
     let resolveObserved: (() => void) | null = null;
     const observed = new Promise<void>((resolve) => {
@@ -698,6 +745,7 @@ export class StorageCoordinator {
   }
 
   private async writeStartupRemove(keys: string[]): Promise<void> {
+    this.assertSupportedSchema();
     const ack = this.nextRepairAck();
     let resolveArmed: (() => void) | null = null;
     let resolveComplete: (() => void) | null = null;
@@ -813,7 +861,11 @@ export class StorageCoordinator {
   }
 
   private async enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
-    const run = this.writeQueue.then(task, task);
+    const guardedTask = () => {
+      this.assertSupportedSchema();
+      return task();
+    };
+    const run = this.writeQueue.then(guardedTask, guardedTask);
     this.writeQueue = run.then(
       () => undefined,
       () => undefined,

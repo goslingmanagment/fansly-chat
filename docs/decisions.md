@@ -53,6 +53,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E34 | 2026-07-13 | Progressive Spenders snapshot/single-flight and nonblocking Settings hydration |
 | E35 | 2026-07-13 | Confirmed reliability/performance fixes: recoverable persona sync, precise autosave revisions, capture/cache backoff, and stale async-result guards |
 | E36 | 2026-07-13 | Global personas are server-admin content; the extension consumes metadata only and preserves legacy local definitions |
+| E37 | 2026-07-14 | Read-only persona follow-up: narrow refreshes, future-schema barrier, durable Scan fences, and exact deployed-contract release gate |
 
 ## Entries
 
@@ -797,3 +798,45 @@ Release ordering is executable policy: `.env.deploy` must name the production
 `AGENCY_HUB_BASE_URL`, and `deploy.sh` requires the unauthenticated persona
 catalog route to return exactly 401 before AMO signing. A 404 therefore blocks
 an extension-first release against an old Core.
+
+**E37 (2026-07-14).** Persona-catalog polling is state-sensitive rather than a
+five-minute UI reset. A byte-identical normalized catalog performs no storage
+write. Freshness timestamps are operational metadata and do not refresh tabs;
+changed catalog, mapping, alias, and account metadata use the narrow
+`mapping:changed` message. Only an actual normalized Hub-origin or credential
+custody change uses `settings:changed` and invalidates the Spenders context.
+Consequently an owner metadata refresh cannot close an open board or discard
+unrelated work, while a real source/principal replacement still does.
+
+Storage v14 fails closed if either startup migration or a later fresh deferred
+read sees a schema newer than this build. The coordinator drops its cached
+projection and buffered patches, refuses subsequent reads and writes, and never
+downgrades the unknown layout. Browser storage has no transactional compare-and-
+set primitive: a write already in flight when a newer worker commits its schema
+cannot be retroactively cancelled, and already-shipped v13 workers cannot be
+changed. Rollout therefore reloads every old extension context, including
+Fansly tabs and Options, after the update. Coordinator-managed writes check the
+barrier immediately before their queued task executes, and every future schema
+discovered by a fresh coordinator read permanently closes that worker. The
+write-once namespaced legacy snapshot may be added before full schema discovery;
+it never serializes, removes, or downgrades the newer state layout.
+
+Per-conversation Scan commit tokens are correctness fences, not an LRU cache.
+They have no arbitrary 200-group eviction: a slow operation may still be
+finishing its durable save or Hub append after many unrelated conversations
+were opened. The map is worker-lifetime scoped and is intentionally allowed to
+grow by one small tuple per distinct group; a later Scan for the same group
+replaces its row.
+
+Core's metadata catalog adds the required opaque `definitionId` in addition to
+the numeric revision. It identifies exact definition bytes across restore or
+revision rollback. Clients send it as the generation precondition, require the
+successful stream metadata to echo the same applied identity, and use it for
+persona-dependent cache and in-flight fences; they compare it but never parse
+its current `v1:` representation. The old
+E36 field list remains historical and is superseded by this additive metadata
+contract. Release provenance is similarly content-based: deploy accepts only
+the exact canonical `https://gosling-agency.ru` origin, requires healthy Core
+to expose the normalized-OpenAPI `contractHash` equal to the vendored SDK
+manifest, and then proves the catalog route is auth-protected with 401 before
+AMO signing. No deployed source-SHA ancestry is inferred.

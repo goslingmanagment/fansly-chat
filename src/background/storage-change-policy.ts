@@ -6,12 +6,13 @@ const UI_RELEVANT_KEYS = new Set([
   'agencyHubApiKey',
   'personaCatalog',
   'personaCatalogSource',
-  'personaCatalogFetchedAt',
   'accountMappings',
   'accountAliases',
   'knownAccounts',
   'schemaVersion',
 ]);
+
+export type TabRefreshMessage = 'settings:changed' | 'mapping:changed';
 
 function hubBaseUrlFromSettings(value: unknown): string {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -25,8 +26,30 @@ export function shouldRefreshTabsForStorageChanges(
   changes: Record<string, browser.storage.StorageChange>,
   areaName: string,
 ): boolean {
-  return areaName === 'local' &&
-    Object.keys(changes).some((key) => UI_RELEVANT_KEYS.has(key));
+  return tabRefreshMessageForStorageChanges(changes, areaName) !== null;
+}
+
+/**
+ * Catalog timestamps are operational metadata, not UI context. Catalog and
+ * mapping changes refresh persona state without invalidating unrelated UI such
+ * as an open Spenders board; only real settings/source context uses the broad
+ * settings event.
+ */
+export function tabRefreshMessageForStorageChanges(
+  changes: Record<string, browser.storage.StorageChange>,
+  areaName: string,
+): TabRefreshMessage | null {
+  if (areaName !== 'local') {
+    return null;
+  }
+  const keys = Object.keys(changes);
+  if (shouldInvalidateSpendersForStorageChanges(changes, areaName)) {
+    return 'settings:changed';
+  }
+  if (keys.some((key) => UI_RELEVANT_KEYS.has(key))) {
+    return 'mapping:changed';
+  }
+  return null;
 }
 
 export function shouldInvalidateSpendersForStorageChanges(

@@ -9,6 +9,7 @@ import {
   migrateState,
   createDefaultSettings,
   createSeedState,
+  UnsupportedFutureStorageSchemaError,
 } from '../src/shared/migrations.js';
 import {
   BUNDLED_LORA_PERSONALITY_ID,
@@ -59,6 +60,23 @@ beforeEach(() => {
 // ─── migrateState ───────────────────────────────────────────────────────
 
 describe('migrateState', () => {
+  it('fails closed instead of downgrading a future storage schema', () => {
+    expect(() => migrateState({
+      schemaVersion: STORAGE_SCHEMA_VERSION + 1,
+      settings: createDefaultSettings(),
+      futureOwnedField: { preserve: true },
+    })).toThrow(UnsupportedFutureStorageSchemaError);
+  });
+
+  it('rejects a settings write when its live schema observer saw a future version', async () => {
+    await expect(storage.saveSettings(
+      { debugMode: true },
+      createDefaultSettings(),
+      { observedSchemaVersion: STORAGE_SCHEMA_VERSION + 1 },
+    )).rejects.toBeInstanceOf(UnsupportedFutureStorageSchemaError);
+    expect(browser.storage.local.set).not.toHaveBeenCalled();
+  });
+
   it('keeps migrations ordered up to the current schema', () => {
     expect(MIGRATIONS.map((migration) => migration.toVersion)).toEqual([
       STORAGE_SCHEMA_VERSION,
@@ -194,7 +212,7 @@ describe('migrateState', () => {
   it('carries forward source-scoped summary:* keys during migration', () => {
     const legacy = {
       schemaVersion: 0,
-      'summary:group1': { summary: 'cached', personalityId: 'p1', personalityUpdatedAt: 100, personaCatalogSource: 'source-a', generatedAt: 200 },
+      'summary:group1': { summary: 'cached', personalityId: 'p1', personaDefinitionId: 'v1:persona-one-definition', personalityUpdatedAt: 100, personaCatalogSource: 'source-a', generatedAt: 200 },
     };
     const result = migrateState(legacy);
     expect((result as unknown as Record<string, unknown>)['summary:group1']).toBeDefined();
@@ -206,6 +224,7 @@ describe('migrateState', () => {
       'summary:valid': {
         summary: 'cached',
         personalityId: 'p1',
+        personaDefinitionId: 'v1:persona-one-definition',
         personalityUpdatedAt: 100,
         personaCatalogSource: 'source-a',
         generatedAt: 200,
@@ -225,6 +244,7 @@ describe('migrateState', () => {
       'summary:group1': {
         summary: 'cached',
         personalityId: 'p1',
+        personaDefinitionId: 'v1:persona-one-definition',
         personalityUpdatedAt: 100,
         personaCatalogSource: 'source-a',
         generatedAt: 200,
@@ -253,6 +273,7 @@ describe('migrateState', () => {
       'summary:group1': {
         summary: 'cached',
         personalityId: 'p1',
+        personaDefinitionId: 'v1:persona-one-definition',
         personalityUpdatedAt: 100,
         personaCatalogSource: 'source-a',
         generatedAt: 200,
@@ -446,6 +467,7 @@ describe('loadStorageState', () => {
       'summary:valid': {
         summary: 'cached',
         personalityId: 'p1',
+        personaDefinitionId: 'v1:persona-one-definition',
         personalityUpdatedAt: 100,
         personaCatalogSource: 'source-a',
         generatedAt: 200,
@@ -530,6 +552,7 @@ describe('saveAccountMapping', () => {
   const activeCatalog = [{
     key: 'p1',
     displayName: 'Custom',
+    definitionId: 'v1:persona-one-definition',
     version: 1,
     status: 'active' as const,
   }];
@@ -730,6 +753,7 @@ describe('summary cache', () => {
     const entry: SummaryCacheEntry = {
       summary: 'Fan is engaged',
       personalityId: 'p1',
+      personaDefinitionId: 'v1:persona-one-definition',
       personalityUpdatedAt: 1000,
       personaCatalogSource: null,
       generatedAt: 5000,

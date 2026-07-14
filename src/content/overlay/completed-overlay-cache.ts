@@ -7,7 +7,7 @@ interface CompletedOverlayEntry {
 
 export interface CompletedOverlayCacheIdentity {
   personaKey: string | null;
-  personaVersion: number | null;
+  personaDefinitionId: string | null;
   personaSource: string | null;
   variantKey: string | null;
 }
@@ -17,7 +17,7 @@ function sameIdentity(
   right: CompletedOverlayCacheIdentity,
 ): boolean {
   return left.personaKey === right.personaKey &&
-    left.personaVersion === right.personaVersion &&
+    left.personaDefinitionId === right.personaDefinitionId &&
     left.personaSource === right.personaSource &&
     left.variantKey === right.variantKey;
 }

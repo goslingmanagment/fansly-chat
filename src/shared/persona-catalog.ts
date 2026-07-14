@@ -29,16 +29,18 @@ function normalizeEntry(value: unknown): PersonaCatalogEntry | null {
   const key = typeof value.key === 'string' ? value.key : '';
   const displayName = typeof value.displayName === 'string' ? value.displayName : '';
   const version = Number(value.version);
+  const definitionId = typeof value.definitionId === 'string' ? value.definitionId : '';
   const status = value.status;
   if (
     !key || key.length > 120 ||
     !displayName || displayName.length > 120 ||
     !Number.isSafeInteger(version) || version < 1 ||
+    definitionId.length < 16 || definitionId.length > 100 ||
     (status !== 'active' && status !== 'archived')
   ) {
     return null;
   }
-  return { key, displayName, version, status };
+  return { key, displayName, version, definitionId, status };
 }
 
 /** Reject malformed rows and duplicate keys at the client boundary. */

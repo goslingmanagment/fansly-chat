@@ -639,6 +639,7 @@ export async function executeCompare(
           legacyAccountId: validated.legacyAccountId,
           personaKey: mappedPersona.key,
           personaVersion: mappedPersona.version,
+          personaDefinitionId: mappedPersona.definitionId,
           personaCatalogSource: storage.personaCatalogSource,
         }
       : null;
@@ -1084,6 +1085,7 @@ export async function executeCompare(
             pageLabel,
             conversationRef: fanAccountId ?? validated.urlGroupId,
             personaKey,
+            expectedPersonaDefinitionId: personaIdentity?.personaDefinitionId,
             replyTone: promptInputs.replyTone,
             replyMode: promptInputs.replyMode,
             isRegeneration: Boolean(payload.forceRegenerate),

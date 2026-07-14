@@ -6,6 +6,7 @@ readonly ENV_FILE="$ROOT_DIR/.env.deploy"
 readonly VPS_HOST="root@45.8.230.111"
 readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"
+readonly PRODUCTION_AGENCY_HUB_BASE_URL="https://gosling-agency.ru"
 readonly EXTENSION_ID="chatgoose@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
@@ -270,13 +271,45 @@ assert_release_preconditions() {
 }
 
 assert_core_persona_catalog_ready() {
-  case "$AGENCY_HUB_BASE_URL" in
-    http://*|https://*) ;;
-    *) fail "AGENCY_HUB_BASE_URL must be an absolute http(s) URL" ;;
-  esac
+  if [[ "$AGENCY_HUB_BASE_URL" != "$PRODUCTION_AGENCY_HUB_BASE_URL" ]]; then
+    fail "AGENCY_HUB_BASE_URL must be the canonical production Core origin: $PRODUCTION_AGENCY_HUB_BASE_URL"
+  fi
+
+  local vendor_manifest="$ROOT_DIR/vendor/kernel-sdk/kernel-sdk.vendor.json"
+  local expected_contract_hash
+  expected_contract_hash="$(node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const manifest = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    if (typeof manifest.contractHash !== "string") process.exit(1);
+    process.stdout.write(manifest.contractHash);
+  ' "$vendor_manifest")" \
+    || fail "Could not read the vendored Kernel contract hash"
+  if [[ ! "$expected_contract_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    fail "Vendored Kernel contractHash must be an exact sha256"
+  fi
+
+  local health_url="$PRODUCTION_AGENCY_HUB_BASE_URL/api/v1/health"
+  local health_json
+  health_json="$(curl \
+    --silent \
+    --show-error \
+    --fail \
+    --max-time 15 \
+    "$health_url")" \
+    || fail "Could not read healthy production Core identity from $health_url"
+  local deployed_contract_hash
+  deployed_contract_hash="$(node --input-type=module -e '
+    const health = JSON.parse(process.argv[1]);
+    if (typeof health.contractHash !== "string") process.exit(1);
+    process.stdout.write(health.contractHash);
+  ' "$health_json")" \
+    || fail "Production Core health does not expose a verifiable contractHash"
+  if [[ "$deployed_contract_hash" != "$expected_contract_hash" ]]; then
+    fail "Production Core contractHash $deployed_contract_hash does not match vendored SDK $expected_contract_hash"
+  fi
 
   local catalog_url
-  catalog_url="${AGENCY_HUB_BASE_URL%/}/api/v1/ai/persona-catalog"
+  catalog_url="$PRODUCTION_AGENCY_HUB_BASE_URL/api/v1/ai/persona-catalog"
   local status
   status="$(
     curl \
@@ -294,7 +327,7 @@ assert_core_persona_catalog_ready() {
   if [[ "$status" != "401" ]]; then
     fail "Core-first prerequisite failed: $catalog_url must return unauthenticated 401 (got ${status:-curl_failed}); deploy Core before signing the extension"
   fi
-  log "Core persona catalog route is deployed and auth-protected (401)"
+  log "Production Core contract matches the vendored SDK and persona catalog is auth-protected (401)"
 }
 
 tag_release() {

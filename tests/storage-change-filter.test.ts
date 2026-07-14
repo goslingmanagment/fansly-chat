@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   shouldInvalidateSpendersForStorageChanges,
   shouldRefreshTabsForStorageChanges,
+  tabRefreshMessageForStorageChanges,
 } from '../src/background/storage-change-policy.js';
 
 /**
@@ -37,6 +38,17 @@ describe('storage.onChanged filter logic (Bug 7)', () => {
 
   it('triggers refresh for server persona catalog changes', () => {
     expect(shouldRefreshTabsForStorageChanges({ personaCatalog: {} }, 'local')).toBe(true);
+    expect(tabRefreshMessageForStorageChanges({ personaCatalog: {} }, 'local'))
+      .toBe('mapping:changed');
+  });
+
+  it('ignores catalog freshness timestamps and routes mapping changes narrowly', () => {
+    expect(shouldRefreshTabsForStorageChanges({ personaCatalogFetchedAt: {} }, 'local')).toBe(false);
+    expect(tabRefreshMessageForStorageChanges({ personaCatalogFetchedAt: {} }, 'local')).toBeNull();
+    expect(tabRefreshMessageForStorageChanges({ accountMappings: {} }, 'local'))
+      .toBe('mapping:changed');
+    expect(tabRefreshMessageForStorageChanges({ settings: {}, personaCatalog: {} }, 'local'))
+      .toBe('mapping:changed');
   });
 
   it('triggers refresh for accountMappings key', () => {
@@ -93,12 +105,14 @@ describe('Spenders invalidation policy', () => {
   });
 
   it('invalidates for a changed Hub source URL but not equivalent normalization', () => {
-    expect(shouldInvalidateSpendersForStorageChanges({
+    const changedSource = {
       settings: change(baseSettings, {
         ...baseSettings,
         agencyHubBaseUrl: 'https://other.example.com',
       }),
-    }, 'local')).toBe(true);
+    };
+    expect(shouldInvalidateSpendersForStorageChanges(changedSource, 'local')).toBe(true);
+    expect(tabRefreshMessageForStorageChanges(changedSource, 'local')).toBe('settings:changed');
     expect(shouldInvalidateSpendersForStorageChanges({
       settings: change(baseSettings, {
         ...baseSettings,

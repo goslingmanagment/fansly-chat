@@ -13,10 +13,11 @@ import { SessionStore } from './session-store.js';
 import { SpendersService } from './spenders-service.js';
 import {
   shouldInvalidateSpendersForStorageChanges,
-  shouldRefreshTabsForStorageChanges,
+  tabRefreshMessageForStorageChanges,
 } from './storage-change-policy.js';
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
+import { readStorageState } from '../shared/storage.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
 
@@ -35,7 +36,6 @@ const spendersService = new SpendersService(
   async () => (await storageCoordinator.getState()).settings,
 );
 const agencyHubClient = new AgencyHubClient();
-const kernelGateway = createKernelFeatureGateway();
 // Stage 32 Task 5: acceptance telemetry on the capture lane (drop-oldest
 // spool in storage.local — recoverable signal, not custody-grade audit).
 const acceptanceReporter = createAcceptanceReporter({
@@ -48,16 +48,18 @@ const acceptanceReporter = createAcceptanceReporter({
 const personaCatalog = createPersonaCatalogController({
   hub: agencyHubClient,
   storage: browser.storage.local,
+  readSettings: async () => (await readStorageState()).settings,
   onWarn: (message) => console.warn(message),
 });
+const kernelGateway = createKernelFeatureGateway(
+  undefined,
+  () => personaCatalog.refresh(),
+);
 // A persistent content port can keep this MV3 worker alive for a whole shift.
 // Refresh while alive so an owner archive/revision does not stay stale until
 // the browser restarts; suspension/restart is covered by the startup refresh.
 startPersonaCatalogRefreshLoop({
-  refresh: async () => {
-    const state = await storageCoordinator.getState();
-    await personaCatalog.refresh(state.settings);
-  },
+  refresh: () => personaCatalog.refresh(),
   onWarn: (message) => console.warn(message),
 });
 const coordinator = new OperationCoordinator(
@@ -98,8 +100,7 @@ registerRuntimeApi({
   // back over the tab's existing content port.
   emitToTab: (tabId, message) => coordinator.sendToTab(tabId, message),
   onAgencyHubReady: async () => {
-    const state = await storageCoordinator.getState();
-    await personaCatalog.refresh(state.settings);
+    await personaCatalog.refresh();
   },
 });
 
@@ -115,17 +116,17 @@ browser.storage.onChanged.addListener((changes, areaName) => {
     // The board cache is source-scoped. A same-URL credential replacement can
     // still change data visibility, so clear both memory and storage.session.
     void spendersService.invalidateAll();
-    void storageCoordinator.getState()
-      .then((state) => personaCatalog.refresh(state.settings))
+    void personaCatalog.refresh()
       .catch((error) => console.warn('[persona-catalog] source refresh failed', error));
   }
-  if (shouldRefreshTabsForStorageChanges(changes, areaName)) {
-    void coordinator.refreshAllTabs('settings:changed');
+  const refreshMessage = tabRefreshMessageForStorageChanges(changes, areaName);
+  if (refreshMessage !== null) {
+    void coordinator.refreshAllTabs(refreshMessage);
   }
 });
 
-void storageCoordinator.init().then((state) => {
-  void personaCatalog.refresh(state.settings)
+void storageCoordinator.init().then(() => {
+  void personaCatalog.refresh()
     .catch((error) => console.warn('[persona-catalog] startup refresh failed', error));
   // W9.4/A40: one startup flush — events spooled when the previous background
   // instance died must not wait for the NEXT enqueue's debounce to deliver.

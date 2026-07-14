@@ -13,7 +13,10 @@ import {
   PERSONA_CATALOG_SOURCE_STORAGE_KEY,
   PERSONA_CATALOG_STORAGE_KEY,
 } from '../src/shared/constants.js';
-import { createDefaultSettings } from '../src/shared/migrations.js';
+import {
+  createDefaultSettings,
+  UnsupportedFutureStorageSchemaError,
+} from '../src/shared/migrations.js';
 import {
   findActivePersona,
   normalizePersonaCatalog,
@@ -24,7 +27,7 @@ import {
   InvalidLegacyPersonaSnapshotError,
   isLegacyPersonaSnapshot,
 } from '../src/shared/persona-preservation.js';
-import type { Settings } from '../src/shared/types.js';
+import type { PersonaCatalogEntry, Settings } from '../src/shared/types.js';
 
 function configuredSettings(overrides: Partial<Settings> = {}): Settings {
   return {
@@ -65,6 +68,7 @@ function makeHub(): {
   const fetchAiPersonaCatalog = vi.fn(async () => [{
     key: 'persona-1',
     displayName: 'Closer',
+    definitionId: 'v1:persona-one-definition',
     version: 7,
     status: 'active' as const,
   }]);
@@ -73,6 +77,32 @@ function makeHub(): {
     hub: {
       isConfigured: (settings) => Boolean(personaCatalogSource(settings)),
       fetchAiPersonaCatalog,
+    },
+  };
+}
+
+function makeController(options: {
+  hub: PersonaCatalogHub;
+  storage: PersonaCatalogStorage;
+  settings?: Settings;
+  readSettings?: () => Promise<Settings>;
+  onWarn?: (message: string) => void;
+  timeoutMs?: number;
+  now?: () => Date;
+}) {
+  let currentSettings = options.settings ?? configuredSettings();
+  const controller = createPersonaCatalogController({
+    hub: options.hub,
+    storage: options.storage,
+    readSettings: options.readSettings ?? (async () => currentSettings),
+    ...(options.onWarn ? { onWarn: options.onWarn } : {}),
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.now ? { now: options.now } : {}),
+  });
+  return {
+    controller,
+    setSettings(settings: Settings) {
+      currentSettings = settings;
     },
   };
 }
@@ -270,6 +300,7 @@ describe('read-only persona catalog controller', () => {
       {
         key: ' legacy.persona ',
         displayName: ' Legacy display name ',
+        definitionId: ' opaque definition bytes ',
         version: 4,
         status: 'active',
       },
@@ -278,11 +309,35 @@ describe('read-only persona catalog controller', () => {
     expect(catalog).toEqual([{
       key: ' legacy.persona ',
       displayName: ' Legacy display name ',
+      definitionId: ' opaque definition bytes ',
       version: 4,
       status: 'active',
     }]);
     expect(findActivePersona(catalog, ' legacy.persona ')?.version).toBe(4);
     expect(findActivePersona(catalog, 'legacy.persona')).toBeNull();
+  });
+
+  it('requires an opaque definition id and preserves its bytes exactly', () => {
+    const catalog = normalizePersonaCatalog([
+      {
+        key: 'missing-definition',
+        displayName: 'Missing',
+        version: 1,
+        status: 'active',
+      },
+      {
+        key: 'valid',
+        displayName: 'Valid',
+        definitionId: ' opaque definition bytes ',
+        version: 1,
+        status: 'active',
+      },
+    ]);
+
+    expect(catalog).toEqual([expect.objectContaining({
+      key: 'valid',
+      definitionId: ' opaque definition bytes ',
+    })]);
   });
 
   it('persists only metadata after the preservation write and never touches legacy personalities', async () => {
@@ -295,25 +350,100 @@ describe('read-only persona catalog controller', () => {
     });
     const originalPersonalities = structuredClone(local.data.personalities);
     const { hub, fetchAiPersonaCatalog } = makeHub();
-    const controller = createPersonaCatalogController({
+    const { controller } = makeController({
       hub,
       storage: local.storage,
+      settings: configuredSettings(),
       now: () => new Date('2026-07-13T12:00:00.000Z'),
     });
 
-    await controller.refresh(configuredSettings());
+    await controller.refresh();
 
     expect(fetchAiPersonaCatalog).toHaveBeenCalledTimes(1);
     expect(local.data.personalities).toEqual(originalPersonalities);
     expect(local.data[PERSONA_CATALOG_STORAGE_KEY]).toEqual([{
       key: 'persona-1',
       displayName: 'Closer',
+      definitionId: 'v1:persona-one-definition',
       version: 7,
       status: 'active',
     }]);
     expect(local.data[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY])
       .toBe('2026-07-13T12:00:00.000Z');
     expect(local.writes.every((write) => !Object.hasOwn(write, 'personalities'))).toBe(true);
+  });
+
+  it('does not rewrite storage when a periodic refresh returns byte-identical catalog metadata', async () => {
+    const settings = configuredSettings();
+    const source = personaCatalogSource(settings);
+    const catalog = [{ key: 'persona-1', displayName: 'Closer', definitionId: 'v1:persona-one-definition', version: 7, status: 'active' as const }];
+    const local = makeStorage({
+      schemaVersion: 14,
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      [PERSONA_CATALOG_STORAGE_KEY]: catalog,
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: source,
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: '2026-07-13T12:00:00.000Z',
+    });
+    const { hub } = makeHub();
+    const { controller } = makeController({
+      hub,
+      storage: local.storage,
+      settings,
+      now: () => new Date('2026-07-13T12:05:00.000Z'),
+    });
+    await ensureLegacyPersonaSnapshot(local.storage);
+    local.writes.length = 0;
+
+    await controller.refresh();
+
+    expect(local.writes).toEqual([]);
+    expect(local.data[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY])
+      .toBe('2026-07-13T12:00:00.000Z');
+  });
+
+  it('persists an ID-only definition change even when the numeric version is unchanged', async () => {
+    const settings = configuredSettings();
+    const source = personaCatalogSource(settings);
+    const local = makeStorage({
+      schemaVersion: 14,
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      [PERSONA_CATALOG_STORAGE_KEY]: [{
+        key: 'persona-1',
+        displayName: 'Closer',
+        definitionId: 'v1:old-persona-definition',
+        version: 7,
+        status: 'active',
+      }],
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: source,
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: '2026-07-13T12:00:00.000Z',
+    });
+    const { hub, fetchAiPersonaCatalog } = makeHub();
+    fetchAiPersonaCatalog.mockResolvedValueOnce([{
+      key: 'persona-1',
+      displayName: 'Closer',
+      definitionId: 'v1:new-persona-definition',
+      version: 7,
+      status: 'active',
+    }]);
+    const { controller } = makeController({
+      hub,
+      storage: local.storage,
+      settings,
+      now: () => new Date('2026-07-13T12:05:00.000Z'),
+    });
+    await ensureLegacyPersonaSnapshot(local.storage);
+    local.writes.length = 0;
+
+    await controller.refresh();
+
+    expect(local.writes).toHaveLength(1);
+    expect(local.data[PERSONA_CATALOG_STORAGE_KEY]).toEqual([
+      expect.objectContaining({ definitionId: 'v1:new-persona-definition', version: 7 }),
+    ]);
   });
 
   it('aborts catalog mutation and fetch when the preservation write fails, then retries cleanly', async () => {
@@ -325,13 +455,17 @@ describe('read-only persona catalog controller', () => {
     });
     local.failNextSet();
     const { hub, fetchAiPersonaCatalog } = makeHub();
-    const controller = createPersonaCatalogController({ hub, storage: local.storage });
+    const { controller } = makeController({
+      hub,
+      storage: local.storage,
+      settings: configuredSettings(),
+    });
 
-    await expect(controller.refresh(configuredSettings())).rejects.toThrow('storage write failed');
+    await expect(controller.refresh()).rejects.toThrow('storage write failed');
     expect(fetchAiPersonaCatalog).not.toHaveBeenCalled();
     expect(local.data[PERSONA_CATALOG_STORAGE_KEY]).toBeUndefined();
 
-    await controller.refresh(configuredSettings());
+    await controller.refresh();
     expect(fetchAiPersonaCatalog).toHaveBeenCalledTimes(1);
     expect(local.data[LEGACY_PERSONA_SNAPSHOT_KEY]).toBeDefined();
   });
@@ -345,16 +479,20 @@ describe('read-only persona catalog controller', () => {
     });
     const { hub, fetchAiPersonaCatalog } = makeHub();
     fetchAiPersonaCatalog.mockResolvedValueOnce([
-      { key: 'archived', displayName: 'Old', version: 3, status: 'archived' },
-      { key: 'bad', displayName: 'Bad', version: 0, status: 'active' },
+      { key: 'archived', displayName: 'Old', definitionId: 'v1:archived-persona', version: 3, status: 'archived' },
+      { key: 'bad', displayName: 'Bad', definitionId: 'v1:invalid-persona-row', version: 0, status: 'active' },
     ]);
-    const controller = createPersonaCatalogController({ hub, storage: local.storage });
+    const { controller } = makeController({
+      hub,
+      storage: local.storage,
+      settings: configuredSettings(),
+    });
 
-    await controller.refresh(configuredSettings());
+    await controller.refresh();
 
     expect(local.data.accountMappings).toEqual({ creator: 'archived' });
     expect(local.data[PERSONA_CATALOG_STORAGE_KEY]).toEqual([
-      { key: 'archived', displayName: 'Old', version: 3, status: 'archived' },
+      { key: 'archived', displayName: 'Old', definitionId: 'v1:archived-persona', version: 3, status: 'archived' },
     ]);
   });
 
@@ -370,20 +508,120 @@ describe('read-only persona catalog controller', () => {
     const { hub, fetchAiPersonaCatalog } = makeHub();
     fetchAiPersonaCatalog
       .mockReturnValueOnce(first)
-      .mockResolvedValueOnce([{ key: 'new', displayName: 'New', version: 2, status: 'active' }]);
-    const controller = createPersonaCatalogController({ hub, storage: local.storage });
+      .mockResolvedValueOnce([{ key: 'new', displayName: 'New', definitionId: 'v1:new-persona-definition', version: 2, status: 'active' }]);
+    const oldSettings = configuredSettings({ agencyHubDeviceToken: 'old' });
+    const newSettings = configuredSettings({ agencyHubDeviceToken: 'new' });
+    const { controller, setSettings } = makeController({
+      hub,
+      storage: local.storage,
+      settings: oldSettings,
+    });
 
-    const oldRefresh = controller.refresh(configuredSettings({ agencyHubDeviceToken: 'old' }));
+    const oldRefresh = controller.refresh();
     await vi.waitFor(() => expect(fetchAiPersonaCatalog).toHaveBeenCalledTimes(1));
-    const newRefresh = controller.refresh(configuredSettings({ agencyHubDeviceToken: 'new' }));
-    releaseFirst([{ key: 'old', displayName: 'Old', version: 1, status: 'active' }]);
+    setSettings(newSettings);
+    const newRefresh = controller.refresh();
+    releaseFirst([{ key: 'old', displayName: 'Old', definitionId: 'v1:old-persona-definition', version: 1, status: 'active' }]);
     await Promise.all([oldRefresh, newRefresh]);
 
     expect(local.data[PERSONA_CATALOG_STORAGE_KEY]).toEqual([
-      { key: 'new', displayName: 'New', version: 2, status: 'active' },
+      { key: 'new', displayName: 'New', definitionId: 'v1:new-persona-definition', version: 2, status: 'active' },
     ]);
     expect(local.data[PERSONA_CATALOG_SOURCE_STORAGE_KEY])
-      .toBe(personaCatalogSource(configuredSettings({ agencyHubDeviceToken: 'new' })));
+      .toBe(personaCatalogSource(newSettings));
+  });
+
+  it('does not commit a fetched catalog after the current source changes without a newer refresh call', async () => {
+    const oldSettings = configuredSettings({ agencyHubDeviceToken: 'old' });
+    const newSettings = configuredSettings({ agencyHubDeviceToken: 'new' });
+    const oldCatalog = [{
+      key: 'old',
+      displayName: 'Old',
+      definitionId: 'v1:old-persona-definition',
+      version: 1,
+      status: 'active' as const,
+    }];
+    const local = makeStorage({
+      schemaVersion: 14,
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      [PERSONA_CATALOG_STORAGE_KEY]: oldCatalog,
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: personaCatalogSource(oldSettings),
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: '2026-07-13T12:00:00.000Z',
+    });
+    await ensureLegacyPersonaSnapshot(local.storage);
+    local.writes.length = 0;
+    let releaseFetch!: (value: PersonaCatalogEntry[]) => void;
+    const fetchPending = new Promise<PersonaCatalogEntry[]>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const { hub, fetchAiPersonaCatalog } = makeHub();
+    fetchAiPersonaCatalog.mockReturnValueOnce(fetchPending);
+    const { controller, setSettings } = makeController({
+      hub,
+      storage: local.storage,
+      settings: oldSettings,
+    });
+
+    const refresh = controller.refresh();
+    await vi.waitFor(() => expect(fetchAiPersonaCatalog).toHaveBeenCalledTimes(1));
+    setSettings(newSettings);
+    releaseFetch([{
+      key: 'stale',
+      displayName: 'Stale',
+      definitionId: 'v1:stale-persona-definition',
+      version: 2,
+      status: 'active',
+    }]);
+    await refresh;
+
+    expect(local.writes).toEqual([]);
+    expect(local.data[PERSONA_CATALOG_STORAGE_KEY]).toEqual(oldCatalog);
+  });
+
+  it('performs a final future-schema read before committing a fetched catalog', async () => {
+    const currentSettings = configuredSettings();
+    const local = makeStorage({
+      schemaVersion: 14,
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      [PERSONA_CATALOG_STORAGE_KEY]: [],
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: personaCatalogSource(currentSettings),
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: null,
+    });
+    await ensureLegacyPersonaSnapshot(local.storage);
+    local.writes.length = 0;
+    let futureSchema = false;
+    let releaseFetch!: (value: PersonaCatalogEntry[]) => void;
+    const fetchPending = new Promise<PersonaCatalogEntry[]>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const { hub, fetchAiPersonaCatalog } = makeHub();
+    fetchAiPersonaCatalog.mockReturnValueOnce(fetchPending);
+    const { controller } = makeController({
+      hub,
+      storage: local.storage,
+      readSettings: async () => {
+        if (futureSchema) throw new UnsupportedFutureStorageSchemaError(15);
+        return currentSettings;
+      },
+    });
+
+    const refresh = controller.refresh();
+    await vi.waitFor(() => expect(fetchAiPersonaCatalog).toHaveBeenCalledTimes(1));
+    futureSchema = true;
+    releaseFetch([{
+      key: 'new',
+      displayName: 'New',
+      definitionId: 'v1:new-persona-definition',
+      version: 1,
+      status: 'active',
+    }]);
+
+    await expect(refresh).rejects.toBeInstanceOf(UnsupportedFutureStorageSchemaError);
+    expect(local.writes).toEqual([]);
   });
 
   it('refreshes on a bounded interval while the worker remains alive', async () => {

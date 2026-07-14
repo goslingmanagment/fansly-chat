@@ -462,7 +462,13 @@ export class AgencyHubClient {
   async fetchAiPersonaCatalog(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
-  ): Promise<Array<{ key: string; displayName: string; version: number; status: 'active' | 'archived' }>> {
+  ): Promise<Array<{
+    key: string;
+    displayName: string;
+    version: number;
+    definitionId: string;
+    status: 'active' | 'archived';
+  }>> {
     const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
     try {
       const response = await this.sdkFor(baseUrl, bearer, signal).aiPersonaCatalog();

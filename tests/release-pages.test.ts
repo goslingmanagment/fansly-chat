@@ -66,7 +66,17 @@ describe('release page stamping', () => {
     expect(deploy).toContain('rev-parse origin/main');
     expect(deploy).toContain('/api/v1/ai/persona-catalog');
     expect(deploy).toContain('if [[ "$status" != "401" ]]');
-    expect(deployEnvExample).toContain('AGENCY_HUB_BASE_URL=');
+    expect(deploy).toContain(
+      'readonly PRODUCTION_AGENCY_HUB_BASE_URL="https://gosling-agency.ru"',
+    );
+    expect(deploy).toContain(
+      '[[ "$AGENCY_HUB_BASE_URL" != "$PRODUCTION_AGENCY_HUB_BASE_URL" ]]',
+    );
+    expect(deploy).toContain('health.contractHash');
+    expect(deploy).toContain('[[ "$deployed_contract_hash" != "$expected_contract_hash" ]]');
+    expect(deployEnvExample).toContain(
+      'AGENCY_HUB_BASE_URL=https://gosling-agency.ru',
+    );
     expect(deploy).toContain('vendor/kernel-sdk/kernel-sdk.vendor.json');
     expect(deploy).toContain('manifest.sourceCommit');
     expect(deploy).toContain('[[ ! "$vendor_source_commit" =~ ^[0-9a-f]{40}$ ]]');

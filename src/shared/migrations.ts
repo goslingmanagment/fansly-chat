@@ -96,6 +96,15 @@ function migrateSettingsRecord(
 
 type MigrationRecord = Record<string, unknown>;
 
+export class UnsupportedFutureStorageSchemaError extends Error {
+  constructor(readonly storedVersion: number) {
+    super(
+      `Storage schema ${storedVersion} is newer than this extension supports (${STORAGE_SCHEMA_VERSION})`,
+    );
+    this.name = 'UnsupportedFutureStorageSchemaError';
+  }
+}
+
 /** The persisted `settings` blob (v13+): everything EXCEPT the credentials,
  * which live in their own storage keys (per-key custody, A41/I116-4). */
 export function stripSecretSettings(
@@ -222,6 +231,14 @@ export function migrateState(raw: unknown): PersistedState {
 
   const record = raw as Record<string, unknown>;
   const schemaVersion = typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
+
+  // Never normalize a future layout back to this build's schema. In-place
+  // downgrade would discard fields the newer extension owns and can create an
+  // MV3 old/new-context write ping-pong. Fail closed until the matching worker
+  // is active; callers already crossed the preservation barrier before here.
+  if (schemaVersion > STORAGE_SCHEMA_VERSION) {
+    throw new UnsupportedFutureStorageSchemaError(schemaVersion);
+  }
 
   if (schemaVersion === STORAGE_SCHEMA_VERSION) {
     // Guard personalities/accountMappings the same way the incremental branch

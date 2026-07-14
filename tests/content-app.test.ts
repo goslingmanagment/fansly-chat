@@ -89,6 +89,7 @@ function readyState(overrides: Partial<TabUiState> = {}): TabUiState {
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',
     mappedPersonaVersion: 1,
+    mappedPersonaDefinitionId: 'v1:persona-one-definition',
     mappedPersonaSource: 'source-a',
     compareCardCount: 2,
     compareDraftCount: 1,
@@ -99,7 +100,7 @@ function readyState(overrides: Partial<TabUiState> = {}): TabUiState {
 function overlayIdentity(variantKey: string | null = null) {
   return {
     personaKey: 'personality-1',
-    personaVersion: 1,
+    personaDefinitionId: 'v1:persona-one-definition',
     personaSource: 'source-a',
     variantKey,
   };
@@ -343,11 +344,11 @@ describe('ChatGooseContentApp', () => {
     }));
   });
 
-  it('hides a visible completed result when the mapped persona revision changes', async () => {
+  it('hides a visible completed result when the mapped persona definition changes', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
 
-    app.tabState = readyState({ mappedPersonaVersion: 1 });
+    app.tabState = readyState({ mappedPersonaDefinitionId: 'v1:persona-one-definition' });
     app.currentGroupId = 'group-1';
     app.activeFeature = 'fast-reply';
     app.activeOperationId = 'reply-op';
@@ -369,7 +370,7 @@ describe('ChatGooseContentApp', () => {
 
     app.handlePortMessage({
       type: 'settings:changed',
-      state: readyState({ mappedPersonaVersion: 2 }),
+      state: readyState({ mappedPersonaDefinitionId: 'v1:persona-two-definition' }),
     });
 
     expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
@@ -380,6 +381,47 @@ describe('ChatGooseContentApp', () => {
       'fast-reply',
       overlayIdentity(),
     )).toBeNull();
+  });
+
+  it('keeps persona-bound UI when only numeric catalog metadata changes', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.tabState = readyState({
+      mappedPersonaVersion: 7,
+      mappedPersonaDefinitionId: 'v1:persona-one-definition',
+    });
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.lastFeature = 'fast-reply';
+    app.quickSurfaceEverOpened = true;
+    app.quickInlineVisible = true;
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'reply-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Stable definition reply',
+        parts: ['Stable definition reply'],
+      },
+    });
+
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState({
+        mappedPersonaVersion: 1,
+        mappedPersonaDefinitionId: 'v1:persona-one-definition',
+      }),
+    });
+
+    expect(app.quickInlineVisible).toBe(true);
+    expect(app.lastFeature).toBe('fast-reply');
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fast-reply',
+      overlayIdentity(),
+    )).not.toBeNull();
   });
 
   it('hides completed and in-flight results when the Hub source changes with the same key/version', async () => {
@@ -410,6 +452,28 @@ describe('ChatGooseContentApp', () => {
       'fast-reply',
       { ...overlayIdentity(), personaSource: 'source-b' },
     )).toBeNull();
+  });
+
+  it('keeps an open Spenders context for a metadata-only mapping refresh', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    const invalidateContext = vi.spyOn(app.board, 'invalidateContext');
+
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState(),
+    });
+
+    expect(invalidateContext).not.toHaveBeenCalled();
+
+    app.handlePortMessage({
+      type: 'settings:changed',
+      state: readyState(),
+    });
+
+    expect(invalidateContext).toHaveBeenCalledTimes(1);
   });
 
   it('cancels and discards an in-flight feature when the mapped persona changes', async () => {
@@ -1351,13 +1415,13 @@ describe('ChatGooseContentApp', () => {
     expect(app.comparePanelVisible).toBe(true);
   });
 
-  it('cancels and discards an in-flight compare when the persona version changes', async () => {
+  it('cancels and discards an in-flight compare when the persona definition changes', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn(() => true);
 
     app.port.send = sendSpy;
-    app.tabState = readyState({ mappedPersonaVersion: 1 });
+    app.tabState = readyState({ mappedPersonaDefinitionId: 'v1:persona-one-definition' });
     app.currentGroupId = 'group-1';
     app.activeCompareModel = createCompareModel({
       operationId: 'compare-op',
@@ -1369,7 +1433,7 @@ describe('ChatGooseContentApp', () => {
 
     app.handlePortMessage({
       type: 'settings:changed',
-      state: readyState({ mappedPersonaVersion: 2 }),
+      state: readyState({ mappedPersonaDefinitionId: 'v1:persona-two-definition' }),
     });
 
     expect(sendSpy).toHaveBeenCalledWith({
@@ -1496,7 +1560,7 @@ describe('ChatGooseContentApp', () => {
     app.currentGroupId = 'group-1';
     mockStorageState = createStorageState({
       personaCatalog: [
-        { key: 'personality-1', displayName: 'Closer', version: 1, status: 'active' },
+        { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:persona-one-definition', version: 1, status: 'active' },
       ],
     });
     app.completedCompareCache.set('group-1', {
@@ -1505,7 +1569,7 @@ describe('ChatGooseContentApp', () => {
     });
     mockStorageState = createStorageState({
       personaCatalog: [
-        { key: 'personality-1', displayName: 'Closer', version: 2, status: 'active' },
+        { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:persona-two-definition', version: 2, status: 'active' },
       ],
     });
 

@@ -706,6 +706,7 @@ export class OperationCoordinator {
     const mappedPersonalityId = mappedPersonality?.key ?? null;
     const mappedPersonalityName = mappedPersonality?.displayName ?? null;
     const mappedPersonaVersion = mappedPersonality?.version ?? null;
+    const mappedPersonaDefinitionId = mappedPersonality?.definitionId ?? null;
     const mappedPersonaSource = mappedPersonality
       ? storage.personaCatalogSource
       : null;
@@ -727,6 +728,7 @@ export class OperationCoordinator {
       mappedPersonalityId,
       mappedPersonalityName,
       mappedPersonaVersion,
+      mappedPersonaDefinitionId,
       mappedPersonaSource,
       compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
       compareDraftCount,
@@ -782,7 +784,7 @@ export class OperationCoordinator {
     if (
       !mappedPersona ||
       cached.personalityId !== mappedPersona.key ||
-      cached.personalityUpdatedAt !== mappedPersona.version ||
+      cached.personaDefinitionId !== mappedPersona.definitionId ||
       cached.personaCatalogSource !== storage.personaCatalogSource
     ) {
       return;
@@ -803,6 +805,7 @@ export class OperationCoordinator {
         legacyAccountId,
         personaKey: mappedPersona.key,
         personaVersion: mappedPersona.version,
+        personaDefinitionId: mappedPersona.definitionId,
         personaCatalogSource: storage.personaCatalogSource,
       },
       requireCachedEntry: true,
@@ -1161,12 +1164,11 @@ export class OperationCoordinator {
     }
     this.latestSummaryCommitByGroupId.delete(groupId);
     this.latestSummaryCommitByGroupId.set(groupId, { operationId, token });
-    while (this.latestSummaryCommitByGroupId.size > 200) {
-      const oldest = this.latestSummaryCommitByGroupId.keys().next().value as
-        string | undefined;
-      if (!oldest) break;
-      this.latestSummaryCommitByGroupId.delete(oldest);
-    }
+    // This map is a correctness fence, not a result cache: a Scan may still be
+    // finishing its durable write or Hub append long after another group was
+    // opened. An arbitrary LRU cap cannot know which token is still pending and
+    // may turn a valid completion into a false stale result. Service-worker
+    // lifetime bounds the map, and repeated work for one group replaces its row.
   }
 
   private isLatestSummaryCommit(
@@ -1215,7 +1217,7 @@ export class OperationCoordinator {
     return cached?.generatedAt === task.generatedAt &&
       cached.summary === task.summary &&
       cached.personalityId === task.personaIdentity.personaKey &&
-      cached.personalityUpdatedAt === task.personaIdentity.personaVersion &&
+      cached.personaDefinitionId === task.personaIdentity.personaDefinitionId &&
       cached.personaCatalogSource === task.personaIdentity.personaCatalogSource;
   }
 
@@ -1244,7 +1246,7 @@ export class OperationCoordinator {
         (expected && (
           entry.summary !== expected.summary ||
           entry.personalityId !== expected.personaIdentity.personaKey ||
-          entry.personalityUpdatedAt !== expected.personaIdentity.personaVersion ||
+          entry.personaDefinitionId !== expected.personaIdentity.personaDefinitionId ||
           entry.personaCatalogSource !== expected.personaIdentity.personaCatalogSource
         ))
       ) {
@@ -1704,6 +1706,7 @@ export class OperationCoordinator {
         legacyAccountId: validated.legacyAccountId,
         personaKey: personality.key,
         personaVersion: personality.version,
+        personaDefinitionId: personality.definitionId,
         personaCatalogSource: storage.personaCatalogSource,
       };
 
@@ -1729,7 +1732,7 @@ export class OperationCoordinator {
         hasValidCachedSummary = isValidSummaryCacheEntry(
           cachedSummary,
           personality.key,
-          personality.version,
+          personality.definitionId,
           storage.personaCatalogSource,
           resolvedModel,
         );
@@ -2331,6 +2334,7 @@ export class OperationCoordinator {
         pageLabel,
         conversationRef: fanAccountId ?? validated.urlGroupId,
         personaKey: personality.key,
+        expectedPersonaDefinitionId: personality.definitionId,
         replyTone: payload.replyTone,
         replyMode: payload.replyMode,
         draftText: payload.draftText,
@@ -2678,6 +2682,7 @@ export class OperationCoordinator {
             {
             summary: rawText,
             personalityId: personality.key,
+            personaDefinitionId: personality.definitionId,
             personalityUpdatedAt: personality.version,
             personaCatalogSource: personaIdentity.personaCatalogSource,
             generatedAt,
