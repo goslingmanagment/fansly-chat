@@ -14,6 +14,7 @@ import {
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../src/shared/constants.js';
 import { ChatGooseError } from '../src/shared/errors.js';
+import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import {
   createMockRuntimePort,
   postedMessages,
@@ -26,11 +27,18 @@ import type {
   FanslyMessagePageResponse,
   MonthlyEarningsRow,
   NormalizedTranscriptMessage,
+  Settings,
   SummaryCacheEntry,
 } from '../src/shared/types.js';
 
 let mockStorage: Record<string, unknown> = {};
 let currentNow = 1_700_000_000_000;
+let activeStorageCoordinator: {
+  applyStorageChanges(
+    changes: Record<string, browser.storage.StorageChange>,
+    areaName: string,
+  ): void;
+} | null = null;
 
 const SESSION_CAPTURE = {
   accountId: 'account-1',
@@ -289,6 +297,9 @@ async function createCoordinatorHarness(options?: {
     enqueue: (...args: any[]) => void;
   };
 }) {
+  mockStorage.personaCatalogSource = personaCatalogSource(
+    mockStorage.settings as Settings,
+  );
   const [{ OperationCoordinator }, { SessionStore }, { StorageCoordinator }, { TabContextStore }] =
     await Promise.all([
       import('../src/background/operations.js'),
@@ -321,6 +332,7 @@ async function createCoordinatorHarness(options?: {
     })),
   };
   const storageCoordinator = new StorageCoordinator();
+  activeStorageCoordinator = storageCoordinator;
 
   const coordinator = new OperationCoordinator(
     sessionStore,
@@ -365,6 +377,12 @@ async function mockCompareCards(cards: CompareModelCard[]): Promise<void> {
         updatedAt: 1000,
       },
     ];
+    mockStorage.personaCatalog = [{
+      key: personalityId,
+      displayName: currentCard.label.replace(/ \(current\)$/, ''),
+      version: 1000,
+      status: 'active',
+    }];
     mockStorage.accountMappings = {
       'account-1': personalityId,
     };
@@ -377,6 +395,7 @@ async function mockCompareCards(cards: CompareModelCard[]): Promise<void> {
 describe('OperationCoordinator', () => {
   beforeEach(() => {
     vi.resetModules();
+    activeStorageCoordinator = null;
     currentNow = 1_700_000_000_000;
     vi.spyOn(Date, 'now').mockImplementation(() => currentNow);
     mockStorage = {
@@ -400,6 +419,14 @@ describe('OperationCoordinator', () => {
           updatedAt: 1000,
         },
       ],
+      personaCatalog: [{
+        key: 'personality-1',
+        displayName: 'Closer',
+        version: 1000,
+        status: 'active',
+      }],
+      personaCatalogSource: null,
+      personaCatalogFetchedAt: null,
       accountMappings: {
         'account-1': 'personality-1',
       },
@@ -409,6 +436,7 @@ describe('OperationCoordinator', () => {
         summary: 'Old summary',
         personalityId: 'personality-1',
         personalityUpdatedAt: 1000,
+        personaCatalogSource: null,
         generatedAt: 2000,
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
@@ -436,11 +464,23 @@ describe('OperationCoordinator', () => {
             return {};
           }),
           set: vi.fn(async (items: Record<string, unknown>) => {
+            const changes = Object.fromEntries(Object.entries(items).map(([key, newValue]) => [
+              key,
+              { oldValue: mockStorage[key], newValue },
+            ]));
             Object.assign(mockStorage, items);
+            activeStorageCoordinator?.applyStorageChanges(changes, 'local');
           }),
           remove: vi.fn(async (keys: string | string[]) => {
+            const changes: Record<string, browser.storage.StorageChange> = {};
             for (const key of Array.isArray(keys) ? keys : [keys]) {
+              if (Object.prototype.hasOwnProperty.call(mockStorage, key)) {
+                changes[key] = { oldValue: mockStorage[key], newValue: undefined };
+              }
               delete mockStorage[key];
+            }
+            if (Object.keys(changes).length > 0) {
+              activeStorageCoordinator?.applyStorageChanges(changes, 'local');
             }
           }),
         },
@@ -454,6 +494,7 @@ describe('OperationCoordinator', () => {
   });
 
   afterEach(() => {
+    activeStorageCoordinator = null;
     delete (globalThis as typeof globalThis & {
       __CHATGOOSE_COMPARE_DRAFTS__?: Record<string, string>;
     }).__CHATGOOSE_COMPARE_DRAFTS__;
@@ -464,7 +505,7 @@ describe('OperationCoordinator', () => {
     vi.unstubAllGlobals();
   });
 
-  it('removes the durable summary cache before a forced fan-summary refresh', async () => {
+  it('keeps the last-good durable cache until a forced refresh can replace it', async () => {
     const { coordinator } = await createCoordinatorHarness({
       anthropicRawText: 'Fresh summary',
     });
@@ -479,7 +520,8 @@ describe('OperationCoordinator', () => {
       forceRegenerate: true,
     });
 
-    expect((globalThis as any).browser.storage.local.remove).toHaveBeenCalledWith('summary:group-1');
+    expect((globalThis as any).browser.storage.local.remove).not.toHaveBeenCalledWith('summary:group-1');
+    expect(mockStorage['summary:group-1']).toMatchObject({ summary: 'Old summary' });
   });
 
   it('marks tab state when a valid summary is already available locally', async () => {
@@ -552,7 +594,7 @@ describe('OperationCoordinator', () => {
   });
 
 
-  it('prefetches an Agency Hub summary for tab state availability and marks it ready', async () => {
+  it('does not adopt an unversioned Hub summary during tab-state refresh', async () => {
     delete mockStorage['summary:group-1'];
 
     const { coordinator, port, agencyHubClient } = await createCoordinatorHarness({
@@ -585,36 +627,13 @@ describe('OperationCoordinator', () => {
       routeNonce: 1,
     });
 
-    await vi.waitFor(() => {
-      const availabilityMessages = postedMessages(port).filter(
-        (message) => message.type === 'tab:state',
-      );
-      expect(availabilityMessages).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            state: expect.objectContaining({
-              groupId: 'group-1',
-              hasAvailableSummary: false,
-            }),
-          }),
-          expect.objectContaining({
-            state: expect.objectContaining({
-              groupId: 'group-1',
-              hasAvailableSummary: true,
-            }),
-          }),
-        ]),
-      );
-    });
-
-    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
-    expect(mockStorage['summary:group-1']).toMatchObject({
-      summary: 'Hub summary',
-      personalityId: 'personality-1',
-      generatedAt: 1234,
-      modelId: 'kernel',
-      fanAccountId: 'fan-1',
-    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(postedMessages(port)).toContainEqual(expect.objectContaining({
+      type: 'tab:state',
+      state: expect.objectContaining({ hasAvailableSummary: false }),
+    }));
+    expect(agencyHubClient.fetchFanProfileByConversation).not.toHaveBeenCalled();
+    expect(mockStorage['summary:group-1']).toBeUndefined();
   });
 
   // Core #136: the kernel injects the HUB copy of a ready Scan into other
@@ -627,6 +646,8 @@ describe('OperationCoordinator', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'hub-key',
       };
+      (mockStorage['summary:group-1'] as Record<string, unknown>).personaCatalogSource =
+        personaCatalogSource(mockStorage.settings as Settings);
     }
 
     function retryHubClient(
@@ -791,6 +812,51 @@ describe('OperationCoordinator', () => {
       expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
       expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
+
+    it('does not push a cached summary when a remap commits during Hub preflight', async () => {
+      hubConfiguredSettings();
+      let resolvePreflight: ((value: Record<string, unknown>) => void) | null = null;
+      let markPreflightStarted: (() => void) | null = null;
+      const preflightStarted = new Promise<void>((resolve) => {
+        markPreflightStarted = resolve;
+      });
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      agencyHubClient.fetchFanProfileByConversation = vi.fn(() => {
+        markPreflightStarted?.();
+        return new Promise((resolve) => {
+          resolvePreflight = resolve;
+        });
+      });
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+      await tabInit(coordinator, 1);
+      await preflightStarted;
+
+      // Simulate storage.set having committed while storage.onChanged is still
+      // queued: mutate the browser-storage backing object only, deliberately
+      // leaving StorageCoordinator.state on persona-1.
+      mockStorage.personaCatalog = [
+        { key: 'personality-1', displayName: 'Closer', version: 1000, status: 'active' },
+        { key: 'personality-2', displayName: 'Warm', version: 1, status: 'active' },
+      ];
+      mockStorage.accountMappings = { 'account-1': 'personality-2' };
+      resolvePreflight!({
+        status: 'not-found',
+        reason: 'profile_missing',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+      expect(mockStorage['summary:group-1']).not.toMatchObject({
+        agencyHubSync: expect.objectContaining({ state: 'saved' }),
+      });
+    });
   });
 
   it('auto-recovers a mapped personality when a new legacy alias is captured for the same account', async () => {
@@ -850,6 +916,144 @@ describe('OperationCoordinator', () => {
     expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
     expect(mockStorage.accountAliases).toEqual({
       'legacy-1': 'resolved-1',
+    });
+  });
+
+  it('does not mix Hub-A settings with a Hub-B persona snapshot after delayed identity resolution', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://hub-a.test',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    const fanslyClient = buildFanslyClientMock();
+    let resolveIdentity: ((value: string) => void) | null = null;
+    let markIdentityStarted: (() => void) | null = null;
+    const identityStarted = new Promise<void>((resolve) => {
+      markIdentityStarted = resolve;
+    });
+    fanslyClient.getAuthenticatedAccountId.mockImplementation(() => {
+      markIdentityStarted?.();
+      return new Promise((resolve) => {
+        resolveIdentity = resolve;
+      });
+    });
+    const agencyHubClient = {
+      isConfigured: vi.fn(() => true),
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      fetchFanProfileByConversation: vi.fn(async () => ({ status: 'not-found' })),
+      pushFanProfile: vi.fn(async () => ({ status: 'pushed', reason: 'pushed' })),
+    };
+    const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
+      fanslyClient,
+      agencyHubClient,
+    });
+    const operation = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'source-switch-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+    await identityStarted;
+
+    const settingsB = {
+      ...(mockStorage.settings as Settings),
+      agencyHubBaseUrl: 'http://hub-b.test',
+    };
+    const sourceB = personaCatalogSource(settingsB);
+    await (globalThis as any).browser.storage.local.set({
+      settings: settingsB,
+      personaCatalogSource: sourceB,
+      personaCatalog: mockStorage.personaCatalog,
+    });
+    resolveIdentity!('account-1');
+    await operation;
+
+    expect(agencyHubClient.resolvePageLabelForUsername).not.toHaveBeenCalled();
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'operation:error',
+        operationId: 'source-switch-op',
+        error: expect.objectContaining({ key: 'chat_changed' }),
+      }),
+    ]));
+  });
+
+  it.each([
+    { label: 'missing', personaCatalog: [] },
+    {
+      label: 'archived',
+      personaCatalog: [{
+        key: 'personality-1',
+        displayName: 'Archived custom',
+        version: 1000,
+        status: 'archived',
+      }],
+    },
+  ])('treats an existing $label personality mapping as unmapped', async ({ personaCatalog }) => {
+    mockStorage.personaCatalog = personaCatalog;
+    mockStorage.accountMappings = { 'account-1': 'personality-1' };
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.handleCapture(1, 'account-1');
+
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'tab:state',
+        state: expect.objectContaining({
+          mappedPersonalityId: null,
+          mappedPersonalityName: null,
+        }),
+      }),
+    ]));
+  });
+
+  it('retries a failed captured identity on ordinary traffic after a cooldown', async () => {
+    mockStorage = {
+      ...mockStorage,
+      accountMappings: { 'resolved-1': 'personality-1' },
+      knownAccounts: ['resolved-1'],
+    };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAuthenticatedAccountId
+      .mockRejectedValueOnce(new Error('temporary account lookup failure'))
+      .mockImplementation(async (session: any) => {
+        session.resolvedAccountId = 'resolved-1';
+        return 'resolved-1';
+      });
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({ fanslyClient });
+    sessionStore.registerCapture(1, { ...SESSION_CAPTURE, accountId: 'legacy-1' });
+
+    await coordinator.handleCapture(1, 'legacy-1', true);
+    await vi.waitFor(() => {
+      expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
+    });
+
+    // Ordinary requests inside the cooldown update headers but do no heavy UI
+    // work and do not hammer /account/me.
+    const messagesBeforeRetry = postedMessages(port).length;
+    await coordinator.handleCapture(1, 'legacy-1', false);
+    expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
+    expect(postedMessages(port)).toHaveLength(messagesBeforeRetry);
+
+    advanceNow(30_001);
+    await coordinator.handleCapture(1, 'legacy-1', false);
+    await vi.waitFor(() => {
+      expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(2);
+      expect(postedMessages(port)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'mapping:changed',
+          state: expect.objectContaining({
+            accountId: 'resolved-1',
+            mappedPersonalityId: 'personality-1',
+          }),
+        }),
+      ]));
     });
   });
 
@@ -1323,6 +1527,206 @@ describe('OperationCoordinator', () => {
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
+  it('discards Compare when the captured persona source/revision changes before card completion', async () => {
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    let resolveStream: ((value: string) => void) | null = null;
+    let markStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      markStreamStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(() => {
+        markStreamStarted?.();
+        return new Promise<string>((resolve) => {
+          resolveStream = resolve;
+        });
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+    const compare = coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'stale-compare',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+    await streamStarted;
+
+    // Same key, new revision; direct mutation leaves coordinator state stale.
+    mockStorage.personaCatalog = [
+      { key: 'personality-1', displayName: 'Closer', version: 1001, status: 'active' },
+    ];
+    resolveStream!('Old compare reply');
+    await compare;
+
+    const messages = postedMessages(port);
+    expect(messages.some((message) => message.type === 'compare:cardComplete')).toBe(false);
+    expect(messages.some((message) => message.type === 'compare:complete')).toBe(false);
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'compare:discarded',
+        operationId: 'stale-compare',
+      }),
+    ]));
+  });
+
+  it('does not mix Hub-A settings with Hub-B Compare cards after delayed identity resolution', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://hub-a.test',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const fanslyClient = buildFanslyClientMock();
+    let resolveIdentity: ((value: string) => void) | null = null;
+    let markIdentityStarted: (() => void) | null = null;
+    const identityStarted = new Promise<void>((resolve) => {
+      markIdentityStarted = resolve;
+    });
+    fanslyClient.getAuthenticatedAccountId.mockImplementation(() => {
+      markIdentityStarted?.();
+      return new Promise((resolve) => {
+        resolveIdentity = resolve;
+      });
+    });
+    const agencyHubClient = {
+      isConfigured: vi.fn(() => true),
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      fetchFanProfileByConversation: vi.fn(async () => ({ status: 'not-found' })),
+      pushFanProfile: vi.fn(async () => ({ status: 'pushed', reason: 'pushed' })),
+    };
+    const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
+      fanslyClient,
+      agencyHubClient,
+    });
+    const compare = coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'source-switch-compare',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+    await identityStarted;
+
+    const settingsB = {
+      ...(mockStorage.settings as Settings),
+      agencyHubBaseUrl: 'http://hub-b.test',
+    };
+    await (globalThis as any).browser.storage.local.set({
+      settings: settingsB,
+      personaCatalogSource: personaCatalogSource(settingsB),
+      personaCatalog: mockStorage.personaCatalog,
+    });
+    resolveIdentity!('account-1');
+    await compare;
+
+    expect(agencyHubClient.resolvePageLabelForUsername).not.toHaveBeenCalled();
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'compare:error',
+        operationId: 'source-switch-compare',
+        error: expect.objectContaining({ key: 'chat_changed' }),
+      }),
+    ]));
+  });
+
+  it('rechecks Compare source after deferred page-label resolution and before kernel stream', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://hub-a.test',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    let resolvePageLabel: ((value: string) => void) | null = null;
+    let markPageLabelStarted: (() => void) | null = null;
+    const pageLabelStarted = new Promise<void>((resolve) => {
+      markPageLabelStarted = resolve;
+    });
+    const agencyHubClient = {
+      isConfigured: vi.fn(() => true),
+      resolvePageLabelForUsername: vi.fn(() => {
+        markPageLabelStarted?.();
+        return new Promise<string>((resolve) => {
+          resolvePageLabel = resolve;
+        });
+      }),
+      fetchFanProfileByConversation: vi.fn(async () => ({ status: 'not-found' })),
+      pushFanProfile: vi.fn(async () => ({ status: 'pushed', reason: 'pushed' })),
+    };
+    const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
+      agencyHubClient,
+    });
+    const compare = coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'deferred-page-label-compare',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+    await pageLabelStarted;
+
+    const settingsB = {
+      ...(mockStorage.settings as Settings),
+      agencyHubBaseUrl: 'http://hub-b.test',
+    };
+    mockStorage.settings = settingsB;
+    mockStorage.personaCatalogSource = personaCatalogSource(settingsB);
+    resolvePageLabel!('creator-fs');
+    await compare;
+
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(postedMessages(port).some((message) => message.type === 'compare:complete')).toBe(false);
+  });
+
   it('includes the selected tone in compare reply prompts', async () => {
     delete mockStorage['summary:group-1'];
     await mockCompareCards([
@@ -1744,6 +2148,142 @@ describe('OperationCoordinator', () => {
         expect(message).not.toHaveProperty('profiling');
       }
     }
+  });
+
+  it('preserves Scan click order when the older tab validates after the newer tab completes', async () => {
+    delete mockStorage['summary:group-1'];
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        request: { clientRequestId: string },
+      ) => request.clientRequestId === 'new-validation-scan'
+        ? 'New validation-order summary'
+        : 'Old validation-order summary'),
+    };
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({
+      fanslyClient,
+      kernelGateway,
+    });
+    sessionStore.registerCapture(2, SESSION_CAPTURE);
+    const secondPort = createMockRuntimePort(2);
+    coordinator.registerPort(secondPort as never);
+    let resolveOldTab: ((value: { url: string }) => void) | null = null;
+    let markOldValidationStarted: (() => void) | null = null;
+    const oldValidationStarted = new Promise<void>((resolve) => {
+      markOldValidationStarted = resolve;
+    });
+    (globalThis as any).browser.tabs.get = vi.fn((tabId: number) => {
+      if (tabId === 1) {
+        markOldValidationStarted?.();
+        return new Promise((resolve) => {
+          resolveOldTab = resolve;
+        });
+      }
+      return Promise.resolve({ url: 'https://fansly.com/messages/group-1' });
+    });
+    const payload = {
+      type: 'operation:start' as const,
+      feature: 'fan-summary' as const,
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    };
+
+    const oldOperation = coordinator.startOperation(1, {
+      ...payload,
+      operationId: 'old-validation-scan',
+      forceRegenerate: true,
+    });
+    await oldValidationStarted;
+    await coordinator.startOperation(2, {
+      ...payload,
+      operationId: 'new-validation-scan',
+    });
+    resolveOldTab!({ url: 'https://fansly.com/messages/group-1' });
+    await oldOperation;
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    expect(mockStorage['summary:group-1']).toMatchObject({
+      summary: 'New validation-order summary',
+    });
+    expect(postedMessages(secondPort).some((message) =>
+      message.type === 'operation:complete' &&
+      message.operationId === 'new-validation-scan'
+    )).toBe(true);
+    expect(postedMessages(port).some((message) =>
+      message.type === 'operation:complete' &&
+      message.operationId === 'old-validation-scan'
+    )).toBe(false);
+  });
+
+  it('revalidates an uncached Scan task after fan-id resolution and before Hub push', async () => {
+    delete mockStorage['summary:group-1'];
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    const fanslyClient = buildFanslyClientMock();
+    let groupCalls = 0;
+    let resolveSyncGroup: ((value: { users: Array<{ userId: string }> }) => void) | null = null;
+    let markSyncGroupStarted: (() => void) | null = null;
+    const syncGroupStarted = new Promise<void>((resolve) => {
+      markSyncGroupStarted = resolve;
+    });
+    fanslyClient.getGroup.mockImplementation(() => {
+      groupCalls += 1;
+      if (groupCalls === 1) {
+        // No fan id during generation => enrichment incomplete and no local
+        // cache, while the existing fire-and-forget Hub path still runs.
+        return Promise.resolve({ users: [{ userId: 'account-1' }] });
+      }
+      markSyncGroupStarted?.();
+      return new Promise((resolve) => {
+        resolveSyncGroup = resolve;
+      });
+    });
+    const agencyHubClient = {
+      isConfigured: vi.fn(() => true),
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      fetchFanProfileByConversation: vi.fn(async () => ({ status: 'not-found' })),
+      pushFanProfile: vi.fn(async () => ({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      })),
+    };
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicRawText: 'Uncached summary',
+      fanslyClient,
+      agencyHubClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'uncached-summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+    await syncGroupStarted;
+
+    // Again reproduce committed storage bytes before onChanged dispatch.
+    mockStorage.personaCatalog = [
+      { key: 'personality-1', displayName: 'Closer', version: 1001, status: 'active' },
+    ];
+    resolveSyncGroup!({ users: [{ userId: 'account-1' }, { userId: 'fan-1' }] });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
   });
 
   it('includes llmSpend in non-debug progress and completion payloads once usage arrives', async () => {
@@ -2687,6 +3227,8 @@ describe('OperationCoordinator', () => {
       agencyHubApiKey: 'hub-key',
       agencyHubDeviceToken: '',
     };
+    (mockStorage['summary:group-1'] as Record<string, unknown>).personaCatalogSource =
+      personaCatalogSource(mockStorage.settings as Settings);
 
     const agencyHubClient = {
       isConfigured: vi.fn(() => true),
@@ -2726,7 +3268,7 @@ describe('OperationCoordinator', () => {
     expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
   });
 
-  it('returns a Hub summary immediately on local cache miss and persists it locally', async () => {
+  it('never stamps an unversioned Hub body as current and runs the gateway on cache miss', async () => {
     delete mockStorage['summary:group-1'];
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -2735,7 +3277,6 @@ describe('OperationCoordinator', () => {
       agencyHubDeviceToken: '',
     };
 
-    const createdAtMs = Date.parse('2026-03-20T12:00:00.000Z');
     const agencyHubClient = {
       isConfigured: vi.fn(() => true),
       resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
@@ -2744,8 +3285,8 @@ describe('OperationCoordinator', () => {
         reason: 'fetched',
         baseUrl: 'http://localhost:3000',
         pageLabel: 'creator-fs',
-        body: 'Hub summary',
-        createdAtMs,
+        body: 'Stale Hub summary from persona v1',
+        createdAtMs: Date.parse('2026-03-20T12:00:00.000Z'),
         fanAccountId: 'fan-9',
       })),
       pushFanProfile: vi.fn(async () => ({
@@ -2755,9 +3296,13 @@ describe('OperationCoordinator', () => {
       })),
     };
 
-    const { coordinator, kernelGateway, fanslyClient, port } = await createCoordinatorHarness({
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
       anthropicRawText: 'Generated summary',
       agencyHubClient,
+      fanslyClient,
     });
 
     await coordinator.startOperation(1, {
@@ -2775,37 +3320,264 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
 
-    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
+    expect(agencyHubClient.fetchFanProfileByConversation).not.toHaveBeenCalled();
     expect(completeMessage?.result).toMatchObject({
-      rawText: 'Hub summary',
+      rawText: 'Generated summary',
       summaryMeta: {
-        generatedAt: createdAtMs,
-        cached: true,
+        cached: false,
         stale: false,
-        syncStatus: {
-          state: 'saved',
-          baseUrl: 'http://localhost:3000',
-          pageLabel: 'creator-fs',
-        },
       },
     });
     expect((mockStorage['summary:group-1'] as SummaryCacheEntry | undefined)).toMatchObject({
-      summary: 'Hub summary',
+      summary: 'Generated summary',
       personalityId: 'personality-1',
       personalityUpdatedAt: 1000,
-      generatedAt: createdAtMs,
+      personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
-      fanAccountId: 'fan-9',
-      agencyHubSync: {
-        state: 'saved',
+    });
+    expect(JSON.stringify(mockStorage['summary:group-1'])).not.toContain('Stale Hub summary');
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not overwrite a newer remapped summary when the old persona stream finishes first', async () => {
+    delete mockStorage['summary:group-1'];
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    let resolveStream: ((value: string) => void) | null = null;
+    let markStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      markStreamStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(() => {
+        markStreamStarted?.();
+        return new Promise<string>((resolve) => {
+          resolveStream = resolve;
+        });
+      }),
+    };
+    const agencyHubClient = {
+      isConfigured: vi.fn(() => true),
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      fetchFanProfileByConversation: vi.fn(async () => ({
+        status: 'not-found',
+        reason: 'profile_missing',
         baseUrl: 'http://localhost:3000',
         pageLabel: 'creator-fs',
-      },
+      })),
+      pushFanProfile: vi.fn(async () => ({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      })),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({
+      fanslyClient,
+      kernelGateway,
+      agencyHubClient,
     });
-    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
-    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+
+    const operation = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'old-summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+    await streamStarted;
+
+    const newerSummary: SummaryCacheEntry = {
+      summary: 'New persona summary',
+      personalityId: 'personality-2',
+      personalityUpdatedAt: 1,
+      personaCatalogSource: mockStorage.personaCatalogSource as string | null,
+      generatedAt: currentNow + 1,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+    };
+    // Browser storage has committed P2, but deliberately do not dispatch the
+    // change into StorageCoordinator: this reproduces the real event lag.
+    mockStorage.personaCatalog = [
+      { key: 'personality-1', displayName: 'Closer', version: 1000, status: 'active' },
+      { key: 'personality-2', displayName: 'Warm', version: 1, status: 'active' },
+    ];
+    mockStorage.accountMappings = { 'account-1': 'personality-2' };
+    mockStorage['summary:group-1'] = newerSummary;
+    resolveStream!('Old persona summary');
+    await operation;
+
+    expect(mockStorage['summary:group-1']).toEqual(newerSummary);
+    expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    expect(postedMessages(port).some((message) =>
+      message.type === 'operation:complete' && message.operationId === 'old-summary-op'
+    )).toBe(false);
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'operation:error',
+        operationId: 'old-summary-op',
+        error: expect.objectContaining({ key: 'chat_changed' }),
+      }),
+    ]));
+  });
+
+  it('replaces a same-millisecond stale P1 cache with a current P2 summary', async () => {
+    mockStorage.personaCatalog = [
+      { key: 'personality-1', displayName: 'Closer', version: 1000, status: 'active' },
+      { key: 'personality-2', displayName: 'Warm', version: 1, status: 'active' },
+    ];
+    mockStorage.accountMappings = { 'account-1': 'personality-2' };
+    mockStorage['summary:group-1'] = {
+      summary: 'Stale P1 summary',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      personaCatalogSource: null,
+      generatedAt: currentNow,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+    } satisfies SummaryCacheEntry;
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator } = await createCoordinatorHarness({
+      anthropicRawText: 'Current P2 summary',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'p2-summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(mockStorage['summary:group-1']).toMatchObject({
+      summary: 'Current P2 summary',
+      personalityId: 'personality-2',
+      personalityUpdatedAt: 1,
+      generatedAt: currentNow,
+    });
+  });
+
+  it.each([
+    { label: 'cached', verified: true },
+    { label: 'uncached incomplete-enrichment', verified: false },
+  ])('lets only the latest cross-tab Scan commit and push ($label)', async ({ verified }) => {
+    delete mockStorage['summary:group-1'];
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    const fanslyClient = buildFanslyClientMock();
+    if (verified) {
+      fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+      fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    }
+    let resolveOldStream: ((value: string) => void) | null = null;
+    let markOldStreamStarted: (() => void) | null = null;
+    const oldStreamStarted = new Promise<void>((resolve) => {
+      markOldStreamStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(
+        (_settings: unknown, request: { clientRequestId: string }) => {
+          if (request.clientRequestId === 'old-scan') {
+            markOldStreamStarted?.();
+            return new Promise<string>((resolve) => {
+              resolveOldStream = resolve;
+            });
+          }
+          return Promise.resolve('Newer Scan body');
+        },
+      ),
+    };
+    const agencyHubClient = {
+      isConfigured: vi.fn(() => true),
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      fetchFanProfileByConversation: vi.fn(async () => ({
+        status: 'not-found',
+        reason: 'profile_missing',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      })),
+      pushFanProfile: vi.fn(async () => ({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      })),
+    };
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({
+      fanslyClient,
+      kernelGateway,
+      agencyHubClient,
+    });
+    sessionStore.registerCapture(2, SESSION_CAPTURE);
+    const secondPort = createMockRuntimePort(2);
+    coordinator.registerPort(secondPort as never);
+    const payload = {
+      type: 'operation:start' as const,
+      feature: 'fan-summary' as const,
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    };
+
+    const oldOperation = coordinator.startOperation(1, {
+      ...payload,
+      operationId: 'old-scan',
+    });
+    await oldStreamStarted;
+    await coordinator.startOperation(2, {
+      ...payload,
+      operationId: 'new-scan',
+    });
+    advanceNow(1_000);
+    resolveOldStream!('Older transcript, later completion');
+    await oldOperation;
+    await vi.waitFor(() => {
+      expect(agencyHubClient.pushFanProfile).toHaveBeenCalledTimes(1);
+    });
+
+    expect(agencyHubClient.pushFanProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'Newer Scan body' }),
+    );
+    expect(postedMessages(secondPort).some((message) =>
+      message.type === 'operation:complete' && message.operationId === 'new-scan'
+    )).toBe(true);
+    expect(postedMessages(port).some((message) =>
+      message.type === 'operation:complete' && message.operationId === 'old-scan'
+    )).toBe(false);
+    if (verified) {
+      expect(mockStorage['summary:group-1']).toMatchObject({
+        summary: 'Newer Scan body',
+        personalityId: 'personality-1',
+      });
+    } else {
+      expect(mockStorage['summary:group-1']).toBeUndefined();
+    }
   });
 
   it('falls through to generation when the Hub has no stored summary', async () => {
@@ -2853,7 +3625,7 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
 
-    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
+    expect(agencyHubClient.fetchFanProfileByConversation).not.toHaveBeenCalled();
     expect(completeMessage?.result.rawText).toBe('Generated summary');
     expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
     expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
@@ -2861,61 +3633,7 @@ describe('OperationCoordinator', () => {
     expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
   });
 
-  it.each([
-    { reason: 'network_error' },
-    { reason: 'aborted' },
-  ])('falls through to generation when the Hub prefetch fails ($reason)', async ({ reason }) => {
-    delete mockStorage['summary:group-1'];
-    mockStorage.settings = {
-      ...(mockStorage.settings as Record<string, unknown>),
-      agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
-    };
-
-    const agencyHubClient = {
-      isConfigured: vi.fn(() => true),
-      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
-      fetchFanProfileByConversation: vi.fn(async () => ({
-        status: 'failed',
-        reason,
-        baseUrl: 'http://localhost:3000',
-      })),
-      pushFanProfile: vi.fn(async () => ({
-        status: 'skipped',
-        reason: 'disabled',
-        baseUrl: null,
-      })),
-    };
-
-    const { coordinator, kernelGateway, fanslyClient, port } = await createCoordinatorHarness({
-      anthropicRawText: 'Generated summary',
-      agencyHubClient,
-    });
-
-    await coordinator.startOperation(1, {
-      type: 'operation:start',
-      operationId: 'summary-op',
-      feature: 'fan-summary',
-      groupId: 'group-1',
-      routeNonce: 1,
-      domFanDisplayName: 'alice',
-      forceRegenerate: false,
-    });
-
-    const completeMessage = postedMessages(port).find(
-      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
-        message.type === 'operation:complete',
-    );
-
-    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
-    expect(completeMessage?.result.rawText).toBe('Generated summary');
-    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
-    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
-    expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
-  });
-
-  it('tries Hub prefetch before regenerating when the local cache entry is stale for the current model', async () => {
+  it('regenerates a stale local entry instead of adopting an unversioned Hub body', async () => {
     // A pre-cutover entry pinned to a vendor model id is stale against the
     // 'kernel' sentinel (the recorded one-time invalidation trade).
     (mockStorage['summary:group-1'] as Record<string, unknown>).modelId =
@@ -2946,9 +3664,13 @@ describe('OperationCoordinator', () => {
       })),
     };
 
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
     const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
       anthropicRawText: 'Regenerated summary',
       agencyHubClient,
+      fanslyClient,
     });
 
     await coordinator.startOperation(1, {
@@ -2966,13 +3688,19 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
 
-    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
-    expect(completeMessage?.result.rawText).toBe('Hub summary for new model');
-    expect(completeMessage?.result.summaryMeta?.cached).toBe(true);
-    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(agencyHubClient.fetchFanProfileByConversation).not.toHaveBeenCalled();
+    expect(completeMessage?.result.rawText).toBe('Regenerated summary');
+    expect(completeMessage?.result.summaryMeta?.cached).toBe(false);
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    expect(mockStorage['summary:group-1']).toMatchObject({
+      summary: 'Regenerated summary',
+      personalityId: 'personality-1',
+      personalityUpdatedAt: 1000,
+      modelId: 'kernel',
+    });
   });
 
-  it('skips Hub prefetch on forced refresh and regenerates immediately', async () => {
+  it('regenerates immediately on forced refresh', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
@@ -3025,7 +3753,7 @@ describe('OperationCoordinator', () => {
     expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the local cache on the second open after a Hub prefetch hit', async () => {
+  it('uses the versioned local cache on the second open after gateway generation', async () => {
     delete mockStorage['summary:group-1'];
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -3034,7 +3762,6 @@ describe('OperationCoordinator', () => {
       agencyHubDeviceToken: '',
     };
 
-    const createdAtMs = Date.parse('2026-03-20T12:00:00.000Z');
     const agencyHubClient = {
       isConfigured: vi.fn(() => true),
       resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
@@ -3044,7 +3771,7 @@ describe('OperationCoordinator', () => {
         baseUrl: 'http://localhost:3000',
         pageLabel: 'creator-fs',
         body: 'Hub summary',
-        createdAtMs,
+        createdAtMs: 123,
         fanAccountId: 'fan-1',
       })),
       pushFanProfile: vi.fn(async () => ({
@@ -3054,9 +3781,13 @@ describe('OperationCoordinator', () => {
       })),
     };
 
-    const { coordinator, kernelGateway, fanslyClient, port } = await createCoordinatorHarness({
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
       anthropicRawText: 'Generated summary',
       agencyHubClient,
+      fanslyClient,
     });
 
     await coordinator.startOperation(1, {
@@ -3085,17 +3816,15 @@ describe('OperationCoordinator', () => {
         message.operationId === 'summary-op-2',
     );
 
-    expect(agencyHubClient.fetchFanProfileByConversation).toHaveBeenCalledTimes(1);
+    expect(agencyHubClient.fetchFanProfileByConversation).not.toHaveBeenCalled();
     expect(secondCompleteMessage?.result).toMatchObject({
-      rawText: 'Hub summary',
+      rawText: 'Generated summary',
       summaryMeta: {
-        generatedAt: createdAtMs,
         cached: true,
-        syncStatus: { state: 'saved' },
       },
     });
-    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
-    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
   });
 
   it('pushes fresh fan summaries to Agency Hub after completion and marks the cache entry as synced', async () => {
@@ -3239,6 +3968,7 @@ describe('OperationCoordinator', () => {
       summary: 'Cached summary',
       personalityId: 'personality-1',
       personalityUpdatedAt: 1000,
+      personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
@@ -3429,7 +4159,7 @@ describe('OperationCoordinator', () => {
     });
   });
 
-  it('treats a changed Agency Hub base URL as a new backfill target for cached summaries', async () => {
+  it('regenerates instead of reusing a same-key/version summary after the Hub source changes', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://hub-a.test',
@@ -3440,6 +4170,7 @@ describe('OperationCoordinator', () => {
       summary: 'Cached summary',
       personalityId: 'personality-1',
       personalityUpdatedAt: 1000,
+      personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
@@ -3526,7 +4257,7 @@ describe('OperationCoordinator', () => {
         message.operationId === 'summary-op-2',
     );
     expect(secondCompleteMessage?.result.summaryMeta).toMatchObject({
-      cached: true,
+      cached: false,
       syncStatus: { state: 'saving' },
     });
 
@@ -3537,7 +4268,9 @@ describe('OperationCoordinator', () => {
       expect(putCalls).toHaveLength(1);
       expect((mockStorage['summary:group-1'] as SummaryCacheEntry).agencyHubSync).toMatchObject({
         state: 'saved',
-        baseUrl: 'http://hub-b.test',
+        // The old A-scoped cache remains inert; the uncached B generation is
+        // pushed without relabelling A's body as B-owned.
+        baseUrl: 'http://hub-a.test',
         pageLabel: 'creator-fs',
       });
     });

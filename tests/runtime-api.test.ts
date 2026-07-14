@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import type { SessionTemplate, SpendersProgressPayload } from '../src/shared/types.js';
+import type { SessionTemplate, SpendersBuildPayload } from '../src/shared/types.js';
 
 type MessageSenderLike = { tab?: { id?: number }; url?: string };
 let mockStorage: Record<string, unknown> = {};
@@ -27,6 +27,9 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: createDefaultSettings(),
     personalities: [],
+    personaCatalog: [],
+    personaCatalogSource: null,
+    personaCatalogFetchedAt: null,
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],
@@ -49,7 +52,8 @@ async function installRuntimeApiHarness(fanslyClient: {
     has: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
   };
-  emitToTab?: (tabId: number, message: SpendersProgressPayload) => void;
+  emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
+  onAgencyHubReady?: () => void;
 }) {
   vi.resetModules();
   onMessageListener = undefined;
@@ -140,6 +144,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     storageCoordinator,
     debugPrompts: debugPrompts as never,
     emitToTab: options?.emitToTab,
+    onAgencyHubReady: options?.onAgencyHubReady,
   });
 
   if (!onMessageListener) {
@@ -278,6 +283,12 @@ describe('runtime-api getPopupStatus', () => {
           updatedAt: 1000,
         },
       ],
+      personaCatalog: [{
+        key: 'p1',
+        displayName: 'Closer',
+        version: 1000,
+        status: 'active',
+      }],
       accountMappings: {
         other: 'p1',
       },
@@ -422,6 +433,34 @@ describe('runtime-api testAgencyHubConnection', () => {
       error: createUserError('hub_request_failed'),
     });
   });
+
+  it('signals persona reconciliation only after a successful live test', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+    const agencyHubClient = {
+      testConnection: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: createUserError('hub_request_failed') })
+        .mockResolvedValueOnce({ ok: true }),
+    };
+    const onAgencyHubReady = vi.fn();
+    await installRuntimeApiHarness(fanslyClient, { agencyHubClient, onAgencyHubReady });
+    const request = {
+      type: 'testAgencyHubConnection',
+      settings: {
+        agencyHubBaseUrl: 'https://hub.test',
+        agencyHubApiKey: 'key',
+        agencyHubDeviceToken: '',
+      },
+    };
+
+    await onMessageListener?.(request);
+    expect(onAgencyHubReady).not.toHaveBeenCalled();
+    await onMessageListener?.(request);
+    expect(onAgencyHubReady).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('runtime-api getSpendersList', () => {
@@ -497,6 +536,11 @@ describe('runtime-api getSpendersList', () => {
     const result = {
       entries: [],
       builtAt: null,
+      source: {
+        streamState: 'ramped' as const,
+        lastSyncedAt: null,
+        consecutiveFailures: 0,
+      },
       fanCount: 0,
       monthWindow: null,
       fetchedAt: 456,
@@ -504,6 +548,7 @@ describe('runtime-api getSpendersList', () => {
     const spendersService = {
       getList: vi.fn(async (_session, _signal, options) => {
         options?.onProgress?.({ type: 'spenders:progress', phase: 'ranking' });
+        options?.onSnapshot?.({ type: 'spenders:snapshot', result });
         return result;
       }),
     };
@@ -523,6 +568,11 @@ describe('runtime-api getSpendersList', () => {
       type: 'spenders:progress',
       buildId: 'board-build-7',
       phase: 'ranking',
+    });
+    expect(emitToTab).toHaveBeenCalledWith(7, {
+      type: 'spenders:snapshot',
+      buildId: 'board-build-7',
+      result,
     });
   });
 });

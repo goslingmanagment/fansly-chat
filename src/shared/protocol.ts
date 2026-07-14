@@ -71,6 +71,10 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || isString(value);
 }
 
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || isNumber(value);
+}
+
 function isOptionalString(record: Record<string, unknown>, key: string): boolean {
   return record[key] === undefined || isString(record[key]);
 }
@@ -130,6 +134,34 @@ function hasUserFacingError(record: Record<string, unknown>): boolean {
 
 function hasFeatureResult(record: Record<string, unknown>): boolean {
   return isObjectRecord(record.result);
+}
+
+function isSpendersListResult(value: unknown): boolean {
+  if (!isObjectRecord(value) || !Array.isArray(value.entries) || !isObjectRecord(value.source)) {
+    return false;
+  }
+  const source = value.source;
+  const sourceOk = (
+    source.streamState === 'ramped' ||
+    source.streamState === 'flag_off' ||
+    source.streamState === 'not_allowlisted' ||
+    source.streamState === 'unsupported_platform'
+  ) && isNullableNumber(source.lastSyncedAt) && isNullableNumber(source.consecutiveFailures);
+  const entriesOk = value.entries.every((entry) => isObjectRecord(entry) &&
+    isString(entry.fanAccountId) &&
+    isNullableString(entry.groupId) &&
+    isNullableString(entry.customName) &&
+    isNullableString(entry.displayName) &&
+    isNullableString(entry.username) &&
+    isNumber(entry.lifetimeMills) &&
+    isNumber(entry.lifetimeUsd) &&
+    isNullableNumber(entry.monthMills) &&
+    isNullableNumber(entry.monthUsd));
+  return sourceOk && entriesOk &&
+    isNullableNumber(value.builtAt) &&
+    isNumber(value.fanCount) &&
+    isNullableString(value.monthWindow) &&
+    isNumber(value.fetchedAt);
 }
 
 function isTabRouteMessage(record: Record<string, unknown>): boolean {
@@ -346,6 +378,8 @@ export function isBackgroundPortMessage(message: unknown): message is Background
         isOptionalString(message, 'buildId') &&
         isOptionalNumber(message, 'done') &&
         isOptionalNumber(message, 'total');
+    case 'spenders:snapshot':
+      return isOptionalString(message, 'buildId') && isSpendersListResult(message.result);
     case 'operation:progress':
       return hasOperationProgressShape(message) && isFeatureType(message.feature);
     case 'compare:progress':

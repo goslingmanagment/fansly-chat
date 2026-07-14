@@ -20,6 +20,9 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       uiTheme: 'system',
     },
     personalities: [],
+    personaCatalog: [],
+    personaCatalogSource: null,
+    personaCatalogFetchedAt: null,
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],
@@ -54,12 +57,12 @@ describe('compare cards', () => {
   it('orders draft cards stably and deduplicates the current label', async () => {
     const compareCards = await importCompareCardsModule({});
     const storage = createStorage({
-      personalities: [
+      personaCatalog: [
         {
-          id: 'personality-1',
-          name: 'A-card',
-          content: 'Current personality',
-          updatedAt: 1000,
+          key: 'personality-1',
+          displayName: 'A-card',
+          version: 1,
+          status: 'active',
         },
       ],
     });
@@ -87,12 +90,12 @@ describe('compare cards', () => {
       draft: 'Draft content',
     });
     const baseStorage = createStorage({
-      personalities: [
+      personaCatalog: [
         {
-          id: 'personality-1',
-          name: 'Closer',
-          content: 'Current content',
-          updatedAt: 1000,
+          key: 'personality-1',
+          displayName: 'Closer',
+          version: 1,
+          status: 'active',
         },
       ],
     });
@@ -106,14 +109,18 @@ describe('compare cards', () => {
     });
     const changedContentStorage = createStorage({
       ...baseStorage,
-      personalities: [
+      personaCatalog: [
         {
-          id: 'personality-1',
-          name: 'Closer',
-          content: 'Changed content',
-          updatedAt: 2000,
+          key: 'personality-1',
+          displayName: 'Closer',
+          version: 2,
+          status: 'active',
         },
       ],
+    });
+    const changedSourceStorage = createStorage({
+      ...baseStorage,
+      personaCatalogSource: 'source-b',
     });
 
     const baseFingerprint =
@@ -131,6 +138,12 @@ describe('compare cards', () => {
     expect(
       compareCards.getCompareCardsFingerprintForPersonality(
         changedContentStorage,
+        'personality-1',
+      ),
+    ).not.toBe(baseFingerprint);
+    expect(
+      compareCards.getCompareCardsFingerprintForPersonality(
+        changedSourceStorage,
         'personality-1',
       ),
     ).not.toBe(baseFingerprint);

@@ -6,7 +6,10 @@ import { installContentStyles } from './dom-anchor.js';
 import { CompletedCompareCache } from './inline-panel/completed-compare-cache.js';
 import { InlinePanelController } from './inline-panel/inline-panel-controller.js';
 import { MappingBanner } from './mapping-banner.js';
-import { CompletedOverlayCache } from './overlay/completed-overlay-cache.js';
+import {
+  CompletedOverlayCache,
+  type CompletedOverlayCacheIdentity,
+} from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
@@ -146,6 +149,9 @@ export class ChatGooseContentApp {
   private tabState: TabUiState | null = null;
   private activeFeature: FeatureType | null = null;
   private activeOperationId: string | null = null;
+  private activePersonaKey: string | null = null;
+  private activePersonaVersion: number | null = null;
+  private activePersonaSource: string | null = null;
   private activeFanDisplayName: string | null = null;
   private activeDebugPrompt: PromptDebugSnapshot | null = null;
   /** E28: the kernel echo's fate + its viewer token. Closure-only, never DOM. */
@@ -569,13 +575,29 @@ export class ChatGooseContentApp {
     return this.completedOverlayCache.get(
       this.currentGroupId,
       this.lastFeature,
-      this.buildFeatureCacheKey(
-        this.lastFeature,
-        featureRequiresDraft(this.lastFeature)
-          ? getActiveConversationDraftText()
-          : undefined,
+      this.overlayCacheIdentity(
+        this.buildFeatureCacheKey(
+          this.lastFeature,
+          featureRequiresDraft(this.lastFeature)
+            ? getActiveConversationDraftText()
+            : undefined,
+        ),
       ),
     );
+  }
+
+  private overlayCacheIdentity(
+    variantKey: string | null | undefined,
+    personaKey = this.tabState?.mappedPersonalityId ?? null,
+    personaVersion = this.tabState?.mappedPersonaVersion ?? null,
+    personaSource = this.tabState?.mappedPersonaSource ?? null,
+  ): CompletedOverlayCacheIdentity {
+    return {
+      personaKey,
+      personaVersion,
+      personaSource,
+      variantKey: variantKey ?? null,
+    };
   }
 
   private applySurfacePlan(plan: SurfacePlan): void {
@@ -780,6 +802,9 @@ export class ChatGooseContentApp {
     this.activeProgress = null;
     this.activeFeature = feature;
     this.activeOperationId = operationId;
+    this.activePersonaKey = this.tabState?.mappedPersonalityId ?? null;
+    this.activePersonaVersion = this.tabState?.mappedPersonaVersion ?? null;
+    this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
     this.activeFanDisplayName = domFanDisplayName ?? 'fan';
     this.lastFeature = feature;
     this.overlayRawText = '';
@@ -881,7 +906,7 @@ export class ChatGooseContentApp {
         ? this.completedOverlayCache.get(
             this.currentGroupId,
             feature,
-            improveDraftCacheKey,
+            this.overlayCacheIdentity(improveDraftCacheKey),
           )
         : null;
     if (cachedResult) {
@@ -1109,11 +1134,47 @@ export class ChatGooseContentApp {
 
   // ─── Port Messages ──────────────────────────────────────────────────
 
+  private personaIdentityChanged(next: TabUiState): boolean {
+    return Boolean(
+      this.tabState &&
+      (
+        this.tabState.mappedPersonalityId !== next.mappedPersonalityId ||
+        this.tabState.mappedPersonaVersion !== next.mappedPersonaVersion ||
+        this.tabState.mappedPersonaSource !== next.mappedPersonaSource
+      )
+    );
+  }
+
+  private clearPersonaBoundFeatureState(): void {
+    this.completedOverlayCache.clearAll();
+    if (this.activeFeature && this.activeOperationId) {
+      this.suppressTerminalOperation(this.activeOperationId);
+      this.port.send({ type: 'operation:cancel', operationId: this.activeOperationId });
+    }
+    if (this.activeCompareModel?.operationId) {
+      this.suppressTerminalOperation(this.activeCompareModel.operationId);
+      this.port.send({
+        type: 'compare:cancel',
+        operationId: this.activeCompareModel.operationId,
+      });
+    }
+    this.quickInlineVisible = false;
+    this.deepOverlayModel = null;
+    this.activeCompareModel = null;
+    this.comparePanelVisible = false;
+    this.pendingCompareFingerprint = null;
+    this.completedCompareCache.clearAll();
+    this.lastFeature = null;
+    this.overlayRawText = '';
+    this.clearOperationState(true);
+  }
+
   private handlePortMessage(message: BackgroundPortMessage): void {
     switch (message.type) {
       case 'tab:state':
       case 'settings:changed':
-      case 'mapping:changed':
+      case 'mapping:changed': {
+        const personaChanged = this.personaIdentityChanged(message.state);
         if (
           message.type === 'settings:changed' ||
           this.tabState?.accountId !== message.state.accountId
@@ -1121,15 +1182,25 @@ export class ChatGooseContentApp {
           this.boardContextGeneration += 1;
           this.board.invalidateContext();
         }
+        if (personaChanged) {
+          this.clearPersonaBoundFeatureState();
+        }
         this.tabState = message.state;
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
+        if (personaChanged) {
+          this.renderSurfaces();
+        }
         this.renderButtonBar();
         break;
+      }
       case 'summary:syncStatus':
         this.handleSummarySyncStatus(message);
         break;
       case 'spenders:progress':
         this.board.setBuildProgress(message);
+        break;
+      case 'spenders:snapshot':
+        this.board.setBuildSnapshot(message);
         break;
       case 'operation:progress':
         this.handleProgress(message);
@@ -1187,6 +1258,7 @@ export class ChatGooseContentApp {
     const cachedModel = this.completedOverlayCache.get(
       this.currentGroupId,
       'fan-summary',
+      this.overlayCacheIdentity(null),
     );
     const updatedCachedModel = applyFanSummarySyncStatus(
       cachedModel,
@@ -1501,16 +1573,17 @@ export class ChatGooseContentApp {
       };
     }
     const improveDraftCacheKey = this.activeImproveDraftCacheKey;
-    if (featureRequiresDraft(feature)) {
-      this.completedOverlayCache.set(
-        this.currentGroupId,
-        feature,
-        completedModel,
-        improveDraftCacheKey,
-      );
-    } else {
-      this.completedOverlayCache.set(this.currentGroupId, feature, completedModel);
-    }
+    this.completedOverlayCache.set(
+      this.currentGroupId,
+      feature,
+      completedModel,
+      this.overlayCacheIdentity(
+        featureRequiresDraft(feature) ? improveDraftCacheKey : null,
+        this.activePersonaKey ?? this.tabState?.mappedPersonalityId ?? null,
+        this.activePersonaVersion ?? this.tabState?.mappedPersonaVersion ?? null,
+        this.activePersonaSource ?? this.tabState?.mappedPersonaSource ?? null,
+      ),
+    );
 
     this.presentCompletedFeature(feature, completedModel);
   }
@@ -1571,6 +1644,9 @@ export class ChatGooseContentApp {
   private clearOperationState(fullReset: boolean): void {
     this.activeFeature = null;
     this.activeOperationId = null;
+    this.activePersonaKey = null;
+    this.activePersonaVersion = null;
+    this.activePersonaSource = null;
     this.activeFanDisplayName = null;
     this.activeLlmSpend = null;
     this.activeProfiling = null;

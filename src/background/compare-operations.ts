@@ -2,7 +2,11 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
-import { resolveCompareModelCards } from '../shared/compare-cards.js';
+import {
+  resolveCompareModelCards,
+  resolveMappedPersonalityId,
+} from '../shared/compare-cards.js';
+import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { aggregateMonthlyEarnings, formatFanSpendingData } from '../shared/earnings.js';
 import { ChatGooseError, toUserError } from '../shared/errors.js';
 import { logDebug } from '../shared/log.js';
@@ -65,6 +69,10 @@ import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
+import {
+  isFreshPersonaOperationIdentityCurrent,
+  type PersonaOperationIdentity,
+} from './persona-identity-fence.js';
 
 export interface ActiveCompareCardState {
   card: Pick<CompareModelCard, 'id' | 'label' | 'source'>;
@@ -81,6 +89,7 @@ export interface ActiveCompareOperation {
   startedAtMs: number;
   controller: AbortController;
   profiler: OperationProfiler;
+  personaIdentity: PersonaOperationIdentity | null;
   compareCards: Map<string, ActiveCompareCardState>;
 }
 
@@ -311,7 +320,7 @@ async function validateCompareStart(
   if (!context.kernelGateway.isConfigured(storage.settings)) {
     throw new ChatGooseError('hub_missing_api_key');
   }
-  if (storage.personalities.length === 0) {
+  if (getActivePersonaCatalog(storage.personaCatalog).length === 0) {
     throw new ChatGooseError('no_personalities');
   }
   if (!legacyAccountId || !session) {
@@ -381,6 +390,28 @@ export function cancelCompareOperation(
   }
 }
 
+async function fenceComparePersonaIdentity(
+  context: CompareOperationsContext,
+  tabId: number,
+  operationId: string,
+  identity: PersonaOperationIdentity,
+): Promise<boolean> {
+  if (await isFreshPersonaOperationIdentityCurrent(identity)) {
+    return true;
+  }
+
+  const active = getActiveCompare(context, tabId);
+  if (active?.operationId === operationId) {
+    cancelCompareOperation(
+      context,
+      tabId,
+      new ChatGooseError('chat_changed'),
+      true,
+    );
+  }
+  return false;
+}
+
 export async function executeCompare(
   context: CompareOperationsContext,
   tabId: number,
@@ -434,6 +465,7 @@ export async function executeCompare(
       startedAtMs: Date.now(),
       controller: compareController,
       profiler,
+      personaIdentity: null,
       compareCards: new Map(),
     };
 
@@ -591,6 +623,26 @@ export async function executeCompare(
       resolvedAccountId,
     );
     const storage = rekeyResult.state;
+    if (storage.personaCatalogSource !== validated.storage.personaCatalogSource) {
+      throw new ChatGooseError('chat_changed');
+    }
+    const mappedPersonaKey = resolveMappedPersonalityId(
+      storage.accountMappings,
+      resolvedAccountId,
+      validated.legacyAccountId,
+      storage.accountAliases,
+    );
+    const mappedPersona = findActivePersona(storage.personaCatalog, mappedPersonaKey);
+    const personaIdentity: PersonaOperationIdentity | null = mappedPersona
+      ? {
+          resolvedAccountId,
+          legacyAccountId: validated.legacyAccountId,
+          personaKey: mappedPersona.key,
+          personaVersion: mappedPersona.version,
+          personaCatalogSource: storage.personaCatalogSource,
+        }
+      : null;
+    active.personaIdentity = personaIdentity;
     const compareCards = resolveCompareModelCards(
       storage,
       resolvedAccountId,
@@ -932,16 +984,43 @@ export async function executeCompare(
       replyMode: ReplyMode;
       replyTone: ReplyTone;
     };
+    if (personaIdentity && !await fenceComparePersonaIdentity(
+      context,
+      tabId,
+      payload.operationId,
+      personaIdentity,
+    )) {
+      context.lifecycle.forgetCancelledCompare(payload.operationId);
+      return;
+    }
     // Stage 32: the kernel lane needs the page label; resolve once per run.
     const creatorUsername = validated.session.resolvedUsername?.trim()
       || (await context.fanslyClient.getAuthenticatedAccount(validated.session, signal))
         .username?.trim()
       || null;
+    if (personaIdentity && !await fenceComparePersonaIdentity(
+      context,
+      tabId,
+      payload.operationId,
+      personaIdentity,
+    )) {
+      context.lifecycle.forgetCancelledCompare(payload.operationId);
+      return;
+    }
     const pageLabel = await context.agencyHubClient.resolvePageLabelForUsername(
       validated.storage.settings,
       creatorUsername,
       signal,
     );
+    if (personaIdentity && !await fenceComparePersonaIdentity(
+      context,
+      tabId,
+      payload.operationId,
+      personaIdentity,
+    )) {
+      context.lifecycle.forgetCancelledCompare(payload.operationId);
+      return;
+    }
     if (!pageLabel) {
       throw new ChatGooseError('hub_page_match_failed');
     }
@@ -1066,6 +1145,14 @@ export async function executeCompare(
 
       let rawText = '';
       try {
+        if (!personaIdentity || !await fenceComparePersonaIdentity(
+          context,
+          tabId,
+          payload.operationId,
+          personaIdentity,
+        )) {
+          return;
+        }
         rawText = await streamToCard();
       } catch (error) {
         const abortError = resolveAbortChatGooseError(error, {
@@ -1144,6 +1231,14 @@ export async function executeCompare(
         splitModeRequested: payload.replyMode === 'preferSplit',
         parts,
       };
+      if (!personaIdentity || !await fenceComparePersonaIdentity(
+        context,
+        tabId,
+        payload.operationId,
+        personaIdentity,
+      )) {
+        return;
+      }
       const completedSpend = cardSpend ?? createZeroLlmSpendSummary();
       sendCompareCardComplete(
         context,
@@ -1171,6 +1266,16 @@ export async function executeCompare(
       // The session was cancelled/superseded mid-stream: every card swallowed
       // the abort and resolved, so we never reached the catch that clears the
       // cancelled id. Drop it here to keep the set from growing unbounded.
+      context.lifecycle.forgetCancelledCompare(payload.operationId);
+      return;
+    }
+
+    if (personaIdentity && !await fenceComparePersonaIdentity(
+      context,
+      tabId,
+      payload.operationId,
+      personaIdentity,
+    )) {
       context.lifecycle.forgetCancelledCompare(payload.operationId);
       return;
     }

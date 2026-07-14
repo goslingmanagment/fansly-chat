@@ -5,6 +5,7 @@ import type {
   PersistedState,
   SummaryCacheEntry,
 } from './types.js';
+import { findActivePersona } from './persona-catalog.js';
 
 export type SummaryCacheKey = `${typeof SUMMARY_CACHE_PREFIX}${string}`;
 
@@ -59,6 +60,8 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
     typeof record.summary !== 'string' ||
     typeof record.personalityId !== 'string' ||
     !isFiniteNumber(record.personalityUpdatedAt) ||
+    !Object.prototype.hasOwnProperty.call(record, 'personaCatalogSource') ||
+    (typeof record.personaCatalogSource !== 'string' && record.personaCatalogSource !== null) ||
     !isFiniteNumber(record.generatedAt)
   ) {
     return null;
@@ -68,6 +71,7 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
     summary: record.summary,
     personalityId: record.personalityId,
     personalityUpdatedAt: record.personalityUpdatedAt,
+    personaCatalogSource: record.personaCatalogSource,
     generatedAt: record.generatedAt,
   };
 
@@ -262,12 +266,14 @@ export function isValidSummaryCacheEntry(
   entry: SummaryCacheEntry | null | undefined,
   personalityId: string,
   personalityUpdatedAt: number,
+  personaCatalogSource: string | null,
   modelId: string,
 ): entry is SummaryCacheEntry {
   return Boolean(
     entry &&
     entry.personalityId === personalityId &&
     entry.personalityUpdatedAt === personalityUpdatedAt &&
+    entry.personaCatalogSource === personaCatalogSource &&
     (entry.modelId ?? null) === (modelId ?? null) &&
     entry.spendingDataVerified === true &&
     entry.subscriptionLookupVerified === true
@@ -283,9 +289,7 @@ export function hasAvailableFanSummary(
     return false;
   }
 
-  const personality = storage.personalities.find(
-    (entry) => entry.id === mappedPersonalityId,
-  );
+  const personality = findActivePersona(storage.personaCatalog, mappedPersonalityId);
   if (!personality) {
     return false;
   }
@@ -295,8 +299,9 @@ export function hasAvailableFanSummary(
   // Stage 32: models are kernel config — 'kernel' is the cache model pin.
   return isValidSummaryCacheEntry(
     summaryEntry,
-    personality.id,
-    personality.updatedAt,
+    personality.key,
+    personality.version,
+    storage.personaCatalogSource,
     'kernel',
   );
 }

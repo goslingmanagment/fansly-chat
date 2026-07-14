@@ -1,5 +1,6 @@
 import modelCardDrafts from 'virtual:model-card-drafts';
 import { buildAccountLookupOrder } from './account-aliases.js';
+import { findActivePersona } from './persona-catalog.js';
 import type { CompareModelCard, PersistedState } from './types.js';
 
 type CompareDraftOverrideGlobal = typeof globalThis & {
@@ -79,21 +80,23 @@ export function resolveCompareModelCardsForDrafts(
   drafts: Record<string, string>,
 ): CompareModelCard[] {
   const draftCards = resolveCompareDraftCards(drafts);
-  const personality = personalityId
-    ? storage.personalities.find((entry) => entry.id === personalityId) ?? null
-    : null;
+  const personality = findActivePersona(storage.personaCatalog, personalityId);
 
   if (!personality) {
     return draftCards;
   }
 
   const duplicateLabel = draftCards.some(
-    (card) => normalizeLabel(card.label) === normalizeLabel(personality.name),
+    (card) => normalizeLabel(card.label) === normalizeLabel(personality.displayName),
   );
   const currentCard: CompareModelCard = {
-    id: `current:${personality.id}`,
-    label: duplicateLabel ? `${personality.name} (current)` : personality.name,
-    content: personality.content,
+    id: `current:${personality.key}`,
+    label: duplicateLabel
+      ? `${personality.displayName} (current)`
+      : personality.displayName,
+    // Content never enters the client. This internal identity string exists
+    // only so compare fingerprints invalidate when the server revision moves.
+    content: `persona:${storage.personaCatalogSource ?? 'unscoped'}:${personality.key}@${personality.version}`,
     source: 'current',
   };
 
@@ -105,12 +108,16 @@ export function resolveCompareModelCards(
   resolvedAccountId: string | null,
   legacyAccountId: string | null,
 ): CompareModelCard[] {
-  const personalityId = resolveMappedPersonalityId(
+  const rawPersonalityId = resolveMappedPersonalityId(
     storage.accountMappings,
     resolvedAccountId,
     legacyAccountId,
     storage.accountAliases,
   );
+  const personalityId = findActivePersona(
+    storage.personaCatalog,
+    rawPersonalityId,
+  )?.key ?? null;
   return resolveCompareModelCardsForPersonality(storage, personalityId);
 }
 

@@ -118,6 +118,33 @@ describe('protocol boundary guards', () => {
     })).toBe(true);
 
     expect(isBackgroundPortMessage({
+      type: 'spenders:snapshot',
+      buildId: 'board-build-1',
+      result: {
+        entries: [{
+          fanAccountId: 'fan-1',
+          groupId: null,
+          customName: null,
+          displayName: 'Fan One',
+          username: 'fan-one',
+          lifetimeMills: 123_000,
+          lifetimeUsd: 123,
+          monthMills: null,
+          monthUsd: null,
+        }],
+        builtAt: 100,
+        source: {
+          streamState: 'ramped',
+          lastSyncedAt: 90,
+          consecutiveFailures: 0,
+        },
+        fanCount: 1,
+        monthWindow: null,
+        fetchedAt: 110,
+      },
+    })).toBe(true);
+
+    expect(isBackgroundPortMessage({
       type: 'operation:error',
       operationId: 'op-1',
       error: {

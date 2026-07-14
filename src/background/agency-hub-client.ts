@@ -85,6 +85,8 @@ export interface AgencyHubPushFanProfileInput {
   signal: AbortSignal;
   existingSync?: AgencyHubSummarySyncMetadata;
   generatedAt?: number;
+  /** Last-moment guard after page resolution and immediately before PUT. */
+  beforeCommit?: () => boolean | Promise<boolean>;
 }
 
 export interface AgencyHubPushFanProfileResult extends AgencyHubResultBase {
@@ -442,9 +444,7 @@ export class AgencyHubClient {
     }
   }
 
-  /** W9.2/A7: persona custody is kernel-side (`ai_personas`, Stage 31 — the
-   * same store the desktop picker reads). These three calls are the whole
-   * sync surface; resolution of WHAT to sync lives in persona-sync.ts. */
+  /** Global persona bodies are admin-only. Chatter clients receive metadata. */
   private async resolvePersonaCallContext(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
   ): Promise<{ baseUrl: string; bearer: string }> {
@@ -459,52 +459,16 @@ export class AgencyHubClient {
     return { baseUrl, bearer };
   }
 
-  async listAiPersonas(
+  async fetchAiPersonaCatalog(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
-  ): Promise<Array<{ key: string; displayName: string; systemBlock: string; updatedAt: string }>> {
+  ): Promise<Array<{ key: string; displayName: string; version: number; status: 'active' | 'archived' }>> {
     const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
     try {
-      const response = await this.sdkFor(baseUrl, bearer, signal).aiPersonasList();
+      const response = await this.sdkFor(baseUrl, bearer, signal).aiPersonaCatalog();
       return response.personas;
     } catch (error) {
-      throw this.toHubError(error, 'personas list');
-    }
-  }
-
-  async upsertAiPersona(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
-    key: string,
-    body: { displayName: string; systemBlock: string },
-    signal: AbortSignal,
-  ): Promise<void> {
-    const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
-    try {
-      await this.sdkFor(baseUrl, bearer, signal).aiPersonaUpsert({
-        params: { key },
-        body,
-      });
-    } catch (error) {
-      throw this.toHubError(error, 'persona upsert');
-    }
-  }
-
-  async archiveAiPersona(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
-    key: string,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const { baseUrl, bearer } = await this.resolvePersonaCallContext(settings);
-    try {
-      await this.sdkFor(baseUrl, bearer, signal).aiPersonaArchive({ params: { key } });
-    } catch (error) {
-      // 404 = the kernel never knew this persona — the desired end state
-      // (absent) already holds; deleting an unsynced local persona is not
-      // an error.
-      if (error instanceof KernelApiError && error.status === 404) {
-        return;
-      }
-      throw this.toHubError(error, 'persona archive');
+      throw this.toHubError(error, 'persona catalog');
     }
   }
 
@@ -653,6 +617,7 @@ export class AgencyHubClient {
     signal,
     existingSync,
     generatedAt,
+    beforeCommit,
   }: AgencyHubPushFanProfileInput): Promise<AgencyHubPushFanProfileResult> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const apiKey = resolveHubBearer(settings);
@@ -736,6 +701,15 @@ export class AgencyHubClient {
         return {
           status: 'already-synced',
           reason: 'already_synced',
+          baseUrl,
+          pageLabel,
+        };
+      }
+
+      if (beforeCommit && !await beforeCommit()) {
+        return {
+          status: 'skipped',
+          reason: 'stale_context',
           baseUrl,
           pageLabel,
         };

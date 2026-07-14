@@ -84,6 +84,40 @@ describe('AgencyHubClient', () => {
     vi.unstubAllGlobals();
   });
 
+  it('fetches the read-only persona metadata catalog without exposing prompt text', async () => {
+    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      expect(String(url)).toBe('http://localhost:3000/api/v1/ai/persona-catalog');
+      expect(init?.method).toBe('GET');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer hub-key');
+      return jsonResponse({
+        personas: [{
+          key: 'closer',
+          displayName: 'Closer',
+          version: 4,
+          status: 'active',
+          // The generated catalog response schema strips unknown fields, so a
+          // buggy server response cannot promote prompt text into client state.
+          systemBlock: 'must not leave the SDK boundary',
+        }],
+      });
+    });
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+    };
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(client.fetchAiPersonaCatalog(
+      makeSettings(),
+      new AbortController().signal,
+    )).resolves.toEqual([{
+      key: 'closer',
+      displayName: 'Closer',
+      version: 4,
+      status: 'active',
+    }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves top-spenders source health from the validated SDK response', async () => {
     const fetchMock = vi.fn(async (url: URL | string) => {
       const requestUrl = new URL(String(url));
@@ -331,6 +365,50 @@ describe('AgencyHubClient', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       authorization: 'Bearer hub-key',
     });
+  });
+
+  it('revalidates immediately after deferred page resolution and before profile PUT', async () => {
+    const permissionsContains = vi.fn(async () => true);
+    let resolvePages: ((value: Response) => void) | null = null;
+    let markPagesStarted: (() => void) | null = null;
+    const pagesStarted = new Promise<void>((resolve) => {
+      markPagesStarted = resolve;
+    });
+    const fetchMock = vi.fn((url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        markPagesStarted?.();
+        return new Promise<Response>((resolve) => {
+          resolvePages = resolve;
+        });
+      }
+      throw new Error(`Unexpected irreversible request: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: permissionsContains },
+    };
+    const beforeCommit = vi.fn(async () => false);
+    const client = new AgencyHubClient(fetch);
+    const pushing = client.pushFanProfile({
+      settings: makeSettings(),
+      pageUsername: 'LoraVie',
+      platformUserId: 'fan-1',
+      body: '# stale summary',
+      signal: new AbortController().signal,
+      beforeCommit,
+    });
+
+    await pagesStarted;
+    resolvePages!(jsonResponse([
+      hubPage({ id: 2, label: 'creator-fs', username: 'LoraVie' }),
+    ]));
+    await expect(pushing).resolves.toMatchObject({
+      status: 'skipped',
+      reason: 'stale_context',
+    });
+    expect(beforeCommit).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('submits AI usage events as a batch', async () => {

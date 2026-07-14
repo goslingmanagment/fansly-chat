@@ -58,22 +58,37 @@ export function createVersionTag(extensionVersion: string): HTMLDivElement {
   return tag;
 }
 
-export type Debounced<T extends (...args: never[]) => void> = T & {
+export type Debounced<T extends (...args: never[]) => unknown> = (
+  (...args: Parameters<T>) => void
+) & {
   cancel: () => void;
+  flush: () => ReturnType<T> | undefined;
 };
 
-export function debounce<T extends (...args: never[]) => void>(
+export function debounce<T extends (...args: never[]) => unknown>(
   callback: T,
   waitMs: number,
 ): Debounced<T> {
   let timer: number | null = null;
-  const debounced = ((...args: never[]) => {
+  let pendingArgs: Parameters<T> | null = null;
+
+  const invoke = (): ReturnType<T> | undefined => {
+    if (pendingArgs === null) {
+      return undefined;
+    }
+    const args = pendingArgs;
+    pendingArgs = null;
+    return callback(...args) as ReturnType<T>;
+  };
+
+  const debounced = ((...args: Parameters<T>) => {
+    pendingArgs = args;
     if (timer !== null) {
       window.clearTimeout(timer);
     }
     timer = window.setTimeout(() => {
       timer = null;
-      callback(...args);
+      invoke();
     }, waitMs);
   }) as Debounced<T>;
   debounced.cancel = () => {
@@ -81,6 +96,14 @@ export function debounce<T extends (...args: never[]) => void>(
       window.clearTimeout(timer);
       timer = null;
     }
+    pendingArgs = null;
+  };
+  debounced.flush = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    return invoke();
   };
   return debounced;
 }

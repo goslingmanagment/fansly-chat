@@ -42,6 +42,7 @@ import {
   resolveFeatureMessageCount,
 } from '../shared/features.js';
 import { logDebug } from '../shared/log.js';
+import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { isContentPortMessage } from '../shared/protocol.js';
 import {
   normalizeReplyParts,
@@ -49,6 +50,7 @@ import {
   normalizeVariantReplyParts,
 } from '../shared/reply-output.js';
 import {
+  getSummaryCacheEntry,
   hasAvailableFanSummary,
   isValidSummaryCacheEntry,
 } from '../shared/summary-cache.js';
@@ -90,7 +92,6 @@ import type {
 import type {
   AgencyHubClient} from './agency-hub-client.js';
 import {
-  type AgencyHubFetchFanProfileResult,
   type AgencyHubPushFanProfileResult,
 } from './agency-hub-client.js';
 import type {
@@ -126,6 +127,12 @@ import {
 import { OperationRegistry } from './operation-registry.js';
 import { OperationTimeoutController } from './operation-timeouts.js';
 import {
+  isFreshPersonaOperationIdentityCurrent,
+  isPersonaOperationIdentityCurrent,
+  readFreshPersonaFenceState,
+  type PersonaOperationIdentity,
+} from './persona-identity-fence.js';
+import {
   describeMessageLoadProgress,
   describeSubscriptionTraceStep,
   errorCode,
@@ -149,12 +156,14 @@ interface ActiveOperation {
   flushTimer: number | null;
   llmSpend: LlmSpendSummary | null;
   profiler: OperationProfiler;
+  summaryCommitToken: number | null;
 }
 
 const NO_OP_PROFILER = createOperationProfiler(false);
 /** Stage 32: models are kernel config — the summary-cache model pin. */
 const KERNEL_MODEL_ID = 'kernel';
 const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
+const CAPTURE_IDENTITY_RETRY_COOLDOWN_MS = 30_000;
 const DEEP_OPERATION_TIMEOUTS = {
   prep: DEEP_OPERATION_PREP_TIMEOUT_MS,
   llmTtfb: DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
@@ -199,13 +208,12 @@ interface AgencyHubSummarySyncTask {
   session: SessionTemplate;
   resolvedAccountId: string;
   debugEnabled: boolean;
-}
-
-interface AgencyHubSummaryPrefetchResult {
-  summary: string;
-  generatedAt: number;
-  syncStatus: FanSummarySyncStatus;
-  fanAccountId: string | null;
+  personaIdentity: PersonaOperationIdentity;
+  /** Generated summaries with incomplete enrichment are intentionally not
+   * cached, but still retain the persona fence before their existing Hub push. */
+  requireCachedEntry: boolean;
+  operationId?: string;
+  summaryCommitToken?: number;
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
@@ -310,19 +318,6 @@ function resolveSummarySyncStatusFromResult(
   }
 }
 
-function resolveSummarySyncStatusFromHubFetch(
-  result: AgencyHubFetchFanProfileResult,
-  generatedAt: number,
-): FanSummarySyncStatus {
-  const updatedAt = Date.now();
-  return createFanSummarySyncStatus('saved', generatedAt, {
-    baseUrl: result.baseUrl,
-    pageLabel: result.pageLabel ?? null,
-    syncedAt: updatedAt,
-    updatedAt,
-  });
-}
-
 function usesDeepOperationTimeouts(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
@@ -378,7 +373,6 @@ export class OperationCoordinator {
   private readonly portsByTabId = new Map<number, browser.runtime.Port>();
   private readonly lifecycle =
     new OperationRegistry<ActiveOperation, ActiveCompareOperation>();
-  private readonly pendingSummaryAvailabilityByKey = new Map<string, Promise<void>>();
   /** Hub-sync retry bookkeeping, keyed `groupId|generatedAt|baseUrl` — a new
    * Scan (new generatedAt) or a hub retarget gets a fresh key. Entries clear
    * once saved; failures wait out SUMMARY_SYNC_RETRY_COOLDOWN_MS. */
@@ -392,6 +386,14 @@ export class OperationCoordinator {
       promise: Promise<void>;
       waitingTabIds: Set<number>;
     }
+  >();
+  private readonly captureIdentityRetryAfterByLegacyAccountId = new Map<string, number>();
+  private summaryCommitSequence = 0;
+  /** Latest user-started Scan for each conversation. Kept after completion so
+   * its async Hub append cannot be overtaken by an older cross-tab operation. */
+  private readonly latestSummaryCommitByGroupId = new Map<
+    string,
+    { operationId: string; token: number }
   >();
 
   constructor(
@@ -476,9 +478,7 @@ export class OperationCoordinator {
       type: messageType,
       state,
     } satisfies TabStatePayload);
-    if (!state.hasAvailableSummary) {
-      void this.prefetchAvailableSummary(tabId);
-    } else {
+    if (state.hasAvailableSummary) {
       // Core #136: the kernel injects the HUB copy of a ready Scan into other
       // features' prompts — so an unsaved local summary gets an opportunistic
       // re-push here, not only when the chatter reopens Scan.
@@ -496,10 +496,40 @@ export class OperationCoordinator {
     );
   }
 
-  async handleCapture(tabId: number, accountId: string): Promise<void> {
+  async handleCapture(
+    tabId: number,
+    accountId: string,
+    material = true,
+  ): Promise<void> {
     this.tabContexts.setAccount(tabId, accountId);
-    await this.refreshTabState(tabId);
-    void this.resolveCapturedIdentity(tabId, accountId);
+    const session = this.sessionStore.getSessionByAccount(accountId);
+    let shouldResolveIdentity = false;
+    if (session?.resolvedAccountId) {
+      this.captureIdentityRetryAfterByLegacyAccountId.delete(accountId);
+    } else {
+      const now = Date.now();
+      const retryAfter = this.captureIdentityRetryAfterByLegacyAccountId.get(accountId) ?? 0;
+      if (material || retryAfter <= now) {
+        this.captureIdentityRetryAfterByLegacyAccountId.set(
+          accountId,
+          now + CAPTURE_IDENTITY_RETRY_COOLDOWN_MS,
+        );
+        shouldResolveIdentity = true;
+      }
+    }
+    if (material) {
+      try {
+        await this.refreshTabState(tabId);
+      } finally {
+        // Identity recovery is independent of UI refresh/storage side effects:
+        // one transient failure must be retried by later same-session traffic.
+        if (shouldResolveIdentity) {
+          void this.resolveCapturedIdentity(tabId, accountId);
+        }
+      }
+    } else if (shouldResolveIdentity) {
+      void this.resolveCapturedIdentity(tabId, accountId);
+    }
   }
 
   async handleTabRemoved(tabId: number): Promise<void> {
@@ -604,6 +634,7 @@ export class OperationCoordinator {
           resolvedAccountId,
         );
         const canonicalAccountId = session.resolvedAccountId ?? resolvedAccountId;
+        this.captureIdentityRetryAfterByLegacyAccountId.delete(legacyAccountId);
         await Promise.all(
           Array.from(waitingTabIds).map(async (waitingTabId) => {
             this.tabContexts.setAccount(waitingTabId, canonicalAccountId);
@@ -662,15 +693,22 @@ export class OperationCoordinator {
     const accountId = session?.resolvedAccountId ?? legacyAccountId;
     this.tabContexts.setAccount(tabId, accountId);
 
-    const mappedPersonalityId = resolveMappedPersonalityId(
+    const rawMappedPersonalityId = resolveMappedPersonalityId(
       storage.accountMappings,
       accountId,
       legacyAccountId,
       storage.accountAliases,
     );
-    const mappedPersonalityName =
-      storage.personalities.find((p) => p.id === mappedPersonalityId)?.name ??
-      null;
+    const mappedPersonality = findActivePersona(
+      storage.personaCatalog,
+      rawMappedPersonalityId,
+    );
+    const mappedPersonalityId = mappedPersonality?.key ?? null;
+    const mappedPersonalityName = mappedPersonality?.displayName ?? null;
+    const mappedPersonaVersion = mappedPersonality?.version ?? null;
+    const mappedPersonaSource = mappedPersonality
+      ? storage.personaCatalogSource
+      : null;
     const compareDraftCount = getCompareDraftCount();
 
     return {
@@ -685,117 +723,14 @@ export class OperationCoordinator {
       connected: Boolean(session?.connected),
       // Stage 32: readiness = kernel lane configured (hub transport up).
       hasApiKey: this.kernelGateway.isConfigured(storage.settings),
-      hasPersonalities: storage.personalities.length > 0,
+      hasPersonalities: getActivePersonaCatalog(storage.personaCatalog).length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
+      mappedPersonaVersion,
+      mappedPersonaSource,
       compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
       compareDraftCount,
     };
-  }
-
-  private async cachePrefetchedSummary(
-    groupId: string,
-    personality: PersistedState['personalities'][number],
-    modelId: string,
-    prefetchedSummary: AgencyHubSummaryPrefetchResult,
-  ): Promise<void> {
-    await this.storageCoordinator.saveSummaryCache(groupId, {
-      summary: prefetchedSummary.summary,
-      personalityId: personality.id,
-      personalityUpdatedAt: personality.updatedAt,
-      generatedAt: prefetchedSummary.generatedAt,
-      spendingDataVerified: true,
-      subscriptionLookupVerified: true,
-      modelId,
-      fanAccountId: prefetchedSummary.fanAccountId,
-      agencyHubSync: prefetchedSummary.syncStatus,
-    });
-  }
-
-  private async prefetchAvailableSummary(tabId: number): Promise<void> {
-    const storage = await this.storageCoordinator.getState();
-    const context = this.tabContexts.getOrCreate(tabId);
-    const groupId = context.groupId?.trim() ?? '';
-    if (!groupId) {
-      return;
-    }
-
-    const session = this.sessionStore.getSessionForTab(tabId);
-    if (!session?.connected) {
-      return;
-    }
-
-    const legacyAccountId =
-      this.sessionStore.getAccountIdForTab(tabId) ?? context.accountId;
-    const accountId = session.resolvedAccountId ?? legacyAccountId;
-    const mappedPersonalityId = resolveMappedPersonalityId(
-      storage.accountMappings,
-      accountId,
-      legacyAccountId,
-      storage.accountAliases,
-    );
-
-    if (hasAvailableFanSummary(storage, groupId, mappedPersonalityId)) {
-      return;
-    }
-
-    const personality = storage.personalities.find(
-      (entry) => entry.id === mappedPersonalityId,
-    );
-    if (!personality) {
-      return;
-    }
-
-    const modelId = KERNEL_MODEL_ID;
-    const key = [
-      tabId,
-      groupId,
-      personality.id,
-      personality.updatedAt,
-      modelId,
-    ].join('|');
-
-    const pending = this.pendingSummaryAvailabilityByKey.get(key);
-    if (pending) {
-      await pending;
-      return;
-    }
-
-    const task = (async () => {
-      const prefetchedSummary = await this.prefetchAgencyHubSummary(
-        groupId,
-        storage.settings,
-        session,
-        new AbortController().signal,
-        storage.settings.debugMode,
-      );
-      if (!prefetchedSummary) {
-        return;
-      }
-
-      const active = this.lifecycle.getFeature(tabId);
-      if (active?.feature === 'fan-summary' && active.groupId === groupId) {
-        return;
-      }
-
-      await this.cachePrefetchedSummary(
-        groupId,
-        personality,
-        modelId,
-        prefetchedSummary,
-      );
-
-      if (this.tabContexts.getOrCreate(tabId).groupId === groupId) {
-        await this.refreshTabState(tabId, 'tab:state');
-      }
-    })().finally(() => {
-      if (this.pendingSummaryAvailabilityByKey.get(key) === task) {
-        this.pendingSummaryAvailabilityByKey.delete(key);
-      }
-    });
-
-    this.pendingSummaryAvailabilityByKey.set(key, task);
-    await task;
   }
 
   /** Re-push a valid-but-unsaved cached summary to the hub. Bounded: dedup
@@ -837,6 +772,43 @@ export class OperationCoordinator {
     if (!resolvedAccountId) {
       return;
     }
+    const mappedPersonaKey = resolveMappedPersonalityId(
+      storage.accountMappings,
+      resolvedAccountId,
+      legacyAccountId,
+      storage.accountAliases,
+    );
+    const mappedPersona = findActivePersona(storage.personaCatalog, mappedPersonaKey);
+    if (
+      !mappedPersona ||
+      cached.personalityId !== mappedPersona.key ||
+      cached.personalityUpdatedAt !== mappedPersona.version ||
+      cached.personaCatalogSource !== storage.personaCatalogSource
+    ) {
+      return;
+    }
+    const syncTask: AgencyHubSummarySyncTask = {
+      tabId,
+      groupId,
+      settings: storage.settings,
+      summary: cached.summary,
+      generatedAt: cached.generatedAt,
+      existingSync: cached.agencyHubSync,
+      fanAccountId: cached.fanAccountId ?? null,
+      session,
+      resolvedAccountId,
+      debugEnabled: storage.settings.debugMode,
+      personaIdentity: {
+        resolvedAccountId,
+        legacyAccountId,
+        personaKey: mappedPersona.key,
+        personaVersion: mappedPersona.version,
+        personaCatalogSource: storage.personaCatalogSource,
+      },
+      requireCachedEntry: true,
+      summaryCommitToken:
+        this.latestSummaryCommitByGroupId.get(groupId)?.token ?? 0,
+    };
 
     const key = [groupId, cached.generatedAt, baseUrl].join('|');
     const now = Date.now();
@@ -850,6 +822,11 @@ export class OperationCoordinator {
     });
 
     try {
+      // buildTabUiState may have observed the old mapping while the committed
+      // storage change event is still queued. Fence before even reading Hub.
+      if (!await this.isSummarySyncTaskCurrent(syncTask)) {
+        return;
+      }
       const preflight = await this.preflightSummaryHubState(
         groupId,
         storage.settings,
@@ -858,6 +835,9 @@ export class OperationCoordinator {
         cached.generatedAt,
       );
       if (preflight.verdict === 'already-stored') {
+        if (!await this.isSummarySyncTaskCurrent(syncTask)) {
+          return;
+        }
         // The hub already holds this exact dossier (a previous push whose ack
         // was lost) — record the save, never append a duplicate version.
         const syncStatus = createFanSummarySyncStatus('saved', cached.generatedAt, {
@@ -866,13 +846,16 @@ export class OperationCoordinator {
           syncedAt: Date.now(),
           updatedAt: Date.now(),
         });
-        await this.persistSummarySyncStatus(
+        const persisted = await this.persistSummarySyncStatus(
           groupId,
           cached.generatedAt,
           syncStatus,
           cached.fanAccountId ?? null,
+          syncTask,
         );
-        this.sendSummarySyncStatus(tabId, groupId, syncStatus);
+        if (persisted && await this.isSummarySyncTaskCurrent(syncTask)) {
+          this.sendSummarySyncStatus(tabId, groupId, syncStatus);
+        }
         this.summarySyncRetryByKey.delete(key);
         return;
       }
@@ -892,18 +875,7 @@ export class OperationCoordinator {
         return;
       }
 
-      await this.syncAgencyHubSummary({
-        tabId,
-        groupId,
-        settings: storage.settings,
-        summary: cached.summary,
-        generatedAt: cached.generatedAt,
-        existingSync: cached.agencyHubSync,
-        fanAccountId: cached.fanAccountId ?? null,
-        session,
-        resolvedAccountId,
-        debugEnabled: storage.settings.debugMode,
-      });
+      await this.syncAgencyHubSummary(syncTask);
     } finally {
       const current = this.summarySyncRetryByKey.get(key);
       if (current) {
@@ -1108,7 +1080,7 @@ export class OperationCoordinator {
     if (!this.kernelGateway.isConfigured(storage.settings)) {
       throw new ChatGooseError('hub_missing_api_key');
     }
-    if (storage.personalities.length === 0) {
+    if (getActivePersonaCatalog(storage.personaCatalog).length === 0) {
       throw new ChatGooseError('no_personalities');
     }
     if (!legacyAccountId || !session) {
@@ -1165,6 +1137,88 @@ export class OperationCoordinator {
     return this.lifecycle.getFeature(tabId);
   }
 
+  private async assertPersonaIdentityCurrent(
+    identity: PersonaOperationIdentity,
+  ): Promise<void> {
+    if (!await isFreshPersonaOperationIdentityCurrent(identity)) {
+      throw new ChatGooseError('chat_changed');
+    }
+  }
+
+  private reserveSummaryCommitToken(): number {
+    this.summaryCommitSequence += 1;
+    return this.summaryCommitSequence;
+  }
+
+  private registerSummaryCommit(
+    groupId: string,
+    operationId: string,
+    token: number,
+  ): void {
+    const current = this.latestSummaryCommitByGroupId.get(groupId);
+    if (current && current.token > token) {
+      return;
+    }
+    this.latestSummaryCommitByGroupId.delete(groupId);
+    this.latestSummaryCommitByGroupId.set(groupId, { operationId, token });
+    while (this.latestSummaryCommitByGroupId.size > 200) {
+      const oldest = this.latestSummaryCommitByGroupId.keys().next().value as
+        string | undefined;
+      if (!oldest) break;
+      this.latestSummaryCommitByGroupId.delete(oldest);
+    }
+  }
+
+  private isLatestSummaryCommit(
+    groupId: string,
+    operationId: string | undefined,
+    token: number | undefined,
+  ): boolean {
+    if (token === undefined) {
+      return true;
+    }
+    const latest = this.latestSummaryCommitByGroupId.get(groupId);
+    const latestToken = latest?.token ?? 0;
+    return latestToken === token &&
+      (operationId === undefined || latest?.operationId === operationId);
+  }
+
+  private assertLatestSummaryCommit(
+    groupId: string,
+    operationId: string,
+    token: number,
+  ): void {
+    if (!this.isLatestSummaryCommit(groupId, operationId, token)) {
+      throw new ChatGooseError('chat_changed');
+    }
+  }
+
+  private async isSummarySyncTaskCurrent(
+    task: AgencyHubSummarySyncTask,
+  ): Promise<boolean> {
+    if (!this.isLatestSummaryCommit(
+      task.groupId,
+      task.operationId,
+      task.summaryCommitToken,
+    )) {
+      return false;
+    }
+    const state = await readFreshPersonaFenceState();
+    if (!isPersonaOperationIdentityCurrent(state, task.personaIdentity)) {
+      return false;
+    }
+    if (!task.requireCachedEntry) {
+      return true;
+    }
+
+    const cached = getSummaryCacheEntry(state, task.groupId);
+    return cached?.generatedAt === task.generatedAt &&
+      cached.summary === task.summary &&
+      cached.personalityId === task.personaIdentity.personaKey &&
+      cached.personalityUpdatedAt === task.personaIdentity.personaVersion &&
+      cached.personaCatalogSource === task.personaIdentity.personaCatalogSource;
+  }
+
   private enqueueAgencyHubSummarySync(task: AgencyHubSummarySyncTask): void {
     if (!this.agencyHubClient.isConfigured(task.settings)) {
       return;
@@ -1178,18 +1232,33 @@ export class OperationCoordinator {
     generatedAt: number,
     syncStatus: FanSummarySyncStatus,
     fanAccountId?: string | null,
-  ): Promise<void> {
+    expected?: Pick<
+      AgencyHubSummarySyncTask,
+      'summary' | 'personaIdentity'
+    >,
+  ): Promise<boolean> {
+    let updated = false;
     await this.storageCoordinator.updateSummaryCache(groupId, (entry) => {
-      if (entry.generatedAt !== generatedAt) {
+      if (
+        entry.generatedAt !== generatedAt ||
+        (expected && (
+          entry.summary !== expected.summary ||
+          entry.personalityId !== expected.personaIdentity.personaKey ||
+          entry.personalityUpdatedAt !== expected.personaIdentity.personaVersion ||
+          entry.personaCatalogSource !== expected.personaIdentity.personaCatalogSource
+        ))
+      ) {
         return entry;
       }
 
+      updated = true;
       return {
         ...entry,
         ...(fanAccountId?.trim() ? { fanAccountId: fanAccountId.trim() } : {}),
         agencyHubSync: syncStatus,
       };
     });
+    return updated;
   }
 
   private async resolveCreatorUsername(
@@ -1224,73 +1293,6 @@ export class OperationCoordinator {
     )?.userId ?? null;
   }
 
-  private async prefetchAgencyHubSummary(
-    groupId: string,
-    settings: Settings,
-    session: SessionTemplate,
-    signal: AbortSignal,
-    debugEnabled: boolean,
-  ): Promise<AgencyHubSummaryPrefetchResult | null> {
-    if (!this.agencyHubClient.isConfigured(settings)) {
-      return null;
-    }
-
-    const timeoutController = new AbortController();
-    const timeoutHandle = globalThis.setTimeout(
-      () => timeoutController.abort(),
-      AGENCY_HUB_PREFETCH_TIMEOUT_MS,
-    );
-    const prefetchSignal = AbortSignal.any([signal, timeoutController.signal]);
-
-    try {
-      const pageUsername = await this.resolveCreatorUsername(session, prefetchSignal);
-      const result = await this.agencyHubClient.fetchFanProfileByConversation({
-        settings,
-        pageUsername,
-        conversationId: groupId,
-        signal: prefetchSignal,
-      });
-
-      if (signal.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-
-      logDebug(debugEnabled, 'agency hub summary prefetch', {
-        status: result.status,
-        reason: result.reason,
-        baseUrl: result.baseUrl,
-        pageLabel: result.pageLabel,
-        fanAccountId: result.fanAccountId,
-        error: result.error,
-      });
-
-      if (result.status !== 'fetched' || !result.body) {
-        return null;
-      }
-
-      // The SOURCE generation time is the dossier's identity/age (core #136);
-      // createdAtMs is only the hub APPEND time — hydrating with it would make
-      // an old dossier look freshly generated, and a later retarget/re-push
-      // would propagate that wrong stamp back as generatedAtMs.
-      const generatedAt = result.sourceGeneratedAtMs ?? result.createdAtMs ?? Date.now();
-      return {
-        summary: result.body,
-        generatedAt,
-        syncStatus: resolveSummarySyncStatusFromHubFetch(result, generatedAt),
-        fanAccountId: result.fanAccountId?.trim() || null,
-      };
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError' && signal.aborted) {
-        throw error;
-      }
-
-      logDebug(debugEnabled, 'agency hub summary prefetch failed', toDebugErrorPayload(error));
-      return null;
-    } finally {
-      clearTimeout(timeoutHandle);
-    }
-  }
-
   private async syncAgencyHubSummary(task: AgencyHubSummarySyncTask): Promise<void> {
     const timeoutController = new AbortController();
     const timeoutHandle = globalThis.setTimeout(
@@ -1310,6 +1312,13 @@ export class OperationCoordinator {
         timeoutController.signal,
       );
 
+      // All resolution above can await long enough for an owner revision or a
+      // local remap to commit before storage.onChanged/cancel reaches the tab.
+      // Read storage directly immediately before the irreversible Hub append.
+      if (!await this.isSummarySyncTaskCurrent(task)) {
+        return;
+      }
+
       const result = await this.agencyHubClient.pushFanProfile({
         settings: task.settings,
         pageUsername,
@@ -1318,6 +1327,7 @@ export class OperationCoordinator {
         signal: timeoutController.signal,
         existingSync: task.existingSync,
         generatedAt: task.generatedAt,
+        beforeCommit: () => this.isSummarySyncTaskCurrent(task),
       });
 
       logDebug(task.debugEnabled, 'agency hub summary sync', {
@@ -1342,13 +1352,23 @@ export class OperationCoordinator {
       return;
     }
 
-    await this.persistSummarySyncStatus(
+    // Do not stamp or announce a stale cache entry if the identity changed
+    // while the remote request was in flight. The append cannot be retracted,
+    // but all later local state remains scoped to the current persona.
+    if (!await this.isSummarySyncTaskCurrent(task)) {
+      return;
+    }
+
+    const persisted = await this.persistSummarySyncStatus(
       task.groupId,
       task.generatedAt,
       syncStatus,
       resolvedFanAccountId,
+      task,
     );
-    this.sendSummarySyncStatus(task.tabId, task.groupId, syncStatus);
+    if (persisted || !task.requireCachedEntry) {
+      this.sendSummarySyncStatus(task.tabId, task.groupId, syncStatus);
+    }
   }
 
   private assertActive(
@@ -1390,6 +1410,20 @@ export class OperationCoordinator {
         error: toUserError(new ChatGooseError('another_operation')),
       });
       return;
+    }
+    // Preserve user-arrival order across tabs before validateStart's first
+    // await. Register immediately so a newer click also fences old async Hub
+    // work while its own validation is pending; an older slow validation can
+    // never obtain a newer token and supersede that click.
+    const reservedSummaryCommitToken = payload.feature === 'fan-summary'
+      ? this.reserveSummaryCommitToken()
+      : null;
+    if (reservedSummaryCommitToken !== null && payload.groupId) {
+      this.registerSummaryCommit(
+        payload.groupId,
+        payload.operationId,
+        reservedSummaryCommitToken,
+      );
     }
     let timeoutController: OperationTimeoutController<OperationTimeoutKey> | null = null;
     let controller: AbortController | null = null;
@@ -1440,6 +1474,7 @@ export class OperationCoordinator {
         operationController.signal,
         operationTimeoutController.signal,
       ]);
+      const summaryCommitToken = reservedSummaryCommitToken;
 
       const active: ActiveOperation = {
         operationId: payload.operationId,
@@ -1454,6 +1489,7 @@ export class OperationCoordinator {
         flushTimer: null,
         llmSpend: null,
         profiler,
+        summaryCommitToken,
       };
 
       this.lifecycle.activateFeature(tabId, active);
@@ -1646,6 +1682,9 @@ export class OperationCoordinator {
       }
 
       const storage = rekeyResult.state;
+      if (storage.personaCatalogSource !== validated.storage.personaCatalogSource) {
+        throw new ChatGooseError('chat_changed');
+      }
       const personalityId = resolveMappedPersonalityId(
         storage.accountMappings,
         resolvedAccountId,
@@ -1656,12 +1695,17 @@ export class OperationCoordinator {
         throw new ChatGooseError('no_mapping');
       }
 
-      const personality = storage.personalities.find(
-        (entry) => entry.id === personalityId,
-      );
+      const personality = findActivePersona(storage.personaCatalog, personalityId);
       if (!personality) {
         throw new ChatGooseError('no_mapping');
       }
+      const personaIdentity: PersonaOperationIdentity = {
+        resolvedAccountId,
+        legacyAccountId: validated.legacyAccountId,
+        personaKey: personality.key,
+        personaVersion: personality.version,
+        personaCatalogSource: storage.personaCatalogSource,
+      };
 
       if (featureRequiresDraft(payload.feature) && !payload.draftText?.trim()) {
         throw new ChatGooseError('unknown_error');
@@ -1678,20 +1722,29 @@ export class OperationCoordinator {
         startStage('summary-cache-check', 'Check summary cache');
         if (payload.forceRegenerate) {
           profiler.log('Forced summary refresh');
-          await this.storageCoordinator.removeSummaryCache(validated.urlGroupId);
         }
         cachedSummary = payload.forceRegenerate
           ? null
           : await this.storageCoordinator.getSummaryCache(validated.urlGroupId);
         hasValidCachedSummary = isValidSummaryCacheEntry(
           cachedSummary,
-          personality.id,
-          personality.updatedAt,
+          personality.key,
+          personality.version,
+          storage.personaCatalogSource,
           resolvedModel,
         );
       }
 
       if (payload.feature === 'fan-summary' && cachedSummary && hasValidCachedSummary) {
+        if (summaryCommitToken === null) {
+          throw new ChatGooseError('unknown_error');
+        }
+        this.assertLatestSummaryCommit(
+          validated.urlGroupId,
+          payload.operationId,
+          summaryCommitToken,
+        );
+        await this.assertPersonaIdentityCurrent(personaIdentity);
         const normalizedCachedSync = normalizeAgencyHubSummarySyncMetadata(
           cachedSummary.agencyHubSync,
         );
@@ -1723,6 +1776,10 @@ export class OperationCoordinator {
             cachedSummary.generatedAt,
             syncStatus,
             cachedSummary.fanAccountId ?? null,
+            {
+              summary: cachedSummary.summary,
+              personaIdentity,
+            },
           );
           cachedSummary.agencyHubSync = syncStatus;
         } else {
@@ -1751,6 +1808,25 @@ export class OperationCoordinator {
         // No kernel call happened, so there is no prompt to echo — say that
         // outright instead of showing an empty inspector (E28).
         sendDebugEchoStatus({ state: 'cache-hit' });
+        const summarySyncTask: AgencyHubSummarySyncTask = {
+          tabId,
+          groupId: validated.urlGroupId,
+          settings: validated.storage.settings,
+          summary: cachedSummary.summary,
+          generatedAt: cachedSummary.generatedAt,
+          existingSync: cachedSummary.agencyHubSync,
+          fanAccountId: cachedSummary.fanAccountId ?? null,
+          session: validated.session,
+          resolvedAccountId,
+          debugEnabled,
+          personaIdentity,
+          requireCachedEntry: true,
+          operationId: payload.operationId,
+          summaryCommitToken,
+        };
+        if (!await this.isSummarySyncTaskCurrent(summarySyncTask)) {
+          throw new ChatGooseError('chat_changed');
+        }
         const zeroSpend = createZeroLlmSpendSummary();
         this.sendComplete(tabId, {
           type: 'operation:complete',
@@ -1760,68 +1836,18 @@ export class OperationCoordinator {
         }, zeroSpend, profiler);
         this.clearCompletedOperation(tabId);
         if (shouldAttemptSync && !savedForCurrentTarget) {
-          this.enqueueAgencyHubSummarySync({
-            tabId,
-            groupId: validated.urlGroupId,
-            settings: validated.storage.settings,
-            summary: cachedSummary.summary,
-            generatedAt: cachedSummary.generatedAt,
-            existingSync: cachedSummary.agencyHubSync,
-            fanAccountId: cachedSummary.fanAccountId ?? null,
-            session: validated.session,
-            resolvedAccountId,
-            debugEnabled,
-          });
+          this.enqueueAgencyHubSummarySync(summarySyncTask);
         }
         return;
       }
 
       if (payload.feature === 'fan-summary') {
-        if (!payload.forceRegenerate) {
-          const prefetchedSummary = await this.prefetchAgencyHubSummary(
-            validated.urlGroupId,
-            validated.storage.settings,
-            validated.session,
-            signal,
-            debugEnabled,
-          );
-
-          if (prefetchedSummary) {
-            await this.cachePrefetchedSummary(
-              validated.urlGroupId,
-              personality,
-              resolvedModel,
-              prefetchedSummary,
-            );
-
-            const result: FeatureResult = {
-              rawText: prefetchedSummary.summary,
-              summaryMeta: {
-                generatedAt: prefetchedSummary.generatedAt,
-                stale: false,
-                cached: true,
-                syncStatus: prefetchedSummary.syncStatus,
-              },
-            };
-
-            this.assertActive(tabId, payload.operationId);
-            completeStage(
-              'summary-cache-check',
-              'Summary loaded from Agency Hub',
-              'hub hit',
-            );
-            const zeroSpend = createZeroLlmSpendSummary();
-            this.sendComplete(tabId, {
-              type: 'operation:complete',
-              operationId: payload.operationId,
-              result,
-              fanDisplayName: payload.domFanDisplayName ?? 'fan',
-            }, zeroSpend, profiler);
-            this.clearCompletedOperation(tabId);
-            return;
-          }
-        }
-
+        // The Hub fan-profile contract does not yet carry persona key/version
+        // provenance. A remote body therefore cannot be proved to belong to
+        // the currently mapped revision and must never be returned or stamped
+        // into the local cache as current. Local cache hits remain versioned;
+        // every miss runs the gateway. The post-generation Hub PUSH path is
+        // intentionally retained below.
         completeStage(
           'summary-cache-check',
           `Summary cache miss${
@@ -2286,7 +2312,11 @@ export class OperationCoordinator {
       // platform wording, budgets, capture). The client ships context VALUES
       // because Fansly has no webhook lane — the kernel archive is
       // pull-cadenced while this transcript was read live moments ago.
+      // Do not make even the page-label/generation request against stale Hub A
+      // after a committed A→B switch whose onChanged delivery lagged.
+      await this.assertPersonaIdentityCurrent(personaIdentity);
       const pageUsername = await this.resolveCreatorUsername(validated.session, signal);
+      await this.assertPersonaIdentityCurrent(personaIdentity);
       const pageLabel = await this.agencyHubClient.resolvePageLabelForUsername(
         validated.storage.settings,
         pageUsername,
@@ -2300,7 +2330,7 @@ export class OperationCoordinator {
         clientRequestId: payload.operationId,
         pageLabel,
         conversationRef: fanAccountId ?? validated.urlGroupId,
-        personaKey: personality.id,
+        personaKey: personality.key,
         replyTone: payload.replyTone,
         replyMode: payload.replyMode,
         draftText: payload.draftText,
@@ -2502,6 +2532,14 @@ export class OperationCoordinator {
       let rawText: string;
       while (true) {
         try {
+          await this.assertPersonaIdentityCurrent(personaIdentity);
+          if (summaryCommitToken !== null) {
+            this.assertLatestSummaryCommit(
+              validated.urlGroupId,
+              payload.operationId,
+              summaryCommitToken,
+            );
+          }
           reasoningObserved = false;
           reasoningDebugText = '';
           profiler.setReasoningBlock('');
@@ -2598,8 +2636,18 @@ export class OperationCoordinator {
         payload.replyMode,
       );
       assertInsertableFeatureResult(payload.feature, result);
+      await this.assertPersonaIdentityCurrent(personaIdentity);
 
+      let summarySyncTask: AgencyHubSummarySyncTask | null = null;
       if (payload.feature === 'fan-summary') {
+        if (summaryCommitToken === null) {
+          throw new ChatGooseError('unknown_error');
+        }
+        this.assertLatestSummaryCommit(
+          validated.urlGroupId,
+          payload.operationId,
+          summaryCommitToken,
+        );
         const generatedAt = Date.now();
         const shouldAttemptSync = shouldAttemptAgencyHubSummarySync(
           this.agencyHubClient,
@@ -2623,18 +2671,50 @@ export class OperationCoordinator {
         // model id, so the equality never held and no fresh summary was ever
         // cached. Model choice is kernel config now; the sentinel pin below
         // is the cache identity, and the equality gate is gone.
-        if (spendingDataVerified && subscriptionLookupVerified) {
-          await this.storageCoordinator.saveSummaryCache(validated.urlGroupId, {
+        const shouldCacheSummary = spendingDataVerified && subscriptionLookupVerified;
+        if (shouldCacheSummary) {
+          const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(
+            validated.urlGroupId,
+            {
             summary: rawText,
-            personalityId: personality.id,
-            personalityUpdatedAt: personality.updatedAt,
+            personalityId: personality.key,
+            personalityUpdatedAt: personality.version,
+            personaCatalogSource: personaIdentity.personaCatalogSource,
             generatedAt,
             spendingDataVerified: true,
             subscriptionLookupVerified: true,
             modelId: resolvedModel,
             fanAccountId,
             agencyHubSync: initialSyncStatus,
-          });
+            },
+            (state) => this.isLatestSummaryCommit(
+              validated.urlGroupId,
+              payload.operationId,
+              summaryCommitToken,
+            ) && isPersonaOperationIdentityCurrent(state, personaIdentity),
+          );
+          if (!committed) {
+            throw new ChatGooseError('chat_changed');
+          }
+        }
+        summarySyncTask = {
+          tabId,
+          groupId: validated.urlGroupId,
+          settings: validated.storage.settings,
+          summary: rawText,
+          generatedAt,
+          existingSync: initialSyncStatus,
+          fanAccountId,
+          session: validated.session,
+          resolvedAccountId,
+          debugEnabled,
+          personaIdentity,
+          requireCachedEntry: shouldCacheSummary,
+          operationId: payload.operationId,
+          summaryCommitToken,
+        };
+        if (!await this.isSummarySyncTaskCurrent(summarySyncTask)) {
+          throw new ChatGooseError('chat_changed');
         }
       }
       const completedSpend = latestLlmSpend ?? createZeroLlmSpendSummary();
@@ -2646,20 +2726,9 @@ export class OperationCoordinator {
       }, completedSpend, profiler);
 
       this.clearCompletedOperation(tabId);
-      if (payload.feature === 'fan-summary' && result.summaryMeta) {
+      if (payload.feature === 'fan-summary' && result.summaryMeta && summarySyncTask) {
         if (result.summaryMeta.syncStatus?.state === 'saving') {
-          this.enqueueAgencyHubSummarySync({
-            tabId,
-            groupId: validated.urlGroupId,
-            settings: validated.storage.settings,
-            summary: rawText,
-            generatedAt: result.summaryMeta.generatedAt,
-            existingSync: result.summaryMeta.syncStatus,
-            fanAccountId,
-            session: validated.session,
-            resolvedAccountId,
-            debugEnabled,
-          });
+          this.enqueueAgencyHubSummarySync(summarySyncTask);
         }
       }
     } catch (error) {

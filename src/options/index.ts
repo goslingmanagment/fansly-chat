@@ -31,11 +31,30 @@ import {
   createUserError,
   getUserErrorDescription,
 } from '../shared/errors.js';
+import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
+  PERSONA_CATALOG_SOURCE_STORAGE_KEY,
+  PERSONA_CATALOG_STORAGE_KEY,
+} from '../shared/constants.js';
+import {
+  buildLegacyPersonaExport,
+  ensureLegacyPersonaSnapshot,
+  InvalidLegacyPersonaSnapshotError,
+} from '../shared/persona-preservation.js';
 import { sendRuntimeRequest } from '../shared/protocol.js';
-import { saveSettings, loadStorageState, savePersonalities, saveAccountMapping, deletePersonality } from '../shared/storage.js';
+import {
+  loadStorageState,
+  readStorageState,
+  saveAccountMapping,
+  saveSettings,
+} from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
-  Personality,
+  PersonaCatalogEntry,
+  SessionSnapshotEntry,
+  Settings,
   UiThemeSetting,
 } from '../shared/types.js';
 
@@ -48,19 +67,118 @@ if (!(rootElement instanceof HTMLElement)) {
 
 const root = rootElement;
 
-let renderCleanup: (() => void) | null = null;
+let renderCleanup: (() => Promise<void>) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
 let uiThemeInstalled = false;
 
+function createLegacyPersonaExportControls(): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const exportStatus = document.createElement('div');
+  exportStatus.setAttribute('role', 'status');
+  exportStatus.setAttribute('aria-live', 'polite');
+  exportStatus.style.fontSize = '12px';
+  exportStatus.style.color = 'var(--chatgoose-ink-mid)';
+  const exportJson = async (): Promise<string> => JSON.stringify(
+    await buildLegacyPersonaExport(),
+    null,
+    2,
+  );
+  const downloadExport = createButton('Download legacy persona JSON', true);
+  downloadExport.addEventListener('click', () => {
+    downloadExport.disabled = true;
+    void exportJson().then((json) => {
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `chatgoose-legacy-personas-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      exportStatus.textContent = 'Legacy persona JSON downloaded.';
+    }).catch((error: unknown) => {
+      console.error('Failed to export legacy persona data', error);
+      exportStatus.textContent = 'Export failed. Reload Settings and try again.';
+    }).finally(() => {
+      downloadExport.disabled = false;
+    });
+  });
+  const copyExport = createButton('Copy legacy persona JSON', true);
+  copyExport.addEventListener('click', () => {
+    copyExport.disabled = true;
+    void exportJson().then(async (json) => {
+      await navigator.clipboard.writeText(json);
+      exportStatus.textContent = 'Legacy persona JSON copied.';
+    }).catch((error: unknown) => {
+      console.error('Failed to copy legacy persona data', error);
+      exportStatus.textContent = 'Copy failed. Use Download instead.';
+    }).finally(() => {
+      copyExport.disabled = false;
+    });
+  });
+  const exportActions = document.createElement('div');
+  exportActions.className = 'chatgoose-card-actions';
+  exportActions.append(downloadExport, copyExport);
+  fragment.append(exportActions, exportStatus);
+  return fragment;
+}
+
+function renderLegacyPersonaRecovery(): void {
+  root.replaceChildren();
+  root.style.paddingBottom = '24px';
+  const hero = document.createElement('div');
+  hero.style.padding = '28px 20px 4px';
+  hero.style.display = 'grid';
+  hero.style.gap = '8px';
+  const title = document.createElement('h1');
+  title.textContent = 'ChatGoose Persona Recovery';
+  const subtitle = document.createElement('div');
+  subtitle.textContent = 'The preserved legacy persona snapshot is malformed. Normal Settings and Agency Hub access are disabled so the snapshot cannot be overwritten.';
+  subtitle.style.color = 'var(--chatgoose-ink-mid)';
+  hero.append(createVersionTag(extensionVersion), title, subtitle);
+
+  const recovery = createSection(
+    'Legacy Persona Recovery',
+    'Export the malformed preserved value together with the current legacy persona data, mappings, and aliases for manual recovery.',
+  );
+  recovery.append(createLegacyPersonaExportControls());
+  root.append(hero, recovery);
+}
+
 async function render(): Promise<void> {
-  renderCleanup?.();
+  await renderCleanup?.();
   renderCleanup = null;
 
   const cleanupTasks: Array<() => void> = [];
-  const sessions = await sendRuntimeRequest('getSessionsSnapshot');
-  const state = await loadStorageState();
-  const sessionsByAccountId = buildSessionLookup(sessions);
+  let disposed = false;
+  try {
+    // Recovery must be decided before session discovery or a Hub connection
+    // test can trigger network traffic. The malformed value remains untouched.
+    await ensureLegacyPersonaSnapshot();
+  } catch (error) {
+    if (error instanceof InvalidLegacyPersonaSnapshotError) {
+      renderLegacyPersonaRecovery();
+      return;
+    }
+    throw error;
+  }
+  // Start live session discovery immediately, but do not put it on the
+  // critical path for the local settings UI. getSessionsSnapshot may spend up
+  // to five seconds resolving a Fansly identity. It also owns identity
+  // rekey/reconcile, so account controls stay in a loading state until it has
+  // finished and we have re-read the resulting storage state.
+  const sessionsResultPromise = sendRuntimeRequest('getSessionsSnapshot')
+    .then((sessions):
+      | { ok: true; sessions: SessionSnapshotEntry[] }
+      | { ok: false; error: unknown } => (
+      Array.isArray(sessions)
+        ? { ok: true, sessions }
+        : { ok: false, error: new Error('Invalid sessions snapshot response') }
+    ))
+    .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error }));
+  // This first read must stay non-mutating. Session discovery owns account
+  // identity reconciliation and runs concurrently; a full-state migration
+  // write from an older snapshot could otherwise restore pre-rekey mappings.
+  const state = await readStorageState();
 
   // One-time: reuse this render's state instead of a second storage read;
   // installUiTheme keeps itself current afterwards (storage + OS listeners).
@@ -82,7 +200,7 @@ async function render(): Promise<void> {
   title.textContent = 'ChatGoose Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure generation, Agency Hub sync, personalities, mappings, and live Fansly connections.';
+  subtitle.textContent = 'Configure generation, Agency Hub, persona mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
@@ -106,10 +224,6 @@ async function render(): Promise<void> {
     themeSelect.append(option);
   }
   themeSelect.value = state.settings.uiTheme;
-  themeSelect.addEventListener('change', () => {
-    // installUiTheme's storage listener re-applies the theme on save.
-    void saveSettings({ uiTheme: themeSelect.value as UiThemeSetting });
-  });
   appearanceSection.append(labeledField('Theme', themeSelect));
 
   // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
@@ -276,14 +390,10 @@ async function render(): Promise<void> {
     renderAgencyHubConnectionState();
   };
 
-  const persistAgencyHubSettings = async (): Promise<void> => {
-    const savedSettings = await saveSettings({
-      agencyHubBaseUrl: agencyHubUrlInput.value,
-      agencyHubApiKey: agencyHubKeyInput.value,
-    });
-    agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
-    agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
-  };
+  // Assigned after the shared settings writer is built below. Every Hub action
+  // uses that same writer so a direct Test/Grant save cannot race a debounced
+  // theme/count edit through a second read-modify-write path.
+  let persistAgencyHubSettings: () => Promise<void> = async () => undefined;
 
   const runAgencyHubConnectionTest = async (options?: {
     force?: boolean;
@@ -515,9 +625,7 @@ async function render(): Promise<void> {
         }
 
         try {
-          const savedSettings = await saveSettings(settingsPatch);
-          agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
-          agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
+          await persistAgencyHubSettings();
         } catch (error) {
           console.error('Failed to save Agency Hub settings', error);
         }
@@ -587,6 +695,10 @@ async function render(): Promise<void> {
       hubSignInButton.disabled = true;
       hubSignInMeta.textContent = 'Signing in…';
       try {
+        // Finish the shared local form write before the background issues a
+        // device token from those Hub inputs. This prevents a delayed local
+        // settings write from restoring the pre-sign-in base URL afterwards.
+        await persistAgencyHubSettings();
         const response = await sendRuntimeRequest('issueAgencyHubDeviceToken', {
           baseUrl: agencyHubUrlInput.value,
           username,
@@ -632,45 +744,182 @@ async function render(): Promise<void> {
 
   // ─── AI Models ───────────────────────────────────────────
 
-  const saveSettingsDebounced = debounce(async () => {
-    const savedSettings = await saveSettings({
+  let agencyHubApiKeyDirty = false;
+  const settingsFormSignature = (): string => JSON.stringify([
+    themeSelect.value,
+    agencyHubUrlInput.value,
+    agencyHubKeyInput.value,
+    quickInput.value,
+    pingInput.value,
+    improveInput.value,
+    deepInput.value,
+    debugInput.checked,
+  ]);
+  const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
+    const patch: Partial<Settings> = {
+      uiTheme: themeSelect.value as UiThemeSetting,
       agencyHubBaseUrl: agencyHubUrlInput.value,
-      agencyHubApiKey: agencyHubKeyInput.value,
       quickMessageCount: Number(quickInput.value),
       pingMessageCount: Number(pingInput.value),
       improveMessageCount: Number(improveInput.value),
       deepMessageCount: Number(deepInput.value),
       debugMode: debugInput.checked,
-    });
+    };
+    // The API key has its own custody key. A theme/count save from a stale
+    // Options tab must not write the old visible value over a rotation made by
+    // another tab or the background. Only an explicit edit owns this field.
+    if (
+      agencyHubApiKeyDirty ||
+      (forceHubSnapshot && agencyHubKeyInput.value !== state.settings.agencyHubApiKey)
+    ) {
+      patch.agencyHubApiKey = agencyHubKeyInput.value;
+    }
+    return patch;
+  };
 
-    agencyHubUrlInput.value = savedSettings.agencyHubBaseUrl;
-    agencyHubKeyInput.value = savedSettings.agencyHubApiKey;
+  const mergeSavedFormSettings = (
+    savedSettings: Settings,
+    patch: Partial<Settings>,
+  ): Settings => ({
+    ...savedSettings,
+    // Device tokens are background-issued and never form-owned. Preserve a
+    // newer sign-in/re-read if an older local write acknowledges afterwards.
+    agencyHubDeviceToken: state.settings.agencyHubDeviceToken,
+    // Likewise, a patch that did not explicitly own the custody key must not
+    // make this page's in-memory view regress to its stale base snapshot.
+    agencyHubApiKey: Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')
+      ? savedSettings.agencyHubApiKey
+      : state.settings.agencyHubApiKey,
+  });
 
-    // Reflect the sanitized/clamped counts back into the fields so an
-    // out-of-range or blank entry doesn't keep displaying a value that differs
-    // from what was stored. Skip a field the user is still editing.
-    const writeCount = (input: HTMLInputElement, value: number): void => {
-      if (document.activeElement !== input) {
-        input.value = String(value);
+  let settingsSaveChain: Promise<void> | null = null;
+  let settingsDirty = false;
+  let settingsSnapshotVersion = 0;
+  let agencyHubApiKeySnapshotVersion = 0;
+  let settingsSaveChainSignature: string | null = null;
+  const queueSettingsSave = (forceHubSnapshot = false): Promise<void> => {
+    // Capture the fields now, then serialize storage writes. A slow previous
+    // storage read must not be allowed to finish after a newer edit and put an
+    // older form snapshot back into storage.
+    const formSignature = settingsFormSignature();
+    const patch = collectSettingsPatch(forceHubSnapshot);
+    const snapshotVersion = ++settingsSnapshotVersion;
+    if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
+      agencyHubApiKeySnapshotVersion = snapshotVersion;
+    }
+    settingsDirty = false;
+    const persist = async (): Promise<void> => {
+      const savedSettings = await saveSettings(patch, state.settings);
+      if (
+        Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey') &&
+        snapshotVersion === agencyHubApiKeySnapshotVersion &&
+        agencyHubKeyInput.value === patch.agencyHubApiKey
+      ) {
+        // A newer non-credential snapshot may already exist, but it is queued
+        // behind this one and needs the successfully-written custody value as
+        // its base. Move only the field this snapshot explicitly owned.
+        agencyHubApiKeyDirty = false;
+        state.settings = {
+          ...state.settings,
+          agencyHubApiKey: savedSettings.agencyHubApiKey,
+        };
+      }
+      const mergedSettings = mergeSavedFormSettings(savedSettings, patch);
+      if (snapshotVersion !== settingsSnapshotVersion) {
+        return;
+      }
+      state.settings = mergedSettings;
+
+      if (disposed) {
+        return;
+      }
+
+      agencyHubUrlInput.value = mergedSettings.agencyHubBaseUrl;
+      if (!agencyHubApiKeyDirty && document.activeElement !== agencyHubKeyInput) {
+        agencyHubKeyInput.value = mergedSettings.agencyHubApiKey;
+      }
+
+      // Reflect the sanitized/clamped counts back into the fields so an
+      // out-of-range or blank entry doesn't keep displaying a value that differs
+      // from what was stored. Skip a field the user is still editing.
+      const writeCount = (input: HTMLInputElement, value: number): void => {
+        if (document.activeElement !== input) {
+          input.value = String(value);
+        }
+      };
+      writeCount(quickInput, mergedSettings.quickMessageCount);
+      writeCount(pingInput, mergedSettings.pingMessageCount);
+      writeCount(improveInput, mergedSettings.improveMessageCount);
+      writeCount(deepInput, mergedSettings.deepMessageCount);
+
+      const hubSignature = buildAgencyHubConnectionSignature(
+        mergedSettings.agencyHubBaseUrl,
+        mergedSettings.agencyHubApiKey,
+        mergedSettings.agencyHubDeviceToken,
+      );
+      if (hubSignature !== lastAgencyHubConnectionSignature) {
+        // Connection diagnostics can take much longer than local persistence.
+        // Keep them outside the serialized write chain so a second edit (or a
+        // pagehide flush) never waits behind a network check before storage.
+        void (async () => {
+          await refreshAgencyHubPermissionState();
+          if (!disposed) {
+            await runAgencyHubConnectionTest({ force: true });
+          }
+        })().catch((error: unknown) => {
+          console.error('Failed to refresh Agency Hub status after Settings save', error);
+        });
       }
     };
-    writeCount(quickInput, savedSettings.quickMessageCount);
-    writeCount(pingInput, savedSettings.pingMessageCount);
-    writeCount(improveInput, savedSettings.improveMessageCount);
-    writeCount(deepInput, savedSettings.deepMessageCount);
+    const execution = settingsSaveChain
+      ? settingsSaveChain.then(persist)
+      : persist();
+    const settled = execution
+      .catch((error: unknown) => {
+        console.error('Failed to save Settings changes', error);
+      });
+    settingsSaveChain = settled;
+    settingsSaveChainSignature = formSignature;
+    void settled.finally(() => {
+      if (settingsSaveChain === settled) {
+        settingsSaveChain = null;
+        settingsSaveChainSignature = null;
+      }
+    });
+    return settled;
+  };
 
-    const hubSignature = buildAgencyHubConnectionSignature(
-      savedSettings.agencyHubBaseUrl,
-      savedSettings.agencyHubApiKey,
-      savedSettings.agencyHubDeviceToken,
-    );
-    if (hubSignature !== lastAgencyHubConnectionSignature) {
-      await refreshAgencyHubPermissionState();
-      await runAgencyHubConnectionTest({ force: true });
+  const saveSettingsDebounced = debounce(queueSettingsSave, 350);
+  const scheduleSettingsSave = (): void => {
+    settingsDirty = true;
+    saveSettingsDebounced();
+  };
+  const flushSettingsSave = (): Promise<void> => {
+    const flushed = saveSettingsDebounced.flush();
+    return flushed ?? settingsSaveChain ?? Promise.resolve();
+  };
+  persistAgencyHubSettings = (): Promise<void> => {
+    const currentSignature = settingsFormSignature();
+    if (
+      settingsSaveChain !== null &&
+      settingsSaveChainSignature === currentSignature
+    ) {
+      // A blur/change may have scheduled the exact snapshot a Hub action needs.
+      // Join it instead of writing the same form twice.
+      saveSettingsDebounced.cancel();
+      settingsDirty = false;
+      return settingsSaveChain;
     }
-  }, 350);
+
+    // Hub actions are explicit persistence boundaries. They must save even
+    // when values were assigned programmatically (no input/change event), or
+    // when the current form differs from the active queued snapshot.
+    saveSettingsDebounced.cancel();
+    return queueSettingsSave(true);
+  };
 
   [
+    themeSelect,
     agencyHubUrlInput,
     agencyHubKeyInput,
     quickInput,
@@ -679,8 +928,22 @@ async function render(): Promise<void> {
     deepInput,
     debugInput,
   ].forEach((element) => {
-    element.addEventListener('input', saveSettingsDebounced);
-    element.addEventListener('change', saveSettingsDebounced);
+    element.addEventListener('input', () => {
+      if (element === agencyHubKeyInput) {
+        agencyHubApiKeyDirty = true;
+      }
+      scheduleSettingsSave();
+    });
+    element.addEventListener('change', () => {
+      if (element === agencyHubKeyInput) {
+        agencyHubApiKeyDirty = true;
+      }
+      scheduleSettingsSave();
+      void saveSettingsDebounced.flush();
+    });
+    element.addEventListener('blur', () => {
+      void saveSettingsDebounced.flush();
+    });
   });
   agencyHubUrlInput.addEventListener('input', () => {
     markAgencyHubConnectionPending();
@@ -723,258 +986,466 @@ async function render(): Promise<void> {
   root.append(apiSection);
   root.append(agencyHubSection);
 
-  // ─── Personalities ─────────────────────────────────────────
-  const personalitiesSection = createSection('Model Personalities');
+  // ─── Persona catalog (server-owned, metadata only) ─────────
+  const personalitiesSection = createSection(
+    'Model Personalities',
+    'Global personalities are managed by Agency Hub admins. This extension only reads the catalog and stores account mappings.',
+  );
   const personalitiesList = document.createElement('div');
   personalitiesList.style.display = 'grid';
-  personalitiesList.style.gap = '16px';
+  personalitiesList.style.gap = '10px';
+  let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
-  const collectPersonalityEntries = (): Personality[] =>
-    Array.from(personalitiesList.querySelectorAll<HTMLElement>('[data-personality-id]')).map((card) => {
-      const id = card.dataset.personalityId!;
-      const nameVal = card.querySelector<HTMLInputElement>('input[data-role="name"]')!.value;
-      const contentVal = card.querySelector<HTMLTextAreaElement>('textarea[data-role="content"]')!.value;
-      const builtin = card.dataset.personalityBuiltin === 'true';
-      const builtinVersion = Number(card.dataset.personalityBuiltinVersion);
-      return {
-        id,
-        name: nameVal,
-        content: contentVal,
-        updatedAt: Date.now(),
-        ...(builtin ? { builtin: true } : {}),
-        ...(builtin && Number.isFinite(builtinVersion) ? { builtinVersion } : {}),
-      } satisfies Personality;
-    });
-
-  const savePersonalitiesDebounced = debounce(async () => {
-    // Persist without re-rendering: rebuilding the DOM here would replace the
-    // textarea the user is editing and steal focus/caret mid-edit. Keep the
-    // in-memory state in sync so add/delete read current values.
-    state.personalities = await savePersonalities(collectPersonalityEntries());
-  }, 450);
-
-  const makeCard = (personality: Personality): HTMLElement => {
-    const card = document.createElement('div');
-    card.dataset.personalityId = personality.id;
-    card.dataset.personalityBuiltin = personality.builtin ? 'true' : 'false';
-    if (personality.builtinVersion !== undefined) {
-      card.dataset.personalityBuiltinVersion = String(personality.builtinVersion);
+  const renderPersonaCatalog = (): void => {
+    personalitiesList.replaceChildren();
+    if (state.personaCatalog.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.';
+      empty.style.color = 'var(--chatgoose-ink-mid)';
+      personalitiesList.append(empty);
+      return;
     }
-    card.className = 'chatgoose-card';
-
-    const nameInput = document.createElement('input');
-    nameInput.className = 'chatgoose-input';
-    nameInput.dataset.role = 'name';
-    nameInput.value = personality.name;
-
-    const contentInput = document.createElement('textarea');
-    contentInput.className = 'chatgoose-textarea';
-    contentInput.dataset.role = 'content';
-    contentInput.value = personality.content;
-    contentInput.rows = 12;
-
-    // W9.2/A7 (E17): built-in personas are read-only — the kernel owns the
-    // builtin voice, and a local edit was silently ignored at generation time
-    // (the kernel assembles from ITS builtin:lora, not from this textarea).
-    // Locking the card ends that silent drift; custom personas sync instead.
-    if (personality.builtin) {
-      nameInput.readOnly = true;
-      contentInput.readOnly = true;
-      nameInput.title = 'Built-in personality — read-only';
-      contentInput.title = 'Built-in personality — read-only. Add a personality to customize a voice.';
+    for (const persona of state.personaCatalog) {
+      const card = document.createElement('div');
+      card.className = 'chatgoose-card';
+      card.dataset.personaKey = persona.key;
+      const heading = document.createElement('div');
+      heading.textContent = persona.displayName;
+      heading.style.fontWeight = '700';
+      const meta = document.createElement('div');
+      meta.textContent = `${persona.key} • version ${persona.version} • ${persona.status}`;
+      meta.style.fontSize = '12px';
+      meta.style.color = persona.status === 'active'
+        ? 'var(--chatgoose-ink-mid)'
+        : 'var(--chatgoose-bad)';
+      card.append(heading, meta);
+      personalitiesList.append(card);
     }
-
-    const actions = document.createElement('div');
-    actions.className = 'chatgoose-card-actions';
-    if (personality.builtin) {
-      const builtinNote = document.createElement('div');
-      builtinNote.textContent = 'Built-in personality — read-only. Add a personality to customize a voice.';
-      builtinNote.style.fontSize = '12px';
-      builtinNote.style.color = 'var(--chatgoose-ink-mid)';
-      actions.append(builtinNote);
-    }
-    if (!personality.builtin) {
-      const deleteButton = createButton('Delete', false, true);
-      deleteButton.addEventListener('click', async () => {
-        const confirmed = window.confirm(`Delete personality "${nameInput.value || personality.name}"?`);
-        if (!confirmed) {
-          return;
-        }
-        // Cancel the pending debounced save so a stale pre-delete snapshot can't
-        // flush afterwards and resurrect this card, then flush current edits so
-        // other cards' in-progress changes survive the delete (which also clears
-        // this personality's account mappings and cached summaries).
-        savePersonalitiesDebounced.cancel();
-        await savePersonalities(collectPersonalityEntries());
-        await deletePersonality(personality.id);
-        await render();
-      });
-      actions.append(deleteButton);
-    }
-
-    nameInput.addEventListener('input', savePersonalitiesDebounced);
-    contentInput.addEventListener('input', savePersonalitiesDebounced);
-
-    card.append(labeledField('Name', nameInput), labeledField('Personality content', contentInput), actions);
-    return card;
   };
+  renderPersonaCatalog();
 
-  state.personalities.forEach((personality) => personalitiesList.append(makeCard(personality)));
+  const preservationNote = document.createElement('div');
+  preservationNote.textContent = 'Legacy local persona text is preserved unchanged on this device. Export it before removing the extension or clearing browser data.';
+  preservationNote.style.color = 'var(--chatgoose-ink-mid)';
+  preservationNote.style.fontSize = '13px';
 
-  const addPersonality = createButton('Add Personality');
-  addPersonality.addEventListener('click', async () => {
-    // Cancel the pending debounced save and read current DOM values so an
-    // in-progress edit isn't lost when the list is rebuilt.
-    savePersonalitiesDebounced.cancel();
-    const personalities = [
-      ...collectPersonalityEntries(),
-      {
-        id: crypto.randomUUID(),
-        name: 'New Personality',
-        content: '',
-        updatedAt: Date.now(),
-      },
-    ];
-    await savePersonalities(personalities);
-    await render();
-  });
+  const flushPendingEdits = (): Promise<void> => {
+    void flushSettingsSave();
+    return (settingsSaveChain ?? Promise.resolve()).then(() => undefined);
+  };
+  const handlePageHide = (): void => {
+    // pagehide cannot wait for an existing save chain. Cancel pending timers
+    // and invoke storage.set for the newest dirty snapshots NOW, even when an
+    // older write promise is still unsettled. Calls are issued oldest->newest,
+    // preserving storage.local's last-write-wins order without scheduling the
+    // same snapshot through the normal chain a second time.
+    saveSettingsDebounced.cancel();
+    if (settingsDirty || agencyHubApiKeyDirty) {
+      settingsDirty = false;
+      const patch = collectSettingsPatch();
+      const snapshotVersion = ++settingsSnapshotVersion;
+      if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
+        agencyHubApiKeySnapshotVersion = snapshotVersion;
+      }
+      void saveSettings(patch, state.settings)
+        .then((savedSettings) => {
+          if (
+            Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey') &&
+            snapshotVersion === agencyHubApiKeySnapshotVersion &&
+            agencyHubKeyInput.value === patch.agencyHubApiKey
+          ) {
+            agencyHubApiKeyDirty = false;
+            state.settings = {
+              ...state.settings,
+              agencyHubApiKey: savedSettings.agencyHubApiKey,
+            };
+          }
+          if (snapshotVersion === settingsSnapshotVersion) {
+            state.settings = mergeSavedFormSettings(savedSettings, patch);
+          }
+        })
+        .catch((error: unknown) => {
+          console.error('Failed to save Settings changes on pagehide', error);
+        });
+    }
+  };
+  window.addEventListener('pagehide', handlePageHide);
+  cleanupTasks.push(() => window.removeEventListener('pagehide', handlePageHide));
 
-  personalitiesSection.append(personalitiesList, addPersonality);
+  personalitiesSection.append(
+    personalitiesList,
+    preservationNote,
+    createLegacyPersonaExportControls(),
+  );
   root.append(personalitiesSection);
 
   // ─── Account Mappings ──────────────────────────────────────
   const mappingsSection = createSection('Account Mappings');
+  mappingsSection.dataset.sessionHydration = 'loading';
   const mappingsTable = document.createElement('div');
   mappingsTable.style.display = 'grid';
   mappingsTable.style.gap = '12px';
-  const personalitiesById = new Map(state.personalities.map((personality) => [personality.id, personality]));
-  // Names aren't unique; track collisions so the mapping dropdown can
-  // disambiguate same-named personalities with a short id suffix.
-  const personalityNameCounts = new Map<string, number>();
-  for (const personality of state.personalities) {
-    personalityNameCounts.set(personality.name, (personalityNameCounts.get(personality.name) ?? 0) + 1);
-  }
-  const personalityOptionLabel = (personality: Personality): string =>
-    (personalityNameCounts.get(personality.name) ?? 0) > 1
-      ? `${personality.name} · ${personality.id.slice(0, 6)}`
-      : personality.name;
-
-  state.knownAccounts.forEach((accountId) => {
-    const session = sessionsByAccountId.get(accountId);
-    const row = document.createElement('div');
-    row.style.display = 'grid';
-    row.style.gridTemplateColumns = '1fr minmax(220px, 320px) auto';
-    row.style.gap = '12px';
-    row.style.alignItems = 'center';
-    row.style.padding = '12px';
-    row.style.borderRadius = 'var(--chatgoose-radius-card)';
-    row.style.background = 'var(--chatgoose-bg2)';
-    row.style.border = '1px solid var(--chatgoose-line)';
-
-    const label = document.createElement('div');
-    label.style.display = 'grid';
-    label.style.gap = '4px';
-
-    const labelTitle = document.createElement('div');
-    labelTitle.textContent = formatAccountHeading(accountId, session);
-    labelTitle.style.fontWeight = '600';
-
-    const labelMeta = document.createElement('div');
-    labelMeta.textContent = formatAccountMeta(accountId, session);
-    labelMeta.style.fontSize = '12px';
-    labelMeta.style.color = 'var(--chatgoose-ink-mid)';
-
-    label.append(labelTitle, labelMeta);
-
-    const select = document.createElement('select');
-    select.className = 'chatgoose-select';
-    const unmapped = document.createElement('option');
-    unmapped.value = '';
-    unmapped.textContent = 'Unmapped';
-    select.append(unmapped);
-    for (const personality of state.personalities) {
-      const option = document.createElement('option');
-      option.value = personality.id;
-      option.textContent = personalityOptionLabel(personality);
-      select.append(option);
-    }
-    select.value = state.accountMappings[accountId] ?? '';
-    select.addEventListener('change', async () => {
-      await saveAccountMapping(accountId, select.value || null);
-      await render();
-    });
-
-    const info = document.createElement('div');
-    info.style.fontSize = '12px';
-    info.style.color = 'var(--chatgoose-ink-mid)';
-    const mapped = personalitiesById.get(state.accountMappings[accountId] ?? '');
-    info.textContent = `${mapped ? personalityOptionLabel(mapped) : 'Unmapped'} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
-
-    row.append(label, select, info);
-    mappingsTable.append(row);
-  });
-
-  if (state.knownAccounts.length === 0) {
-    const empty = document.createElement('div');
-    empty.textContent = 'No Fansly accounts detected yet.';
-    empty.style.color = 'var(--chatgoose-ink-mid)';
-    mappingsTable.append(empty);
-  }
-
+  const mappingsLoading = document.createElement('div');
+  mappingsLoading.textContent = 'Loading Fansly accounts…';
+  mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
+  mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
   root.append(mappingsSection);
 
   // ─── Connection Status ─────────────────────────────────────
   const connectionsSection = createSection('Connection Status');
+  connectionsSection.dataset.sessionHydration = 'loading';
   const sessionsGrid = document.createElement('div');
   sessionsGrid.style.display = 'grid';
   sessionsGrid.style.gap = '10px';
-
-  const connectionRows = buildConnectionRows(sessions);
-
-  connectionRows
-    .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
-    .forEach(({ accountId, session }) => {
-      const card = document.createElement('div');
-      card.className = 'chatgoose-card';
-      card.style.display = 'grid';
-      card.style.gap = '6px';
-      const heading = document.createElement('div');
-      heading.style.display = 'flex';
-      heading.style.justifyContent = 'space-between';
-      heading.style.alignItems = 'center';
-      const left = document.createElement('div');
-      left.textContent = formatAccountHeading(accountId, session);
-      left.style.fontWeight = '600';
-      const right = document.createElement('div');
-      right.textContent = session?.connected ? 'Connected' : 'Disconnected';
-      right.style.color = session?.connected ? 'var(--chatgoose-green)' : 'var(--chatgoose-bad)';
-      heading.append(left, right);
-      const meta = document.createElement('div');
-      meta.textContent = formatAccountMeta(accountId, session);
-      meta.style.fontSize = '12px';
-      meta.style.color = 'var(--chatgoose-ink-mid)';
-      card.append(heading, meta);
-      sessionsGrid.append(card);
-    });
-
-  if (connectionRows.length === 0) {
-    const empty = document.createElement('div');
-    empty.textContent = 'No active sessions captured yet.';
-    empty.style.color = 'var(--chatgoose-ink-mid)';
-    sessionsGrid.append(empty);
-  }
-
+  const connectionsLoading = document.createElement('div');
+  connectionsLoading.textContent = 'Loading live connection status…';
+  connectionsLoading.style.color = 'var(--chatgoose-ink-mid)';
+  sessionsGrid.append(connectionsLoading);
   connectionsSection.append(sessionsGrid);
   root.append(connectionsSection);
 
-  renderCleanup = () => {
+  cleanupTasks.push(() => {
+    disposed = true;
+  });
+
+  type PersonalityMappingView = {
+    personality: PersonaCatalogEntry;
+    label: string;
+    usable: boolean;
+  };
+  const buildPersonalityMappingViews = (): PersonalityMappingView[] => {
+    const personalityNameCounts = new Map<string, number>();
+    for (const personality of state.personaCatalog) {
+      personalityNameCounts.set(
+        personality.displayName,
+        (personalityNameCounts.get(personality.displayName) ?? 0) + 1,
+      );
+    }
+    return state.personaCatalog.map((personality) => {
+      const label = (personalityNameCounts.get(personality.displayName) ?? 0) > 1
+        ? `${personality.displayName} · ${personality.key.slice(0, 6)}`
+        : personality.displayName;
+      return {
+        personality,
+        label,
+        usable: personality.status === 'active',
+      };
+    });
+  };
+  const populateMappingSelect = (
+    select: HTMLSelectElement,
+    selectedPersonalityId: string,
+    views: PersonalityMappingView[],
+  ): { label: string; usable: boolean } | null => {
+    const unmapped = document.createElement('option');
+    unmapped.value = '';
+    unmapped.textContent = 'Unmapped';
+    select.replaceChildren(unmapped);
+    for (const view of views) {
+      const option = document.createElement('option');
+      option.value = view.personality.key;
+      option.textContent = view.usable
+        ? view.label
+        : `${view.label} · archived`;
+      option.disabled = !view.usable;
+      select.append(option);
+    }
+
+    const selectedView = views.find(
+      (view) => view.personality.key === selectedPersonalityId,
+    ) ?? null;
+    if (selectedPersonalityId && !selectedView) {
+      const missing = document.createElement('option');
+      missing.value = selectedPersonalityId;
+      missing.textContent = `Unavailable persona · ${selectedPersonalityId}`;
+      missing.disabled = true;
+      select.append(missing);
+      select.value = selectedPersonalityId;
+      return { label: missing.textContent, usable: false };
+    }
+    select.value = selectedView?.personality.key ?? '';
+    return selectedView
+      ? { label: selectedView.label, usable: selectedView.usable }
+      : null;
+  };
+
+  refreshAccountMappingPersonalityOptions = (): void => {
+    if (disposed || mappingsSection.dataset.sessionHydration === 'loading') {
+      return;
+    }
+    const views = buildPersonalityMappingViews();
+    for (const select of mappingsTable.querySelectorAll<HTMLSelectElement>(
+      'select[data-account-id]',
+    )) {
+      const accountId = select.dataset.accountId!;
+      const selectedPersonalityId = select.dataset.mappingPending === 'true'
+        ? select.value
+        : (state.accountMappings[accountId] ?? '');
+      const selectedView = populateMappingSelect(select, selectedPersonalityId, views);
+      const info = select.closest<HTMLElement>('[data-account-mapping-row]')
+        ?.querySelector<HTMLElement>('[data-role="mapping-info"]');
+      if (info) {
+        info.textContent = `${selectedView?.label ?? 'Unmapped'}${selectedView && !selectedView.usable ? ' · unavailable' : ''} • ${select.dataset.connected === 'true' ? 'Connected' : 'Disconnected'}`;
+      }
+    }
+  };
+
+  if (
+    typeof browser.storage.onChanged?.addListener === 'function' &&
+    typeof browser.storage.onChanged?.removeListener === 'function'
+  ) {
+    let catalogReadGeneration = 0;
+    const handleCatalogStorageChange = (
+      changes: Record<string, browser.storage.StorageChange>,
+      areaName: string,
+    ): void => {
+      if (
+        areaName !== 'local' ||
+        !(
+          changes.settings ||
+          changes[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] ||
+          changes[AGENCY_HUB_API_KEY_STORAGE_KEY] ||
+          changes[PERSONA_CATALOG_STORAGE_KEY] ||
+          changes[PERSONA_CATALOG_SOURCE_STORAGE_KEY] ||
+          changes[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]
+        )
+      ) {
+        return;
+      }
+      const generation = ++catalogReadGeneration;
+      void readStorageState().then((refreshedState) => {
+        if (disposed || generation !== catalogReadGeneration) {
+          return;
+        }
+        state.personaCatalog = refreshedState.personaCatalog;
+        state.personaCatalogSource = refreshedState.personaCatalogSource;
+        state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
+        renderPersonaCatalog();
+        refreshAccountMappingPersonalityOptions?.();
+      }).catch((error: unknown) => {
+        console.error('Failed to apply live persona catalog update', error);
+      });
+    };
+    browser.storage.onChanged.addListener(handleCatalogStorageChange);
+    cleanupTasks.push(() => {
+      catalogReadGeneration += 1;
+      browser.storage.onChanged.removeListener(handleCatalogStorageChange);
+    });
+  }
+
+  const renderAccountMappings = (
+    sessions: SessionSnapshotEntry[],
+    hydrationFailed: boolean,
+  ): void => {
+    const sessionsByAccountId = buildSessionLookup(sessions);
+    const personalityViews = buildPersonalityMappingViews();
+
+    mappingsTable.replaceChildren();
+    mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
+
+    if (hydrationFailed) {
+      const warning = document.createElement('div');
+      warning.textContent = 'Live account refresh failed. Showing mappings from local storage.';
+      warning.style.color = 'var(--chatgoose-ink-mid)';
+      mappingsTable.append(warning);
+    }
+
+    state.knownAccounts.forEach((accountId) => {
+      const session = sessionsByAccountId.get(accountId);
+      const row = document.createElement('div');
+      row.dataset.accountMappingRow = accountId;
+      row.style.display = 'grid';
+      row.style.gridTemplateColumns = '1fr minmax(220px, 320px) auto';
+      row.style.gap = '12px';
+      row.style.alignItems = 'center';
+      row.style.padding = '12px';
+      row.style.borderRadius = 'var(--chatgoose-radius-card)';
+      row.style.background = 'var(--chatgoose-bg2)';
+      row.style.border = '1px solid var(--chatgoose-line)';
+
+      const label = document.createElement('div');
+      label.style.display = 'grid';
+      label.style.gap = '4px';
+
+      const labelTitle = document.createElement('div');
+      labelTitle.textContent = formatAccountHeading(accountId, session);
+      labelTitle.style.fontWeight = '600';
+
+      const labelMeta = document.createElement('div');
+      labelMeta.textContent = formatAccountMeta(accountId, session);
+      labelMeta.style.fontSize = '12px';
+      labelMeta.style.color = 'var(--chatgoose-ink-mid)';
+
+      label.append(labelTitle, labelMeta);
+
+      const select = document.createElement('select');
+      select.className = 'chatgoose-select';
+      select.dataset.accountId = accountId;
+      select.dataset.connected = session?.connected ? 'true' : 'false';
+      const mappedView = populateMappingSelect(
+        select,
+        state.accountMappings[accountId] ?? '',
+        personalityViews,
+      );
+      select.addEventListener('change', () => {
+        const selectedPersonalityId = select.value || null;
+        select.disabled = true;
+        select.dataset.mappingPending = 'true';
+        void (async () => {
+          try {
+            await saveAccountMapping(accountId, selectedPersonalityId);
+            const refreshedState = await loadStorageState();
+            if (disposed) {
+              return;
+            }
+            state.accountMappings = refreshedState.accountMappings;
+            state.accountAliases = refreshedState.accountAliases;
+            state.knownAccounts = refreshedState.knownAccounts;
+            // Update only the account rows. Rebuilding the whole page here
+            // would replace personality inputs and could flush stale debounced
+            // form state over a user's in-progress edit.
+            renderAccountMappings(sessions, hydrationFailed);
+          } catch (error) {
+            console.error('Failed to save account mapping', error);
+            if (!disposed) {
+              select.dataset.mappingPending = 'false';
+              select.disabled = false;
+              refreshAccountMappingPersonalityOptions?.();
+            }
+          }
+        })();
+      });
+
+      const info = document.createElement('div');
+      info.dataset.role = 'mapping-info';
+      info.style.fontSize = '12px';
+      info.style.color = 'var(--chatgoose-ink-mid)';
+      info.textContent = `${mappedView?.label ?? 'Unmapped'}${mappedView && !mappedView.usable ? ' · unavailable' : ''} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
+
+      row.append(label, select, info);
+      mappingsTable.append(row);
+    });
+
+    if (state.knownAccounts.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No Fansly accounts detected yet.';
+      empty.style.color = 'var(--chatgoose-ink-mid)';
+      mappingsTable.append(empty);
+    }
+  };
+
+  const renderConnections = (
+    sessions: SessionSnapshotEntry[],
+    hydrationFailed: boolean,
+  ): void => {
+    sessionsGrid.replaceChildren();
+    connectionsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
+
+    if (hydrationFailed) {
+      const error = document.createElement('div');
+      error.textContent = 'Could not load live connection status. Reload Settings to try again.';
+      error.style.color = 'var(--chatgoose-bad)';
+      sessionsGrid.append(error);
+      return;
+    }
+
+    const connectionRows = buildConnectionRows(sessions);
+    connectionRows
+      .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
+      .forEach(({ accountId, session }) => {
+        const card = document.createElement('div');
+        card.className = 'chatgoose-card';
+        card.style.display = 'grid';
+        card.style.gap = '6px';
+        const heading = document.createElement('div');
+        heading.style.display = 'flex';
+        heading.style.justifyContent = 'space-between';
+        heading.style.alignItems = 'center';
+        const left = document.createElement('div');
+        left.textContent = formatAccountHeading(accountId, session);
+        left.style.fontWeight = '600';
+        const right = document.createElement('div');
+        right.textContent = session.connected ? 'Connected' : 'Disconnected';
+        right.style.color = session.connected ? 'var(--chatgoose-green)' : 'var(--chatgoose-bad)';
+        heading.append(left, right);
+        const meta = document.createElement('div');
+        meta.textContent = formatAccountMeta(accountId, session);
+        meta.style.fontSize = '12px';
+        meta.style.color = 'var(--chatgoose-ink-mid)';
+        card.append(heading, meta);
+        sessionsGrid.append(card);
+      });
+
+    if (connectionRows.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No active sessions captured yet.';
+      empty.style.color = 'var(--chatgoose-ink-mid)';
+      sessionsGrid.append(empty);
+    }
+  };
+
+  const hydrateAccountSections = async (): Promise<void> => {
+    const result = await sessionsResultPromise;
+    if (disposed) {
+      return;
+    }
+
+    if (!result.ok) {
+      console.error('Failed to load Fansly sessions for Settings', result.error);
+      renderAccountMappings([], true);
+      renderConnections([], true);
+      return;
+    }
+
+    // The runtime snapshot performs identity rekey/reconciliation. Read only
+    // after it resolves, then copy only account-owned fields into this render's
+    // state so unrelated local form state cannot be replaced by a stale read.
+    try {
+      const refreshedState = await loadStorageState();
+      if (disposed) {
+        return;
+      }
+      state.accountMappings = refreshedState.accountMappings;
+      state.accountAliases = refreshedState.accountAliases;
+      state.knownAccounts = refreshedState.knownAccounts;
+      renderAccountMappings(result.sessions, false);
+      renderConnections(result.sessions, false);
+    } catch (error) {
+      console.error('Failed to refresh account state for Settings', error);
+      if (!disposed) {
+        renderAccountMappings([], true);
+        renderConnections([], true);
+      }
+    }
+  };
+
+  void hydrateAccountSections();
+
+  renderCleanup = async () => {
+    const pendingEdits = flushPendingEdits();
     cleanupTasks.forEach((cleanup) => cleanup());
+    await pendingEdits;
     renderCleanup = null;
   };
 
   await refreshAgencyHubPermissionState();
   await runAgencyHubConnectionTest({ force: true });
+  // A successful connection test waits for the background catalog refresh.
+  // Merge only catalog fields so account hydration and form edits keep their
+  // narrow ownership boundaries.
+  try {
+    const refreshedCatalogState = await readStorageState();
+    if (!disposed) {
+      state.personaCatalog = refreshedCatalogState.personaCatalog;
+      state.personaCatalogSource = refreshedCatalogState.personaCatalogSource;
+      state.personaCatalogFetchedAt = refreshedCatalogState.personaCatalogFetchedAt;
+      renderPersonaCatalog();
+      refreshAccountMappingPersonalityOptions?.();
+    }
+  } catch (error) {
+    console.error('Failed to refresh persona catalog view', error);
+  }
 }
 
 injectStyles(optionsStyles);

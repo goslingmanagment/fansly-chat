@@ -60,8 +60,8 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   no_personalities: {
     key: 'no_personalities',
     code: 'CG-FLOW-01',
-    message: 'No model personalities are configured.',
-    description: 'Open Settings and create at least one personality.',
+    message: 'No active server personas are available.',
+    description: 'Ask an Agency Hub admin to create or activate a persona, then refresh Settings.',
     settingsLink: true,
   },
   no_mapping: {

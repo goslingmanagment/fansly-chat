@@ -1,8 +1,25 @@
 import type { CompletedOverlayViewModel, FeatureType } from '../../shared/types.js';
 
 interface CompletedOverlayEntry {
-  cacheKey: string | null;
+  identity: CompletedOverlayCacheIdentity;
   model: CompletedOverlayViewModel;
+}
+
+export interface CompletedOverlayCacheIdentity {
+  personaKey: string | null;
+  personaVersion: number | null;
+  personaSource: string | null;
+  variantKey: string | null;
+}
+
+function sameIdentity(
+  left: CompletedOverlayCacheIdentity,
+  right: CompletedOverlayCacheIdentity,
+): boolean {
+  return left.personaKey === right.personaKey &&
+    left.personaVersion === right.personaVersion &&
+    left.personaSource === right.personaSource &&
+    left.variantKey === right.variantKey;
 }
 
 export class CompletedOverlayCache {
@@ -21,7 +38,7 @@ export class CompletedOverlayCache {
   get(
     groupId: string | null,
     feature: FeatureType,
-    cacheKey?: string | null,
+    identity: CompletedOverlayCacheIdentity,
   ): CompletedOverlayViewModel | null {
     if (!groupId || this.activeGroupId !== groupId) {
       return null;
@@ -32,7 +49,7 @@ export class CompletedOverlayCache {
       return null;
     }
 
-    if ((cacheKey ?? null) !== entry.cacheKey) {
+    if (!sameIdentity(identity, entry.identity)) {
       return null;
     }
 
@@ -43,7 +60,7 @@ export class CompletedOverlayCache {
     groupId: string | null,
     feature: FeatureType,
     model: CompletedOverlayViewModel,
-    cacheKey?: string | null,
+    identity: CompletedOverlayCacheIdentity,
   ): void {
     if (!groupId) {
       return;
@@ -51,7 +68,7 @@ export class CompletedOverlayCache {
 
     this.setActiveGroup(groupId);
     this.completedByFeature.set(feature, {
-      cacheKey: cacheKey ?? null,
+      identity: { ...identity },
       model,
     });
   }

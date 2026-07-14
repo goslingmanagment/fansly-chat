@@ -44,6 +44,7 @@ import type {
   SpenderListEntry,
   SpendersListResult,
   SpendersProgressPayload,
+  SpendersSnapshotPayload,
   SpendersStreamState,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
@@ -149,6 +150,21 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 interface CacheEntry {
   cachedAt: number;
   result: SpendersListResult;
+}
+
+interface SpendersBuildSubscriber {
+  onProgress?: (progress: SpendersProgressPayload) => void;
+  onSnapshot?: (snapshot: SpendersSnapshotPayload) => void;
+}
+
+interface InFlightBuild {
+  controller: AbortController;
+  promise: Promise<SpendersListResult>;
+  subscribers: Set<SpendersBuildSubscriber>;
+  latestProgress: SpendersProgressPayload | null;
+  latestSnapshot: SpendersSnapshotPayload | null;
+  waiterCount: number;
+  settled: boolean;
 }
 
 /** Conversation enumeration only accelerates direct chat-open; never let it
@@ -374,6 +390,8 @@ function isCacheableResult(result: SpendersListResult): boolean {
 
 export class SpendersService {
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly inFlightByKey = new Map<string, InFlightBuild>();
+  private readonly activeBuildControllers = new Map<AbortController, string>();
   private cacheGeneration = 0;
   private buildSequence = 0;
   private readonly latestBuildByKey = new Map<string, number>();
@@ -410,14 +428,17 @@ export class SpendersService {
     options?: {
       refresh?: boolean;
       onProgress?: (progress: SpendersProgressPayload) => void;
+      onSnapshot?: (snapshot: SpendersSnapshotPayload) => void;
     },
   ): Promise<SpendersListResult> {
+    throwIfParentAborted(signal);
     const settings = await this.getSettings?.();
     if (this.kernelSource === undefined || settings === undefined) {
       // The legacy per-fan rebuild died in 1.7.0 — a board without the kernel
       // wired is a composition bug, not a fallback case.
       throw new ChatGooseError('hub_request_failed');
     }
+    throwIfParentAborted(signal);
 
     const key = this.boardCacheKey(session, settings);
     const now = Date.now();
@@ -430,6 +451,7 @@ export class SpendersService {
         now - cached.cachedAt < SPENDERS_CACHE_TTL_MS &&
         isCacheableResult(cached.result)
       ) {
+        throwIfParentAborted(signal);
         return cached.result;
       }
       // Worker restarted since the last build? The session-storage copy is
@@ -441,14 +463,60 @@ export class SpendersService {
         now - persisted.cachedAt < SPENDERS_CACHE_TTL_MS &&
         isCacheableResult(persisted.result)
       ) {
+        throwIfParentAborted(signal);
         this.cache.set(key, persisted);
         return persisted.result;
       }
     }
 
+    throwIfParentAborted(signal);
+
+    if (options?.refresh) {
+      // Refresh remains an independent rebuild and supersedes an older cold
+      // build for cache purposes. Do not make later cold callers join stale
+      // work that a user explicitly asked to replace.
+      this.inFlightByKey.delete(key);
+      const controller = new AbortController();
+      this.activeBuildControllers.set(controller, key);
+      try {
+        return await this.runBuild(
+          key,
+          generation,
+          session,
+          settings,
+          AbortSignal.any([signal, controller.signal]),
+          options,
+        );
+      } finally {
+        this.activeBuildControllers.delete(controller);
+      }
+    }
+
+    let inFlight = this.inFlightByKey.get(key);
+    if (!inFlight) {
+      inFlight = this.startSharedBuild(key, generation, session, settings);
+      this.inFlightByKey.set(key, inFlight);
+    }
+    return await this.waitForSharedBuild(key, inFlight, signal, options);
+  }
+
+  private async runBuild(
+    key: string,
+    generation: number,
+    session: SessionTemplate,
+    settings: Settings,
+    signal: AbortSignal,
+    callbacks?: SpendersBuildSubscriber,
+  ): Promise<SpendersListResult> {
     const buildSequence = ++this.buildSequence;
     this.latestBuildByKey.set(key, buildSequence);
-    const built = await this.buildFromKernel(session, settings, signal, options?.onProgress);
+    const built = await this.buildFromKernel(
+      session,
+      settings,
+      signal,
+      callbacks?.onProgress,
+      callbacks?.onSnapshot,
+    );
     const { result } = built;
 
     // A token/settings invalidation may race an already-running build. Return
@@ -470,6 +538,121 @@ export class SpendersService {
       await writeSessionCache(key, null);
     }
     return result;
+  }
+
+  private startSharedBuild(
+    key: string,
+    generation: number,
+    session: SessionTemplate,
+    settings: Settings,
+  ): InFlightBuild {
+    const controller = new AbortController();
+    this.activeBuildControllers.set(controller, key);
+    const build: InFlightBuild = {
+      controller,
+      promise: Promise.resolve(null as unknown as SpendersListResult),
+      subscribers: new Set<SpendersBuildSubscriber>(),
+      latestProgress: null,
+      latestSnapshot: null,
+      waiterCount: 0,
+      settled: false,
+    };
+
+    const publishProgress = (progress: SpendersProgressPayload): void => {
+      build.latestProgress = progress;
+      for (const subscriber of build.subscribers) {
+        try {
+          subscriber.onProgress?.(progress);
+        } catch {
+          // A disconnected content port must not poison work shared by other tabs.
+        }
+      }
+    };
+    const publishSnapshot = (snapshot: SpendersSnapshotPayload): void => {
+      build.latestSnapshot = snapshot;
+      for (const subscriber of build.subscribers) {
+        try {
+          subscriber.onSnapshot?.(snapshot);
+        } catch {
+          // A disconnected content port must not poison work shared by other tabs.
+        }
+      }
+    };
+
+    // Defer the actual build by one microtask so the first caller is subscribed
+    // before the synchronous ranking progress frame is published.
+    build.promise = Promise.resolve().then(async () => await this.runBuild(
+      key,
+      generation,
+      session,
+      settings,
+      controller.signal,
+      { onProgress: publishProgress, onSnapshot: publishSnapshot },
+    )).finally(() => {
+      build.settled = true;
+      this.activeBuildControllers.delete(controller);
+      if (this.inFlightByKey.get(key) === build) {
+        this.inFlightByKey.delete(key);
+      }
+    });
+    return build;
+  }
+
+  private waitForSharedBuild(
+    key: string,
+    build: InFlightBuild,
+    signal: AbortSignal,
+    subscriber: SpendersBuildSubscriber = {},
+  ): Promise<SpendersListResult> {
+    throwIfParentAborted(signal);
+    build.waiterCount += 1;
+    build.subscribers.add(subscriber);
+    // Late joiners should not regress to an empty spinner while the first tab
+    // is already showing rows. Snapshot first, then the latest enrichment bar.
+    try {
+      if (build.latestSnapshot) subscriber.onSnapshot?.(build.latestSnapshot);
+      if (build.latestProgress) subscriber.onProgress?.(build.latestProgress);
+    } catch {
+      // The request promise still delivers the final result.
+    }
+
+    return new Promise<SpendersListResult>((resolve, reject) => {
+      let finished = false;
+      const cleanup = (): void => {
+        if (finished) return;
+        finished = true;
+        signal.removeEventListener('abort', onAbort);
+        build.subscribers.delete(subscriber);
+        build.waiterCount = Math.max(0, build.waiterCount - 1);
+        if (!build.settled && build.waiterCount === 0) {
+          if (this.inFlightByKey.get(key) === build) {
+            this.inFlightByKey.delete(key);
+          }
+          build.controller.abort();
+        }
+      };
+      const onAbort = (): void => {
+        cleanup();
+        reject(parentAbortError(signal));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      build.promise.then(
+        (result) => {
+          cleanup();
+          resolve(result);
+        },
+        (error: unknown) => {
+          cleanup();
+          reject(error);
+        },
+      );
+      // A replay callback above may synchronously abort this caller before the
+      // listener is installed. AbortSignal does not replay an earlier event,
+      // so close that gap after the shared promise has its rejection handler.
+      if (signal.aborted) {
+        onAbort();
+      }
+    });
   }
 
   private async listFanAccountsBestEffort(
@@ -536,6 +719,7 @@ export class SpendersService {
     settings: Settings,
     signal: AbortSignal,
     onProgress?: (progress: SpendersProgressPayload) => void,
+    onSnapshot?: (snapshot: SpendersSnapshotPayload) => void,
   ): Promise<BuiltSpendersResult> {
     onProgress?.({ type: 'spenders:progress', phase: 'ranking' });
     const pageUsername = session.resolvedUsername?.trim() || null;
@@ -562,19 +746,45 @@ export class SpendersService {
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
     );
-    const [lifetime, month] = await Promise.all([
-      this.kernelSource!.fetchTopSpenders(
-        settings,
-        pageLabel,
-        'lifetime',
-        SPENDERS_KERNEL_LIMIT,
-        signal,
-      ),
-      this.fetchMonthBestEffort(settings, pageLabel, monthWindow, signal),
-    ]).catch((error: unknown) => {
+    // Start the required lifetime request first. Optional work is launched
+    // immediately after, but can never consume a sequential mock/retry slot
+    // that belongs to the authoritative request.
+    const lifetimeRequest = this.kernelSource!.fetchTopSpenders(
+      settings,
+      pageLabel,
+      'lifetime',
+      SPENDERS_KERNEL_LIMIT,
+      signal,
+    );
+    const monthOutcome = this.fetchMonthBestEffort(
+      settings,
+      pageLabel,
+      monthWindow,
+      signal,
+    ).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    let lifetime: KernelSpendersSnapshot;
+    try {
+      lifetime = await lifetimeRequest;
+    } catch (error) {
       chatMapController.abort();
       throw error;
-    });
+    }
+
+    // Lifetime is the only authoritative ranking. Publish it immediately with
+    // honest unknowns for optional fields; month, direct-chat ids, and custom
+    // names hydrate in the final response without hiding usable rows.
+    const preliminary = this.assembleKernelResult(
+      lifetime,
+      null,
+      monthWindow,
+      new Map(),
+      new Map(),
+    );
+    onSnapshot?.({ type: 'spenders:snapshot', result: preliminary.result });
 
     if (lifetime.entries.length === 0) {
       // Disabled, pending, and authoritatively-empty sources have no chat to
@@ -583,11 +793,46 @@ export class SpendersService {
       chatMapController.abort();
     }
 
-    const mapOutcome = await chatMapOutcome;
+    // Once the ranking exists, run all optional enrichment concurrently. The
+    // settled wrappers prevent a fast fatal outcome from becoming unhandled
+    // while another best-effort source is still finishing.
+    const namesOutcome = lifetime.entries.length === 0
+      ? Promise.resolve({ ok: true as const, value: new Map<string, FanNames>() })
+      : this.resolveFanNames(
+          lifetime.entries.map((entry) => entry.platformUserId),
+          session,
+          signal,
+          onProgress,
+        ).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+    const [mapOutcome, resolvedMonth, resolvedNames] = await Promise.all([
+      chatMapOutcome,
+      monthOutcome,
+      namesOutcome,
+    ]);
     if (!mapOutcome.ok) throw mapOutcome.error;
+    if (!resolvedMonth.ok) throw resolvedMonth.error;
+    if (!resolvedNames.ok) throw resolvedNames.error;
     const { fans } = mapOutcome.value;
-
     const groupByFanId = new Map(fans.map((fan) => [fan.fanAccountId, fan.groupId]));
+    return this.assembleKernelResult(
+      lifetime,
+      resolvedMonth.value,
+      monthWindow,
+      groupByFanId,
+      resolvedNames.value,
+    );
+  }
+
+  private assembleKernelResult(
+    lifetime: KernelSpendersSnapshot,
+    month: KernelSpendersSnapshot | null,
+    monthWindow: string,
+    groupByFanId: ReadonlyMap<string, string>,
+    namesByFanId: ReadonlyMap<string, FanNames>,
+  ): BuiltSpendersResult {
     // Source health distinguishes a successful empty month from an unramped
     // stream. Even when usable, entries may be a bounded top-N subset: only
     // a complete response makes an absent lifetime fan a known $0.
@@ -604,19 +849,6 @@ export class SpendersService {
     const monthByFanId = new Map(
       monthReady ? month.entries.map((entry) => [entry.platformUserId, entry.grossMills]) : [],
     );
-
-    // Best-effort: the names chatters actually recognize (custom rename
-    // notes + platform-name backfill). Cached long and hard-budgeted —
-    // names are decoration, the board must never hang on them (the 1.9.1
-    // freeze was this sweep retrying through rate limits).
-    const namesByFanId = lifetime.entries.length === 0
-      ? new Map<string, FanNames>()
-      : await this.resolveFanNames(
-          lifetime.entries.map((entry) => entry.platformUserId),
-          session,
-          signal,
-          onProgress,
-        );
 
     const entries: SpenderListEntry[] = lifetime.entries.map((entry) => {
       const knownMonthMills = monthReady ? monthByFanId.get(entry.platformUserId) : undefined;
@@ -782,6 +1014,15 @@ export class SpendersService {
     for (const key of this.latestBuildByKey.keys()) {
       if (key.startsWith(prefix)) this.latestBuildByKey.delete(key);
     }
+    for (const [key] of this.inFlightByKey) {
+      if (!key.startsWith(prefix)) continue;
+      this.inFlightByKey.delete(key);
+    }
+    // Includes direct Refresh builds and a cold build that Refresh superseded
+    // in inFlightByKey; neither may keep using invalidated credentials.
+    for (const [controller, key] of this.activeBuildControllers) {
+      if (key.startsWith(prefix)) controller.abort();
+    }
     await deleteSessionCachesWithPrefix(prefix);
   }
 
@@ -791,6 +1032,10 @@ export class SpendersService {
     this.cacheGeneration += 1;
     this.cache.clear();
     this.latestBuildByKey.clear();
+    for (const controller of this.activeBuildControllers.keys()) {
+      controller.abort();
+    }
+    this.inFlightByKey.clear();
     await clearSessionCache();
   }
 }

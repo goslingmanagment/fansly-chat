@@ -17,17 +17,19 @@ describe('summary cache model matching', () => {
       summary: 'Cached',
       personalityId: 'personality-1',
       personalityUpdatedAt: 1000,
+      personaCatalogSource: 'source-a',
       generatedAt: 456,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
     };
-    expect(isValidSummaryCacheEntry(entry, 'personality-1', 1000, 'kernel')).toBe(true);
+    expect(isValidSummaryCacheEntry(entry, 'personality-1', 1000, 'source-a', 'kernel')).toBe(true);
     // Pre-cutover entries pinned to vendor ids invalidate once (recorded trade).
     expect(isValidSummaryCacheEntry(
       { ...entry, modelId: 'anthropic:claude-sonnet-4-6' },
       'personality-1',
       1000,
+      'source-a',
       'kernel',
     )).toBe(false);
   });
@@ -38,6 +40,7 @@ describe('summary cache boundaries', () => {
     summary: 'Cached',
     personalityId: 'p1',
     personalityUpdatedAt: 123,
+    personaCatalogSource: 'source-a',
     generatedAt: 456,
     spendingDataVerified: true,
     subscriptionLookupVerified: true,
@@ -47,6 +50,10 @@ describe('summary cache boundaries', () => {
   it('normalizes valid entries and drops corrupt summary cache values', () => {
     expect(normalizeSummaryCacheEntry(validEntry)).toEqual(validEntry);
     expect(normalizeSummaryCacheEntry({ summary: 'missing metadata' })).toBeNull();
+    expect(normalizeSummaryCacheEntry({
+      ...validEntry,
+      personaCatalogSource: undefined,
+    })).toBeNull();
 
     const entries = collectSummaryCacheEntries({
       'summary:group-1': validEntry,

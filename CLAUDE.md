@@ -49,7 +49,7 @@ and may be deleted only after device-token adoption is demonstrated (E9d).**
 - **AI never sends without explicit human action; never auto-retry an
   indeterminate send** (same family law as the desktop).
 - **Storage migrations are numbered and forward-only** (`createDefaultSettings`
-  / migrations — currently v13, `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`
+  / migrations — currently v14, `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`
   is the source of truth); every settings shape change ships a migration.
   Since v13 the hub credentials live in their OWN storage keys — every
   full-state persist goes through `serializePersistedState`, and the settings

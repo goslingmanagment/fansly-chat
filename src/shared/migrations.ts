@@ -8,6 +8,10 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
 import { collectSummaryCacheEntries } from './summary-cache.js';
+import {
+  normalizePersonaCatalog,
+  personaCatalogSource,
+} from './persona-catalog.js';
 import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
@@ -30,6 +34,9 @@ export function createSeedState(): PersistedState {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: createDefaultSettings(),
     personalities: [],
+    personaCatalog: [],
+    personaCatalogSource: null,
+    personaCatalogFetchedAt: null,
     accountMappings: {},
     accountAliases: {},
     knownAccounts: [],
@@ -136,6 +143,21 @@ function normalizePersistedRecord(
     : migrateSettingsRecord(null, custody);
 
   const personalities = Array.isArray(record.personalities) ? record.personalities : defaults.personalities;
+  const storedPersonaCatalogSource = typeof record.personaCatalogSource === 'string'
+    ? record.personaCatalogSource
+    : null;
+  // Catalog bytes are capability-scoped to the exact normalized Hub origin
+  // and credential. Hide them synchronously when settings/custody change;
+  // the queued controller refresh may still be behind a hung request from the
+  // old source, or the worker may crash before it gets a chance to clear disk.
+  const catalogSourceMatches = storedPersonaCatalogSource === personaCatalogSource(settings);
+  const personaCatalog = catalogSourceMatches
+    ? normalizePersonaCatalog(record.personaCatalog)
+    : [];
+  const personaCatalogFetchedAt = catalogSourceMatches &&
+    typeof record.personaCatalogFetchedAt === 'string'
+    ? record.personaCatalogFetchedAt
+    : null;
   const accountMappings = record.accountMappings && typeof record.accountMappings === 'object'
     ? (record.accountMappings as Record<string, string>)
     : defaults.accountMappings;
@@ -148,6 +170,9 @@ function normalizePersistedRecord(
     schemaVersion,
     settings,
     personalities: personalities as PersistedState['personalities'],
+    personaCatalog,
+    personaCatalogSource: storedPersonaCatalogSource,
+    personaCatalogFetchedAt,
     accountMappings,
     accountAliases,
     knownAccounts: knownAccounts as string[],

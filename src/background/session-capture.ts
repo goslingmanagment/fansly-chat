@@ -81,7 +81,11 @@ function extractCapture(
 
 export function initializeSessionCapture(
   sessionStore: SessionStore,
-  onCapture: (tabId: number, accountId: string) => void | Promise<void>,
+  onCapture: (
+    tabId: number,
+    accountId: string,
+    material: boolean,
+  ) => void | Promise<void>,
 ): void {
   browser.webRequest.onBeforeSendHeaders.addListener(
     (details) => {
@@ -95,8 +99,26 @@ export function initializeSessionCapture(
         return;
       }
 
+      const previousAccountId = sessionStore.getAccountIdForTab(details.tabId);
+      const previousSession = sessionStore.getSessionForTab(details.tabId);
+      const isMaterialCapture =
+        previousAccountId === null ||
+        previousAccountId !== capture.accountId ||
+        previousSession === null ||
+        !previousSession.connected ||
+        previousSession.authorization !== capture.authorization ||
+        previousSession.fanslyClientId !== capture.fanslyClientId ||
+        previousSession.fanslySessionId !== capture.fanslySessionId;
+
+      // Every request refreshes the timestamp/check template used by Fansly
+      // reads. Only a material session transition needs the expensive side
+      // effects behind onCapture (tab-state rebuild, identity lookup and Hub
+      // summary prefetch); fansly-client-ts/check normally change per request.
       sessionStore.registerCapture(details.tabId, capture);
-      void onCapture(details.tabId, capture.accountId);
+      // The callback is cheap for an ordinary capture: it only passes through
+      // the coordinator's cooldown-gated identity recovery. Expensive UI/
+      // prefetch work remains restricted to material transitions.
+      void onCapture(details.tabId, capture.accountId, isMaterialCapture);
     },
     { urls: ['https://apiv3.fansly.com/*'] },
     ['requestHeaders'],

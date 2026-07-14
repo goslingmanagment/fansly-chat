@@ -11,13 +11,14 @@ import {
   isObjectRecord,
 } from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
+import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
-  SpendersProgressPayload,
+  SpendersBuildPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
@@ -39,8 +40,10 @@ export interface RuntimeApiDeps {
   tabContexts: TabContextStore;
   storageCoordinator: StorageCoordinator;
   debugPrompts: DebugPromptStore;
-  /** Pushes board-build progress to the requesting tab's content port. */
-  emitToTab?: (tabId: number, message: SpendersProgressPayload) => void;
+  /** Pushes board-build progress/snapshots to the requesting tab's content port. */
+  emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
+  /** A successful live test is a reliable signal to refresh the persona catalog. */
+  onAgencyHubReady?: () => void | Promise<void>;
 }
 
 /** E28. The prompt echo is readable by ONE caller: our own viewer page. The
@@ -73,6 +76,7 @@ export function registerRuntimeApi({
   storageCoordinator,
   debugPrompts,
   emitToTab,
+  onAgencyHubReady,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: unknown, sender: browser.runtime.MessageSender) => {
@@ -112,6 +116,8 @@ export function registerRuntimeApi({
             hasPersonalities: false,
             mappedPersonalityId: null,
             mappedPersonalityName: null,
+            mappedPersonaVersion: null,
+            mappedPersonaSource: null,
             compareCardCount: 0,
             compareDraftCount: 0,
             accountLabel: 'Not connected',
@@ -130,15 +136,22 @@ export function registerRuntimeApi({
         const displayGroupId = context.groupId ?? parseGroupIdFromUrl(tabUrl);
         context.accountId = accountId;
 
-        const mappedPersonalityId = resolveMappedPersonalityId(
+        const rawMappedPersonalityId = resolveMappedPersonalityId(
           state.accountMappings,
           accountId,
           legacyAccountId,
           state.accountAliases,
         );
-        const mappedPersonalityName =
-          state.personalities.find((p) => p.id === mappedPersonalityId)
-            ?.name ?? null;
+        const mappedPersonality = findActivePersona(
+          state.personaCatalog,
+          rawMappedPersonalityId,
+        );
+        const mappedPersonalityId = mappedPersonality?.key ?? null;
+        const mappedPersonalityName = mappedPersonality?.displayName ?? null;
+        const mappedPersonaVersion = mappedPersonality?.version ?? null;
+        const mappedPersonaSource = mappedPersonality
+          ? state.personaCatalogSource
+          : null;
         const connected = Boolean(session?.connected);
         const compareDraftCount = getCompareDraftCount();
 
@@ -157,9 +170,11 @@ export function registerRuntimeApi({
             normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) &&
             (state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim()),
           ),
-          hasPersonalities: state.personalities.length > 0,
+          hasPersonalities: getActivePersonaCatalog(state.personaCatalog).length > 0,
           mappedPersonalityId,
           mappedPersonalityName,
+          mappedPersonaVersion,
+          mappedPersonaSource,
           compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
           compareDraftCount,
           accountLabel:
@@ -282,7 +297,11 @@ export function registerRuntimeApi({
           AGENCY_HUB_PREFETCH_TIMEOUT_MS,
         );
         try {
-          return await agencyHubClient.testConnection(settings, controller.signal);
+          const response = await agencyHubClient.testConnection(settings, controller.signal);
+          if (response.ok) {
+            await onAgencyHubReady?.();
+          }
+          return response;
         } finally {
           globalThis.clearTimeout(timeout);
         }
@@ -391,6 +410,12 @@ export function registerRuntimeApi({
               ? (progress) => emitToTab(
                   tabId,
                   buildId === undefined ? progress : { ...progress, buildId },
+                )
+              : undefined,
+            onSnapshot: emitToTab && tabId !== undefined
+              ? (snapshot) => emitToTab(
+                  tabId,
+                  buildId === undefined ? snapshot : { ...snapshot, buildId },
                 )
               : undefined,
           });

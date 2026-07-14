@@ -25,7 +25,11 @@ let mockStorage: Record<string, unknown> = {};
     local: {
       get: vi.fn(async (keys?: string | string[] | Record<string, unknown> | null) => {
         if (keys === null || keys === undefined) return { ...mockStorage };
-        if (typeof keys === 'string') return { [keys]: mockStorage[keys] };
+        if (typeof keys === 'string') {
+          return Object.prototype.hasOwnProperty.call(mockStorage, keys)
+            ? { [keys]: mockStorage[keys] }
+            : {};
+        }
         if (Array.isArray(keys)) {
           const result: Record<string, unknown> = {};
           for (const k of keys) result[k] = mockStorage[k];
@@ -187,10 +191,10 @@ describe('migrateState', () => {
 
 
 
-  it('carries forward summary:* keys during migration', () => {
+  it('carries forward source-scoped summary:* keys during migration', () => {
     const legacy = {
       schemaVersion: 0,
-      'summary:group1': { summary: 'cached', personalityId: 'p1', personalityUpdatedAt: 100, generatedAt: 200 },
+      'summary:group1': { summary: 'cached', personalityId: 'p1', personalityUpdatedAt: 100, personaCatalogSource: 'source-a', generatedAt: 200 },
     };
     const result = migrateState(legacy);
     expect((result as unknown as Record<string, unknown>)['summary:group1']).toBeDefined();
@@ -203,6 +207,7 @@ describe('migrateState', () => {
         summary: 'cached',
         personalityId: 'p1',
         personalityUpdatedAt: 100,
+        personaCatalogSource: 'source-a',
         generatedAt: 200,
       },
       'summary:corrupt': {
@@ -221,6 +226,7 @@ describe('migrateState', () => {
         summary: 'cached',
         personalityId: 'p1',
         personalityUpdatedAt: 100,
+        personaCatalogSource: 'source-a',
         generatedAt: 200,
         fanAccountId: 'fan-1',
         agencyHubSync: {
@@ -248,6 +254,7 @@ describe('migrateState', () => {
         summary: 'cached',
         personalityId: 'p1',
         personalityUpdatedAt: 100,
+        personaCatalogSource: 'source-a',
         generatedAt: 200,
         agencyHubSync: {
           baseUrl: 'http://localhost:3000',
@@ -440,6 +447,7 @@ describe('loadStorageState', () => {
         summary: 'cached',
         personalityId: 'p1',
         personalityUpdatedAt: 100,
+        personaCatalogSource: 'source-a',
         generatedAt: 200,
       } as SummaryCacheEntry,
       'summary:corrupt': {
@@ -462,7 +470,7 @@ describe('loadStorageState', () => {
     );
   });
 
-  it('seeds bundled Lora when storage has no personalities', async () => {
+  it('keeps an empty legacy personalities array unchanged', async () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: createDefaultSettings(),
@@ -472,13 +480,11 @@ describe('loadStorageState', () => {
     };
 
     const result = await storage.loadStorageState();
-    const [bundledLora] = createBundledPersonalities();
-
-    expect(result.personalities).toEqual([bundledLora]);
-    expect(mockStorage.personalities).toEqual([bundledLora]);
+    expect(result.personalities).toEqual([]);
+    expect(mockStorage.personalities).toEqual([]);
   });
 
-  it('preserves modified bundled personalities until the bundled version changes', async () => {
+  it('does not normalize, repair, or overwrite legacy persona definitions', async () => {
     const [bundledLora] = createBundledPersonalities();
     if (!bundledLora) {
       throw new Error('Expected bundled Lora personality');
@@ -489,9 +495,12 @@ describe('loadStorageState', () => {
       personalities: [
         {
           ...bundledLora,
-          content: 'customized by user',
+          name: '  User Edited Lora  ',
+          content: '',
           updatedAt: bundledLora.updatedAt + 123,
+          builtinVersion: (bundledLora.builtinVersion ?? 1) - 1,
         },
+        { id: 'large', name: 'Large', content: 'x'.repeat(100_000), updatedAt: 1 },
       ],
       accountMappings: {},
       knownAccounts: [],
@@ -499,180 +508,38 @@ describe('loadStorageState', () => {
 
     const result = await storage.loadStorageState();
 
+    expect(result.personalities).toEqual(mockStorage.personalities);
     expect(result.personalities[0]).toMatchObject({
       id: BUNDLED_LORA_PERSONALITY_ID,
-      builtin: true,
-      builtinVersion: BUNDLED_LORA_PERSONALITY_VERSION,
-      content: 'customized by user',
+      name: '  User Edited Lora  ',
+      content: '',
+      builtinVersion: BUNDLED_LORA_PERSONALITY_VERSION - 1,
     });
-  });
-
-  it('re-adds bundled Lora when other personalities exist but the bundled entry is missing', async () => {
-    const [bundledLora] = createBundledPersonalities();
-    if (!bundledLora) {
-      throw new Error('Expected bundled Lora personality');
-    }
-    mockStorage = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: createDefaultSettings(),
-      personalities: [
-        { id: 'custom-1', name: 'Custom', content: 'custom', updatedAt: 1000 },
-      ],
-      accountMappings: {},
-      knownAccounts: [],
-    };
-
-    const result = await storage.loadStorageState();
-
-    expect(result.personalities).toEqual([
-      { id: 'custom-1', name: 'Custom', content: 'custom', updatedAt: 1000 },
-      bundledLora,
-    ]);
-    expect(mockStorage.personalities).toEqual([
-      { id: 'custom-1', name: 'Custom', content: 'custom', updatedAt: 1000 },
-      bundledLora,
-    ]);
-  });
-
-  it('overwrites modified bundled personalities when the bundled version changes', async () => {
-    const [bundledLora] = createBundledPersonalities();
-    if (!bundledLora) {
-      throw new Error('Expected bundled Lora personality');
-    }
-    mockStorage = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: createDefaultSettings(),
-      personalities: [
-        {
-          ...bundledLora,
-          name: 'User Edited Lora',
-          content: 'customized by user',
-          updatedAt: bundledLora.updatedAt + 123,
-          builtinVersion: bundledLora.builtinVersion! - 1,
-        },
-      ],
-      accountMappings: {},
-      knownAccounts: [],
-    };
-
-    const result = await storage.loadStorageState();
-
-    expect(result.personalities).toEqual([bundledLora]);
-    expect(mockStorage.personalities).toEqual([bundledLora]);
-  });
-
-  it('normalizes personality names (trim, default to Unnamed)', async () => {
-    const personalities: Personality[] = [
-      { id: 'p1', name: '  ', content: 'test', updatedAt: 1000 },
-      { id: 'p2', name: '  Trimmed  ', content: 'test', updatedAt: 1000 },
-    ];
-    const result = await storage.savePersonalities(personalities);
-    expect(result[0]!.name).toBe('Unnamed');
-    expect(result[1]!.name).toBe('Trimmed');
-  });
-
-  it('seeds bundled Lora when saving an empty personalities list', async () => {
-    const result = await storage.savePersonalities([]);
-
-    expect(result).toEqual(createBundledPersonalities());
-    expect(mockStorage.personalities).toEqual(createBundledPersonalities());
-  });
-
-  it('re-adds bundled Lora when saving a custom-only personality list', async () => {
-    const [bundledLora] = createBundledPersonalities();
-    if (!bundledLora) {
-      throw new Error('Expected bundled Lora personality');
-    }
-
-    const result = await storage.savePersonalities([
-      { id: 'p1', name: 'Custom', content: 'test', updatedAt: 1000 },
-    ]);
-
-    expect(result).toEqual([
-      { id: 'p1', name: 'Custom', content: 'test', updatedAt: 1000 },
-      bundledLora,
-    ]);
-    expect(mockStorage.personalities).toEqual([
-      { id: 'p1', name: 'Custom', content: 'test', updatedAt: 1000 },
-      bundledLora,
-    ]);
-  });
-});
-
-// ─── deletePersonality (cascade) ────────────────────────────────────────
-
-describe('deletePersonality', () => {
-  it('removes personality, related mappings, and related summaries', async () => {
-    const [bundledLora] = createBundledPersonalities();
-    if (!bundledLora) {
-      throw new Error('Expected bundled Lora personality');
-    }
-    mockStorage = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: createDefaultSettings(),
-      personalities: [
-        { id: 'p1', name: 'ToDelete', content: 'x', updatedAt: 1000 },
-        { id: 'p2', name: 'Keep', content: 'y', updatedAt: 1000 },
-      ],
-      accountMappings: { acc1: 'p1', acc2: 'p1', acc3: 'p2' },
-      knownAccounts: [],
-      'summary:group1': { summary: 'sum1', personalityId: 'p1', personalityUpdatedAt: 1000, generatedAt: 2000 } as SummaryCacheEntry,
-      'summary:group2': { summary: 'sum2', personalityId: 'p2', personalityUpdatedAt: 1000, generatedAt: 2000 } as SummaryCacheEntry,
-      'summary:group3': { summary: 'sum3', personalityId: 'p1', personalityUpdatedAt: 1000, generatedAt: 3000 } as SummaryCacheEntry,
-      'summary:corrupt-group': { summary: 'bad', personalityId: 'p1' },
-    };
-
-    await storage.deletePersonality('p1');
-
-    expect(mockStorage.personalities).toEqual([
-      { id: 'p2', name: 'Keep', content: 'y', updatedAt: 1000 },
-      bundledLora,
-    ]);
-    expect((mockStorage.accountMappings as Record<string, string>).acc1).toBeUndefined();
-    expect((mockStorage.accountMappings as Record<string, string>).acc2).toBeUndefined();
-    expect((mockStorage.accountMappings as Record<string, string>).acc3).toBe('p2');
-    expect(mockStorage['summary:group1']).toBeUndefined();
-    expect(mockStorage['summary:group3']).toBeUndefined();
-    expect(mockStorage['summary:corrupt-group']).toBeUndefined();
-    expect(mockStorage['summary:group2']).toBeDefined();
-  });
-
-  it('does not delete bundled personalities or their related state', async () => {
-    const [bundledLora] = createBundledPersonalities();
-    if (!bundledLora) {
-      throw new Error('Expected bundled Lora personality');
-    }
-
-    mockStorage = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      settings: createDefaultSettings(),
-      personalities: [bundledLora],
-      accountMappings: { acc1: bundledLora.id },
-      knownAccounts: [],
-      'summary:group1': {
-        summary: 'sum1',
-        personalityId: bundledLora.id,
-        personalityUpdatedAt: bundledLora.updatedAt,
-        generatedAt: 2000,
-      } as SummaryCacheEntry,
-    };
-
-    await storage.deletePersonality(bundledLora.id);
-
-    expect(mockStorage.personalities).toEqual([bundledLora]);
-    expect(mockStorage.accountMappings).toEqual({ acc1: bundledLora.id });
-    expect(mockStorage['summary:group1']).toBeDefined();
   });
 });
 
 // ─── saveAccountMapping ─────────────────────────────────────────────────
 
 describe('saveAccountMapping', () => {
+  const usablePersonality: Personality = {
+    id: 'p1',
+    name: 'Custom',
+    content: 'Reply naturally',
+    updatedAt: 1,
+  };
+  const activeCatalog = [{
+    key: 'p1',
+    displayName: 'Custom',
+    version: 1,
+    status: 'active' as const,
+  }];
+
   it('adds a mapping when personalityId is provided', async () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: createDefaultSettings(),
-      personalities: [],
+      personalities: [usablePersonality],
+      personaCatalog: activeCatalog,
       accountMappings: {},
       accountAliases: {},
       knownAccounts: [],
@@ -685,7 +552,8 @@ describe('saveAccountMapping', () => {
     mockStorage = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: createDefaultSettings(),
-      personalities: [],
+      personalities: [usablePersonality],
+      personaCatalog: activeCatalog,
       accountMappings: {
         legacy: 'stale',
       },
@@ -713,6 +581,22 @@ describe('saveAccountMapping', () => {
     };
     await storage.saveAccountMapping('acc1', null);
     expect((mockStorage.accountMappings as Record<string, string>).acc1).toBeUndefined();
+  });
+
+  it('rejects mappings to missing or archived server personas', async () => {
+    mockStorage = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: createDefaultSettings(),
+      personalities: [{ ...usablePersonality, content: '   ' }],
+      personaCatalog: [{ ...activeCatalog[0]!, status: 'archived' }],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+
+    await expect(storage.saveAccountMapping('acc1', 'p1')).rejects.toThrow('archived');
+    await expect(storage.saveAccountMapping('acc1', 'missing')).rejects.toThrow('missing');
+    expect(mockStorage.accountMappings).toEqual({});
   });
 });
 
@@ -847,6 +731,7 @@ describe('summary cache', () => {
       summary: 'Fan is engaged',
       personalityId: 'p1',
       personalityUpdatedAt: 1000,
+      personaCatalogSource: null,
       generatedAt: 5000,
       fanAccountId: 'fan-1',
       agencyHubSync: {

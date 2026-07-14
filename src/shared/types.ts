@@ -39,6 +39,17 @@ export interface Personality {
   builtinVersion?: number;
 }
 
+export type PersonaCatalogStatus = 'active' | 'archived';
+
+/** Metadata-only kernel catalog. Persona instructions never enter a client. */
+export interface PersonaCatalogEntry {
+  key: string;
+  displayName: string;
+  /** Monotonic server CAS revision; also invalidates persona-dependent caches. */
+  version: number;
+  status: PersonaCatalogStatus;
+}
+
 export interface CompareDraftCard {
   id: string;
   label: string;
@@ -89,6 +100,8 @@ export interface SummaryCacheEntry {
   summary: string;
   personalityId: string;
   personalityUpdatedAt: number;
+  /** Exact Hub+credential catalog source. Missing legacy entries invalidate. */
+  personaCatalogSource: string | null;
   generatedAt: number;
   spendingDataVerified?: boolean;
   subscriptionLookupVerified?: boolean;
@@ -100,7 +113,12 @@ export interface SummaryCacheEntry {
 export interface PersistedState {
   schemaVersion: number;
   settings: Settings;
+  /** Raw pre-read-only client data. Kept verbatim for recovery/export only. */
   personalities: Personality[];
+  /** Server-owned metadata used by runtime and mapping UI. */
+  personaCatalog: PersonaCatalogEntry[];
+  personaCatalogSource: string | null;
+  personaCatalogFetchedAt: string | null;
   accountMappings: Record<string, string>;
   accountAliases: Record<string, string>;
   knownAccounts: string[];
@@ -723,6 +741,8 @@ export interface TabUiState {
   hasPersonalities: boolean;
   mappedPersonalityId: string | null;
   mappedPersonalityName: string | null;
+  mappedPersonaVersion: number | null;
+  mappedPersonaSource: string | null;
   compareCardCount: number;
   compareDraftCount: number;
 }
@@ -1171,9 +1191,22 @@ export interface SpendersProgressPayload {
   total?: number;
 }
 
+/** The lifetime ranking is already usable while optional month, chat-map,
+ * and custom-name enrichment continues. Correlated exactly like progress so
+ * a stale build can never repaint a newer board. */
+export interface SpendersSnapshotPayload {
+  type: 'spenders:snapshot';
+  /** Optional for mixed-version extension contexts; new callers always set it. */
+  buildId?: string;
+  result: SpendersListResult;
+}
+
+export type SpendersBuildPayload = SpendersProgressPayload | SpendersSnapshotPayload;
+
 export type BackgroundPortMessage =
   | ChunkPayload
   | SpendersProgressPayload
+  | SpendersSnapshotPayload
   | CompareReadyPayload
   | CompareChunkPayload
   | DebugPromptPayload
