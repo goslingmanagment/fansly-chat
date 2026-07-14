@@ -50,6 +50,10 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E31 | 2026-07-12 | Spenders current-page completeness: Core #142 cap 1000, V3 bound-aware cache, exact old-Core 500 fallback, measured Firefox 1000-row render gate |
 | E32 | 2026-07-12 | Kernel-only UX truth: dynamic server model catalog, owner-gated prompt debug, inert client prompt-caching control removed |
 | E33 | 2026-07-12 | Release pages are validated and stamped pre-sign; release HEAD must exactly equal fetched origin/main; guide remains versionless |
+| E34 | 2026-07-13 | Progressive Spenders snapshot/single-flight and nonblocking Settings hydration |
+| E35 | 2026-07-13 | Confirmed reliability/performance fixes: recoverable persona sync, precise autosave revisions, capture/cache backoff, and stale async-result guards |
+| E36 | 2026-07-13 | Global personas are server-admin content; the extension consumes metadata only and preserves legacy local definitions |
+| E37 | 2026-07-14 | Read-only persona follow-up: narrow refreshes, future-schema barrier, durable Scan fences, and exact deployed-contract release gate |
 
 ## Entries
 
@@ -654,3 +658,185 @@ fetches `origin/main` plus tags and requires exact commit identity with
 unchanged, with the signed update feed as version truth. Changelog copy names
 kernel-served AI rather than the retired client-selected provider model. Offline
 tests pin slot cardinality, substitution, guide versionlessness, and sign order.
+**E34 (2026-07-13).** Slow optional discovery no longer blocks the first useful
+Settings or Spenders UI. Settings starts `getSessionsSnapshot` immediately but
+renders Appearance, Generation, Agency Hub, and Model Personalities from a
+non-mutating local read; only Account Mappings and Connection Status remain in
+an explicit hydration state. After the background-owned identity rekey finishes,
+Settings re-reads storage and merges only mappings, aliases, and known accounts,
+then replaces only those two sections. Mapping saves follow the same narrow
+rerender path, so a persona textarea and its pending debounced edit survive.
+The initial read is deliberately read-only: a concurrent full-state migration
+write captured before the rekey could otherwise restore legacy account IDs over
+the canonical state. Snapshot failure leaves all local controls usable and
+marks only the account-owned sections failed.
+
+Spenders now publishes the authoritative lifetime ranking as a correlated
+`spenders:snapshot` as soon as that query resolves. The one-shot request remains
+open while month spend, chat IDs, and custom names enrich concurrently; only the
+final enriched result enters the 10-minute board cache. The controller keeps the
+preliminary rows interactive, ignores stale build IDs, preserves the active tier
+and search while keeping the focused input/caret intact, and rebuilds only row
+nodes so enriched values actually repaint. Concurrent non-refresh cold requests
+for the same creator/Hub key share one internally-owned build with per-caller
+progress/snapshot fan-out and late-join replay. A caller abort detaches only
+that caller; the upstream work
+is cancelled when no waiters remain or invalidation makes it unsafe. This removes
+the optional 12-second month/chat-map budgets and name sweep from time-to-first-
+row, and removes the up-to-5-second live identity lookup from Settings' initial
+local render. Pinned in options accounts, spenders service/controller,
+runtime API, and protocol suites.
+
+**E35 (2026-07-13).** Follow-up fixes are limited to failures reproduced in
+tests or demonstrated through complete execution paths. Persona synchronization
+keeps the latest desired snapshot, reconciles after a Hub source or credential
+change and after a successful connection, and retries transient writes with a
+bounded delay. Deletions are persisted as individual local journal entries
+before the remote archive call: each delete synchronously starts its encoded
+journal write before the first await, so neither an initial aggregate read failure nor
+a Manifest V3 worker restart can silently forget it. Archive acknowledgement or
+same-ID recreation removes only that key; a later reconciliation retries only
+those explicit IDs. Missing or empty custom personas are not valid mappings:
+existing stale mappings now surface the mapping banner and cannot reach
+generation, prefetch, popup, or
+comparison-card persona paths.
+
+Normal Options saves are serialized and flushed on change/blur. The pagehide
+path directly dispatches the newest dirty snapshot even if an older write is
+still awaiting acknowledgement. Hub actions join an identical active snapshot
+or force exactly one current snapshot; ordinary form completion preserves a
+newer background-issued device token, and the API-key custody key is written
+only after an explicit key edit. A persona receives a new monotonic `updatedAt`
+only when its own draft changes; unrelated rerenders preserve the other revisions.
+Failed explicit API-key writes retain ownership and are retried by the next save
+or pagehide. A successful persona save refreshes only mapping options, so
+empty-to-usable transitions appear immediately without replacing the focused
+persona input. The mapping banner similarly carries a render generation and
+rechecks its desired account after asynchronous persona loading, preventing an
+older render or detached controls from reopening or saving a mapping for the
+wrong account.
+
+Background startup proves that Firefox has registered `storage.onChanged` with
+a bounded private probe, then takes a fresh non-mutating snapshot. Only an
+observed probe permits migration or bundled-persona repair writes; otherwise the
+normalized state remains available read-only and a later access retries. Patches
+arriving during the read or repair are merged and replayed, late self-events are
+consumed, valid summary writes remain raw, and custody keys never re-enter the
+settings blob. This avoids depending on an early change event that Firefox may
+drop before parent-side listener registration.
+
+Routine authenticated captures still refresh the in-memory session template,
+but UI refresh and prefetch run only for first/account/reconnect/auth/session
+changes. Legacy unresolved account IDs retain an independent 30-second identity
+retry cooldown, so making the heavy path conditional cannot make a transient
+lookup failure permanent. Hub summary not-found results use a bounded 60-second
+negative cache while transient failures are never cached, and Spenders snapshots
+are invalidated only by normalized Hub source or credential custody changes.
+Final Spenders enrichment restores the keyboard cursor by `fanAccountId` (or the
+nearest surviving row) while retaining search focus/caret. Tests pin restart
+recovery, stale async completions, pagehide ordering, precise persona revisions,
+startup storage races and listener loss, cursor identity, capture retry behavior,
+and cache invalidation boundaries.
+
+**E36 (2026-07-13).** Global persona authoring and lifecycle ownership move to
+Core administrators. This supersedes only the client-authoring and persona-sync
+parts of E17 and E35; those entries remain as historical records. Chatter
+clients may fetch the authenticated metadata catalog (`key`, `displayName`,
+`version`, and `status`) but never receive or write a global persona's
+`systemBlock`. The extension no longer exposes persona add, edit, delete, or
+sync controls.
+
+Storage schema v14 keeps the old `personalities` array byte-for-byte separate
+from the server metadata catalog. Before any migration write or first catalog
+request, the extension creates a write-once preservation snapshot containing
+the complete legacy definitions, mappings, and aliases. A failed snapshot write
+or malformed existing snapshot fails closed instead of overwriting evidence or
+continuing with a network/migration mutation. Settings offers copy and JSON
+download export of the preservation data. Legacy definitions are not silently
+deleted.
+
+Mappings remain local. Active catalog entries are selectable; mappings to a
+missing or archived key remain stored and visible as unresolved, but cannot be
+used for generation. Catalog refresh runs on startup, normalized Hub source or
+credential changes, a successful connection test, and a bounded five-minute
+loop while the worker remains alive. Responses from an obsolete source are
+discarded. Server persona `version` participates in generation and comparison
+cache identity so an administrator update invalidates stale results without
+exposing prompt bodies. Preservation, source-change races, archived/missing
+mappings, export completeness, refresh cadence, and cache invalidation are
+pinned in focused tests.
+
+Catalog bytes are usable only while their stored source fingerprint exactly
+matches the normalized Hub URL and current credential. Migration and the
+background storage coordinator enforce that fence synchronously, before a
+queued refresh can finish, so a hung old-source request or worker crash cannot
+carry Hub A persona metadata into Hub B. Ordinary completed-result caches are
+likewise pinned to persona key and version and are cleared on remap, archive,
+or revision change.
+
+The current Hub fan-profile contract does not include persona key/version
+provenance. Consequently the extension never adopts a pulled profile body as a
+current local Summary or stamps it with the current persona revision; a local
+cache miss runs the kernel gateway. Post-generation profile PUSH and its
+conflict preflight remain enabled. A malformed preservation snapshot renders a
+minimal copy/download recovery page before any runtime or Hub request.
+
+Persona-dependent identity is the complete catalog-source/key/version tuple,
+not key/version alone. Summary caches persist that source (legacy source-less
+entries invalidate once), and tab, completed-overlay, and Compare fingerprints
+carry it through the UI. At every terminal save/send and immediately before
+kernel or Hub transport, the background reads browser storage directly instead
+of trusting a possibly lagging `storage.onChanged` projection. Per-conversation
+Scan tokens preserve click order across tabs and validation latency; conditional
+save operations run inside the storage write queue, so an older Scan cannot
+overwrite a newer cache. Forced regeneration bypasses the old cache without
+deleting it up front; a verified success overwrites it, while a failed or
+superseded run leaves the last-good value intact. Hub profile append performs
+one last callback fence after page resolution and immediately before PUT.
+
+Release ordering is executable policy: `.env.deploy` must name the production
+`AGENCY_HUB_BASE_URL`, and `deploy.sh` requires the unauthenticated persona
+catalog route to return exactly 401 before AMO signing. A 404 therefore blocks
+an extension-first release against an old Core.
+
+**E37 (2026-07-14).** Persona-catalog polling is state-sensitive rather than a
+five-minute UI reset. A byte-identical normalized catalog performs no storage
+write. Freshness timestamps are operational metadata and do not refresh tabs;
+changed catalog, mapping, alias, and account metadata use the narrow
+`mapping:changed` message. Only an actual normalized Hub-origin or credential
+custody change uses `settings:changed` and invalidates the Spenders context.
+Consequently an owner metadata refresh cannot close an open board or discard
+unrelated work, while a real source/principal replacement still does.
+
+Storage v14 fails closed if either startup migration or a later fresh deferred
+read sees a schema newer than this build. The coordinator drops its cached
+projection and buffered patches, refuses subsequent reads and writes, and never
+downgrades the unknown layout. Browser storage has no transactional compare-and-
+set primitive: a write already in flight when a newer worker commits its schema
+cannot be retroactively cancelled, and already-shipped v13 workers cannot be
+changed. Rollout therefore reloads every old extension context, including
+Fansly tabs and Options, after the update. Coordinator-managed writes check the
+barrier immediately before their queued task executes, and every future schema
+discovered by a fresh coordinator read permanently closes that worker. The
+write-once namespaced legacy snapshot may be added before full schema discovery;
+it never serializes, removes, or downgrades the newer state layout.
+
+Per-conversation Scan commit tokens are correctness fences, not an LRU cache.
+They have no arbitrary 200-group eviction: a slow operation may still be
+finishing its durable save or Hub append after many unrelated conversations
+were opened. The map is worker-lifetime scoped and is intentionally allowed to
+grow by one small tuple per distinct group; a later Scan for the same group
+replaces its row.
+
+Core's metadata catalog adds the required opaque `definitionId` in addition to
+the numeric revision. It identifies exact definition bytes across restore or
+revision rollback. Clients send it as the generation precondition, require the
+successful stream metadata to echo the same applied identity, and use it for
+persona-dependent cache and in-flight fences; they compare it but never parse
+its current `v1:` representation. The old
+E36 field list remains historical and is superseded by this additive metadata
+contract. Release provenance is similarly content-based: deploy accepts only
+the exact canonical `https://gosling-agency.ru` origin, requires healthy Core
+to expose the normalized-OpenAPI `contractHash` equal to the vendored SDK
+manifest, and then proves the catalog route is auth-protected with 401 before
+AMO signing. No deployed source-SHA ancestry is inferred.

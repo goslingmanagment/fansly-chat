@@ -23,20 +23,18 @@ import {
   migrateState,
   serializePersistedState,
   stripSecretSettings,
+  UnsupportedFutureStorageSchemaError,
 } from './migrations.js';
 import {
-  normalizeSavedPersonality,
-  reconcileBundledPersonalities,
-} from './personalities.js';
+  findActivePersona,
+} from './persona-catalog.js';
+import { ensureLegacyPersonaSnapshot } from './persona-preservation.js';
 import {
   getInvalidSummaryCacheKeys,
-  getSummaryCacheKeysForPersonality,
-  getSummaryCacheKeysReferencingPersonality,
   SummaryCacheStore,
 } from './summary-cache.js';
 import type {
   PersistedState,
-  Personality,
   Settings,
   SummaryCacheEntry,
 } from './types.js';
@@ -53,27 +51,66 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+export interface StorageRepairPlan {
+  invalidSummaryKeys: string[];
+  persistState: boolean;
+}
 
-export async function loadStorageState(): Promise<PersistedState> {
-  const raw = await browser.storage.local.get(null);
+export interface StorageStateSnapshot {
+  state: PersistedState;
+  repair: StorageRepairPlan;
+}
+
+function materializeStorageState(raw: Record<string, unknown>): StorageStateSnapshot {
   const invalidSummaryKeys = getInvalidSummaryCacheKeys(raw);
   const state = migrateState(raw);
   state.settings = sanitizeSettings(state.settings);
-  const {
-    personalities,
-    changed: personalitiesChanged,
-  } = reconcileBundledPersonalities(state.personalities);
-  state.personalities = personalities;
 
-  if (invalidSummaryKeys.length > 0) {
+  return {
+    state,
+    repair: {
+      invalidSummaryKeys,
+      persistState:
+        (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION,
+    },
+  };
+}
+
+/**
+ * Capture and normalize one storage snapshot, plus the cleanup it needs,
+ * without performing that cleanup. The background coordinator uses this
+ * split phase so storage.onChanged patches can be merged before any migration
+ * or bundled-persona repair writes back to disk.
+ */
+export async function readStorageStateSnapshot(): Promise<StorageStateSnapshot> {
+  // Hard preservation barrier: no migration/full-state repair can run unless
+  // the exact pre-normalization persona data is durably captured first.
+  await ensureLegacyPersonaSnapshot();
+  const raw = await browser.storage.local.get(null);
+  return materializeStorageState(raw);
+}
+
+/**
+ * Return the normalized local state without repairing storage. This is for
+ * latency-sensitive readers that may run beside a background-owned identity
+ * rekey: unlike loadStorageState(), it cannot write an older full-state
+ * snapshot back over that reconciliation.
+ */
+export async function readStorageState(): Promise<PersistedState> {
+  return (await readStorageStateSnapshot()).state;
+}
+
+export async function loadStorageState(): Promise<PersistedState> {
+  const { state, repair } = await readStorageStateSnapshot();
+
+  if (repair.invalidSummaryKeys.length > 0) {
     await browser.storage.local.remove(
-      invalidSummaryKeys.length === 1 ? invalidSummaryKeys[0]! : invalidSummaryKeys,
+      repair.invalidSummaryKeys.length === 1
+        ? repair.invalidSummaryKeys[0]!
+        : repair.invalidSummaryKeys,
     );
   }
-  if (
-    (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION ||
-    personalitiesChanged
-  ) {
+  if (repair.persistState) {
     // v13 (A41/I116-4): full-state persists go through the serializer —
     // credentials land in their own keys, never back into the blob. The
     // v12→v13 pass IS this write: it moves the secrets out of the blob.
@@ -123,9 +160,28 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
  * settings blob itself never carries them, so a read-modify-write racing a
  * token issuance can no longer clobber the fresh token (the pre-v13 bug:
  * options-page debounced saves rewrote the whole blob, stale token included). */
-export async function saveSettings(settingsPatch: Partial<Settings>): Promise<Settings> {
-  const state = await loadStorageState();
-  const nextSettings = sanitizeSettings({ ...state.settings, ...settingsPatch });
+export async function saveSettings(
+  settingsPatch: Partial<Settings>,
+  baseSettings?: Settings,
+  options: { observedSchemaVersion?: number | null } = {},
+): Promise<Settings> {
+  const observedSchemaVersion = options.observedSchemaVersion;
+  if (
+    observedSchemaVersion !== null &&
+    observedSchemaVersion !== undefined &&
+    Number.isSafeInteger(observedSchemaVersion) &&
+    observedSchemaVersion > STORAGE_SCHEMA_VERSION
+  ) {
+    throw new UnsupportedFutureStorageSchemaError(observedSchemaVersion);
+  }
+  // Options already owns a normalized snapshot and passes it so pagehide can
+  // dispatch storage.set before the document is discarded. Other callers keep
+  // the coordinator-safe read/modify/write path. Options installs its schema
+  // observer before taking that snapshot and passes the observed version here;
+  // this branch deliberately has no await before storage.set so pagehide keeps
+  // its synchronous dispatch guarantee.
+  const currentSettings = baseSettings ?? (await loadStorageState()).settings;
+  const nextSettings = sanitizeSettings({ ...currentSettings, ...settingsPatch });
   const items: Record<string, unknown> = {
     settings: stripSecretSettings(nextSettings),
   };
@@ -137,37 +193,6 @@ export async function saveSettings(settingsPatch: Partial<Settings>): Promise<Se
   }
   await browser.storage.local.set(items);
   return nextSettings;
-}
-
-export async function savePersonalities(personalities: Personality[]): Promise<Personality[]> {
-  const normalized = personalities.map(normalizeSavedPersonality);
-  const { personalities: reconciled } = reconcileBundledPersonalities(normalized);
-
-  await browser.storage.local.set({ personalities: reconciled });
-  return reconciled;
-}
-
-export async function deletePersonality(personalityId: string): Promise<void> {
-  const state = await loadStorageState();
-  const target = state.personalities.find((personality) => personality.id === personalityId);
-  if (target?.builtin) {
-    return;
-  }
-  const personalities = state.personalities.filter((p) => p.id !== personalityId);
-  const accountMappings = Object.fromEntries(
-    Object.entries(state.accountMappings).filter(([, mapped]) => mapped !== personalityId),
-  );
-
-  const raw = await browser.storage.local.get(null);
-  const removals = Array.from(new Set([
-    ...getSummaryCacheKeysForPersonality(state, personalityId),
-    ...getSummaryCacheKeysReferencingPersonality(raw, personalityId),
-  ]));
-
-  await browser.storage.local.set({ personalities, accountMappings });
-  if (removals.length > 0) {
-    await browser.storage.local.remove(removals);
-  }
 }
 
 export async function saveAccountMapping(accountId: string, personalityId: string | null): Promise<void> {
@@ -185,6 +210,9 @@ export async function saveAccountMapping(accountId: string, personalityId: strin
   }
 
   if (personalityId) {
+    if (!findActivePersona(state.personaCatalog, personalityId)) {
+      throw new Error('Cannot map an account to a missing or archived server persona');
+    }
     nextMappings[canonicalAccountId] = personalityId;
   }
 

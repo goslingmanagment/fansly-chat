@@ -611,6 +611,140 @@ describe('SpendersBoardController', () => {
     expect(document.querySelector('.chatgoose-board-progress-bar')).toBeNull();
   });
 
+  it('shows lifetime rows before enrichment and preserves filters when final rows repaint', async () => {
+    let resolveList!: (response: SpendersListResponse) => void;
+    const board = new SpendersBoardController(makeDeps({
+      fetchList: async () => await new Promise<SpendersListResponse>((resolve) => {
+        resolveList = resolve;
+      }),
+    }));
+    void board.show();
+    const activeBuildId = (board as unknown as { activeBuildId: string }).activeBuildId;
+
+    const preliminary = makeResult({
+      entries: [entry('fan-1', null, 'Alice', 900)],
+      fanCount: 1,
+      monthWindow: null,
+    });
+    board.setBuildSnapshot({
+      type: 'spenders:snapshot',
+      buildId: activeBuildId,
+      result: preliminary,
+    });
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]!.querySelector('.chatgoose-board-row-name')?.textContent).toBe('Alice');
+    expect(document.querySelector('.chatgoose-board-progress-label')?.textContent).toContain(
+      'Ranking ready',
+    );
+    expect(document.querySelector<HTMLButtonElement>('.chatgoose-board-action')?.disabled).toBe(true);
+
+    typeSearch('alice');
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    const activeSearch = searchInput();
+    activeSearch.focus();
+    activeSearch.setSelectionRange(2, 4);
+
+    const enriched = makeResult({
+      entries: [entry('fan-1', 'group-1', 'Alice', 900, 75, 'Alice VIP')],
+      fanCount: 1,
+      monthWindow: '2026-07',
+    });
+    resolveList({ ok: true, result: enriched });
+    await vi.waitFor(() => {
+      expect(rows()[0]!.querySelector('.chatgoose-board-row-name')?.textContent).toBe('Alice VIP');
+    });
+
+    expect(searchInput()).toBe(activeSearch);
+    expect(document.activeElement).toBe(activeSearch);
+    expect(activeSearch.selectionStart).toBe(2);
+    expect(activeSearch.selectionEnd).toBe(4);
+    expect(activeSearch.value).toBe('alice');
+    expect(document.querySelector('.chatgoose-board-progress-label')).toBeNull();
+    expect(document.querySelector<HTMLButtonElement>('.chatgoose-board-refresh')?.disabled).toBe(false);
+  });
+
+  it('preserves the J/K-selected fan when deferred enrichment repaints rows', async () => {
+    let resolveList!: (response: SpendersListResponse) => void;
+    const openChat = vi.fn();
+    const board = new SpendersBoardController(makeDeps({
+      fetchList: async () => await new Promise<SpendersListResponse>((resolve) => {
+        resolveList = resolve;
+      }),
+      openChat,
+    }));
+    void board.show();
+    const activeBuildId = (board as unknown as { activeBuildId: string }).activeBuildId;
+
+    board.setBuildSnapshot({
+      type: 'spenders:snapshot',
+      buildId: activeBuildId,
+      result: makeResult({ monthWindow: null }),
+    });
+    pressKey('j');
+    pressKey('j');
+    expect(rows()[2]?.classList.contains('chatgoose-board-row-active')).toBe(true);
+
+    resolveList({
+      ok: true,
+      result: makeResult({
+        entries: [
+          entry('fan-1', 'group-1', 'Jonathan', 1078, 80, 'Jonathan VIP'),
+          entry('fan-2', 'group-2', 'Charles', 700, 60, 'Charles VIP'),
+          entry('fan-3', 'group-3', 'Ricky', 200, 40, 'Ricky VIP'),
+          entry('fan-4', 'group-4', 'Brad', 40, 20, 'Brad VIP'),
+        ],
+        monthWindow: '2026-07',
+      }),
+    });
+    await vi.waitFor(() => {
+      expect(rows()[2]?.querySelector('.chatgoose-board-row-name')?.textContent).toBe('Ricky VIP');
+    });
+
+    expect(rows()[2]?.classList.contains('chatgoose-board-row-active')).toBe(true);
+    pressKey('Enter');
+    expect(openChat).toHaveBeenCalledWith('group-3');
+  });
+
+  it('falls back to the nearest surviving row when enrichment removes the selected fan', async () => {
+    let resolveList!: (response: SpendersListResponse) => void;
+    const openChat = vi.fn();
+    const board = new SpendersBoardController(makeDeps({
+      fetchList: async () => await new Promise<SpendersListResponse>((resolve) => {
+        resolveList = resolve;
+      }),
+      openChat,
+    }));
+    void board.show();
+    const activeBuildId = (board as unknown as { activeBuildId: string }).activeBuildId;
+
+    board.setBuildSnapshot({
+      type: 'spenders:snapshot',
+      buildId: activeBuildId,
+      result: makeResult({ monthWindow: null }),
+    });
+    pressKey('j');
+    pressKey('j');
+
+    resolveList({
+      ok: true,
+      result: makeResult({
+        entries: [
+          entry('fan-1', 'group-1', 'Jonathan', 1078, 80),
+          entry('fan-2', 'group-2', 'Charles', 700, 60),
+          entry('fan-4', 'group-4', 'Brad', 40, 20),
+        ],
+        fanCount: 3,
+        monthWindow: '2026-07',
+      }),
+    });
+    await vi.waitFor(() => expect(rows()).toHaveLength(3));
+
+    expect(rows()[2]?.classList.contains('chatgoose-board-row-active')).toBe(true);
+    pressKey('Enter');
+    expect(openChat).toHaveBeenCalledWith('group-4');
+  });
+
   it('ignores progress frames when no build is on screen', async () => {
     const board = new SpendersBoardController(makeDeps());
     await board.show();

@@ -2124,6 +2124,14 @@ body.chatgoose-scroll-lock {
   font-variant-numeric: tabular-nums;
 }
 
+.chatgoose-board-progress-inline {
+  display: grid;
+  gap: 6px;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+}
+
 .chatgoose-board-footer {
   padding: 10px 20px;
   border-top: 1px solid var(--chatgoose-line);

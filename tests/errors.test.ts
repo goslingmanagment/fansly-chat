@@ -80,4 +80,11 @@ describe('getErrorMessage', () => {
   it('returns settingsLink for no_mapping', () => {
     expect(getErrorMessage('no_mapping').settingsLink).toBe(true);
   });
+
+  it('explains every persona-identity cause for a discarded result', () => {
+    const result = getErrorMessage('chat_changed');
+    expect(result.message).toContain('context changed');
+    expect(result.description).toContain('mapped personality');
+    expect(result.description).toContain('Hub source');
+  });
 });

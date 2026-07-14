@@ -27,6 +27,7 @@ import type {
   SpendersListResponse,
   SpendersListResult,
   SpendersProgressPayload,
+  SpendersSnapshotPayload,
 } from '../../shared/types.js';
 import { formatUserFacingError } from '../../shared/errors.js';
 import { makeKbd } from '../ui/kbd.js';
@@ -121,6 +122,7 @@ export class SpendersBoardController {
   private resolveGeneration = 0;
   private buildCounter = 0;
   private activeBuildId: string | null = null;
+  private hasPreliminaryResult = false;
   private pendingListRequest: {
     buildId: string;
     contextKey: string;
@@ -139,6 +141,8 @@ export class SpendersBoardController {
    * previous context must neither remain visible nor be reused on reopen. */
   invalidateContext(): void {
     this.pendingListRequest = null;
+    this.hasPreliminaryResult = false;
+    this.result = null;
     if (this.open) this.close();
   }
 
@@ -186,6 +190,27 @@ export class SpendersBoardController {
     this.renderProgress();
   }
 
+  /** Lifetime ranking is usable before optional enrichment completes. Keep
+   * the request alive, but replace the spinner with interactive rows. */
+  setBuildSnapshot(snapshot: SpendersSnapshotPayload): void {
+    if (
+      !this.open ||
+      !this.loading ||
+      snapshot.buildId === undefined ||
+      snapshot.buildId !== this.activeBuildId
+    ) return;
+    const firstSnapshot = !this.hasPreliminaryResult;
+    this.hasPreliminaryResult = true;
+    this.result = snapshot.result;
+    if (firstSnapshot) {
+      this.activeTier = 'all';
+      this.searchQuery = '';
+    }
+    this.releaseListReferences();
+    this.releaseProgressReferences();
+    this.renderBoard();
+  }
+
   private async load(refresh: boolean): Promise<void> {
     const generation = ++this.loadGeneration;
     // A new result invalidates any lazy lookup started from the old rows.
@@ -203,7 +228,13 @@ export class SpendersBoardController {
     this.activeBuildId = buildId;
     this.loading = true;
     this.buildProgress = null;
-    this.renderLoading(refresh);
+    if (request !== null && this.hasPreliminaryResult && this.result !== null) {
+      this.renderBoard();
+    } else {
+      this.hasPreliminaryResult = false;
+      this.result = null;
+      this.renderLoading(refresh);
+    }
     try {
       if (request === null) {
         request = {
@@ -224,11 +255,19 @@ export class SpendersBoardController {
       this.buildProgress = null;
       this.releaseProgressReferences();
       if (response.ok) {
+        const enrichInPlace = this.hasPreliminaryResult;
+        this.hasPreliminaryResult = false;
         this.result = response.result;
-        this.activeTier = 'all';
-        this.searchQuery = '';
-        this.renderBoard();
+        if (!enrichInPlace) {
+          this.activeTier = 'all';
+          this.searchQuery = '';
+        }
+        if (!enrichInPlace || !this.renderEnrichedBoardInPlace()) {
+          this.releaseListReferences();
+          this.renderBoard();
+        }
       } else {
+        this.hasPreliminaryResult = false;
         this.renderError(formatUserFacingError(response.error));
       }
     } catch (error) {
@@ -236,6 +275,7 @@ export class SpendersBoardController {
       this.loading = false;
       this.activeBuildId = null;
       this.buildProgress = null;
+      this.hasPreliminaryResult = false;
       this.releaseProgressReferences();
       this.renderError(error instanceof Error ? error.message : 'Could not load spenders.');
     } finally {
@@ -307,7 +347,7 @@ export class SpendersBoardController {
 
     const refresh = document.createElement('button');
     refresh.type = 'button';
-    refresh.className = 'chatgoose-board-action';
+    refresh.className = 'chatgoose-board-action chatgoose-board-refresh';
     refresh.textContent = '↻ Refresh';
     refresh.title = FRESHNESS_TOOLTIP;
     refresh.disabled = this.loading;
@@ -403,7 +443,9 @@ export class SpendersBoardController {
 
     const progress = this.buildProgress;
     if (!progress || progress.phase === 'ranking') {
-      label.textContent = 'Building the board — fetching the top-spenders snapshot…';
+      label.textContent = this.hasPreliminaryResult
+        ? 'Ranking ready — adding month spend, chat links, and fan names…'
+        : 'Building the board — fetching the top-spenders snapshot…';
       bar.style.width = '0%';
       return;
     }
@@ -444,6 +486,22 @@ export class SpendersBoardController {
 
     const body = document.createElement('div');
     body.className = 'chatgoose-board-body';
+    if (this.loading) {
+      const progress = document.createElement('div');
+      progress.className = 'chatgoose-board-progress-inline';
+      const label = document.createElement('div');
+      label.className = 'chatgoose-board-progress-label';
+      const track = document.createElement('div');
+      track.className = 'chatgoose-board-progress-track';
+      const bar = document.createElement('div');
+      bar.className = 'chatgoose-board-progress-bar';
+      track.append(bar);
+      progress.append(label, track);
+      this.progressLabel = label;
+      this.progressBar = bar;
+      body.append(progress);
+      this.renderProgress();
+    }
     body.append(this.buildChips(result));
 
     const listHost = document.createElement('div');
@@ -472,10 +530,45 @@ export class SpendersBoardController {
     this.shell(body);
   }
 
+  /** Replace enrichment-owned data without replacing the controls the chatter
+   * is using. A final response may arrive during search input or IME
+   * composition; rebuilding the shell would drop focus and the caret. */
+  private renderEnrichedBoardInPlace(): boolean {
+    const result = this.result;
+    const body = this.root.querySelector<HTMLElement>('.chatgoose-board-body');
+    if (!result || !body || !this.listHost) {
+      return false;
+    }
+
+    const selectedFanAccountId =
+      this.visibleEntries[this.cursorIndex]?.fanAccountId ?? null;
+    const previousCursorIndex = this.cursorIndex;
+
+    body.querySelector('.chatgoose-board-progress-inline')?.remove();
+    const subtitle = this.root.querySelector<HTMLElement>('.chatgoose-board-subtitle');
+    if (subtitle) {
+      subtitle.textContent = this.metaLine(result);
+      subtitle.title = result.builtAt === null ? '' : FRESHNESS_TOOLTIP;
+    }
+    const refresh = this.root.querySelector<HTMLButtonElement>('.chatgoose-board-refresh');
+    if (refresh) {
+      refresh.disabled = false;
+    }
+
+    // Preliminary rows carry null month/chat/name decoration. Rebuild only the
+    // list so final values repaint while chips/search DOM and focus stay intact.
+    this.rowCache.clear();
+    this.renderList({ selectedFanAccountId, previousCursorIndex });
+    return true;
+  }
+
   /** (Re)fill the list host for the current tier + search query. Kept apart
    * from renderBoard so typing in the search box never rebuilds the input
    * it is typing into. */
-  private renderList(): void {
+  private renderList(preserveCursor?: {
+    selectedFanAccountId: string | null;
+    previousCursorIndex: number;
+  }): void {
     this.cancelSearchRender();
     const result = this.result;
     const listHost = this.listHost;
@@ -597,7 +690,21 @@ export class SpendersBoardController {
     this.rowEls = nextRowEls;
     this.visibleEntries = nextVisibleEntries;
     this.cursorIndex = -1;
-    this.setCursor(this.visibleEntries.length > 0 ? 0 : -1, false);
+    let nextCursorIndex = this.visibleEntries.length > 0 ? 0 : -1;
+    if (preserveCursor !== undefined && this.visibleEntries.length > 0) {
+      const selectedIndex = preserveCursor.selectedFanAccountId === null
+        ? -1
+        : this.visibleEntries.findIndex(
+          (entry) => entry.fanAccountId === preserveCursor.selectedFanAccountId,
+        );
+      nextCursorIndex = selectedIndex >= 0
+        ? selectedIndex
+        : Math.min(
+          Math.max(preserveCursor.previousCursorIndex, 0),
+          this.visibleEntries.length - 1,
+        );
+    }
+    this.setCursor(nextCursorIndex, false);
   }
 
   private buildChips(result: SpendersListResult): HTMLElement {

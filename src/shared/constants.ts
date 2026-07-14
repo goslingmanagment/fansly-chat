@@ -7,9 +7,13 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 13;
+export const STORAGE_SCHEMA_VERSION = 14;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
+export const LEGACY_PERSONA_SNAPSHOT_KEY = 'legacyPersonaSnapshotV1';
+export const PERSONA_CATALOG_STORAGE_KEY = 'personaCatalog';
+export const PERSONA_CATALOG_SOURCE_STORAGE_KEY = 'personaCatalogSource';
+export const PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY = 'personaCatalogFetchedAt';
 // 1.8.1 (v13, A41/I116-4): hub credentials live in their OWN storage.local
 // keys (per-key custody, atomic single-key set) — the options page's
 // read-modify-write of the `settings` blob can no longer clobber a token
@@ -132,6 +136,8 @@ export const AGENCY_HUB_SYNC_TIMEOUT_MS = 10_000;
 // so an unsaved summary gets an opportunistic re-push on chat open — but a
 // persistently failing hub must not be hammered on every tab refresh.
 export const SUMMARY_SYNC_RETRY_COOLDOWN_MS = 3 * 60_000;
+// A missing Hub profile is stable enough to suppress repeated route/capture
+// probes, but bounded so a summary created on another device appears soon.
 export const AGENCY_HUB_AI_USAGE_BATCH_MAX_EVENTS = 100;
 // W9.4/A26: mirrors the kernel's clientContext.transcript cap (core
 // routes.ts aiFeatureStreamBodySchema: z.string().max(300_000)). A giant
