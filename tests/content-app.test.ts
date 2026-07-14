@@ -88,9 +88,21 @@ function readyState(overrides: Partial<TabUiState> = {}): TabUiState {
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',
+    mappedPersonaVersion: 1,
+    mappedPersonaDefinitionId: 'v1:persona-one-definition',
+    mappedPersonaSource: 'source-a',
     compareCardCount: 2,
     compareDraftCount: 1,
     ...overrides,
+  };
+}
+
+function overlayIdentity(variantKey: string | null = null) {
+  return {
+    personaKey: 'personality-1',
+    personaDefinitionId: 'v1:persona-one-definition',
+    personaSource: 'source-a',
+    variantKey,
   };
 }
 
@@ -272,7 +284,7 @@ describe('ChatGooseContentApp', () => {
     expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
 
     // Modify the cached part to simulate previous insert
-    const cached = app.completedOverlayCache.get('group-1', 'fast-reply');
+    const cached = app.completedOverlayCache.get('group-1', 'fast-reply', overlayIdentity());
     cached.parts[0].insertedOnce = true;
     cached.parts[0].insertedAt = null;
 
@@ -320,7 +332,7 @@ describe('ChatGooseContentApp', () => {
     app.handleRouteChange('group-2');
 
     expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
-    expect(app.completedOverlayCache.get('group-2', 'fast-reply')).toBeNull();
+    expect(app.completedOverlayCache.get('group-2', 'fast-reply', overlayIdentity())).toBeNull();
 
     sendSpy.mockClear();
     app.startFeature('fast-reply', false);
@@ -330,6 +342,191 @@ describe('ChatGooseContentApp', () => {
       feature: 'fast-reply',
       groupId: 'group-2',
     }));
+  });
+
+  it('hides a visible completed result when the mapped persona definition changes', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.tabState = readyState({ mappedPersonaDefinitionId: 'v1:persona-one-definition' });
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.lastFeature = 'fast-reply';
+    app.quickSurfaceEverOpened = true;
+    app.quickInlineVisible = true;
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'reply-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Persona v1 reply',
+        parts: ['Persona v1 reply'],
+      },
+    });
+
+    const inlineRoot = app.inlinePanel.root as HTMLElement;
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
+
+    app.handlePortMessage({
+      type: 'settings:changed',
+      state: readyState({ mappedPersonaDefinitionId: 'v1:persona-two-definition' }),
+    });
+
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(app.quickInlineVisible).toBe(false);
+    expect(app.lastFeature).toBeNull();
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fast-reply',
+      overlayIdentity(),
+    )).toBeNull();
+  });
+
+  it('keeps persona-bound UI when only numeric catalog metadata changes', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.tabState = readyState({
+      mappedPersonaVersion: 7,
+      mappedPersonaDefinitionId: 'v1:persona-one-definition',
+    });
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.lastFeature = 'fast-reply';
+    app.quickSurfaceEverOpened = true;
+    app.quickInlineVisible = true;
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'reply-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Stable definition reply',
+        parts: ['Stable definition reply'],
+      },
+    });
+
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState({
+        mappedPersonaVersion: 1,
+        mappedPersonaDefinitionId: 'v1:persona-one-definition',
+      }),
+    });
+
+    expect(app.quickInlineVisible).toBe(true);
+    expect(app.lastFeature).toBe('fast-reply');
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fast-reply',
+      overlayIdentity(),
+    )).not.toBeNull();
+  });
+
+  it('hides completed and in-flight results when the Hub source changes with the same key/version', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn(() => true);
+    app.port.send = sendSpy;
+    app.tabState = readyState({ mappedPersonaSource: 'source-a' });
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.activePersonaKey = 'personality-1';
+    app.activePersonaVersion = 1;
+    app.activePersonaSource = 'source-a';
+
+    app.handlePortMessage({
+      type: 'settings:changed',
+      state: readyState({ mappedPersonaSource: 'source-b' }),
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'operation:cancel',
+      operationId: 'reply-op',
+    });
+    expect(app.activeFeature).toBeNull();
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fast-reply',
+      { ...overlayIdentity(), personaSource: 'source-b' },
+    )).toBeNull();
+  });
+
+  it('keeps an open Spenders context for a metadata-only mapping refresh', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    const invalidateContext = vi.spyOn(app.board, 'invalidateContext');
+
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState(),
+    });
+
+    expect(invalidateContext).not.toHaveBeenCalled();
+
+    app.handlePortMessage({
+      type: 'settings:changed',
+      state: readyState(),
+    });
+
+    expect(invalidateContext).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels and discards an in-flight feature when the mapped persona changes', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn(() => true);
+
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'chat-review';
+    app.activeOperationId = 'review-op';
+    app.activePersonaKey = 'personality-1';
+    app.activePersonaVersion = 1;
+
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState({
+        mappedPersonalityId: 'personality-2',
+        mappedPersonalityName: 'Other',
+        mappedPersonaVersion: 1,
+      }),
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'operation:cancel',
+      operationId: 'review-op',
+    });
+    expect(app.activeFeature).toBeNull();
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'review-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: '<rating>9</rating>',
+        chatReview: {
+          rating: 9,
+          evaluation: 'Stale evaluation',
+          recommendations: 'Stale recommendation',
+          raw: '<rating>9</rating>',
+          valid: true,
+        },
+      },
+    });
+
+    expect(app.deepOverlayModel).toBeNull();
+    expect(app.completedOverlayCache.get('group-1', 'chat-review', {
+      personaKey: 'personality-2',
+      personaVersion: 1,
+      personaSource: 'source-a',
+      variantKey: null,
+    })).toBeNull();
   });
 
   it('shows an OpenRouter missing-key toast when the selected feature model uses OpenRouter', async () => {
@@ -383,10 +580,10 @@ describe('ChatGooseContentApp', () => {
     const refreshButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-overlay-actions .chatgoose-button'))
       .find((element) => element.textContent === 'Refresh');
 
-    expect(app.completedOverlayCache.get('group-1', 'chat-review')).not.toBeNull();
+    expect(app.completedOverlayCache.get('group-1', 'chat-review', overlayIdentity())).not.toBeNull();
     refreshButton!.click();
 
-    expect(app.completedOverlayCache.get('group-1', 'chat-review')).toBeNull();
+    expect(app.completedOverlayCache.get('group-1', 'chat-review', overlayIdentity())).toBeNull();
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'operation:start',
       feature: 'chat-review',
@@ -516,7 +713,7 @@ describe('ChatGooseContentApp', () => {
     const cached = app.completedOverlayCache.get(
       'group-1',
       'improve-draft',
-      'hey babe how was your day',
+      overlayIdentity('hey babe how was your day'),
     );
     expect(cached?.kind).toBe('reply');
     if (!cached || cached.kind !== 'reply') {
@@ -555,7 +752,7 @@ describe('ChatGooseContentApp', () => {
         rawText: 'Improved message',
         rerunActionLabel: 'Regenerate',
       },
-      'hey babe how was your day',
+      overlayIdentity('hey babe how was your day'),
     );
 
     app.startFeature('improve-draft', false);
@@ -646,7 +843,7 @@ describe('ChatGooseContentApp', () => {
       },
     });
 
-    const cached = app.completedOverlayCache.get('group-1', 'fast-reply');
+    const cached = app.completedOverlayCache.get('group-1', 'fast-reply', overlayIdentity());
     expect(cached?.profiling).toEqual(profiling);
   });
 
@@ -717,7 +914,7 @@ describe('ChatGooseContentApp', () => {
     });
 
     // Must NOT cache under group-2
-    expect(app.completedOverlayCache.get('group-2', 'fast-reply')).toBeNull();
+    expect(app.completedOverlayCache.get('group-2', 'fast-reply', overlayIdentity())).toBeNull();
     // Operation state must be fully cleared
     expect(app.activeFeature).toBeNull();
     expect(app.activeOperationId).toBeNull();
@@ -754,7 +951,7 @@ describe('ChatGooseContentApp', () => {
       },
     });
 
-    expect(app.completedOverlayCache.get('group-2', 'fast-reply')).toBeNull();
+    expect(app.completedOverlayCache.get('group-2', 'fast-reply', overlayIdentity())).toBeNull();
     expect(app.activeFeature).toBe('ping');
     expect(app.activeOperationId).toBe('new-ping-op');
     expect(app.suppressedTerminalOpIds.size).toBe(0);
@@ -821,7 +1018,7 @@ describe('ChatGooseContentApp', () => {
     });
 
     // Must not cache under or mark the new group as summary-ready.
-    expect(app.completedOverlayCache.get('group-2', 'fan-summary')).toBeNull();
+    expect(app.completedOverlayCache.get('group-2', 'fan-summary', overlayIdentity())).toBeNull();
     expect(app.tabState.hasAvailableSummary).toBe(false);
     expect(app.activeFeature).toBeNull();
     expect(app.suppressedTerminalOpIds.size).toBe(0);
@@ -1059,7 +1256,7 @@ describe('ChatGooseContentApp', () => {
 
     expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saved');
     expect(
-      app.completedOverlayCache.get('group-1', 'fan-summary').summaryMeta.syncStatus.state,
+      app.completedOverlayCache.get('group-1', 'fan-summary', overlayIdentity()).summaryMeta.syncStatus.state,
     ).toBe('saved');
 
     app.deepOverlayModel = null;
@@ -1218,6 +1415,70 @@ describe('ChatGooseContentApp', () => {
     expect(app.comparePanelVisible).toBe(true);
   });
 
+  it('cancels and discards an in-flight compare when the persona definition changes', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn(() => true);
+
+    app.port.send = sendSpy;
+    app.tabState = readyState({ mappedPersonaDefinitionId: 'v1:persona-one-definition' });
+    app.currentGroupId = 'group-1';
+    app.activeCompareModel = createCompareModel({
+      operationId: 'compare-op',
+      canCancel: true,
+      canRegenerate: false,
+    });
+    app.comparePanelVisible = true;
+    app.pendingCompareFingerprint = 'persona-v1';
+
+    app.handlePortMessage({
+      type: 'settings:changed',
+      state: readyState({ mappedPersonaDefinitionId: 'v1:persona-two-definition' }),
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'compare:cancel',
+      operationId: 'compare-op',
+    });
+    expect(app.activeCompareModel).toBeNull();
+    expect(app.comparePanelVisible).toBe(false);
+    expect(app.pendingCompareFingerprint).toBeNull();
+
+    app.handleCompareComplete({
+      type: 'compare:complete',
+      operationId: 'compare-op',
+      fanDisplayName: 'alice',
+    });
+    expect(app.completedCompareCache.get('group-1')).toBeNull();
+  });
+
+  it('clears a completed compare immediately when the account is remapped', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeCompareModel = createCompareModel();
+    app.comparePanelVisible = true;
+    app.completedCompareCache.set('group-1', {
+      model: createCompareModel(),
+      fingerprint: 'persona-a-v1',
+    });
+
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState({
+        mappedPersonalityId: 'personality-2',
+        mappedPersonalityName: 'Other',
+        mappedPersonaVersion: 1,
+      }),
+    });
+
+    expect(app.completedCompareCache.get('group-1')).toBeNull();
+    expect(app.activeCompareModel).toBeNull();
+    expect(app.comparePanelVisible).toBe(false);
+  });
+
   it('clears cached compare results on conversation change and starts a new compare request', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
@@ -1297,18 +1558,18 @@ describe('ChatGooseContentApp', () => {
 
     app.tabState = readyState();
     app.currentGroupId = 'group-1';
+    mockStorageState = createStorageState({
+      personaCatalog: [
+        { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:persona-one-definition', version: 1, status: 'active' },
+      ],
+    });
     app.completedCompareCache.set('group-1', {
       model: createCompareModel(),
       fingerprint: await app.computeCompareFingerprint(),
     });
     mockStorageState = createStorageState({
-      personalities: [
-        {
-          id: 'personality-1',
-          name: 'Closer',
-          content: 'Changed draft baseline',
-          updatedAt: 2000,
-        },
+      personaCatalog: [
+        { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:persona-two-definition', version: 2, status: 'active' },
       ],
     });
 

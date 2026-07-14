@@ -8,6 +8,7 @@ import type {
   FanslyAccountResponse,
   SessionTemplate,
   Settings,
+  SpendersListResult,
   SpendersStreamState,
 } from '../src/shared/types.js';
 
@@ -935,6 +936,142 @@ describe('SpendersService (kernel source)', () => {
     expect(fetchTopSpenders).toHaveBeenCalledTimes(4);
   });
 
+  it('publishes the lifetime ranking before optional enrichment finishes', async () => {
+    const { service, fetchTopSpenders } = makeKernelHarness();
+    let releaseMonth!: (snapshot: KernelSnapshot) => void;
+    fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+    ) => {
+      if (window === 'lifetime') return LIFETIME_SNAPSHOT;
+      return await new Promise<KernelSnapshot>((resolve) => {
+        releaseMonth = resolve;
+      });
+    });
+
+    const snapshots: SpendersListResult[] = [];
+    let finalSettled = false;
+    const finalPromise = service.getList(kernelSession(), new AbortController().signal, {
+      onSnapshot: (snapshot) => snapshots.push(snapshot.result),
+    }).finally(() => {
+      finalSettled = true;
+    });
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(finalSettled).toBe(false);
+    expect(snapshots[0]!.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fanAccountId: 'f1',
+        groupId: null,
+        customName: null,
+        monthMills: null,
+      }),
+    ]));
+
+    releaseMonth(MONTH_SNAPSHOT);
+    const final = await finalPromise;
+    expect(final.entries[0]).toEqual(expect.objectContaining({
+      fanAccountId: 'f1',
+      groupId: 'g1',
+      monthMills: 120_000,
+    }));
+  });
+
+  it('single-flights concurrent cold builds and fans out the snapshot', async () => {
+    const { service, fetchTopSpenders, listFanAccounts, getAccountNames, kernelSource } =
+      makeKernelHarness();
+    let releaseMonth!: (snapshot: KernelSnapshot) => void;
+    fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+    ) => {
+      if (window === 'lifetime') return LIFETIME_SNAPSHOT;
+      return await new Promise<KernelSnapshot>((resolve) => {
+        releaseMonth = resolve;
+      });
+    });
+    const firstSnapshots: SpendersListResult[] = [];
+    const secondSnapshots: SpendersListResult[] = [];
+
+    const first = service.getList(kernelSession(), new AbortController().signal, {
+      onSnapshot: (snapshot) => firstSnapshots.push(snapshot.result),
+    });
+    await vi.waitFor(() => expect(firstSnapshots).toHaveLength(1));
+    // Join after ranking-ready was already published: the shared build replays
+    // the latest usable rows instead of showing another empty spinner.
+    const second = service.getList(kernelSession(), new AbortController().signal, {
+      onSnapshot: (snapshot) => secondSnapshots.push(snapshot.result),
+    });
+    await vi.waitFor(() => expect(secondSnapshots).toHaveLength(1));
+    releaseMonth(MONTH_SNAPSHOT);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(kernelSource.resolvePageLabelForUsername).toHaveBeenCalledTimes(1);
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(2);
+    expect(listFanAccounts).toHaveBeenCalledTimes(1);
+    expect(getAccountNames).toHaveBeenCalledTimes(1);
+    expect(firstSnapshots).toHaveLength(1);
+    expect(secondSnapshots).toHaveLength(1);
+  });
+
+  it('detaches one aborted cold caller without cancelling another waiter', async () => {
+    const { service, fetchTopSpenders } = makeKernelHarness();
+    let releaseLifetime!: (snapshot: KernelSnapshot) => void;
+    fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+    ) => {
+      if (window !== 'lifetime') return MONTH_SNAPSHOT;
+      return await new Promise<KernelSnapshot>((resolve) => {
+        releaseLifetime = resolve;
+      });
+    });
+
+    const firstController = new AbortController();
+    const first = service.getList(kernelSession(), firstController.signal);
+    const second = service.getList(kernelSession(), new AbortController().signal);
+    await vi.waitFor(() => expect(fetchTopSpenders).toHaveBeenCalledTimes(2));
+
+    const firstRejected = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    firstController.abort();
+    await firstRejected;
+    releaseLifetime(LIFETIME_SNAPSHOT);
+    await expect(second).resolves.toMatchObject({ fanCount: 3 });
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(2);
+  });
+
+  it('detaches a late caller that aborts synchronously during snapshot replay', async () => {
+    const { service, fetchTopSpenders } = makeKernelHarness();
+    let releaseMonth!: (snapshot: KernelSnapshot) => void;
+    fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+    ) => {
+      if (window === 'lifetime') return LIFETIME_SNAPSHOT;
+      return await new Promise<KernelSnapshot>((resolve) => {
+        releaseMonth = resolve;
+      });
+    });
+
+    const first = service.getList(kernelSession(), new AbortController().signal);
+    await vi.waitFor(() => expect(releaseMonth).toBeTypeOf('function'));
+
+    const lateController = new AbortController();
+    const late = service.getList(kernelSession(), lateController.signal, {
+      onSnapshot: () => lateController.abort(),
+    });
+
+    await expect(late).rejects.toMatchObject({ name: 'AbortError' });
+    releaseMonth(MONTH_SNAPSHOT);
+    await expect(first).resolves.toMatchObject({ fanCount: 3 });
+    expect(fetchTopSpenders).toHaveBeenCalledTimes(2);
+  });
+
   it('scopes the board cache to the normalized Hub base URL', async () => {
     const { service, settings, fetchTopSpenders } = makeKernelHarness({
       settings: { agencyHubBaseUrl: ' http://localhost:3000/ ' },
@@ -1152,14 +1289,53 @@ describe('SpendersService (kernel source)', () => {
 
     const oldBuild = first.service.getList(kernelSession(), new AbortController().signal);
     await vi.waitFor(() => expect(first.fetchTopSpenders).toHaveBeenCalledTimes(2));
+    const oldBuildRejected = expect(oldBuild).rejects.toMatchObject({ name: 'AbortError' });
     await first.service.invalidateAll();
     releaseLifetime();
-    await oldBuild;
+    await oldBuildRejected;
 
     expect(store.get('spendersCacheV3')).toEqual({});
     const restarted = makeKernelHarness();
     await restarted.service.getList(kernelSession(), new AbortController().signal);
     expect(restarted.fetchTopSpenders).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts both Refresh and the cold build it superseded on invalidation', async () => {
+    const harness = makeKernelHarness();
+    const lifetimeSignals: AbortSignal[] = [];
+    harness.fetchTopSpenders.mockImplementation(async (
+      _settings: unknown,
+      _pageLabel: string,
+      window: string,
+      _limit: number,
+      signal: AbortSignal,
+    ) => {
+      if (window !== 'lifetime') return MONTH_SNAPSHOT;
+      lifetimeSignals.push(signal);
+      return await new Promise<KernelSnapshot>((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const cold = harness.service.getList(kernelSession(), new AbortController().signal);
+    await vi.waitFor(() => expect(lifetimeSignals).toHaveLength(1));
+    const refresh = harness.service.getList(
+      kernelSession(),
+      new AbortController().signal,
+      { refresh: true },
+    );
+    await vi.waitFor(() => expect(lifetimeSignals).toHaveLength(2));
+
+    const coldRejected = expect(cold).rejects.toMatchObject({ name: 'AbortError' });
+    const refreshRejected = expect(refresh).rejects.toMatchObject({ name: 'AbortError' });
+    await harness.service.invalidateAll();
+
+    await Promise.all([coldRejected, refreshRejected]);
+    expect(lifetimeSignals.every((signal) => signal.aborted)).toBe(true);
   });
 
   // ── W9.3/A20: not-ramped pages (kernel builtAt null) ─────────────────────

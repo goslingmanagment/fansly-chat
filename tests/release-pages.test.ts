@@ -52,14 +52,36 @@ describe('release page stamping', () => {
 
   it('validates pages and remote identity before AMO signing', () => {
     const deploy = readRepoFile('scripts/deploy.sh');
+    const deployEnvExample = readRepoFile('.env.deploy.example');
     const mainIndex = deploy.indexOf('main() {');
+    const coreGateIndex = deploy.indexOf('  assert_core_persona_catalog_ready', mainIndex);
     const stampIndex = deploy.indexOf('  stamp_release_pages "$version"', mainIndex);
     const signIndex = deploy.indexOf('  web-ext sign \\', mainIndex);
 
+    expect(coreGateIndex).toBeGreaterThan(mainIndex);
     expect(stampIndex).toBeGreaterThan(mainIndex);
     expect(signIndex).toBeGreaterThan(stampIndex);
+    expect(coreGateIndex).toBeLessThan(signIndex);
     expect(deploy).toContain('fetch origin main --tags --quiet');
     expect(deploy).toContain('rev-parse origin/main');
+    expect(deploy).toContain('/api/v1/ai/persona-catalog');
+    expect(deploy).toContain('if [[ "$status" != "401" ]]');
+    expect(deploy).toContain(
+      'readonly PRODUCTION_AGENCY_HUB_BASE_URL="https://gosling-agency.ru"',
+    );
+    expect(deploy).toContain(
+      '[[ "$AGENCY_HUB_BASE_URL" != "$PRODUCTION_AGENCY_HUB_BASE_URL" ]]',
+    );
+    expect(deploy).toContain('health.contractHash');
+    expect(deploy).toContain('[[ "$deployed_contract_hash" != "$expected_contract_hash" ]]');
+    expect(deployEnvExample).toContain(
+      'AGENCY_HUB_BASE_URL=https://gosling-agency.ru',
+    );
+    expect(deploy).toContain('vendor/kernel-sdk/kernel-sdk.vendor.json');
+    expect(deploy).toContain('manifest.sourceCommit');
+    expect(deploy).toContain('[[ ! "$vendor_source_commit" =~ ^[0-9a-f]{40}$ ]]');
+    expect(deploy.indexOf('[[ ! "$vendor_source_commit" =~ ^[0-9a-f]{40}$ ]]'))
+      .toBeLessThan(signIndex);
     expect(deploy).not.toContain('stamp_guide_page_version');
   });
 });

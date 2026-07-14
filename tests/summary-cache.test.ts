@@ -16,20 +16,62 @@ describe('summary cache model matching', () => {
     const entry: SummaryCacheEntry = {
       summary: 'Cached',
       personalityId: 'personality-1',
+      personaDefinitionId: 'v1:persona-one-definition',
       personalityUpdatedAt: 1000,
+      personaCatalogSource: 'source-a',
       generatedAt: 456,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
     };
-    expect(isValidSummaryCacheEntry(entry, 'personality-1', 1000, 'kernel')).toBe(true);
+    expect(isValidSummaryCacheEntry(
+      entry,
+      'personality-1',
+      'v1:persona-one-definition',
+      'source-a',
+      'kernel',
+    )).toBe(true);
     // Pre-cutover entries pinned to vendor ids invalidate once (recorded trade).
     expect(isValidSummaryCacheEntry(
       { ...entry, modelId: 'anthropic:claude-sonnet-4-6' },
       'personality-1',
-      1000,
+      'v1:persona-one-definition',
+      'source-a',
       'kernel',
     )).toBe(false);
+  });
+
+  it('uses the opaque definition id as identity and treats numeric version as metadata', () => {
+    const entry: SummaryCacheEntry = {
+      summary: 'Cached',
+      personalityId: 'personality-1',
+      personaDefinitionId: 'v1:persona-one-definition',
+      personalityUpdatedAt: 1000,
+      personaCatalogSource: 'source-a',
+      generatedAt: 456,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+    };
+
+    expect(isValidSummaryCacheEntry(
+      { ...entry, personalityUpdatedAt: 1 },
+      'personality-1',
+      'v1:persona-one-definition',
+      'source-a',
+      'kernel',
+    )).toBe(true);
+    expect(isValidSummaryCacheEntry(
+      entry,
+      'personality-1',
+      'v1:persona-two-definition',
+      'source-a',
+      'kernel',
+    )).toBe(false);
+    expect(normalizeSummaryCacheEntry({
+      ...entry,
+      personaDefinitionId: undefined,
+    })).toBeNull();
   });
 });
 
@@ -37,7 +79,9 @@ describe('summary cache boundaries', () => {
   const validEntry: SummaryCacheEntry = {
     summary: 'Cached',
     personalityId: 'p1',
+    personaDefinitionId: 'v1:persona-one-definition',
     personalityUpdatedAt: 123,
+    personaCatalogSource: 'source-a',
     generatedAt: 456,
     spendingDataVerified: true,
     subscriptionLookupVerified: true,
@@ -47,6 +91,10 @@ describe('summary cache boundaries', () => {
   it('normalizes valid entries and drops corrupt summary cache values', () => {
     expect(normalizeSummaryCacheEntry(validEntry)).toEqual(validEntry);
     expect(normalizeSummaryCacheEntry({ summary: 'missing metadata' })).toBeNull();
+    expect(normalizeSummaryCacheEntry({
+      ...validEntry,
+      personaCatalogSource: undefined,
+    })).toBeNull();
 
     const entries = collectSummaryCacheEntries({
       'summary:group-1': validEntry,

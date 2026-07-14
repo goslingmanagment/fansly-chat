@@ -34,6 +34,8 @@ export interface KernelFeatureRequest {
   /** Fansly fan account id (conversation partner). */
   conversationRef: string;
   personaKey?: string | null;
+  /** Exact catalog definition expected to assemble the prompt. */
+  expectedPersonaDefinitionId?: string;
   replyTone?: 'none' | 'casual' | 'flirty' | 'upsell' | 'spicy';
   replyMode?: 'default' | 'preferSplit';
   draftText?: string;
@@ -66,7 +68,12 @@ export interface KernelFeatureUsage {
 export interface KernelFeatureCallbacks {
   onText: (text: string) => void;
   /** Gateway meta frame: requestId = the generation ref (acceptance correlation). */
-  onMeta?: (meta: { requestId: string; clientRequestId: string; model: string }) => void;
+  onMeta?: (meta: {
+    requestId: string;
+    clientRequestId: string;
+    model: string;
+    personaDefinitionId?: string;
+  }) => void;
   onUsage?: (usage: KernelFeatureUsage) => void;
   onReasoningDelta?: (text: string) => void;
   onStopReason?: (stopReason: string | null) => void;
@@ -128,6 +135,9 @@ function toChatGooseError(error: unknown): ChatGooseError {
         ? new ChatGooseError('hub_quota_exceeded', { message: error.message })
         : new ChatGooseError('rate_limited', { message: error.message });
     }
+    if (error.status === 409 && error.code === 'persona_definition_changed') {
+      return new ChatGooseError('chat_changed', { message: error.message });
+    }
     if (error.status === 503 || error.status === 502) {
       return new ChatGooseError('service_unavailable', { message: error.message });
     }
@@ -164,6 +174,7 @@ export interface KernelFeatureGateway {
 
 export function createKernelFeatureGateway(
   fetchImpl: typeof fetch = (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+  onPersonaDefinitionChanged: () => void | Promise<void> = () => {},
 ): KernelFeatureGateway {
   return {
     isConfigured(settings) {
@@ -181,8 +192,24 @@ export function createKernelFeatureGateway(
 
       let text = '';
       let done = false;
+      let personaDefinitionValidated = request.expectedPersonaDefinitionId === undefined;
+
+      const refreshPersonaCatalog = (): void => {
+        try {
+          void Promise.resolve(onPersonaDefinitionChanged()).catch(() => undefined);
+        } catch {
+          // The generation remains fail-closed even if refresh scheduling fails.
+        }
+      };
 
       const handleFrame = (frame: AiFeatureStreamFrame): void => {
+        // The meta echo is the provenance barrier for the whole stream, not
+        // only visible content. Debug/reasoning/usage/done callbacks can all
+        // mutate UI or accounting state, so none may escape before the exact
+        // server-applied definition has been confirmed.
+        if (frame.type !== 'meta' && !personaDefinitionValidated) {
+          throw new ChatGooseError('chat_changed');
+        }
         switch (frame.type) {
           case 'debug_input_v1':
             callbacks.onDebugInput?.({
@@ -192,6 +219,13 @@ export function createKernelFeatureGateway(
             });
             return;
           case 'meta':
+            if (
+              request.expectedPersonaDefinitionId !== undefined &&
+              frame.personaDefinitionId !== request.expectedPersonaDefinitionId
+            ) {
+              throw new ChatGooseError('chat_changed');
+            }
+            personaDefinitionValidated = true;
             // The meta frame's quota snapshot feeds the popup indicator —
             // fire-and-forget so a storage hiccup can't stall the stream.
             void recordQuotaSnapshot(
@@ -202,6 +236,9 @@ export function createKernelFeatureGateway(
               requestId: frame.requestId,
               clientRequestId: frame.clientRequestId,
               model: frame.model,
+              ...(frame.personaDefinitionId !== undefined
+                ? { personaDefinitionId: frame.personaDefinitionId }
+                : {}),
             });
             return;
           case 'content_delta':
@@ -245,6 +282,9 @@ export function createKernelFeatureGateway(
             platform: 'fansly',
             conversationRef: request.conversationRef,
             ...(request.personaKey != null ? { personaKey: request.personaKey } : {}),
+            ...(request.expectedPersonaDefinitionId !== undefined
+              ? { expectedPersonaDefinitionId: request.expectedPersonaDefinitionId }
+              : {}),
             ...(request.replyTone !== undefined ? { replyTone: request.replyTone } : {}),
             ...(request.replyMode !== undefined ? { replyMode: request.replyMode } : {}),
             ...(request.draftText !== undefined ? { draftText: request.draftText } : {}),
@@ -273,6 +313,9 @@ export function createKernelFeatureGateway(
         await handle.done;
       } catch (error) {
         const mapped = toChatGooseError(error);
+        if (mapped.key === 'chat_changed') {
+          refreshPersonaCatalog();
+        }
         if (mapped.key === 'hub_quota_exceeded') {
           void recordQuotaDenied(request.pageLabel);
         }
@@ -284,6 +327,10 @@ export function createKernelFeatureGateway(
         throw new ChatGooseError('hub_request_failed', {
           message: 'AI stream ended without completing.',
         });
+      }
+      if (!personaDefinitionValidated) {
+        refreshPersonaCatalog();
+        throw new ChatGooseError('chat_changed');
       }
       return text;
     },

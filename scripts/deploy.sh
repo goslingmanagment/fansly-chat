@@ -6,6 +6,7 @@ readonly ENV_FILE="$ROOT_DIR/.env.deploy"
 readonly VPS_HOST="root@45.8.230.111"
 readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"
+readonly PRODUCTION_AGENCY_HUB_BASE_URL="https://gosling-agency.ru"
 readonly EXTENSION_ID="chatgoose@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
@@ -77,6 +78,7 @@ load_env() {
 
   : "${WEB_EXT_API_KEY:?Missing WEB_EXT_API_KEY in $ENV_FILE}"
   : "${WEB_EXT_API_SECRET:?Missing WEB_EXT_API_SECRET in $ENV_FILE}"
+  : "${AGENCY_HUB_BASE_URL:?Missing AGENCY_HUB_BASE_URL in $ENV_FILE}"
 }
 
 read_manifest_version() {
@@ -228,6 +230,24 @@ assert_release_preconditions() {
     fail "Working tree is dirty — commit (or stash) before deploying; what gets signed must be what is committed"
   fi
 
+  # The vendored SDK is release evidence, not just build input. A `-dirty`
+  # provenance means its generated contracts cannot be tied to an immutable
+  # Core commit, so fail before the AMO signing request.
+  local vendor_manifest="$ROOT_DIR/vendor/kernel-sdk/kernel-sdk.vendor.json"
+  require_file "$vendor_manifest"
+  local vendor_source_commit
+  vendor_source_commit="$(node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const manifest = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    if (typeof manifest.sourceCommit === "string") {
+      process.stdout.write(manifest.sourceCommit);
+    }
+  ' "$vendor_manifest")" \
+    || fail "Could not read vendor/kernel-sdk/kernel-sdk.vendor.json sourceCommit"
+  if [[ ! "$vendor_source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+    fail "Vendored Kernel SDK sourceCommit must be an exact clean Core commit; re-vendor from a clean Core checkout before release"
+  fi
+
   git -C "$ROOT_DIR" fetch origin main --tags --quiet \
     || fail "Could not fetch origin/main and tags to verify the release state"
   if [[ "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$(git -C "$ROOT_DIR" rev-parse origin/main)" ]]; then
@@ -248,6 +268,66 @@ assert_release_preconditions() {
   else
     log "No readable served feed at ${BASE_URL}/updates.json (first deploy?) — skipping no-downgrade assert"
   fi
+}
+
+assert_core_persona_catalog_ready() {
+  if [[ "$AGENCY_HUB_BASE_URL" != "$PRODUCTION_AGENCY_HUB_BASE_URL" ]]; then
+    fail "AGENCY_HUB_BASE_URL must be the canonical production Core origin: $PRODUCTION_AGENCY_HUB_BASE_URL"
+  fi
+
+  local vendor_manifest="$ROOT_DIR/vendor/kernel-sdk/kernel-sdk.vendor.json"
+  local expected_contract_hash
+  expected_contract_hash="$(node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const manifest = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    if (typeof manifest.contractHash !== "string") process.exit(1);
+    process.stdout.write(manifest.contractHash);
+  ' "$vendor_manifest")" \
+    || fail "Could not read the vendored Kernel contract hash"
+  if [[ ! "$expected_contract_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    fail "Vendored Kernel contractHash must be an exact sha256"
+  fi
+
+  local health_url="$PRODUCTION_AGENCY_HUB_BASE_URL/api/v1/health"
+  local health_json
+  health_json="$(curl \
+    --silent \
+    --show-error \
+    --fail \
+    --max-time 15 \
+    "$health_url")" \
+    || fail "Could not read healthy production Core identity from $health_url"
+  local deployed_contract_hash
+  deployed_contract_hash="$(node --input-type=module -e '
+    const health = JSON.parse(process.argv[1]);
+    if (typeof health.contractHash !== "string") process.exit(1);
+    process.stdout.write(health.contractHash);
+  ' "$health_json")" \
+    || fail "Production Core health does not expose a verifiable contractHash"
+  if [[ "$deployed_contract_hash" != "$expected_contract_hash" ]]; then
+    fail "Production Core contractHash $deployed_contract_hash does not match vendored SDK $expected_contract_hash"
+  fi
+
+  local catalog_url
+  catalog_url="$PRODUCTION_AGENCY_HUB_BASE_URL/api/v1/ai/persona-catalog"
+  local status
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 15 \
+      --output /dev/null \
+      --write-out '%{http_code}' \
+      "$catalog_url" || true
+  )"
+
+  # Exact unauthenticated 401 proves the route exists behind Core auth. An old
+  # Core returns 404; releasing this client first would clear every v14 catalog
+  # and disable generation until Core catches up.
+  if [[ "$status" != "401" ]]; then
+    fail "Core-first prerequisite failed: $catalog_url must return unauthenticated 401 (got ${status:-curl_failed}); deploy Core before signing the extension"
+  fi
+  log "Production Core contract matches the vendored SDK and persona catalog is auth-protected (401)"
 }
 
 tag_release() {
@@ -338,6 +418,7 @@ main() {
 
   # W9.1/A19: branch/clean-tree/pushed-HEAD/no-downgrade — all before signing.
   assert_release_preconditions "$version"
+  assert_core_persona_catalog_ready
 
   log "Building extension"
   pnpm build

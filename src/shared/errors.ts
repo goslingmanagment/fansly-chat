@@ -60,8 +60,8 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   no_personalities: {
     key: 'no_personalities',
     code: 'CG-FLOW-01',
-    message: 'No model personalities are configured.',
-    description: 'Open Settings and create at least one personality.',
+    message: 'No active server personas are available.',
+    description: 'Ask an Agency Hub admin to create or activate a persona, then refresh Settings.',
     settingsLink: true,
   },
   no_mapping: {
@@ -92,8 +92,8 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   chat_changed: {
     key: 'chat_changed',
     code: 'CG-FLOW-06',
-    message: 'Conversation changed.',
-    description: 'The result was discarded because you switched chats.',
+    message: 'Conversation context changed.',
+    description: 'The result was discarded because the chat, mapped personality, or Hub source changed.',
   },
   extension_reloaded: {
     key: 'extension_reloaded',

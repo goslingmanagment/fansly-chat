@@ -205,6 +205,122 @@ describe('kernel feature gateway', () => {
     expect(truncated.key).toBe('hub_request_failed');
     expect(truncated.message).toContain('without completing');
   });
+
+  it('sends the expected definition and accepts text only after the exact meta echo', async () => {
+    const calls: Array<RequestInit | undefined> = [];
+    const definitionId = 'v1:persona-one-definition';
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      calls.push(init);
+      return sseResponse([
+        { ...META, personaDefinitionId: definitionId },
+        { type: 'content_delta', text: 'safe text' },
+        { type: 'done', stopReason: 'end_turn' },
+      ]);
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    const texts: string[] = [];
+    const metas: unknown[] = [];
+
+    await expect(gateway.streamFeature(
+      settings(),
+      request({ expectedPersonaDefinitionId: definitionId }),
+      {
+        onText: (text) => texts.push(text),
+        onMeta: (meta) => metas.push(meta),
+      },
+      new AbortController().signal,
+    )).resolves.toBe('safe text');
+
+    expect(JSON.parse(String(calls[0]?.body))).toMatchObject({
+      expectedPersonaDefinitionId: definitionId,
+    });
+    expect(texts).toEqual(['safe text']);
+    expect(metas).toEqual([expect.objectContaining({ personaDefinitionId: definitionId })]);
+  });
+
+  it.each([
+    { label: 'missing', metaDefinitionId: undefined },
+    { label: 'different', metaDefinitionId: 'v1:persona-two-definition' },
+  ])('fails closed before text when the meta definition echo is $label', async ({ metaDefinitionId }) => {
+    const refresh = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async () => sseResponse([
+      {
+        ...META,
+        ...(metaDefinitionId === undefined ? {} : { personaDefinitionId: metaDefinitionId }),
+      },
+      { type: 'content_delta', text: 'must not escape' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]));
+    const gateway = createKernelFeatureGateway(
+      fetchMock as unknown as typeof fetch,
+      refresh,
+    );
+    const onText = vi.fn();
+
+    await expect(gateway.streamFeature(
+      settings(),
+      request({ expectedPersonaDefinitionId: 'v1:persona-one-definition' }),
+      { onText },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ key: 'chat_changed' });
+    expect(onText).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('rejects every non-meta side effect before provenance is established', async () => {
+    const refresh = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async () => sseResponse([
+      {
+        type: 'debug_input_v1',
+        systemBlocks: [{ text: 'must not escape', cache: '1h' }],
+        userBlocks: [{ text: 'must not escape either', cache: '5m' }],
+        contextManifest: null,
+      },
+      { ...META, personaDefinitionId: 'v1:persona-one-definition' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]));
+    const gateway = createKernelFeatureGateway(
+      fetchMock as unknown as typeof fetch,
+      refresh,
+    );
+    const onDebugInput = vi.fn();
+    const onStopReason = vi.fn();
+
+    await expect(gateway.streamFeature(
+      settings(),
+      request({ expectedPersonaDefinitionId: 'v1:persona-one-definition' }),
+      { onText: () => undefined, onDebugInput, onStopReason },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ key: 'chat_changed' });
+    expect(onDebugInput).not.toHaveBeenCalled();
+    expect(onStopReason).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('maps a structured definition conflict and schedules a catalog refresh', async () => {
+    const refresh = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: 'persona_definition_changed',
+      message: 'Persona definition changed',
+      statusCode: 409,
+    }), {
+      status: 409,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const gateway = createKernelFeatureGateway(
+      fetchMock as unknown as typeof fetch,
+      refresh,
+    );
+
+    await expect(gateway.streamFeature(
+      settings(),
+      request({ expectedPersonaDefinitionId: 'v1:persona-one-definition' }),
+      { onText: () => undefined },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ key: 'chat_changed' });
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledWith();
+  });
 });
 
 // E28 — the prompt echo. The capability rides a HEADER, never the body: an old
