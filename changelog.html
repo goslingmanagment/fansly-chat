@@ -417,11 +417,51 @@
 
 <div class="timeline">
 
+  <!-- 1.9.7 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.7</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Глобальными персонами теперь управляет Agency Hub: расширение читает серверный каталог, хранит привязки аккаунтов и страхует старые локальные тексты.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Изменилось поведение</div>
+        <ul class="changes-list">
+          <li><strong>Локальный CRUD убран.</strong> <code>Model Personalities</code> показывает read-only каталог; глобальные персоны создаёт и редактирует администратор Agency Hub</li>
+          <li><strong>Никаких автоперезаписей Core.</strong> Локальный prompt не отправляется на сервер; при одинаковом ключе исполняется серверная версия</li>
+          <li><strong>Привязки не теряются.</strong> Отсутствующая или архивная персона остаётся unavailable, но не может генерировать до ручного импорта или новой привязки</li>
+          <li><strong>После автообновления перезагрузите открытые Fansly и Settings вкладки</strong>, чтобы все контексты работали со схемой v14</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Миграция без потери текста</div>
+        <ul class="changes-list">
+          <li><strong>Write-once snapshot.</strong> До первой записи v14 исходные локальные персоны, mappings и aliases сохраняются отдельно, без Hub credentials, и больше не перезаписываются</li>
+          <li><strong>Экспорт в Settings.</strong> <code>Download legacy persona JSON</code> и <code>Copy legacy persona JSON</code> выгружают snapshot и текущие привязки для ручного импорта; экспорт нужно сделать до удаления расширения или очистки browser storage</li>
+          <li><strong>Fail closed.</strong> Повреждённый snapshot или неизвестная более новая схема блокируют обычные записи и новые сетевые запросы, но оставляют recovery-экспорт</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Надёжность</div>
+        <ul class="changes-list">
+          <li>Каталог привязан к конкретному Hub и credential; поздний ответ от старого источника не может вернуть устаревшие персоны</li>
+          <li>Точный opaque <code>definitionId</code> входит в generation/cache identity, поэтому после админской правки не переиспользуется кэш от другого prompt</li>
+          <li>Фоновое обновление неизменившегося каталога не пишет его заново и не закрывает открытую доску Spenders</li>
+          <li>Release gate не подпишет XPI, пока production Core не покажет совпадающий <code>contractHash</code> и защищённый persona-catalog route</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.9.6 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.6</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
