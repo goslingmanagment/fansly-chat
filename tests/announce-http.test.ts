@@ -164,4 +164,44 @@ describe('sendRichMessage', () => {
       sendRichMessage({ botToken: TOKEN, chatId: 'c', markdown: 'x', fetchImpl, sleep: noSleep }),
     ).rejects.toThrow(/502/);
   });
+
+  it('treats a 429 with an unreadable body as a plain failure, no retry', async () => {
+    const brokenBody = {
+      ok: false,
+      status: 429,
+      json: () => Promise.reject(new SyntaxError('bad json')),
+    } as unknown as Response;
+    const fetchImpl = vi.fn().mockResolvedValue(brokenBody);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      sendRichMessage({ botToken: TOKEN, chatId: 'c', markdown: 'x', fetchImpl, sleep }),
+    ).rejects.toThrow(/429/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a 429 whose body lacks a numeric retry_after', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: false, error_code: 429, description: 'Too Many Requests' }, 429),
+    );
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      sendRichMessage({ botToken: TOKEN, chatId: 'c', markdown: 'x', fetchImpl, sleep }),
+    ).rejects.toThrow(/429/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('names its errors TelegramApiError', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: false, error_code: 400, description: 'Bad Request' }, 400),
+    );
+    const rejection = sendRichMessage({
+      botToken: TOKEN, chatId: 'c', markdown: 'x', fetchImpl, sleep: noSleep,
+    });
+    await expect(rejection).rejects.toThrow();
+    await rejection.catch((error: Error) => {
+      expect(error.name).toBe('TelegramApiError');
+    });
+  });
 });

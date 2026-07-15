@@ -8,7 +8,12 @@
 const REQUEST_TIMEOUT_MS = 30_000;
 const RETRY_AFTER_MAX_SECONDS = 60;
 
-export class TelegramApiError extends Error {}
+export class TelegramApiError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'TelegramApiError';
+  }
+}
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -53,10 +58,13 @@ async function callTelegram({ botToken, method, payload, fetchImpl }) {
   if (response.ok && json?.ok === true) {
     return { kind: 'ok', result: json.result };
   }
-  if (response.status === 429 || json?.error_code === 429) {
-    return { kind: 'rate_limited', retryAfterSeconds: json?.parameters?.retry_after ?? 5 };
+  if (json?.error_code === 429 && typeof json?.parameters?.retry_after === 'number') {
+    return { kind: 'rate_limited', retryAfterSeconds: json.parameters.retry_after };
   }
-  const description = json?.description ?? `HTTP ${response.status} with an unreadable body`;
+  const description =
+    json === null
+      ? `HTTP ${response.status} with an unreadable body`
+      : (json?.description ?? `HTTP ${response.status} without a description`);
   return {
     kind: 'failed',
     message: `Telegram error ${json?.error_code ?? response.status}: ${redact(String(description), botToken)}`,
