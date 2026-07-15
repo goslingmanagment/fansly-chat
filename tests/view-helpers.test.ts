@@ -7,6 +7,7 @@ import {
   getInsertButtonLabel,
   getNextInsertablePart,
   getSplitContractNote,
+  getSplitPartCardOptions,
   isInsertFeedbackActive,
 } from '../src/content/ui/view-helpers.js';
 import { getErrorMessage } from '../src/shared/errors.js';
@@ -114,5 +115,28 @@ describe('getSplitContractNote (E40)', () => {
     const guidance = createSplitContractNote(getSplitContractNote(true, false, 2)!);
     expect(guidance.className).toBe('chatgoose-inline-note');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('getSplitPartCardOptions (E40)', () => {
+  it('returns {} when split was not requested or only one part exists', () => {
+    expect(getSplitPartCardOptions(part(0), false, 2)).toEqual({});
+    expect(getSplitPartCardOptions(part(0), undefined, 2)).toEqual({});
+    expect(getSplitPartCardOptions(part(0), true, 1)).toEqual({});
+  });
+
+  it('marks the first send recommended and every later part as a follow-up', () => {
+    expect(getSplitPartCardOptions(part(0), true, 2)).toEqual({
+      hint: 'Suggested first send.',
+      emphasis: 'recommended',
+    });
+    expect(getSplitPartCardOptions(part(1), true, 2)).toEqual({
+      hint: 'Suggested follow-up after message 1.',
+      emphasis: 'followup',
+    });
+    expect(getSplitPartCardOptions(part(2), true, 3)).toEqual({
+      hint: 'Suggested follow-up after message 1.',
+      emphasis: 'followup',
+    });
   });
 });

@@ -508,6 +508,13 @@ describe('InlinePanelController', () => {
     expect(cards).toHaveLength(2);
     const firstHeaderRow = requireElement(cards[0] as HTMLElement, '.chatgoose-card-header-row');
     expect(requireElement(firstHeaderRow, '.chatgoose-card-hint').textContent).toBe('Suggested first send.');
+    expect((cards[0] as HTMLElement).classList.contains('chatgoose-card-recommended')).toBe(true);
+    // The follow-up half of the shared presentation (E40): hint + emphasis class.
+    const secondHeaderRow = requireElement(cards[1] as HTMLElement, '.chatgoose-card-header-row');
+    expect(requireElement(secondHeaderRow, '.chatgoose-card-hint').textContent).toBe(
+      'Suggested follow-up after message 1.',
+    );
+    expect((cards[1] as HTMLElement).classList.contains('chatgoose-card-followup')).toBe(true);
   });
 
   it('one-part split result shows the violation warning inline while keeping actions (E40)', () => {
