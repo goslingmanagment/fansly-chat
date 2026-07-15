@@ -32,6 +32,7 @@ import {
   getNextInsertablePart,
   getReplyPartTitle,
   getSplitContractNote,
+  getSplitPartCardOptions,
   insertedFeedbackDelayMs,
   isEditableElement,
   isInsertFeedbackActive,
@@ -1070,15 +1071,9 @@ export class OverlayController {
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {
-        const isSplit = model.splitModeRequested && model.parts.length > 1;
         parts.append(
           this.createPartCard(getReplyPartTitle(part, model.splitModeRequested), part, {
-            hint: isSplit
-              ? (part.sequenceIndex === 0 ? 'Suggested first send.' : 'Suggested follow-up after message 1.')
-              : undefined,
-            emphasis: isSplit
-              ? (part.sequenceIndex === 0 ? 'recommended' : 'followup')
-              : undefined,
+            ...getSplitPartCardOptions(part, model.splitModeRequested, model.parts.length),
             status: part.insertedOnce ? 'Inserted earlier.' : undefined,
             autoPassThrough: true,
           }),

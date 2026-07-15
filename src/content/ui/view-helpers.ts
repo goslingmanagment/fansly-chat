@@ -135,6 +135,31 @@ export function createSplitContractNote(note: SplitContractNote): HTMLDivElement
   return el;
 }
 
+export interface SplitPartCardOptions {
+  hint?: string;
+  emphasis?: 'recommended' | 'followup';
+}
+
+/**
+ * Split part-card presentation (hint + emphasis), shared by the same three
+ * surfaces as the note (E40): hint/emphasis exist only when the split
+ * actually happened — 2+ parts under a split request. Kept beside
+ * getSplitContractNote so the two halves of split presentation cannot
+ * drift apart per-surface again (the 1.9.9 failure mode).
+ */
+export function getSplitPartCardOptions(
+  part: OverlayInsertPart,
+  splitModeRequested: boolean | undefined,
+  partCount: number,
+): SplitPartCardOptions {
+  if (!splitModeRequested || partCount <= 1) {
+    return {};
+  }
+  return part.sequenceIndex === 0
+    ? { hint: 'Suggested first send.', emphasis: 'recommended' }
+    : { hint: 'Suggested follow-up after message 1.', emphasis: 'followup' };
+}
+
 export function isInsertFeedbackActive(
   part: OverlayInsertPart,
   now = Date.now(),
