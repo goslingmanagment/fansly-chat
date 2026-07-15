@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { ChatGooseError, toUserError, getErrorMessage } from '../src/shared/errors.js';
+import {
+  ChatGooseError,
+  formatUserErrorTechnicalDetail,
+  getErrorMessage,
+  toUserError,
+} from '../src/shared/errors.js';
 
 describe('ChatGooseError', () => {
   it('constructs with code and default message', () => {
@@ -68,6 +73,27 @@ describe('toUserError', () => {
     const result = toUserError(err);
     expect(result.httpStatus).toBeUndefined();
     expect(result.serverDetail).toBeUndefined();
+  });
+});
+
+describe('formatUserErrorTechnicalDetail', () => {
+  it('joins status and server detail into one diagnostic line', () => {
+    expect(formatUserErrorTechnicalDetail({
+      ...getErrorMessage('hub_request_failed'),
+      httpStatus: 503,
+      serverDetail: 'upstream unavailable',
+    })).toBe('HTTP 503 • upstream unavailable');
+  });
+
+  it('shows the server detail alone when no HTTP status is known', () => {
+    expect(formatUserErrorTechnicalDetail({
+      ...getErrorMessage('hub_provider_failed'),
+      serverDetail: 'provider_stream_failed: AI gateway provider stream failed',
+    })).toBe('provider_stream_failed: AI gateway provider stream failed');
+  });
+
+  it('returns null when the error carries no diagnostics', () => {
+    expect(formatUserErrorTechnicalDetail(getErrorMessage('hub_request_failed'))).toBeNull();
   });
 });
 

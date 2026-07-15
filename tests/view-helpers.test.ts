@@ -1,11 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
 import {
+  createUserErrorBlock,
   formatLoadingStatus,
   getInsertButtonLabel,
   getNextInsertablePart,
   isInsertFeedbackActive,
 } from '../src/content/ui/view-helpers.js';
+import { getErrorMessage } from '../src/shared/errors.js';
 import type { OverlayInsertPart } from '../src/shared/types.js';
+
+function installDom() {
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>');
+  vi.stubGlobal('window', dom.window);
+  vi.stubGlobal('document', dom.window.document);
+  vi.stubGlobal('HTMLDivElement', dom.window.HTMLDivElement);
+  return dom;
+}
 
 function part(
   sequenceIndex: number,
@@ -46,5 +57,26 @@ describe('content view helpers', () => {
     expect(getNextInsertablePart([first, second, third], 2_000)).toBe(third);
     expect(isInsertFeedbackActive(second, 2_000)).toBe(true);
     expect(getInsertButtonLabel(second)).toBe('Inserted \u2713');
+  });
+
+  it('renders the technical diagnostic line on the inline error card when present', () => {
+    installDom();
+    const block = createUserErrorBlock({
+      ...getErrorMessage('hub_provider_failed'),
+      httpStatus: 502,
+      serverDetail: 'provider_stream_failed: AI gateway provider stream failed',
+    });
+    const detail = block.querySelector('.chatgoose-error-detail');
+    expect(detail?.textContent).toBe(
+      'HTTP 502 \u2022 provider_stream_failed: AI gateway provider stream failed',
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('omits the diagnostic line when the error has no technical detail', () => {
+    installDom();
+    const block = createUserErrorBlock(getErrorMessage('hub_request_failed'));
+    expect(block.querySelector('.chatgoose-error-detail')).toBeNull();
+    vi.unstubAllGlobals();
   });
 });

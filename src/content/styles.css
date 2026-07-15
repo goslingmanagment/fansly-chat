@@ -880,6 +880,14 @@
   line-height: 1.45;
 }
 
+.chatgoose-toast-detail {
+  color: var(--chatgoose-ink-mid);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 .chatgoose-toast-error {
   border-color: color-mix(in srgb, var(--chatgoose-bad) 45%, transparent);
 }
@@ -1326,6 +1334,14 @@ ol.chatgoose-md-list {
 .chatgoose-error-secondary {
   color: color-mix(in srgb, var(--chatgoose-bad) 70%, var(--chatgoose-ink));
   line-height: 1.45;
+}
+
+.chatgoose-error-detail {
+  color: var(--chatgoose-ink-mid);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .chatgoose-inline-note {

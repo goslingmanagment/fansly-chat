@@ -652,6 +652,7 @@ export type UserErrorKey =
   | 'hub_request_failed'
   | 'hub_sync_failed'
   | 'hub_quota_exceeded'
+  | 'hub_provider_failed'
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
   | 'insertion_failed'
