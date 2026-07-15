@@ -623,6 +623,29 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatgoose-card-status').textContent).toBe('Inserted earlier.');
   });
 
+  it('flags a one-part Split result while preserving the insertable reply', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const model = createReplyModel(createPart('One message'));
+    model.splitModeRequested = true;
+
+    controller.render(model);
+
+    expect(requireElement<HTMLDivElement>('.chatgoose-inline-note').textContent).toBe(
+      'Split mode expected at least 2 messages, but this result contains one. Try Regenerate to retry the split.',
+    );
+    expect(requireElement<HTMLDivElement>('.chatgoose-card-text-insertable').textContent).toBe(
+      'One message',
+    );
+    expect(
+      requireElement<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button').textContent,
+    ).toBe('Insert');
+  });
+
   it('renders a profiling summary in completed views when profiling is present', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
