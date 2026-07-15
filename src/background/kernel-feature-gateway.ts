@@ -203,6 +203,22 @@ export function createKernelFeatureGateway(
       };
 
       const handleFrame = (frame: AiFeatureStreamFrame): void => {
+        // A terminal error frame is the kernel NAMING the failure (e.g. a
+        // dead page proxy → provider_stream_failed). It must surface as that
+        // cause — before the provenance barrier, which would misreport it as
+        // chat_changed, and before EOF collapses it into the generic
+        // "ended without completing" truncation error.
+        if (frame.type === 'error') {
+          throw new ChatGooseError(
+            frame.code.startsWith('provider') ? 'hub_provider_failed' : 'hub_request_failed',
+            {
+              details: { status: 0, responseSnippet: `${frame.code}: ${frame.message}` },
+              ...(typeof frame.retryAfterMs === 'number'
+                ? { retryAfterMs: frame.retryAfterMs }
+                : {}),
+            },
+          );
+        }
         // The meta echo is the provenance barrier for the whole stream, not
         // only visible content. Debug/reasoning/usage/done callbacks can all
         // mutate UI or accounting state, so none may escape before the exact
