@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
+  createSplitContractNote,
   createUserErrorBlock,
   formatLoadingStatus,
   getInsertButtonLabel,
   getNextInsertablePart,
+  getSplitContractNote,
   isInsertFeedbackActive,
 } from '../src/content/ui/view-helpers.js';
 import { getErrorMessage } from '../src/shared/errors.js';
@@ -77,6 +79,40 @@ describe('content view helpers', () => {
     installDom();
     const block = createUserErrorBlock(getErrorMessage('hub_request_failed'));
     expect(block.querySelector('.chatgoose-error-detail')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('getSplitContractNote (E40)', () => {
+  it('returns null when split was not requested', () => {
+    expect(getSplitContractNote(false, false, 1)).toBeNull();
+    expect(getSplitContractNote(undefined, false, 1)).toBeNull();
+  });
+
+  it('returns null for errored or empty results — those states have their own surfaces', () => {
+    expect(getSplitContractNote(true, true, 1)).toBeNull();
+    expect(getSplitContractNote(true, false, 0)).toBeNull();
+  });
+
+  it('flags a one-part result as a contract violation', () => {
+    const note = getSplitContractNote(true, false, 1);
+    expect(note?.tone).toBe('violation');
+    expect(note?.text).toContain('Try Regenerate');
+  });
+
+  it('keeps 2+ parts as guidance — the contract warns about the minimum only', () => {
+    for (const count of [2, 3, 4]) {
+      expect(getSplitContractNote(true, false, count)?.tone).toBe('guidance');
+    }
+  });
+
+  it('createSplitContractNote adds the amber warn modifier only for violations', () => {
+    installDom();
+    const violation = createSplitContractNote(getSplitContractNote(true, false, 1)!);
+    expect(violation.className).toBe('chatgoose-inline-note chatgoose-inline-note-warn');
+    expect(violation.textContent).toContain('at least 2 messages');
+    const guidance = createSplitContractNote(getSplitContractNote(true, false, 2)!);
+    expect(guidance.className).toBe('chatgoose-inline-note');
     vi.unstubAllGlobals();
   });
 });

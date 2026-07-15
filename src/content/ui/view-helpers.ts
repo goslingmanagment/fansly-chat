@@ -89,6 +89,52 @@ export function getReplyPartTitle(
     : `Message ${number}`;
 }
 
+export interface SplitContractNote {
+  text: string;
+  tone: 'guidance' | 'violation';
+}
+
+/**
+ * The Split-contract note for a completed reply-like result, shared by every
+ * surface that renders generated parts (overlay, inline panel, compare tabs) —
+ * E40. Guidance when the kernel honored the 2–3 part request; a violation
+ * warning when a sticky Split request still produced a single part (core
+ * Decision #156 made the prompt strict — one part is a missed contract, not
+ * AI judgment). Null when Split was not requested, the result errored, or no
+ * usable parts exist (error/raw-stream paths own those states). 4+ parts read
+ * as guidance: the client contract warns about the MINIMUM only (E40).
+ */
+export function getSplitContractNote(
+  splitModeRequested: boolean | undefined,
+  hasError: boolean,
+  partCount: number,
+): SplitContractNote | null {
+  if (!splitModeRequested || hasError || partCount === 0) {
+    return null;
+  }
+  return partCount > 1
+    ? {
+        text: 'Split mode was on. Start with message 1, send it manually in Fansly, then use the follow-up if it still feels right.',
+        tone: 'guidance',
+      }
+    : {
+        text: 'Split mode expected at least 2 messages, but this result contains one. Try Regenerate to retry the split.',
+        tone: 'violation',
+      };
+}
+
+/** A violation note must not wear the money-green success voice — it gets the
+ *  amber warn modifier (family rule: green is reserved for money). */
+export function createSplitContractNote(note: SplitContractNote): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className =
+    note.tone === 'violation'
+      ? 'chatgoose-inline-note chatgoose-inline-note-warn'
+      : 'chatgoose-inline-note';
+  el.textContent = note.text;
+  return el;
+}
+
 export function isInsertFeedbackActive(
   part: OverlayInsertPart,
   now = Date.now(),

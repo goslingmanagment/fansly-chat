@@ -417,11 +417,32 @@
 
 <div class="timeline">
 
+  <!-- 1.9.10 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.10</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Предупреждение о несостоявшемся Split теперь видно в основной панели ответа, а не только в развёрнутом виде.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li><strong>«Split вернул одно сообщение» — предупреждение в основной inline-панели и в Compare.</strong> В 1.9.9 оно рендерилось только в развёрнутом overlay-виде: обычный fast-reply показывал одиночный ответ без объяснения. Insert и Regenerate при этом сохраняются</li>
+          <li><strong>Плашка-нарушение больше не зелёная.</strong> Зелёный зарезервирован под деньги; предупреждение о нарушении Split-контракта получило янтарный тон</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 1.9.9 -->
   <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.9</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -433,6 +454,7 @@
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
           <li><strong>Recap и чип персоны — единый правый блок.</strong> Право-прижатие случайно несли два элемента сразу, и на широком композере свободное место делилось пополам: Recap повисал между двумя провалами. Теперь слева действия, справа блок «про фана» (Recap · персона); на узких окнах вид не меняется</li>
+          <li><strong>Сменился текст Split-подсказки</strong> (дополнение задним числом): ядро перестало разрешать одиночный ответ при включённом Split, и подсказка теперь честно называет один part нарушением с советом Regenerate. В 1.9.9 была видна только в развёрнутом виде результата — с 1.9.10 на всех поверхностях</li>
         </ul>
       </div>
     </div>

@@ -1353,6 +1353,14 @@ ol.chatgoose-md-list {
   color: var(--chatgoose-green);
 }
 
+/* Violation variant (one-part Split, E40): amber is the family's attention
+   voice — the base note's green must stay reserved for money/success. */
+.chatgoose-inline-note-warn {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+}
+
 /* ─── Layout Helpers ─────────────────────────────────────────── */
 
 .chatgoose-grid {

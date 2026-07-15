@@ -56,6 +56,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E37 | 2026-07-14 | Read-only persona follow-up: narrow refreshes, future-schema barrier, durable Scan fences, and exact deployed-contract release gate |
 | E38 | 2026-07-15 | Kernel SSE error frames surface as their named cause: gateway maps provider* codes to hub_provider_failed/hub_request_failed, error surfaces render one technical-detail line, frame code matched by prefix not enum |
 | E39 | 2026-07-15 | Releases announce themselves in the ChatGoose Telegram channel: `--check` fails deploy.sh preflight before AMO signing, the real send runs only after tag_release and never fails a live deploy, load_env stops exporting `.env.deploy` |
+| E40 | 2026-07-16 | Split-contract note is one shared helper on every reply surface (inline/overlay/compare); the one-part violation wears amber (green stays money-only); the contract warns about the MINIMUM only; copy follows core Decision #156 — shipping it requires prod core ⊇ bc19f8b |
 
 ## Entries
 
@@ -881,3 +882,21 @@ bot token is not handed to child processes; the CLI loads the file itself.
 Backfill = the same CLI with `--version X.Y.Z --silent` per missing
 release, channel inventory via the user-session tooling (bots cannot read
 channel history).
+
+**E40 (2026-07-16).** The Split-contract note renders on EVERY surface that
+shows generated reply parts, via one shared helper (`getSplitContractNote` /
+`createSplitContractNote` in view-helpers): the expanded overlay, the inline
+panel (the DEFAULT fast-reply surface — 1.9.9 shipped the warning
+overlay-only, so the primary path stayed silent), and compare tabs (dormant
+in the shipped build, fixed so a Compare revival cannot regress it). The
+one-part violation variant wears the amber warn modifier: the base note's
+green is reserved for money (family theme rule), and a contract-violation
+warning must not read as success. The client contract warns about the
+MINIMUM only — 4+ provider parts remain guidance, mirroring core's tolerant
+output cardinality. The copy references core Decision #156 (strict 2–3 part
+prompt, core bc19f8b): "Try Regenerate" is only honest against a kernel that
+no longer opts out of splitting, so a release carrying this copy requires
+production core to run a descendant of bc19f8b. Accepted edge: disarming
+Split after a one-part result and clicking Regenerate regenerates in the
+CURRENT toolbar mode while the stale note still mentions the split — the
+note describes the completed result, not the next request.

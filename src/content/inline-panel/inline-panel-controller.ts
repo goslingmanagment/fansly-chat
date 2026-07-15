@@ -17,11 +17,13 @@ import {
 } from '../spend-format.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
 import {
+  createSplitContractNote,
   createUserErrorBlock,
   formatLoadingStatus,
   getInsertButtonLabel,
   getNextInsertablePart,
   getReplyPartTitle,
+  getSplitContractNote,
   insertedFeedbackDelayMs,
   isEditableElement,
   isInsertFeedbackActive,
@@ -444,6 +446,18 @@ export class InlinePanelController {
       section.append(createUserErrorBlock(this.inlineError));
     }
 
+    // Same Split-contract note as the expanded overlay (E40): the inline
+    // panel is the DEFAULT fast-reply surface, so the one-part violation
+    // warning must be visible here, not only after expanding the result.
+    const splitNote = getSplitContractNote(
+      model.splitModeRequested,
+      Boolean(model.error),
+      model.parts.length,
+    );
+    if (splitNote) {
+      section.append(createSplitContractNote(splitNote));
+    }
+
     if (model.error) {
       section.append(createUserErrorBlock(model.error));
     } else if (model.parts.length > 0) {
@@ -613,6 +627,13 @@ export class InlinePanelController {
     const spend = tab.llmSpend;
     if (spend) {
       section.append(this.createSpendStrip(spend));
+    }
+
+    // Compare tabs carry the same Split contract as a plain reply (E40).
+    // Error tabs returned above, so hasError is always false here.
+    const tabSplitNote = getSplitContractNote(tab.splitModeRequested, false, tab.parts.length);
+    if (tabSplitNote) {
+      section.append(createSplitContractNote(tabSplitNote));
     }
 
     if (tab.parts.length > 0) {

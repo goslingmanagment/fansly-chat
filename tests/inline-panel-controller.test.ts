@@ -510,6 +510,65 @@ describe('InlinePanelController', () => {
     expect(requireElement(firstHeaderRow, '.chatgoose-card-hint').textContent).toBe('Suggested first send.');
   });
 
+  it('one-part split result shows the violation warning inline while keeping actions (E40)', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const model = createReplyModel([createPart('Only one')]);
+    model.splitModeRequested = true;
+    controller.render(model);
+
+    const note = requireElement(controller.root, '.chatgoose-inline-note');
+    expect(note.classList.contains('chatgoose-inline-note-warn')).toBe(true);
+    expect(note.textContent).toContain('Try Regenerate');
+    // The warning must not cost the chatter the result: the part card with
+    // its Insert action and the Regenerate button both stay.
+    const buttons = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-button'),
+    ).map((btn) => btn.textContent);
+    expect(buttons).toContain('Insert');
+    expect(buttons).toContain('Regenerate');
+  });
+
+  it('two-part split result keeps the guidance note without the warn tone', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const model = createReplyModel([createPart('First', 0), createPart('Second', 1)]);
+    model.splitModeRequested = true;
+    controller.render(model);
+
+    const note = requireElement(controller.root, '.chatgoose-inline-note');
+    expect(note.classList.contains('chatgoose-inline-note-warn')).toBe(false);
+    expect(note.textContent).toContain('Split mode was on');
+  });
+
+  it('active compare tab carries the one-part split violation warning (E40)', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const model = createCompareModel({
+      progress: null,
+      canCancel: false,
+      tabs: [
+        {
+          cardId: 'current',
+          label: 'Current',
+          source: 'current',
+          status: 'reply',
+          rawText: 'Only one',
+          parts: [createPart('Only one')],
+          splitModeRequested: true,
+        },
+      ],
+    });
+    controller.render(model);
+
+    const note = requireElement(controller.root, '.chatgoose-inline-note');
+    expect(note.classList.contains('chatgoose-inline-note-warn')).toBe(true);
+    expect(note.textContent).toContain('at least 2 messages');
+  });
+
   it('reply Regenerate button calls onRerun', () => {
     const onRerun = vi.fn();
     const controller = createController({ onRerun });
