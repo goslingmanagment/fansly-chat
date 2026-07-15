@@ -71,14 +71,21 @@ load_env() {
     fail "Missing $ENV_FILE. Copy .env.deploy.example and add AMO credentials."
   fi
 
-  set -a
+  # Not exported to the environment: nothing downstream reads these vars —
+  # AMO keys are passed as CLI arguments, the hub URL is compared in-shell,
+  # and the announce CLI loads .env.deploy itself. Exporting would hand the
+  # Telegram bot token to every child process (pnpm, web-ext, ssh, scp, curl).
   # shellcheck disable=SC1090
   source "$ENV_FILE"
-  set +a
 
   : "${WEB_EXT_API_KEY:?Missing WEB_EXT_API_KEY in $ENV_FILE}"
   : "${WEB_EXT_API_SECRET:?Missing WEB_EXT_API_SECRET in $ENV_FILE}"
   : "${AGENCY_HUB_BASE_URL:?Missing AGENCY_HUB_BASE_URL in $ENV_FILE}"
+
+  if [[ "${SKIP_ANNOUNCE:-0}" != "1" ]]; then
+    : "${TELEGRAM_BOT_TOKEN:?Missing TELEGRAM_BOT_TOKEN in $ENV_FILE (set SKIP_ANNOUNCE=1 to release without the announce)}"
+    : "${TELEGRAM_CHANNEL_ID:?Missing TELEGRAM_CHANNEL_ID in $ENV_FILE (set SKIP_ANNOUNCE=1 to release without the announce)}"
+  fi
 }
 
 read_manifest_version() {
@@ -437,6 +444,15 @@ main() {
 
   # W9.1/A19: branch/clean-tree/pushed-HEAD/no-downgrade — all before signing.
   assert_release_preconditions "$version"
+
+  # The announcement's changelog section must exist, stay inside Telegram's
+  # limits, and use only supported markdown BEFORE the irreversible AMO
+  # request (E33 fail-early policy). SKIP_ANNOUNCE skips only the final
+  # send, never this validation.
+  log "Validating changelog announce for ${version}"
+  node "$ROOT_DIR/scripts/announce-release.mjs" --check --version "$version" \
+    || fail "Changelog announce preflight failed — fix CHANGELOG.md before signing"
+
   assert_core_persona_catalog_ready
 
   log "Building extension"
@@ -567,6 +583,15 @@ EOF
 
   log "Install page: ${BASE_URL}/"
   log "Install link: $latest_xpi_url"
+
+  if [[ "${SKIP_ANNOUNCE:-0}" == "1" ]]; then
+    log "SKIP_ANNOUNCE=1 — skipping the Telegram changelog announce"
+  elif node "$ROOT_DIR/scripts/announce-release.mjs" --version "$version"; then
+    log "Telegram changelog announce posted"
+  else
+    log "WARNING: Telegram announce failed — the release itself is live and tagged."
+    log "Retry manually: node $ROOT_DIR/scripts/announce-release.mjs --version ${version}"
+  fi
 }
 
 main "$@"
