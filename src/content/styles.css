@@ -439,17 +439,17 @@
   margin: 0 2px;
 }
 
-/* Recap opens the right-hand "about the fan" cluster (Recap + persona). */
+/* Recap opens the right-hand "about the fan" cluster (Recap + persona): its
+   auto margin is the row's ONE right-pin. A second auto margin in the row
+   (the persona pill carried a leftover one until 1.9.9) makes flexbox split
+   the free space between them, stranding Recap mid-bar on wide composers. */
 .chatgoose-toolbar-right-start {
   margin-left: auto;
 }
 
-/* ─── Personality (pinned right) ─────────────────────────── */
+/* ─── Personality (right cluster tail) ─────────────────────── */
 
-/* Soak up the row's free space here so the personality pill sits at the right
-   edge, with the action buttons packed left. */
 .chatgoose-toolbar-personality-end {
-  margin-left: auto;
   max-width: 100%;
   flex: 0 0 auto;
 }
