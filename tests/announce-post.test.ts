@@ -61,6 +61,11 @@ describe('extractSection', () => {
     const crlf = SAMPLE.replace(/\n/g, '\r\n');
     expect(extractSection(crlf, '1.6.0').body).toBe('Тело переезда.');
   });
+
+  it('throws on an unclosed fence instead of swallowing later sections', () => {
+    const broken = '## 2.0.0\n\nДо фенса.\n\n```\nвнутри без закрытия\n\n## 1.9.9\n\nСоседняя.\n';
+    expect(() => extractSection(broken, '2.0.0')).toThrow(/unclosed/i);
+  });
 });
 
 describe('composePost', () => {
@@ -98,6 +103,16 @@ describe('composePost', () => {
     expect(() => composePost({ heading, body: 'непарный ` бэктик и $5' })).toThrow(
       /unmatched backtick/i,
     );
+  });
+
+  it('throws on an unclosed fence in the section body', () => {
+    expect(() => composePost({ heading: '## 1.0.0', body: '```\nname = $x' })).toThrow(/unclosed/i);
+  });
+
+  it('rejects 4+-backtick fences', () => {
+    expect(() =>
+      composePost({ heading: '## 1.0.0', body: '````\nx\n````' }),
+    ).toThrow(/fence style/i);
   });
 });
 

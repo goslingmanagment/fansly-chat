@@ -9,7 +9,7 @@ export const RICH_MESSAGE_CHAR_LIMIT = 32768;
 
 function scanLines(markdownText) {
   let inFence = false;
-  return markdownText
+  const scanned = markdownText
     .replace(/\r\n/g, '\n')
     .split('\n')
     .map((line) => {
@@ -19,6 +19,10 @@ function scanLines(markdownText) {
       }
       return { line, protected: inFence };
     });
+  if (inFence) {
+    throw new Error('Unclosed ``` fence — refusing to parse (everything after it would be treated as code)');
+  }
+  return scanned;
 }
 
 export function extractSection(changelogText, version) {
