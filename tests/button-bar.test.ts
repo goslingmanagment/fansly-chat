@@ -1,8 +1,15 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { ButtonBar } from '../src/content/button-bar.js';
+import { installContentStyles } from '../src/content/dom-anchor.js';
 import { detectLabelPlatform, featureHotkeyLabel } from '../src/shared/hotkeys.js';
 import type { TabUiState } from '../src/shared/types.js';
+
+const contentStyles = readFileSync(
+  new URL('../src/content/styles.css', import.meta.url),
+  'utf8',
+);
 
 function installDom() {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>');
@@ -402,5 +409,40 @@ describe('ButtonBar improve draft state', () => {
     expect(
       children[recapIndex]!.classList.contains('chatgoose-toolbar-right-start'),
     ).toBe(true);
+  });
+});
+
+describe('ButtonBar right-pin invariant (real stylesheet)', () => {
+  beforeEach(() => {
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // The row's ONE right-pin lives on Recap (.chatgoose-toolbar-right-start).
+  // A second auto margin in the same nowrap row (the persona pill carried a
+  // pre-E24 leftover until 1.9.9) makes flexbox split the free space between
+  // the margins, stranding Recap mid-bar on wide composers — invisible on
+  // narrow windows where both margins collapse to zero. jsdom computes the
+  // cascade (not layout), which is exactly what broke, so pin the cascade:
+  // Recap is the single toolbar child whose margin-left resolves to auto.
+  it('gives Recap the only auto left margin in the toolbar row', () => {
+    installContentStyles(contentStyles);
+    const bar = makeBar();
+    document.body.append(bar.root);
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const recap = buttonByLabel(bar.root, 'Recap')!;
+    const persona = bar.root.querySelector('.chatgoose-toolbar-personality-end')!;
+    const autoPinned = Array.from(bar.root.children).filter(
+      (child) => window.getComputedStyle(child).marginLeft === 'auto',
+    );
+
+    expect(window.getComputedStyle(recap).marginLeft).toBe('auto');
+    expect(window.getComputedStyle(persona).marginLeft).not.toBe('auto');
+    expect(autoPinned).toEqual([recap]);
   });
 });
