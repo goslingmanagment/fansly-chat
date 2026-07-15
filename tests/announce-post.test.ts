@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractSection } from '../scripts/lib/announce-post.mjs';
+import { composePost, extractSection, validatePost } from '../scripts/lib/announce-post.mjs';
 
 const SAMPLE = `# Что нового
 
@@ -60,5 +60,53 @@ describe('extractSection', () => {
   it('normalizes CRLF input', () => {
     const crlf = SAMPLE.replace(/\n/g, '\r\n');
     expect(extractSection(crlf, '1.6.0').body).toBe('Тело переезда.');
+  });
+});
+
+describe('composePost', () => {
+  it('turns the H2 heading into a ChatGoose title, preserving the suffix', () => {
+    expect(composePost({ heading: '## 1.9.6', body: 'Тело.' })).toBe(
+      '# ChatGoose 1.9.6\n\nТело.',
+    );
+    expect(
+      composePost({ heading: '## 1.6.0 — Переезд на ядро агентства', body: 'Тело.' }),
+    ).toBe('# ChatGoose 1.6.0 — Переезд на ядро агентства\n\nТело.');
+  });
+
+  it('escapes bare dollars but not dollars inside code spans', () => {
+    expect(composePost({ heading: '## 1.0.0', body: 'Цена $5 и `$0` в коде' })).toBe(
+      '# ChatGoose 1.0.0\n\nЦена \\$5 и `$0` в коде',
+    );
+  });
+
+  it('leaves fenced code blocks untouched', () => {
+    const body = '```\nprice = $x\n```\nснаружи $y';
+    expect(composePost({ heading: '## 1.0.0', body })).toBe(
+      '# ChatGoose 1.0.0\n\n```\nprice = $x\n```\nснаружи \\$y',
+    );
+  });
+
+  it('rejects markdown outside the supported subset', () => {
+    const heading = '## 1.0.0';
+    expect(() => composePost({ heading, body: '~~~\nx\n~~~' })).toThrow(/fence style/i);
+    expect(() => composePost({ heading, body: 'span ``с бэктиком`` внутри' })).toThrow(
+      /double-backtick/i,
+    );
+    expect(() => composePost({ heading, body: 'уже экранировано \\$5' })).toThrow(
+      /pre-escaped/i,
+    );
+    expect(() => composePost({ heading, body: 'непарный ` бэктик и $5' })).toThrow(
+      /unmatched backtick/i,
+    );
+  });
+});
+
+describe('validatePost', () => {
+  it('returns the post when under the limit', () => {
+    expect(validatePost('короткий пост')).toBe('короткий пост');
+  });
+
+  it('throws when over 32768 chars', () => {
+    expect(() => validatePost('a'.repeat(32769))).toThrow(/32768/);
   });
 });
