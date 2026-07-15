@@ -108,4 +108,25 @@ describe('release page stamping', () => {
       .toBeLessThan(signIndex);
     expect(deploy).not.toContain('stamp_guide_page_version');
   });
+
+  it('checks the announce before signing and sends it only after tagging', () => {
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const mainIndex = deploy.indexOf('main() {');
+    const checkIndex = deploy.indexOf('announce-release.mjs" --check --version', mainIndex);
+    const signIndex = deploy.indexOf('  web-ext sign \\', mainIndex);
+    const tagIndex = deploy.indexOf('  tag_release "$version"', mainIndex);
+    const skipGuardIndex = deploy.indexOf('"${SKIP_ANNOUNCE:-0}" == "1"', mainIndex);
+    const sendIndex = deploy.indexOf('announce-release.mjs" --version', mainIndex);
+    expect(checkIndex).toBeGreaterThan(mainIndex);
+    expect(signIndex).toBeGreaterThan(checkIndex);
+    expect(tagIndex).toBeGreaterThan(signIndex);
+    expect(skipGuardIndex).toBeGreaterThan(tagIndex);
+    expect(sendIndex).toBeGreaterThan(skipGuardIndex);
+    // Announce failure is nonfatal once the release is live, and the send
+    // requires credentials up front (deterministic failures fail preflight).
+    expect(deploy).toContain('WARNING: Telegram announce failed');
+    expect(deploy).toContain('TELEGRAM_BOT_TOKEN:?Missing');
+    // The token must never be exported to child processes.
+    expect(deploy).not.toContain('set -a');
+  });
 });

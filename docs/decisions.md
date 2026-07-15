@@ -54,6 +54,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E35 | 2026-07-13 | Confirmed reliability/performance fixes: recoverable persona sync, precise autosave revisions, capture/cache backoff, and stale async-result guards |
 | E36 | 2026-07-13 | Global personas are server-admin content; the extension consumes metadata only and preserves legacy local definitions |
 | E37 | 2026-07-14 | Read-only persona follow-up: narrow refreshes, future-schema barrier, durable Scan fences, and exact deployed-contract release gate |
+| E38 | 2026-07-15 | Kernel SSE error frames surface as their named cause: gateway maps provider* codes to hub_provider_failed/hub_request_failed, error surfaces render one technical-detail line, frame code matched by prefix not enum |
+| E39 | 2026-07-15 | Releases announce themselves in the ChatGoose Telegram channel: `--check` fails deploy.sh preflight before AMO signing, the real send runs only after tag_release and never fails a live deploy, load_env stops exporting `.env.deploy` |
 
 ## Entries
 
@@ -862,3 +864,20 @@ error-frame `code` stays an open string in the contract (kernel can add
 `provider_proxy_unreachable` etc. without a re-vendor); the extension matches
 by prefix, not by enum. Fail-closed behavior is unchanged: an error frame
 still means no result is presented.
+
+**E39 (2026-07-15).** Releases announce themselves in the ChatGoose Telegram
+channel: `scripts/announce-release.mjs` posts the released CHANGELOG.md
+section via Bot API `sendRichMessage` (Rich Markdown carries the section
+nearly verbatim; the 32768-char limit is enforced, bare `$` is escaped
+because Rich Markdown parses `$…$` as math, and markdown outside the
+supported subset fails preflight instead of being silently mis-escaped).
+`deploy.sh` runs `--check` before `web-ext sign` (E33 fail-early, including
+credential presence when the send is not skipped) and the real send only
+after `tag_release`; an announce failure warns but never fails a live
+deploy, and any transport failure after dispatch is indeterminate — never
+auto-retried (family law); only an explicit 429 with `retry_after ≤ 60s`
+gets one retry. `load_env` no longer `set -a`-exports `.env.deploy`, so the
+bot token is not handed to child processes; the CLI loads the file itself.
+Backfill = the same CLI with `--version X.Y.Z --silent` per missing
+release, channel inventory via the user-session tooling (bots cannot read
+channel history).
