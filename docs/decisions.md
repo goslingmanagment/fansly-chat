@@ -840,3 +840,25 @@ the exact canonical `https://gosling-agency.ru` origin, requires healthy Core
 to expose the normalized-OpenAPI `contractHash` equal to the vendored SDK
 manifest, and then proves the catalog route is auth-protected with 401 before
 AMO signing. No deployed source-SHA ancestry is inferred.
+
+**E38 (2026-07-15).** Kernel SSE `error` frames surface as their named cause,
+never as the generic truncation error. Trigger: lora-2's dead page proxy made
+every generation fail as `CG-HUB-07: Agency Hub request failed` — the kernel
+HAD named the cause (`error` frame, code `provider_stream_failed`) but the
+gateway's frame switch ignored the frame, so EOF-without-`done` collapsed it
+into "AI stream ended without completing", and a day of screenshots was spent
+rediscovering what the wire already said. Three rulings: (1) the feature-lane
+gateway maps `provider*` error-frame codes to the new `hub_provider_failed`
+(CG-HUB-10, "infrastructure for this page, tell a manager" — retry-neutral
+wording because a dead proxy is never fixed by retrying), any other frame code
+to `hub_request_failed`, both carrying `code: message` as `serverDetail` and
+passing `retryAfterMs` through; the frame check runs BEFORE the persona
+provenance barrier because a terminal error is not a provenance violation and
+must not be misreported as `chat_changed`. (2) Error surfaces (inline card and
+toast) render one mono `formatUserErrorTechnicalDetail` line — `HTTP <status>
+• <serverDetail>` — whenever the error carries diagnostics; the fields already
+rode `UserFacingError` end-to-end and were simply never rendered. (3) The
+error-frame `code` stays an open string in the contract (kernel can add
+`provider_proxy_unreachable` etc. without a re-vendor); the extension matches
+by prefix, not by enum. Fail-closed behavior is unchanged: an error frame
+still means no result is presented.

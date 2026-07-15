@@ -206,6 +206,60 @@ describe('kernel feature gateway', () => {
     expect(truncated.message).toContain('without completing');
   });
 
+  it('surfaces a provider error frame as hub_provider_failed with the technical detail', async () => {
+    const gateway = createKernelFeatureGateway(vi.fn(async () => sseResponse([
+      META,
+      { type: 'content_delta', text: 'partial ' },
+      {
+        type: 'error',
+        code: 'provider_stream_failed',
+        message: 'AI gateway provider stream failed',
+        retryAfterMs: null,
+      },
+    ])) as unknown as typeof fetch);
+
+    let caught: unknown;
+    try {
+      await gateway.streamFeature(settings(), request(), { onText: () => {} }, new AbortController().signal);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ChatGooseError);
+    const error = caught as ChatGooseError;
+    // The frame's cause must survive — never the generic truncation wording.
+    expect(error.key).toBe('hub_provider_failed');
+    expect(error.message).not.toContain('without completing');
+    expect(error.details?.responseSnippet).toBe(
+      'provider_stream_failed: AI gateway provider stream failed',
+    );
+  });
+
+  it('maps an unknown error frame code to hub_request_failed, still carrying the detail', async () => {
+    const gateway = createKernelFeatureGateway(vi.fn(async () => sseResponse([
+      META,
+      {
+        type: 'error',
+        code: 'context_overflow',
+        message: 'prompt too large',
+        retryAfterMs: 12_000,
+      },
+    ])) as unknown as typeof fetch);
+
+    let caught: unknown;
+    try {
+      await gateway.streamFeature(settings(), request(), { onText: () => {} }, new AbortController().signal);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ChatGooseError);
+    const error = caught as ChatGooseError;
+    expect(error.key).toBe('hub_request_failed');
+    expect(error.details?.responseSnippet).toBe('context_overflow: prompt too large');
+    expect(error.retryAfterMs).toBe(12_000);
+  });
+
   it('sends the expected definition and accepts text only after the exact meta echo', async () => {
     const calls: Array<RequestInit | undefined> = [];
     const definitionId = 'v1:persona-one-definition';

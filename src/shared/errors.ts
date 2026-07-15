@@ -208,6 +208,14 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Daily AI generation limit reached.',
     description: 'This page used up its Agency Hub AI quota for today. It resets at midnight UTC. Ask a manager to raise the cap if this blocks work.',
   },
+  hub_provider_failed: {
+    key: 'hub_provider_failed',
+    // The kernel's SSE error frame for provider/egress failures (e.g. a dead
+    // page proxy): page-scoped infrastructure, not something a retry fixes.
+    code: 'CG-HUB-10',
+    message: 'Agency Hub could not reach its AI provider.',
+    description: 'The Hub-side AI connection for this page is down (proxy or provider). Tell a manager — retrying will not help until it is repaired.',
+  },
   hi_too_many_messages: {
     key: 'hi_too_many_messages',
     code: 'CG-FLOW-09',
@@ -417,6 +425,20 @@ export function formatUserFacingError(error: UserFacingError): string {
 
 export function getUserErrorDescription(error: UserFacingError): string | null {
   return error.description?.trim() || null;
+}
+
+/** One diagnostic line for error surfaces (toast/inline card): the upstream
+ * HTTP status and/or server detail already carried by the UserFacingError.
+ * Null when the error holds no diagnostics — surfaces skip the line. */
+export function formatUserErrorTechnicalDetail(error: UserFacingError): string | null {
+  const detail = error.serverDetail?.trim() || null;
+  const status = typeof error.httpStatus === 'number' && error.httpStatus > 0
+    ? `HTTP ${error.httpStatus}`
+    : null;
+  if (status && detail) {
+    return `${status} • ${detail}`;
+  }
+  return status ?? detail;
 }
 
 export function toDebugErrorPayload(error: unknown): unknown {

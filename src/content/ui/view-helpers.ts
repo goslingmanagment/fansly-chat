@@ -1,4 +1,5 @@
 import {
+  formatUserErrorTechnicalDetail,
   formatUserFacingError,
   getUserErrorDescription,
 } from '../../shared/errors.js';
@@ -65,6 +66,14 @@ export function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
     secondary.className = 'chatgoose-error-secondary';
     secondary.textContent = description;
     block.append(secondary);
+  }
+
+  const technicalDetail = formatUserErrorTechnicalDetail(error);
+  if (technicalDetail) {
+    const detail = document.createElement('div');
+    detail.className = 'chatgoose-error-detail';
+    detail.textContent = technicalDetail;
+    block.append(detail);
   }
 
   return block;

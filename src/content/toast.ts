@@ -1,4 +1,5 @@
 import {
+  formatUserErrorTechnicalDetail,
   formatUserFacingError,
   getUserErrorDescription,
   isUserFacingError,
@@ -49,6 +50,16 @@ export class ToastController {
       secondary.className = 'chatgoose-toast-secondary';
       secondary.textContent = description;
       toast.append(secondary);
+    }
+
+    const technicalDetail = isUserFacingError(message)
+      ? formatUserErrorTechnicalDetail(message)
+      : null;
+    if (technicalDetail) {
+      const detail = document.createElement('div');
+      detail.className = 'chatgoose-toast-detail';
+      detail.textContent = technicalDetail;
+      toast.append(detail);
     }
 
     if (options.actionLabel && options.onAction) {
