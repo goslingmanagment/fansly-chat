@@ -1059,7 +1059,7 @@ export class OverlayController {
       helper.textContent =
         model.parts.length > 1
           ? 'Split mode was on. Start with message 1, send it manually in Fansly, then use the follow-up if it still feels right.'
-          : 'Split mode was on, but the AI kept this as one message because a natural split did not fit this reply.';
+          : 'Split mode expected at least 2 messages, but this result contains one. Try Regenerate to retry the split.';
       section.append(helper);
     }
 
