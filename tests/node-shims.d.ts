@@ -10,11 +10,29 @@ declare module 'node:os' {
 declare module 'node:path' {
   interface PathModule {
     join(...paths: string[]): string;
+    dirname(path: string): string;
+    resolve(...paths: string[]): string;
   }
 
   const path: PathModule;
   export default path;
 }
+
+declare module 'node:child_process' {
+  export function execFileSync(
+    file: string,
+    args?: string[],
+    options?: { cwd?: string; encoding?: string },
+  ): string;
+}
+
+declare module 'node:url' {
+  export function fileURLToPath(url: string | URL): string;
+}
+
+declare const process: {
+  execPath: string;
+};
 
 declare module 'node:fs/promises' {
   export function mkdtemp(prefix: string): Promise<string>;
