@@ -746,13 +746,13 @@ async function render(): Promise<void> {
   hubSignInUserInput.type = 'text';
   hubSignInUserInput.autocomplete = 'username';
   hubSignInUserInput.className = 'chatgoose-input';
-  hubSignInUserInput.placeholder = 'Логин хаба';
+  hubSignInUserInput.placeholder = 'Логин Hub';
 
   const hubSignInPasswordInput = document.createElement('input');
   hubSignInPasswordInput.type = 'password';
   hubSignInPasswordInput.autocomplete = 'current-password';
   hubSignInPasswordInput.className = 'chatgoose-input';
-  hubSignInPasswordInput.placeholder = 'Пароль хаба';
+  hubSignInPasswordInput.placeholder = 'Пароль Hub';
 
   const hubSignInButton = createButton('Войти и выпустить token', true);
   const hubSignInStatus = document.createElement('div');
@@ -853,7 +853,7 @@ async function render(): Promise<void> {
   hubFooter.append(testLine, agencyHubConnectionButton);
 
   agencyHubSection.append(
-    createLabelRow('Адрес хаба', agencyHubUrlInput),
+    createLabelRow('Адрес Hub', agencyHubUrlInput),
     createLabelRow('Вход устройства', hubSignInBlock),
     createLabelRow('Доступ Firefox', permissionBlock),
     legacyDetails,

@@ -555,7 +555,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     const labels = Array.from(section.querySelectorAll('.chatgoose-lrow-label'), (n) => n.textContent);
-    expect(labels).toEqual(['Адрес хаба', 'Вход устройства', 'Доступ Firefox']);
+    expect(labels).toEqual(['Адрес Hub', 'Вход устройства', 'Доступ Firefox']);
     expect(section.querySelector('[data-hub-permission-badge]')).not.toBeNull();
   });
 

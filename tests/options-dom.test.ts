@@ -82,9 +82,9 @@ describe('options dom primitives', () => {
   it('createLabelRow wraps a form control in a real label, other content in a div', async () => {
     const { createLabelRow } = await import('../src/options/dom.js');
     const input = document.createElement('input');
-    const labeled = createLabelRow('Адрес хаба', input);
+    const labeled = createLabelRow('Адрес Hub', input);
     expect(labeled.tagName).toBe('LABEL');
-    expect(labeled.querySelector('.chatgoose-lrow-label')?.textContent).toBe('Адрес хаба');
+    expect(labeled.querySelector('.chatgoose-lrow-label')?.textContent).toBe('Адрес Hub');
     const block = document.createElement('div');
     const wrapped = createLabelRow('Вход устройства', block);
     expect(wrapped.tagName).toBe('DIV');

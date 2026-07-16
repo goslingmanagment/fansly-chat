@@ -11,9 +11,8 @@ export const COPY = Object.freeze({
   }),
   sections: Object.freeze({
     hubTitle: 'Agency Hub',
-    hubHint: 'Кернел агентства: генерация, персоны, spenders. Вход — по device token.',
+    hubHint: 'Кернел агентства: генерация, персоны, Spenders. Вход — по device token.',
     personasTitle: 'Персоны',
-    personasHint: 'Голоса управляются на сервере агентства; здесь — только каталог.',
     accountsTitle: 'Аккаунты',
     accountsHint: 'Fansly-аккаунты, которые видит расширение, и их персоны.',
     generationTitle: 'Генерация',
