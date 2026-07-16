@@ -58,4 +58,17 @@ describe('options hidden-control persistence', () => {
     await page.flushAsync();
     expect(page.getState().settings.debugMode).toBe(true);
   });
+
+  it('flashes Сохранено after a settings change persists', async () => {
+    const page = await mountOptionsPage();
+    const quick = page.document.querySelector(
+      '[data-shell-section="generation"] input',
+    ) as HTMLInputElement;
+    quick.value = '30';
+    quick.dispatchEvent(new page.window.Event('change', { bubbles: true }));
+    await page.flushAsync();
+    const flash = page.document.querySelector('[data-saved-flash]') as HTMLElement;
+    expect(flash.hidden).toBe(false);
+    expect(flash.textContent).toBe('Сохранено ✓');
+  });
 });

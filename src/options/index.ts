@@ -16,6 +16,7 @@ import {
   createCap,
   createChipGroup,
   createLabelRow,
+  createSavedFlash,
   createSection,
   createToggle,
   createVersionTag,
@@ -257,6 +258,14 @@ async function render(): Promise<void> {
   ]);
   root.append(shell.layout);
   cleanupTasks.push(() => shell.dispose());
+
+  // Central save feedback. Mounted once per render as a direct child of root,
+  // never on the legacy-persona recovery page path. Success save paths call
+  // showSaved(); caught save errors ALSO call showError() beside (never
+  // replacing) their existing console.error.
+  const savedFlash = createSavedFlash();
+  savedFlash.root.dataset.savedFlash = 'true';
+  root.append(savedFlash.root);
 
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
@@ -949,6 +958,7 @@ async function render(): Promise<void> {
         return;
       }
       state.settings = mergedSettings;
+      savedFlash.showSaved();
 
       if (disposed) {
         return;
@@ -997,6 +1007,7 @@ async function render(): Promise<void> {
     const settled = execution
       .catch((error: unknown) => {
         console.error('Failed to save Settings changes', error);
+        savedFlash.showError('настройки не сохранились — повтори');
       });
     settingsSaveChain = settled;
     settingsSaveChainSignature = formSignature;
@@ -1518,6 +1529,7 @@ async function render(): Promise<void> {
         void (async () => {
           try {
             await saveAccountMapping(accountId, selectedPersonalityId);
+            savedFlash.showSaved();
             const refreshedState = await loadStorageState();
             if (disposed) {
               return;
@@ -1531,6 +1543,7 @@ async function render(): Promise<void> {
             renderAccountMappings(sessions, hydrationFailed);
           } catch (error) {
             console.error('Failed to save account mapping', error);
+            savedFlash.showError('маппинг не сохранился');
             if (!disposed) {
               select.dataset.mappingPending = 'false';
               select.disabled = false;
