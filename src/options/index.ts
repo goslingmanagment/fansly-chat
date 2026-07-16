@@ -9,6 +9,7 @@ import {
   type AgencyHubConnectionFeedback,
   type AgencyHubPermissionFeedback,
 } from './agency-hub-settings.js';
+import { COPY } from './copy.js';
 import {
   createButton,
   createSection,
@@ -23,6 +24,7 @@ import {
   formatAccountHeading,
   formatAccountMeta,
 } from './sessions.js';
+import { buildShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
@@ -228,13 +230,29 @@ async function render(): Promise<void> {
   hero.style.gap = '8px';
   hero.style.position = 'relative';
   const title = document.createElement('h1');
-  title.textContent = 'ChatGoose Settings';
+  title.textContent = COPY.pageTitle;
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure generation, Agency Hub, persona mappings, and live Fansly connections.';
+  subtitle.textContent = COPY.pageSubtitle;
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
+
+  // ─── Shell (nav + main) ─────────────────────────────────────
+  // Nav order == card order == the registration order below. Sections are
+  // built in place further down and registered as one ordered block, anchored
+  // immediately before the future-schema barrier so its catch-up can find and
+  // disable the real controls (see the registration block for the invariant).
+  const shell = buildShell([
+    { id: 'hub', title: COPY.nav.hub },
+    { id: 'personas', title: COPY.nav.personas },
+    { id: 'accounts', title: COPY.nav.accounts },
+    { id: 'generation', title: COPY.nav.generation },
+    { id: 'appearance', title: COPY.nav.appearance },
+    { id: 'version', title: COPY.nav.version },
+  ]);
+  root.append(shell.layout);
+  cleanupTasks.push(() => shell.dispose());
 
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
@@ -1025,10 +1043,6 @@ async function render(): Promise<void> {
       browser.permissions.onRemoved.removeListener(handlePermissionChanged);
     });
   }
-  root.append(appearanceSection);
-  root.append(apiSection);
-  root.append(agencyHubSection);
-
   // ─── Persona catalog (server-owned, metadata only) ─────────
   const personalitiesSection = createSection(
     'Model Personalities',
@@ -1127,7 +1141,6 @@ async function render(): Promise<void> {
     preservationNote,
     createLegacyPersonaExportControls(),
   );
-  root.append(personalitiesSection);
 
   // ─── Account Mappings ──────────────────────────────────────
   const mappingsSection = createSection('Account Mappings');
@@ -1140,7 +1153,6 @@ async function render(): Promise<void> {
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
-  root.append(mappingsSection);
 
   // ─── Connection Status ─────────────────────────────────────
   const connectionsSection = createSection('Connection Status');
@@ -1153,7 +1165,6 @@ async function render(): Promise<void> {
   connectionsLoading.style.color = 'var(--chatgoose-ink-mid)';
   sessionsGrid.append(connectionsLoading);
   connectionsSection.append(sessionsGrid);
-  root.append(connectionsSection);
 
   cleanupTasks.push(() => {
     disposed = true;
@@ -1240,6 +1251,35 @@ async function render(): Promise<void> {
       }
     }
   };
+
+  // ─── Version ────────────────────────────────────────────────
+  const versionSection = createSection(COPY.sections.versionTitle, COPY.sections.versionHint);
+  const versionLine = document.createElement('div');
+  versionLine.className = 'chatgoose-num';
+  versionLine.style.fontSize = '12px';
+  versionLine.style.color = 'var(--chatgoose-ink-mid)';
+  versionLine.textContent = `v ${extensionVersion} · канал: self-hosted feed`;
+  versionSection.append(versionLine);
+
+  // ─── Ordered section registration ───────────────────────────
+  // MUST stay immediately before the future-schema barrier block below. Every
+  // section is now in the DOM (shell.main → shell.layout → root) BEFORE the
+  // barrier's catch-up runs `activateFutureSchemaBarrier(futureSchemaObserved)`,
+  // so its one-shot `root.querySelectorAll('input, select, button, textarea')`
+  // sweep disables the REAL controls. Move this block after the barrier and a
+  // v15 observed during the initial storage read would disable nothing real —
+  // the re-entry guard makes that first (empty) sweep the only one. Registration
+  // order == nav order == card DOM order == the mount test's expectation.
+  shell.addSection('hub', agencyHubSection);
+  shell.addSection('personas', personalitiesSection);
+  shell.addSection('accounts', mappingsSection);
+  shell.addSection('generation', apiSection);
+  shell.addSection('appearance', appearanceSection);
+  shell.addSection('version', versionSection);
+  // Connection Status is not a nav section (it dies in Task 5); it still needs
+  // to be in the DOM and inside `root` for the barrier sweep, so append it to
+  // shell.main directly.
+  shell.main.append(connectionsSection);
 
   if (
     typeof browser.storage.onChanged?.addListener === 'function' &&

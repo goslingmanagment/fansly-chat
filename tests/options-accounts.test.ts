@@ -678,6 +678,45 @@ describe('Options page settings and read-only personas', () => {
     expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
   });
 
+  it('future-schema catch-up during the initial read still disables the section controls', async () => {
+    // Initial-read path (vs the listener path above): the future-schema
+    // listener is installed BEFORE the first readStorageState(). Emitting a v15
+    // change while that read is in flight sets futureSchemaObserved before the
+    // barrier block runs its synchronous catch-up, which disables controls via
+    // root.querySelectorAll — so the sections must already be mounted in `root`
+    // at that moment. This regression guards the ordered registration block
+    // staying anchored before the barrier: move it after and the catch-up's
+    // one-shot sweep finds no real controls, leaving them silently enabled.
+    //
+    // Emit only the change event, never mutate the stored schemaVersion: a v15
+    // in the record would make migrateState throw on the very read being hooked.
+    // Gate on storageChangeListeners so the emit lands on the first read AFTER
+    // the future-schema listener registers (the pre-listener snapshot read would
+    // otherwise swallow it), and only once.
+    let armed = false;
+    await loadOptionsPage({
+      state: makeState(),
+      sessions: [],
+      onStorageRead: () => {
+        if (armed || storageChangeListeners.size === 0) {
+          return;
+        }
+        armed = true;
+        emitStorageChanges({
+          schemaVersion: {
+            oldValue: STORAGE_SCHEMA_VERSION,
+            newValue: STORAGE_SCHEMA_VERSION + 1,
+          },
+        });
+      },
+    });
+
+    expect(document.querySelector('[data-future-schema-barrier="true"]')?.getAttribute('role'))
+      .toBe('alert');
+    const quickInput = getSectionByTitle('Generation').querySelector('input') as HTMLInputElement;
+    expect(quickInput.disabled).toBe(true);
+  });
+
   it('makes a Hub test wait for the active shared settings save without writing twice', async () => {
     await loadOptionsPage({
       state: makeState({
