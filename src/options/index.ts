@@ -11,6 +11,7 @@ import {
 } from './agency-hub-settings.js';
 import { COPY } from './copy.js';
 import {
+  createBadge,
   createButton,
   createSection,
   createVersionTag,
@@ -19,10 +20,10 @@ import {
   labeledField,
 } from './dom.js';
 import {
-  buildConnectionRows,
   buildSessionLookup,
   formatAccountHeading,
   formatAccountMeta,
+  formatCaptureStatus,
 } from './sessions.js';
 import { buildShell } from './shell.js';
 import {
@@ -1142,8 +1143,11 @@ async function render(): Promise<void> {
     createLegacyPersonaExportControls(),
   );
 
-  // ─── Account Mappings ──────────────────────────────────────
-  const mappingsSection = createSection('Account Mappings');
+  // ─── Аккаунты (merged: mappings + live capture status) ─────
+  const mappingsSection = createSection(
+    COPY.sections.accountsTitle,
+    COPY.sections.accountsHint,
+  );
   mappingsSection.dataset.sessionHydration = 'loading';
   const mappingsTable = document.createElement('div');
   mappingsTable.style.display = 'grid';
@@ -1153,18 +1157,6 @@ async function render(): Promise<void> {
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
-
-  // ─── Connection Status ─────────────────────────────────────
-  const connectionsSection = createSection('Connection Status');
-  connectionsSection.dataset.sessionHydration = 'loading';
-  const sessionsGrid = document.createElement('div');
-  sessionsGrid.style.display = 'grid';
-  sessionsGrid.style.gap = '10px';
-  const connectionsLoading = document.createElement('div');
-  connectionsLoading.textContent = 'Loading live connection status…';
-  connectionsLoading.style.color = 'var(--chatgoose-ink-mid)';
-  sessionsGrid.append(connectionsLoading);
-  connectionsSection.append(sessionsGrid);
 
   cleanupTasks.push(() => {
     disposed = true;
@@ -1231,6 +1223,41 @@ async function render(): Promise<void> {
       : null;
   };
 
+  // [data-role="mapping-info"] carries persona availability ONLY (label /
+  // archived / unavailable). Session state lives in the identity block's
+  // capture line — the old "• Connected|Disconnected" tail is gone from both
+  // build sites so the two views never disagree.
+  const formatMappingInfo = (
+    view: { label: string; usable: boolean } | null,
+  ): string => `${view?.label ?? 'Unmapped'}${view && !view.usable ? ' · unavailable' : ''}`;
+
+  // The amber "AI отключён" badge tracks the mapping select, not the session.
+  // It lives inside the identity block (never a fifth grid child) and toggles
+  // wherever the select's value can change: render, change handler, catalog
+  // refresh.
+  const syncAccountAiBadge = (select: HTMLSelectElement): void => {
+    const identity = select
+      .closest<HTMLElement>('[data-account-mapping-row]')
+      ?.querySelector<HTMLElement>('[data-role="account-identity"]');
+    if (!identity) {
+      return;
+    }
+    const existing = identity.querySelector('.chatgoose-badge-amber');
+    if (select.value === '') {
+      if (!existing) {
+        identity.append(createBadge('AI отключён', 'amber'));
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  };
+
+  const accountAvatarInitials = (heading: string): string => {
+    const words = heading.replace(/^@+/, '').trim().split(/\s+/).filter(Boolean);
+    const initials = words.slice(0, 2).map((word) => word.charAt(0)).join('');
+    return initials ? initials.toUpperCase() : '?';
+  };
+
   refreshAccountMappingPersonalityOptions = (): void => {
     if (disposed || mappingsSection.dataset.sessionHydration === 'loading') {
       return;
@@ -1247,8 +1274,9 @@ async function render(): Promise<void> {
       const info = select.closest<HTMLElement>('[data-account-mapping-row]')
         ?.querySelector<HTMLElement>('[data-role="mapping-info"]');
       if (info) {
-        info.textContent = `${selectedView?.label ?? 'Unmapped'}${selectedView && !selectedView.usable ? ' · unavailable' : ''} • ${select.dataset.connected === 'true' ? 'Connected' : 'Disconnected'}`;
+        info.textContent = formatMappingInfo(selectedView);
       }
+      syncAccountAiBadge(select);
     }
   };
 
@@ -1276,10 +1304,6 @@ async function render(): Promise<void> {
   shell.addSection('generation', apiSection);
   shell.addSection('appearance', appearanceSection);
   shell.addSection('version', versionSection);
-  // Connection Status is not a nav section (it dies in Task 5); it still needs
-  // to be in the DOM and inside `root` for the barrier sweep, so append it to
-  // shell.main directly.
-  shell.main.append(connectionsSection);
 
   if (
     typeof browser.storage.onChanged?.addListener === 'function' &&
@@ -1365,30 +1389,43 @@ async function render(): Promise<void> {
 
     if (hydrationFailed) {
       const warning = document.createElement('div');
-      warning.textContent = 'Live account refresh failed. Showing mappings from local storage.';
+      warning.textContent = 'Не удалось обновить живой статус аккаунтов — показаны маппинги из локального хранилища';
       warning.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(warning);
     }
 
     state.knownAccounts.forEach((accountId) => {
       const session = sessionsByAccountId.get(accountId);
+      const heading = formatAccountHeading(accountId, session);
       const row = document.createElement('div');
       row.dataset.accountMappingRow = accountId;
+      // Four columns: avatar, identity block, select, mapping-info. The amber
+      // badge lives INSIDE the identity block, never as a fifth grid child.
       row.style.display = 'grid';
-      row.style.gridTemplateColumns = '1fr minmax(220px, 320px) auto';
+      row.style.gridTemplateColumns = 'auto minmax(0, 1fr) minmax(220px, 320px) auto';
       row.style.gap = '12px';
       row.style.alignItems = 'center';
       row.style.padding = '12px';
       row.style.borderRadius = 'var(--chatgoose-radius-card)';
       row.style.background = 'var(--chatgoose-bg2)';
       row.style.border = '1px solid var(--chatgoose-line)';
+      // Raw timestamp for the minute ticker; only connected rows have a live
+      // capture to age. Disconnected rows keep a static "нет сессии".
+      if (session?.connected) {
+        row.dataset.captureAt = String(session.lastSeenAt);
+      }
+
+      const avatar = document.createElement('div');
+      avatar.className = 'chatgoose-avatar';
+      avatar.textContent = accountAvatarInitials(heading);
 
       const label = document.createElement('div');
+      label.dataset.role = 'account-identity';
       label.style.display = 'grid';
       label.style.gap = '4px';
 
       const labelTitle = document.createElement('div');
-      labelTitle.textContent = formatAccountHeading(accountId, session);
+      labelTitle.textContent = heading;
       labelTitle.style.fontWeight = '600';
 
       const labelMeta = document.createElement('div');
@@ -1396,12 +1433,17 @@ async function render(): Promise<void> {
       labelMeta.style.fontSize = '12px';
       labelMeta.style.color = 'var(--chatgoose-ink-mid)';
 
-      label.append(labelTitle, labelMeta);
+      const captureLine = document.createElement('div');
+      captureLine.dataset.role = 'capture-status';
+      captureLine.textContent = formatCaptureStatus(session);
+      captureLine.style.fontSize = '12px';
+      captureLine.style.color = 'var(--chatgoose-ink-mid)';
+
+      label.append(labelTitle, labelMeta, captureLine);
 
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
       select.dataset.accountId = accountId;
-      select.dataset.connected = session?.connected ? 'true' : 'false';
       const mappedView = populateMappingSelect(
         select,
         state.accountMappings[accountId] ?? '',
@@ -1409,6 +1451,9 @@ async function render(): Promise<void> {
       );
       select.addEventListener('change', () => {
         const selectedPersonalityId = select.value || null;
+        // Reflect the mapping change on the badge immediately, before the
+        // async save round-trips.
+        syncAccountAiBadge(select);
         select.disabled = true;
         select.dataset.mappingPending = 'true';
         void (async () => {
@@ -1440,9 +1485,11 @@ async function render(): Promise<void> {
       info.dataset.role = 'mapping-info';
       info.style.fontSize = '12px';
       info.style.color = 'var(--chatgoose-ink-mid)';
-      info.textContent = `${mappedView?.label ?? 'Unmapped'}${mappedView && !mappedView.usable ? ' · unavailable' : ''} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
+      info.textContent = formatMappingInfo(mappedView);
 
-      row.append(label, select, info);
+      row.append(avatar, label, select, info);
+      // append() first so closest('[data-account-mapping-row]') resolves.
+      syncAccountAiBadge(select);
       mappingsTable.append(row);
     });
 
@@ -1454,55 +1501,32 @@ async function render(): Promise<void> {
     }
   };
 
-  const renderConnections = (
-    sessions: SessionSnapshotEntry[],
-    hydrationFailed: boolean,
-  ): void => {
-    sessionsGrid.replaceChildren();
-    connectionsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
-
-    if (hydrationFailed) {
-      const error = document.createElement('div');
-      error.textContent = 'Could not load live connection status. Reload Settings to try again.';
-      error.style.color = 'var(--chatgoose-bad)';
-      sessionsGrid.append(error);
-      return;
-    }
-
-    const connectionRows = buildConnectionRows(sessions);
-    connectionRows
-      .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
-      .forEach(({ accountId, session }) => {
-        const card = document.createElement('div');
-        card.className = 'chatgoose-card';
-        card.style.display = 'grid';
-        card.style.gap = '6px';
-        const heading = document.createElement('div');
-        heading.style.display = 'flex';
-        heading.style.justifyContent = 'space-between';
-        heading.style.alignItems = 'center';
-        const left = document.createElement('div');
-        left.textContent = formatAccountHeading(accountId, session);
-        left.style.fontWeight = '600';
-        const right = document.createElement('div');
-        right.textContent = session.connected ? 'Connected' : 'Disconnected';
-        right.style.color = session.connected ? 'var(--chatgoose-green)' : 'var(--chatgoose-bad)';
-        heading.append(left, right);
-        const meta = document.createElement('div');
-        meta.textContent = formatAccountMeta(accountId, session);
-        meta.style.fontSize = '12px';
-        meta.style.color = 'var(--chatgoose-ink-mid)';
-        card.append(heading, meta);
-        sessionsGrid.append(card);
+  // One ticker for the whole section rewrites every connected row's capture
+  // line from its stored timestamp, so a long-open tab does not freeze on
+  // "захвачена 5 мин назад". Rebuilds re-query the live DOM, so a single
+  // interval survives mapping changes; its teardown is registered below.
+  const refreshCaptureLines = (): void => {
+    for (const row of mappingsTable.querySelectorAll<HTMLElement>('[data-account-mapping-row]')) {
+      const captureAt = row.dataset.captureAt;
+      if (!captureAt) {
+        continue;
+      }
+      const captureLine = row.querySelector<HTMLElement>('[data-role="capture-status"]');
+      if (!captureLine) {
+        continue;
+      }
+      captureLine.textContent = formatCaptureStatus({
+        legacyAccountId: '',
+        resolvedAccountId: null,
+        username: null,
+        displayName: null,
+        connected: true,
+        lastSeenAt: Number(captureAt),
       });
-
-    if (connectionRows.length === 0) {
-      const empty = document.createElement('div');
-      empty.textContent = 'No active sessions captured yet.';
-      empty.style.color = 'var(--chatgoose-ink-mid)';
-      sessionsGrid.append(empty);
     }
   };
+  const captureTicker = window.setInterval(refreshCaptureLines, 60_000);
+  cleanupTasks.push(() => window.clearInterval(captureTicker));
 
   const hydrateAccountSections = async (): Promise<void> => {
     const result = await sessionsResultPromise;
@@ -1513,7 +1537,6 @@ async function render(): Promise<void> {
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       renderAccountMappings([], true);
-      renderConnections([], true);
       return;
     }
 
@@ -1529,12 +1552,10 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
-      renderConnections(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);
       if (!disposed) {
         renderAccountMappings([], true);
-        renderConnections([], true);
       }
     }
   };

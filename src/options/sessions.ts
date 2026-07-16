@@ -36,32 +36,30 @@ export function buildSessionLookup(
   sessions: SessionSnapshotEntry[],
 ): Map<string, SessionSnapshotEntry> {
   const lookup = new Map<string, SessionSnapshotEntry>();
-
+  const put = (key: string, session: SessionSnapshotEntry): void => {
+    const existing = lookup.get(key);
+    // Newest-wins: a duplicated account id (legacy + resolved keys, or two
+    // snapshots for the same identity) resolves to the most recently seen
+    // session so the merged Accounts row reflects the live capture.
+    if (!existing || session.lastSeenAt > existing.lastSeenAt) {
+      lookup.set(key, session);
+    }
+  };
   sessions.forEach((session) => {
-    lookup.set(session.legacyAccountId, session);
+    put(session.legacyAccountId, session);
     if (session.resolvedAccountId) {
-      lookup.set(session.resolvedAccountId, session);
+      put(session.resolvedAccountId, session);
     }
   });
-
   return lookup;
 }
 
-export function buildConnectionRows(
-  sessions: SessionSnapshotEntry[],
-): Array<{ accountId: string; session: SessionSnapshotEntry }> {
-  const deduped = new Map<string, SessionSnapshotEntry>();
-
-  sessions.forEach((session) => {
-    const canonicalAccountId = session.resolvedAccountId ?? session.legacyAccountId;
-    const existing = deduped.get(canonicalAccountId);
-    if (!existing || session.lastSeenAt > existing.lastSeenAt) {
-      deduped.set(canonicalAccountId, session);
-    }
-  });
-
-  return Array.from(deduped.entries()).map(([accountId, session]) => ({
-    accountId,
-    session,
-  }));
+export function formatCaptureStatus(session: SessionSnapshotEntry | undefined): string {
+  if (!session?.connected) return 'нет сессии';
+  const seenAt = session.lastSeenAt;
+  if (!Number.isFinite(seenAt)) return 'захвачена только что';
+  const minutes = Math.max(0, Math.round((Date.now() - seenAt) / 60_000));
+  if (minutes === 0) return 'захвачена только что';
+  if (minutes < 60) return `захвачена ${minutes} мин назад`;
+  return `захвачена ${Math.round(minutes / 60)} ч назад`;
 }

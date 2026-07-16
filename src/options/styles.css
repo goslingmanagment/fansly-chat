@@ -250,6 +250,12 @@ input[type='checkbox'] {
 .chatgoose-badge-clay { background: var(--chatgoose-clay-bg); border-color: var(--chatgoose-clay-line); color: var(--chatgoose-clay-ink); }
 .chatgoose-badge-mono { font-family: var(--chatgoose-font-mono); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10.5px; }
 
+.chatgoose-avatar {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--chatgoose-bg3);
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  font: 600 10px/1 var(--chatgoose-font); color: var(--chatgoose-ink-mid); letter-spacing: 0.06em;
+}
+
 .chatgoose-cap { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--chatgoose-ink-low); }
 .chatgoose-num { font-family: var(--chatgoose-font-mono); font-variant-numeric: tabular-nums; }
 
