@@ -654,7 +654,7 @@ async function render(): Promise<void> {
     if (!hasApiKey) {
       agencyHubPermissionStatus.textContent = 'Синк отключён: нет учётных данных Agency Hub.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Доступ к ${originPattern} выдан, но ChatGoose нужны учётные данные — войди или добавь ключ hub.`,
+        `Доступ к ${originPattern} выдан, но ChatGoose нужны учётные данные — войди или добавь ключ Hub.`,
         permissionScopeNote,
       );
       return;
