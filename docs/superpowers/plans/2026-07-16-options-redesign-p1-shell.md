@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Rev 3** — after a codex ultra cross-review (2026-07-16). Key deltas from rev 1: the shared test helper is NEW-tests-only (existing suites keep their local harnesses); the Аккаунты merge preserves the `mapping-info` persona-availability node and newest-snapshot-wins; the Hub re-wrap keeps `agencyHubPermissionStatus` in the DOM; a full Russian copy sweep task replaces the strings-only pass; the fonts task covers debug-prompt, mono 600, provenance, and shim-safe tests.
+**Rev 4** — after the double-blind toolkit review of PR #8 (claude-opus + codex, 5 blockers + 5 P2 all fixed here) on top of rev 3's codex-ultra fixes. Rev 4 deltas: section registration anchored BEFORE the future-schema barrier block (catch-up path kept intact, with a regression test); `createLabelRow` detects form controls by tagName (no realm globals); scrollspy is a scroll-scanline (IO couldn't activate bottom sections); the permission badge is three-state (check errors are not «не выдан»); the copy sweep covers template literals, `agency-hub-settings.ts`, and `shared/errors.ts` with an inverted-Cyrillic audit; the Аккаунты merge renames all `getSectionByTitle('Account Mappings')` call sites, strips the English `• Connected` tail from `mapping-info`, and adds a minute ticker for capture times; the Cyrillic-body font behavior is a recorded decision, not a false «same as today».
 
 **Goal:** Rebuild the options page shell to desktop parity (sticky nav + scrollspy + section cards + family primitives + Russian copy + local fonts) with zero behavior change to settings/save/hub logic.
 
@@ -377,10 +377,13 @@ export function createChipGroup(
   return { root, input };
 }
 
+const FORM_CONTROL_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
+
 function isFormControl(node: HTMLElement): boolean {
-  return node instanceof HTMLInputElement
-    || node instanceof HTMLSelectElement
-    || node instanceof HTMLTextAreaElement;
+  // tagName, not instanceof: this code runs under several JSDOM test
+  // harnesses, and not all of them stub every element constructor into the
+  // global realm — instanceof against an unstubbed global throws.
+  return FORM_CONTROL_TAGS.has(node.tagName);
 }
 
 export function createLabelRow(label: string, control: HTMLElement): HTMLElement {
@@ -580,6 +583,18 @@ describe('options shell', () => {
     expect(active).toHaveLength(1);
     expect((active[0] as HTMLElement).dataset.navId).toBe('accounts');
   });
+
+  it('pickActiveSectionId picks the last section above the 25% line and pins bottom', async () => {
+    const { pickActiveSectionId } = await import('../src/options/shell.js');
+    const cards = [
+      { id: 'a', top: -500 },
+      { id: 'b', top: 100 },
+      { id: 'c', top: 900 },
+    ];
+    expect(pickActiveSectionId(cards, 800, false)).toBe('b');
+    expect(pickActiveSectionId(cards, 800, true)).toBe('c');
+    expect(pickActiveSectionId([], 800, false)).toBeNull();
+  });
 });
 ```
 
@@ -635,28 +650,71 @@ export function buildShell(sections: ShellSection[], scrollRoot?: HTMLElement): 
     nav.append(item);
   }
 
-  let observer: IntersectionObserver | null = null;
-  if (typeof IntersectionObserver === 'function') {
-    observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        const first = visible[0]?.target as HTMLElement | undefined;
-        if (first?.dataset.shellSection) setActiveNav(first.dataset.shellSection);
-      },
-      { root: scrollRoot ?? null, rootMargin: '-20% 0px -70% 0px' },
+  // Scrollspy: a rAF-throttled scroll scanline (the desktop's discipline).
+  // IntersectionObserver with a top band cannot activate short sections at
+  // the bottom of the page — they never reach the band. The scanline picks
+  // the LAST section whose top is above the 25% line, and pins the final
+  // section when the page is scrolled to the bottom.
+  let rafHandle: number | null = null;
+  const recomputeActive = (): void => {
+    const orderedIds = sections.map((section) => section.id);
+    const cards = orderedIds
+      .map((id) => ({ id, card: cardsById.get(id) }))
+      .filter((entry): entry is { id: string; card: HTMLElement } => Boolean(entry.card));
+    if (cards.length === 0) return;
+    const scrollBottom = window.innerHeight + window.scrollY;
+    const atBottom = scrollBottom >= document.documentElement.scrollHeight - 2;
+    const picked = pickActiveSectionId(
+      cards.map(({ id, card }) => ({ id, top: card.getBoundingClientRect().top })),
+      window.innerHeight,
+      atBottom,
     );
-  }
+    if (picked) setActiveNav(picked);
+  };
+  const onScroll = (): void => {
+    if (rafHandle !== null) return;
+    rafHandle = window.requestAnimationFrame(() => {
+      rafHandle = null;
+      recomputeActive();
+    });
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
 
   const addSection = (id: string, card: HTMLElement): void => {
     card.dataset.shellSection = id;
     cardsById.set(id, card);
     main.append(card);
-    observer?.observe(card);
   };
 
-  return { layout, main, addSection, setActiveNav, dispose: () => observer?.disconnect() };
+  return {
+    layout,
+    main,
+    addSection,
+    setActiveNav,
+    dispose: () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (rafHandle !== null) window.cancelAnimationFrame(rafHandle);
+    },
+  };
+}
+
+/** Pure selection rule, unit-tested: last section whose top is above the
+ * 25%-of-viewport line; the final section wins when scrolled to bottom. */
+export function pickActiveSectionId(
+  cards: Array<{ id: string; top: number }>,
+  viewportHeight: number,
+  atBottom: boolean,
+): string | null {
+  if (cards.length === 0) return null;
+  if (atBottom) return cards[cards.length - 1]!.id;
+  const line = viewportHeight * 0.25;
+  let picked = cards[0]!.id;
+  for (const card of cards) {
+    if (card.top <= line) picked = card.id;
+  }
+  return picked;
 }
 
 function prefersReducedMotion(): boolean {
@@ -785,7 +843,7 @@ Expected: FAIL (old h1, no nav). If the FIRST test fails on mounting rather than
   2. Imports: `import { buildShell } from './shell.js'; import { COPY } from './copy.js';` (create `copy.ts` per the interface block).
   3. Hero texts from `COPY.pageTitle`/`COPY.pageSubtitle`.
   4. Build the shell after the hero (`root.append(shell.layout)`, `cleanupTasks.push(() => shell.dispose())`).
-  5. **Ordered registration:** do NOT register sections where they are built. Keep all existing section-construction code in place, and at the END of `render()` (after the last section variable exists, right before the trailing awaits) register everything in ONE block — this is the only way the DOM order matches the nav order, because construction order in the file is Appearance → Generation → Hub → …:
+  5. **Ordered registration — anchored BEFORE the future-schema barrier block.** Do NOT register sections where they are built, and do NOT put the block "at the end of render()". The barrier's catch-up path (`applyFutureSchemaBarrierToUi = …; if (futureSchemaObserved !== null) …` — find the assignment in `render()`) disables controls via `root.querySelectorAll('input, select, button, textarea')` and its re-entry guard makes the FIRST invocation the only one that disables; if sections are not in the DOM yet at that moment, a v15 observed during the initial storage read would disable only the nav buttons and never the real controls — silently, with all existing tests green. So: keep all section-construction code in place, and insert the single ordered registration block IMMEDIATELY BEFORE the barrier block (all section variables already exist there — construction order in the file is Appearance → Generation → Hub → Personas → Mappings/Connections, all before the barrier):
 
 ```ts
 shell.addSection('hub', agencyHubSection);
@@ -811,15 +869,29 @@ versionSection.append(versionLine);
 
   (No Changelog button — that is P2, after the anchored page deploys.)
 
-- [ ] **Step 4: Run new + existing suites; update ONLY hero-text assertions if any pin the old English strings**
+- [ ] **Step 4: Add the barrier catch-up regression test** to `tests/options-accounts.test.ts` (its harness controls storage reads and change emission; the slim helper deliberately cannot). Mirror the technique of the existing listener-path barrier test (the one asserting `quickInput.disabled` after a v15 change): use the file's `onStorageRead` hook to emit a `schemaVersion: 15` storage change WHILE the initial read is in flight, complete the mount, then assert a real settings control is disabled:
+
+```ts
+it('future-schema catch-up during the initial read still disables the section controls', async () => {
+  // arrange: onStorageRead → emitStorageChanges({ schemaVersion: { newValue: 15 } })
+  // (exact wiring mirrors the existing listener-path barrier test in this file)
+  await loadOptionsPage(/* same base fixture as the existing barrier test */);
+  const quickInput = getSectionByTitle('Generation').querySelector('input') as HTMLInputElement;
+  expect(quickInput.disabled).toBe(true);
+});
+```
+
+(Adjust the section lookup to whatever title Generation carries at this task — it is renamed to «Генерация» in this same task's copy module only if the section title literal was switched here; otherwise keep the current title. The assertion that matters is `disabled === true` on a real control, not the title.)
+
+- [ ] **Step 5: Run new + existing suites; update ONLY hero-text assertions if any pin the old English strings**
 
 Run: `pnpm vitest run tests/options-shell-mount.test.ts tests/options-accounts.test.ts tests/options-agency-hub.test.ts tests/options-persona-recovery.test.ts`
-Expected: PASS.
+Expected: PASS, including the new catch-up test.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/options/copy.ts src/options/index.ts src/options/index.html tests/options-shell-mount.test.ts
+git add src/options/copy.ts src/options/index.ts src/options/index.html tests/options-shell-mount.test.ts tests/options-accounts.test.ts
 git commit -m "feat(options): mount desktop-parity shell with ordered sections and Russian hero"
 ```
 
@@ -878,7 +950,10 @@ it('unmapped account carries the amber AI badge next to identity', async () => {
 });
 ```
 
-  Also update, in the SAME edit, every existing reference to the removed section: the file's post-mount wait/assert on `getSectionByTitle('Connection Status')` re-points to `getSectionByTitle('Аккаунты')` with identical `dataset.sessionHydration` expectations, and the hydration-failure text assertion switches to the Russian failure message above.
+  Also update, in the SAME edit, every existing reference to BOTH old sections:
+  - every `getSectionByTitle('Connection Status')` re-points to `getSectionByTitle('Аккаунты')` with identical `dataset.sessionHydration` expectations, and the hydration-failure text assertion switches to the Russian failure message above;
+  - every `getSectionByTitle('Account Mappings')` (≈11 call sites in this file) ALSO re-points to `getSectionByTitle('Аккаунты')` — this task renames the section title, and `getSectionByTitle` throws on a missing title, so leaving any call site un-renamed fails the suite for a reason that has nothing to do with behavior;
+  - any assertion pinning the mapping-info `• Connected` / `• Disconnected` tail updates to the new mapping-info contract (persona availability ONLY — see Step 3): session state now lives exclusively in the identity block's capture line.
 
 - [ ] **Step 2: Run to verify the new tests fail** (`pnpm vitest run tests/options-accounts.test.ts`).
 
@@ -915,7 +990,10 @@ export function formatCaptureStatus(session: SessionSnapshotEntry | undefined): 
 ```
 
     (If `lastSeenAt` on `SessionSnapshotEntry` is not a number on main, adapt the comparison to its actual type — check `src/shared/types.ts`; `buildConnectionRows` already compares it, so mirror that comparison exactly. Delete `buildConnectionRows` once nothing imports it.)
-  - `index.ts`: delete `connectionsSection` + `renderConnections`; `hydrateAccountSections` calls only `renderAccountMappings`. In `renderAccountMappings`: section title/hint from `COPY.sections.accounts*`; row grid to four columns (`row.style.gridTemplateColumns = 'auto minmax(0,1fr) minmax(220px,320px) auto'`); prepend the avatar; identity block = heading + meta (existing) + NEW capture line `formatCaptureStatus(session)` + amber badge when `select.value === ''` (`createBadge('AI отключён', 'amber')` appended to the identity block; also append/remove it inside the select's change handler and in `refreshAccountMappingPersonalityOptions` so it tracks mapping changes). The `info` element (`data-role="mapping-info"`) stays exactly where it is, fourth column.
+  - `index.ts`: delete `connectionsSection` + `renderConnections`; `hydrateAccountSections` calls only `renderAccountMappings`. In `renderAccountMappings`: section title/hint from `COPY.sections.accounts*`; row grid to four columns (`row.style.gridTemplateColumns = 'auto minmax(0,1fr) minmax(220px,320px) auto'`); prepend the avatar; identity block = heading + meta (existing) + NEW capture line `formatCaptureStatus(session)` + amber badge when `select.value === ''` (`createBadge('AI отключён', 'amber')` appended to the identity block; also append/remove it inside the select's change handler and in `refreshAccountMappingPersonalityOptions` so it tracks mapping changes).
+  - **`mapping-info` sheds its session tail.** Today the info element's text ends with `• Connected|Disconnected` at BOTH build sites (`renderAccountMappings` and `refreshAccountMappingPersonalityOptions`). After this task that tail is a duplicate of the capture line — and English. Remove the tail from both sites: `data-role="mapping-info"` carries persona availability ONLY (label / archived / unavailable semantics untouched). If `select.dataset.connected` then has no remaining consumer, delete the assignment too.
+  - **Capture times tick.** `formatCaptureStatus` reads `Date.now()` at render; a tab left open would show «захвачена 5 мин назад» forever. Store the raw timestamp on each row (`row.dataset.captureAt = String(session.lastSeenAt)` when connected), keep the capture line in a queryable node (`data-role="capture-status"`), and run ONE `window.setInterval(refreshCaptureLines, 60_000)` for the section that rewrites each line from its `dataset.captureAt`; register the interval's teardown in `cleanupTasks`. Fake-timer test: mount with a connected session, `vi.advanceTimersByTime(5 * 60_000)`, expect the capture line to now read `5 мин назад` (the repo already advances `window.setInterval` this way — see the spenders board controller tests for precedent).
+  - The `info` element (`data-role="mapping-info"`) stays exactly where it is, fourth column.
   - Avatar CSS:
 
 ```css
@@ -929,7 +1007,7 @@ export function formatCaptureStatus(session: SessionSnapshotEntry | undefined): 
 - [ ] **Step 4: Run the full options suites**
 
 Run: `pnpm vitest run tests/options-accounts.test.ts tests/options-agency-hub.test.ts tests/options-persona-recovery.test.ts tests/options-shell-mount.test.ts`
-Expected: PASS. Persona-availability pins (archived/unavailable mapping tests) must pass WITHOUT edits — if one fails, the merge broke `mapping-info`; fix the merge, not the test.
+Expected: PASS. Persona-availability EXPECTATIONS (the archived/unavailable content asserted on `[data-role="mapping-info"]`) must pass without weakening — the two permitted mechanical edits to those tests are the section-title re-point (`'Account Mappings'` → `'Аккаунты'`, part of the rename) and dropping the `• Connected` tail from expected strings (part of the mapping-info contract change). If an availability expectation itself fails, the merge broke `mapping-info`; fix the merge, not the test.
 
 - [ ] **Step 5: Commit**
 
@@ -1028,12 +1106,33 @@ agencyHubSection.append(
 );
 ```
 
-  In `refreshAgencyHubPermissionState`, ADD badge reflection (keep all existing status/meta writes):
+  In `refreshAgencyHubPermissionState`, ADD badge reflection with THREE states, set inside the same branches that already write `agencyHubPermissionStatus` (keep all existing status/meta writes). A failed `browser.permissions.contains` check (`permissionCheck.errorMessage`) is «couldn't verify», never a proven «не выдан»:
 
 ```ts
-permissionBadge.textContent = permissionGranted ? 'разрешён' : 'не выдан';
-permissionBadge.className = `chatgoose-badge chatgoose-badge-${permissionGranted ? 'green' : 'amber'}`;
+const setPermissionBadge = (label: string, tone: 'green' | 'amber' | 'neutral'): void => {
+  permissionBadge.textContent = label;
+  permissionBadge.className = `chatgoose-badge chatgoose-badge-${tone}`;
+  permissionBadge.dataset.hubPermissionBadge = 'true';
+};
+// granted branch:              setPermissionBadge('разрешён', 'green');
+// permissionCheck.errorMessage branch (check failed):
+//                              setPermissionBadge('не удалось проверить', 'neutral');
+// all other not-granted branches:
+//                              setPermissionBadge('не выдан', 'amber');
 ```
+
+  Add a test for the check-failure state (the hub harness can make `browser.permissions.contains` reject — mirror how the file's existing permission-state tests force branches):
+
+```ts
+it('a failed permission check shows «не удалось проверить», not «не выдан»', async () => {
+  await loadOptionsPage(/* fixture with permissions.contains rejecting */);
+  const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+  expect(badge?.textContent).toBe('не удалось проверить');
+  expect(badge?.className).toContain('chatgoose-badge-neutral');
+});
+```
+
+  (`chatgoose-badge-neutral` requires the neutral tone class to exist — Task 2's `createBadge` default tone renders `chatgoose-badge-neutral`; confirm the CSS class name matches.)
 
   CSS:
 
@@ -1269,7 +1368,25 @@ Translation table (exact target strings; left = current literal in code):
 
 - [ ] **Step 1: Update the pinned strings in all three test files first** (they are the failing tests: every assertion that quotes one of the left-column literals switches to the right column).
 - [ ] **Step 2: Run to verify failures** (`pnpm vitest run tests/options-accounts.test.ts tests/options-agency-hub.test.ts tests/options-persona-recovery.test.ts`).
-- [ ] **Step 3: Translate the literals in `index.ts` / `sessions.ts`** per the table. Then sweep for leftovers: `grep -nE "textContent = '[A-Z]|placeholder = '[A-Z]|title = '[A-Z]" src/options/*.ts` — every hit must be either in the glossary or translated; extend the table in this plan's PR description for anything the grep uncovers that the table missed.
+- [ ] **Step 3: Translate the literals** per the table — in `index.ts`, `sessions.ts`, AND `agency-hub-settings.ts` (the permission scope-note builder there emits user-visible English for URLs with ports), plus the user-facing description strings in `src/shared/errors.ts` that the options page renders on failed hub tests (they also serve the in-page surface — Russian is the goal there too; update every test pinning them). Additional table rows for template-literal strings the old grep missed:
+
+| Current (template/ternary literals) | Russian |
+|---|---|
+| `Live connection test succeeded for ${X}.` | `Живой тест соединения прошёл: ${X}.` |
+| `Device token ${prefix}… issued (expires ${date}).` | `Device token ${prefix}… выпущен (истекает ${date}).` |
+| `${view.label} · archived` | `${view.label} · в архиве` |
+| `Unavailable persona · select a replacement` (mirror the exact current literal) | `Персона недоступна · выбери замену` |
+| `• Connected` / `• Disconnected` tails | (deleted by Task 5 — verify gone, do not translate) |
+
+  Then sweep for leftovers with an INVERTED-CYRILLIC audit — the point is to find every user-visible assignment that contains no Cyrillic, whatever quoting it uses:
+
+```bash
+grep -nE "(textContent|placeholder|title)\s*=" src/options/*.ts | grep -vP '[А-Яа-яЁё]'
+grep -n "createTextNode(" src/options/*.ts
+grep -n '\${' src/options/index.ts src/options/agency-hub-settings.ts   # manual pass over every composed string
+```
+
+  Every hit must be glossary-only Latin (Hub, device token, …), a non-UI string (selector, storage key, code), or translated. Anything else is an unfinished sweep — the task is not done while such a hit exists.
 - [ ] **Step 4: Run the three suites + full run** (`pnpm vitest run`) — PASS.
 - [ ] **Step 5: Commit** `git commit -am "feat(options): Russian copy sweep with EN-term glossary"`
 
@@ -1285,12 +1402,22 @@ Translation table (exact target strings; left = current literal in code):
 Font inventory (from google-webfonts-helper, `https://gwfh.mranftl.com/fonts`; record the helper's version stamp per family in `assets/fonts/README.md` together with the license — all three families are SIL OFL):
 
 ```
-hanken-grotesk-latin-400.woff2 / -500 / -600 / -700      (no Cyrillic exists for this family;
-                                                          Russian text falls back to system sans — same as today)
+hanken-grotesk-latin-400.woff2 / -500 / -600 / -700
 source-serif-4-latin-600.woff2 / source-serif-4-cyrillic-600.woff2
 ibm-plex-mono-latin-400.woff2 / -500 / -600
 ibm-plex-mono-cyrillic-400.woff2 / -500 / -600           (popup mono runs at 600 today — cover it)
 ```
+
+**Recorded decision on the Cyrillic body (not an accident):** Hanken Grotesk
+has no Cyrillic subset, and after Task 9 nearly all body copy IS Cyrillic —
+so body text intentionally renders in the system sans
+(-apple-system/Segoe UI, the next fonts in `--chatgoose-font`), with Hanken
+serving the Latin glossary terms and figures. This is the same behavior the
+desktop app exhibits in its Russian locale (same font stack, same missing
+subset), so it IS the family look for Russian copy — but it is a decision
+this task records (in the Task 11 decision entry), not a "same as today"
+claim: today's page is all-English and renders Hanken everywhere. Do not
+swap the sans family; do not fake Cyrillic with a lookalike.
 
 - [ ] **Step 1: Check debug-prompt first.** `grep -n "googleapis\|Hanken\|Source Serif\|Plex" src/debug-prompt/index.html src/debug-prompt/styles.css` — if the page neither links Google nor names the families, it is OUT of this task (system fonts by design); if it names families, add the same `@font-face` block to its styles.css and (if present) remove its Google links.
 
@@ -1408,6 +1535,9 @@ newest-snapshot-wins preserved), collapses the legacy chatter key behind
 <details>, moves the options surface to Russian copy with an English-term
 glossary, and bundles the family fonts locally (Google Fonts CDN removed
 from options and popup; debug-prompt deliberately stays on system fonts).
+Cyrillic body text intentionally renders in the system sans — Hanken
+Grotesk has no Cyrillic subset, matching the desktop's Russian-locale
+behavior; Hanken serves Latin glossary terms and figures.
 Zero behavior change: the single central write controller, custody
 discipline (E19), persona preservation/recovery (E36/E37) and the
 future-schema barrier move verbatim; storage schema stays v14. Per-section
