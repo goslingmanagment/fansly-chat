@@ -107,3 +107,135 @@ export function debounce<T extends (...args: never[]) => unknown>(
   };
   return debounced;
 }
+
+export type BadgeTone = 'neutral' | 'green' | 'amber' | 'bad' | 'clay';
+
+export function createBadge(label: string, tone: BadgeTone = 'neutral', mono = false): HTMLSpanElement {
+  const badge = document.createElement('span');
+  badge.className = `chatgoose-badge chatgoose-badge-${tone}${mono ? ' chatgoose-badge-mono' : ''}`;
+  badge.textContent = label;
+  return badge;
+}
+
+export function createCap(text: string): HTMLSpanElement {
+  const cap = document.createElement('span');
+  cap.className = 'chatgoose-cap';
+  cap.textContent = text;
+  return cap;
+}
+
+export function createToggle(
+  label: string,
+  hint?: string,
+): { root: HTMLLabelElement; input: HTMLInputElement } {
+  const root = document.createElement('label');
+  root.className = 'chatgoose-toggle-row';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'chatgoose-toggle-input';
+  const track = document.createElement('span');
+  track.className = 'chatgoose-toggle';
+  const text = document.createElement('span');
+  text.className = 'chatgoose-toggle-label';
+  text.textContent = label;
+  root.append(input, track, text);
+  if (hint) {
+    const hintNode = document.createElement('span');
+    hintNode.className = 'chatgoose-toggle-hint';
+    hintNode.textContent = hint;
+    root.append(hintNode);
+  }
+  return { root, input };
+}
+
+export function createChipGroup(
+  choices: Array<{ value: string; label: string }>,
+  initialValue: string,
+): { root: HTMLDivElement; input: HTMLSelectElement } {
+  const root = document.createElement('div');
+  root.className = 'chatgoose-chip-group';
+  const input = document.createElement('select');
+  input.className = 'chatgoose-chip-value';
+  input.hidden = true;
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = choice.value;
+    option.textContent = choice.label;
+    input.append(option);
+  }
+  input.value = initialValue;
+  const buttons: HTMLButtonElement[] = [];
+  const renderSelection = (): void => {
+    for (const button of buttons) {
+      button.classList.toggle('chatgoose-chip-selected', button.dataset.value === input.value);
+    }
+  };
+  for (const choice of choices) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chatgoose-chip';
+    button.dataset.value = choice.value;
+    button.textContent = choice.label;
+    button.addEventListener('click', () => {
+      if (input.value === choice.value) return;
+      input.value = choice.value;
+      renderSelection();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    buttons.push(button);
+    root.append(button);
+  }
+  root.append(input);
+  renderSelection();
+  return { root, input };
+}
+
+const FORM_CONTROL_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
+
+function isFormControl(node: HTMLElement): boolean {
+  // tagName, not instanceof: this code runs under several JSDOM test
+  // harnesses, and not all of them stub every element constructor into the
+  // global realm — instanceof against an unstubbed global throws.
+  return FORM_CONTROL_TAGS.has(node.tagName);
+}
+
+export function createLabelRow(label: string, control: HTMLElement): HTMLElement {
+  const row = document.createElement(isFormControl(control) ? 'label' : 'div');
+  row.className = 'chatgoose-lrow';
+  const labelNode = document.createElement('span');
+  labelNode.className = 'chatgoose-lrow-label';
+  labelNode.textContent = label;
+  const controlWrap = document.createElement('span');
+  controlWrap.className = 'chatgoose-lrow-control';
+  controlWrap.append(control);
+  row.append(labelNode, controlWrap);
+  return row;
+}
+
+const SAVED_FLASH_VISIBLE_MS = 2000;
+
+export function createSavedFlash(): {
+  root: HTMLDivElement;
+  showSaved: () => void;
+  showError: (message: string) => void;
+} {
+  const root = document.createElement('div');
+  root.className = 'chatgoose-saved-flash';
+  root.hidden = true;
+  let hideTimer: number | null = null;
+  const show = (className: string, text: string, autoHide: boolean): void => {
+    root.className = `chatgoose-saved-flash ${className}`;
+    root.textContent = text;
+    root.hidden = false;
+    if (hideTimer !== null) window.clearTimeout(hideTimer);
+    hideTimer = autoHide
+      ? window.setTimeout(() => { root.hidden = true; hideTimer = null; }, SAVED_FLASH_VISIBLE_MS)
+      : null;
+  };
+  return {
+    root,
+    showSaved: () => show('chatgoose-saved-flash-ok', 'Сохранено ✓', true),
+    showError: (message: string) => show('chatgoose-saved-flash-bad', `Ошибка: ${message}`, false),
+  };
+}
