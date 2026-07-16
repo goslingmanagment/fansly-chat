@@ -69,20 +69,20 @@ describe('Options malformed persona snapshot recovery', () => {
     await import('../src/options/index.js');
     await vi.waitFor(() => {
       expect(document.querySelector('h1')?.textContent)
-        .toBe('ChatGoose Persona Recovery');
+        .toBe('Восстановление персон');
     });
 
-    expect(document.body.textContent).toContain('Legacy Persona Recovery');
-    expect(document.body.textContent).toContain('Download legacy persona JSON');
-    expect(document.body.textContent).toContain('Copy legacy persona JSON');
+    expect(document.body.textContent).toContain('Экспорт легаси-персон');
+    expect(document.body.textContent).toContain('Скачать JSON легаси-персон');
+    expect(document.body.textContent).toContain('Скопировать JSON легаси-персон');
     const sectionTitles = Array.from(document.querySelectorAll('h2'))
       .map((heading) => heading.textContent);
-    expect(sectionTitles).toEqual(['Legacy Persona Recovery']);
+    expect(sectionTitles).toEqual(['Экспорт легаси-персон']);
     expect(sendMessage).not.toHaveBeenCalled();
     expect(storageSet).not.toHaveBeenCalled();
 
     const copy = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Copy legacy persona JSON');
+      .find((button) => button.textContent === 'Скопировать JSON легаси-персон');
     copy?.click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const exported = JSON.parse(writeText.mock.calls[0]![0] as string) as Record<string, unknown>;

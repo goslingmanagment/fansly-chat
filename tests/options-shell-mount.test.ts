@@ -29,6 +29,18 @@ describe('options shell mount', () => {
     expect(active).toHaveLength(1);
     expect((active[0] as HTMLElement).dataset.navId).toBe('hub');
   });
+
+  it('no known-English UI strings survive on the rendered page', async () => {
+    const { document } = await mountOptionsPage();
+    const text = document.body.textContent ?? '';
+    for (const english of [
+      'Loading', 'Connection Status', 'Account Mappings', 'Model Personalities',
+      'Sync disabled', 'Not tested yet', 'Grant Access', 'Test Connection',
+      'No Fansly accounts', 'Unmapped', 'Enable debug mode', 'preserved unchanged',
+    ]) {
+      expect(text, `English leftover: ${english}`).not.toContain(english);
+    }
+  });
 });
 
 describe('options hidden-control persistence', () => {
@@ -52,7 +64,7 @@ describe('options hidden-control persistence', () => {
   it('debug toggle lives in the Advanced block and persists', async () => {
     const page = await mountOptionsPage();
     const generation = page.document.querySelector('[data-shell-section="generation"]')!;
-    expect(generation.querySelector('.chatgoose-cap')?.textContent).toBe('Advanced');
+    expect(generation.querySelector('.chatgoose-cap')?.textContent).toBe('Дополнительно');
     const toggle = generation.querySelector('.chatgoose-toggle-input') as HTMLInputElement;
     toggle.click();
     await page.flushAsync();

@@ -29,7 +29,7 @@ export function formatAccountMeta(
   session: SessionSnapshotEntry | null | undefined,
 ): string {
   const resolvedAccountId = session?.resolvedAccountId ?? accountId;
-  return `Account ID: ${resolvedAccountId}`;
+  return `ID аккаунта: ${resolvedAccountId}`;
 }
 
 export function buildSessionLookup(

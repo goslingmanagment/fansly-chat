@@ -92,7 +92,7 @@ function createLegacyPersonaExportControls(): DocumentFragment {
     null,
     2,
   );
-  const downloadExport = createButton('Download legacy persona JSON', true);
+  const downloadExport = createButton('Скачать JSON легаси-персон', true);
   downloadExport.addEventListener('click', () => {
     downloadExport.disabled = true;
     void exportJson().then((json) => {
@@ -102,23 +102,23 @@ function createLegacyPersonaExportControls(): DocumentFragment {
       link.download = `chatgoose-legacy-personas-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      exportStatus.textContent = 'Legacy persona JSON downloaded.';
+      exportStatus.textContent = 'JSON легаси-персон скачан.';
     }).catch((error: unknown) => {
       console.error('Failed to export legacy persona data', error);
-      exportStatus.textContent = 'Export failed. Reload Settings and try again.';
+      exportStatus.textContent = 'Экспорт не удался. Перезагрузи настройки и попробуй снова.';
     }).finally(() => {
       downloadExport.disabled = false;
     });
   });
-  const copyExport = createButton('Copy legacy persona JSON', true);
+  const copyExport = createButton('Скопировать JSON легаси-персон', true);
   copyExport.addEventListener('click', () => {
     copyExport.disabled = true;
     void exportJson().then(async (json) => {
       await navigator.clipboard.writeText(json);
-      exportStatus.textContent = 'Legacy persona JSON copied.';
+      exportStatus.textContent = 'JSON легаси-персон скопирован.';
     }).catch((error: unknown) => {
       console.error('Failed to copy legacy persona data', error);
-      exportStatus.textContent = 'Copy failed. Use Download instead.';
+      exportStatus.textContent = 'Копирование не удалось. Используй «Скачать».';
     }).finally(() => {
       copyExport.disabled = false;
     });
@@ -138,15 +138,15 @@ function renderLegacyPersonaRecovery(): void {
   hero.style.display = 'grid';
   hero.style.gap = '8px';
   const title = document.createElement('h1');
-  title.textContent = 'ChatGoose Persona Recovery';
+  title.textContent = 'Восстановление персон';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'The preserved legacy persona snapshot is malformed. Normal Settings and Agency Hub access are disabled so the snapshot cannot be overwritten.';
+  subtitle.textContent = 'Сохранённый снапшот легаси-персон повреждён. Обычные настройки и доступ к Agency Hub отключены, чтобы снапшот нельзя было перезаписать.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
 
   const recovery = createSection(
-    'Legacy Persona Recovery',
-    'Export the malformed preserved value together with the current legacy persona data, mappings, and aliases for manual recovery.',
+    'Экспорт легаси-персон',
+    'Экспортируй повреждённое сохранённое значение вместе с текущими легаси-персонами, привязками и алиасами для ручного восстановления.',
   );
   recovery.append(createLegacyPersonaExportControls());
   root.append(hero, recovery);
@@ -346,13 +346,13 @@ async function render(): Promise<void> {
   const debugToggle = createToggle('Debug mode', 'окно отладки промпта');
   const debugInput = debugToggle.input;
   debugInput.checked = state.settings.debugMode;
-  advanced.append(createCap('Advanced'), debugToggle.root);
+  advanced.append(createCap('Дополнительно'), debugToggle.root);
   apiSection.append(countsGrid, advanced);
 
   // ─── Agency Hub ───────────────────────────────────────────
   const agencyHubSection = createSection(
-    'Agency Hub',
-    'Push Fan Summary results to Agency Hub for durable storage and version history.',
+    COPY.sections.hubTitle,
+    COPY.sections.hubHint,
   );
   const agencyHubUrlInput = document.createElement('input');
   agencyHubUrlInput.type = 'url';
@@ -366,10 +366,10 @@ async function render(): Promise<void> {
   agencyHubKeyInput.className = 'chatgoose-input';
   agencyHubKeyInput.value = state.settings.agencyHubApiKey;
 
-  const agencyHubToggle = createButton('Show', true);
+  const agencyHubToggle = createButton('Показать', true);
   agencyHubToggle.addEventListener('click', () => {
     agencyHubKeyInput.type = agencyHubKeyInput.type === 'password' ? 'text' : 'password';
-    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password' ? 'Show' : 'Hide';
+    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password' ? 'Показать' : 'Скрыть';
   });
 
   const agencyHubKeyRow = document.createElement('div');
@@ -386,7 +386,7 @@ async function render(): Promise<void> {
   agencyHubPermissionMeta.style.color = 'var(--chatgoose-ink-mid)';
   agencyHubPermissionMeta.style.fontSize = '13px';
 
-  const agencyHubPermissionButton = createButton('Grant Access', true);
+  const agencyHubPermissionButton = createButton('Разрешить доступ', true);
   const agencyHubConnectionStatus = document.createElement('div');
   agencyHubConnectionStatus.style.fontWeight = '600';
   agencyHubConnectionStatus.style.fontSize = '14px';
@@ -395,7 +395,7 @@ async function render(): Promise<void> {
   agencyHubConnectionMeta.style.color = 'var(--chatgoose-ink-mid)';
   agencyHubConnectionMeta.style.fontSize = '13px';
 
-  const agencyHubConnectionButton = createButton('Test Connection', true);
+  const agencyHubConnectionButton = createButton('Проверить соединение', true);
   const agencyHubActionRow = document.createElement('div');
   agencyHubActionRow.style.display = 'flex';
   agencyHubActionRow.style.gap = '8px';
@@ -414,32 +414,32 @@ async function render(): Promise<void> {
 
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
-        agencyHubConnectionStatus.textContent = 'Not tested yet.';
+        agencyHubConnectionStatus.textContent = 'Ещё не проверялось.';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
-        agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
+        agencyHubConnectionMeta.textContent = 'Сохрани адрес Hub и ключ, чтобы запустить живой тест соединения.';
         return;
       case 'pending':
-        agencyHubConnectionStatus.textContent = 'Connection status updating…';
+        agencyHubConnectionStatus.textContent = 'Статус соединения обновляется…';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
-        agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
+        agencyHubConnectionMeta.textContent = 'Сохраняю изменения Agency Hub перед следующим живым тестом.';
         return;
       case 'testing':
-        agencyHubConnectionStatus.textContent = 'Testing connection…';
+        agencyHubConnectionStatus.textContent = 'Проверяю соединение…';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
-        agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
+        agencyHubConnectionMeta.textContent = 'Проверяю доступность Hub, разрешения и ключ.';
         return;
       case 'connected':
-        agencyHubConnectionStatus.textContent = 'Connected ✓';
+        agencyHubConnectionStatus.textContent = 'Соединение OK ✓';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-green)';
-        agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
+        agencyHubConnectionMeta.textContent = `Живой тест соединения прошёл: ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
-        agencyHubConnectionStatus.textContent = `Connection failed: ${failedError.code}`;
+        agencyHubConnectionStatus.textContent = `Соединение не удалось: ${failedError.code}`;
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-bad)';
         const serverEcho = typeof failedError.httpStatus === 'number'
-          ? `Hub responded ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
+          ? `Hub ответил ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
           : null;
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -531,7 +531,7 @@ async function render(): Promise<void> {
       agencyHubConnectionFeedback = {
         kind: 'failed',
         error: createUserError('hub_request_failed', {
-          description: 'The connection test could not be completed.',
+          description: 'Не удалось выполнить проверку соединения.',
         }),
       };
       lastAgencyHubConnectionSignature = null;
@@ -558,7 +558,7 @@ async function render(): Promise<void> {
       agencyHubPermissionFeedback = null;
     }
 
-    agencyHubPermissionButton.textContent = permissionGranted ? 'Reconnect' : 'Grant Access';
+    agencyHubPermissionButton.textContent = permissionGranted ? 'Переподключить' : 'Разрешить доступ';
     agencyHubPermissionButton.disabled = !originPattern;
 
     // Badge reflection computed ONCE here — after the staleness guard (a
@@ -582,14 +582,14 @@ async function render(): Promise<void> {
     }
 
     if (!agencyHubUrlInput.value.trim()) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: add an Agency Hub URL.';
-      agencyHubPermissionMeta.textContent = 'Enter the Hub base URL, then grant host access for that origin.';
+      agencyHubPermissionStatus.textContent = 'Синк отключён: добавь адрес Agency Hub.';
+      agencyHubPermissionMeta.textContent = 'Укажи базовый адрес Hub и выдай доступ к этому origin.';
       return;
     }
 
     if (!normalizedBaseUrl) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: invalid Agency Hub URL.';
-      agencyHubPermissionMeta.textContent = 'Use a full http:// or https:// base URL.';
+      agencyHubPermissionStatus.textContent = 'Синк отключён: неверный адрес Agency Hub.';
+      agencyHubPermissionMeta.textContent = 'Укажи полный http:// или https:// адрес.';
       return;
     }
 
@@ -600,9 +600,9 @@ async function render(): Promise<void> {
           : null;
 
       if (permissionCheck.errorMessage) {
-        agencyHubPermissionStatus.textContent = 'Sync disabled: host access could not be verified.';
+        agencyHubPermissionStatus.textContent = 'Синк отключён: не удалось проверить доступ к хосту.';
         agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-          `Firefox returned an error while checking ${originPattern}: ${permissionCheck.errorMessage}.`,
+          `Firefox вернул ошибку при проверке ${originPattern}: ${permissionCheck.errorMessage}.`,
           permissionScopeNote,
         );
         return;
@@ -611,23 +611,23 @@ async function render(): Promise<void> {
       if (permissionFeedback) {
         switch (permissionFeedback.kind) {
           case 'denied':
-            agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
+            agencyHubPermissionStatus.textContent = 'Синк отключён: доступ к хосту не выдан.';
             agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              `Firefox did not grant access for ${originPattern}. Click Grant Access to try again.`,
+              `Firefox не выдал доступ к ${originPattern}. Нажми «Разрешить доступ», чтобы повторить.`,
               permissionScopeNote,
             );
             return;
           case 'request_error':
-            agencyHubPermissionStatus.textContent = 'Sync disabled: failed to request host access.';
+            agencyHubPermissionStatus.textContent = 'Синк отключён: не удалось запросить доступ к хосту.';
             agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              `Firefox returned an error while requesting ${originPattern}: ${permissionFeedback.errorMessage}.`,
+              `Firefox вернул ошибку при запросе ${originPattern}: ${permissionFeedback.errorMessage}.`,
               permissionScopeNote,
             );
             return;
           case 'unsupported':
-            agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
+            agencyHubPermissionStatus.textContent = 'Синк отключён: запрос доступа к хосту недоступен.';
             agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              'This browser build does not expose browser.permissions.request for Agency Hub access.',
+              'Эта сборка браузера не предоставляет browser.permissions.request для доступа к Agency Hub.',
               permissionScopeNote,
             );
             return;
@@ -635,26 +635,26 @@ async function render(): Promise<void> {
       }
 
       if (typeof browser.permissions?.request !== 'function') {
-        agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
+        agencyHubPermissionStatus.textContent = 'Синк отключён: запрос доступа к хосту недоступен.';
         agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-          'This browser build does not expose browser.permissions.request for Agency Hub access.',
+          'Эта сборка браузера не предоставляет browser.permissions.request для доступа к Agency Hub.',
           permissionScopeNote,
         );
         return;
       }
 
-      agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
+      agencyHubPermissionStatus.textContent = 'Синк отключён: доступ к хосту не выдан.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Grant access for ${originPattern} before ChatGoose can push summaries.`,
+        `Выдай доступ к ${originPattern}, чтобы ChatGoose мог отправлять сводки.`,
         permissionScopeNote,
       );
       return;
     }
 
     if (!hasApiKey) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub credential missing.';
+      agencyHubPermissionStatus.textContent = 'Синк отключён: нет учётных данных Agency Hub.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Host access is granted for ${originPattern}, but ChatGoose still needs a credential — sign in or add the hub key.`,
+        `Доступ к ${originPattern} выдан, но ChatGoose нужны учётные данные — войди или добавь ключ hub.`,
         permissionScopeNote,
       );
       return;
@@ -662,9 +662,9 @@ async function render(): Promise<void> {
 
     // Never claim readiness here: this is a local check (permission + a
     // non-empty credential) — only the live connection test below proves sync.
-    agencyHubPermissionStatus.textContent = 'Host access granted.';
+    agencyHubPermissionStatus.textContent = 'Доступ к хосту выдан.';
     agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-      `ChatGoose can reach ${originPattern}. Sync goes live once the connection test below passes.`,
+      `ChatGoose может достучаться до ${originPattern}. Синк заработает, когда пройдёт проверка соединения ниже.`,
       permissionScopeNote,
     );
   };
@@ -746,15 +746,15 @@ async function render(): Promise<void> {
   hubSignInUserInput.type = 'text';
   hubSignInUserInput.autocomplete = 'username';
   hubSignInUserInput.className = 'chatgoose-input';
-  hubSignInUserInput.placeholder = 'Hub username';
+  hubSignInUserInput.placeholder = 'Логин хаба';
 
   const hubSignInPasswordInput = document.createElement('input');
   hubSignInPasswordInput.type = 'password';
   hubSignInPasswordInput.autocomplete = 'current-password';
   hubSignInPasswordInput.className = 'chatgoose-input';
-  hubSignInPasswordInput.placeholder = 'Hub password';
+  hubSignInPasswordInput.placeholder = 'Пароль хаба';
 
-  const hubSignInButton = createButton('Sign in & issue device token', true);
+  const hubSignInButton = createButton('Войти и выпустить token', true);
   const hubSignInStatus = document.createElement('div');
   hubSignInStatus.style.fontWeight = '600';
   hubSignInStatus.style.fontSize = '14px';
@@ -765,15 +765,15 @@ async function render(): Promise<void> {
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
     hubSignInStatus.textContent = hasToken
-      ? 'Device token active ✓'
-      : 'No device token yet.';
+      ? 'Device token активен ✓'
+      : 'Device token ещё не выпущен.';
     hubSignInStatus.style.color = hasToken
       ? 'var(--chatgoose-green)'
       : 'var(--chatgoose-ink)';
     if (!hubSignInMeta.textContent) {
       hubSignInMeta.textContent = hasToken
-        ? 'Hub requests use the device token; the legacy API key is the fallback.'
-        : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
+        ? 'Запросы к Hub используют device token; legacy-ключ — запасной вариант.'
+        : 'Войди один раз, чтобы выпустить привязанный к устройству token — больше не нужно вставлять ключ, и он переживает ротацию ключа.';
     }
   };
 
@@ -782,11 +782,11 @@ async function render(): Promise<void> {
       const username = hubSignInUserInput.value.trim();
       const password = hubSignInPasswordInput.value;
       if (!username || !password || !agencyHubUrlInput.value.trim()) {
-        hubSignInMeta.textContent = 'Enter the Hub base URL, username, and password first.';
+        hubSignInMeta.textContent = 'Сначала укажи адрес Hub, логин и пароль.';
         return;
       }
       hubSignInButton.disabled = true;
-      hubSignInMeta.textContent = 'Signing in…';
+      hubSignInMeta.textContent = 'Вхожу…';
       try {
         // Finish the shared local form write before the background issues a
         // device token from those Hub inputs. This prevents a delayed local
@@ -804,9 +804,9 @@ async function render(): Promise<void> {
           state.settings = (await loadStorageState()).settings;
           hubSignInPasswordInput.value = '';
           hubSignInMeta.textContent =
-            `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
+            `Device token ${response.keyPrefix}… выпущен (истекает ${new Date(response.expiresAt).toLocaleDateString()}).`;
         } else {
-          hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
+          hubSignInMeta.textContent = `Вход не удался: ${response.error.message}`;
         }
       } finally {
         hubSignInButton.disabled = false;
@@ -1116,8 +1116,8 @@ async function render(): Promise<void> {
   }
   // ─── Persona catalog (server-owned, metadata only) ─────────
   const personalitiesSection = createSection(
-    'Model Personalities',
-    'Global personalities are managed by Agency Hub admins. This extension only reads the catalog and stores account mappings.',
+    COPY.sections.personasTitle,
+    'Голоса управляются на сервере агентства; здесь — только каталог и привязки аккаунтов.',
   );
   const personalitiesList = document.createElement('div');
   personalitiesList.style.display = 'grid';
@@ -1128,7 +1128,7 @@ async function render(): Promise<void> {
     personalitiesList.replaceChildren();
     if (state.personaCatalog.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.';
+      empty.textContent = 'Каталог персон пуст — проверь подключение к Hub. Голоса приходят с сервера; их редактирование сейчас заморожено.';
       empty.style.color = 'var(--chatgoose-ink-mid)';
       personalitiesList.append(empty);
       return;
@@ -1141,7 +1141,7 @@ async function render(): Promise<void> {
       heading.textContent = persona.displayName;
       heading.style.fontWeight = '700';
       const meta = document.createElement('div');
-      meta.textContent = `${persona.key} • version ${persona.version} • ${persona.status}`;
+      meta.textContent = `${persona.key} • версия ${persona.version} • ${persona.status === 'active' ? 'активна' : 'в архиве'}`;
       meta.style.fontSize = '12px';
       meta.style.color = persona.status === 'active'
         ? 'var(--chatgoose-ink-mid)'
@@ -1153,7 +1153,7 @@ async function render(): Promise<void> {
   renderPersonaCatalog();
 
   const preservationNote = document.createElement('div');
-  preservationNote.textContent = 'Legacy local persona text is preserved unchanged on this device. Export it before removing the extension or clearing browser data.';
+  preservationNote.textContent = 'Легаси-тексты персон сохранены на этом устройстве без изменений. Экспортируй их перед удалением расширения или очисткой браузера.';
   preservationNote.style.color = 'var(--chatgoose-ink-mid)';
   preservationNote.style.fontSize = '13px';
 
@@ -1223,7 +1223,7 @@ async function render(): Promise<void> {
   mappingsTable.style.display = 'grid';
   mappingsTable.style.gap = '12px';
   const mappingsLoading = document.createElement('div');
-  mappingsLoading.textContent = 'Loading Fansly accounts…';
+  mappingsLoading.textContent = 'Загружаю аккаунты Fansly…';
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
@@ -1263,14 +1263,14 @@ async function render(): Promise<void> {
   ): { label: string; usable: boolean } | null => {
     const unmapped = document.createElement('option');
     unmapped.value = '';
-    unmapped.textContent = 'Unmapped';
+    unmapped.textContent = '— не назначена —';
     select.replaceChildren(unmapped);
     for (const view of views) {
       const option = document.createElement('option');
       option.value = view.personality.key;
       option.textContent = view.usable
         ? view.label
-        : `${view.label} · archived`;
+        : `${view.label} · в архиве`;
       option.disabled = !view.usable;
       select.append(option);
     }
@@ -1281,7 +1281,7 @@ async function render(): Promise<void> {
     if (selectedPersonalityId && !selectedView) {
       const missing = document.createElement('option');
       missing.value = selectedPersonalityId;
-      missing.textContent = `Unavailable persona · ${selectedPersonalityId}`;
+      missing.textContent = `Персона недоступна · ${selectedPersonalityId}`;
       missing.disabled = true;
       select.append(missing);
       select.value = selectedPersonalityId;
@@ -1299,7 +1299,7 @@ async function render(): Promise<void> {
   // build sites so the two views never disagree.
   const formatMappingInfo = (
     view: { label: string; usable: boolean } | null,
-  ): string => `${view?.label ?? 'Unmapped'}${view && !view.usable ? ' · unavailable' : ''}`;
+  ): string => `${view?.label ?? '— не назначена —'}${view && !view.usable ? ' · недоступна' : ''}`;
 
   // The amber "AI отключён" badge tracks the mapping select, not the session.
   // It lives inside the identity block (never a fifth grid child) and toggles
@@ -1396,7 +1396,7 @@ async function render(): Promise<void> {
       const warning = document.createElement('div');
       warning.dataset.futureSchemaBarrier = 'true';
       warning.setAttribute('role', 'alert');
-      warning.textContent = `Settings were upgraded by a newer ChatGoose build (storage v${storedVersion}). Reload this page before editing.`;
+      warning.textContent = `Настройки открыты в более новой версии схемы (v${storedVersion}) — эта вкладка больше не сохраняет изменения. Перезагрузи страницу.`;
       warning.style.margin = '16px 20px 0';
       warning.style.padding = '12px';
       warning.style.border = '1px solid var(--chatgoose-bad)';
@@ -1567,7 +1567,7 @@ async function render(): Promise<void> {
 
     if (state.knownAccounts.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'No Fansly accounts detected yet.';
+      empty.textContent = 'Аккаунты не обнаружены — открой fansly.com с аккаунтом модели.';
       empty.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(empty);
     }

@@ -147,16 +147,16 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_invalid_url: {
     key: 'hub_invalid_url',
     code: 'CG-HUB-01',
-    message: 'Agency Hub URL is invalid.',
-    description: 'Use a full http:// or https:// Agency Hub base URL.',
+    message: 'Адрес Agency Hub неверный.',
+    description: 'Укажи полный http:// или https:// адрес Agency Hub.',
     settingsLink: true,
   },
   hub_missing_api_key: {
     key: 'hub_missing_api_key',
     code: 'CG-HUB-02',
     // Fires when NEITHER credential exists (resolveHubBearer came up empty).
-    message: 'Agency Hub credential is missing.',
-    description: 'Sign in to issue a device token, or add the Hub API key in Settings.',
+    message: 'Нет учётных данных Agency Hub.',
+    description: 'Войди, чтобы выпустить device token, или добавь ключ Hub в настройках.',
     settingsLink: true,
   },
   hub_invalid_api_key: {
@@ -164,15 +164,15 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     code: 'CG-HUB-03',
     // Credential-neutral: outside the connection test we don't know whether
     // the rejected bearer was the device token or the legacy key.
-    message: 'Agency Hub rejected the credential.',
-    description: 'Check the device token or Hub API key in Settings and test the connection again.',
+    message: 'Agency Hub отклонил учётные данные.',
+    description: 'Проверь device token или ключ Hub в настройках и повтори проверку соединения.',
     settingsLink: true,
   },
   hub_missing_permission: {
     key: 'hub_missing_permission',
     code: 'CG-HUB-04',
-    message: 'Agency Hub host access is not granted.',
-    description: 'Grant host access for the configured Hub origin in Settings.',
+    message: 'Доступ к хосту Agency Hub не выдан.',
+    description: 'Выдай доступ к хосту Hub в настройках.',
     settingsLink: true,
   },
   hub_page_match_failed: {
@@ -185,14 +185,14 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_timeout: {
     key: 'hub_timeout',
     code: 'CG-HUB-06',
-    message: 'Agency Hub request timed out.',
-    description: 'The Hub did not respond in time. Try the connection test again.',
+    message: 'Запрос к Agency Hub истёк по таймауту.',
+    description: 'Hub не ответил вовремя. Повтори проверку соединения.',
   },
   hub_request_failed: {
     key: 'hub_request_failed',
     code: 'CG-HUB-07',
-    message: 'Agency Hub request failed.',
-    description: 'The Hub returned an error or could not be reached.',
+    message: 'Запрос к Agency Hub не удался.',
+    description: 'Hub вернул ошибку или недоступен.',
   },
   hub_sync_failed: {
     key: 'hub_sync_failed',
