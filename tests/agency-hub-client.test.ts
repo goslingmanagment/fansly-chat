@@ -685,7 +685,7 @@ describe('AgencyHubClient', () => {
     });
     // Copy names the credential that was actually sent (legacy key here) and
     // points at the preferred fix — issuing a device token.
-    expect(result.error?.message).toContain('API key');
+    expect(result.error?.message).toContain('API-ключ');
     expect(result.error?.description).toContain('device token');
     expect(result.error?.serverDetail).toContain('unauthorized');
     // The failure is also visible in the background console.
@@ -717,7 +717,7 @@ describe('AgencyHubClient', () => {
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe('CG-HUB-03');
     expect(result.error?.message).toContain('device token');
-    expect(result.error?.message).not.toContain('API key');
+    expect(result.error?.message).not.toContain('API-ключ');
   });
 
   it('returns a failed result on non-ok or network failures without throwing', async () => {

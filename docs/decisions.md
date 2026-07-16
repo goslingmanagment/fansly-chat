@@ -56,6 +56,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E37 | 2026-07-14 | Read-only persona follow-up: narrow refreshes, future-schema barrier, durable Scan fences, and exact deployed-contract release gate |
 | E38 | 2026-07-15 | Kernel SSE error frames surface as their named cause: gateway maps provider* codes to hub_provider_failed/hub_request_failed, error surfaces render one technical-detail line, frame code matched by prefix not enum |
 | E39 | 2026-07-15 | Releases announce themselves in the ChatGoose Telegram channel: `--check` fails deploy.sh preflight before AMO signing, the real send runs only after tag_release and never fails a live deploy, load_env stops exporting `.env.deploy` |
+| E40 | 2026-07-17 | Options P1 shell redesign: desktop SettingsSurface shape + family control vocabulary, one «Аккаунты» section, Russian copy with EN-term glossary, local fonts (Google CDN removed) — zero behavior change, schema stays v14 |
 
 ## Entries
 
@@ -881,3 +882,26 @@ bot token is not handed to child processes; the CLI loads the file itself.
 Backfill = the same CLI with `--version X.Y.Z --silent` per missing
 release, channel inventory via the user-session tooling (bots cannot read
 channel history).
+**E40 (2026-07-17).** Options P1 shell redesign: the settings page adopts
+the desktop SettingsSurface shape (sticky nav + scroll-scanline scrollspy +
+9px section cards) and the family control vocabulary (badge/toggle/chips/
+cap/num, saved-flash autosave feedback), merges Account Mappings +
+Connection Status into one «Аккаунты» section (persona-availability info
+node and newest-snapshot-wins preserved; capture times tick), re-wraps the
+Hub section into label rows with a four-state permission badge computed
+before every status exit, collapses the legacy chatter key behind
+<details>, moves the options surface to Russian copy with an English-term
+glossary (options-reachable hub error strings in shared/errors.ts included
+— they also serve the in-page surface by recorded intent), and bundles the
+family fonts locally (Google Fonts CDN removed from options and popup;
+debug-prompt deliberately stays on system fonts). Cyrillic body text
+intentionally renders in the system sans — Hanken Grotesk has no Cyrillic
+subset, matching the desktop's Russian-locale behavior; Hanken serves
+Latin glossary terms and figures. Zero behavior change: the single central
+write controller, custody discipline (E19), persona preservation/recovery
+(E36/E37) and the future-schema barrier move verbatim (pinned by a new
+initial-read catch-up regression test); storage schema stays v14.
+Per-section module extraction is deferred to P2/P3 (spec §10 amended on
+the docs branch). Spec: docs/superpowers/specs/2026-07-16-options-redesign-
+design.md (P1); plan rev 5 after one codex-ultra and two double-blind
+toolkit reviews.

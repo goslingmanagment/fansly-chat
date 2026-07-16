@@ -125,7 +125,7 @@ function getSectionByTitle(title: string): HTMLElement {
 
 function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
   const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) => candidate.textContent?.includes('Grant Access'),
+    (candidate) => candidate.textContent?.includes('Разрешить доступ'),
   );
   if (!button) {
     throw new Error('Missing Agency Hub access button');
@@ -135,7 +135,7 @@ function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
 
 function getTestConnectionButton(section: HTMLElement): HTMLButtonElement {
   const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) => candidate.textContent?.includes('Test Connection'),
+    (candidate) => candidate.textContent?.includes('Проверить соединение'),
   );
   if (!button) {
     throw new Error('Missing Agency Hub test connection button');
@@ -189,7 +189,7 @@ async function loadOptionsPage(
             error: {
               key: 'hub_request_failed',
               code: 'CG-HUB-07',
-              message: 'Agency Hub request failed.',
+              message: 'Запрос к Agency Hub не удался.',
             },
           };
         }
@@ -233,7 +233,7 @@ describe('Options page - Agency Hub section', () => {
 
     expect(urlInput?.value).toBe('http://localhost:3000');
     expect(keyInput?.value).toBe('hub-key');
-    expect(section.textContent).toContain('Sync disabled: host access not granted.');
+    expect(section.textContent).toContain('Синк отключён: доступ к хосту не выдан.');
     expect(section.textContent).toContain('http://localhost/*');
     expect(permissionsContains).toHaveBeenCalled();
   });
@@ -307,7 +307,7 @@ describe('Options page - Agency Hub section', () => {
     storageDeferred.resolve();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Host access granted.');
+      expect(section.textContent).toContain('Доступ к хосту выдан.');
       // Readiness is claimed only by the live connection test, never by the
       // local permission check (they contradicted each other on screen).
       expect(section.textContent).not.toContain('Sync ready');
@@ -325,8 +325,8 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Sync disabled: host access not granted.');
-      expect(section.textContent).toContain('Firefox did not grant access for http://localhost/*.');
+      expect(section.textContent).toContain('Синк отключён: доступ к хосту не выдан.');
+      expect(section.textContent).toContain('Firefox не выдал доступ к http://localhost/*.');
     }, { timeout: 2000 });
   });
 
@@ -345,7 +345,7 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Sync disabled: failed to request host access.');
+      expect(section.textContent).toContain('Синк отключён: не удалось запросить доступ к хосту.');
       expect(section.textContent).toContain('May only request permissions from a user input handler');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
@@ -375,9 +375,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connected ✓');
+      expect(section.textContent).toContain('Соединение OK ✓');
       expect(section.textContent).toContain(
-        'Live connection test succeeded for http://localhost:3000.',
+        'Живой тест соединения прошёл: http://localhost:3000.',
       );
     }, { timeout: 2000 });
 
@@ -412,9 +412,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
-      expect(section.textContent).toContain('Agency Hub request failed.');
-      expect(section.textContent).toContain('The Hub returned an error or could not be reached.');
+      expect(section.textContent).toContain('Соединение не удалось: CG-HUB-07');
+      expect(section.textContent).toContain('Запрос к Agency Hub не удался.');
+      expect(section.textContent).toContain('Hub вернул ошибку или недоступен.');
     }, { timeout: 2000 });
   });
 
@@ -445,9 +445,9 @@ describe('Options page - Agency Hub section', () => {
     const button = getTestConnectionButton(section);
 
     expect(button.disabled).toBe(true);
-    expect(section.textContent).toContain('Not tested yet.');
+    expect(section.textContent).toContain('Ещё не проверялось.');
     expect(section.textContent).toContain(
-      'Save a Hub URL and API key to run a live connection test.',
+      'Сохрани адрес Hub и ключ, чтобы запустить живой тест соединения.',
     );
     expect(runtimeSendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -475,9 +475,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
-      expect(section.textContent).toContain('Agency Hub request failed.');
-      expect(section.textContent).toContain('The connection test could not be completed.');
+      expect(section.textContent).toContain('Соединение не удалось: CG-HUB-07');
+      expect(section.textContent).toContain('Запрос к Agency Hub не удался.');
+      expect(section.textContent).toContain('Не удалось выполнить проверку соединения.');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
       'Agency Hub connection test failed',
@@ -499,8 +499,8 @@ describe('Options page - Agency Hub section', () => {
           error: {
             key: 'hub_invalid_api_key',
             code: 'CG-HUB-03',
-            message: 'Agency Hub API key is invalid.',
-            description: 'Check the key in Agency Hub settings and try again.',
+            message: 'Ключ Agency Hub недействителен.',
+            description: 'Проверь ключ в настройках Agency Hub и попробуй снова.',
             httpStatus: 401,
             serverDetail: '{"message":"Unauthorized"}',
           },
@@ -534,10 +534,10 @@ describe('Options page - Agency Hub section', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
       });
       expect(savedCustody).toEqual({ agencyHubApiKey: 'invalid-key' });
-      expect(section.textContent).toContain('Connection failed: CG-HUB-03');
-      expect(section.textContent).toContain('Agency Hub API key is invalid.');
-      expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
-      expect(section.textContent).toContain('Hub responded 401: {"message":"Unauthorized"}');
+      expect(section.textContent).toContain('Соединение не удалось: CG-HUB-03');
+      expect(section.textContent).toContain('Ключ Agency Hub недействителен.');
+      expect(section.textContent).toContain('Проверь ключ в настройках Agency Hub и попробуй снова.');
+      expect(section.textContent).toContain('Hub ответил 401: {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
     expect(runtimeSendMessage).toHaveBeenLastCalledWith({
@@ -548,5 +548,69 @@ describe('Options page - Agency Hub section', () => {
         agencyHubDeviceToken: '',
       },
     });
+  });
+
+  it('renders the hub section as labeled rows with a permission badge', async () => {
+    await loadOptionsPage(makeState());
+
+    const section = getSectionByTitle('Agency Hub');
+    const labels = Array.from(section.querySelectorAll('.chatgoose-lrow-label'), (n) => n.textContent);
+    expect(labels).toEqual(['Адрес Hub', 'Вход устройства', 'Доступ Firefox']);
+    expect(section.querySelector('[data-hub-permission-badge]')).not.toBeNull();
+  });
+
+  it('legacy key lives inside a collapsed details block and permission status text survives', async () => {
+    await loadOptionsPage(makeState());
+
+    const section = getSectionByTitle('Agency Hub');
+    const details = section.querySelector('details.chatgoose-hub-legacy') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toContain('Legacy chatter key');
+    expect(details.querySelector('input[type="password"]')).not.toBeNull();
+    // the status node all permission states write to is still rendered:
+    expect(section.textContent).toContain('Синк отключён'); // Task-9 Russian state text
+  });
+
+  it('a failed permission check shows «не удалось проверить», not «не выдан»', async () => {
+    await loadOptionsPage(makeState(), {
+      permissionsContainsImpl: async () => {
+        throw new Error('permissions.contains blew up');
+      },
+    });
+
+    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+    expect(badge?.textContent).toBe('не удалось проверить');
+    expect(badge?.className).toContain('chatgoose-badge-neutral');
+  });
+
+  it('permission badge shows разрешён when host access is granted but no credential is set', async () => {
+    await loadOptionsPage(makeState({
+      agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
+    }), {
+      permissionsContainsImpl: async () => true,
+    });
+
+    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+    expect(badge?.textContent).toBe('разрешён');
+    expect(badge?.className).toContain('chatgoose-badge-green');
+  });
+
+  it('permission badge shows не выдан when the origin is valid but access is not granted', async () => {
+    await loadOptionsPage(makeState(), {
+      permissionsContainsImpl: async () => false,
+    });
+
+    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+    expect(badge?.textContent).toBe('не выдан');
+    expect(badge?.className).toContain('chatgoose-badge-amber');
+  });
+
+  it('permission badge shows нет адреса when the Hub URL is empty', async () => {
+    await loadOptionsPage(makeState({ agencyHubBaseUrl: '' }));
+
+    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+    expect(badge?.textContent).toBe('нет адреса');
+    expect(badge?.className).toContain('chatgoose-badge-neutral');
   });
 });
