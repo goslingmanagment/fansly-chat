@@ -252,8 +252,11 @@ writing.
 - Tokens are already shared — `src/options/styles.css` grows component
   classes; dark theme remains a pure variable swap.
 - Plain TS + DOM, no framework (repo convention). `src/options/index.ts`
-  (1531 lines on main) gets split: `sections/*.ts` per section + a shared
-  shell (nav/scrollspy/autosave) — exact boundaries fixed in the plan.
+  (1531 lines on main) stays the single orchestrator through P1
+  (shell/primitives/copy extracted); per-section modules are carved out
+  incrementally in P2 (status/hub) and P3 (personas) as those phases
+  rebuild each section — extracting race-sensitive save wiring with zero
+  behavior change is not worth doing twice.
 - All existing save discipline survives: debounce + flush on
   blur/change/pagehide, custody keys, "first read never mutates",
   non-blocking account hydration, serialized writes. After the split there
