@@ -549,4 +549,50 @@ describe('Options page - Agency Hub section', () => {
       },
     });
   });
+
+  it('renders the hub section as labeled rows with a permission badge', async () => {
+    await loadOptionsPage(makeState());
+
+    const section = getSectionByTitle('Agency Hub');
+    const labels = Array.from(section.querySelectorAll('.chatgoose-lrow-label'), (n) => n.textContent);
+    expect(labels).toEqual(['Адрес хаба', 'Вход устройства', 'Доступ Firefox']);
+    expect(section.querySelector('[data-hub-permission-badge]')).not.toBeNull();
+  });
+
+  it('legacy key lives inside a collapsed details block and permission status text survives', async () => {
+    await loadOptionsPage(makeState());
+
+    const section = getSectionByTitle('Agency Hub');
+    const details = section.querySelector('details.chatgoose-hub-legacy') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toContain('Legacy chatter key');
+    expect(details.querySelector('input[type="password"]')).not.toBeNull();
+    // the status node all permission states write to is still rendered:
+    expect(section.textContent).toContain('Sync disabled'); // pre-Task-9 English state text
+  });
+
+  it('a failed permission check shows «не удалось проверить», not «не выдан»', async () => {
+    await loadOptionsPage(makeState(), {
+      permissionsContainsImpl: async () => {
+        throw new Error('permissions.contains blew up');
+      },
+    });
+
+    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+    expect(badge?.textContent).toBe('не удалось проверить');
+    expect(badge?.className).toContain('chatgoose-badge-neutral');
+  });
+
+  it('permission badge shows разрешён when host access is granted but no credential is set', async () => {
+    await loadOptionsPage(makeState({
+      agencyHubApiKey: '',
+      agencyHubDeviceToken: '',
+    }), {
+      permissionsContainsImpl: async () => true,
+    });
+
+    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+    expect(badge?.textContent).toBe('разрешён');
+    expect(badge?.className).toContain('chatgoose-badge-green');
+  });
 });

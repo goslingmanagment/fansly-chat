@@ -292,6 +292,10 @@ input[type='checkbox'] {
 .chatgoose-lrow-label { width: 150px; flex: none; font-weight: 600; font-size: 12.5px; padding-top: 6px; }
 .chatgoose-lrow-control { flex: 1; min-width: 0; display: grid; gap: 7px; }
 
+.chatgoose-hub-footer { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--chatgoose-line); margin-top: 6px; padding-top: 12px; }
+.chatgoose-hub-footer > :first-child { flex: 1; min-width: 0; }
+.chatgoose-hub-legacy > summary { cursor: pointer; font-size: 12px; color: var(--chatgoose-ink-low); }
+
 .chatgoose-saved-flash {
   position: fixed; right: 18px; bottom: 16px; z-index: 20;
   border-radius: 999px; padding: 5px 14px; font: 600 11.5px/1.5 var(--chatgoose-font);

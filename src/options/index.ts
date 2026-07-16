@@ -13,6 +13,7 @@ import { COPY } from './copy.js';
 import {
   createBadge,
   createButton,
+  createLabelRow,
   createSection,
   createVersionTag,
   debounce,
@@ -538,6 +539,26 @@ async function render(): Promise<void> {
     agencyHubPermissionButton.textContent = permissionGranted ? 'Reconnect' : 'Grant Access';
     agencyHubPermissionButton.disabled = !originPattern;
 
+    // Badge reflection computed ONCE here — after the staleness guard (a
+    // superseded refresh must not restamp it) but before the seven status
+    // early returns below, so no forgotten branch can strand it on the «…»
+    // placeholder. permissionBadge is created in the section composition
+    // below and only ever read here, long after that runs (E37 barrier).
+    const setPermissionBadge = (label: string, tone: 'green' | 'amber' | 'neutral'): void => {
+      permissionBadge.textContent = label;
+      permissionBadge.className = `chatgoose-badge chatgoose-badge-${tone}`;
+      permissionBadge.dataset.hubPermissionBadge = 'true';
+    };
+    if (!originPattern) {
+      setPermissionBadge('нет адреса', 'neutral'); // empty or invalid hub URL
+    } else if (permissionGranted) {
+      setPermissionBadge('разрешён', 'green'); // covers granted+no-credential too
+    } else if (permissionCheck.errorMessage) {
+      setPermissionBadge('не удалось проверить', 'neutral'); // a failed check is NOT a proven «не выдан»
+    } else {
+      setPermissionBadge('не выдан', 'amber');
+    }
+
     if (!agencyHubUrlInput.value.trim()) {
       agencyHubPermissionStatus.textContent = 'Sync disabled: add an Agency Hub URL.';
       agencyHubPermissionMeta.textContent = 'Enter the Hub base URL, then grant host access for that origin.';
@@ -779,17 +800,42 @@ async function render(): Promise<void> {
   hubSignInRow.style.flexWrap = 'wrap';
   hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
 
+  const hubSignInBlock = document.createElement('div');
+  hubSignInBlock.style.display = 'grid';
+  hubSignInBlock.style.gap = '7px';
+  hubSignInBlock.append(hubSignInRow, hubSignInStatus, hubSignInMeta);
+
+  const permissionBadge = createBadge('…', 'neutral');
+  permissionBadge.dataset.hubPermissionBadge = 'true';
+  const permissionBlock = document.createElement('div');
+  permissionBlock.style.display = 'grid';
+  permissionBlock.style.gap = '6px';
+  const permissionTop = document.createElement('div');
+  permissionTop.style.display = 'flex';
+  permissionTop.style.gap = '8px';
+  permissionTop.style.alignItems = 'center';
+  permissionTop.append(permissionBadge, agencyHubPermissionButton);
+  permissionBlock.append(permissionTop, agencyHubPermissionStatus, agencyHubPermissionMeta);
+
+  const legacyDetails = document.createElement('details');
+  legacyDetails.className = 'chatgoose-hub-legacy';
+  const legacySummary = document.createElement('summary');
+  legacySummary.textContent = 'Legacy chatter key — на период миграции';
+  legacyDetails.append(legacySummary, agencyHubKeyRow);
+
+  const testLine = document.createElement('div');
+  testLine.dataset.hubTestLine = 'true';
+  testLine.append(agencyHubConnectionStatus, agencyHubConnectionMeta);
+  const hubFooter = document.createElement('div');
+  hubFooter.className = 'chatgoose-hub-footer';
+  hubFooter.append(testLine, agencyHubConnectionButton);
+
   agencyHubSection.append(
-    labeledField('Agency Hub base URL', agencyHubUrlInput),
-    labeledField('Sign in (device token)', hubSignInRow),
-    hubSignInStatus,
-    hubSignInMeta,
-    labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
-    agencyHubPermissionStatus,
-    agencyHubPermissionMeta,
-    agencyHubConnectionStatus,
-    agencyHubConnectionMeta,
-    agencyHubActionRow,
+    createLabelRow('Адрес хаба', agencyHubUrlInput),
+    createLabelRow('Вход устройства', hubSignInBlock),
+    createLabelRow('Доступ Firefox', permissionBlock),
+    legacyDetails,
+    hubFooter,
   );
 
   // ─── AI Models ───────────────────────────────────────────
