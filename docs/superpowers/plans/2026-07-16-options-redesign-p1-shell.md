@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Rev 5** — second double-blind toolkit pass (7 unique findings, all fixed): `scrollRoot` dropped from `buildShell` (unused param = lint error); scrollspy activates the FIRST section at mount deterministically (real scrolls recompute); the fonts test uses `Uint8Array` + numeric wOF2 magic and extends the `node:fs` shim in `src/env.d.ts` (the real shim site — `Buffer` does not exist in this repo's types); the copy audit uses `rg` (BSD grep has no `-P`), sweeps `createSection(...)` description args and BOTH `UserFacingError` fields, and adds a rendered-DOM English-blocklist test; the personas empty state stops promising an impossible action (editing is frozen until core #151); the permission badge is computed ONCE before the early returns (7 exit paths — no stuck «…» placeholder) with a granted-but-no-credential test; the newest-wins fixture pins its order (newer FIRST) plus a direct unit test for `sessions.ts`.
+
 **Rev 4** — after the double-blind toolkit review of PR #8 (claude-opus + codex, 5 blockers + 5 P2 all fixed here) on top of rev 3's codex-ultra fixes. Rev 4 deltas: section registration anchored BEFORE the future-schema barrier block (catch-up path kept intact, with a regression test); `createLabelRow` detects form controls by tagName (no realm globals); scrollspy is a scroll-scanline (IO couldn't activate bottom sections); the permission badge is three-state (check errors are not «не выдан»); the copy sweep covers template literals, `agency-hub-settings.ts`, and `shared/errors.ts` with an inverted-Cyrillic audit; the Аккаунты merge renames all `getSectionByTitle('Account Mappings')` call sites, strips the English `• Connected` tail from `mapping-info`, and adds a minute ticker for capture times; the Cyrillic-body font behavior is a recorded decision, not a false «same as today».
 
 **Goal:** Rebuild the options page shell to desktop parity (sticky nav + scrollspy + section cards + family primitives + Russian copy + local fonts) with zero behavior change to settings/save/hub logic.
@@ -46,7 +48,9 @@ tests/helpers/options-page.ts (create: slim mount helper for NEW tests only)
 tests/options-dom.test.ts     (create)
 tests/options-shell.test.ts   (create)
 tests/options-shell-mount.test.ts (create)
+tests/options-sessions.test.ts (create — unit tests for sessions.ts pure fns)
 tests/local-fonts.test.ts     (create)
+src/env.d.ts                  (modify: node:fs no-encoding overload for the fonts test)
 tests/options-accounts.test.ts / options-agency-hub.test.ts / options-persona-recovery.test.ts
                               (modify: new assertions via THEIR OWN local harnesses; RU string updates)
 docs/decisions.md             (append the P1 entry in the same PR)
@@ -525,8 +529,12 @@ export interface OptionsShell {
   setActiveNav: (id: string) => void;
   dispose: () => void;
 }
-export function buildShell(sections: ShellSection[], scrollRoot?: HTMLElement): OptionsShell;
+export function buildShell(sections: ShellSection[]): OptionsShell;
 ```
+
+(No `scrollRoot` parameter: the scanline reads `window` directly, an unused
+parameter fails `@typescript-eslint/no-unused-vars`, and no caller ever
+passes one.)
 
 - [ ] **Step 1: Write failing tests** in `tests/options-shell.test.ts`:
 
@@ -595,6 +603,17 @@ describe('options shell', () => {
     expect(pickActiveSectionId(cards, 800, true)).toBe('c');
     expect(pickActiveSectionId([], 800, false)).toBeNull();
   });
+
+  it('the first registered section is active at mount, before any scroll', async () => {
+    const { buildShell } = await import('../src/options/shell.js');
+    const shell = buildShell(SECTIONS);
+    expect(shell.layout.querySelector('.chatgoose-nav-item-active')).toBeNull();
+    shell.addSection('hub', document.createElement('section'));
+    shell.addSection('accounts', document.createElement('section'));
+    const active = shell.layout.querySelectorAll('.chatgoose-nav-item-active');
+    expect(active).toHaveLength(1);
+    expect((active[0] as HTMLElement).dataset.navId).toBe('hub');
+  });
 });
 ```
 
@@ -615,7 +634,7 @@ export interface OptionsShell {
   dispose: () => void;
 }
 
-export function buildShell(sections: ShellSection[], scrollRoot?: HTMLElement): OptionsShell {
+export function buildShell(sections: ShellSection[]): OptionsShell {
   const layout = document.createElement('div');
   layout.className = 'chatgoose-layout';
   const nav = document.createElement('nav');
@@ -685,6 +704,12 @@ export function buildShell(sections: ShellSection[], scrollRoot?: HTMLElement): 
     card.dataset.shellSection = id;
     cardsById.set(id, card);
     main.append(card);
+    // Initial highlight is deterministic, not layout-derived: the first
+    // registered section is active until a real scroll/resize recomputes.
+    // (A geometry-based initial pick would misfire under JSDOM, where every
+    // rect is zero; in Firefox the page opens at top — first section — and
+    // scroll restoration fires a scroll event that corrects it.)
+    if (cardsById.size === 1) setActiveNav(id);
   };
 
   return {
@@ -830,6 +855,13 @@ describe('options shell mount', () => {
     );
     expect(ids).toEqual(['hub', 'personas', 'accounts', 'generation', 'appearance', 'version']);
   });
+
+  it('exactly one nav item is active at mount — the first section', async () => {
+    const { document } = await mountOptionsPage();
+    const active = document.querySelectorAll('.chatgoose-nav-item-active');
+    expect(active).toHaveLength(1);
+    expect((active[0] as HTMLElement).dataset.navId).toBe('hub');
+  });
 });
 ```
 
@@ -902,6 +934,38 @@ git commit -m "feat(options): mount desktop-parity shell with ordered sections a
 **Files:**
 - Modify: `src/options/index.ts`, `src/options/sessions.ts`, `src/options/styles.css`
 - Test: extend `tests/options-accounts.test.ts` (using ITS OWN local harness: `loadOptionsPage`, `getSectionByTitle`, and the file's session fixtures)
+- Test: create `tests/options-sessions.test.ts` — direct unit tests for the pure `sessions.ts` functions (the module has zero direct test coverage today):
+
+```ts
+import { describe, expect, it, vi } from 'vitest';
+import { buildSessionLookup, formatCaptureStatus } from '../src/options/sessions.js';
+import type { SessionSnapshotEntry } from '../src/shared/types.js';
+
+// Build entries via a small local factory copying the exact field set of
+// SessionSnapshotEntry from src/shared/types.ts (fill required fields with
+// inert values; only the fields under test vary).
+describe('buildSessionLookup', () => {
+  it('keeps the entry with the larger lastSeenAt regardless of array order', () => {
+    const older = makeEntry({ resolvedAccountId: 'acc-1', lastSeenAt: 1_000, connected: false });
+    const newer = makeEntry({ resolvedAccountId: 'acc-1', lastSeenAt: 2_000, connected: true });
+    expect(buildSessionLookup([newer, older]).get('acc-1')).toBe(newer);
+    expect(buildSessionLookup([older, newer]).get('acc-1')).toBe(newer);
+  });
+});
+
+describe('formatCaptureStatus', () => {
+  it('renders нет сессии / только что / minutes / hours', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-16T12:00:00Z'));
+    expect(formatCaptureStatus(undefined)).toBe('нет сессии');
+    expect(formatCaptureStatus(makeEntry({ connected: false }))).toBe('нет сессии');
+    expect(formatCaptureStatus(makeEntry({ connected: true, lastSeenAt: Date.now() }))).toBe('захвачена только что');
+    expect(formatCaptureStatus(makeEntry({ connected: true, lastSeenAt: Date.now() - 5 * 60_000 }))).toBe('захвачена 5 мин назад');
+    expect(formatCaptureStatus(makeEntry({ connected: true, lastSeenAt: Date.now() - 3 * 3_600_000 }))).toBe('захвачена 3 ч назад');
+    vi.useRealTimers();
+  });
+});
+```
 
 **Interfaces:**
 - Consumes: `createBadge` (Task 2).
@@ -935,11 +999,13 @@ it('renders one merged Аккаунты section with capture status and no Conne
 });
 
 it('newest session snapshot wins for a duplicated account id', async () => {
-  // fixture: two SessionSnapshotEntry rows with the same resolvedAccountId
-  // and different lastSeenAt — assert the newer one's data renders.
-  await loadOptionsPage(/* two-session fixture */);
+  // ORDER IS THE TEST: the NEWER (connected, larger lastSeenAt) session goes
+  // FIRST in the array, the older disconnected one SECOND. The old last-wins
+  // implementation picks the second (disconnected) entry and fails this
+  // assertion; newest-wins picks the first. A fixture with the newer entry
+  // last would pass under BOTH implementations and prove nothing.
+  await loadOptionsPage(/* two-session fixture: [newerConnected, olderDisconnected] */);
   const section = getSectionByTitle('Аккаунты');
-  // the OLDER session is disconnected, the NEWER connected → row must say захвачена
   expect(section.textContent).toContain('захвачена');
 });
 
@@ -1106,7 +1172,7 @@ agencyHubSection.append(
 );
 ```
 
-  In `refreshAgencyHubPermissionState`, ADD badge reflection with THREE states, set inside the same branches that already write `agencyHubPermissionStatus` (keep all existing status/meta writes). A failed `browser.permissions.contains` check (`permissionCheck.errorMessage`) is «couldn't verify», never a proven «не выдан»:
+  In `refreshAgencyHubPermissionState`, ADD badge reflection computed ONCE — NOT per branch. The function has SEVEN status exits, two of which return before the granted/not-granted fork (empty URL, invalid URL) and one of which is granted-but-no-credential; wiring the badge "inside the branches" strands it on the «…» placeholder for any path you forget. Compute it immediately after `permissionCheck` is obtained, BEFORE any early return (keep all existing status/meta writes untouched):
 
 ```ts
 const setPermissionBadge = (label: string, tone: 'green' | 'amber' | 'neutral'): void => {
@@ -1114,11 +1180,15 @@ const setPermissionBadge = (label: string, tone: 'green' | 'amber' | 'neutral'):
   permissionBadge.className = `chatgoose-badge chatgoose-badge-${tone}`;
   permissionBadge.dataset.hubPermissionBadge = 'true';
 };
-// granted branch:              setPermissionBadge('разрешён', 'green');
-// permissionCheck.errorMessage branch (check failed):
-//                              setPermissionBadge('не удалось проверить', 'neutral');
-// all other not-granted branches:
-//                              setPermissionBadge('не выдан', 'amber');
+if (!originPattern) {
+  setPermissionBadge('нет адреса', 'neutral');        // empty or invalid hub URL
+} else if (permissionGranted) {
+  setPermissionBadge('разрешён', 'green');             // covers granted+no-credential too
+} else if (permissionCheck.errorMessage) {
+  setPermissionBadge('не удалось проверить', 'neutral'); // a failed check is NOT a proven «не выдан»
+} else {
+  setPermissionBadge('не выдан', 'amber');
+}
 ```
 
   Add a test for the check-failure state (the hub harness can make `browser.permissions.contains` reject — mirror how the file's existing permission-state tests force branches):
@@ -1133,6 +1203,17 @@ it('a failed permission check shows «не удалось проверить», 
 ```
 
   (`chatgoose-badge-neutral` requires the neutral tone class to exist — Task 2's `createBadge` default tone renders `chatgoose-badge-neutral`; confirm the CSS class name matches.)
+
+  Add the granted-but-no-credential test (the badge must show the granted state even while the credential is missing — the onboarding state from spec §4 step 1):
+
+```ts
+it('permission badge shows разрешён when host access is granted but no credential is set', async () => {
+  await loadOptionsPage(/* fixture: permissions.contains resolves true, empty credentials */);
+  const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
+  expect(badge?.textContent).toBe('разрешён');
+  expect(badge?.className).toContain('chatgoose-badge-green');
+});
+```
 
   CSS:
 
@@ -1341,7 +1422,7 @@ Translation table (exact target strings; left = current literal in code):
 | `Account ID: <id>` | `ID аккаунта: <id>` |
 | `Model Personalities` (section title) | `Персоны` (from `COPY`) |
 | `Global personalities are managed by Agency Hub admins. This extension only reads the catalog and stores account mappings.` | `Голоса управляются на сервере агентства; здесь — только каталог и привязки аккаунтов.` |
-| `No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.` | `Персон на сервере ещё нет — проверь подключение к Hub или попроси владельца создать голос.` |
+| `No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.` | `Каталог персон пуст — проверь подключение к Hub. Голоса приходят с сервера; их редактирование сейчас заморожено.` (do NOT promise «попроси владельца создать» — authoring is frozen everywhere until core #151 ships; an impossible call to action is worse than none) |
 | `Legacy local persona text is preserved unchanged on this device. Export it before removing the extension or clearing browser data.` | `Легаси-тексты персон сохранены на этом устройстве без изменений. Экспортируй их перед удалением расширения или очисткой браузера.` |
 | `ChatGoose Persona Recovery` | `Восстановление персон` |
 | `The preserved legacy persona snapshot is malformed. Normal Settings and Agency Hub access are disabled so the snapshot cannot be overwritten.` | `Сохранённый снапшот легаси-персон повреждён. Обычные настройки и доступ к Agency Hub отключены, чтобы снапшот нельзя было перезаписать.` |
@@ -1378,15 +1459,35 @@ Translation table (exact target strings; left = current literal in code):
 | `Unavailable persona · select a replacement` (mirror the exact current literal) | `Персона недоступна · выбери замену` |
 | `• Connected` / `• Disconnected` tails | (deleted by Task 5 — verify gone, do not translate) |
 
-  Then sweep for leftovers with an INVERTED-CYRILLIC audit — the point is to find every user-visible assignment that contains no Cyrillic, whatever quoting it uses:
+  Two sweep extensions the assignment-grep cannot see:
+  - **Strings passed as function ARGUMENTS**, not assigned: every `createSection('…', '…')` description (the current hub description `'Push Fan Summary results…'` and the recovery description are live examples), `labeledField('…', …)` labels, `createButton('…')` labels. Wire every section title/hint that earlier tasks did not already switch to `COPY.sections.*`.
+  - **Both `UserFacingError` fields.** The options failure line renders `failedError.message` AND the `getUserErrorDescription(...)` description — translate both field families in `src/shared/errors.ts` for errors reachable from the options page, and update every test pinning them. (Deliberate, review-confirmed scope: these strings also render on the in-page Fansly surface via toast/overlay — Russian is the goal there too; rev-4 header records this decision.)
+
+  Then sweep for leftovers with an INVERTED-CYRILLIC audit — `rg`, not grep (BSD grep on macOS has no `-P`; `rg` is available and CI-portable):
 
 ```bash
-grep -nE "(textContent|placeholder|title)\s*=" src/options/*.ts | grep -vP '[А-Яа-яЁё]'
-grep -n "createTextNode(" src/options/*.ts
-grep -n '\${' src/options/index.ts src/options/agency-hub-settings.ts   # manual pass over every composed string
+rg -n "(textContent|placeholder|title)\s*=" src/options/ | rg -v '[А-Яа-яЁё]'
+rg -n "createTextNode\(|createSection\(|labeledField\(|createButton\(" src/options/ | rg -v '[А-Яа-яЁё]'
+rg -n '\$\{' src/options/index.ts src/options/agency-hub-settings.ts   # manual pass over every composed string
 ```
 
   Every hit must be glossary-only Latin (Hub, device token, …), a non-UI string (selector, storage key, code), or translated. Anything else is an unfinished sweep — the task is not done while such a hit exists.
+
+  Finally add a rendered-DOM regression net to `tests/options-shell-mount.test.ts` — a blocklist of known-English leftovers that must never render again:
+
+```ts
+it('no known-English UI strings survive on the rendered page', async () => {
+  const { document } = await mountOptionsPage();
+  const text = document.body.textContent ?? '';
+  for (const english of [
+    'Loading', 'Connection Status', 'Account Mappings', 'Model Personalities',
+    'Sync disabled', 'Not tested yet', 'Grant Access', 'Test Connection',
+    'No Fansly accounts', 'Unmapped', 'Enable debug mode', 'preserved unchanged',
+  ]) {
+    expect(text, `English leftover: ${english}`).not.toContain(english);
+  }
+});
+```
 - [ ] **Step 4: Run the three suites + full run** (`pnpm vitest run`) — PASS.
 - [ ] **Step 5: Commit** `git commit -am "feat(options): Russian copy sweep with EN-term glossary"`
 
@@ -1421,7 +1522,14 @@ swap the sans family; do not fake Cyrillic with a lookalike.
 
 - [ ] **Step 1: Check debug-prompt first.** `grep -n "googleapis\|Hanken\|Source Serif\|Plex" src/debug-prompt/index.html src/debug-prompt/styles.css` — if the page neither links Google nor names the families, it is OUT of this task (system fonts by design); if it names families, add the same `@font-face` block to its styles.css and (if present) remove its Google links.
 
-- [ ] **Step 2: Write the failing static test** `tests/local-fonts.test.ts` — mirror `tests/release-pages.test.ts`'s file-access pattern (URL-relative `readFileSync`, no `process.cwd`, no `readdirSync` — those are absent from the repo's Node shims):
+- [ ] **Step 2: Write the failing static test** `tests/local-fonts.test.ts` — mirror `tests/release-pages.test.ts`'s file-access pattern (URL-relative `readFileSync`, no `process.cwd`, no `readdirSync`, and NO `Buffer` — the type does not exist anywhere in this repo's declarations). First extend the `node:fs` shim in **`src/env.d.ts`** (that file, NOT `tests/node-shims.d.ts`, holds the `declare module 'node:fs'` block) with a no-encoding overload returning `Uint8Array`:
+
+```ts
+declare module 'node:fs' {
+  export function readFileSync(path: string | URL, encoding: string): string;
+  export function readFileSync(path: string | URL): Uint8Array;
+}
+```
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -1429,7 +1537,8 @@ import { describe, expect, it } from 'vitest';
 
 const root = new URL('../', import.meta.url);
 const read = (path: string): string => readFileSync(new URL(path, root), 'utf8');
-const readBytes = (path: string): Buffer => readFileSync(new URL(path, root)) as Buffer;
+const readBytes = (path: string): Uint8Array => readFileSync(new URL(path, root));
+const WOFF2_MAGIC = [0x77, 0x4f, 0x46, 0x32]; // 'wOF2'
 
 const PAGES = ['src/options/index.html', 'src/popup/index.html', 'src/debug-prompt/index.html'];
 const FONT_FILES = [
@@ -1451,7 +1560,7 @@ describe('local fonts', () => {
   it('every declared font file exists and is real WOFF2', () => {
     for (const file of FONT_FILES) {
       const bytes = readBytes(`assets/fonts/${file}`);
-      expect(bytes.subarray(0, 4).toString('ascii'), file).toBe('wOF2');
+      expect(Array.from(bytes.subarray(0, 4)), file).toEqual(WOFF2_MAGIC);
     }
   });
 
@@ -1469,7 +1578,7 @@ describe('local fonts', () => {
 });
 ```
 
-  If `readFileSync` overloads in `tests/node-shims.d.ts` lack the no-encoding (Buffer) form, extend the shim with that overload declaration in this task.
+  (The shim edit above IS part of this task — `src/env.d.ts` must be staged in the commit.)
 
 - [ ] **Step 3: Run to verify failure** (`pnpm vitest run tests/local-fonts.test.ts`).
 
@@ -1508,7 +1617,7 @@ Expected: PASS; `dist/fonts` lists 12 files.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add assets/fonts src/options/index.html src/popup/index.html src/options/styles.css src/popup/styles.css esbuild.config.mjs tests/local-fonts.test.ts tests/node-shims.d.ts
+git add assets/fonts src/options/index.html src/popup/index.html src/options/styles.css src/popup/styles.css esbuild.config.mjs tests/local-fonts.test.ts src/env.d.ts
 git commit -m "feat: bundle family fonts locally, drop Google Fonts CDN from extension pages"
 ```
 
