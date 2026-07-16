@@ -69,6 +69,21 @@ export interface MountedOptionsPage {
 }
 ```
 
+CRITICAL for byte-identical test bodies: the existing test bodies call the
+setup's control hooks directly ~37 times (`stallNextStorageSet`,
+`releaseFirstStorageSet`, `failNextStorageSet`, `onSnapshotRequest`,
+`onStorageRead`, `callOrder`, plus the fixture builders like
+`connectedSession`). The helper must re-export ALL of them as named exports
+under their existing names, so the test file only swaps its local
+declarations for `import { stallNextStorageSet, releaseFirstStorageSet,
+failNextStorageSet, setOnSnapshotRequest, setOnStorageRead, callOrder,
+connectedSession, flushSessionHydration, getSectionByTitle, … } from
+'./helpers/options-page.js'`. Where a hook is a reassignable `let`
+(`onSnapshotRequest = () => …`), export a setter (`setOnSnapshotRequest`)
+and mechanically rewrite those assignment call sites — that is the ONLY
+permitted body edit. Enumerate the exact export list by grepping the file
+for every identifier declared in the moved span and used below it.
+
 - [ ] **Step 1: Read the existing setup once.** Open `tests/options-accounts.test.ts` and identify the setup span: JSDOM construction (`dom = new JSDOM(` around line 87), the `browser` global staging (storage.local get/set fakes over `currentState`, `runtime.sendMessage` returning `currentSessions` for `getSessionsSnapshot`, `runtime.getManifest`, permissions stubs, `matchMedia`), and the mount call `await import('../src/options/index.js')` (around line 206). This is a MOVE, not a rewrite: the helper's body is that existing code relocated verbatim, parameterized by `MountOverrides` instead of the file-scoped `currentState`/`currentSessions` variables.
 
 - [ ] **Step 2: Create `tests/helpers/options-page.ts`** exporting `mountOptionsPage`, `MountOverrides`, `MountedOptionsPage`. Body = relocated setup from Step 1. Default state = the file's current default `PersistedState` fixture (schemaVersion 14). Keep `vi.resetModules()` before the dynamic import so each mount gets a fresh module instance. Keep the JSDOM teardown in an exported `unmountOptionsPage()` used by `afterEach`.
@@ -809,6 +824,17 @@ Expected: the two new tests FAIL (two separate sections exist; no badge/word «�
 
 - [ ] **Step 3: Implement the merge in `index.ts`:**
   - Delete the `connectionsSection` (`createSection('Connection Status')`) and `renderConnections` entirely; `hydrateAccountSections` now calls only `renderAccountMappings`.
+  - The merged section INHERITS the hydration lifecycle contract the tests
+    pin: `mappingsSection.dataset.sessionHydration` keeps its
+    `loading → ready|failed` transitions exactly as today, and the
+    hydration-failure state keeps a visible message — the section's existing
+    warning becomes the single failure copy: «Не удалось обновить живой
+    статус аккаунтов — показаны маппинги из локального хранилища». Existing
+    assertions on `getSectionByTitle('Connection Status')` re-point to
+    `getSectionByTitle('Аккаунты')` (same `dataset.sessionHydration`
+    expectations, failure text updated to the Russian string above) — the
+    BEHAVIOR they pin (non-blocking hydration, honest failure) must survive
+    unchanged.
   - Retitle the mappings section: `createSection(COPY.sections.accountsTitle, COPY.sections.accountsHint)`.
   - Inside `renderAccountMappings`, per row: prepend an avatar span (`chatgoose-avatar`, initials = first two chars of `formatAccountHeading(...)` uppercased); replace the trailing `info` element with a status line under the heading using session state:
 
