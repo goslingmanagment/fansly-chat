@@ -13,12 +13,14 @@ import { COPY } from './copy.js';
 import {
   createBadge,
   createButton,
+  createCap,
+  createChipGroup,
   createLabelRow,
   createSection,
+  createToggle,
   createVersionTag,
   debounce,
   injectStyles,
-  labeledField,
 } from './dom.js';
 import {
   buildSessionLookup,
@@ -258,27 +260,29 @@ async function render(): Promise<void> {
 
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
-    'Appearance',
-    'One family look, light and dark. System follows your OS.',
+    COPY.sections.appearanceTitle,
+    COPY.sections.appearanceHint,
   );
-  const themeSelect = document.createElement('select');
-  themeSelect.className = 'chatgoose-select';
-  const themeChoices: Array<{ value: UiThemeSetting; label: string }> = [
-    { value: 'system', label: 'System' },
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
-  ];
-  for (const choice of themeChoices) {
-    const option = document.createElement('option');
-    option.value = choice.value;
-    option.textContent = choice.label;
-    themeSelect.append(option);
-  }
-  themeSelect.value = state.settings.uiTheme;
-  appearanceSection.append(labeledField('Theme', themeSelect));
+  // The chip group's hidden <select> is `themeSelect` — the SAME binding the
+  // form signature, listener array, and pagehide path already read. Clicking a
+  // chip fires input/change on that select, so the central save controller
+  // persists uiTheme with zero edits to the save logic below.
+  const themeChips = createChipGroup(
+    [
+      { value: 'system', label: 'Системная' },
+      { value: 'light', label: 'Светлая' },
+      { value: 'dark', label: 'Тёмная' },
+    ],
+    state.settings.uiTheme,
+  );
+  const themeSelect = themeChips.input;
+  appearanceSection.append(themeChips.root);
 
   // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
-  const apiSection = createSection('Generation');
+  const apiSection = createSection(
+    COPY.sections.generationTitle,
+    COPY.sections.generationHint,
+  );
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -308,24 +312,33 @@ async function render(): Promise<void> {
   deepInput.max = '3000';
   deepInput.value = String(state.settings.deepMessageCount);
 
-  const debugInput = document.createElement('input');
-  debugInput.type = 'checkbox';
-  debugInput.checked = state.settings.debugMode;
-
-  const debugLabel = document.createElement('label');
-  debugLabel.style.display = 'flex';
-  debugLabel.style.gap = '10px';
-  debugLabel.style.alignItems = 'center';
-  debugLabel.style.fontWeight = '600';
-  debugLabel.append(debugInput, document.createTextNode('Enable debug mode'));
-
-  apiSection.append(
-    labeledField('Reply + Help message count', quickInput),
-    labeledField('Ping message count', pingInput),
-    labeledField('Fix message count', improveInput),
-    labeledField('Deep feature message count', deepInput),
-    debugLabel,
+  const countsGrid = document.createElement('div');
+  countsGrid.className = 'chatgoose-counts-grid';
+  const countField = (label: string, input: HTMLInputElement): HTMLElement => {
+    input.classList.add('chatgoose-num');
+    const wrap = document.createElement('label');
+    wrap.className = 'chatgoose-count-field';
+    const text = document.createElement('span');
+    text.textContent = label;
+    wrap.append(text, input);
+    return wrap;
+  };
+  countsGrid.append(
+    countField('Reply + Help', quickInput),
+    countField('Ping', pingInput),
+    countField('Fix', improveInput),
+    countField('Deep — Summary, Review', deepInput),
   );
+
+  // `debugInput` keeps its name: it is now the toggle's hidden checkbox, still
+  // in the listener array and form signature, so no save logic changes.
+  const advanced = document.createElement('div');
+  advanced.className = 'chatgoose-advanced';
+  const debugToggle = createToggle('Debug mode', 'окно отладки промпта');
+  const debugInput = debugToggle.input;
+  debugInput.checked = state.settings.debugMode;
+  advanced.append(createCap('Advanced'), debugToggle.root);
+  apiSection.append(countsGrid, advanced);
 
   // ─── Agency Hub ───────────────────────────────────────────
   const agencyHubSection = createSection(

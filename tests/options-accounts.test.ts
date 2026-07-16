@@ -765,7 +765,7 @@ describe('Options page settings and read-only personas', () => {
 
     expect(document.querySelector('[data-future-schema-barrier="true"]')?.getAttribute('role'))
       .toBe('alert');
-    const quickInput = getSectionByTitle('Generation').querySelector('input') as HTMLInputElement;
+    const quickInput = getSectionByTitle('Генерация').querySelector('input') as HTMLInputElement;
     expect(quickInput.disabled).toBe(true);
   });
 

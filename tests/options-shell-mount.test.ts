@@ -30,3 +30,32 @@ describe('options shell mount', () => {
     expect((active[0] as HTMLElement).dataset.navId).toBe('hub');
   });
 });
+
+describe('options hidden-control persistence', () => {
+  it('theme renders as chips reflecting the stored value', async () => {
+    const { document } = await mountOptionsPage({ settings: { uiTheme: 'dark' } });
+    const chips = document.querySelectorAll('[data-shell-section="appearance"] .chatgoose-chip');
+    expect(Array.from(chips, (chip) => chip.textContent)).toEqual(['Системная', 'Светлая', 'Тёмная']);
+    expect(document.querySelector('.chatgoose-chip-selected')?.textContent).toBe('Тёмная');
+  });
+
+  it('clicking a theme chip persists uiTheme through the central controller', async () => {
+    const page = await mountOptionsPage({ settings: { uiTheme: 'light' } });
+    const dark = Array.from(
+      page.document.querySelectorAll('[data-shell-section="appearance"] .chatgoose-chip'),
+    ).find((chip) => chip.textContent === 'Тёмная') as HTMLButtonElement;
+    dark.click();
+    await page.flushAsync();
+    expect(page.getState().settings.uiTheme).toBe('dark');
+  });
+
+  it('debug toggle lives in the Advanced block and persists', async () => {
+    const page = await mountOptionsPage();
+    const generation = page.document.querySelector('[data-shell-section="generation"]')!;
+    expect(generation.querySelector('.chatgoose-cap')?.textContent).toBe('Advanced');
+    const toggle = generation.querySelector('.chatgoose-toggle-input') as HTMLInputElement;
+    toggle.click();
+    await page.flushAsync();
+    expect(page.getState().settings.debugMode).toBe(true);
+  });
+});
