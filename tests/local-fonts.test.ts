@@ -30,6 +30,13 @@ describe('local fonts', () => {
     }
   });
 
+  it('the build copies bundled fonts into the dist outdir', () => {
+    // Static pin (no build run): keeps assets/fonts → dist/fonts wired so the
+    // @font-face url('fonts/…') references resolve at runtime.
+    expect(read('esbuild.config.mjs'))
+      .toMatch(/cp\(path\.join\(root, 'assets\/fonts'\), path\.join\(outdir, 'fonts'\)/);
+  });
+
   it('each font-bearing stylesheet declares the families and only known files', () => {
     for (const cssPath of FONT_CSS) {
       const css = read(cssPath);

@@ -53,6 +53,12 @@ describe('options dom primitives', () => {
     expect(chips).toHaveLength(3);
     expect(input.value).toBe('light');
     expect(chips[1]!.className).toContain('chatgoose-chip-selected');
+    // a11y: the group is a radiogroup and each chip is a radio whose
+    // aria-checked mirrors the current selection.
+    expect(root.getAttribute('role')).toBe('radiogroup');
+    expect(chips[1]!.getAttribute('role')).toBe('radio');
+    expect(chips[1]!.getAttribute('aria-checked')).toBe('true');
+    expect(chips[2]!.getAttribute('aria-checked')).toBe('false');
     const events: string[] = [];
     input.addEventListener('input', () => events.push('input'));
     input.addEventListener('change', () => events.push('change'));
@@ -61,6 +67,8 @@ describe('options dom primitives', () => {
     expect(events).toEqual(['input', 'change']);
     expect(chips[2]!.className).toContain('chatgoose-chip-selected');
     expect(chips[1]!.className).not.toContain('chatgoose-chip-selected');
+    expect(chips[2]!.getAttribute('aria-checked')).toBe('true');
+    expect(chips[1]!.getAttribute('aria-checked')).toBe('false');
   });
 
   it('createSavedFlash toggles saved and error states', async () => {

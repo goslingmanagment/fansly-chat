@@ -1315,7 +1315,7 @@ describe('ChatGooseContentApp', () => {
 
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-HUB-08');
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'Hub sync failed, summary remains available locally.',
+      'Синхронизация с Hub не удалась, сводка осталась доступна локально.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
       'Latest Hub error: CG-HUB-07: Запрос к Agency Hub не удался.',

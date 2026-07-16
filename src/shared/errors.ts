@@ -178,8 +178,8 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_page_match_failed: {
     key: 'hub_page_match_failed',
     code: 'CG-HUB-05',
-    message: 'Agency Hub page mapping failed.',
-    description: 'ChatGoose could not match the current creator to a Hub page.',
+    message: 'Не удалось сопоставить страницу Agency Hub.',
+    description: 'ChatGoose не смог сопоставить текущую модель со страницей Hub.',
     settingsLink: true,
   },
   hub_timeout: {
@@ -197,24 +197,24 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_sync_failed: {
     key: 'hub_sync_failed',
     code: 'CG-HUB-08',
-    message: 'Hub sync failed, summary remains available locally.',
-    description: 'ChatGoose kept the local result so the workflow can continue.',
+    message: 'Синхронизация с Hub не удалась, сводка осталась доступна локально.',
+    description: 'ChatGoose сохранил локальный результат, чтобы можно было продолжить работу.',
   },
   hub_quota_exceeded: {
     key: 'hub_quota_exceeded',
     code: 'CG-HUB-09',
     // Kernel AI gateway daily cap (429 quota_denied) — per page per UTC day,
     // so "try again shortly" would be wrong advice until midnight UTC.
-    message: 'Daily AI generation limit reached.',
-    description: 'This page used up its Agency Hub AI quota for today. It resets at midnight UTC. Ask a manager to raise the cap if this blocks work.',
+    message: 'Достигнут дневной лимит AI-генераций.',
+    description: 'Эта страница исчерпала дневную квоту AI в Agency Hub. Лимит сбрасывается в полночь по UTC. Если это блокирует работу, попроси менеджера поднять лимит.',
   },
   hub_provider_failed: {
     key: 'hub_provider_failed',
     // The kernel's SSE error frame for provider/egress failures (e.g. a dead
     // page proxy): page-scoped infrastructure, not something a retry fixes.
     code: 'CG-HUB-10',
-    message: 'Agency Hub could not reach its AI provider.',
-    description: 'The Hub-side AI connection for this page is down (proxy or provider). Tell a manager — retrying will not help until it is repaired.',
+    message: 'Agency Hub не смог связаться со своим AI-провайдером.',
+    description: 'AI-подключение на стороне Hub для этой страницы недоступно (прокси или провайдер). Скажи менеджеру — повторные попытки не помогут, пока это не починят.',
   },
   hi_too_many_messages: {
     key: 'hi_too_many_messages',

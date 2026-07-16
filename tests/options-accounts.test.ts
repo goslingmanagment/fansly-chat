@@ -373,6 +373,11 @@ describe('Options page account sections', () => {
     expect(getSectionByTitle('Аккаунты').textContent).toContain('ID аккаунта: offline-account');
     expect(getSectionByTitle('Аккаунты').textContent)
       .toContain('Не удалось обновить живой статус аккаунтов');
+    // Hydration failed: the capture line must NOT assert a proven "нет сессии"
+    // (a claim we never verified). It shows the honest unknown state and skips
+    // the ticker because no dataset.captureAt is stamped.
+    expect(getSectionByTitle('Аккаунты').textContent).toContain('статус неизвестен');
+    expect(getSectionByTitle('Аккаунты').textContent).not.toContain('нет сессии');
     expect(document.body.contains(quickInput)).toBe(true);
 
     quickInput.value = '40';

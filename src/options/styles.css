@@ -251,6 +251,9 @@ input[type='checkbox'] {
   padding: 1.5px 9px; font-size: 11px; font-weight: 600;
   background: var(--chatgoose-bg2); color: var(--chatgoose-ink-mid);
   white-space: nowrap;
+  /* Keep the pill at its intrinsic width inside a grid identity block instead
+     of stretching to fill the column (ignored outside grid contexts). */
+  justify-self: start;
 }
 .chatgoose-badge-green { background: var(--chatgoose-green-bg); border-color: var(--chatgoose-green-line); color: var(--chatgoose-green); }
 .chatgoose-badge-amber { background: var(--chatgoose-amber-bg); border-color: var(--chatgoose-amber-line); color: var(--chatgoose-amber); }
@@ -295,8 +298,16 @@ input[type='checkbox'] {
 .chatgoose-chip-selected { background: var(--chatgoose-ink); color: var(--chatgoose-bg1); font-weight: 600; }
 .chatgoose-chip-selected:hover { background: var(--chatgoose-ink); }
 
+/* Disabled interactive controls (e.g. the future-schema barrier sweep): dim
+   them and drop the pointer/hover affordances so they don't read as live. */
+.chatgoose-nav-item:disabled,
+.chatgoose-chip:disabled,
+.chatgoose-button:disabled { opacity: 0.45; cursor: default; }
+.chatgoose-nav-item:disabled:hover,
+.chatgoose-chip:disabled:hover { background: transparent; }
+
 .chatgoose-lrow { display: flex; gap: 14px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--chatgoose-line); }
-.chatgoose-lrow:last-of-type { border-bottom: 0; }
+.chatgoose-lrow:not(:has(+ .chatgoose-lrow)) { border-bottom: 0; }
 .chatgoose-lrow-label { width: 150px; flex: none; font-weight: 600; font-size: 12.5px; padding-top: 6px; }
 .chatgoose-lrow-control { flex: 1; min-width: 0; display: grid; gap: 7px; }
 

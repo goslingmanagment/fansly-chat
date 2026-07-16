@@ -364,6 +364,9 @@ async function render(): Promise<void> {
   agencyHubKeyInput.type = 'password';
   agencyHubKeyInput.autocomplete = 'off';
   agencyHubKeyInput.className = 'chatgoose-input';
+  // The field lives inside a collapsed <details>; give it a standalone
+  // accessible name since its <summary> label is not programmatically linked.
+  agencyHubKeyInput.setAttribute('aria-label', 'Legacy chatter key');
   agencyHubKeyInput.value = state.settings.agencyHubApiKey;
 
   const agencyHubToggle = createButton('Показать', true);
@@ -396,11 +399,6 @@ async function render(): Promise<void> {
   agencyHubConnectionMeta.style.fontSize = '13px';
 
   const agencyHubConnectionButton = createButton('Проверить соединение', true);
-  const agencyHubActionRow = document.createElement('div');
-  agencyHubActionRow.style.display = 'flex';
-  agencyHubActionRow.style.gap = '8px';
-  agencyHubActionRow.style.flexWrap = 'wrap';
-  agencyHubActionRow.append(agencyHubPermissionButton, agencyHubConnectionButton);
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
@@ -1505,7 +1503,12 @@ async function render(): Promise<void> {
 
       const captureLine = document.createElement('div');
       captureLine.dataset.role = 'capture-status';
-      captureLine.textContent = formatCaptureStatus(session);
+      // When the live snapshot failed we never verified the session, so do not
+      // render a proven "нет сессии". Show the honest unknown state; no
+      // dataset.captureAt is stamped above, so the minute ticker skips it.
+      captureLine.textContent = hydrationFailed
+        ? 'статус неизвестен'
+        : formatCaptureStatus(session);
       captureLine.style.fontSize = '12px';
       captureLine.style.color = 'var(--chatgoose-ink-mid)';
 

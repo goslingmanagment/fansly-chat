@@ -154,6 +154,7 @@ export function createChipGroup(
 ): { root: HTMLDivElement; input: HTMLSelectElement } {
   const root = document.createElement('div');
   root.className = 'chatgoose-chip-group';
+  root.setAttribute('role', 'radiogroup');
   const input = document.createElement('select');
   input.className = 'chatgoose-chip-value';
   input.hidden = true;
@@ -167,13 +168,16 @@ export function createChipGroup(
   const buttons: HTMLButtonElement[] = [];
   const renderSelection = (): void => {
     for (const button of buttons) {
-      button.classList.toggle('chatgoose-chip-selected', button.dataset.value === input.value);
+      const selected = button.dataset.value === input.value;
+      button.classList.toggle('chatgoose-chip-selected', selected);
+      button.setAttribute('aria-checked', selected ? 'true' : 'false');
     }
   };
   for (const choice of choices) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'chatgoose-chip';
+    button.setAttribute('role', 'radio');
     button.dataset.value = choice.value;
     button.textContent = choice.label;
     button.addEventListener('click', () => {
