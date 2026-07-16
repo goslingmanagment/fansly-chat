@@ -296,3 +296,27 @@ input[type='checkbox'] {
 @media (prefers-reduced-motion: reduce) {
   .chatgoose-toggle, .chatgoose-toggle::after, .chatgoose-button { transition: none; }
 }
+
+/* ── P1 shell: two-column layout with sticky scrollspy nav ── */
+.chatgoose-layout { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 22px; align-items: start; padding: 0 20px; }
+.chatgoose-nav { display: grid; gap: 2px; position: sticky; top: 16px; }
+.chatgoose-nav-item {
+  border: 0; background: transparent; text-align: left; cursor: pointer;
+  padding: 5.5px 10px; border-left: 2px solid transparent; border-radius: 0 7px 7px 0;
+  font: 500 12.5px/1.5 var(--chatgoose-font); color: var(--chatgoose-ink-mid);
+}
+.chatgoose-nav-item:hover { background: var(--chatgoose-bg2); }
+.chatgoose-nav-item:focus-visible { outline: 2px solid var(--chatgoose-clay); outline-offset: 2px; }
+.chatgoose-nav-item-active { background: var(--chatgoose-bg2); color: var(--chatgoose-ink); font-weight: 650; border-left-color: var(--chatgoose-clay); }
+.chatgoose-main { display: grid; gap: 18px; min-width: 0; }
+
+/* Desktop card metrics inside the shell (spec §10: radius 9, title 15, hint 12).
+   Scoped to .chatgoose-main so the recovery page keeps rendering unchanged. */
+.chatgoose-main .chatgoose-section { margin: 0; padding: 16px; border-radius: var(--chatgoose-radius-card); }
+.chatgoose-main .chatgoose-section h2 { font-size: 15px; }
+.chatgoose-main .chatgoose-section .chatgoose-section-desc { font-size: 12px; color: var(--chatgoose-ink-low); }
+
+@media (max-width: 680px) {
+  .chatgoose-layout { grid-template-columns: 1fr; }
+  .chatgoose-nav { position: static; grid-auto-flow: column; overflow-x: auto; }
+}
