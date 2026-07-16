@@ -205,11 +205,11 @@ async function loadOptionsPage(options: {
 
   await import('../src/options/index.js');
   await vi.waitFor(() => {
-    getSectionByTitle('Connection Status');
+    getSectionByTitle('Аккаунты');
   }, { timeout: 2000 });
   if (options.waitForHydration !== false) {
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Connection Status').dataset.sessionHydration).toBe('ready');
+      expect(getSectionByTitle('Аккаунты').dataset.sessionHydration).toBe('ready');
     }, { timeout: 2000 });
   }
 }
@@ -249,16 +249,15 @@ describe('Options page account sections', () => {
       },
     });
 
-    const mappingsSection = getSectionByTitle('Account Mappings');
-    const connectionSection = getSectionByTitle('Connection Status');
+    const accountsSection = getSectionByTitle('Аккаунты');
 
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
-    expect(mappingsSection.textContent).toContain('Account ID: active-resolved');
-    expect(mappingsSection.textContent).toContain('Account ID: mappedOffline');
-    expect(mappingsSection.textContent).not.toContain('stale');
-    expect(connectionSection.textContent).toContain('Account ID: active-resolved');
-    expect(connectionSection.textContent).not.toContain('mappedOffline');
-    expect(connectionSection.textContent).not.toContain('stale');
+    expect(accountsSection.textContent).toContain('ID аккаунта: active-resolved');
+    expect(accountsSection.textContent).toContain('ID аккаунта: mappedOffline');
+    expect(accountsSection.textContent).not.toContain('stale');
+    // The merged section shows all known accounts; active-resolved is the live
+    // connected session, so its capture line renders.
+    expect(accountsSection.textContent).toContain('захвачена');
   });
 
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
@@ -272,15 +271,13 @@ describe('Options page account sections', () => {
       waitForHydration: false,
     });
 
-    const personalityCard = getSectionByTitle('Model Personalities')
+    const personalityCard = getSectionByTitle('Персоны')
       .querySelector<HTMLElement>('[data-persona-key="p1"]')!;
-    const connectionSection = getSectionByTitle('Connection Status');
-    const mappingsSection = getSectionByTitle('Account Mappings');
+    const accountsSection = getSectionByTitle('Аккаунты');
 
     expect(personalityCard.textContent).toContain('Closer');
-    expect(connectionSection.dataset.sessionHydration).toBe('loading');
-    expect(connectionSection.textContent).toContain('Loading live connection status');
-    expect(mappingsSection.dataset.sessionHydration).toBe('loading');
+    expect(accountsSection.dataset.sessionHydration).toBe('loading');
+    expect(accountsSection.textContent).toContain('Загружаю аккаунты Fansly');
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
 
     // getSessionsSnapshot owns identity rekey/reconciliation in the real
@@ -299,12 +296,12 @@ describe('Options page account sections', () => {
     }]);
 
     await vi.waitFor(() => {
-      expect(connectionSection.dataset.sessionHydration).toBe('ready');
-      expect(mappingsSection.textContent).toContain('Account ID: canonical');
+      expect(accountsSection.dataset.sessionHydration).toBe('ready');
+      expect(accountsSection.textContent).toContain('ID аккаунта: canonical');
     });
 
     // Session hydration must not rebuild unrelated catalog UI.
-    expect(getSectionByTitle('Model Personalities')
+    expect(getSectionByTitle('Персоны')
       .querySelector('[data-persona-key="p1"]')).toBe(personalityCard);
     expect(currentState.personalities[0]?.name).toBe('Closer');
   });
@@ -352,8 +349,8 @@ describe('Options page account sections', () => {
     expect(currentState.accountMappings).toEqual({ canonical: 'p1' });
     expect(currentState.accountAliases).toEqual({ legacy: 'canonical' });
     expect(currentState.knownAccounts).toEqual(['canonical']);
-    expect(getSectionByTitle('Account Mappings').textContent).toContain('Account ID: canonical');
-    expect(getSectionByTitle('Account Mappings').textContent).not.toContain('Account ID: legacy');
+    expect(getSectionByTitle('Аккаунты').textContent).toContain('ID аккаунта: canonical');
+    expect(getSectionByTitle('Аккаунты').textContent).not.toContain('ID аккаунта: legacy');
   });
 
   it('keeps local settings usable and marks only account sections failed when session loading rejects', async () => {
@@ -370,12 +367,17 @@ describe('Options page account sections', () => {
 
     snapshot.reject(new Error('Fansly identity timed out'));
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Connection Status').dataset.sessionHydration).toBe('failed');
-      expect(getSectionByTitle('Account Mappings').dataset.sessionHydration).toBe('failed');
+      expect(getSectionByTitle('Аккаунты').dataset.sessionHydration).toBe('failed');
     });
 
-    expect(getSectionByTitle('Account Mappings').textContent).toContain('Account ID: offline-account');
-    expect(getSectionByTitle('Connection Status').textContent).toContain('Could not load live connection status');
+    expect(getSectionByTitle('Аккаунты').textContent).toContain('ID аккаунта: offline-account');
+    expect(getSectionByTitle('Аккаунты').textContent)
+      .toContain('Не удалось обновить живой статус аккаунтов');
+    // Hydration failed: the capture line must NOT assert a proven "нет сессии"
+    // (a claim we never verified). It shows the honest unknown state and skips
+    // the ticker because no dataset.captureAt is stamped.
+    expect(getSectionByTitle('Аккаунты').textContent).toContain('статус неизвестен');
+    expect(getSectionByTitle('Аккаунты').textContent).not.toContain('нет сессии');
     expect(document.body.contains(quickInput)).toBe(true);
 
     quickInput.value = '40';
@@ -385,36 +387,91 @@ describe('Options page account sections', () => {
     }, { timeout: 2000 });
   });
 
-  it('dedupes connection status rows by canonical account id using the newest snapshot entry', async () => {
+  it('renders one merged Аккаунты section with capture status and no Connection Status', async () => {
     await loadOptionsPage({
-      state: makeState(),
+      state: makeState({ knownAccounts: ['acc-1'] }),
       sessions: [
         {
-          legacyAccountId: 'legacy-1',
-          resolvedAccountId: 'resolved',
-          username: 'older',
-          displayName: 'Older',
+          legacyAccountId: 'legacy',
+          resolvedAccountId: 'acc-1',
+          username: 'creator',
+          displayName: 'Creator',
           connected: true,
-          lastSeenAt: 10,
+          lastSeenAt: Date.now(),
         },
+      ],
+    });
+    const section = getSectionByTitle('Аккаунты');
+    expect(section.dataset.sessionHydration).toBe('ready');
+    expect(section.textContent).toContain('захвачена');
+    expect(section.querySelector('[data-role="mapping-info"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain('Connection Status');
+  });
+
+  it('newest session snapshot wins for a duplicated account id', async () => {
+    // ORDER IS THE TEST: the NEWER (connected, larger lastSeenAt) session is
+    // FIRST, the older disconnected one SECOND. Last-wins picks the second
+    // (disconnected → "нет сессии") and fails; newest-wins keeps the first.
+    await loadOptionsPage({
+      state: makeState({ knownAccounts: ['resolved'] }),
+      sessions: [
         {
-          legacyAccountId: 'legacy-2',
+          legacyAccountId: 'legacy-newer',
           resolvedAccountId: 'resolved',
           username: 'newer',
           displayName: 'Newer',
           connected: true,
-          lastSeenAt: 20,
+          lastSeenAt: Date.now(),
+        },
+        {
+          legacyAccountId: 'legacy-older',
+          resolvedAccountId: 'resolved',
+          username: 'older',
+          displayName: 'Older',
+          connected: false,
+          lastSeenAt: Date.now() - 60 * 60_000,
         },
       ],
     });
+    const section = getSectionByTitle('Аккаунты');
+    expect(section.textContent).toContain('захвачена');
+  });
 
-    const connectionSection = getSectionByTitle('Connection Status');
-    const cards = connectionSection.querySelectorAll('.chatgoose-card');
+  it('unmapped account carries the amber AI badge next to identity', async () => {
+    await loadOptionsPage({
+      state: makeState({ knownAccounts: ['acc-1'], accountMappings: {} }),
+      sessions: [],
+    });
+    const badge = getSectionByTitle('Аккаунты').querySelector('.chatgoose-badge-amber');
+    expect(badge?.textContent).toBe('AI отключён');
+  });
 
-    expect(cards).toHaveLength(1);
-    expect(connectionSection.textContent).toContain('Newer');
-    expect(connectionSection.textContent).not.toContain('Older');
-    expect(connectionSection.textContent).toContain('Account ID: resolved');
+  it('reticks each capture line from its stored timestamp as minutes pass', async () => {
+    // Fake timers must be active BEFORE the page mounts so the section's
+    // window.setInterval is created under them (an interval scheduled under
+    // real timers is invisible to advanceTimers). shouldAdvanceTime keeps the
+    // harness's vi.waitFor progressing during hydration.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const base = Date.now();
+    await loadOptionsPage({
+      state: makeState({ knownAccounts: ['acc-1'] }),
+      sessions: [
+        {
+          legacyAccountId: 'legacy',
+          resolvedAccountId: 'acc-1',
+          username: 'creator',
+          displayName: 'Creator',
+          connected: true,
+          lastSeenAt: base,
+        },
+      ],
+    });
+    const captureLine = getSectionByTitle('Аккаунты')
+      .querySelector<HTMLElement>('[data-role="capture-status"]')!;
+    expect(captureLine.textContent).toBe('захвачена только что');
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(captureLine.textContent).toBe('захвачена 5 мин назад');
   });
 });
 
@@ -434,9 +491,9 @@ describe('Options page settings and read-only personas', () => {
       sessions: [],
     });
 
-    const section = getSectionByTitle('Model Personalities');
+    const section = getSectionByTitle('Персоны');
     expect(section.textContent).toContain('Closer');
-    expect(section.textContent).toContain('version 1');
+    expect(section.textContent).toContain('версия 1');
     expect(section.querySelector('input[data-role="name"]')).toBeNull();
     expect(section.querySelector('textarea[data-role="content"]')).toBeNull();
     expect(Array.from(section.querySelectorAll('button')).map((button) => button.textContent))
@@ -471,16 +528,16 @@ describe('Options page settings and read-only personas', () => {
     });
 
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Model Personalities').textContent)
-        .toContain('version 2 • archived');
+      expect(getSectionByTitle('Персоны').textContent)
+        .toContain('версия 2 • в архиве');
     });
-    const mappingSelect = getSectionByTitle('Account Mappings')
+    const mappingSelect = getSectionByTitle('Аккаунты')
       .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
     const archivedOption = Array.from(mappingSelect.options)
       .find((option) => option.value === 'p1');
     expect(archivedOption?.disabled).toBe(true);
     expect(mappingSelect.closest('[data-account-mapping-row]')?.textContent)
-      .toContain('unavailable');
+      .toContain('недоступна');
     expect(currentState.accountMappings).toEqual({ account: 'p1' });
   });
 
@@ -516,7 +573,7 @@ describe('Options page settings and read-only personas', () => {
         sessions: [],
       });
 
-      expect(getSectionByTitle('Model Personalities').textContent).toContain('Source A');
+      expect(getSectionByTitle('Персоны').textContent).toContain('Source A');
 
       let changes: Record<string, browser.storage.StorageChange>;
       if (sourceChangeKey === 'settings') {
@@ -547,17 +604,17 @@ describe('Options page settings and read-only personas', () => {
       emitStorageChanges(changes);
 
       await vi.waitFor(() => {
-        expect(getSectionByTitle('Model Personalities').textContent)
-          .toContain('No server personas are available yet');
+        expect(getSectionByTitle('Персоны').textContent)
+          .toContain('Каталог персон пуст');
       });
-      expect(getSectionByTitle('Model Personalities').textContent).not.toContain('Source A');
+      expect(getSectionByTitle('Персоны').textContent).not.toContain('Source A');
 
-      const mappingSelect = getSectionByTitle('Account Mappings')
+      const mappingSelect = getSectionByTitle('Аккаунты')
         .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
       const unresolved = Array.from(mappingSelect.options)
         .find((option) => option.value === 'source-a-persona');
       expect(unresolved?.disabled).toBe(true);
-      expect(unresolved?.textContent).toContain('Unavailable persona');
+      expect(unresolved?.textContent).toContain('Персона недоступна');
       expect(currentState.accountMappings).toEqual({ account: 'source-a-persona' });
     },
   );
@@ -566,9 +623,9 @@ describe('Options page settings and read-only personas', () => {
     await loadOptionsPage({ state: makeState({ accountMappings: { creator: 'p1' } }), sessions: [] });
     const writeText = vi.fn(async (_value: string) => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    const section = getSectionByTitle('Model Personalities');
+    const section = getSectionByTitle('Персоны');
     const copy = Array.from(section.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Copy legacy persona JSON')!;
+      .find((button) => button.textContent === 'Скопировать JSON легаси-персон')!;
     copy.click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const exported = JSON.parse(writeText.mock.calls[0]![0]);
@@ -678,6 +735,45 @@ describe('Options page settings and read-only personas', () => {
     expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
   });
 
+  it('future-schema catch-up during the initial read still disables the section controls', async () => {
+    // Initial-read path (vs the listener path above): the future-schema
+    // listener is installed BEFORE the first readStorageState(). Emitting a v15
+    // change while that read is in flight sets futureSchemaObserved before the
+    // barrier block runs its synchronous catch-up, which disables controls via
+    // root.querySelectorAll — so the sections must already be mounted in `root`
+    // at that moment. This regression guards the ordered registration block
+    // staying anchored before the barrier: move it after and the catch-up's
+    // one-shot sweep finds no real controls, leaving them silently enabled.
+    //
+    // Emit only the change event, never mutate the stored schemaVersion: a v15
+    // in the record would make migrateState throw on the very read being hooked.
+    // Gate on storageChangeListeners so the emit lands on the first read AFTER
+    // the future-schema listener registers (the pre-listener snapshot read would
+    // otherwise swallow it), and only once.
+    let armed = false;
+    await loadOptionsPage({
+      state: makeState(),
+      sessions: [],
+      onStorageRead: () => {
+        if (armed || storageChangeListeners.size === 0) {
+          return;
+        }
+        armed = true;
+        emitStorageChanges({
+          schemaVersion: {
+            oldValue: STORAGE_SCHEMA_VERSION,
+            newValue: STORAGE_SCHEMA_VERSION + 1,
+          },
+        });
+      },
+    });
+
+    expect(document.querySelector('[data-future-schema-barrier="true"]')?.getAttribute('role'))
+      .toBe('alert');
+    const quickInput = getSectionByTitle('Генерация').querySelector('input') as HTMLInputElement;
+    expect(quickInput.disabled).toBe(true);
+  });
+
   it('makes a Hub test wait for the active shared settings save without writing twice', async () => {
     await loadOptionsPage({
       state: makeState({
@@ -700,7 +796,7 @@ describe('Options page settings and read-only personas', () => {
 
     expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
     const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Test Connection')!;
+      .find((button) => button.textContent === 'Проверить соединение')!;
     testButton.click();
     await flushMicrotasks();
 
@@ -748,7 +844,7 @@ describe('Options page settings and read-only personas', () => {
     const username = document.querySelector<HTMLInputElement>('input[autocomplete="username"]')!;
     const password = document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!;
     const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Sign in & issue device token')!;
+      .find((button) => button.textContent === 'Войти и выпустить token')!;
     username.value = 'owner';
     password.value = 'secret';
     signIn.click();
@@ -774,20 +870,20 @@ describe('Options page settings and read-only personas', () => {
       expiresAt: Date.now() + 86_400_000,
     });
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain('Device token active');
+      expect(document.body.textContent).toContain('Device token активен');
     });
 
     releaseFirstStorageSet?.();
     await flushMicrotasks();
 
     const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Test Connection')!;
+      .find((button) => button.textContent === 'Проверить соединение')!;
     await vi.waitFor(() => expect(testButton.disabled).toBe(false));
     testButton.click();
     await vi.waitFor(() => {
       expect(connectionTokens.at(-1)).toBe('device-token-new');
     });
-    expect(document.body.textContent).toContain('Device token active');
+    expect(document.body.textContent).toContain('Device token активен');
   });
 
   it('does not rewrite a rotated API-key custody value from an unrelated count edit', async () => {
@@ -946,7 +1042,7 @@ describe('Options page settings and read-only personas', () => {
       sessions: [],
     });
 
-    const section = getSectionByTitle('Account Mappings');
+    const section = getSectionByTitle('Аккаунты');
     const lunaOptions = Array.from(section.querySelectorAll('option'))
       .map((option) => option.textContent)
       .filter((text) => text?.startsWith('Luna'));
@@ -963,13 +1059,13 @@ describe('Options page settings and read-only personas', () => {
       }),
       sessions: [],
     });
-    const mappingSection = getSectionByTitle('Account Mappings');
+    const mappingSection = getSectionByTitle('Аккаунты');
     const mappingSelect = mappingSection.querySelector<HTMLSelectElement>('select')!;
     expect(mappingSelect.value).toBe('p1');
     expect(mappingSelect.querySelector<HTMLOptionElement>('option[value="p1"]')?.disabled)
       .toBe(true);
     expect(mappingSection.querySelector<HTMLElement>('[data-role="mapping-info"]')?.textContent)
-      .toContain('unavailable');
+      .toContain('недоступна');
     expect(currentState.accountMappings).toEqual({ 'acc-1': 'p1' });
   });
 
@@ -1000,7 +1096,7 @@ describe('Options page settings and read-only personas', () => {
 
     const legacyBefore = structuredClone(currentState.personalities);
 
-    const mappingSelect = getSectionByTitle('Account Mappings')
+    const mappingSelect = getSectionByTitle('Аккаунты')
       .querySelector<HTMLSelectElement>('select')!;
     mappingSelect.value = 'p1';
     mappingSelect.dispatchEvent(new Event('change', { bubbles: true }));

@@ -1,0 +1,25 @@
+export const COPY = Object.freeze({
+  pageTitle: 'Настройки',
+  pageSubtitle: 'Генерация, Agency Hub, персоны и аккаунты Fansly — всё в одном месте.',
+  nav: Object.freeze({
+    hub: 'Agency Hub',
+    personas: 'Персоны',
+    accounts: 'Аккаунты',
+    generation: 'Генерация',
+    appearance: 'Вид',
+    version: 'Версия',
+  }),
+  sections: Object.freeze({
+    hubTitle: 'Agency Hub',
+    hubHint: 'Кернел агентства: генерация, персоны, Spenders. Вход — по device token.',
+    personasTitle: 'Персоны',
+    accountsTitle: 'Аккаунты',
+    accountsHint: 'Fansly-аккаунты, которые видит расширение, и их персоны.',
+    generationTitle: 'Генерация',
+    generationHint: 'Сколько сообщений диалога уходит в контекст каждой фичи.',
+    appearanceTitle: 'Вид',
+    appearanceHint: 'Один семейный стиль, светлый и тёмный.',
+    versionTitle: 'Версия',
+    versionHint: 'Firefox обновляет расширение сам; форсировать — about:addons.',
+  }),
+});

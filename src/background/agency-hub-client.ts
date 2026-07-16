@@ -527,12 +527,12 @@ export class AgencyHubClient {
       ...userError,
       ...(usedDeviceToken
         ? {
-            message: 'Agency Hub rejected the device token.',
-            description: 'The token may be revoked or expired. Sign in again in Settings to issue a fresh device token, then retest.',
+            message: 'Hub отклонил device token.',
+            description: 'Токен мог быть отозван или просрочен. Войди снова в настройках, чтобы выпустить новый device token, затем повтори проверку соединения.',
           }
         : {
-            message: 'Agency Hub rejected the API key.',
-            description: 'The key may be mistyped, rotated away by a newer key, revoked, or not a chatter key. Fix it — or sign in above to issue a device token instead.',
+            message: 'Hub отклонил API-ключ.',
+            description: 'Ключ мог быть введён с ошибкой, заменён более новым, отозван или не является chatter key. Исправь его — или войди выше, чтобы вместо этого выпустить device token.',
           }),
     };
   }
