@@ -1,5 +1,14 @@
 # Options Redesign P2 — Status Section, Readiness Hero & Changelog Button
 
+> **Rev 2 (2026-07-17)** — double-blind review fixes (all verified against this worktree's code):
+> 1. **No per-keystroke hub storm** — hub-status hydration no longer hooks `input`/`change`; it fires at mount and re-fires only on the post-persist connection-test boundary, so a keystroke costs zero hub requests (Task 6 Step 3).
+> 2. **No stale-hub paint** — hydration runs AFTER the autosave persists (piggybacking `queueSettingsSave`'s post-save hub-signature block) and carries a connection-signature guard re-checked before painting; deferred A→B race test added (Task 6).
+> 3. **Independent sources** — both `Promise.all` pairs became `Promise.allSettled`; each row renders its own failure state; one-reject/one-success tests added (Tasks 6 & 7, helper gains a function-form reply in Task 4).
+> 4. **Readiness uses captured sessions** — `mappedDone` checks only accounts WITH captured sessions (`statusModel.fanslyCapturedAccountIds`), never every `knownAccount`; offline-archived-mapping test added (Task 8).
+> 5. **`no_permission` is first-class** — distinct Hub-row badge «НЕТ ДОСТУПА» + «Разрешить доступ» action; `checkIdentity` propagates `no_permission`; the Доступ row paints `unreachable`/`no_permission` as neutral «НЕИЗВЕСТНО» (never «НЕТ CREDENTIAL»); hero step 1 offers the permission grant; tests for both reasons (Tasks 1, 6, 8).
+> 6. **Client tests stub `globalThis.browser`** — the new `checkHealth`/`checkIdentity` tests stage the bare `browser` global (with cleanup), mirroring the file's existing pattern (Task 1 Step 1).
+> 7. **All-green fixtures survive migration** — every persona fixture uses a ≥16-char `definitionId` and a real `personaCatalogSource(...)` so `migrateState` keeps the catalog through the serialize round-trip (Task 8).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Basis** — this plan builds on the P1 shell (merged to main): `buildShell`/`pickActiveSectionId` (`shell.ts`), the family primitives (`createBadge`/`createCap`/`createToggle`/`createChipGroup`/`createLabelRow`/`createSavedFlash` in `dom.ts`), `COPY` (`copy.ts`), the ordered `shell.addSection` block anchored before the future-schema barrier, `hydrateAccountSections` (non-blocking async fill), and the connection-signature guard in `runAgencyHubConnectionTest` (`index.ts`). Every integration fact below was verified against the code and the vendored SDK during the design review — the citations are load-bearing, not decoration.
@@ -96,10 +105,12 @@ export type AgencyHubHealthResponse =
     }
   | { ok: false; reason: 'no_base_url' | 'no_permission' | 'unreachable' };
 
-/** Authenticated identity, read for the «Доступ» status row. */
+/** Authenticated identity, read for the «Доступ» status row. `no_permission`
+ * is propagated distinctly (never folded into `unreachable`) so the renderer
+ * can keep the credential badge neutral and surface the grant on the Hub row. */
 export type AgencyHubIdentityResponse =
   | { ok: true; username: string; role: string; pages: string[] }
-  | { ok: false; reason: 'no_credential' | 'unauthorized' | 'unreachable' };
+  | { ok: false; reason: 'no_credential' | 'no_permission' | 'unauthorized' | 'unreachable' };
 ```
 
 - Add to `RuntimeRequestMap`: `getAgencyHubHealth: undefined;` and `getAgencyHubIdentity: undefined;`
@@ -108,7 +119,7 @@ export type AgencyHubIdentityResponse =
 - [ ] **Step 1: Write failing client tests** in `tests/agency-hub-client.test.ts`. Mirror the file's existing fetch-seam pattern (the client takes a `fetchImpl`; the SDK routes health/me through it). Health is served via `raw('health')`, so the mock returns a `Response` with the health JSON at 200 AND at 503:
 
 ```ts
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import { KERNEL_CONTRACT_HASH } from '@kernel/sdk';
 import type { Settings } from '../src/shared/types.js';
@@ -136,7 +147,24 @@ function jsonResponse(body: unknown, statusCode: number): Response {
   });
 }
 
+// checkHealth/checkIdentity dereference the bare `browser` global inside
+// hasHostPermission BEFORE the try, and vitest has no setupFiles shim, so every
+// test in this file stages `globalThis.browser` by hand (see the existing
+// resolvePageLabelForUsername/testConnection cases). Grant by default; the
+// no_permission cases flip `contains` → false.
+function stubBrowserPermission(granted: boolean): void {
+  (globalThis as Record<string, unknown>).browser = {
+    permissions: { contains: vi.fn(async () => granted) },
+  };
+}
+
 describe('AgencyHubClient.checkHealth', () => {
+  beforeEach(() => stubBrowserPermission(true));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).browser;
+  });
+
   it('reports UP from a 200 body', async () => {
     const client = new AgencyHubClient(async () => jsonResponse(healthBody('ok', 12), 200));
     const result = await client.checkHealth(HUB, new AbortController().signal);
@@ -165,9 +193,22 @@ describe('AgencyHubClient.checkHealth', () => {
     expect(await client.checkHealth({ ...HUB, agencyHubBaseUrl: '' }, new AbortController().signal))
       .toEqual({ ok: false, reason: 'no_base_url' });
   });
+
+  it('reports no_permission when the hub origin is not granted', async () => {
+    stubBrowserPermission(false);
+    const client = new AgencyHubClient(async () => jsonResponse(healthBody('ok', 1), 200));
+    expect(await client.checkHealth(HUB, new AbortController().signal))
+      .toEqual({ ok: false, reason: 'no_permission' });
+  });
 });
 
 describe('AgencyHubClient.checkIdentity', () => {
+  beforeEach(() => stubBrowserPermission(true));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).browser;
+  });
+
   function meBody() {
     return {
       authMethod: 'device_token',
@@ -197,8 +238,21 @@ describe('AgencyHubClient.checkIdentity', () => {
     expect(await client.checkIdentity({ ...HUB, agencyHubDeviceToken: '', agencyHubApiKey: '' }, new AbortController().signal))
       .toEqual({ ok: false, reason: 'no_credential' });
   });
+
+  it('propagates no_permission distinctly (never folded into unreachable)', async () => {
+    stubBrowserPermission(false);
+    const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
+    expect(await client.checkIdentity(HUB, new AbortController().signal))
+      .toEqual({ ok: false, reason: 'no_permission' });
+  });
 });
 ```
+
+  (The file's top-level `describe('AgencyHubClient', …)` already sets an
+  `afterEach` — these two NEW describe blocks are siblings and stage/clean the
+  bare `browser` global themselves, exactly as the existing permission-sensitive
+  tests do. `restoreAllMocks` clears the `vi.fn` spies; the `delete` drops the
+  hand-set global that `unstubAllGlobals` would not.)
 
 - [ ] **Step 2: Run to verify failure** — `pnpm vitest run tests/agency-hub-client.test.ts` (methods missing).
 
@@ -247,7 +301,10 @@ import type {
   }
 
   /** Authenticated identity for the «Доступ» row. A 401/403 is the credential
-   * being rejected (distinct from a DOWN hub); no bearer means nothing to send. */
+   * being rejected (distinct from a DOWN hub); no bearer means nothing to send.
+   * A missing host permission is its OWN reason — NOT unreachable — so the
+   * renderer keeps the credential badge neutral and lets the Hub row own the
+   * grant prompt (health ≠ credential). */
   async checkIdentity(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
@@ -255,7 +312,7 @@ import type {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
     if (!baseUrl || !bearer) return { ok: false, reason: 'no_credential' };
-    if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'unreachable' };
+    if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'no_permission' };
     try {
       const me = await this.sdkFor(baseUrl, bearer, signal).me();
       return {
@@ -674,12 +731,15 @@ export interface MountOverrides {
   settings?: Partial<Settings>;
   state?: Partial<Omit<PersistedState, 'settings' | 'schemaVersion'>>;
   sessions?: SessionSnapshotEntry[];
-  /** Deterministic replies for the P2 status/hero runtime reads. */
+  /** Deterministic replies for the P2 status/hero runtime reads. Each field may
+   * be a value OR a factory — a factory lets a test return a deferred promise
+   * (signature-guard A→B race) or a rejecting promise (independent-source
+   * failure), so one source can fail without stranding the other. */
   runtime?: {
-    health?: AgencyHubHealthResponse;
-    identity?: AgencyHubIdentityResponse;
-    quotaByPage?: Record<string, AiQuotaStatus>;
-    spenders?: SpendersObservation | null;
+    health?: AgencyHubHealthResponse | (() => AgencyHubHealthResponse | Promise<AgencyHubHealthResponse>);
+    identity?: AgencyHubIdentityResponse | (() => AgencyHubIdentityResponse | Promise<AgencyHubIdentityResponse>);
+    quotaByPage?: Record<string, AiQuotaStatus> | (() => Record<string, AiQuotaStatus> | Promise<Record<string, AiQuotaStatus>>);
+    spenders?: SpendersObservation | null | (() => SpendersObservation | null | Promise<SpendersObservation | null>);
   };
 }
 ```
@@ -692,17 +752,29 @@ export interface MountOverrides {
           message && typeof message === 'object'
             ? (message as { type?: unknown }).type
             : undefined;
+        // Resolve a value-or-factory override; an omitted override yields the
+        // honest fallback. `await` surfaces a factory's rejection to the caller
+        // so the page's Promise.allSettled sees it as an independent failure.
+        const runtimeReply = async <T>(
+          override: T | (() => T | Promise<T>) | undefined,
+          fallback: T,
+        ): Promise<T> => {
+          if (override === undefined) return fallback;
+          return typeof override === 'function'
+            ? await (override as () => T | Promise<T>)()
+            : override;
+        };
         switch (requestType) {
           case 'getSessionsSnapshot':
             return sessions;
           case 'getAgencyHubHealth':
-            return runtime.health ?? { ok: false, reason: 'no_base_url' };
+            return runtimeReply<AgencyHubHealthResponse>(runtime.health, { ok: false, reason: 'no_base_url' });
           case 'getAgencyHubIdentity':
-            return runtime.identity ?? { ok: false, reason: 'no_credential' };
+            return runtimeReply<AgencyHubIdentityResponse>(runtime.identity, { ok: false, reason: 'no_credential' });
           case 'getAiQuotaByPage':
-            return runtime.quotaByPage ?? {};
+            return runtimeReply<Record<string, AiQuotaStatus>>(runtime.quotaByPage, {});
           case 'getSpendersStatus':
-            return runtime.spenders ?? null;
+            return runtimeReply<SpendersObservation | null>(runtime.spenders, null);
           default:
             return undefined;
         }
@@ -757,10 +829,13 @@ export function createStatusRow(label: string): StatusRow;
     contractLabel: 'Контракт',
     fanslyEmpty: 'аккаунты не обнаружены — открой Fansly',
     hubEmpty: 'адрес хаба не задан',
+    hubNoPermission: 'нет разрешения на хаб',
     accessEmpty: 'войди или добавь ключ',
+    accessUnknown: 'состояние хаба неизвестно',
     aiEmpty: 'сегодня генераций не было — квота неизвестна',
     spendersEmpty: 'доска ещё не открывалась',
     reLogin: 'Войти заново',
+    grantAccess: 'Разрешить доступ',
   }),
 ```
 
@@ -1017,9 +1092,75 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
   });
   expect(rowByLabel(document, 'Контракт').querySelector('.chatgoose-badge-mono')?.textContent).toBe('DRIFT');
 });
+
+it('paints НЕТ ДОСТУПА + «Разрешить доступ» when the hub origin is not granted', async () => {
+  const { document } = await mountOptionsPage({
+    settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 't' },
+    runtime: {
+      health: { ok: false, reason: 'no_permission' },
+      identity: { ok: false, reason: 'no_permission' },
+    },
+  });
+  const hub = rowByLabel(document, 'Hub (core)');
+  expect(hub.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕТ ДОСТУПА');
+  expect(hub.dataset.tone).toBe('amber');
+  expect((hub.querySelector('button') as HTMLButtonElement).textContent).toBe('Разрешить доступ');
+  // no_permission is a hub-health condition, never a credential verdict (§14):
+  // the Доступ badge stays neutral, not the red «НЕТ CREDENTIAL».
+  const access = rowByLabel(document, 'Доступ');
+  expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕИЗВЕСТНО');
+  expect(access.dataset.tone).toBe('neutral');
+  expect(access.textContent).not.toContain('НЕТ CREDENTIAL');
+});
+
+it('paints Доступ as neutral НЕИЗВЕСТНО (not НЕТ CREDENTIAL) when the hub is unreachable', async () => {
+  const { document } = await mountOptionsPage({
+    settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 't' },
+    runtime: {
+      health: { ok: false, reason: 'unreachable' },
+      identity: { ok: false, reason: 'unreachable' },
+    },
+  });
+  const access = rowByLabel(document, 'Доступ');
+  expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕИЗВЕСТНО');
+  expect(access.dataset.tone).toBe('neutral');
+});
+
+it('renders each hub row independently when one read rejects', async () => {
+  const { document } = await mountOptionsPage({
+    settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 't' },
+    runtime: {
+      health: { ok: true, status: 'ok', dbLatencyMs: 8, contractHash: 'a', sdkContractHash: 'a' },
+      // A rejected identity read must not strand the Hub row as a skeleton.
+      identity: () => Promise.reject(new Error('runtime channel closed')),
+    },
+  });
+  const hub = rowByLabel(document, 'Hub (core)');
+  expect(hub.dataset.status).toBe('ready');
+  expect(hub.querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
+  const access = rowByLabel(document, 'Доступ');
+  expect(access.dataset.status).toBe('ready');
+  expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕИЗВЕСТНО');
+});
+
+it('drops a stale hub-A reply after the URL is re-typed to hub B (signature guard)', async () => {
+  let releaseHealth!: (value: AgencyHubHealthResponse) => void;
+  const deferredHealthA = new Promise<AgencyHubHealthResponse>((resolve) => { releaseHealth = resolve; });
+  const { document, flushAsync } = await mountOptionsPage({
+    settings: { agencyHubBaseUrl: 'https://hub-a.example', agencyHubDeviceToken: 't' },
+    runtime: { health: () => deferredHealthA },
+  });
+  // The user re-types the hub before A's reply lands (no persist yet).
+  const urlInput = document.querySelector('[data-shell-section="hub"] input[type="url"]') as HTMLInputElement;
+  urlInput.value = 'https://hub-b.example';
+  releaseHealth({ ok: true, status: 'ok', dbLatencyMs: 3, contractHash: 'a', sdkContractHash: 'a' });
+  await flushAsync();
+  // A's UP paint is dropped: the live form signature is now hub-b, not fired hub-a.
+  expect(rowByLabel(document, 'Hub (core)').querySelector('.chatgoose-badge-mono')?.textContent).not.toBe('UP');
+});
 ```
 
-  (Add a `rowByLabel(doc, label)` helper at the top of the file: find the `.chatgoose-status-row` whose `.chatgoose-status-label` text equals `label`. Import `vi`.)
+  (Add a `rowByLabel(doc, label)` helper at the top of the file: find the `.chatgoose-status-row` whose `.chatgoose-status-label` text equals `label`, returned as `HTMLElement`. Import `vi` and, for the deferred race, `import type { AgencyHubHealthResponse } from '../src/shared/types.js';`.)
 
 - [ ] **Step 2: Run to verify failure** — `pnpm vitest run tests/options-status.test.ts`.
 
@@ -1030,10 +1171,14 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
   // Rows are painted directly here; the hero (Task 8) re-renders from this.
   const statusModel: {
     fanslyAccounts: number;
+    // The account ids that currently have a CAPTURED session — the hero's step-3
+    // readiness reads only this set, never every knownAccount (an offline
+    // historical account with an archived mapping must not block «Всё работает»).
+    fanslyCapturedAccountIds: string[];
     fanslyFreshest: SessionSnapshotEntry | undefined;
     health: AgencyHubHealthResponse | null;
     identity: AgencyHubIdentityResponse | null;
-  } = { fanslyAccounts: 0, fanslyFreshest: undefined, health: null, identity: null };
+  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
 ```
 
   Fansly row — fold into the existing `hydrateAccountSections` success/failure paths (after `renderAccountMappings(...)`), reusing the snapshot it already has:
@@ -1045,20 +1190,25 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
       return;
     }
     const lookup = buildSessionLookup(sessions);
-    const connected = state.knownAccounts
+    // The captured-session account ids drive BOTH the Fansly row count and the
+    // hero's step-3 readiness. An account with no captured session needs no
+    // persona (spec §4), so it must never enter this set.
+    const capturedAccountIds = state.knownAccounts.filter(
+      (id) => lookup.get(id)?.connected === true,
+    );
+    statusModel.fanslyCapturedAccountIds = capturedAccountIds;
+    statusModel.fanslyAccounts = capturedAccountIds.length;
+    statusModel.fanslyFreshest = capturedAccountIds
       .map((id) => lookup.get(id))
-      .filter((s): s is SessionSnapshotEntry => Boolean(s?.connected));
-    statusModel.fanslyAccounts = connected.length;
-    statusModel.fanslyFreshest = connected
-      .slice()
+      .filter((s): s is SessionSnapshotEntry => Boolean(s))
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
-    if (connected.length === 0) {
+    if (capturedAccountIds.length === 0) {
       statusRows.fansly.set({ badge: 'OFF', tone: 'amber', fact: COPY.status.fanslyEmpty });
     } else {
       statusRows.fansly.set({
         badge: 'CAPTURED',
         tone: 'green',
-        fact: `${connected.length} акк.`,
+        fact: `${capturedAccountIds.length} акк.`,
         detail: formatCaptureStatus(statusModel.fanslyFreshest),
       });
     }
@@ -1072,15 +1222,38 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
 
 ```ts
   let statusHubGeneration = 0;
+  // The connection signature the rows are currently painting FOR. Captured at
+  // fire, re-checked before painting: it guards the window between a hub-field
+  // edit and that edit's own post-persist re-hydration, so a slow hub-A reply
+  // can never paint while the field already shows hub B.
+  const currentHubSignature = (): string =>
+    buildAgencyHubConnectionSignature(
+      agencyHubUrlInput.value,
+      agencyHubKeyInput.value,
+      state.settings.agencyHubDeviceToken,
+    );
   const hydrateHubStatusRows = async (): Promise<void> => {
     const generation = ++statusHubGeneration;
+    const signature = currentHubSignature();
     for (const row of [statusRows.hub, statusRows.access]) row.skeleton();
-    const [health, identity] = await Promise.all([
+    statusRows.hub.setAction(null);
+    // Independent sources (§12): a rejected transport on ONE read must not leave
+    // the OTHER row a skeleton nor surface as an unhandled rejection. allSettled
+    // lets each row render its own honest state.
+    const [healthResult, identityResult] = await Promise.allSettled([
       sendRuntimeRequest('getAgencyHubHealth'),
       sendRuntimeRequest('getAgencyHubIdentity'),
     ]);
-    // A hub the user has since re-typed must not be painted by A's late reply.
-    if (disposed || generation !== statusHubGeneration) return;
+    // Drop a superseded run (generation) AND a run whose form has since changed
+    // (signature) — the reads pull SAVED settings background-side, so painting
+    // is only valid while the form still matches what this run fired for.
+    if (disposed || generation !== statusHubGeneration || signature !== currentHubSignature()) return;
+    const health: AgencyHubHealthResponse = healthResult.status === 'fulfilled'
+      ? healthResult.value
+      : { ok: false, reason: 'unreachable' };
+    const identity: AgencyHubIdentityResponse = identityResult.status === 'fulfilled'
+      ? identityResult.value
+      : { ok: false, reason: 'unreachable' };
     statusModel.health = health;
     statusModel.identity = identity;
 
@@ -1094,11 +1267,22 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
       });
     } else if (health.reason === 'no_base_url') {
       statusRows.hub.set({ badge: 'DOWN', tone: 'neutral', fact: COPY.status.hubEmpty });
+    } else if (health.reason === 'no_permission') {
+      // A fresh install has no host permission (permissions.contains defaults
+      // false) — that is NOT a down core. Distinct amber badge + a grant action
+      // anchored to the hub section (where the permission button lives), so the
+      // renderer never falls through to a false red «ядро недоступно».
+      statusRows.hub.set({ badge: 'НЕТ ДОСТУПА', tone: 'amber', fact: COPY.status.hubNoPermission });
+      const grant = createButton(COPY.status.grantAccess, true);
+      grant.addEventListener('click', () => {
+        agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      statusRows.hub.setAction(grant);
     } else {
       statusRows.hub.set({ badge: 'DOWN', tone: 'bad', fact: 'ядро недоступно' });
     }
 
-    // Доступ
+    // Доступ — CREDENTIAL validity only, never a hub-health verdict (§14).
     statusRows.access.setAction(null);
     if (identity.ok) {
       statusRows.access.set({
@@ -1117,7 +1301,10 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
     } else if (identity.reason === 'no_credential') {
       statusRows.access.set({ badge: 'НЕТ CREDENTIAL', tone: 'neutral', fact: COPY.status.accessEmpty });
     } else {
-      statusRows.access.set({ badge: 'НЕТ CREDENTIAL', tone: 'bad', fact: 'хаб недоступен' });
+      // no_permission and unreachable are HUB-health conditions, not credential
+      // verdicts — the Доступ badge stays neutral «НЕИЗВЕСТНО» (the blocker is
+      // surfaced on the Hub row), never a red «НЕТ CREDENTIAL».
+      statusRows.access.set({ badge: 'НЕИЗВЕСТНО', tone: 'neutral', fact: COPY.status.accessUnknown });
     }
 
     // Контракт (debug only; derived from the same health response)
@@ -1136,7 +1323,13 @@ it('DRIFT when the hub contract hash differs from the SDK (debug row)', async ()
   };
 ```
 
-  Add the type imports at the top of `index.ts`: `AgencyHubHealthResponse`, `AgencyHubIdentityResponse` (from `../shared/types.js`). Trigger `void hydrateHubStatusRows()` at mount (right after `void hydrateAccountSections();`) AND on hub-input changes — extend the EXISTING `agencyHubUrlInput`/`agencyHubKeyInput` `input`+`change` handlers (which already call `markAgencyHubConnectionPending()` + `refreshAgencyHubPermissionState()`) with `void hydrateHubStatusRows();`, and the permission `handlePermissionChanged` block. Define a no-op `updateReadinessHero = (): void => undefined;` placeholder here (Task 8 replaces the body).
+  Add the type imports at the top of `index.ts`: `AgencyHubHealthResponse`, `AgencyHubIdentityResponse` (from `../shared/types.js`); `buildAgencyHubConnectionSignature` and `createButton` are already imported. **Never hook `input`/`change`** — each hydration fires TWO hub requests, so per-keystroke firing on a 40-char key would be an ~80-request 401 storm. Trigger it exactly where the connection test already runs against PERSISTED settings:
+
+  1. **At mount:** `void hydrateHubStatusRows();` right after `void hydrateAccountSections();`.
+  2. **After every persisted hub change:** inside `queueSettingsSave`'s post-save block — the `if (hubSignature !== lastAgencyHubConnectionSignature)` IIFE that already `await`s `refreshAgencyHubPermissionState()` then `runAgencyHubConnectionTest({ force: true })` — append `await hydrateHubStatusRows();` after the connection test. This is the ONLY place hydration reads the hub the field now shows: it runs AFTER the 350 ms autosave persists, so the background read can never see hub A while the field shows hub B (fixes the stale-paint race — before this the input handler fired hydration BEFORE persist).
+  3. **On a permission grant:** in `handlePermissionChanged`, after its `runAgencyHubConnectionTest({ force: true })`, add `void hydrateHubStatusRows();` (a granted origin flips `no_permission` → live without a reload).
+
+  `hydrateHubStatusRows` is a `const` in `render()` scope; the IIFE and permission handler reference it as a closure (they run post-mount, after the const initializes — no TDZ, mirroring how `runAgencyHubConnectionTest` is already referenced from `queueSettingsSave`). The connection-signature guard inside the function is the belt to that suspenders. Define a no-op `updateReadinessHero = (): void => undefined;` placeholder here (Task 8 replaces the body).
 
 - [ ] **Step 4: Run** — `pnpm vitest run tests/options-status.test.ts tests/options-shell-mount.test.ts tests/options-accounts.test.ts` → PASS. (The accounts harness answers the new requests with `currentSessions` by default; the hub rows fall back to honest unknown states there — assert nothing broke.)
 
@@ -1187,6 +1380,21 @@ it('Spenders row maps the freshest observation and honest empty', async () => {
   const empty = await mountOptionsPage({ runtime: { spenders: null } });
   expect(rowByLabel(empty.document, 'Spenders').textContent).toContain('доска ещё не открывалась');
 });
+
+it('renders Spenders even when the AI quota read rejects (independent sources)', async () => {
+  const { document } = await mountOptionsPage({
+    runtime: {
+      quotaByPage: () => Promise.reject(new Error('runtime channel closed')),
+      spenders: { sourceIdentity: 's', streamState: 'ramped', outcome: 'ok', observedAt: Date.now() },
+    },
+  });
+  // The Spenders row paints despite the sibling read failing…
+  expect(rowByLabel(document, 'Spenders').querySelector('.chatgoose-badge-mono')?.textContent).toBe('RAMPED');
+  // …and the AI row falls to its honest-empty state, never a stuck skeleton.
+  const ai = rowByLabel(document, 'AI');
+  expect(ai.dataset.status).toBe('ready');
+  expect(ai.textContent).toContain('сегодня генераций не было');
+});
 ```
 
 - [ ] **Step 2: Run to verify failure** — `pnpm vitest run tests/options-status.test.ts`.
@@ -1195,11 +1403,16 @@ it('Spenders row maps the freshest observation and honest empty', async () => {
 
 ```ts
   const hydrateLocalStatusRows = async (): Promise<void> => {
-    const [quotaByPage, spenders] = await Promise.all([
+    // Independent sources (§12): one rejected local read must not strand the
+    // other row as a skeleton or raise an unhandled rejection. A rejected source
+    // falls to its honest-unknown render ({} / null), never a stuck skeleton.
+    const [quotaResult, spendersResult] = await Promise.allSettled([
       sendRuntimeRequest('getAiQuotaByPage'),
       sendRuntimeRequest('getSpendersStatus'),
     ]);
     if (disposed) return;
+    const quotaByPage = quotaResult.status === 'fulfilled' ? quotaResult.value : {};
+    const spenders = spendersResult.status === 'fulfilled' ? spendersResult.value : null;
 
     // AI — per page, requests only; NO micro-USD (E14). Empty map = unknown.
     const quotaEntries = quotaByPage && typeof quotaByPage === 'object'
@@ -1270,9 +1483,11 @@ One card above the sections, two states. Route: «До работы — N шаг
     allGood: 'Всё работает',
     expand: 'развернуть ▾',
     step1: 'Agency Hub подключён',
+    step1Permission: 'Разреши доступ к Hub',
     step2: 'Открой Fansly с аккаунтом модели',
     step3: 'Назначь персону аккаунту',
     step1Action: 'Войти',
+    step1PermissionAction: 'Разрешить доступ',
     step2Action: 'Открыть fansly.com',
     step3Action: 'К аккаунтам',
   }),
@@ -1281,6 +1496,15 @@ One card above the sections, two states. Route: «До работы — N шаг
 - [ ] **Step 1: Write failing tests:**
 
 ```ts
+// mountOptionsPage serializes through the REAL serializers, so migrateState's
+// normalizePersonaCatalog rejects a definitionId shorter than 16 chars AND
+// hides the whole catalog unless the stored source equals
+// personaCatalogSource(settings). Use real values on BOTH so the catalog
+// survives the serialize→migrate round-trip. (Add to the file's imports:
+// `import { personaCatalogSource } from '../src/shared/persona-catalog.js';`.)
+const HUB_SETTINGS = { agencyHubBaseUrl: 'https://hub.example', agencyHubApiKey: '', agencyHubDeviceToken: 't' };
+const ACTIVE_PERSONA = { key: 'closer', displayName: 'Closer', definitionId: 'defid-0123456789abcdef', version: 1, status: 'active' as const };
+
 it('route state lists open steps with actions', async () => {
   const { document } = await mountOptionsPage(); // nothing configured
   const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
@@ -1290,11 +1514,25 @@ it('route state lists open steps with actions', async () => {
   expect(actions).toContain('Войти');
 });
 
+it('offers the permission grant, not «Войти», when the hub origin is not granted', async () => {
+  const { document } = await mountOptionsPage({
+    settings: HUB_SETTINGS,
+    runtime: {
+      health: { ok: false, reason: 'no_permission' },
+      identity: { ok: false, reason: 'no_permission' },
+    },
+  });
+  const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+  const actions = Array.from(hero.querySelectorAll('button'), (b) => b.textContent);
+  expect(actions).toContain('Разрешить доступ');
+  expect(actions).not.toContain('Войти');
+});
+
 it('collapses to a pulse line when all three checks pass', async () => {
   const { document } = await mountOptionsPage({
-    settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 't' },
-    state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'p1' },
-      personaCatalog: [{ key: 'p1', displayName: 'Closer', definitionId: 'd', version: 1, status: 'active' }] },
+    settings: HUB_SETTINGS,
+    state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'closer' },
+      personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: personaCatalogSource(HUB_SETTINGS) },
     sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
     runtime: {
       health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
@@ -1304,6 +1542,32 @@ it('collapses to a pulse line when all three checks pass', async () => {
   const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
   expect(hero.dataset.heroState).toBe('pulse');
   expect(hero.textContent).toContain('Всё работает');
+});
+
+it('stays green when an offline archived-mapping account has no captured session', async () => {
+  // acc-current is captured + mapped active. acc-archived is a historical
+  // account mapped to an ARCHIVED persona with NO captured session — under the
+  // old `knownAccounts.every` rule it blocked the pulse forever; readiness now
+  // checks only captured-session accounts, so the pulse stays green.
+  const { document } = await mountOptionsPage({
+    settings: HUB_SETTINGS,
+    state: {
+      knownAccounts: ['acc-current', 'acc-archived'],
+      accountMappings: { 'acc-current': 'closer', 'acc-archived': 'retired' },
+      personaCatalog: [
+        ACTIVE_PERSONA,
+        { key: 'retired', displayName: 'Retired', definitionId: 'defid-fedcba9876543210', version: 1, status: 'archived' },
+      ],
+      personaCatalogSource: personaCatalogSource(HUB_SETTINGS),
+    },
+    sessions: [{ legacyAccountId: 'acc-current', resolvedAccountId: 'acc-current', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+    runtime: {
+      health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+      identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+    },
+  });
+  const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+  expect(hero.dataset.heroState).toBe('pulse');
 });
 ```
 
@@ -1330,13 +1594,25 @@ it('collapses to a pulse line when all three checks pass', async () => {
 
   const updateReadinessHero = (): void => {
     const hubDone = statusModel.identity?.ok === true;
-    const fanslyDone = statusModel.fanslyAccounts > 0;
-    // Every KNOWN account with a captured session maps to an active persona.
-    const mappedDone = fanslyDone && state.knownAccounts.length > 0 &&
-      state.knownAccounts.every((id) => isAccountPersonaMapped(id));
+    const fanslyDone = statusModel.fanslyCapturedAccountIds.length > 0;
+    // ONLY accounts with a captured session need an active persona (spec §4).
+    // An offline historical account carrying an archived mapping has no captured
+    // session, so it is absent from this set and never blocks «Всё работает».
+    const mappedDone = fanslyDone &&
+      statusModel.fanslyCapturedAccountIds.every((id) => isAccountPersonaMapped(id));
+
+    // On a fresh install the real step-1 blocker is the host-permission grant,
+    // not sign-in — offer «Разрешить доступ» (still anchored to the hub section)
+    // when checkHealth/checkIdentity reported no_permission, so the hero never
+    // mislabels the action as «Войти».
+    const permissionBlocked =
+      (statusModel.health?.ok === false && statusModel.health.reason === 'no_permission') ||
+      (statusModel.identity?.ok === false && statusModel.identity.reason === 'no_permission');
 
     const steps = [
-      { done: hubDone, label: COPY.hero.step1, action: COPY.hero.step1Action,
+      { done: hubDone,
+        label: permissionBlocked ? COPY.hero.step1Permission : COPY.hero.step1,
+        action: permissionBlocked ? COPY.hero.step1PermissionAction : COPY.hero.step1Action,
         run: () => agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
       { done: fanslyDone, label: COPY.hero.step2, action: COPY.hero.step2Action,
         run: () => { void browser.tabs.create({ url: 'https://fansly.com' }); } },
@@ -1485,20 +1761,27 @@ git commit -m "feat(options): Changelog button linking the anchored release page
 
 ```markdown
 **E<N> (2026-07-<DD>).** Options P2 informativeness: a read-only «Статус»
-section (Fansly capture / Hub /health UP·DEGRADED·DOWN / Доступ me AUTH·401·
-НЕТ CREDENTIAL / per-page AI quota / Spenders observation / debug-only
-Контракт MATCH·DRIFT) plus a readiness hero that reaches all-green in ≤3
-actions and collapses to a pulse line. Four new runtime reads
+section (Fansly capture / Hub /health UP·DEGRADED·DOWN·НЕТ ДОСТУПА / Доступ me
+AUTH·401·НЕТ CREDENTIAL·НЕИЗВЕСТНО / per-page AI quota / Spenders observation /
+debug-only Контракт MATCH·DRIFT) plus a readiness hero that reaches all-green in
+≤3 actions and collapses to a pulse line. Four new runtime reads
 (getAgencyHubHealth, getAgencyHubIdentity, getAiQuotaByPage, getSpendersStatus)
 — the options page never calls the kernel directly; each source hydrates
-independently with a skeleton and fails honestly ("unknown", never an invented
-number). DEGRADED is read via client.raw('health') + the vendored 200 schema
-(the typed client throws before the declared 503 body); the debug Контракт row
-compares the health contractHash to a background-stamped KERNEL_CONTRACT_HASH,
-so the options bundle imports no SDK. Health and credential validity stay
-SEPARATE rows and requests (never one indicator). Quota and spenders
-observations are storage.session-scale — schema stays v14; no new Fansly egress
-(DP 1-B). The Версия «Changelog» button links the anchored changelog page,
+independently (Promise.allSettled — one reject never strands a sibling row) with
+a skeleton and fails honestly ("unknown", never an invented number). DEGRADED is
+read via client.raw('health') + the vendored 200 schema (the typed client throws
+before the declared 503 body); the debug Контракт row compares the health
+contractHash to a background-stamped KERNEL_CONTRACT_HASH, so the options bundle
+imports no SDK. Health and credential validity stay SEPARATE rows and requests
+(never one indicator): no_permission is first-class (checkIdentity propagates it,
+the Hub row owns the «Разрешить доступ» grant, the Доступ badge stays neutral),
+so a fresh install is never a false red. Hub-status hydration fires at mount and
+on the post-persist connection-test boundary only (never per-keystroke), under a
+connection-signature + generation guard, so it reads the persisted hub and no
+stale reply paints a re-typed field. Readiness step 3 checks only accounts with
+captured sessions (an offline archived mapping never blocks all-green). Quota and
+spenders observations are storage.session-scale — schema stays v14; no new Fansly
+egress (DP 1-B). The Версия «Changelog» button links the anchored changelog page,
 gated on that page deploying first. Read-only throughout: the one central write
 controller, E19 custody, and the E37 barrier are untouched. Spec:
 docs/superpowers/specs/2026-07-16-options-redesign-design.md (P2).
@@ -1533,5 +1816,5 @@ gh pr create --draft --title "Options P2: Статус section, readiness hero, 
 - **Spec coverage of the P2 slice.** §4 readiness hero — Task 8 (route + pulse, same data sources, actions-not-diagnoses, `tabs.create`/scroll actions). §5 «Статус» rows — Tasks 5–7 cover every table row with its exact source and honest empty state: Fansly (`getSessionsSnapshot`, «захвачена», worker-restart id degradation inherited from P1's `formatAccountHeading`), Hub (`/health` via `raw`, DB latency label, DEGRADED path), Доступ (`me`, 401 «Войти заново»), AI (per-page map, amber ≤20 / red at 0, NO micro-USD — E14), Spenders (observation tracker, «доска ещё не открывалась»), Контракт (debug-only MATCH/DRIFT). §9 Версия Changelog button — Task 9. §12 data/failure modes — four independent runtime reads, each failing to an honest unknown; storage stays v14; no new Fansly egress. §13.2 + §14 acceptance — health and credential validity are never merged (separate rows AND separate requests); the hero reaches all-green in ≤3 actions.
 - **Type consistency across tasks.** The four response types (`AgencyHubHealthResponse`, `AgencyHubIdentityResponse`, `Record<string, AiQuotaStatus>`, `SpendersObservation | null`) are defined once in `types.ts` (Tasks 1–3) and consumed by the mount helper (Task 4), the row hydration (Tasks 6–7), and the hero (Task 8) under the same names. `statusModel` is the single in-memory record both rows and hero read; `BadgeTone` is reused from `dom.ts` for row tones. All four requests carry `undefined` payloads → `OptionalRuntimeRequestType`, callable as `sendRuntimeRequest('…')` with no second argument. `KERNEL_CONTRACT_HASH` is imported only in the background client; the options bundle compares two strings already present in the health response (keeps the AI-cutover gate trivially green).
 - **Verified against code, not assumed.** `raw`/`me`/`routeSchemas.health.response[200]`/`KernelApiError` shapes were read from `vendor/kernel-sdk/dist`; the runtime-request registry + exhaustive `protocol.test.ts`, the `quota-tracker.ts` storage.session pattern, the `spenders-service.getList` resolve/reject boundary, the P1 ordered `shell.addSection` block and connection-signature guard, and the two test harnesses (`mountOptionsPage`, the accounts `loadOptionsPage`/`onRuntimeRequest` hook) were all confirmed in the worktree.
-- **Risky spots flagged.** (1) The `getList` wrapper (Task 3) must skip `AbortError` recording or a closed tab would log a false FAIL — the test pins both branches. (2) The section-registration line (Task 5) MUST stay inside the pre-barrier block or a v15 observed during the initial read would not disable the new status buttons (P1's documented invariant); the P1 barrier catch-up test still guards this. (3) The generation guard (Task 6) is required because health/me are the only P2 calls that can be superseded by a hub-URL edit — local reads (sessions/quota/spenders) deliberately carry none.
+- **Risky spots flagged.** (1) The `getList` wrapper (Task 3) must skip `AbortError` recording or a closed tab would log a false FAIL — the test pins both branches. (2) The section-registration line (Task 5) MUST stay inside the pre-barrier block or a v15 observed during the initial read would not disable the new status buttons (P1's documented invariant); the P1 barrier catch-up test still guards this. (3) Hub-status hydration NEVER fires on `input`/`change` (that would be a per-keystroke two-request storm); it fires at mount and re-fires only on the post-persist connection-test boundary, so it reads the PERSISTED hub, and a connection-signature guard (captured at fire, re-checked before painting) plus the generation counter drop any reply whose form has since changed — local reads (sessions/quota/spenders) carry neither guard. Both hydration pairs use `Promise.allSettled`, so one rejected source renders its own honest-unknown state instead of stranding the sibling row as a skeleton. (4) `no_permission` is first-class end-to-end: `checkIdentity` propagates it (never folded into `unreachable`), the Hub row owns the grant («НЕТ ДОСТУПА» + «Разрешить доступ»), the Доступ credential badge stays neutral «НЕИЗВЕСТНО», and hero step 1 offers the permission action — so a fresh install (permissions.contains defaults false) is never a false red. (5) Readiness `mappedDone` reads `statusModel.fanslyCapturedAccountIds` (captured-session accounts only), so an offline archived-mapping account cannot block «Всё работает».
 - **Deliberately out of P2 (do not build here).** P3: the persona catalog row presentation (§7) and the «Выйти» sign-out protocol (§6) with `authRevokeCurrentDeviceToken`. Parallel track: the `changelog.html` web-register port (§11) — P2 only adds the button that links its anchors, gated on that page deploying first. No storage migration in any phase.
