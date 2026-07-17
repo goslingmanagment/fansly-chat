@@ -151,7 +151,7 @@ Included every turn (assembled kernel-side; the extension ships raw values only)
 | 4 | Fan bio | NEW shared policy flag `includesFanBio` (§7) |
 | 5 | Model persona (voice, boundaries) | `personaKey` already in every request; coach prompt must consume it |
 | 6 | Kernel fan dossier | `usesFanProfile: true` under the existing env rollout gate |
-| 7 | Freshest usable stored recap + age/mode | kernel-side attach, §5 |
+| 7 | Freshest full AND freshest short recap (both, dated; older-of-two skipped) | kernel-side attach, §5 |
 | 8 | Coach dialog history (rolling window) | `coachHistory`, §7 |
 | 9 | The chatter's question | `chatterQuestion`, §7 |
 | 10 | Transcript coverage flag | `transcriptCoverage`, §6 |
@@ -207,26 +207,35 @@ about it.
 The coach empty state and the auto-recap decision need an authoritative answer to
 «when was this fan last recapped, and how» — local state is not authoritative (other
 tabs/devices, erasure). Add a **metadata-only, page-scoped SDK read** (no generation,
-no AI spend — consistent with the §3 invariant): returns freshest usable recap's mode,
-generated-at, coverage, requested/kept counts, or "none". The coach stream's response
-additionally reports which recap was actually attached (it can differ from the earlier
-status read) — delivered without changing the meta frames old clients parse (§7).
+no AI spend — consistent with the §3 invariant): returns BOTH slots — freshest usable
+full and freshest usable short — each with generated-at, coverage, requested/kept
+counts; or "none". The coach status line shows both with dates («Полный: 3 дн ·
+Короткий: 10 мин»); the standalone dialog's «Открыть последний» uses the same read.
+The coach stream's response additionally reports which recap(s) were actually attached
+(can differ from the earlier status read) — delivered without changing the meta frames
+old clients parse (§7).
 
 ### Kernel-side attach (defined contract, not an impl detail)
 
-On every coach turn core selects the freshest **usable** recap:
+On every coach turn core selects **two slots** — the freshest usable FULL recap and
+the freshest usable SHORT recap — and attaches per the owner's rule «коуч видит оба,
+с датами»:
 
-- Match page + canonical conversation identity (below); `feature = 'fan-summary'`;
-  terminal outcome = completed; non-empty completion; no output-exhaustion stop
-  reason; deterministic `ORDER BY created_at DESC, id DESC`.
+- Usability per slot: match page + canonical conversation identity (below);
+  `feature = 'fan-summary'`; matching `summaryMode`; terminal outcome = completed;
+  non-empty completion; no output-exhaustion stop reason; deterministic
+  `ORDER BY created_at DESC, id DESC`.
+- **Attach rule:** only one exists → attach it. Both exist and the full is the newer →
+  attach the full only (an older short adds nothing). The short is newer than the
+  full → attach BOTH, each labeled with age and role: «Полный рекап (3 дня назад)» —
+  depth, «Короткий рекап (10 минут назад)» — freshness. Both are budgeted (§7);
+  the short is small by construction.
 - Generation `params` must record `summaryMode`, coverage, requested/kept counts, and
   persona — rows predating these fields (legacy) are excluded from attach.
 - A composite index supports the lookup. Lookup failure **fails open** (coach proceeds
   recap-less) and is recorded in the context manifest.
-- Attached recap is labeled with age + size in the prompt. **Dedupe:** if the attached
-  recap is the same content as the injected dossier, inject once; if a short recap and
-  an older full dossier are both present, label their distinct roles and budget them
-  separately (§7).
+- **Dedupe vs dossier:** if an attached recap is the same content as the injected
+  dossier (`usesFanProfile` gate), inject once.
 
 **Canonical identity:** new Recap and Coach requests send
 `conversationRef = Fansly groupId` and `fanRef = fanAccountId` (the contract already
@@ -432,6 +441,11 @@ gains `recapMode`, origin, attached-recap age, prompt bytes, history-entry count
   violates DP 1-B freshness; media/PPV material parity missing). If ever revisited:
   shadow measurements first, serve only on proof. The canonical
   `conversationRef`/`fanRef` split (§5) removes the identity blocker in advance.
+- **Two-slot Hub dossier** (short recap as a second `fan_profiles` slot, refreshing
+  dossier context for OTHER features): owner-endorsed follow-up, deliberately deferred
+  until the scan-dossier effort (core #136) lands — touching `fan_profiles` semantics
+  in parallel would conflict with that unmerged work. The coach itself is NOT waiting
+  on this: it already sees both recap slots via the attach (§5).
 - Toolbar redesign / returning Help to the bar (separate effort; Coach does not
   supersede `help-me`).
 - `edited`/`sent` acceptance provenance (v1 = copied/inserted, §3).
@@ -468,9 +482,9 @@ Vitest, alongside `pnpm check` (typecheck, lint, gates incl. AI-cutover, build):
   preserved.
 - Renderer: keyed updates preserve focus/caret/scroll; Esc semantics; a11y roles.
 - Core side (in core's suite): feature-specific body validation, prompt escaping +
-  shedding priorities, enum migration, recap selection query (usable-only, ordering,
-  legacy exclusion, dual-key transition), attach fail-open + manifest, dedupe vs
-  dossier, short output cap, exhaustion normalization across providers, worst-case
+  shedding priorities, enum migration, recap selection query (two slots, usable-only,
+  ordering, legacy exclusion, dual-key transition), attach rule (one/both/newer-full-
+  only), attach fail-open + manifest, dedupe vs dossier, short output cap, exhaustion normalization across providers, worst-case
   payload, compat matrix (new/old × client/core + rollback), restricted-capture rows.
 
 ## 14. Sequencing
