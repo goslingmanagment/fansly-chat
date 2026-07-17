@@ -66,6 +66,37 @@ describe('release page stamping', () => {
     }
   });
 
+  it('gives every release div a unique anchor id matching its version', () => {
+    const changelog = readRepoFile('changelog.html');
+    // Each release div carries `id="vX-Y-Z"` derived from its release-version, so
+    // the Changelog button's `#v<major>-<minor>-<patch>` target is a real anchor.
+    const releaseBlocks = changelog.match(
+      /<div class="release"[^>]*>\s*<div class="release-header">\s*<span class="release-version">([0-9]+\.[0-9]+\.[0-9]+)<\/span>/g,
+    );
+    const openTags = changelog.match(/<div class="release"[^>]*>/g) ?? [];
+    // No release div is left without the anchor pass.
+    expect(releaseBlocks).not.toBeNull();
+    expect(releaseBlocks!.length).toBe(openTags.length);
+
+    const ids: string[] = [];
+    const pairRe =
+      /<div class="release"([^>]*)>\s*<div class="release-header">\s*<span class="release-version">([0-9]+\.[0-9]+\.[0-9]+)<\/span>/g;
+    for (let match = pairRe.exec(changelog); match !== null; match = pairRe.exec(changelog)) {
+      const attrs = match[1]!;
+      const version = match[2]!;
+      const expectedId = `v${version.replace(/\./g, '-')}`;
+      expect(attrs).toContain(`id="${expectedId}"`);
+      ids.push(expectedId);
+    }
+    // Unique ids (a duplicate would make the browser jump to the wrong release).
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // The anchor for the CURRENT shipped version must exist — the button target.
+    const pkg = JSON.parse(readRepoFile('package.json')) as { version: string };
+    const currentId = `v${pkg.version.replace(/\./g, '-')}`;
+    expect(changelog).toContain(`<div class="release" id="${currentId}">`);
+  });
+
   it('keeps the guide intentionally versionless', () => {
     const guide = readRepoFile('guide.html');
 

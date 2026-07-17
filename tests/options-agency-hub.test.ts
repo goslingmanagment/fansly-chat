@@ -540,7 +540,11 @@ describe('Options page - Agency Hub section', () => {
       expect(section.textContent).toContain('Hub ответил 401: {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
-    expect(runtimeSendMessage).toHaveBeenLastCalledWith({
+    // Not `toHaveBeenLastCalledWith`: a persisted hub change now re-hydrates the
+    // Статус rows (getAgencyHubHealth/getAgencyHubIdentity) AFTER the connection
+    // test, so the test call is no longer the final runtime message. The intent
+    // here is that the connection test carried the right settings.
+    expect(runtimeSendMessage).toHaveBeenCalledWith({
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',

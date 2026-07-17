@@ -117,6 +117,80 @@ export function createBadge(label: string, tone: BadgeTone = 'neutral', mono = f
   return badge;
 }
 
+export interface StatusRowView { badge: string; tone: BadgeTone; fact: string; detail?: string }
+export interface StatusRow {
+  root: HTMLElement;
+  set: (view: StatusRowView) => void;
+  /** Multi-line right detail (AI row: one line per page). */
+  setDetailLines: (lines: string[]) => void;
+  /** Append an inline action (e.g. «Войти заново») to the right of the fact. */
+  setAction: (button: HTMLButtonElement | null) => void;
+  skeleton: () => void;
+}
+
+export function createStatusRow(label: string): StatusRow {
+  const root = document.createElement('div');
+  root.className = 'chatgoose-status-row';
+  const dot = document.createElement('span');
+  dot.className = 'chatgoose-status-dot';
+  const badge = createBadge('…', 'neutral', true);
+  const body = document.createElement('div');
+  body.className = 'chatgoose-status-body';
+  const labelNode = document.createElement('span');
+  labelNode.className = 'chatgoose-status-label';
+  labelNode.textContent = label;
+  const fact = document.createElement('span');
+  fact.className = 'chatgoose-status-fact';
+  body.append(labelNode, fact);
+  const actionSlot = document.createElement('span');
+  actionSlot.className = 'chatgoose-status-action';
+  const detail = document.createElement('div');
+  detail.className = 'chatgoose-status-detail';
+  root.append(dot, badge, body, actionSlot, detail);
+
+  const applyTone = (tone: BadgeTone): void => {
+    badge.className = `chatgoose-badge chatgoose-badge-${tone} chatgoose-badge-mono`;
+    root.dataset.tone = tone;
+  };
+
+  return {
+    root,
+    skeleton: () => {
+      root.dataset.status = 'loading';
+      badge.textContent = '…';
+      applyTone('neutral');
+      fact.textContent = '';
+      detail.replaceChildren();
+    },
+    set: (view) => {
+      root.dataset.status = 'ready';
+      badge.textContent = view.badge;
+      applyTone(view.tone);
+      fact.textContent = view.fact;
+      detail.replaceChildren();
+      if (view.detail) {
+        const line = document.createElement('div');
+        line.className = 'chatgoose-status-detail-line';
+        line.textContent = view.detail;
+        detail.append(line);
+      }
+    },
+    setDetailLines: (lines) => {
+      detail.replaceChildren();
+      for (const text of lines) {
+        const line = document.createElement('div');
+        line.className = 'chatgoose-status-detail-line';
+        line.textContent = text;
+        detail.append(line);
+      }
+    },
+    setAction: (button) => {
+      actionSlot.replaceChildren();
+      if (button) actionSlot.append(button);
+    },
+  };
+}
+
 export function createCap(text: string): HTMLSpanElement {
   const cap = document.createElement('span');
   cap.className = 'chatgoose-cap';
