@@ -300,9 +300,11 @@ describe('Options page account sections', () => {
       expect(accountsSection.textContent).toContain('ID аккаунта: canonical');
     });
 
-    // Session hydration must not rebuild unrelated catalog UI.
+    // Session hydration refreshes «аккаунтов: N» on the read-only catalog (no
+    // editable inputs there), so the row may be rebuilt — but its content is
+    // preserved and no form state is touched.
     expect(getSectionByTitle('Персоны')
-      .querySelector('[data-persona-key="p1"]')).toBe(personalityCard);
+      .querySelector<HTMLElement>('[data-persona-key="p1"]')?.textContent).toContain('Closer');
     expect(currentState.personalities[0]?.name).toBe('Closer');
   });
 
@@ -493,7 +495,9 @@ describe('Options page settings and read-only personas', () => {
 
     const section = getSectionByTitle('Персоны');
     expect(section.textContent).toContain('Closer');
-    expect(section.textContent).toContain('версия 1');
+    // P3 human row: mono version badge replaces the raw «версия 1» meta line.
+    expect(section.querySelector('[data-persona-key="p1"] .chatgoose-badge-mono')?.textContent)
+      .toBe('v1');
     expect(section.querySelector('input[data-role="name"]')).toBeNull();
     expect(section.querySelector('textarea[data-role="content"]')).toBeNull();
     expect(Array.from(section.querySelectorAll('button')).map((button) => button.textContent))
@@ -528,9 +532,13 @@ describe('Options page settings and read-only personas', () => {
     });
 
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Персоны').textContent)
-        .toContain('версия 2 • в архиве');
+      // Archived-and-still-referenced → dimmed row + mono v2 + replacement hint.
+      const row = getSectionByTitle('Персоны').querySelector<HTMLElement>('[data-persona-key="p1"]');
+      expect(row?.className).toContain('chatgoose-persona-row-archived');
+      expect(row?.textContent).toContain('в архиве · выбери замену');
     });
+    expect(getSectionByTitle('Персоны')
+      .querySelector('[data-persona-key="p1"] .chatgoose-badge-mono')?.textContent).toBe('v2');
     const mappingSelect = getSectionByTitle('Аккаунты')
       .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
     const archivedOption = Array.from(mappingSelect.options)
@@ -604,10 +612,15 @@ describe('Options page settings and read-only personas', () => {
       emitStorageChanges(changes);
 
       await vi.waitFor(() => {
-        expect(getSectionByTitle('Персоны').textContent)
-          .toContain('Каталог персон пуст');
+        // Rotated to source B without a catalog event: the stored source (A) no
+        // longer matches, so the source-A rows drop and an honest empty state
+        // (never «персона удалена») replaces them.
+        expect(getSectionByTitle('Персоны')
+          .querySelector('[data-persona-key="source-a-persona"]')).toBeNull();
       });
-      expect(getSectionByTitle('Персоны').textContent).not.toContain('Source A');
+      const droppedSection = getSectionByTitle('Персоны').textContent ?? '';
+      expect(droppedSection).not.toContain('Source A');
+      expect(droppedSection).not.toContain('удалена');
 
       const mappingSelect = getSectionByTitle('Аккаунты')
         .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;

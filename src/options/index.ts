@@ -31,11 +31,18 @@ import {
   formatAccountMeta,
   formatCaptureStatus,
 } from './sessions.js';
+import {
+  buildPersonaRowViews,
+  classifyPersonaEmptyState,
+  formatCatalogChangedAt,
+  type PersonaEmptyState,
+} from './personas.js';
 import { buildShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
+import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
   getUserErrorDescription,
@@ -94,6 +101,15 @@ let renderCleanup: (() => Promise<void>) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
 let uiThemeInstalled = false;
+
+// Classified empty-section copy. The frozen-editing honesty holds everywhere —
+// never promise owner-side creation (persona authoring stays frozen until core
+// #151 closes the legacy-LWW lane).
+const PERSONA_EMPTY_COPY: Record<PersonaEmptyState, string> = {
+  'no-credentials': 'Каталог персон пуст — подключись к Hub выше, чтобы загрузить голоса.',
+  'awaiting-refresh': 'Каталог для новых кредов ещё не загружен — обновится после первой успешной проверки соединения.',
+  'empty-catalog': 'Сервер вернул пустой каталог. Редактирование голосов сейчас заморожено.',
+};
 
 function createLegacyPersonaExportControls(): DocumentFragment {
   const fragment = document.createDocumentFragment();
@@ -1291,37 +1307,76 @@ async function render(): Promise<void> {
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
   const renderPersonaCatalog = (): void => {
+    personaChangedLine.textContent = formatCatalogChangedAt(state.personaCatalogFetchedAt);
     personalitiesList.replaceChildren();
-    if (state.personaCatalog.length === 0) {
+    const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
+    if (rows.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'Каталог персон пуст — проверь подключение к Hub. Голоса приходят с сервера; их редактирование сейчас заморожено.';
+      empty.dataset.role = 'persona-empty';
       empty.style.color = 'var(--chatgoose-ink-mid)';
+      empty.style.fontSize = '12.5px';
+      empty.textContent = PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
+        currentSource: personaCatalogSource(state.settings),
+        storedSource: state.personaCatalogSource,
+      })];
       personalitiesList.append(empty);
       return;
     }
-    for (const persona of state.personaCatalog) {
-      const card = document.createElement('div');
-      card.className = 'chatgoose-card';
-      card.dataset.personaKey = persona.key;
-      const heading = document.createElement('div');
-      heading.textContent = persona.displayName;
-      heading.style.fontWeight = '700';
-      const meta = document.createElement('div');
-      meta.textContent = `${persona.key} • версия ${persona.version} • ${persona.status === 'active' ? 'активна' : 'в архиве'}`;
-      meta.style.fontSize = '12px';
-      meta.style.color = persona.status === 'active'
-        ? 'var(--chatgoose-ink-mid)'
-        : 'var(--chatgoose-bad)';
-      card.append(heading, meta);
-      personalitiesList.append(card);
+    for (const view of rows) {
+      const row = document.createElement('div');
+      row.className = view.archived
+        ? 'chatgoose-persona-row chatgoose-persona-row-archived'
+        : 'chatgoose-persona-row';
+      row.dataset.personaKey = view.key;
+      const main = document.createElement('div');
+      main.className = 'chatgoose-persona-main';
+      const name = document.createElement('span');
+      name.className = 'chatgoose-persona-name';
+      name.textContent = view.displayName;
+      main.append(name);
+      if (view.builtin) {
+        main.append(createBadge('built-in', 'neutral'));
+      }
+      main.append(createBadge(`v${view.version}`, 'neutral', true));
+      const count = document.createElement('span');
+      count.className = 'chatgoose-persona-count';
+      count.textContent = `аккаунтов: ${view.accountCount}`;
+      main.append(count);
+      row.append(main);
+      if (view.archived) {
+        const hint = document.createElement('div');
+        hint.className = 'chatgoose-persona-hint';
+        hint.textContent = 'в архиве · выбери замену';
+        row.append(hint);
+      }
+      personalitiesList.append(row);
     }
   };
-  renderPersonaCatalog();
 
   const preservationNote = document.createElement('div');
   preservationNote.textContent = 'Легаси-тексты персон сохранены на этом устройстве без изменений. Экспортируй их перед удалением расширения или очисткой браузера.';
   preservationNote.style.color = 'var(--chatgoose-ink-mid)';
   preservationNote.style.fontSize = '13px';
+
+  // Footer nodes: constructed BEFORE the first renderPersonaCatalog() call,
+  // which writes personaChangedLine.textContent on every render.
+  const personaFrozenNote = document.createElement('div');
+  personaFrozenNote.textContent = 'Редактирование голосов сейчас заморожено — включится владельческой консолью хаба.';
+  const personaChangedLine = document.createElement('div');
+  personaChangedLine.dataset.role = 'persona-changed';
+  const personaFooter = document.createElement('div');
+  personaFooter.className = 'chatgoose-persona-footer';
+  personaFooter.append(personaFrozenNote, personaChangedLine);
+
+  const preservationBlock = document.createElement('div');
+  preservationBlock.className = 'chatgoose-preservation';
+  preservationBlock.append(
+    createCap('Легаси-тексты'),
+    preservationNote,
+    createLegacyPersonaExportControls(),
+  );
+
+  renderPersonaCatalog();
 
   const flushPendingEdits = (): Promise<void> => {
     void flushSettingsSave();
@@ -1373,11 +1428,7 @@ async function render(): Promise<void> {
   window.addEventListener('pagehide', handlePageHide);
   cleanupTasks.push(() => window.removeEventListener('pagehide', handlePageHide));
 
-  personalitiesSection.append(
-    personalitiesList,
-    preservationNote,
-    createLegacyPersonaExportControls(),
-  );
+  personalitiesSection.append(personalitiesList, personaFooter, preservationBlock);
 
   // ─── Аккаунты (merged: mappings + live capture status) ─────
   const mappingsSection = createSection(
@@ -2093,6 +2144,8 @@ async function render(): Promise<void> {
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
             renderAccountMappings(sessions, hydrationFailed);
+            // Keep «аккаунтов: N» in the persona catalog in sync with the new mapping.
+            renderPersonaCatalog();
             // A fresh mapping can flip step 3 (persona assigned) from open to
             // done, so repaint the hero from the same statusModel + account state.
             updateReadinessHero();
@@ -2183,6 +2236,8 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
+      // Keep «аккаунтов: N» in sync with the reconciled account mappings.
+      renderPersonaCatalog();
       paintFanslyStatusRow(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);

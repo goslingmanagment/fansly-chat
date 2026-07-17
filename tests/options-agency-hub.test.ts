@@ -4,6 +4,7 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { createBundledPersonalities } from '../src/shared/personalities.js';
+import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
 
 let dom: InstanceType<typeof JSDOM>;
@@ -836,5 +837,101 @@ describe('Options page - device-token sign-out (P3)', () => {
     // pagehide after sign-out must not replay the key: dirty flags were cleared.
     window.dispatchEvent(new Event('pagehide'));
     expect(savedCustody.agencyHubApiKey).toBe('');
+  });
+});
+
+describe('Options page - persona catalog presentation (P3)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('persona row: built-in badge, mono version, mapping count', async () => {
+    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
+    const source = personaCatalogSource(base.settings)!; // REAL source; a fake is hidden by migrateState
+    await loadOptionsPage({
+      ...base,
+      personaCatalog: [
+        { key: 'builtin:lora', displayName: 'Lora', version: 3, definitionId: 'definition-id-16chars', status: 'active' },
+      ],
+      accountMappings: { acc1: 'builtin:lora' },
+      personaCatalogSource: source,
+      personaCatalogFetchedAt: new Date().toISOString(),
+    });
+    const section = getSectionByTitle('Персоны');
+    const row = section.querySelector('[data-persona-key="builtin:lora"]') as HTMLElement;
+    expect(row.querySelector('.chatgoose-persona-name')?.textContent).toBe('Lora');
+    expect(Array.from(row.querySelectorAll('.chatgoose-badge'), (b) => b.textContent))
+      .toEqual(['built-in', 'v3']);
+    expect(row.querySelector('.chatgoose-persona-count')?.textContent).toBe('аккаунтов: 1');
+  });
+
+  it('archived persona is shown dimmed with a replacement hint ONLY while referenced', async () => {
+    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
+    const source = personaCatalogSource(base.settings)!;
+    await loadOptionsPage({
+      ...base,
+      personaCatalog: [
+        { key: 'old', displayName: 'Old', version: 1, definitionId: 'definition-id-16chars', status: 'archived' },
+        { key: 'gone', displayName: 'Gone', version: 1, definitionId: 'definition-id-abcdef', status: 'archived' },
+      ],
+      accountMappings: { acc1: 'old' }, // 'gone' referenced by nobody
+      personaCatalogSource: source,
+      personaCatalogFetchedAt: new Date().toISOString(),
+    });
+    const section = getSectionByTitle('Персоны');
+    const shown = section.querySelector('[data-persona-key="old"]') as HTMLElement;
+    expect(shown.className).toContain('chatgoose-persona-row-archived');
+    expect(shown.textContent).toContain('выбери замену');
+    expect(section.querySelector('[data-persona-key="gone"]')).toBeNull();
+  });
+
+  it('empty section states are honest, never «персона удалена»', async () => {
+    // no credentials → source is null for both sides
+    await loadOptionsPage({ ...makeState({ agencyHubBaseUrl: '', agencyHubApiKey: '', agencyHubDeviceToken: '' }),
+      personaCatalog: [], personaCatalogSource: null, personaCatalogFetchedAt: null });
+    expect(getSectionByTitle('Персоны').textContent).toContain('подключись к Hub');
+
+    // creds set, catalog NOT yet synced to these creds (rotation/first-load):
+    // stored source null ≠ current source → awaiting-refresh, never «удалена».
+    // The harness caches the module, so re-mount cleanly for the second state.
+    vi.resetModules();
+    installDom();
+    await loadOptionsPage({ ...makeState({ agencyHubDeviceToken: 'agency_hub_device_x' }),
+      personaCatalog: [], personaCatalogSource: null, personaCatalogFetchedAt: null });
+    const rotated = getSectionByTitle('Персоны').textContent ?? '';
+    expect(rotated).toContain('для новых кредов ещё не загружен');
+    expect(rotated).not.toContain('удалена');
+  });
+
+  it('server-confirmed empty (source synced, fetchedAt never advanced) → «пустой каталог», NOT «ещё не загружен»', async () => {
+    // Finding #4 regression: after a byte-identical empty refresh the background
+    // skips the write and personaCatalogFetchedAt stays null, yet the source DOES
+    // match the current creds — so the section must report empty-catalog, not
+    // awaiting-refresh.
+    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
+    const source = personaCatalogSource(base.settings)!;
+    await loadOptionsPage({ ...base,
+      personaCatalog: [], personaCatalogSource: source, personaCatalogFetchedAt: null });
+    const confirmed = getSectionByTitle('Персоны').textContent ?? '';
+    expect(confirmed).toContain('пустой каталог');
+    expect(confirmed).not.toContain('ещё не загружен');
+  });
+
+  it('footer reports last-CHANGED catalog time and the frozen-editing truth', async () => {
+    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
+    const source = personaCatalogSource(base.settings)!;
+    await loadOptionsPage({ ...base,
+      personaCatalog: [{ key: 'p1', displayName: 'Closer', version: 1, definitionId: 'definition-id-16chars', status: 'active' }],
+      personaCatalogSource: source,
+      personaCatalogFetchedAt: new Date().toISOString() });
+    const section = getSectionByTitle('Персоны');
+    expect(section.querySelector('[data-role="persona-changed"]')?.textContent).toContain('каталог изменялся');
+    expect(section.textContent).toContain('редактирование голосов сейчас заморожено'.replace('р', 'Р'));
   });
 });
