@@ -25,6 +25,7 @@ import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
 import { getLatestQuotaSnapshot, getQuotaSnapshotsByPage } from './quota-tracker.js';
+import { getLatestSpendersObservation } from './spenders-status-tracker.js';
 import type { SessionStore } from './session-store.js';
 import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
@@ -328,6 +329,10 @@ export function registerRuntimeApi({
 
       if (requestType === 'getAiQuotaByPage') {
         return await getQuotaSnapshotsByPage();
+      }
+
+      if (requestType === 'getSpendersStatus') {
+        return await getLatestSpendersObservation();
       }
 
       if (requestType === 'issueAgencyHubDeviceToken') {

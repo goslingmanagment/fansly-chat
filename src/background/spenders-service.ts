@@ -49,6 +49,7 @@ import type {
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
+import { recordSpendersObservation } from './spenders-status-tracker.js';
 
 /** The creator's custom display name for a fan — Fansly's native rename,
  * stored as an account note whose text is the name. */
@@ -423,6 +424,36 @@ export class SpendersService {
   }
 
   async getList(
+    session: SessionTemplate,
+    signal: AbortSignal,
+    options?: {
+      refresh?: boolean;
+      onProgress?: (progress: SpendersProgressPayload) => void;
+      onSnapshot?: (snapshot: SpendersSnapshotPayload) => void;
+    },
+  ): Promise<SpendersListResult> {
+    const settings = await this.getSettings?.();
+    const sourceIdentity = settings
+      ? `${this.creatorKey(session)}|${normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl)}`
+      : this.creatorKey(session);
+    try {
+      const result = await this.getListInternal(session, signal, options);
+      await recordSpendersObservation({
+        sourceIdentity,
+        streamState: result.source.streamState,
+        outcome: 'ok',
+      });
+      return result;
+    } catch (error) {
+      // A caller cancellation (tab closed / superseded) is not a board outcome.
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        await recordSpendersObservation({ sourceIdentity, streamState: null, outcome: 'fail' });
+      }
+      throw error;
+    }
+  }
+
+  private async getListInternal(
     session: SessionTemplate,
     signal: AbortSignal,
     options?: {

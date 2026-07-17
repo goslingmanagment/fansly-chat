@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SpendersService } from '../src/background/spenders-service.js';
+import { getLatestSpendersObservation } from '../src/background/spenders-status-tracker.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
@@ -242,6 +243,22 @@ describe('SpendersService (kernel source)', () => {
     expect(result.fanCount).toBe(3);
     expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
     expect(typeof result.fetchedAt).toBe('number');
+  });
+
+  it('records a ramped observation on a successful board', async () => {
+    const { service } = makeKernelHarness();
+    await service.getList(kernelSession(), new AbortController().signal);
+    expect(await getLatestSpendersObservation()).toMatchObject({ outcome: 'ok', streamState: 'ramped' });
+  });
+
+  it('records a failure observation when the board build throws', async () => {
+    const { service, kernelSource } = makeKernelHarness();
+    // A page-mapping failure makes the kernel build reject with a non-abort error.
+    kernelSource.resolvePageLabelForUsername = vi.fn(async () => {
+      throw new ChatGooseError('hub_page_match_failed');
+    });
+    await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
+    expect(await getLatestSpendersObservation()).toMatchObject({ outcome: 'fail', streamState: null });
   });
 
   it('keeps all 1000 returned rows instead of applying a second client-side cutoff', async () => {

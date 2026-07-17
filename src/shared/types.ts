@@ -789,6 +789,7 @@ export interface RuntimeRequestMap {
   getAgencyHubHealth: undefined;
   getAgencyHubIdentity: undefined;
   getAiQuotaByPage: undefined;
+  getSpendersStatus: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   openDebugPrompt: DebugPromptTokenRequest;
@@ -803,6 +804,7 @@ export interface RuntimeResponseMap {
   getAgencyHubHealth: AgencyHubHealthResponse;
   getAgencyHubIdentity: AgencyHubIdentityResponse;
   getAiQuotaByPage: Record<string, AiQuotaStatus>;
+  getSpendersStatus: SpendersObservation | null;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   openDebugPrompt: OpenDebugPromptResponse;
@@ -891,6 +893,16 @@ export interface SpendersSourceStatus {
   lastSyncedAt: number | null;
   /** Null means the page has no fan-earnings sync-state row yet. */
   consecutiveFailures: number | null;
+}
+
+/** The last board result seen for a source (creator|hub identity). `streamState`
+ * is the kernel source state on success; `outcome:'fail'` records a board that
+ * errored (streamState null). Session-scale — never persisted, never schema. */
+export interface SpendersObservation {
+  sourceIdentity: string;
+  streamState: SpendersStreamState | null;
+  outcome: 'ok' | 'fail';
+  observedAt: number;
 }
 
 export interface SpendersListResult {

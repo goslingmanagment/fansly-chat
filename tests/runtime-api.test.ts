@@ -521,6 +521,31 @@ describe('runtime-api getAiQuotaByPage', () => {
   });
 });
 
+describe('runtime-api getSpendersStatus', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('returns the freshest recorded board observation', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    // Same post-reset instance the handler reads (no browser.storage.session
+    // in the test env — the tracker uses its module-memory fallback).
+    const { recordSpendersObservation } = await import('../src/background/spenders-status-tracker.js');
+    await recordSpendersObservation({ sourceIdentity: 'creator-1|https://hub', streamState: 'ramped', outcome: 'ok' });
+
+    const result = await harness.send({ type: 'getSpendersStatus' });
+    expect(result).toMatchObject({ sourceIdentity: 'creator-1|https://hub', outcome: 'ok', streamState: 'ramped' });
+  });
+
+  it('returns null when no board has been observed', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    expect(await harness.send({ type: 'getSpendersStatus' })).toBeNull();
+  });
+});
+
 describe('runtime-api getSpendersList', () => {
   beforeEach(() => {
     mockStorage = {};
