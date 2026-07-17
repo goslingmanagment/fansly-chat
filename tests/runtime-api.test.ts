@@ -499,6 +499,28 @@ describe('runtime-api agency hub reads', () => {
   });
 });
 
+describe('runtime-api getAiQuotaByPage', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('returns the full same-day per-page quota map', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    // The harness resetModules()-loads the tracker the handler reads; import the
+    // SAME post-reset instance to seed its session-memory fallback (no
+    // browser.storage.session in the test env).
+    const { recordQuotaSnapshot } = await import('../src/background/quota-tracker.js');
+    await recordQuotaSnapshot('lilly', 143);
+    await recordQuotaSnapshot('ari', 4);
+
+    const result = await harness.send({ type: 'getAiQuotaByPage' }) as Record<string, unknown>;
+    expect(Object.keys(result).sort()).toEqual(['ari', 'lilly']);
+    expect(result.ari).toMatchObject({ remainingRequestsToday: 4, exhausted: false });
+  });
+});
+
 describe('runtime-api getSpendersList', () => {
   beforeEach(() => {
     mockStorage = {};

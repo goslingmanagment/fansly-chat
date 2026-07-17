@@ -788,6 +788,7 @@ export interface RuntimeRequestMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getAgencyHubHealth: undefined;
   getAgencyHubIdentity: undefined;
+  getAiQuotaByPage: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   openDebugPrompt: DebugPromptTokenRequest;
@@ -801,6 +802,7 @@ export interface RuntimeResponseMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getAgencyHubHealth: AgencyHubHealthResponse;
   getAgencyHubIdentity: AgencyHubIdentityResponse;
+  getAiQuotaByPage: Record<string, AiQuotaStatus>;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   openDebugPrompt: OpenDebugPromptResponse;

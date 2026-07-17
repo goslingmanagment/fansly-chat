@@ -13,6 +13,7 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'testAgencyHubConnection' })).toBe('testAgencyHubConnection');
     expect(getRuntimeRequestType({ type: 'getAgencyHubHealth' })).toBe('getAgencyHubHealth');
     expect(getRuntimeRequestType({ type: 'getAgencyHubIdentity' })).toBe('getAgencyHubIdentity');
+    expect(getRuntimeRequestType({ type: 'getAiQuotaByPage' })).toBe('getAiQuotaByPage');
     // 1.6.0 shipped without this case — options-page device-token sign-in
     // was unreachable (found by the Stage 35 map regeneration).
     expect(

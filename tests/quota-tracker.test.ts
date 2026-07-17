@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getLatestQuotaSnapshot,
+  getQuotaSnapshotsByPage,
   recordQuotaDenied,
   recordQuotaSnapshot,
 } from '../src/background/quota-tracker.js';
@@ -58,5 +59,18 @@ describe('quota-tracker', () => {
     await recordQuotaSnapshot('', 10);
     await recordQuotaDenied('');
     expect(await getLatestQuotaSnapshot()).toBeNull();
+  });
+
+  it('returns the full same-UTC-day map, dropping stale-day pages', async () => {
+    vi.setSystemTime(new Date('2026-07-10T10:00:00.000Z'));
+    await recordQuotaSnapshot('lilly', 143);
+    await recordQuotaSnapshot('ari', 4);
+    let byPage = await getQuotaSnapshotsByPage();
+    expect(Object.keys(byPage).sort()).toEqual(['ari', 'lilly']);
+    expect(byPage.ari).toMatchObject({ remainingRequestsToday: 4, exhausted: false });
+
+    vi.setSystemTime(new Date('2026-07-11T00:01:00.000Z')); // next UTC day
+    byPage = await getQuotaSnapshotsByPage();
+    expect(byPage).toEqual({});
   });
 });

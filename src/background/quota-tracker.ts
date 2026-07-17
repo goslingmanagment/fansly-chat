@@ -95,6 +95,20 @@ export async function recordQuotaDenied(pageLabel: string): Promise<void> {
   await writeAll(snapshots);
 }
 
+/** Full per-page map, same-UTC-day only (a previous day's numbers would lie
+ * after the kernel's 00:00 UTC reset). Empty object = no observations today. */
+export async function getQuotaSnapshotsByPage(): Promise<Record<string, AiQuotaSnapshot>> {
+  const snapshots = await readAll();
+  const now = Date.now();
+  const sameDay: Record<string, AiQuotaSnapshot> = {};
+  for (const [pageLabel, snapshot] of Object.entries(snapshots)) {
+    if (isSameUtcDay(snapshot.observedAt, now)) {
+      sameDay[pageLabel] = snapshot;
+    }
+  }
+  return sameDay;
+}
+
 /** Freshest same-UTC-day snapshot across pages (null when none). */
 export async function getLatestQuotaSnapshot(): Promise<AiQuotaSnapshot | null> {
   const snapshots = await readAll();

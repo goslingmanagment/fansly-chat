@@ -272,6 +272,8 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getAgencyHubHealth';
     case 'getAgencyHubIdentity':
       return 'getAgencyHubIdentity';
+    case 'getAiQuotaByPage':
+      return 'getAiQuotaByPage';
     case 'issueAgencyHubDeviceToken':
       return 'issueAgencyHubDeviceToken';
     case 'getSpendersList':
