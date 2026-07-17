@@ -171,6 +171,11 @@ export async function mountOptionsPage(
       }),
       openOptionsPage: vi.fn(async () => undefined),
     },
+    tabs: {
+      // Any tab-opening path (readiness hero step 2, the Changelog button) is
+      // safe by default; a test override reassigns this to assert the URL.
+      create: vi.fn(async () => ({})),
+    },
     permissions: {
       contains: vi.fn(async () => false),
       request: vi.fn(async () => false),

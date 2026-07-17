@@ -1381,7 +1381,14 @@ async function render(): Promise<void> {
   versionLine.style.fontSize = '12px';
   versionLine.style.color = 'var(--chatgoose-ink-mid)';
   versionLine.textContent = `v ${extensionVersion} · канал: self-hosted feed`;
-  versionSection.append(versionLine);
+  // The anchored changelog.html deploys via the parallel changelog track; the
+  // anchor is `v<major>-<minor>-<patch>` derived from the manifest version.
+  const changelogButton = createButton(COPY.version.changelogButton, true);
+  changelogButton.addEventListener('click', () => {
+    const anchor = `v${extensionVersion.replace(/\./g, '-')}`;
+    void browser.tabs.create({ url: `https://ext.gosling-agency.ru/changelog.html#${anchor}` });
+  });
+  versionSection.append(versionLine, changelogButton);
 
   // ─── Статус (read-only state rows) ─────────────────────────
   const statusSection = createSection(COPY.sections.statusTitle, COPY.sections.statusHint);

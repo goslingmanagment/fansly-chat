@@ -25,6 +25,9 @@ export const COPY = Object.freeze({
     versionTitle: 'Версия',
     versionHint: 'Firefox обновляет расширение сам; форсировать — about:addons.',
   }),
+  version: Object.freeze({
+    changelogButton: 'Changelog',
+  }),
   hero: Object.freeze({
     stepsPrefix: 'До работы —',
     allGood: 'Всё работает',

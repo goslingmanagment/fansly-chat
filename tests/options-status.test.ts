@@ -337,3 +337,17 @@ describe('options readiness hero (route → pulse)', () => {
     expect(hero.dataset.heroState).toBe('pulse');
   });
 });
+
+describe('options Версия section', () => {
+  it('Changelog button opens the anchored changelog page for the current version', async () => {
+    const { document, window } = await mountOptionsPage(); // manifest version is '0.0.0-test'
+    const created: string[] = [];
+    (window as unknown as { browser: { tabs: { create: (i: { url: string }) => Promise<unknown> } } }).browser.tabs = {
+      create: async (info) => { created.push(info.url); return {}; },
+    };
+    const button = Array.from(document.querySelectorAll('[data-shell-section="version"] button'))
+      .find((b) => b.textContent === 'Changelog') as HTMLButtonElement;
+    button.click();
+    expect(created[0]).toBe('https://ext.gosling-agency.ru/changelog.html#v0-0-0-test');
+  });
+});
