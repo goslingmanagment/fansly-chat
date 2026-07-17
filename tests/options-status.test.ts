@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
+import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import type { AgencyHubHealthResponse } from '../src/shared/types.js';
 
 afterEach(async () => { await unmountOptionsPage(); });
@@ -259,5 +260,80 @@ describe('options Статус — AI quota & Spenders hydration', () => {
     const ai = rowByLabel(document, 'AI');
     expect(ai.dataset.status).toBe('ready');
     expect(ai.textContent).toContain('сегодня генераций не было');
+  });
+});
+
+describe('options readiness hero (route → pulse)', () => {
+  // mountOptionsPage serializes through the REAL serializers, so migrateState's
+  // normalizePersonaCatalog rejects a definitionId shorter than 16 chars AND
+  // hides the whole catalog unless the stored source equals
+  // personaCatalogSource(settings). Use real values on BOTH so the catalog
+  // survives the serialize→migrate round-trip.
+  const HUB_SETTINGS = { agencyHubBaseUrl: 'https://hub.example', agencyHubApiKey: '', agencyHubDeviceToken: 't' };
+  const ACTIVE_PERSONA = { key: 'closer', displayName: 'Closer', definitionId: 'defid-0123456789abcdef', version: 1, status: 'active' as const };
+
+  it('route state lists open steps with actions', async () => {
+    const { document } = await mountOptionsPage(); // nothing configured
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('route');
+    expect(hero.textContent).toContain('До работы —');
+    const actions = Array.from(hero.querySelectorAll('button'), (b) => b.textContent);
+    expect(actions).toContain('Войти');
+  });
+
+  it('offers the permission grant, not «Войти», when the hub origin is not granted', async () => {
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      runtime: {
+        health: { ok: false, reason: 'no_permission' },
+        identity: { ok: false, reason: 'no_permission' },
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    const actions = Array.from(hero.querySelectorAll('button'), (b) => b.textContent);
+    expect(actions).toContain('Разрешить доступ');
+    expect(actions).not.toContain('Войти');
+  });
+
+  it('collapses to a pulse line when all three checks pass', async () => {
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'closer' },
+        personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: personaCatalogSource(HUB_SETTINGS) },
+      sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+      runtime: {
+        health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('pulse');
+    expect(hero.textContent).toContain('Всё работает');
+  });
+
+  it('stays green when an offline archived-mapping account has no captured session', async () => {
+    // acc-current is captured + mapped active. acc-archived is a historical
+    // account mapped to an ARCHIVED persona with NO captured session — under the
+    // old `knownAccounts.every` rule it blocked the pulse forever; readiness now
+    // checks only captured-session accounts, so the pulse stays green.
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: {
+        knownAccounts: ['acc-current', 'acc-archived'],
+        accountMappings: { 'acc-current': 'closer', 'acc-archived': 'retired' },
+        personaCatalog: [
+          ACTIVE_PERSONA,
+          { key: 'retired', displayName: 'Retired', definitionId: 'defid-fedcba9876543210', version: 1, status: 'archived' },
+        ],
+        personaCatalogSource: personaCatalogSource(HUB_SETTINGS),
+      },
+      sessions: [{ legacyAccountId: 'acc-current', resolvedAccountId: 'acc-current', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+      runtime: {
+        health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('pulse');
   });
 });

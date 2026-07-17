@@ -249,6 +249,14 @@ async function render(): Promise<void> {
   hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
 
+  // ─── Readiness hero (route → pulse) ─────────────────────────
+  // Derives entirely from the SAME `statusModel` the Статус rows paint from —
+  // zero new requests, no own fetch. Rendered by `updateReadinessHero` below.
+  const readinessHero = document.createElement('section');
+  readinessHero.className = 'chatgoose-readiness';
+  readinessHero.dataset.readinessHero = 'true';
+  root.append(readinessHero);
+
   // ─── Shell (nav + main) ─────────────────────────────────────
   // Nav order == card order == the registration order below. Sections are
   // built in place further down and registered as one ordered block, anchored
@@ -1411,9 +1419,83 @@ async function render(): Promise<void> {
     identity: AgencyHubIdentityResponse | null;
   } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
 
-  // Task 8 replaces this body; a no-op placeholder keeps the hydration calls
-  // that read `statusModel` self-contained until then.
-  const updateReadinessHero = (): void => undefined;
+  const isAccountPersonaMapped = (accountId: string): boolean => {
+    const mappedKey = state.accountMappings[accountId] ?? '';
+    return Boolean(mappedKey) && state.personaCatalog.some(
+      (persona) => persona.key === mappedKey && persona.status === 'active',
+    );
+  };
+
+  const updateReadinessHero = (): void => {
+    const hubDone = statusModel.identity?.ok === true;
+    const fanslyDone = statusModel.fanslyCapturedAccountIds.length > 0;
+    // ONLY accounts with a captured session need an active persona (spec §4).
+    // An offline historical account carrying an archived mapping has no captured
+    // session, so it is absent from this set and never blocks «Всё работает».
+    const mappedDone = fanslyDone &&
+      statusModel.fanslyCapturedAccountIds.every((id) => isAccountPersonaMapped(id));
+
+    // On a fresh install the real step-1 blocker is the host-permission grant,
+    // not sign-in — offer «Разрешить доступ» (still anchored to the hub section)
+    // when checkHealth/checkIdentity reported no_permission, so the hero never
+    // mislabels the action as «Войти».
+    const permissionBlocked =
+      (statusModel.health?.ok === false && statusModel.health.reason === 'no_permission') ||
+      (statusModel.identity?.ok === false && statusModel.identity.reason === 'no_permission');
+
+    const steps = [
+      { done: hubDone,
+        label: permissionBlocked ? COPY.hero.step1Permission : COPY.hero.step1,
+        action: permissionBlocked ? COPY.hero.step1PermissionAction : COPY.hero.step1Action,
+        run: () => agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+      { done: fanslyDone, label: COPY.hero.step2, action: COPY.hero.step2Action,
+        run: () => { void browser.tabs.create({ url: 'https://fansly.com' }); } },
+      { done: mappedDone, label: COPY.hero.step3, action: COPY.hero.step3Action,
+        run: () => mappingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+    ];
+    const open = steps.filter((step) => !step.done);
+    readinessHero.replaceChildren();
+
+    if (open.length === 0) {
+      readinessHero.dataset.heroState = 'pulse';
+      const dot = document.createElement('span');
+      dot.className = 'chatgoose-readiness-dot';
+      const line = document.createElement('span');
+      line.className = 'chatgoose-readiness-pulse';
+      line.textContent = COPY.hero.allGood;
+      const facts = document.createElement('span');
+      facts.className = 'chatgoose-num chatgoose-readiness-facts';
+      const spendersBadge = statusRows.spenders.root.querySelector('.chatgoose-badge-mono')?.textContent ?? '—';
+      facts.textContent = `Fansly ${statusModel.fanslyAccounts} · Hub ✓ · Spenders ${spendersBadge}`;
+      const expand = createButton(COPY.hero.expand, true);
+      expand.addEventListener('click', () => statusSection.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      readinessHero.append(dot, line, facts, expand);
+      return;
+    }
+
+    readinessHero.dataset.heroState = 'route';
+    const heading = document.createElement('h2');
+    heading.className = 'chatgoose-readiness-heading';
+    heading.textContent = `${COPY.hero.stepsPrefix} ${open.length} шаг.`;
+    readinessHero.append(heading);
+    for (const step of steps) {
+      const stepRow = document.createElement('div');
+      stepRow.className = 'chatgoose-readiness-step';
+      stepRow.dataset.done = String(step.done);
+      const mark = document.createElement('span');
+      mark.textContent = step.done ? '✓' : '•';
+      const text = document.createElement('span');
+      text.textContent = step.label;
+      stepRow.append(mark, text);
+      if (!step.done) {
+        const button = createButton(step.action, true);
+        button.addEventListener('click', step.run);
+        stepRow.append(button);
+      }
+      readinessHero.append(stepRow);
+    }
+  };
+  updateReadinessHero(); // initial paint from skeleton state (all open)
 
   const paintFanslyStatusRow = (sessions: SessionSnapshotEntry[], failed: boolean): void => {
     if (failed) {
@@ -1803,6 +1885,9 @@ async function render(): Promise<void> {
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
             renderAccountMappings(sessions, hydrationFailed);
+            // A fresh mapping can flip step 3 (persona assigned) from open to
+            // done, so repaint the hero from the same statusModel + account state.
+            updateReadinessHero();
           } catch (error) {
             console.error('Failed to save account mapping', error);
             savedFlash.showError('маппинг не сохранился');

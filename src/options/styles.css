@@ -365,3 +365,15 @@ input[type='checkbox'] {
 .chatgoose-status-detail { grid-column: 3 / 5; display: grid; gap: 2px; }
 .chatgoose-status-detail-line { font: 11.5px/1.4 var(--chatgoose-font-mono); font-variant-numeric: tabular-nums; color: var(--chatgoose-ink-low); }
 .chatgoose-status-row[data-status="loading"] .chatgoose-status-fact::after { content: '…'; }
+
+/* ── Readiness hero: route checklist ↔ all-green pulse line ── */
+.chatgoose-readiness { margin: 4px 20px 0; padding: 14px 16px; border-radius: var(--chatgoose-radius-card); border: 1px solid var(--chatgoose-line); background: var(--chatgoose-bg1); box-shadow: var(--chatgoose-shadow); }
+.chatgoose-readiness[data-hero-state="pulse"] { display: flex; align-items: center; gap: 10px; }
+.chatgoose-readiness-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--chatgoose-green); flex: none; }
+.chatgoose-readiness-pulse { font-weight: 650; }
+.chatgoose-readiness-facts { color: var(--chatgoose-ink-mid); font-size: 12px; }
+.chatgoose-readiness[data-hero-state="pulse"] .chatgoose-button { margin-left: auto; }
+.chatgoose-readiness-heading { margin: 0 0 8px; font-size: 15px; }
+.chatgoose-readiness-step { display: flex; gap: 9px; align-items: center; padding: 5px 0; }
+.chatgoose-readiness-step[data-done="true"] { color: var(--chatgoose-green); }
+.chatgoose-readiness-step .chatgoose-button { margin-left: auto; }
