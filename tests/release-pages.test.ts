@@ -254,4 +254,24 @@ describe('changelog web register', () => {
     expect(html.match(/<span class="nav-version">v[^<]+<\/span>/g)).toHaveLength(1);
     expect(html.match(/<p>v[^<]+ &middot; Gosling Agency &middot; Kernel-served AI<\/p>/g)).toHaveLength(1);
   });
+
+  it('stamps cleanly through both deploy.sh and deploy-pages.sh (no script edits needed)', () => {
+    // deploy.sh — stamp_changelog_page_version (v OUTSIDE group 1, re-added as $1v…$2)
+    const a = replaceExactlyOnce(html, /(<span class="nav-version">)v[^<]+(<\/span>)/, '$1v9.8.7$2');
+    const b = replaceExactlyOnce(a, /(<p>)v[^<]+( &middot; Gosling Agency &middot; Kernel-served AI<\/p>)/, '$1v9.8.7$2');
+    // deploy-pages.sh — generic stamp_version (v INSIDE group 1, kept as $1…$2)
+    const c = replaceExactlyOnce(html, /(<span class="nav-version">v)[^<]+(<\/span>)/, '$19.8.7$2');
+    const d = replaceExactlyOnce(c, /(<p>v)[^<]+( &middot; Gosling Agency &middot; Kernel-served AI<\/p>)/, '$19.8.7$2');
+    for (const stamped of [b, d]) {
+      expect(stamped).toContain('<span class="nav-version">v9.8.7</span>');
+      expect(stamped).toContain('<p>v9.8.7 &middot; Gosling Agency &middot; Kernel-served AI</p>');
+    }
+    // both deploy scripts still carry their changelog slot regexes unchanged
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const deployPages = readRepoFile('scripts/deploy-pages.sh');
+    expect(deploy).toContain('changelog nav version');
+    expect(deploy).toContain('changelog footer version');
+    expect(deployPages).toContain('(<span class="nav-version">v)[^<]+(</span>)');
+    expect(deployPages).toContain('(<p>v)[^<]+( &middot; Gosling Agency &middot; Kernel-served AI</p>)');
+  });
 });
