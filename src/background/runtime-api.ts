@@ -424,7 +424,11 @@ export function registerRuntimeApi({
         return withAgencyHubCustodyLock(async () => {
           // (a) Capture the current token + base URL BEFORE the wipe. The token never
           // crosses the runtime boundary; the page only sees the outcome.
-          const before = await loadStorageState();
+          // readStorageState, not loadStorageState: this is a pure read, and the
+          // repair-write in loadStorageState could clobber a concurrent
+          // rekey/reconcile with a pre-rekey snapshot (same rule as the sibling
+          // hub handlers above).
+          const before = await readStorageState();
           const capturedToken = before.settings.agencyHubDeviceToken.trim();
           const capturedBaseUrl = before.settings.agencyHubBaseUrl;
 
