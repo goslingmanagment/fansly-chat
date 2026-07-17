@@ -11,7 +11,7 @@ describe('options shell mount', () => {
       document.querySelectorAll('.chatgoose-nav-item'),
       (item) => item.textContent,
     );
-    expect(navLabels).toEqual(['Agency Hub', 'Персоны', 'Аккаунты', 'Генерация', 'Вид', 'Версия']);
+    expect(navLabels).toEqual(['Статус', 'Agency Hub', 'Персоны', 'Аккаунты', 'Генерация', 'Вид', 'Версия']);
   });
 
   it('registers section cards in nav order', async () => {
@@ -20,14 +20,14 @@ describe('options shell mount', () => {
       document.querySelectorAll('[data-shell-section]'),
       (card) => (card as HTMLElement).dataset.shellSection,
     );
-    expect(ids).toEqual(['hub', 'personas', 'accounts', 'generation', 'appearance', 'version']);
+    expect(ids).toEqual(['status', 'hub', 'personas', 'accounts', 'generation', 'appearance', 'version']);
   });
 
   it('exactly one nav item is active at mount — the first section', async () => {
     const { document } = await mountOptionsPage();
     const active = document.querySelectorAll('.chatgoose-nav-item-active');
     expect(active).toHaveLength(1);
-    expect((active[0] as HTMLElement).dataset.navId).toBe('hub');
+    expect((active[0] as HTMLElement).dataset.navId).toBe('status');
   });
 
   it('no known-English UI strings survive on the rendered page', async () => {

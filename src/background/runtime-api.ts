@@ -1,6 +1,7 @@
 import {
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_MS,
+  SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_RESOLVE_TIMEOUT_MS,
 } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
@@ -12,7 +13,7 @@ import {
 } from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
-import { saveSettings } from '../shared/storage.js';
+import { readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
@@ -20,11 +21,12 @@ import type {
   PopupStatus,
   SpendersBuildPayload,
 } from '../shared/types.js';
-import type { AgencyHubClient } from './agency-hub-client.js';
+import { resolveHubBearer, type AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
-import { getLatestQuotaSnapshot } from './quota-tracker.js';
+import { getLatestQuotaSnapshot, getQuotaSnapshotsByPage } from './quota-tracker.js';
+import { getLatestSpendersObservation } from './spenders-status-tracker.js';
 import type { SessionStore } from './session-store.js';
 import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
@@ -310,6 +312,44 @@ export function registerRuntimeApi({
         }
       }
 
+      if (requestType === 'getAgencyHubHealth' || requestType === 'getAgencyHubIdentity') {
+        // Read a FRESH non-mutating snapshot, not the coordinator cache: a just-
+        // saved hub can still be lagging behind storage.onChanged in the cache,
+        // so a status read fired right after a save would otherwise probe the
+        // PREVIOUS hub. readStorageState re-reads storage without writing back
+        // (session discovery may own a concurrent identity rekey).
+        const { settings } = await readStorageState();
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+        );
+        try {
+          return requestType === 'getAgencyHubHealth'
+            ? await agencyHubClient.checkHealth(settings, controller.signal)
+            : await agencyHubClient.checkIdentity(settings, controller.signal);
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
+      }
+
+      if (requestType === 'getAiQuotaByPage') {
+        return await getQuotaSnapshotsByPage();
+      }
+
+      if (requestType === 'getSpendersStatus') {
+        // Scope the read to the CURRENT hub AND credential: a board observation
+        // recorded under a previous hub/principal must not survive a hub change
+        // OR a same-URL credential swap and paint a stale RAMPED/FLAG OFF row for
+        // a principal the chatter is no longer signed in as. Fresh read so a
+        // just-saved credential is not still lagging in the coordinator cache.
+        const { settings } = await readStorageState();
+        return await getLatestSpendersObservation(
+          normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl),
+          resolveHubBearer(settings),
+        );
+      }
+
       if (requestType === 'issueAgencyHubDeviceToken') {
         const input = isObjectRecord(message) &&
           typeof message.baseUrl === 'string' &&
@@ -402,8 +442,13 @@ export function registerRuntimeApi({
           ? message.buildId
           : undefined;
         const controller = new AbortController();
+        // Stamp the abort with a real AbortError DOMException carrying the reason
+        // so the getList wrapper can record a build timeout as a FAIL (not silently
+        // skip it like a user-cancel / superseded build) AND so an aborted fetch
+        // rejects with an AbortError — a bare string reason makes fetch reject with
+        // that string, defeating the `instanceof DOMException` timeout classifier.
         const timeout = globalThis.setTimeout(
-          () => controller.abort(),
+          () => controller.abort(new DOMException(SPENDERS_BUILD_TIMEOUT_REASON, 'AbortError')),
           SPENDERS_BUILD_TIMEOUT_MS,
         );
         try {
@@ -424,7 +469,14 @@ export function registerRuntimeApi({
           });
           return { ok: true, result };
         } catch (error) {
-          const timedOut = error instanceof DOMException && error.name === 'AbortError';
+          // A build timeout: the caught error is an AbortError AND this handler's
+          // own controller was aborted with the build-timeout reason. Reading the
+          // reason off the controller (not the caught error) is robust — some
+          // inner abort points rethrow a bare 'Aborted' DOMException that no
+          // longer carries the reason.
+          const reason: unknown = controller.signal.reason;
+          const timedOut = error instanceof DOMException && error.name === 'AbortError' &&
+            reason instanceof DOMException && reason.message === SPENDERS_BUILD_TIMEOUT_REASON;
           return {
             ok: false,
             error: timedOut ? createUserError('timed_out') : toUserError(error),

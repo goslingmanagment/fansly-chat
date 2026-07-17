@@ -57,6 +57,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E38 | 2026-07-15 | Kernel SSE error frames surface as their named cause: gateway maps provider* codes to hub_provider_failed/hub_request_failed, error surfaces render one technical-detail line, frame code matched by prefix not enum |
 | E39 | 2026-07-15 | Releases announce themselves in the ChatGoose Telegram channel: `--check` fails deploy.sh preflight before AMO signing, the real send runs only after tag_release and never fails a live deploy, load_env stops exporting `.env.deploy` |
 | E40 | 2026-07-17 | Options P1 shell redesign: desktop SettingsSurface shape + family control vocabulary, one «Аккаунты» section, Russian copy with EN-term glossary, local fonts (Google CDN removed) — zero behavior change, schema stays v14 |
+| E41 | 2026-07-17 | Options P2 informativeness: read-only «Статус» section + readiness hero, four independent runtime reads (health raw-503, me, per-page quota, spenders observations), persisted-signature hydration guard, no_permission first-class — schema stays v14, read-only throughout |
 
 ## Entries
 
@@ -905,3 +906,31 @@ Per-section module extraction is deferred to P2/P3 (spec §10 amended on
 the docs branch). Spec: docs/superpowers/specs/2026-07-16-options-redesign-
 design.md (P1); plan rev 5 after one codex-ultra and two double-blind
 toolkit reviews.
+**E41 (2026-07-17).** Options P2 informativeness: a read-only «Статус»
+section (Fansly capture / Hub /health UP·DEGRADED·DOWN·НЕТ ДОСТУПА / Доступ me
+AUTH·401·НЕТ CREDENTIAL·НЕИЗВЕСТНО / per-page AI quota / Spenders observation /
+debug-only Контракт MATCH·DRIFT) plus a readiness hero that reaches all-green in
+≤3 actions and collapses to a pulse line. Four new runtime reads
+(getAgencyHubHealth, getAgencyHubIdentity, getAiQuotaByPage, getSpendersStatus)
+— the options page never calls the kernel directly; each source hydrates
+independently (Promise.allSettled — one reject never strands a sibling row) with
+a skeleton and fails honestly ("unknown", never an invented number). DEGRADED is
+read via client.raw('health') + the vendored 200 schema (the typed client throws
+before the declared 503 body); the debug Контракт row compares the health
+contractHash to a background-stamped KERNEL_CONTRACT_HASH, so the options bundle
+imports no SDK. Health and credential validity stay SEPARATE rows and requests
+(never one indicator): no_permission is first-class (checkIdentity propagates it,
+the Hub row owns the «Разрешить доступ» grant, the Доступ badge stays neutral),
+so a fresh install is never a false red. Hub-status hydration fires at mount, on
+the post-persist connection-test boundary, and on the auth events (sign-in
+success, permission grant) — never per-keystroke — each caller passing the
+signature of the snapshot it persisted; the guard binds to that signature
+(checked before issuing AND before painting, no generation counter), so a
+re-typed field never gets a stale paint and a freshly-issued device token flips
+Доступ to AUTH in place. Readiness step 3 checks only accounts with
+captured sessions (an offline archived mapping never blocks all-green). Quota and
+spenders observations are storage.session-scale — schema stays v14; no new Fansly
+egress (DP 1-B). The Версия «Changelog» button links the anchored changelog page,
+gated on that page deploying first. Read-only throughout: the one central write
+controller, E19 custody, and the E37 barrier are untouched. Spec:
+docs/superpowers/specs/2026-07-16-options-redesign-design.md (P2).

@@ -17,6 +17,12 @@ const STORAGE_KEY = 'aiQuotaByPage';
 
 let memoryFallback: Record<string, AiQuotaSnapshot> = {};
 
+// storage.session updates replace the whole per-page object. Serialize every
+// read-modify-write so two overlapping generations (different pages) cannot both
+// read the same snapshot and let the later writer erase the earlier page's
+// entry. Mirrors the spenders session-cache queue in spenders-service.
+let mutationQueue: Promise<void> = Promise.resolve();
+
 function sessionStorageArea(): browser.storage.StorageArea | null {
   try {
     return browser.storage?.session ?? null;
@@ -54,6 +60,24 @@ async function writeAll(snapshots: Record<string, AiQuotaSnapshot>): Promise<voi
   }
 }
 
+/** Serialize a read-modify-write of the whole per-page map. Each queued task
+ * re-reads the freshest snapshot before applying its own change, so overlapping
+ * generations compose instead of clobbering. */
+async function mutateSnapshots(
+  mutate: (all: Record<string, AiQuotaSnapshot>) => void,
+): Promise<void> {
+  const run = mutationQueue.then(async () => {
+    const current = await readAll();
+    const next = { ...current };
+    mutate(next);
+    await writeAll(next);
+  });
+  // Keep the queue usable after a storage failure; each caller awaits its own
+  // ordered attempt.
+  mutationQueue = run.catch(() => undefined);
+  await mutationQueue;
+}
+
 function isSameUtcDay(left: number, right: number): boolean {
   const a = new Date(left);
   const b = new Date(right);
@@ -71,32 +95,50 @@ export async function recordQuotaSnapshot(
   if (!pageLabel) {
     return;
   }
-  const snapshots = await readAll();
-  snapshots[pageLabel] = {
-    pageLabel,
-    remainingRequestsToday,
-    exhausted: remainingRequestsToday === 0,
-    observedAt: Date.now(),
-  };
-  await writeAll(snapshots);
+  await mutateSnapshots((snapshots) => {
+    snapshots[pageLabel] = {
+      pageLabel,
+      remainingRequestsToday,
+      exhausted: remainingRequestsToday === 0,
+      observedAt: Date.now(),
+    };
+  });
 }
 
 export async function recordQuotaDenied(pageLabel: string): Promise<void> {
   if (!pageLabel) {
     return;
   }
+  await mutateSnapshots((snapshots) => {
+    snapshots[pageLabel] = {
+      pageLabel,
+      remainingRequestsToday: 0,
+      exhausted: true,
+      observedAt: Date.now(),
+    };
+  });
+}
+
+/** Full per-page map, same-UTC-day only (a previous day's numbers would lie
+ * after the kernel's 00:00 UTC reset). Empty object = no observations today. */
+export async function getQuotaSnapshotsByPage(): Promise<Record<string, AiQuotaSnapshot>> {
+  // Let any queued mutation land before reading, so a record that just resolved
+  // is visible to the very next read.
+  await mutationQueue;
   const snapshots = await readAll();
-  snapshots[pageLabel] = {
-    pageLabel,
-    remainingRequestsToday: 0,
-    exhausted: true,
-    observedAt: Date.now(),
-  };
-  await writeAll(snapshots);
+  const now = Date.now();
+  const sameDay: Record<string, AiQuotaSnapshot> = {};
+  for (const [pageLabel, snapshot] of Object.entries(snapshots)) {
+    if (isSameUtcDay(snapshot.observedAt, now)) {
+      sameDay[pageLabel] = snapshot;
+    }
+  }
+  return sameDay;
 }
 
 /** Freshest same-UTC-day snapshot across pages (null when none). */
 export async function getLatestQuotaSnapshot(): Promise<AiQuotaSnapshot | null> {
+  await mutationQueue;
   const snapshots = await readAll();
   const now = Date.now();
   let latest: AiQuotaSnapshot | null = null;

@@ -1,4 +1,4 @@
-import { KernelApiError, createClient } from '@kernel/sdk';
+import { KernelApiError, createClient, routeSchemas, KERNEL_CONTRACT_HASH } from '@kernel/sdk';
 import { clientVersionHeaders } from '../shared/client-version.js';
 import {
   AGENCY_HUB_PROFILE_MAX_BYTES,
@@ -23,6 +23,8 @@ import type {
   AgencyHubAiUsageBatchResponse,
   AgencyHubAiUsageEvent,
   AgencyHubConnectionTestResponse,
+  AgencyHubHealthResponse,
+  AgencyHubIdentityResponse,
   AgencyHubSummarySyncMetadata,
   Settings,
   SpendersStreamState,
@@ -535,6 +537,70 @@ export class AgencyHubClient {
             description: 'Ключ мог быть введён с ошибкой, заменён более новым, отозван или не является chatter key. Исправь его — или войди выше, чтобы вместо этого выпустить device token.',
           }),
     };
+  }
+
+  /** Public /health for the status row. DEGRADED is a declared 503 whose body
+   * the TYPED client throws before parsing — so read the raw Response (200 AND
+   * 503 both carry the body) and validate with the vendored 200 schema, whose
+   * status enum already covers 'degraded'. Health needs no bearer; it still
+   * needs the base URL and host permission (the extension can only reach the
+   * hub origin with the granted permission). */
+  async checkHealth(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<AgencyHubHealthResponse> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    if (!baseUrl) return { ok: false, reason: 'no_base_url' };
+    if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'no_permission' };
+    try {
+      const response = await this.sdkFor(baseUrl, resolveHubBearer(settings), signal).raw('health');
+      const json: unknown = await response.json().catch(() => null);
+      const parsed = routeSchemas.health.response[200].safeParse(json);
+      if (!parsed.success) return { ok: false, reason: 'unreachable' };
+      return {
+        ok: true,
+        status: parsed.data.status,
+        dbLatencyMs: parsed.data.checks.database.latencyMs,
+        contractHash: parsed.data.contractHash,
+        sdkContractHash: KERNEL_CONTRACT_HASH,
+      };
+    } catch {
+      return { ok: false, reason: 'unreachable' };
+    }
+  }
+
+  /** Authenticated identity for the «Доступ» row. A 401/403 is the credential
+   * being rejected (distinct from a DOWN hub); no bearer means nothing to send.
+   * A missing host permission is its OWN reason — NOT unreachable — so the
+   * renderer keeps the credential badge neutral and lets the Hub row own the
+   * grant prompt (health ≠ credential). */
+  async checkIdentity(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<AgencyHubIdentityResponse> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    // A missing credential and a missing base URL are DIFFERENT verdicts: with a
+    // bearer present but no address, there is nothing wrong with the credential —
+    // the hub is simply unaddressed. Conflating them into `no_credential` paints
+    // the Доступ row a false red «нет credential».
+    if (!bearer) return { ok: false, reason: 'no_credential' };
+    if (!baseUrl) return { ok: false, reason: 'no_base_url' };
+    if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'no_permission' };
+    try {
+      const me = await this.sdkFor(baseUrl, bearer, signal).me();
+      return {
+        ok: true,
+        username: me.user.username,
+        role: me.user.role,
+        pages: me.user.assignedPages.map((page) => page.label),
+      };
+    } catch (error) {
+      if (error instanceof KernelApiError && (error.status === 401 || error.status === 403)) {
+        return { ok: false, reason: 'unauthorized' };
+      }
+      return { ok: false, reason: 'unreachable' };
+    }
   }
 
   async submitAiUsageBatch({

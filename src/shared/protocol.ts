@@ -268,8 +268,16 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getSessionsSnapshot';
     case 'testAgencyHubConnection':
       return 'testAgencyHubConnection';
+    case 'getAgencyHubHealth':
+      return 'getAgencyHubHealth';
+    case 'getAgencyHubIdentity':
+      return 'getAgencyHubIdentity';
+    case 'getAiQuotaByPage':
+      return 'getAiQuotaByPage';
     case 'issueAgencyHubDeviceToken':
       return 'issueAgencyHubDeviceToken';
+    case 'getSpendersStatus':
+      return 'getSpendersStatus';
     case 'getSpendersList':
       return isOptionalBoolean(message, 'refresh') &&
         isOptionalString(message, 'buildId')
