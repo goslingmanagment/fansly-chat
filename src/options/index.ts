@@ -18,6 +18,7 @@ import {
   createLabelRow,
   createSavedFlash,
   createSection,
+  createStatusRow,
   createToggle,
   createVersionTag,
   debounce,
@@ -249,6 +250,7 @@ async function render(): Promise<void> {
   // immediately before the future-schema barrier so its catch-up can find and
   // disable the real controls (see the registration block for the invariant).
   const shell = buildShell([
+    { id: 'status', title: COPY.nav.status },
     { id: 'hub', title: COPY.nav.hub },
     { id: 'personas', title: COPY.nav.personas },
     { id: 'accounts', title: COPY.nav.accounts },
@@ -1357,6 +1359,29 @@ async function render(): Promise<void> {
   versionLine.textContent = `v ${extensionVersion} · канал: self-hosted feed`;
   versionSection.append(versionLine);
 
+  // ─── Статус (read-only state rows) ─────────────────────────
+  const statusSection = createSection(COPY.sections.statusTitle, COPY.sections.statusHint);
+  const statusRows = {
+    fansly: createStatusRow(COPY.status.fanslyLabel),
+    hub: createStatusRow(COPY.status.hubLabel),
+    access: createStatusRow(COPY.status.accessLabel),
+    ai: createStatusRow(COPY.status.aiLabel),
+    spenders: createStatusRow(COPY.status.spendersLabel),
+    contract: createStatusRow(COPY.status.contractLabel),
+  };
+  for (const row of Object.values(statusRows)) row.skeleton();
+  // The Контракт row is debug-only (spec §5). Hide it unless debugMode; the
+  // row still hydrates so toggling debug and reloading shows a live value.
+  if (!state.settings.debugMode) statusRows.contract.root.hidden = true;
+  statusSection.append(
+    statusRows.fansly.root,
+    statusRows.hub.root,
+    statusRows.access.root,
+    statusRows.ai.root,
+    statusRows.spenders.root,
+    statusRows.contract.root,
+  );
+
   // ─── Ordered section registration ───────────────────────────
   // MUST stay immediately before the future-schema barrier block below. Every
   // section is now in the DOM (shell.main → shell.layout → root) BEFORE the
@@ -1366,6 +1391,7 @@ async function render(): Promise<void> {
   // v15 observed during the initial storage read would disable nothing real —
   // the re-entry guard makes that first (empty) sweep the only one. Registration
   // order == nav order == card DOM order == the mount test's expectation.
+  shell.addSection('status', statusSection);
   shell.addSection('hub', agencyHubSection);
   shell.addSection('personas', personalitiesSection);
   shell.addSection('accounts', mappingsSection);

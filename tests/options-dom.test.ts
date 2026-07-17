@@ -97,4 +97,20 @@ describe('options dom primitives', () => {
     const wrapped = createLabelRow('Вход устройства', block);
     expect(wrapped.tagName).toBe('DIV');
   });
+
+  it('createStatusRow renders a mono badge, fact, and toggles skeleton', async () => {
+    const { createStatusRow } = await import('../src/options/dom.js');
+    const row = createStatusRow('Hub (core)');
+    row.skeleton();
+    expect(row.root.dataset.status).toBe('loading');
+    row.set({ badge: 'UP', tone: 'green', fact: 'ядро отвечает', detail: 'DB latency 12 мс' });
+    expect(row.root.dataset.status).toBe('ready');
+    const badge = row.root.querySelector('.chatgoose-badge-mono');
+    expect(badge?.textContent).toBe('UP');
+    expect(badge?.className).toContain('chatgoose-badge-green');
+    expect(row.root.textContent).toContain('Hub (core)');
+    expect(row.root.textContent).toContain('DB latency 12 мс');
+    row.setDetailLines(['lilly · осталось 143', 'ari · осталось 4']);
+    expect(row.root.querySelectorAll('.chatgoose-status-detail-line')).toHaveLength(2);
+  });
 });
