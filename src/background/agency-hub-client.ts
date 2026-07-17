@@ -580,7 +580,12 @@ export class AgencyHubClient {
   ): Promise<AgencyHubIdentityResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
-    if (!baseUrl || !bearer) return { ok: false, reason: 'no_credential' };
+    // A missing credential and a missing base URL are DIFFERENT verdicts: with a
+    // bearer present but no address, there is nothing wrong with the credential —
+    // the hub is simply unaddressed. Conflating them into `no_credential` paints
+    // the Доступ row a false red «нет credential».
+    if (!bearer) return { ok: false, reason: 'no_credential' };
+    if (!baseUrl) return { ok: false, reason: 'no_base_url' };
     if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'no_permission' };
     try {
       const me = await this.sdkFor(baseUrl, bearer, signal).me();

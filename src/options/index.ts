@@ -417,6 +417,9 @@ async function render(): Promise<void> {
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
+  // Monotonic run id for hydrateHubStatusRows: a newer run bumps it, so an older
+  // same-signature run that resolves out of order drops its paint (see below).
+  let agencyHubHydrationRun = 0;
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
@@ -1426,6 +1429,11 @@ async function render(): Promise<void> {
     identity: AgencyHubIdentityResponse | null;
   } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
 
+  // Task 8: the hero must not invent a verdict from zero data. Until the first
+  // real datum lands — a hub identity read OR the Fansly row painting — it holds
+  // a quiet loading line instead of claiming «До работы — N шагов».
+  let fanslyRowPainted = false;
+
   const isAccountPersonaMapped = (accountId: string): boolean => {
     const mappedKey = state.accountMappings[accountId] ?? '';
     return Boolean(mappedKey) && state.personaCatalog.some(
@@ -1441,7 +1449,21 @@ async function render(): Promise<void> {
     return 'шагов';
   };
   const updateReadinessHero = (): void => {
-    const hubDone = statusModel.identity?.ok === true;
+    // Loading: no hub identity yet AND the Fansly row has not painted. Render a
+    // quiet skeleton line — never a step count or an action — so a pre-hydration
+    // mount does not flash a fabricated «До работы — 3 шага».
+    if (statusModel.identity === null && !fanslyRowPainted) {
+      readinessHero.dataset.heroState = 'loading';
+      readinessHero.replaceChildren();
+      const line = document.createElement('span');
+      line.className = 'chatgoose-readiness-loading';
+      line.textContent = '…';
+      readinessHero.append(line);
+      return;
+    }
+    // Hub step is done only when BOTH the hub is healthy AND the credential is
+    // valid — an identity AUTH while /health is DOWN is not «Hub подключён».
+    const hubDone = statusModel.health?.ok === true && statusModel.identity?.ok === true;
     const fanslyDone = statusModel.fanslyCapturedAccountIds.length > 0;
     // ONLY accounts with a captured session need an active persona (spec §4).
     // An offline historical account carrying an archived mapping has no captured
@@ -1509,9 +1531,12 @@ async function render(): Promise<void> {
       readinessHero.append(stepRow);
     }
   };
-  updateReadinessHero(); // initial paint from skeleton state (all open)
+  updateReadinessHero(); // initial paint: loading skeleton until the first datum
 
   const paintFanslyStatusRow = (sessions: SessionSnapshotEntry[], failed: boolean): void => {
+    // Either branch below paints a real Fansly state — that is enough to lift the
+    // hero out of its loading skeleton even before the hub identity read lands.
+    fanslyRowPainted = true;
     if (failed) {
       statusRows.fansly.set({ badge: 'OFF', tone: 'neutral', fact: 'живой статус недоступен' });
       return;
@@ -1562,6 +1587,11 @@ async function render(): Promise<void> {
       state.settings.agencyHubDeviceToken,
     );
   const hydrateHubStatusRows = async (expectedSignature: string): Promise<void> => {
+    // Stamp a monotonic run id. Two runs can share the same expectedSignature
+    // (a permission grant firing while a post-persist run is still in flight);
+    // the signature guard alone cannot order them, so the newest run wins and an
+    // older run whose reply lands later has its paint dropped.
+    const run = ++agencyHubHydrationRun;
     // (1) Delayed-START guard — BEFORE issuing any request. If the live form has
     // already moved on from the snapshot this run was fired for, skip entirely:
     // the user is mid-edit and a newer persist will re-trigger with its own
@@ -1579,9 +1609,9 @@ async function render(): Promise<void> {
     // (2) In-flight guard — re-check before PAINTING. The reads pull SAVED
     // settings background-side, so a paint is only valid while the live form
     // still equals the persisted snapshot this run fired for; a mid-flight edit
-    // drops the result (that edit's own persist re-runs hydration). No generation
-    // counter — the persisted signature is the sole binding.
-    if (disposed || currentHubSignature() !== expectedSignature) return;
+    // drops the result (that edit's own persist re-runs hydration). The run id
+    // additionally drops a same-signature run that a newer run has superseded.
+    if (disposed || run !== agencyHubHydrationRun || currentHubSignature() !== expectedSignature) return;
     // A fulfilled read still has to be a well-formed response — a transport that
     // resolves `undefined` (a harness with no handler, a truncated frame) is a
     // failure, never invented into a verdict: fall to honest «unreachable».
@@ -1639,6 +1669,11 @@ async function render(): Promise<void> {
       statusRows.access.setAction(reLogin);
     } else if (identity.reason === 'no_credential') {
       statusRows.access.set({ badge: 'НЕТ CREDENTIAL', tone: 'neutral', fact: COPY.status.accessEmpty });
+    } else if (identity.reason === 'no_base_url') {
+      // A credential is present but the hub address is blank — nothing is wrong
+      // with the credential, so the badge stays neutral «НЕИЗВЕСТНО» and the fact
+      // names the real gap (the missing address), not a false «нет credential».
+      statusRows.access.set({ badge: 'НЕИЗВЕСТНО', tone: 'neutral', fact: COPY.status.hubEmpty });
     } else {
       // no_permission and unreachable are HUB-health conditions, not credential
       // verdicts — the Доступ badge stays neutral «НЕИЗВЕСТНО» (the blocker is
@@ -1693,8 +1728,11 @@ async function render(): Promise<void> {
     }
 
     // Spenders — freshest observation → RAMPED / FLAG OFF / NOT ALLOWLISTED / FAIL.
+    // A null observation is «not yet observed», NOT «flag off»: no board has been
+    // opened for this hub, so paint a neutral em-dash — inventing FLAG OFF here
+    // would claim the projection is disabled when we have never looked.
     if (!spenders) {
-      statusRows.spenders.set({ badge: 'FLAG OFF', tone: 'neutral', fact: COPY.status.spendersEmpty });
+      statusRows.spenders.set({ badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty });
     } else if (spenders.outcome === 'fail') {
       statusRows.spenders.set({ badge: 'FAIL', tone: 'bad', fact: 'последняя сборка доски не удалась' });
     } else {
@@ -1704,7 +1742,11 @@ async function render(): Promise<void> {
         not_allowlisted: { badge: 'NOT ALLOWLISTED', tone: 'amber', fact: 'страница не в allowlist' },
         unsupported_platform: { badge: 'FLAG OFF', tone: 'neutral', fact: 'платформа не поддерживается' },
       };
-      const view = spenders.streamState ? map[spenders.streamState] : map.flag_off;
+      // FLAG OFF only from a real flag_off observation; a null streamState on a
+      // successful outcome is «not yet observed», so keep the neutral em-dash.
+      const view = spenders.streamState
+        ? map[spenders.streamState]
+        : { badge: '—', tone: 'neutral' as BadgeTone, fact: COPY.status.spendersEmpty };
       statusRows.spenders.set(view);
     }
 
@@ -1788,6 +1830,10 @@ async function render(): Promise<void> {
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
         renderPersonaCatalog();
         refreshAccountMappingPersonalityOptions?.();
+        // A repopulated catalog can flip step 3 (persona assigned) from open to
+        // done — a mapping that was hidden by migrateState now resolves to an
+        // active persona — so repaint the hero from the fresh catalog state.
+        updateReadinessHero();
       }).catch((error: unknown) => {
         console.error('Failed to apply live persona catalog update', error);
       });
@@ -2023,6 +2069,10 @@ async function render(): Promise<void> {
       state.personaCatalogFetchedAt = refreshedCatalogState.personaCatalogFetchedAt;
       renderPersonaCatalog();
       refreshAccountMappingPersonalityOptions?.();
+      // The connection test just repopulated the catalog; a mapping that was
+      // hidden by migrateState may now resolve to an active persona, flipping
+      // step 3 done. Repaint the hero so it can reach pulse without a remount.
+      updateReadinessHero();
     }
   } catch (error) {
     console.error('Failed to refresh persona catalog view', error);

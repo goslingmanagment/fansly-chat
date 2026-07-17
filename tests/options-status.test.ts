@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
-import type { AgencyHubHealthResponse } from '../src/shared/types.js';
+import type {
+  AgencyHubHealthResponse,
+  AgencyHubIdentityResponse,
+  SessionSnapshotEntry,
+} from '../src/shared/types.js';
+
+/** A promise that never settles — used to hold a runtime read pending so a
+ * pre-hydration state can be observed. */
+const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
 afterEach(async () => { await unmountOptionsPage(); });
 
@@ -69,6 +77,23 @@ describe('options Статус — hub/session hydration', () => {
     const { document } = await mountOptionsPage(); // defaults: no_base_url / no_credential
     expect(rowByLabel(document, 'Hub (core)').textContent).toContain('адрес хаба не задан');
     expect(rowByLabel(document, 'Доступ').textContent).toContain('войди или добавь ключ');
+  });
+
+  it('paints Доступ neutral НЕИЗВЕСТНО «адрес хаба не задан» when a credential exists but the address is blank', async () => {
+    // Task 3: a device token with a blank base URL is no_base_url, not
+    // no_credential — the credential badge stays neutral and names the real gap.
+    const { document } = await mountOptionsPage({
+      settings: { agencyHubDeviceToken: 't' }, // token set, base URL blank
+      runtime: {
+        health: { ok: false, reason: 'no_base_url' },
+        identity: { ok: false, reason: 'no_base_url' },
+      },
+    });
+    const access = rowByLabel(document, 'Доступ');
+    expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕИЗВЕСТНО');
+    expect(access.dataset.tone).toBe('neutral');
+    expect(access.textContent).toContain('адрес хаба не задан');
+    expect(access.textContent).not.toContain('НЕТ CREDENTIAL');
   });
 
   it('DRIFT when the hub contract hash differs from the SDK (debug row)', async () => {
@@ -243,8 +268,14 @@ describe('options Статус — AI quota & Spenders hydration', () => {
     const ramped = await mountOptionsPage({ runtime: { spenders: { sourceIdentity: 's', streamState: 'ramped', outcome: 'ok', observedAt: Date.now() } } });
     expect(rowByLabel(ramped.document, 'Spenders').querySelector('.chatgoose-badge-mono')?.textContent).toBe('RAMPED');
     await unmountOptionsPage();
+    // A null observation = «doska ещё не открывалась» — a NEUTRAL em-dash, never
+    // an invented FLAG OFF (which would claim the projection is disabled).
     const empty = await mountOptionsPage({ runtime: { spenders: null } });
-    expect(rowByLabel(empty.document, 'Spenders').textContent).toContain('доска ещё не открывалась');
+    const spendersRow = rowByLabel(empty.document, 'Spenders');
+    expect(spendersRow.textContent).toContain('доска ещё не открывалась');
+    expect(spendersRow.querySelector('.chatgoose-badge-mono')?.textContent).toBe('—');
+    expect(spendersRow.dataset.tone).toBe('neutral');
+    expect(spendersRow.textContent).not.toContain('FLAG OFF');
   });
 
   it('renders Spenders even when the AI quota read rejects (independent sources)', async () => {
@@ -335,6 +366,140 @@ describe('options readiness hero (route → pulse)', () => {
     });
     const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
     expect(hero.dataset.heroState).toBe('pulse');
+  });
+
+  it('holds a quiet loading line before any data lands (no invented step count)', async () => {
+    // Deferred hub reads AND deferred sessions → neither the hub identity nor the
+    // Fansly row ever paints, so the hero must stay in its loading skeleton and
+    // NOT fabricate «До работы — 3 шага» from zero data.
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      sessions: () => never<SessionSnapshotEntry[]>(),
+      runtime: {
+        health: () => never<AgencyHubHealthResponse>(),
+        identity: () => never<AgencyHubIdentityResponse>(),
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('loading');
+    expect(hero.textContent).not.toContain('До работы');
+    expect(hero.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('keeps the hub step open when identity is AUTH but /health is DOWN', async () => {
+    // Task 2: «Всё работает» must require a healthy hub AND a valid credential.
+    // An AUTH identity while /health rejects is NOT «Hub подключён».
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      runtime: {
+        health: () => Promise.reject(new Error('health channel closed')),
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('route');
+    const step1 = Array.from(hero.querySelectorAll('.chatgoose-readiness-step'))
+      .find((step) => step.textContent?.includes('Agency Hub подключён')) as HTMLElement;
+    expect(step1.dataset.done).toBe('false');
+  });
+
+  it('reaches pulse after the mount-tail connection test repopulates a hidden catalog', async () => {
+    // Stored catalog source MISMATCHES the creds → migrateState hides it at mount
+    // (step 3 open → route). The connection test then publishes a fresh,
+    // matching-source catalog; the mount-tail merge must repaint the hero (Task 1
+    // site A) so it can reach pulse without a remount.
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: {
+        knownAccounts: ['acc-1'],
+        accountMappings: { 'acc-1': 'closer' },
+        personaCatalog: [ACTIVE_PERSONA],
+        personaCatalogSource: 'stale-source-mismatch',
+      },
+      sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+      runtime: {
+        health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+      },
+      revealCatalogOnConnect: { catalog: [ACTIVE_PERSONA], source: personaCatalogSource(HUB_SETTINGS)! },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('pulse');
+  });
+
+  it('reaches pulse when a live catalog storage-change repopulates a hidden catalog', async () => {
+    // Task 1 site B: the same repaint must fire from handleCatalogStorageChange.
+    const matchingSource = personaCatalogSource(HUB_SETTINGS)!;
+    const { document, window, flushAsync } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: {
+        knownAccounts: ['acc-1'],
+        accountMappings: { 'acc-1': 'closer' },
+        personaCatalog: [ACTIVE_PERSONA],
+        personaCatalogSource: 'stale-source-mismatch',
+      },
+      sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+      runtime: {
+        health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    // Catalog still hidden → step 3 open → route.
+    expect(hero.dataset.heroState).toBe('route');
+
+    const browserRef = (window as unknown as {
+      browser: {
+        storage: {
+          local: { set: (items: Record<string, unknown>) => Promise<void> };
+          onChanged: { addListener: ReturnType<typeof vi.fn> };
+        };
+      };
+    }).browser;
+    await browserRef.storage.local.set({ personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: matchingSource });
+    const changes = { personaCatalog: { newValue: [ACTIVE_PERSONA] }, personaCatalogSource: { newValue: matchingSource } };
+    for (const call of browserRef.storage.onChanged.addListener.mock.calls) {
+      (call[0] as (c: unknown, area: string) => void)(changes, 'local');
+    }
+    await flushAsync();
+
+    expect(hero.dataset.heroState).toBe('pulse');
+  });
+
+  it('drops an out-of-order same-signature hydration run (run counter)', async () => {
+    // Two hydrations share the stored signature: run1 from mount, run2 from a
+    // permission grant. run2 (newest) resolves FIRST and paints; run1 resolves
+    // LATE and must be dropped by the run counter (Task 9), never repaint.
+    const healthResolvers: Array<(value: AgencyHubHealthResponse) => void> = [];
+    const nextHealth = (): Promise<AgencyHubHealthResponse> =>
+      new Promise<AgencyHubHealthResponse>((resolve) => { healthResolvers.push(resolve); });
+    const { document, window, flushAsync } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      runtime: {
+        health: () => nextHealth(),
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+      },
+    });
+    // run1 (mount) is parked on its deferred health.
+    expect(healthResolvers).toHaveLength(1);
+
+    const browserRef = (window as unknown as {
+      browser: { permissions: { onAdded: { addListener: ReturnType<typeof vi.fn> } } };
+    }).browser;
+    const onAdded = browserRef.permissions.onAdded.addListener.mock.calls[0]?.[0] as () => void;
+    onAdded(); // permission grant → handlePermissionChanged → run2 (same signature)
+    await flushAsync();
+    expect(healthResolvers).toHaveLength(2);
+
+    // run2 resolves first → paints UP (it is the current run).
+    healthResolvers[1]!({ ok: true, status: 'ok', dbLatencyMs: 3, contractHash: 'a', sdkContractHash: 'a' });
+    await flushAsync();
+    expect(rowByLabel(document, 'Hub (core)').querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
+
+    // run1 resolves LATE with a different verdict → its paint must be dropped.
+    healthResolvers[0]!({ ok: true, status: 'degraded', dbLatencyMs: 9, contractHash: 'a', sdkContractHash: 'a' });
+    await flushAsync();
+    expect(rowByLabel(document, 'Hub (core)').querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
   });
 });
 

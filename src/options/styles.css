@@ -369,6 +369,8 @@ input[type='checkbox'] {
 /* ── Readiness hero: route checklist ↔ all-green pulse line ── */
 .chatgoose-readiness { margin: 4px 20px 0; padding: 14px 16px; border-radius: var(--chatgoose-radius-card); border: 1px solid var(--chatgoose-line); background: var(--chatgoose-bg1); box-shadow: var(--chatgoose-shadow); }
 .chatgoose-readiness[data-hero-state="pulse"] { display: flex; align-items: center; gap: 10px; }
+.chatgoose-readiness[data-hero-state="loading"] { display: flex; align-items: center; min-height: 20px; }
+.chatgoose-readiness-loading { color: var(--chatgoose-ink-mid); font-size: 15px; letter-spacing: 2px; opacity: 0.7; }
 .chatgoose-readiness-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--chatgoose-green); flex: none; }
 .chatgoose-readiness-pulse { font-weight: 650; }
 .chatgoose-readiness-facts { color: var(--chatgoose-ink-mid); font-size: 12px; }

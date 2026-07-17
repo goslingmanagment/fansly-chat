@@ -54,12 +54,21 @@ export async function recordSpendersObservation(
   await writeAll(all);
 }
 
-/** Freshest observation across sources (null when none). Chatters run one
- * creator per browser session, so freshest is the board the row means. */
-export async function getLatestSpendersObservation(): Promise<SpendersObservation | null> {
+/** Freshest observation recorded under the CURRENT hub (null when none). The
+ * caller passes the normalized hub base URL so an observation captured under a
+ * previous hub/principal cannot survive a hub change: every recorded
+ * `sourceIdentity` is `creator|hubBaseUrl`, and only entries ending in the
+ * current `|hubBaseUrl` are eligible. Chatters run one creator per browser
+ * session, so the freshest eligible entry is the board the row means. */
+export async function getLatestSpendersObservation(
+  currentHubBaseUrl: string | null,
+): Promise<SpendersObservation | null> {
+  if (!currentHubBaseUrl) return null;
+  const suffix = `|${currentHubBaseUrl}`;
   const all = await readAll();
   let latest: SpendersObservation | null = null;
   for (const observation of Object.values(all)) {
+    if (!observation.sourceIdentity.endsWith(suffix)) continue;
     if (!latest || observation.observedAt > latest.observedAt) latest = observation;
   }
   return latest;

@@ -1,6 +1,7 @@
 import {
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_MS,
+  SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_RESOLVE_TIMEOUT_MS,
 } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
@@ -332,7 +333,13 @@ export function registerRuntimeApi({
       }
 
       if (requestType === 'getSpendersStatus') {
-        return await getLatestSpendersObservation();
+        // Scope the read to the CURRENT hub: a board observation recorded under a
+        // previous hub/principal must not survive a hub change and paint a stale
+        // RAMPED/FLAG OFF row for a hub the chatter is no longer pointed at.
+        const { settings } = await storageCoordinator.getState();
+        return await getLatestSpendersObservation(
+          normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl),
+        );
       }
 
       if (requestType === 'issueAgencyHubDeviceToken') {
@@ -427,8 +434,10 @@ export function registerRuntimeApi({
           ? message.buildId
           : undefined;
         const controller = new AbortController();
+        // Stamp the abort so the getList wrapper can record a real build timeout
+        // as a FAIL (not silently skip it like a user-cancel / superseded build).
         const timeout = globalThis.setTimeout(
-          () => controller.abort(),
+          () => controller.abort(SPENDERS_BUILD_TIMEOUT_REASON),
           SPENDERS_BUILD_TIMEOUT_MS,
         );
         try {

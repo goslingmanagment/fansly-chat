@@ -1201,6 +1201,14 @@ describe('AgencyHubClient.checkIdentity', () => {
       .toEqual({ ok: false, reason: 'no_credential' });
   });
 
+  it('reports no_base_url — NOT no_credential — when a bearer is present but the address is blank', async () => {
+    // A credential with no hub address is a MISSING-ADDRESS state, not a bad
+    // credential; conflating them paints a false red «нет credential».
+    const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
+    expect(await client.checkIdentity({ ...HUB, agencyHubBaseUrl: '' }, new AbortController().signal))
+      .toEqual({ ok: false, reason: 'no_base_url' });
+  });
+
   it('propagates no_permission distinctly (never folded into unreachable)', async () => {
     stubBrowserPermission(false);
     const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));

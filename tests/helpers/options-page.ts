@@ -11,6 +11,7 @@ import type {
   AgencyHubIdentityResponse,
   AiQuotaStatus,
   PersistedState,
+  PersonaCatalogEntry,
   SessionSnapshotEntry,
   Settings,
   SpendersObservation,
@@ -21,8 +22,15 @@ export interface MountOverrides {
   settings?: Partial<Settings>;
   /** Merged over the default PersistedState (settings + schemaVersion fixed). */
   state?: Partial<Omit<PersistedState, 'settings' | 'schemaVersion'>>;
-  /** Reply for the getSessionsSnapshot runtime request (defaults to []). */
-  sessions?: SessionSnapshotEntry[];
+  /** Reply for the getSessionsSnapshot runtime request (defaults to []). A
+   * factory may return a deferred promise so a test can hold the Fansly row
+   * unpainted (pre-hydration loading-hero assertion). */
+  sessions?: SessionSnapshotEntry[] | (() => SessionSnapshotEntry[] | Promise<SessionSnapshotEntry[]>);
+  /** When set, a successful testAgencyHubConnection writes this catalog + source
+   * into storage before the mount-tail readStorageState re-reads it — simulating
+   * the background catalog refresh that onAgencyHubReady triggers, so a catalog
+   * hidden by migrateState at mount becomes visible after the connection test. */
+  revealCatalogOnConnect?: { catalog: PersonaCatalogEntry[]; source: string };
   /** Deterministic replies for the P2 status/hero runtime reads. Each field may
    * be a value OR a factory — a factory lets a test return a deferred promise
    * (signature-guard A→B race) or a rejecting promise (independent-source
@@ -156,7 +164,20 @@ export async function mountOptionsPage(
         };
         switch (requestType) {
           case 'getSessionsSnapshot':
-            return sessions;
+            return runtimeReply<SessionSnapshotEntry[]>(sessions, []);
+          case 'testAgencyHubConnection':
+            if (overrides.revealCatalogOnConnect) {
+              // The background refresh onAgencyHubReady would fire has just landed:
+              // publish the fresh catalog + matching source before the page's
+              // post-connection-test readStorageState re-reads it.
+              stored = {
+                ...stored,
+                personaCatalog: overrides.revealCatalogOnConnect.catalog,
+                personaCatalogSource: overrides.revealCatalogOnConnect.source,
+              };
+              return { ok: true };
+            }
+            return undefined;
           case 'getAgencyHubHealth':
             return runtimeReply<AgencyHubHealthResponse>(runtime.health, { ok: false, reason: 'no_base_url' });
           case 'getAgencyHubIdentity':
@@ -179,6 +200,10 @@ export async function mountOptionsPage(
     permissions: {
       contains: vi.fn(async () => false),
       request: vi.fn(async () => false),
+      // Real browsers fire these on a grant/revoke; wiring them lets a test drive
+      // the permission-change hydration path (same-signature run ordering).
+      onAdded: { addListener: vi.fn(), removeListener: vi.fn() },
+      onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
     },
   };
   vi.stubGlobal('browser', browserStub);

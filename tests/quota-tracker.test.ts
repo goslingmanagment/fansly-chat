@@ -17,6 +17,7 @@ describe('quota-tracker', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('serves the freshest snapshot and marks denials exhausted', async () => {
@@ -52,6 +53,44 @@ describe('quota-tracker', () => {
     // 00:01 next UTC day: the kernel has reset — yesterday's number would lie.
     vi.setSystemTime(new Date('2026-07-11T00:01:00.000Z'));
     expect(await getLatestQuotaSnapshot()).toBeNull();
+  });
+
+  it('keeps both pages when two records for different pages overlap', async () => {
+    // Simulate storage.session, whose get returns a COPY of the map at call time
+    // (unlike the memory fallback, which shares one object). Without serialization
+    // the later writer would erase the earlier page. The first get parks so the
+    // two read-modify-write cycles are forced to interleave.
+    const KEY = 'aiQuotaByPage';
+    let backing: Record<string, unknown> = {};
+    let releaseFirstGet!: () => void;
+    const firstGetGate = new Promise<void>((resolve) => { releaseFirstGet = resolve; });
+    let getCount = 0;
+    vi.stubGlobal('browser', {
+      storage: {
+        session: {
+          get: vi.fn((_key: string) => {
+            getCount += 1;
+            const captured = { [KEY]: structuredClone(backing) }; // value at CALL time
+            return getCount === 1
+              ? firstGetGate.then(() => captured) // stale snapshot, delivered late
+              : Promise.resolve(captured);
+          }),
+          set: vi.fn(async (items: Record<string, unknown>) => {
+            backing = items[KEY] as Record<string, unknown>;
+          }),
+        },
+      },
+    });
+
+    const first = recordQuotaSnapshot('lilly', 100);
+    const second = recordQuotaSnapshot('ari', 50);
+    releaseFirstGet();
+    await Promise.all([first, second]);
+
+    const byPage = await getQuotaSnapshotsByPage();
+    expect(Object.keys(byPage).sort()).toEqual(['ari', 'lilly']);
+    expect(byPage.lilly).toMatchObject({ remainingRequestsToday: 100 });
+    expect(byPage.ari).toMatchObject({ remainingRequestsToday: 50 });
   });
 
   it('ignores records without a page label', async () => {

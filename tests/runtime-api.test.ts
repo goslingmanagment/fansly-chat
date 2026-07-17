@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import {
+  SPENDERS_BUILD_TIMEOUT_MS,
+  SPENDERS_BUILD_TIMEOUT_REASON,
+  STORAGE_SCHEMA_VERSION,
+} from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { SessionTemplate, SpendersBuildPayload } from '../src/shared/types.js';
@@ -527,8 +531,10 @@ describe('runtime-api getSpendersStatus', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the freshest recorded board observation', async () => {
-    mockStorage = createStorage();
+  it('returns the freshest observation recorded under the CURRENT hub', async () => {
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub' },
+    });
     const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
     // Same post-reset instance the handler reads (no browser.storage.session
     // in the test env — the tracker uses its module-memory fallback).
@@ -539,8 +545,21 @@ describe('runtime-api getSpendersStatus', () => {
     expect(result).toMatchObject({ sourceIdentity: 'creator-1|https://hub', outcome: 'ok', streamState: 'ramped' });
   });
 
+  it('returns null for an observation recorded under a previous hub (hub changed)', async () => {
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b' },
+    });
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    const { recordSpendersObservation } = await import('../src/background/spenders-status-tracker.js');
+    // Observed under hub A; the settings now point at hub B.
+    await recordSpendersObservation({ sourceIdentity: 'creator-1|https://hub-a', streamState: 'ramped', outcome: 'ok' });
+    expect(await harness.send({ type: 'getSpendersStatus' })).toBeNull();
+  });
+
   it('returns null when no board has been observed', async () => {
-    mockStorage = createStorage();
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub' },
+    });
     const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
     expect(await harness.send({ type: 'getSpendersStatus' })).toBeNull();
   });
@@ -610,6 +629,36 @@ describe('runtime-api getSpendersList', () => {
 
     expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
     expect(spendersService.getList).not.toHaveBeenCalled();
+  });
+
+  it('aborts a timed-out build with the timeout reason so the wrapper records a FAIL', async () => {
+    vi.useFakeTimers();
+    try {
+      let captured: AbortSignal | undefined;
+      const spendersService = {
+        getList: vi.fn((_session: unknown, signal: AbortSignal) => new Promise((_resolve, reject) => {
+          captured = signal;
+          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        })),
+      };
+      const { sessionStore, send } = await installRuntimeApiHarness(
+        { getAuthenticatedAccount: vi.fn() },
+        { spendersService },
+      );
+      sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+      const pending = send({ type: 'getSpendersList' }, { tab: { id: 7 } });
+      await Promise.resolve(); // let the handler invoke getList
+      expect(captured?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(SPENDERS_BUILD_TIMEOUT_MS);
+      // The build-timeout handler stamps the reason so the getList wrapper can tell
+      // a real timeout (record FAIL) from a user-cancel / superseded build (skip).
+      expect(captured?.reason).toBe(SPENDERS_BUILD_TIMEOUT_REASON);
+      await expect(pending).resolves.toEqual({ ok: false, error: createUserError('timed_out') });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('correlates progress frames with the requesting board build', async () => {

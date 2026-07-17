@@ -23,6 +23,7 @@
 import {
   FANSLY_CUSTOM_NAME_NOTE_TYPE,
   FANSLY_PAGINATION_DELAY_MS,
+  SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_CACHE_TTL_MS,
   SPENDERS_KERNEL_LIMIT,
   SPENDERS_MAX_FANS,
@@ -445,8 +446,14 @@ export class SpendersService {
       });
       return result;
     } catch (error) {
-      // A caller cancellation (tab closed / superseded) is not a board outcome.
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      const isAbort = error instanceof DOMException && error.name === 'AbortError';
+      // A user cancellation (tab closed / superseded build) is not a board
+      // outcome — skip it. But a build-TIMEOUT abort IS a real failure: recording
+      // it as FAIL is what stops the Статус row from showing a stale RAMPED. The
+      // runtime-api timeout handler stamps `signal.reason` so we can tell them
+      // apart (a plain user abort carries no such reason).
+      const isTimeoutAbort = isAbort && signal.reason === SPENDERS_BUILD_TIMEOUT_REASON;
+      if (!isAbort || isTimeoutAbort) {
         await recordSpendersObservation({ sourceIdentity, streamState: null, outcome: 'fail' });
       }
       throw error;

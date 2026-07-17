@@ -968,7 +968,7 @@ export type AgencyHubHealthResponse =
  * can keep the credential badge neutral and surface the grant on the Hub row. */
 export type AgencyHubIdentityResponse =
   | { ok: true; username: string; role: string; pages: string[] }
-  | { ok: false; reason: 'no_credential' | 'no_permission' | 'unauthorized' | 'unreachable' };
+  | { ok: false; reason: 'no_credential' | 'no_base_url' | 'no_permission' | 'unauthorized' | 'unreachable' };
 
 export interface AgencyHubAiUsageEvent {
   clientEventId: string;
