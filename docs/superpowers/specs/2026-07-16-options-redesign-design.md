@@ -334,7 +334,11 @@ observations are session-scale and do not move the storage schema.
    Russian copy, the autosave flash, the «Аккаунты» merge, the legacy key
    collapse, local fonts. No new data. The page already feels like the
    desktop.
-2. **P2 — informativeness.** The Статус section + readiness hero: health
+2. **P2 — informativeness.** *Shipped 2026-07-17 (E41): the Статус section
+   (Fansly/Hub/Доступ/AI/Spenders/Контракт rows), the readiness hero, the
+   per-page quota read, the spenders observation tracker, and the anchored
+   Changelog button all landed; sign-out and the persona catalog rows remain
+   P3; the changelog.html port remains the parallel track.* The Статус section + readiness hero: health
    (UP/DEGRADED/DOWN) and Доступ (me/test) as separate rows, the per-page
    quota read, the spenders status tracker, the debug-only contract row,
    the Changelog button with the anchor (the page deploys before this
