@@ -61,6 +61,8 @@ import {
 } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  AgencyHubHealthResponse,
+  AgencyHubIdentityResponse,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
   Settings,
@@ -802,6 +804,9 @@ async function render(): Promise<void> {
           // returns only metadata; a placeholder here would later be SENT as
           // the bearer by the connection test (1.7.0 audit finding).
           state.settings = (await loadStorageState()).settings;
+          // The freshly-issued device token makes checkIdentity return AUTH, so
+          // the Доступ row (and the hero) flip in place — no reload, no remount.
+          void hydrateHubStatusRows(storedHubSignature());
           hubSignInPasswordInput.value = '';
           hubSignInMeta.textContent =
             `Device token ${response.keyPrefix}… выпущен (истекает ${new Date(response.expiresAt).toLocaleDateString()}).`;
@@ -996,6 +1001,10 @@ async function render(): Promise<void> {
           if (!disposed) {
             await runAgencyHubConnectionTest({ force: true });
           }
+          // Repaint Статус against the snapshot THIS persist wrote. The guard
+          // inside binds to `hubSignature`, so a run this persist fired against
+          // hub B silently drops if the live field has since moved to hub C.
+          await hydrateHubStatusRows(hubSignature);
         })().catch((error: unknown) => {
           console.error('Failed to refresh Agency Hub status after Settings save', error);
         });
@@ -1104,6 +1113,10 @@ async function render(): Promise<void> {
       void (async () => {
         await refreshAgencyHubPermissionState();
         await runAgencyHubConnectionTest({ force: true });
+        // A granted origin flips a `no_permission` Hub/Доступ verdict to live
+        // without a reload. No unsaved edit is in play at a permission event,
+        // so the stored-settings signature is the expected snapshot.
+        await hydrateHubStatusRows(storedHubSignature());
       })();
     };
 
@@ -1382,6 +1395,173 @@ async function render(): Promise<void> {
     statusRows.contract.root,
   );
 
+  // Shared read-only model the Статус rows and the readiness hero both read.
+  // Rows are painted directly here; the hero (Task 8) re-renders from this.
+  const statusModel: {
+    fanslyAccounts: number;
+    // The account ids that currently have a CAPTURED session — the hero's step-3
+    // readiness reads only this set, never every knownAccount (an offline
+    // historical account with an archived mapping must not block «Всё работает»).
+    fanslyCapturedAccountIds: string[];
+    fanslyFreshest: SessionSnapshotEntry | undefined;
+    health: AgencyHubHealthResponse | null;
+    identity: AgencyHubIdentityResponse | null;
+  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
+
+  // Task 8 replaces this body; a no-op placeholder keeps the hydration calls
+  // that read `statusModel` self-contained until then.
+  const updateReadinessHero = (): void => undefined;
+
+  const paintFanslyStatusRow = (sessions: SessionSnapshotEntry[], failed: boolean): void => {
+    if (failed) {
+      statusRows.fansly.set({ badge: 'OFF', tone: 'neutral', fact: 'живой статус недоступен' });
+      return;
+    }
+    const lookup = buildSessionLookup(sessions);
+    // The captured-session account ids drive BOTH the Fansly row count and the
+    // hero's step-3 readiness. An account with no captured session needs no
+    // persona (spec §4), so it must never enter this set.
+    const capturedAccountIds = state.knownAccounts.filter(
+      (id) => lookup.get(id)?.connected === true,
+    );
+    statusModel.fanslyCapturedAccountIds = capturedAccountIds;
+    statusModel.fanslyAccounts = capturedAccountIds.length;
+    statusModel.fanslyFreshest = capturedAccountIds
+      .map((id) => lookup.get(id))
+      .filter((s): s is SessionSnapshotEntry => Boolean(s))
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
+    if (capturedAccountIds.length === 0) {
+      statusRows.fansly.set({ badge: 'OFF', tone: 'amber', fact: COPY.status.fanslyEmpty });
+    } else {
+      statusRows.fansly.set({
+        badge: 'CAPTURED',
+        tone: 'green',
+        fact: `${capturedAccountIds.length} акк.`,
+        detail: formatCaptureStatus(statusModel.fanslyFreshest),
+      });
+    }
+    updateReadinessHero(); // Task 8 (no-op until then)
+  };
+
+  // The live connection signature the hub fields currently show. The guard binds
+  // to the PERSISTED snapshot: the caller passes the signature of what it just
+  // persisted, and this run is valid only while the live form still equals it.
+  const currentHubSignature = (): string =>
+    buildAgencyHubConnectionSignature(
+      agencyHubUrlInput.value,
+      agencyHubKeyInput.value,
+      state.settings.agencyHubDeviceToken,
+    );
+  // The signature of the SAVED settings — what mount, the sign-in success path,
+  // and the permission grant pass as their expected snapshot (no unsaved edit is
+  // in play at those moments; the form equals stored). The post-persist caller
+  // instead passes its own freshly-computed `hubSignature` from `mergedSettings`.
+  const storedHubSignature = (): string =>
+    buildAgencyHubConnectionSignature(
+      state.settings.agencyHubBaseUrl,
+      state.settings.agencyHubApiKey,
+      state.settings.agencyHubDeviceToken,
+    );
+  const hydrateHubStatusRows = async (expectedSignature: string): Promise<void> => {
+    // (1) Delayed-START guard — BEFORE issuing any request. If the live form has
+    // already moved on from the snapshot this run was fired for, skip entirely:
+    // the user is mid-edit and a newer persist will re-trigger with its own
+    // signature. Firing a doomed pair of hub requests here is the storm we avoid.
+    if (disposed || currentHubSignature() !== expectedSignature) return;
+    for (const row of [statusRows.hub, statusRows.access]) row.skeleton();
+    statusRows.hub.setAction(null);
+    // Independent sources (§12): a rejected transport on ONE read must not leave
+    // the OTHER row a skeleton nor surface as an unhandled rejection. allSettled
+    // lets each row render its own honest state.
+    const [healthResult, identityResult] = await Promise.allSettled([
+      sendRuntimeRequest('getAgencyHubHealth'),
+      sendRuntimeRequest('getAgencyHubIdentity'),
+    ]);
+    // (2) In-flight guard — re-check before PAINTING. The reads pull SAVED
+    // settings background-side, so a paint is only valid while the live form
+    // still equals the persisted snapshot this run fired for; a mid-flight edit
+    // drops the result (that edit's own persist re-runs hydration). No generation
+    // counter — the persisted signature is the sole binding.
+    if (disposed || currentHubSignature() !== expectedSignature) return;
+    // A fulfilled read still has to be a well-formed response — a transport that
+    // resolves `undefined` (a harness with no handler, a truncated frame) is a
+    // failure, never invented into a verdict: fall to honest «unreachable».
+    const isOkResponse = (value: unknown): value is { ok: boolean } =>
+      typeof value === 'object' && value !== null && 'ok' in value;
+    const health: AgencyHubHealthResponse = healthResult.status === 'fulfilled' && isOkResponse(healthResult.value)
+      ? healthResult.value
+      : { ok: false, reason: 'unreachable' };
+    const identity: AgencyHubIdentityResponse = identityResult.status === 'fulfilled' && isOkResponse(identityResult.value)
+      ? identityResult.value
+      : { ok: false, reason: 'unreachable' };
+    statusModel.health = health;
+    statusModel.identity = identity;
+
+    // Hub (core)
+    if (health.ok) {
+      statusRows.hub.set({
+        badge: health.status === 'degraded' ? 'DEGRADED' : 'UP',
+        tone: health.status === 'degraded' ? 'amber' : 'green',
+        fact: health.status === 'degraded' ? 'ядро деградировано' : 'ядро отвечает',
+        detail: health.dbLatencyMs === null ? undefined : `DB latency ${health.dbLatencyMs} мс`,
+      });
+    } else if (health.reason === 'no_base_url') {
+      statusRows.hub.set({ badge: 'DOWN', tone: 'neutral', fact: COPY.status.hubEmpty });
+    } else if (health.reason === 'no_permission') {
+      // A fresh install has no host permission (permissions.contains defaults
+      // false) — that is NOT a down core. Distinct amber badge + a grant action
+      // anchored to the hub section (where the permission button lives), so the
+      // renderer never falls through to a false red «ядро недоступно».
+      statusRows.hub.set({ badge: 'НЕТ ДОСТУПА', tone: 'amber', fact: COPY.status.hubNoPermission });
+      const grant = createButton(COPY.status.grantAccess, true);
+      grant.addEventListener('click', () => {
+        agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      statusRows.hub.setAction(grant);
+    } else {
+      statusRows.hub.set({ badge: 'DOWN', tone: 'bad', fact: 'ядро недоступно' });
+    }
+
+    // Доступ — CREDENTIAL validity only, never a hub-health verdict (§14).
+    statusRows.access.setAction(null);
+    if (identity.ok) {
+      statusRows.access.set({
+        badge: 'AUTH',
+        tone: 'green',
+        fact: `${identity.username} · ${identity.role}`,
+        detail: `pages: ${identity.pages.length}`,
+      });
+    } else if (identity.reason === 'unauthorized') {
+      statusRows.access.set({ badge: '401', tone: 'bad', fact: 'кредерод отклонён' });
+      const reLogin = createButton(COPY.status.reLogin, true);
+      reLogin.addEventListener('click', () => {
+        agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      statusRows.access.setAction(reLogin);
+    } else if (identity.reason === 'no_credential') {
+      statusRows.access.set({ badge: 'НЕТ CREDENTIAL', tone: 'neutral', fact: COPY.status.accessEmpty });
+    } else {
+      // no_permission and unreachable are HUB-health conditions, not credential
+      // verdicts — the Доступ badge stays neutral «НЕИЗВЕСТНО» (the blocker is
+      // surfaced on the Hub row), never a red «НЕТ CREDENTIAL».
+      statusRows.access.set({ badge: 'НЕИЗВЕСТНО', tone: 'neutral', fact: COPY.status.accessUnknown });
+    }
+
+    // Контракт (debug only; derived from the same health response)
+    if (health.ok) {
+      const match = health.contractHash === health.sdkContractHash;
+      statusRows.contract.set({
+        badge: match ? 'MATCH' : 'DRIFT',
+        tone: match ? 'green' : 'bad',
+        fact: match ? 'контракт совпадает' : 'контракт разошёлся с SDK',
+      });
+    } else {
+      statusRows.contract.set({ badge: 'DRIFT', tone: 'neutral', fact: 'контракт неизвестен' });
+    }
+
+    updateReadinessHero(); // Task 8
+  };
+
   // ─── Ordered section registration ───────────────────────────
   // MUST stay immediately before the future-schema barrier block below. Every
   // section is now in the DOM (shell.main → shell.layout → root) BEFORE the
@@ -1638,6 +1818,7 @@ async function render(): Promise<void> {
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       renderAccountMappings([], true);
+      paintFanslyStatusRow([], true);
       return;
     }
 
@@ -1653,15 +1834,20 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
+      paintFanslyStatusRow(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);
       if (!disposed) {
         renderAccountMappings([], true);
+        paintFanslyStatusRow([], true);
       }
     }
   };
 
   void hydrateAccountSections();
+  // The stored-snapshot signature is what mount fires against: the form fields
+  // were initialized from `state.settings`, so live == stored right now.
+  void hydrateHubStatusRows(storedHubSignature());
 
   renderCleanup = async () => {
     const pendingEdits = flushPendingEdits();

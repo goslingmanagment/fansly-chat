@@ -115,7 +115,7 @@ export async function mountOptionsPage(
   vi.stubGlobal('Event', window.Event);
   vi.stubGlobal('CustomEvent', window.CustomEvent);
 
-  vi.stubGlobal('browser', {
+  const browserStub = {
     storage: {
       local: {
         // get(null) or get(key): the app reads the whole record and slices it
@@ -175,7 +175,13 @@ export async function mountOptionsPage(
       contains: vi.fn(async () => false),
       request: vi.fn(async () => false),
     },
-  });
+  };
+  vi.stubGlobal('browser', browserStub);
+  // The options page reads the GLOBAL `browser`; a test that re-points
+  // sendMessage post-mount (the in-flight/sign-in signature-guard races) does so
+  // via `window.browser`. Mirror the SAME object onto the JSDOM window so a
+  // reassignment there mutates what the running module reads.
+  (window as unknown as { browser: typeof browserStub }).browser = browserStub;
 
   vi.resetModules();
   await import('../../src/options/index.js');
