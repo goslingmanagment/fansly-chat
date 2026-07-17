@@ -15,6 +15,7 @@ import {
   shouldInvalidateSpendersForStorageChanges,
   tabRefreshMessageForStorageChanges,
 } from './storage-change-policy.js';
+import { clearSpendersObservations } from './spenders-status-tracker.js';
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 import { readStorageState } from '../shared/storage.js';
@@ -116,6 +117,10 @@ browser.storage.onChanged.addListener((changes, areaName) => {
     // The board cache is source-scoped. A same-URL credential replacement can
     // still change data visibility, so clear both memory and storage.session.
     void spendersService.invalidateAll();
+    // The status observations are keyed by hub+credential fingerprint, but the
+    // freshest-eligible lookup could still surface a same-URL observation from
+    // the previous principal until a new board is opened. Clear them too.
+    void clearSpendersObservations();
     void personaCatalog.refresh()
       .catch((error) => console.warn('[persona-catalog] source refresh failed', error));
   }

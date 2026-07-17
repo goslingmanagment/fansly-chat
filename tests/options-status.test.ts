@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
@@ -29,7 +30,14 @@ describe('options Статус section', () => {
     const rows = section.querySelectorAll('.chatgoose-status-row');
     expect(rows).toHaveLength(6);
     const contract = Array.from(rows).find((r) => r.textContent?.includes('Контракт')) as HTMLElement;
-    expect(contract.hidden).toBe(true);
+    // The row carries the `hidden` attribute…
+    expect(contract.hasAttribute('hidden')).toBe(true);
+    // …but the IDL flag alone does not hide it: the author `.chatgoose-status-row
+    // { display: grid }` rule beats the UA `[hidden] { display: none }` rule
+    // (origin precedes specificity). Assert the author-origin override exists so
+    // the debug-only row is actually invisible, not just attribute-hidden.
+    const styles = readFileSync(new URL('../src/options/styles.css', import.meta.url), 'utf8');
+    expect(styles).toMatch(/\.chatgoose-status-row\[hidden\]\s*\{[^}]*display:\s*none/);
   });
 
   it('shows the Контракт row when debug mode is on', async () => {
@@ -264,6 +272,34 @@ describe('options Статус — AI quota & Spenders hydration', () => {
     expect(rowByLabel(document, 'AI').textContent).toContain('сегодня генераций не было — квота неизвестна');
   });
 
+  it('AI row is NEUTRAL «лимит не сообщён» when the worst page reports no numeric cap', async () => {
+    // Finding 8: remaining === null must NOT paint green (that would falsely claim
+    // headroom we never saw). Stay neutral and say the limit is unknown.
+    const { document } = await mountOptionsPage({
+      runtime: { quotaByPage: {
+        lilly: { pageLabel: 'lilly', remainingRequestsToday: null, exhausted: false, observedAt: Date.now() },
+      } },
+    });
+    const ai = rowByLabel(document, 'AI');
+    expect(ai.dataset.tone).toBe('neutral');
+    expect(ai.querySelector('.chatgoose-status-fact')?.textContent).toBe('лимит не сообщён');
+  });
+
+  it('AI row is RED and names the 00:00 UTC reset when the worst page is exhausted', async () => {
+    // Finding 8: remaining === 0 → red, and the fact ends with the reset boundary.
+    const { document } = await mountOptionsPage({
+      runtime: { quotaByPage: {
+        lilly: { pageLabel: 'lilly', remainingRequestsToday: 40, exhausted: false, observedAt: Date.now() },
+        ari: { pageLabel: 'ari', remainingRequestsToday: 0, exhausted: true, observedAt: Date.now() },
+      } },
+    });
+    const ai = rowByLabel(document, 'AI');
+    expect(ai.dataset.tone).toBe('bad');
+    const fact = ai.querySelector('.chatgoose-status-fact')?.textContent ?? '';
+    expect(fact).toContain('осталось 0');
+    expect(fact.endsWith('· сброс 00:00 UTC')).toBe(true);
+  });
+
   it('Spenders row maps the freshest observation and honest empty', async () => {
     const ramped = await mountOptionsPage({ runtime: { spenders: { sourceIdentity: 's', streamState: 'ramped', outcome: 'ok', observedAt: Date.now() } } });
     expect(rowByLabel(ramped.document, 'Spenders').querySelector('.chatgoose-badge-mono')?.textContent).toBe('RAMPED');
@@ -401,6 +437,98 @@ describe('options readiness hero (route → pulse)', () => {
     const step1 = Array.from(hero.querySelectorAll('.chatgoose-readiness-step'))
       .find((step) => step.textContent?.includes('Agency Hub подключён')) as HTMLElement;
     expect(step1.dataset.done).toBe('false');
+  });
+
+  it('keeps the hub step open on DEGRADED health even with AUTH + a passing connection', async () => {
+    // Finding 3: «Всё работает» must not paint all-green over a DEGRADED core.
+    const { document } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'closer' },
+        personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: personaCatalogSource(HUB_SETTINGS) },
+      sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+      runtime: {
+        health: { ok: true, status: 'degraded', dbLatencyMs: 9, contractHash: 'a', sdkContractHash: 'a' },
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+        connection: { ok: true },
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    expect(hero.dataset.heroState).toBe('route');
+    const step1 = Array.from(hero.querySelectorAll('.chatgoose-readiness-step'))
+      .find((step) => step.textContent?.includes('Agency Hub подключён')) as HTMLElement;
+    expect(step1.dataset.done).toBe('false');
+  });
+
+  it('flips the hub step done only once the live connection test passes', async () => {
+    // Finding 3: healthy hub + valid credential are not enough — the hub step is
+    // gated on a `connected` feedback. A pending test leaves the step open; the
+    // hero must repaint to pulse when the test lands.
+    let releaseConn!: (value: { ok: true }) => void;
+    const conn = new Promise<{ ok: true }>((resolve) => { releaseConn = resolve; });
+    const { document, flushAsync } = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'closer' },
+        personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: personaCatalogSource(HUB_SETTINGS) },
+      sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+      runtime: {
+        health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+        identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+        connection: () => conn,
+      },
+    });
+    const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+    // Live connection test still pending → hub step open → route, not pulse.
+    expect(hero.dataset.heroState).toBe('route');
+    releaseConn({ ok: true });
+    await flushAsync();
+    expect(hero.dataset.heroState).toBe('pulse');
+  });
+
+  it('re-polls sessions on visibilitychange and closes the Fansly step in place (no reload)', async () => {
+    // Finding 4: with no captured session the Fansly step is open. When the chatter
+    // connects a model in another tab and returns, a throttled focus/visibility
+    // re-poll must close the step live — the same snapshot+paint flow, no reload.
+    vi.useFakeTimers();
+    try {
+      const { document, window, flushAsync } = await mountOptionsPage({
+        settings: HUB_SETTINGS,
+        state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'closer' },
+          personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: personaCatalogSource(HUB_SETTINGS) },
+        sessions: [], // no captured session at mount → Fansly step open
+        runtime: {
+          health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+          identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+        },
+      });
+      const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+      expect(hero.dataset.heroState).toBe('route');
+
+      // A session now exists; the next getSessionsSnapshot returns it.
+      const browserRef = (window as unknown as { browser: { runtime: { sendMessage: (m: unknown) => Promise<unknown> } } }).browser;
+      browserRef.runtime.sendMessage = vi.fn(async (message: unknown) => {
+        switch ((message as { type?: string }).type) {
+          case 'getSessionsSnapshot':
+            return [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }];
+          case 'getAgencyHubHealth': return { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' };
+          case 'getAgencyHubIdentity': return { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] };
+          case 'testAgencyHubConnection': return { ok: true };
+          case 'getAiQuotaByPage': return {};
+          case 'getSpendersStatus': return null;
+          default: return undefined;
+        }
+      });
+
+      // >5s since the mount poll, then the tab becomes visible again.
+      vi.advanceTimersByTime(6_000);
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new window.Event('visibilitychange'));
+      await flushAsync();
+
+      expect(hero.dataset.heroState).toBe('pulse');
+      expect(rowByLabel(document, 'Fansly').querySelector('.chatgoose-badge-mono')?.textContent).toBe('CAPTURED');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reaches pulse after the mount-tail connection test repopulates a hidden catalog', async () => {

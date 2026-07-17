@@ -6,6 +6,9 @@ import {
 } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
+import { normalizeAgencyHubBaseUrl } from '../src/shared/agency-hub.js';
+import { SpendersService } from '../src/background/spenders-service.js';
+import { spendersObservationScope } from '../src/background/spenders-status-tracker.js';
 import type { SessionTemplate, SpendersBuildPayload } from '../src/shared/types.js';
 
 type MessageSenderLike = { tab?: { id?: number }; url?: string };
@@ -74,6 +77,10 @@ async function installRuntimeApiHarness(fanslyClient: {
     async () => ({ id: 7 }),
   );
 
+  // A shared in-memory storage.session so a REAL SpendersService's status
+  // observation (written through the tracker's storage.session custody) is
+  // inspectable by the test regardless of module-instance identity.
+  const sessionBacking: Record<string, unknown> = {};
   (globalThis as Record<string, unknown>).browser = {
     storage: {
       local: {
@@ -97,6 +104,12 @@ async function installRuntimeApiHarness(fanslyClient: {
           Object.assign(mockStorage, items);
         }),
         remove: vi.fn(async () => undefined),
+      },
+      session: {
+        get: vi.fn(async (key: string) => structuredClone({ [key]: sessionBacking[key] })),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(sessionBacking, structuredClone(items));
+        }),
       },
     },
     runtime: {
@@ -161,6 +174,8 @@ async function installRuntimeApiHarness(fanslyClient: {
 
   return {
     sessionStore,
+    storageCoordinator,
+    sessionBacking,
     tabsQuery,
     tabsGet,
     tabsCreate,
@@ -501,6 +516,33 @@ describe('runtime-api agency hub reads', () => {
     expect(result).toMatchObject({ ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] });
     expect(checkIdentity).toHaveBeenCalledWith(expect.objectContaining({ agencyHubBaseUrl: 'https://hub.example' }), expect.any(AbortSignal));
   });
+
+  it('reads a FRESH hub snapshot, not the stale coordinator cache, after a delayed onChanged', async () => {
+    // Finding 2: a save landed hub B in storage, but its storage.onChanged has not
+    // yet reached the coordinator, so the cache still holds hub A. The status
+    // handler must probe the just-saved hub B (fresh read), not the previous hub.
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-a.example' },
+    });
+    const checkHealth = vi.fn(async () => ({ ok: true, status: 'ok', dbLatencyMs: 1, contractHash: 'h', sdkContractHash: 'h' }));
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn() },
+      { agencyHubClient: { testConnection: vi.fn(), checkHealth, checkIdentity: vi.fn() } },
+    );
+    // Prime the coordinator cache with hub A.
+    await harness.storageCoordinator.getState();
+    // The save is now durable in storage (hub B) but its onChanged is NOT applied
+    // to the coordinator — the cache is deliberately left stale at hub A.
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b.example' },
+    });
+
+    await harness.send({ type: 'getAgencyHubHealth' });
+    expect(checkHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ agencyHubBaseUrl: 'https://hub-b.example' }),
+      expect.any(AbortSignal),
+    );
+  });
 });
 
 describe('runtime-api getAiQuotaByPage', () => {
@@ -531,34 +573,57 @@ describe('runtime-api getSpendersStatus', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the freshest observation recorded under the CURRENT hub', async () => {
+  it('returns the freshest observation recorded under the CURRENT hub+credential', async () => {
     mockStorage = createStorage({
-      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub' },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub', agencyHubDeviceToken: 'tok' },
     });
     const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
     // Same post-reset instance the handler reads (no browser.storage.session
     // in the test env — the tracker uses its module-memory fallback).
-    const { recordSpendersObservation } = await import('../src/background/spenders-status-tracker.js');
-    await recordSpendersObservation({ sourceIdentity: 'creator-1|https://hub', streamState: 'ramped', outcome: 'ok' });
+    const { recordSpendersObservation, spendersObservationScope } =
+      await import('../src/background/spenders-status-tracker.js');
+    const sourceIdentity = `creator-1|${spendersObservationScope('https://hub', 'tok')}`;
+    await recordSpendersObservation({ sourceIdentity, streamState: 'ramped', outcome: 'ok' });
 
     const result = await harness.send({ type: 'getSpendersStatus' });
-    expect(result).toMatchObject({ sourceIdentity: 'creator-1|https://hub', outcome: 'ok', streamState: 'ramped' });
+    expect(result).toMatchObject({ sourceIdentity, outcome: 'ok', streamState: 'ramped' });
   });
 
   it('returns null for an observation recorded under a previous hub (hub changed)', async () => {
     mockStorage = createStorage({
-      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b' },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b', agencyHubDeviceToken: 'tok' },
     });
     const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
-    const { recordSpendersObservation } = await import('../src/background/spenders-status-tracker.js');
+    const { recordSpendersObservation, spendersObservationScope } =
+      await import('../src/background/spenders-status-tracker.js');
     // Observed under hub A; the settings now point at hub B.
-    await recordSpendersObservation({ sourceIdentity: 'creator-1|https://hub-a', streamState: 'ramped', outcome: 'ok' });
+    await recordSpendersObservation({
+      sourceIdentity: `creator-1|${spendersObservationScope('https://hub-a', 'tok')}`,
+      streamState: 'ramped',
+      outcome: 'ok',
+    });
+    expect(await harness.send({ type: 'getSpendersStatus' })).toBeNull();
+  });
+
+  it('returns null for an observation recorded under a previous credential (same URL)', async () => {
+    // Finding 5: a same-URL credential swap must hide the previous principal's board.
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub', agencyHubDeviceToken: 'new-tok' },
+    });
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    const { recordSpendersObservation, spendersObservationScope } =
+      await import('../src/background/spenders-status-tracker.js');
+    await recordSpendersObservation({
+      sourceIdentity: `creator-1|${spendersObservationScope('https://hub', 'old-tok')}`,
+      streamState: 'ramped',
+      outcome: 'ok',
+    });
     expect(await harness.send({ type: 'getSpendersStatus' })).toBeNull();
   });
 
   it('returns null when no board has been observed', async () => {
     mockStorage = createStorage({
-      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub' },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub', agencyHubDeviceToken: 'tok' },
     });
     const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
     expect(await harness.send({ type: 'getSpendersStatus' })).toBeNull();
@@ -652,10 +717,66 @@ describe('runtime-api getSpendersList', () => {
       expect(captured?.aborted).toBe(false);
 
       await vi.advanceTimersByTimeAsync(SPENDERS_BUILD_TIMEOUT_MS);
-      // The build-timeout handler stamps the reason so the getList wrapper can tell
-      // a real timeout (record FAIL) from a user-cancel / superseded build (skip).
-      expect(captured?.reason).toBe(SPENDERS_BUILD_TIMEOUT_REASON);
+      // The build-timeout handler aborts with a real AbortError DOMException whose
+      // MESSAGE carries the reason so the getList wrapper can tell a real timeout
+      // (record FAIL) from a user-cancel / superseded build (skip), and so an
+      // aborted fetch rejects with an AbortError instead of a bare string.
+      expect(captured?.reason).toBeInstanceOf(DOMException);
+      expect((captured?.reason as DOMException).name).toBe('AbortError');
+      expect((captured?.reason as DOMException).message).toBe(SPENDERS_BUILD_TIMEOUT_REASON);
       await expect(pending).resolves.toEqual({ ok: false, error: createUserError('timed_out') });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('records a FAIL and returns timed_out when a real build times out mid-fetch (refresh path)', async () => {
+    // Finding 7 integration: the abort fires DURING an in-flight kernel fetch on
+    // the refresh path. The user must get an honest timed_out AND the board must
+    // record a FAIL observation (so the Статус row stops showing a stale RAMPED).
+    vi.useFakeTimers();
+    try {
+      // A kernel fetch that hangs until aborted → the build cannot finish before
+      // the runtime build-timeout fires.
+      const kernelSource = {
+        resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+        fetchTopSpenders: vi.fn((_s: unknown, _p: string, _w: string, _l: number, signal: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+          })),
+      };
+      const fanslyClient = {
+        getAuthenticatedAccount: vi.fn(),
+        listFanAccounts: vi.fn(async () => ({ fans: [], truncated: false })),
+        getAccountNames: vi.fn(async () => []),
+      };
+      const settings = {
+        ...createDefaultSettings(),
+        agencyHubBaseUrl: 'http://localhost:3000',
+        agencyHubApiKey: 'hub-key',
+      };
+      const service = new SpendersService(
+        fanslyClient as never,
+        kernelSource as never,
+        async () => settings,
+      );
+      const harness = await installRuntimeApiHarness(
+        fanslyClient,
+        { spendersService: service as unknown as { getList: ReturnType<typeof vi.fn> } },
+      );
+      harness.sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+      const pending = harness.send({ type: 'getSpendersList', refresh: true }, { tab: { id: 7 } });
+      await vi.advanceTimersByTimeAsync(SPENDERS_BUILD_TIMEOUT_MS);
+
+      // The user sees an honest timeout…
+      await expect(pending).resolves.toEqual({ ok: false, error: createUserError('timed_out') });
+      // …and a FAIL observation is recorded under the CURRENT hub+credential.
+      const scope = spendersObservationScope(normalizeAgencyHubBaseUrl('http://localhost:3000'), 'hub-key');
+      const observations = Object.values(
+        (harness.sessionBacking.spendersObservations ?? {}) as Record<string, { outcome: string; sourceIdentity: string }>,
+      );
+      expect(observations.some((o) => o.outcome === 'fail' && o.sourceIdentity.endsWith(`|${scope}`))).toBe(true);
     } finally {
       vi.useRealTimers();
     }

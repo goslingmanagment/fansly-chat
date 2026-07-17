@@ -352,6 +352,10 @@ input[type='checkbox'] {
 
 /* ── Статус section: read-only state rows ── */
 .chatgoose-status-row { display: grid; grid-template-columns: 10px auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--chatgoose-line); }
+/* Author `display: grid` beats the UA `[hidden] { display: none }` rule
+   (origin precedes specificity), so the debug-only Контракт row would stay
+   visible with only the IDL `hidden` set. Restore hiding at author origin. */
+.chatgoose-status-row[hidden] { display: none; }
 .chatgoose-status-row:last-of-type { border-bottom: 0; }
 .chatgoose-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--chatgoose-ink-low); }
 .chatgoose-status-row[data-tone="green"] .chatgoose-status-dot { background: var(--chatgoose-green); }

@@ -48,9 +48,12 @@ import type {
   SpendersSnapshotPayload,
   SpendersStreamState,
 } from '../shared/types.js';
-import type { AgencyHubClient } from './agency-hub-client.js';
+import { resolveHubBearer, type AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
-import { recordSpendersObservation } from './spenders-status-tracker.js';
+import {
+  recordSpendersObservation,
+  spendersObservationScope,
+} from './spenders-status-tracker.js';
 
 /** The creator's custom display name for a fan — Fansly's native rename,
  * stored as an account note whose text is the name. */
@@ -433,12 +436,17 @@ export class SpendersService {
       onSnapshot?: (snapshot: SpendersSnapshotPayload) => void;
     },
   ): Promise<SpendersListResult> {
+    // ONE settings snapshot feeds BOTH the observation record AND the build, so
+    // a mid-build credential change cannot make the two disagree on the source.
     const settings = await this.getSettings?.();
     const sourceIdentity = settings
-      ? `${this.creatorKey(session)}|${normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl)}`
+      ? `${this.creatorKey(session)}|${spendersObservationScope(
+          normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl),
+          resolveHubBearer(settings),
+        )}`
       : this.creatorKey(session);
     try {
-      const result = await this.getListInternal(session, signal, options);
+      const result = await this.getListInternal(session, signal, settings, options);
       await recordSpendersObservation({
         sourceIdentity,
         streamState: result.source.streamState,
@@ -450,9 +458,14 @@ export class SpendersService {
       // A user cancellation (tab closed / superseded build) is not a board
       // outcome — skip it. But a build-TIMEOUT abort IS a real failure: recording
       // it as FAIL is what stops the Статус row from showing a stale RAMPED. The
-      // runtime-api timeout handler stamps `signal.reason` so we can tell them
-      // apart (a plain user abort carries no such reason).
-      const isTimeoutAbort = isAbort && signal.reason === SPENDERS_BUILD_TIMEOUT_REASON;
+      // runtime-api timeout handler aborts with an AbortError DOMException whose
+      // MESSAGE carries the reason, so read it off `signal.reason` (a plain user
+      // abort carries no such message). Reading the reason off the signal — not
+      // the caught error — is robust: some inner abort points rethrow a bare
+      // 'Aborted' DOMException that no longer carries the reason.
+      const reason: unknown = signal.reason;
+      const isTimeoutAbort = isAbort &&
+        reason instanceof DOMException && reason.message === SPENDERS_BUILD_TIMEOUT_REASON;
       if (!isAbort || isTimeoutAbort) {
         await recordSpendersObservation({ sourceIdentity, streamState: null, outcome: 'fail' });
       }
@@ -463,6 +476,7 @@ export class SpendersService {
   private async getListInternal(
     session: SessionTemplate,
     signal: AbortSignal,
+    settings: Settings | undefined,
     options?: {
       refresh?: boolean;
       onProgress?: (progress: SpendersProgressPayload) => void;
@@ -470,7 +484,6 @@ export class SpendersService {
     },
   ): Promise<SpendersListResult> {
     throwIfParentAborted(signal);
-    const settings = await this.getSettings?.();
     if (this.kernelSource === undefined || settings === undefined) {
       // The legacy per-fan rebuild died in 1.7.0 — a board without the kernel
       // wired is a composition bug, not a fallback case.

@@ -40,8 +40,15 @@ export interface MountOverrides {
     identity?: AgencyHubIdentityResponse | (() => AgencyHubIdentityResponse | Promise<AgencyHubIdentityResponse>);
     quotaByPage?: Record<string, AiQuotaStatus> | (() => Record<string, AiQuotaStatus> | Promise<Record<string, AiQuotaStatus>>);
     spenders?: SpendersObservation | null | (() => SpendersObservation | null | Promise<SpendersObservation | null>);
+    /** Reply for the mount-tail (and any post-mount) testAgencyHubConnection.
+     * Defaults to a passing test so a fully-configured page reaches the hero's
+     * pulse — the hub step now requires a `connected` feedback. A factory may
+     * defer or fail the test. Ignored when `revealCatalogOnConnect` is set. */
+    connection?: TestConnectionReply | (() => TestConnectionReply | Promise<TestConnectionReply>);
   };
 }
+
+type TestConnectionReply = { ok: true } | { ok: false; error?: unknown };
 
 export interface MountedOptionsPage {
   document: Document;
@@ -177,7 +184,7 @@ export async function mountOptionsPage(
               };
               return { ok: true };
             }
-            return undefined;
+            return runtimeReply<TestConnectionReply>(runtime.connection, { ok: true });
           case 'getAgencyHubHealth':
             return runtimeReply<AgencyHubHealthResponse>(runtime.health, { ok: false, reason: 'no_base_url' });
           case 'getAgencyHubIdentity':

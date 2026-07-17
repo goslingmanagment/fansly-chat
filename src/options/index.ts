@@ -81,6 +81,15 @@ if (!(rootElement instanceof HTMLElement)) {
 
 const root = rootElement;
 
+// The settings tab has no live session port, so the Fansly step can otherwise
+// only close on a full reload. A focus/visibility re-poll closes it in place;
+// throttle it so rapid tab-switching cannot storm getSessionsSnapshot.
+const SESSIONS_REPOLL_MIN_INTERVAL_MS = 5_000;
+
+type SessionsResult =
+  | { ok: true; sessions: SessionSnapshotEntry[] }
+  | { ok: false; error: unknown };
+
 let renderCleanup: (() => Promise<void>) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
@@ -166,6 +175,9 @@ async function render(): Promise<void> {
   let disposed = false;
   let futureSchemaObserved: number | null = null;
   let applyFutureSchemaBarrierToUi: ((storedVersion: number) => void) | null = null;
+  // Wall-clock of the last getSessionsSnapshot dispatch (mount or re-poll); the
+  // focus/visibility re-poll reads it to enforce the throttle window.
+  let lastSessionsPollAt = 0;
   try {
     // Recovery must be decided before session discovery or a Hub connection
     // test can trigger network traffic. The malformed value remains untouched.
@@ -210,15 +222,17 @@ async function render(): Promise<void> {
   // to five seconds resolving a Fansly identity. It also owns identity
   // rekey/reconcile, so account controls stay in a loading state until it has
   // finished and we have re-read the resulting storage state.
-  const sessionsResultPromise = sendRuntimeRequest('getSessionsSnapshot')
-    .then((sessions):
-      | { ok: true; sessions: SessionSnapshotEntry[] }
-      | { ok: false; error: unknown } => (
-      Array.isArray(sessions)
-        ? { ok: true, sessions }
-        : { ok: false, error: new Error('Invalid sessions snapshot response') }
-    ))
-    .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error }));
+  const loadSessionsResult = (): Promise<SessionsResult> => {
+    lastSessionsPollAt = Date.now();
+    return sendRuntimeRequest('getSessionsSnapshot')
+      .then((sessions): SessionsResult => (
+        Array.isArray(sessions)
+          ? { ok: true, sessions }
+          : { ok: false, error: new Error('Invalid sessions snapshot response') }
+      ))
+      .catch((error: unknown): SessionsResult => ({ ok: false, error }));
+  };
+  const sessionsResultPromise = loadSessionsResult();
   // This first read must stay non-mutating. Session discovery owns account
   // identity reconciliation and runs concurrently; a full-state migration
   // write from an older snapshot could otherwise restore pre-rekey mappings.
@@ -554,6 +568,11 @@ async function render(): Promise<void> {
     }
 
     renderAgencyHubConnectionState();
+    // The connection outcome gates the hero's hub step (hubDone now requires a
+    // `connected` feedback), so repaint the hero whenever the test result lands.
+    // Safe forward reference: this runs only after render() has defined the hero
+    // updater (mount-tail test and all post-mount user triggers fire far later).
+    updateReadinessHero();
   };
 
   let agencyHubPermissionRefreshVersion = 0;
@@ -1461,9 +1480,13 @@ async function render(): Promise<void> {
       readinessHero.append(line);
       return;
     }
-    // Hub step is done only when BOTH the hub is healthy AND the credential is
-    // valid — an identity AUTH while /health is DOWN is not «Hub подключён».
-    const hubDone = statusModel.health?.ok === true && statusModel.identity?.ok === true;
+    // Hub step is done only when the hub is FULLY healthy (not degraded), the
+    // credential is valid, AND a live connection test actually passed. A DEGRADED
+    // core, an AUTH identity while /health is DOWN, or a failed/never-run
+    // connection test each leaves the step open — «Всё работает» must not paint
+    // all-green over any of them.
+    const hubDone = statusModel.health?.ok === true && statusModel.health.status === 'ok' &&
+      statusModel.identity?.ok === true && agencyHubConnectionFeedback.kind === 'connected';
     const fanslyDone = statusModel.fanslyCapturedAccountIds.length > 0;
     // ONLY accounts with a captured session need an active persona (spec §4).
     // An offline historical account carrying an archived mapping has no captured
@@ -1718,9 +1741,24 @@ async function render(): Promise<void> {
       const worst = quotaEntries.reduce<AiQuotaStatus | null>((acc, entry) =>
         acc === null || (entry.remainingRequestsToday ?? Infinity) < (acc.remainingRequestsToday ?? Infinity)
           ? entry : acc, null);
-      const remaining = worst?.remainingRequestsToday;
-      const tone: BadgeTone = remaining === 0 ? 'bad' : (remaining !== null && remaining !== undefined && remaining <= 20) ? 'amber' : 'green';
-      statusRows.ai.set({ badge: 'KERNEL', tone, fact: `${quotaEntries.length} стр.` });
+      const remaining = worst?.remainingRequestsToday ?? null;
+      let tone: BadgeTone;
+      let fact: string;
+      if (remaining === null) {
+        // No numeric cap reported for the worst page — a GREEN badge would falsely
+        // claim headroom we never saw. Stay neutral and say the limit is unknown.
+        tone = 'neutral';
+        fact = 'лимит не сообщён';
+      } else if (remaining === 0) {
+        // Exhausted: red, and name the reset boundary — the kernel resets the day's
+        // budget at 00:00 UTC (the popup's exhausted-row precedent).
+        tone = 'bad';
+        fact = 'осталось 0 · сброс 00:00 UTC';
+      } else {
+        tone = remaining <= 20 ? 'amber' : 'green';
+        fact = `${quotaEntries.length} стр.`;
+      }
+      statusRows.ai.set({ badge: 'KERNEL', tone, fact });
       statusRows.ai.setDetailLines(quotaEntries.map((entry) =>
         entry.remainingRequestsToday === null
           ? `${entry.pageLabel} · лимит не сообщён`
@@ -2007,12 +2045,15 @@ async function render(): Promise<void> {
   const captureTicker = window.setInterval(refreshCaptureLines, 60_000);
   cleanupTasks.push(() => window.clearInterval(captureTicker));
 
-  const hydrateAccountSections = async (): Promise<void> => {
-    const result = await sessionsResultPromise;
+  // Paint the account section + Fansly status row from ONE sessions result.
+  // Shared by the mount hydration and the focus/visibility re-poll so the
+  // identity-rekey read path (loadStorageState after the snapshot resolves) is
+  // never duplicated: the snapshot request owns rekey background-side, and this
+  // reads the reconciled state exactly once afterward.
+  const applySessionsResult = async (result: SessionsResult): Promise<void> => {
     if (disposed) {
       return;
     }
-
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       renderAccountMappings([], true);
@@ -2041,6 +2082,46 @@ async function render(): Promise<void> {
       }
     }
   };
+
+  const hydrateAccountSections = async (): Promise<void> => {
+    await applySessionsResult(await sessionsResultPromise);
+  };
+
+  // Re-poll sessions when the tab regains focus/visibility, throttled so it only
+  // fires once per window. A chatter who connects a model in another tab and
+  // returns here should see the Fansly step close without a reload — but the
+  // re-poll rides the SAME snapshot+paint flow above (rekey stays background-side),
+  // so no live-read logic is duplicated. The in-flight guard collapses a paired
+  // focus + visibilitychange into a single poll.
+  let sessionsRepollInFlight = false;
+  const repollSessions = async (): Promise<void> => {
+    if (disposed || sessionsRepollInFlight) {
+      return;
+    }
+    if (Date.now() - lastSessionsPollAt < SESSIONS_REPOLL_MIN_INTERVAL_MS) {
+      return;
+    }
+    sessionsRepollInFlight = true;
+    try {
+      await applySessionsResult(await loadSessionsResult());
+    } finally {
+      sessionsRepollInFlight = false;
+    }
+  };
+  const handleVisibilityRepoll = (): void => {
+    if (document.visibilityState === 'visible') {
+      void repollSessions();
+    }
+  };
+  const handleFocusRepoll = (): void => {
+    void repollSessions();
+  };
+  document.addEventListener('visibilitychange', handleVisibilityRepoll);
+  window.addEventListener('focus', handleFocusRepoll);
+  cleanupTasks.push(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityRepoll);
+    window.removeEventListener('focus', handleFocusRepoll);
+  });
 
   void hydrateAccountSections();
   // The stored-snapshot signature is what mount fires against: the form fields
