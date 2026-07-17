@@ -314,6 +314,19 @@ input[type='checkbox'] {
 .chatgoose-hub-footer { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--chatgoose-line); margin-top: 6px; padding-top: 12px; }
 .chatgoose-hub-footer > :first-child { flex: 1; min-width: 0; }
 .chatgoose-hub-legacy > summary { cursor: pointer; font-size: 12px; color: var(--chatgoose-ink-low); }
+.chatgoose-hub-token-line {
+  font-family: var(--chatgoose-font-mono); font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--chatgoose-ink-mid); word-break: break-all;
+}
+.chatgoose-hub-identity-line {
+  font-size: 12.5px; color: var(--chatgoose-ink); font-weight: 600;
+}
+/* The sign-in row (display:flex) and signed-in block (display:grid) carry
+   AUTHOR INLINE display, which beats the UA `[hidden] { display: none }` rule
+   (inline styles win on specificity), so the IDL `hidden` flag alone would not
+   hide them. An author-origin `!important` rule outranks the inline declaration
+   and restores real hiding for whichever block is toggled off. */
+.chatgoose-hub-signin-toggle[hidden] { display: none !important; }
 
 .chatgoose-saved-flash {
   position: fixed; right: 18px; bottom: 16px; z-index: 20;
@@ -383,3 +396,13 @@ input[type='checkbox'] {
 .chatgoose-readiness-step { display: flex; gap: 9px; align-items: center; padding: 5px 0; }
 .chatgoose-readiness-step[data-done="true"] { color: var(--chatgoose-green); }
 .chatgoose-readiness-step .chatgoose-button { margin-left: auto; }
+
+/* ── Persona catalog: human rows, footer, preservation block ── */
+.chatgoose-persona-row { display: grid; gap: 4px; padding: 9px 12px; border: 1px solid var(--chatgoose-line); border-radius: var(--chatgoose-radius-card); background: var(--chatgoose-bg2); }
+.chatgoose-persona-row-archived { opacity: 0.62; }
+.chatgoose-persona-main { display: flex; align-items: center; gap: 8px; }
+.chatgoose-persona-name { font-weight: 600; font-size: 13px; }
+.chatgoose-persona-count { margin-left: auto; font-size: 12px; color: var(--chatgoose-ink-mid); }
+.chatgoose-persona-hint { font-size: 11.5px; color: var(--chatgoose-amber); }
+.chatgoose-persona-footer { display: grid; gap: 4px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--chatgoose-line); font-size: 12px; color: var(--chatgoose-ink-low); }
+.chatgoose-preservation { display: grid; gap: 7px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--chatgoose-line); }

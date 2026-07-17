@@ -59,6 +59,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E40 | 2026-07-17 | Options P1 shell redesign: desktop SettingsSurface shape + family control vocabulary, one «Аккаунты» section, Russian copy with EN-term glossary, local fonts (Google CDN removed) — zero behavior change, schema stays v14 |
 | E41 | 2026-07-17 | Options P2 informativeness: read-only «Статус» section + readiness hero, four independent runtime reads (health raw-503, me, per-page quota, spenders observations), persisted-signature hydration guard, no_permission first-class — schema stays v14, read-only throughout |
 | E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
+| E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
 
 ## Entries
 
@@ -954,3 +955,33 @@ was scripted with a text-preservation assertion: 54 cards, 317 list items,
 42 summaries carried over byte-identical; zero release texts rewritten. A
 routine release = one uniform card insert + one manifest line, no other
 churn. Plan: docs/superpowers/plans/2026-07-17-changelog-web-register.md.
+
+**E43 (2026-07-17).** Options P3 — persona presentation + sign-out. The
+persona section renders the kernel catalog as human rows (bold displayName,
+`built-in` badge for builtin:lora, mono vN, «аккаунтов: N» from local
+mappings; archived personas dimmed only while a mapping references them,
+with «выбери замену»), a footer «каталог изменялся N мин назад» (— when
+unknown) and honest frozen-editing copy (authoring stays frozen until core
+#151; the UI never promises owner-side creation). Empty-states are honest
+end-to-end: a confirmed-empty catalog response now STAMPS
+personaCatalogFetchedAt (the byte-identical refresh skip requires a
+non-null stored stamp), so «Сервер вернул пустой каталог» renders only
+after a real fetch, while a failed refresh after rotation keeps «каталог
+для новых кредов ещё не загружен»; the live-rotation storage listener
+re-reads settings so the source check never uses stale credentials.
+«Выйти» is the background `signOutAgencyHub`: durable EMPTY-string wipe of
+both custody keys FIRST (survives a page close mid-operation), then a
+best-effort authRevokeCurrentDeviceToken (~5s, device-token bearer only);
+four honest outcomes (revoked / already-invalid — only when the token is
+absent or the hub answered 401/403, never for a missing URL / unreachable
+→ sliding-expiry / wipe-failed → red flash, credentials still present).
+The page handler awaits the existing save chain (pending unrelated edits
+land in order; queueSettingsSave semantics untouched — no fences, no
+version bumps) and releases custody-field ownership before delegating; a
+pagehide after sign-out cannot replay the old key. The signed-in block
+shows the spec §6 identity line (username · role · страниц: N) as a pure
+reader of P2's guarded statusModel. The recovery gate is restyled on the
+family tokens but stays OUTSIDE the shell. Schema stays v14; E36/E37
+preservation/recovery/export machinery verbatim. Spec:
+docs/superpowers/specs/2026-07-16-options-redesign-design.md (§6 as
+amended wipe-then-revoke, §7, §13.3).
