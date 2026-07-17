@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   STORAGE_SCHEMA_VERSION,
@@ -29,6 +31,16 @@ function makeCapture(accountId: string) {
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -51,6 +63,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     testConnection: ReturnType<typeof vi.fn>;
     checkHealth?: ReturnType<typeof vi.fn>;
     checkIdentity?: ReturnType<typeof vi.fn>;
+    revokeDeviceToken?: ReturnType<typeof vi.fn>;
   };
   spendersService?: {
     getList: ReturnType<typeof vi.fn>;
@@ -484,6 +497,124 @@ describe('runtime-api testAgencyHubConnection', () => {
     expect(onAgencyHubReady).not.toHaveBeenCalled();
     await onMessageListener?.(request);
     expect(onAgencyHubReady).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runtime-api signOutAgencyHub', () => {
+  const fanslyClient = { getAuthenticatedAccount: vi.fn(async () => undefined) };
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('wipes BOTH custody keys and reports "revoked" on a successful revoke', async () => {
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(
+        async (_settings: { agencyHubBaseUrl: string; agencyHubDeviceToken: string }, _signal: AbortSignal) =>
+          'revoked' as const,
+      ),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    const response = await send({ type: 'signOutAgencyHub' });
+    expect(response).toEqual({ outcome: 'revoked' });
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe(''); // EMPTY, not removed
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    // Revoke used the CAPTURED token (the stored copy is already wiped by now).
+    expect(agencyHubClient.revokeDeviceToken).toHaveBeenCalledTimes(1);
+    const [passedSettings] = agencyHubClient.revokeDeviceToken.mock.calls[0]!;
+    expect(passedSettings.agencyHubDeviceToken).toBe('agency_hub_device_abc');
+  });
+
+  it('wipes BEFORE the revoke resolves: a deferred revoke still leaves storage wiped', async () => {
+    // Background durability: the wipe must land even if the page closes mid-revoke.
+    // Model that here by holding the revoke open and asserting the storage is
+    // already wiped before it settles.
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
+    const release = createDeferred<'revoked'>();
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => {
+        // By the time the revoke runs the wipe has already committed.
+        expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+        expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+        return release.promise;
+      }),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    const pending = send({ type: 'signOutAgencyHub' });
+    release.resolve('revoked');
+    expect(await pending).toEqual({ outcome: 'revoked' });
+  });
+
+  it('no token to revoke → "already-invalid", and STILL wipes any leftover apiKey', async () => {
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => 'revoked' as const),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    const response = await send({ type: 'signOutAgencyHub' });
+    expect(response).toEqual({ outcome: 'already-invalid' });
+    expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // nothing to revoke
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe(''); // apiKey still wiped
+  });
+
+  it('maps a 401 revoke to "already-invalid" (still wiped)', async () => {
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc' });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => 'already-invalid' as const),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'already-invalid' });
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+  });
+
+  it('maps a thrown revoke to "unreachable" (already wiped)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc' });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => { throw new Error('network down'); }),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'unreachable' });
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+  });
+
+  it('a failed durable wipe → "wipe-failed" with the error, NO revoke attempted', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc' });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    // After install, reject ONLY the custody wipe write (the write carrying the
+    // device-token key) — the pre-wipe loadStorageState read still needs to
+    // persist its legacy-persona snapshot, so a blanket throw is wrong.
+    (globalThis as { browser: { storage: { local: { set: unknown } } } }).browser.storage.local.set =
+      vi.fn(async (items: Record<string, unknown>) => {
+        if (Object.prototype.hasOwnProperty.call(items, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY)) {
+          throw new Error('storage write failed');
+        }
+        Object.assign(mockStorage, items);
+      });
+    const response = await send({ type: 'signOutAgencyHub' });
+    expect(response).toMatchObject({ outcome: 'wipe-failed' });
+    expect((response as { error?: string }).error).toContain('storage write failed');
+    expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // wipe threw first
   });
 });
 

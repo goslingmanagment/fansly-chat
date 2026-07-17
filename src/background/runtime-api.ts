@@ -1,4 +1,5 @@
 import {
+  AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
@@ -13,9 +14,10 @@ import {
 } from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
-import { readStorageState, saveSettings } from '../shared/storage.js';
+import { loadStorageState, readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
+import { logWarn } from '../shared/log.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
@@ -384,6 +386,56 @@ export function registerRuntimeApi({
               ? toUserError(error)
               : createUserError('hub_request_failed'),
           };
+        }
+      }
+
+      if (requestType === 'signOutAgencyHub') {
+        // (a) Capture the current token + base URL BEFORE the wipe. The token never
+        // crosses the runtime boundary; the page only sees the outcome.
+        const before = await loadStorageState();
+        const capturedToken = before.settings.agencyHubDeviceToken.trim();
+        const capturedBaseUrl = before.settings.agencyHubBaseUrl;
+
+        // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable step.
+        // The background outlives the options page, so doing the wipe here (not on the
+        // page) means a pagehide during the 5s revoke below can never leave the
+        // credentials on disk. EMPTY strings, never key removal (removal would reopen
+        // the pre-v13 blob fallback — E19). This mirrors the issueAgencyHubDeviceToken
+        // handler's own `saveSettings({ agencyHubDeviceToken })` custody write.
+        try {
+          await saveSettings({ agencyHubDeviceToken: '', agencyHubApiKey: '' });
+        } catch (error) {
+          // The loud case: credentials may still be on disk. Do NOT proceed to revoke.
+          const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
+          logWarn('Sign-out custody wipe failed', { error: message });
+          return { outcome: 'wipe-failed', error: message };
+        }
+
+        // (c) Best-effort revoke AFTER the wipe, with the CAPTURED token as the bearer
+        // (the stored copy is already ''). Nothing to revoke without a token.
+        if (!capturedToken) {
+          return { outcome: 'already-invalid' };
+        }
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
+        );
+        try {
+          const outcome = await agencyHubClient.revokeDeviceToken(
+            { agencyHubBaseUrl: capturedBaseUrl, agencyHubDeviceToken: capturedToken },
+            controller.signal,
+          );
+          return { outcome };
+        } catch (error) {
+          // Abort/network/5xx/missing-base-URL — server truth unknown. Already wiped
+          // locally; the token dies by sliding-expiry.
+          logWarn('Device token revoke unreachable', {
+            error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+          });
+          return { outcome: 'unreachable' };
+        } finally {
+          globalThis.clearTimeout(timeout);
         }
       }
 
