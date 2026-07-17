@@ -58,6 +58,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E39 | 2026-07-15 | Releases announce themselves in the ChatGoose Telegram channel: `--check` fails deploy.sh preflight before AMO signing, the real send runs only after tag_release and never fails a live deploy, load_env stops exporting `.env.deploy` |
 | E40 | 2026-07-17 | Options P1 shell redesign: desktop SettingsSurface shape + family control vocabulary, one «Аккаунты» section, Russian copy with EN-term glossary, local fonts (Google CDN removed) — zero behavior change, schema stays v14 |
 | E41 | 2026-07-17 | Options P2 informativeness: read-only «Статус» section + readiness hero, four independent runtime reads (health raw-503, me, per-page quota, spenders observations), persisted-signature hydration guard, no_permission first-class — schema stays v14, read-only throughout |
+| E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
 
 ## Entries
 
@@ -934,3 +935,22 @@ egress (DP 1-B). The Версия «Changelog» button links the anchored change
 gated on that page deploying first. Read-only throughout: the one central write
 controller, E19 custody, and the E37 barrier are untouched. Spec:
 docs/superpowers/specs/2026-07-16-options-redesign-design.md (P2).
+**E42 (2026-07-17).** changelog.html rebuilt in the family WEB register
+(install.html's palette: Fraunces serif + paper/clay, goose mascot header) —
+distinct from the extension's in-app tokens by design. Every release card is
+uniform collapsed <details class="release-detail"> markup; a tiny inline
+footer script opens the latest three at load (no-JS = all collapsed to
+readable serif summaries — accepted). Dark theme is a prefers-color-scheme
+token swap on THIS page only (install/guide deliberately stay light).
+Release canon and dates ride ONE committed manifest
+(tests/fixtures/changelog-manifest.ts: ordered version list, dates only for
+1.7.0+ from real tag creatordates — the 11.07.2026 bulk retro-tag cluster
+recorded as-is); release-pages.test.ts asserts the page's card sequence
+equals the manifest exactly (catches deletions/reorders forever), every
+manifest date renders, anchors stay unique with the current version present,
+and BOTH deploy stamp slots (deploy.sh and deploy-pages.sh regex forms)
+match byte-exactly — proven by a dual-stamp dry-run test. The transformation
+was scripted with a text-preservation assertion: 54 cards, 317 list items,
+42 summaries carried over byte-identical; zero release texts rewritten. A
+routine release = one uniform card insert + one manifest line, no other
+churn. Plan: docs/superpowers/plans/2026-07-17-changelog-web-register.md.
