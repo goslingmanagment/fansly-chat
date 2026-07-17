@@ -1433,6 +1433,13 @@ async function render(): Promise<void> {
     );
   };
 
+  const pluralizeSteps = (count: number): string => {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'шаг';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'шага';
+    return 'шагов';
+  };
   const updateReadinessHero = (): void => {
     const hubDone = statusModel.identity?.ok === true;
     const fanslyDone = statusModel.fanslyCapturedAccountIds.length > 0;
@@ -1483,7 +1490,7 @@ async function render(): Promise<void> {
     readinessHero.dataset.heroState = 'route';
     const heading = document.createElement('h2');
     heading.className = 'chatgoose-readiness-heading';
-    heading.textContent = `${COPY.hero.stepsPrefix} ${open.length} шаг.`;
+    heading.textContent = `${COPY.hero.stepsPrefix} ${open.length} ${pluralizeSteps(open.length)}`;
     readinessHero.append(heading);
     for (const step of steps) {
       const stepRow = document.createElement('div');
@@ -1624,7 +1631,7 @@ async function render(): Promise<void> {
         detail: `pages: ${identity.pages.length}`,
       });
     } else if (identity.reason === 'unauthorized') {
-      statusRows.access.set({ badge: '401', tone: 'bad', fact: 'кредерод отклонён' });
+      statusRows.access.set({ badge: '401', tone: 'bad', fact: 'credential отклонён хабом' });
       const reLogin = createButton(COPY.status.reLogin, true);
       reLogin.addEventListener('click', () => {
         agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1648,7 +1655,7 @@ async function render(): Promise<void> {
         fact: match ? 'контракт совпадает' : 'контракт разошёлся с SDK',
       });
     } else {
-      statusRows.contract.set({ badge: 'DRIFT', tone: 'neutral', fact: 'контракт неизвестен' });
+      statusRows.contract.set({ badge: '—', tone: 'neutral', fact: 'контракт неизвестен' });
     }
 
     updateReadinessHero(); // Task 8
