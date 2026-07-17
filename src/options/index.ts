@@ -964,7 +964,11 @@ async function render(): Promise<void> {
           const response = await sendRuntimeRequest('signOutAgencyHub');
           outcome = response?.outcome ?? 'unreachable';
         } catch (error) {
+          // The REQUEST itself failed — the background may have wiped nothing.
+          // Claiming «стёрт локально» here would be a lie; treat it like a
+          // failed wipe (loud, credentials possibly still present).
           console.error('Sign-out request failed', error);
+          outcome = 'wipe-failed';
         }
 
         // (4) Re-read the truth the background wrote (same pattern as the
@@ -981,7 +985,12 @@ async function render(): Promise<void> {
       // sign-in meta line; a failed LOCAL wipe is the red saved-flash —
       // credentials may still be present, the loud case.
       if (outcome === 'wipe-failed') {
-        savedFlash.showError('не удалось стереть креды локально — попробуй ещё раз');
+        savedFlash.showError('не удалось выполнить выход — попробуй ещё раз');
+        // Restore the visible key field from re-read truth: on a failed wipe
+        // the key may still be on disk, and an empty input would misreport it.
+        if (document.activeElement !== agencyHubKeyInput) {
+          agencyHubKeyInput.value = state.settings.agencyHubApiKey;
+        }
       } else if (outcome === 'revoked') {
         hubSignInMeta.textContent = 'Device token отозван на хабе.';
       } else if (outcome === 'already-invalid') {
