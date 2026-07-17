@@ -7,9 +7,13 @@ import {
   serializePersistedState,
 } from '../../src/shared/migrations.js';
 import type {
+  AgencyHubHealthResponse,
+  AgencyHubIdentityResponse,
+  AiQuotaStatus,
   PersistedState,
   SessionSnapshotEntry,
   Settings,
+  SpendersObservation,
 } from '../../src/shared/types.js';
 
 export interface MountOverrides {
@@ -19,6 +23,16 @@ export interface MountOverrides {
   state?: Partial<Omit<PersistedState, 'settings' | 'schemaVersion'>>;
   /** Reply for the getSessionsSnapshot runtime request (defaults to []). */
   sessions?: SessionSnapshotEntry[];
+  /** Deterministic replies for the P2 status/hero runtime reads. Each field may
+   * be a value OR a factory — a factory lets a test return a deferred promise
+   * (signature-guard A→B race) or a rejecting promise (independent-source
+   * failure), so one source can fail without stranding the other. */
+  runtime?: {
+    health?: AgencyHubHealthResponse | (() => AgencyHubHealthResponse | Promise<AgencyHubHealthResponse>);
+    identity?: AgencyHubIdentityResponse | (() => AgencyHubIdentityResponse | Promise<AgencyHubIdentityResponse>);
+    quotaByPage?: Record<string, AiQuotaStatus> | (() => Record<string, AiQuotaStatus> | Promise<Record<string, AiQuotaStatus>>);
+    spenders?: SpendersObservation | null | (() => SpendersObservation | null | Promise<SpendersObservation | null>);
+  };
 }
 
 export interface MountedOptionsPage {
@@ -61,6 +75,7 @@ export async function mountOptionsPage(
   };
 
   const sessions = overrides.sessions ?? [];
+  const runtime = overrides.runtime ?? {};
 
   // v14 storage.local layout: credentials live in their own custody keys and
   // the `settings` blob is stripped of them. serializePersistedState is the
@@ -127,10 +142,32 @@ export async function mountOptionsPage(
           message && typeof message === 'object'
             ? (message as { type?: unknown }).type
             : undefined;
-        if (requestType === 'getSessionsSnapshot') {
-          return sessions;
+        // Resolve a value-or-factory override; an omitted override yields the
+        // honest fallback. `await` surfaces a factory's rejection to the caller
+        // so the page's Promise.allSettled sees it as an independent failure.
+        const runtimeReply = async <T>(
+          override: T | (() => T | Promise<T>) | undefined,
+          fallback: T,
+        ): Promise<T> => {
+          if (override === undefined) return fallback;
+          return typeof override === 'function'
+            ? await (override as () => T | Promise<T>)()
+            : override;
+        };
+        switch (requestType) {
+          case 'getSessionsSnapshot':
+            return sessions;
+          case 'getAgencyHubHealth':
+            return runtimeReply<AgencyHubHealthResponse>(runtime.health, { ok: false, reason: 'no_base_url' });
+          case 'getAgencyHubIdentity':
+            return runtimeReply<AgencyHubIdentityResponse>(runtime.identity, { ok: false, reason: 'no_credential' });
+          case 'getAiQuotaByPage':
+            return runtimeReply<Record<string, AiQuotaStatus>>(runtime.quotaByPage, {});
+          case 'getSpendersStatus':
+            return runtimeReply<SpendersObservation | null>(runtime.spenders, null);
+          default:
+            return undefined;
         }
-        return undefined;
       }),
       openOptionsPage: vi.fn(async () => undefined),
     },
