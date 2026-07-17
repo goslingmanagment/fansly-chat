@@ -321,6 +321,12 @@ input[type='checkbox'] {
 .chatgoose-hub-identity-line {
   font-size: 12.5px; color: var(--chatgoose-ink); font-weight: 600;
 }
+/* The sign-in row (display:flex) and signed-in block (display:grid) carry
+   AUTHOR INLINE display, which beats the UA `[hidden] { display: none }` rule
+   (inline styles win on specificity), so the IDL `hidden` flag alone would not
+   hide them. An author-origin `!important` rule outranks the inline declaration
+   and restores real hiding for whichever block is toggled off. */
+.chatgoose-hub-signin-toggle[hidden] { display: none !important; }
 
 .chatgoose-saved-flash {
   position: fixed; right: 18px; bottom: 16px; z-index: 20;

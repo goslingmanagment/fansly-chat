@@ -111,6 +111,11 @@ const PERSONA_EMPTY_COPY: Record<PersonaEmptyState, string> = {
   'empty-catalog': 'Сервер вернул пустой каталог. Редактирование голосов сейчас заморожено.',
 };
 
+// buildPersonaRowViews hides archived-and-unreferenced personas, so the raw
+// catalog can be non-empty while zero rows render. That is NOT a server-empty
+// catalog — say so honestly instead of «пустой каталог».
+const PERSONA_ALL_ARCHIVED_COPY = 'Все голоса каталога в архиве.';
+
 function createLegacyPersonaExportControls(): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const exportStatus = document.createElement('div');
@@ -532,6 +537,12 @@ async function render(): Promise<void> {
     );
 
     if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
+      // Bump the version BEFORE returning: an in-flight pre-sign-out test that
+      // captured the old version must fail its `version !== agencyHubConnectionVersion`
+      // guard when it resolves, or it would repaint «Соединение OK» over the now
+      // signed-out state. The old early-return skipped this bump, leaving the
+      // stale test's version still current.
+      agencyHubConnectionVersion += 1;
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
       renderAgencyHubConnectionState();
@@ -840,6 +851,10 @@ async function render(): Promise<void> {
   // first renderHubSignInState() call — that call reads .hidden on each, so
   // leaving either below would throw a ReferenceError at every options mount.
   const hubSignInRow = document.createElement('div');
+  // Shared toggle class: its author-origin `[hidden] { display: none !important }`
+  // rule (styles.css) beats the inline display below, so `.hidden = true` really
+  // hides the row instead of being overridden by the inline author style.
+  hubSignInRow.className = 'chatgoose-hub-signin-toggle';
   hubSignInRow.style.display = 'flex';
   hubSignInRow.style.gap = '8px';
   hubSignInRow.style.flexWrap = 'wrap';
@@ -860,6 +875,9 @@ async function render(): Promise<void> {
   hubSignedInTop.append(hubActiveBadge, hubSignOutButton);
   const hubSignedInBlock = document.createElement('div');
   hubSignedInBlock.dataset.role = 'hub-signed-in';
+  // Same shared toggle class as the sign-in row: the `!important` hidden rule
+  // beats this inline `display: grid` so the signed-in block truly hides.
+  hubSignedInBlock.className = 'chatgoose-hub-signin-toggle';
   hubSignedInBlock.style.display = 'grid';
   hubSignedInBlock.style.gap = '6px';
   hubSignedInBlock.append(hubSignedInTop, hubIdentityLine, hubTokenLine);
@@ -942,11 +960,11 @@ async function render(): Promise<void> {
       agencyHubKeyInput.disabled = true;
       let outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed' = 'unreachable';
       try {
-        // (1) Flush our own pending writes: drop the debounce TIMER only, then
-        // AWAIT the chain. Queued persists run to completion — a pending
-        // theme/count/key edit lands normally, in order.
-        saveSettingsDebounced.cancel();
-        await (settingsSaveChain ?? Promise.resolve());
+        // (1) Flush our own pending writes and AWAIT them. flushSettingsSave()
+        // RUNS any debounced-but-not-yet-fired edit (a <350ms typed change with
+        // no blur/change event) before awaiting the chain — using .cancel() here
+        // instead would DROP that pending snapshot, silently losing the edit.
+        await flushSettingsSave();
 
         // (2) After this point no page write may own the custody field: clear the
         // dirty flag and the visible input BEFORE the background wipe, so neither
@@ -994,7 +1012,9 @@ async function render(): Promise<void> {
       } else if (outcome === 'revoked') {
         hubSignInMeta.textContent = 'Device token отозван на хабе.';
       } else if (outcome === 'already-invalid') {
-        hubSignInMeta.textContent = 'Хаб ответил 401 — token уже был недействителен.';
+        // already-invalid covers 401, 403 AND the no-token-to-revoke case, so a
+        // hard-coded «Хаб ответил 401» would fabricate a status the hub never sent.
+        hubSignInMeta.textContent = 'Token уже недействителен или отсутствует — стёрт локально.';
       } else {
         hubSignInMeta.textContent = 'Хаб недоступен — token стёрт локально, на сервере умрёт по sliding-expiry.';
       }
@@ -1331,11 +1351,16 @@ async function render(): Promise<void> {
       empty.dataset.role = 'persona-empty';
       empty.style.color = 'var(--chatgoose-ink-mid)';
       empty.style.fontSize = '12.5px';
-      empty.textContent = PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
-        currentSource: personaCatalogSource(state.settings),
-        storedSource: state.personaCatalogSource,
-        fetchedAt: state.personaCatalogFetchedAt,
-      })];
+      // rawCount > 0 with zero rows means every persona was archived AND
+      // unreferenced (filtered out) — a real, non-empty catalog. Only a genuinely
+      // empty raw catalog defers to the credential/fetch-state classifier.
+      empty.textContent = state.personaCatalog.length > 0
+        ? PERSONA_ALL_ARCHIVED_COPY
+        : PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
+            currentSource: personaCatalogSource(state.settings),
+            storedSource: state.personaCatalogSource,
+            fetchedAt: state.personaCatalogFetchedAt,
+          })];
       personalitiesList.append(empty);
       return;
     }
@@ -2228,6 +2253,10 @@ async function render(): Promise<void> {
         lastSeenAt: Number(captureAt),
       });
     }
+    // The persona-catalog footer shows a relative "изменялся N мин назад" that
+    // otherwise only re-renders on a catalog change — reuse THIS minute tick so a
+    // long-open options page doesn't freeze it. Reuses the interval, adds none.
+    personaChangedLine.textContent = formatCatalogChangedAt(state.personaCatalogFetchedAt);
   };
   const captureTicker = window.setInterval(refreshCaptureLines, 60_000);
   cleanupTasks.push(() => window.clearInterval(captureTicker));
