@@ -786,6 +786,8 @@ export interface RuntimeRequestMap {
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
+  getAgencyHubHealth: undefined;
+  getAgencyHubIdentity: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   openDebugPrompt: DebugPromptTokenRequest;
@@ -797,6 +799,8 @@ export interface RuntimeResponseMap {
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
+  getAgencyHubHealth: AgencyHubHealthResponse;
+  getAgencyHubIdentity: AgencyHubIdentityResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   openDebugPrompt: OpenDebugPromptResponse;
@@ -931,6 +935,26 @@ export interface AgencyHubConnectionTestResponse {
   ok: boolean;
   error?: UserFacingError;
 }
+
+/** Public /health, read for the «Hub (core)» status row. `sdkContractHash` is
+ * stamped background-side (KERNEL_CONTRACT_HASH) so the options bundle imports
+ * no SDK to render the debug-only Контракт row (MATCH/DRIFT). */
+export type AgencyHubHealthResponse =
+  | {
+      ok: true;
+      status: 'ok' | 'degraded';
+      dbLatencyMs: number | null;
+      contractHash: string;
+      sdkContractHash: string;
+    }
+  | { ok: false; reason: 'no_base_url' | 'no_permission' | 'unreachable' };
+
+/** Authenticated identity, read for the «Доступ» status row. `no_permission`
+ * is propagated distinctly (never folded into `unreachable`) so the renderer
+ * can keep the credential badge neutral and surface the grant on the Hub row. */
+export type AgencyHubIdentityResponse =
+  | { ok: true; username: string; role: string; pages: string[] }
+  | { ok: false; reason: 'no_credential' | 'no_permission' | 'unauthorized' | 'unreachable' };
 
 export interface AgencyHubAiUsageEvent {
   clientEventId: string;

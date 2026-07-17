@@ -310,6 +310,22 @@ export function registerRuntimeApi({
         }
       }
 
+      if (requestType === 'getAgencyHubHealth' || requestType === 'getAgencyHubIdentity') {
+        const { settings } = await storageCoordinator.getState();
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+        );
+        try {
+          return requestType === 'getAgencyHubHealth'
+            ? await agencyHubClient.checkHealth(settings, controller.signal)
+            : await agencyHubClient.checkIdentity(settings, controller.signal);
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
+      }
+
       if (requestType === 'issueAgencyHubDeviceToken') {
         const input = isObjectRecord(message) &&
           typeof message.baseUrl === 'string' &&

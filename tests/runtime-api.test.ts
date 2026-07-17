@@ -42,6 +42,8 @@ async function installRuntimeApiHarness(fanslyClient: {
 }, options?: {
   agencyHubClient?: {
     testConnection: ReturnType<typeof vi.fn>;
+    checkHealth?: ReturnType<typeof vi.fn>;
+    checkIdentity?: ReturnType<typeof vi.fn>;
   };
   spendersService?: {
     getList: ReturnType<typeof vi.fn>;
@@ -119,6 +121,8 @@ async function installRuntimeApiHarness(fanslyClient: {
   const storageCoordinator = new StorageCoordinator();
   const agencyHubClient = options?.agencyHubClient ?? {
     testConnection: vi.fn(async () => ({ ok: true })),
+    checkHealth: vi.fn(async () => ({ ok: false, reason: 'no_base_url' })),
+    checkIdentity: vi.fn(async () => ({ ok: false, reason: 'no_credential' })),
   };
   const spendersService = options?.spendersService ?? {
     getList: vi.fn(async () => ({
@@ -461,6 +465,37 @@ describe('runtime-api testAgencyHubConnection', () => {
     expect(onAgencyHubReady).not.toHaveBeenCalled();
     await onMessageListener?.(request);
     expect(onAgencyHubReady).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runtime-api agency hub reads', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('answers getAgencyHubHealth from the stored settings', async () => {
+    mockStorage = createStorage({ settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub.example' } });
+    const checkHealth = vi.fn(async () => ({ ok: true, status: 'ok', dbLatencyMs: 9, contractHash: 'h', sdkContractHash: 'h' }));
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn() },
+      { agencyHubClient: { testConnection: vi.fn(), checkHealth, checkIdentity: vi.fn() } },
+    );
+    const result = await harness.send({ type: 'getAgencyHubHealth' });
+    expect(result).toMatchObject({ ok: true, status: 'ok' });
+    expect(checkHealth).toHaveBeenCalledWith(expect.objectContaining({ agencyHubBaseUrl: 'https://hub.example' }), expect.any(AbortSignal));
+  });
+
+  it('answers getAgencyHubIdentity from the stored settings', async () => {
+    mockStorage = createStorage({ settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub.example' } });
+    const checkIdentity = vi.fn(async () => ({ ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] }));
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn() },
+      { agencyHubClient: { testConnection: vi.fn(), checkHealth: vi.fn(), checkIdentity } },
+    );
+    const result = await harness.send({ type: 'getAgencyHubIdentity' });
+    expect(result).toMatchObject({ ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] });
+    expect(checkIdentity).toHaveBeenCalledWith(expect.objectContaining({ agencyHubBaseUrl: 'https://hub.example' }), expect.any(AbortSignal));
   });
 });
 

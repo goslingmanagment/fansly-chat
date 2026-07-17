@@ -268,6 +268,10 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getSessionsSnapshot';
     case 'testAgencyHubConnection':
       return 'testAgencyHubConnection';
+    case 'getAgencyHubHealth':
+      return 'getAgencyHubHealth';
+    case 'getAgencyHubIdentity':
+      return 'getAgencyHubIdentity';
     case 'issueAgencyHubDeviceToken':
       return 'issueAgencyHubDeviceToken';
     case 'getSpendersList':
