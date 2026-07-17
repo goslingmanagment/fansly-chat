@@ -216,3 +216,48 @@ describe('options Статус — hub/session hydration', () => {
     expect(access.textContent).toContain('lilly-chatter');
   });
 });
+
+describe('options Статус — AI quota & Spenders hydration', () => {
+  it('AI row lists remaining per page, amber at ≤20 and red at 0', async () => {
+    const { document } = await mountOptionsPage({
+      runtime: { quotaByPage: {
+        lilly: { pageLabel: 'lilly', remainingRequestsToday: 143, exhausted: false, observedAt: Date.now() },
+        ari: { pageLabel: 'ari', remainingRequestsToday: 0, exhausted: true, observedAt: Date.now() },
+      } },
+    });
+    const ai = rowByLabel(document, 'AI');
+    expect(ai.querySelector('.chatgoose-badge-mono')?.textContent).toBe('KERNEL');
+    const lines = Array.from(ai.querySelectorAll('.chatgoose-status-detail-line'), (l) => l.textContent);
+    expect(lines).toContain('lilly · осталось 143');
+    expect(lines).toContain('ari · осталось 0');
+    expect(ai.textContent).not.toMatch(/\$/); // E14: no dollars
+  });
+
+  it('AI row is honest-empty with no observations today', async () => {
+    const { document } = await mountOptionsPage({ runtime: { quotaByPage: {} } });
+    expect(rowByLabel(document, 'AI').textContent).toContain('сегодня генераций не было — квота неизвестна');
+  });
+
+  it('Spenders row maps the freshest observation and honest empty', async () => {
+    const ramped = await mountOptionsPage({ runtime: { spenders: { sourceIdentity: 's', streamState: 'ramped', outcome: 'ok', observedAt: Date.now() } } });
+    expect(rowByLabel(ramped.document, 'Spenders').querySelector('.chatgoose-badge-mono')?.textContent).toBe('RAMPED');
+    await unmountOptionsPage();
+    const empty = await mountOptionsPage({ runtime: { spenders: null } });
+    expect(rowByLabel(empty.document, 'Spenders').textContent).toContain('доска ещё не открывалась');
+  });
+
+  it('renders Spenders even when the AI quota read rejects (independent sources)', async () => {
+    const { document } = await mountOptionsPage({
+      runtime: {
+        quotaByPage: () => Promise.reject(new Error('runtime channel closed')),
+        spenders: { sourceIdentity: 's', streamState: 'ramped', outcome: 'ok', observedAt: Date.now() },
+      },
+    });
+    // The Spenders row paints despite the sibling read failing…
+    expect(rowByLabel(document, 'Spenders').querySelector('.chatgoose-badge-mono')?.textContent).toBe('RAMPED');
+    // …and the AI row falls to its honest-empty state, never a stuck skeleton.
+    const ai = rowByLabel(document, 'AI');
+    expect(ai.dataset.status).toBe('ready');
+    expect(ai.textContent).toContain('сегодня генераций не было');
+  });
+});

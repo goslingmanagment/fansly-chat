@@ -23,6 +23,7 @@ import {
   createVersionTag,
   debounce,
   injectStyles,
+  type BadgeTone,
 } from './dom.js';
 import {
   buildSessionLookup,
@@ -63,9 +64,11 @@ import { installUiTheme } from '../shared/theme.js';
 import type {
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
+  AiQuotaStatus,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
   Settings,
+  SpendersStreamState,
   UiThemeSetting,
 } from '../shared/types.js';
 
@@ -1562,6 +1565,56 @@ async function render(): Promise<void> {
     updateReadinessHero(); // Task 8
   };
 
+  const hydrateLocalStatusRows = async (): Promise<void> => {
+    // Independent sources (§12): one rejected local read must not strand the
+    // other row as a skeleton or raise an unhandled rejection. A rejected source
+    // falls to its honest-unknown render ({} / null), never a stuck skeleton.
+    const [quotaResult, spendersResult] = await Promise.allSettled([
+      sendRuntimeRequest('getAiQuotaByPage'),
+      sendRuntimeRequest('getSpendersStatus'),
+    ]);
+    if (disposed) return;
+    const quotaByPage = quotaResult.status === 'fulfilled' ? quotaResult.value : {};
+    const spenders = spendersResult.status === 'fulfilled' ? spendersResult.value : null;
+
+    // AI — per page, requests only; NO micro-USD (E14). Empty map = unknown.
+    const quotaEntries = quotaByPage && typeof quotaByPage === 'object'
+      ? Object.values(quotaByPage)
+      : [];
+    if (quotaEntries.length === 0) {
+      statusRows.ai.set({ badge: 'KERNEL', tone: 'neutral', fact: COPY.status.aiEmpty });
+    } else {
+      const worst = quotaEntries.reduce<AiQuotaStatus | null>((acc, entry) =>
+        acc === null || (entry.remainingRequestsToday ?? Infinity) < (acc.remainingRequestsToday ?? Infinity)
+          ? entry : acc, null);
+      const remaining = worst?.remainingRequestsToday;
+      const tone: BadgeTone = remaining === 0 ? 'bad' : (remaining !== null && remaining !== undefined && remaining <= 20) ? 'amber' : 'green';
+      statusRows.ai.set({ badge: 'KERNEL', tone, fact: `${quotaEntries.length} стр.` });
+      statusRows.ai.setDetailLines(quotaEntries.map((entry) =>
+        entry.remainingRequestsToday === null
+          ? `${entry.pageLabel} · лимит не сообщён`
+          : `${entry.pageLabel} · осталось ${entry.remainingRequestsToday}`));
+    }
+
+    // Spenders — freshest observation → RAMPED / FLAG OFF / NOT ALLOWLISTED / FAIL.
+    if (!spenders) {
+      statusRows.spenders.set({ badge: 'FLAG OFF', tone: 'neutral', fact: COPY.status.spendersEmpty });
+    } else if (spenders.outcome === 'fail') {
+      statusRows.spenders.set({ badge: 'FAIL', tone: 'bad', fact: 'последняя сборка доски не удалась' });
+    } else {
+      const map: Record<SpendersStreamState, { badge: string; tone: BadgeTone; fact: string }> = {
+        ramped: { badge: 'RAMPED', tone: 'green', fact: 'данные идут' },
+        flag_off: { badge: 'FLAG OFF', tone: 'neutral', fact: 'проекция выключена' },
+        not_allowlisted: { badge: 'NOT ALLOWLISTED', tone: 'amber', fact: 'страница не в allowlist' },
+        unsupported_platform: { badge: 'FLAG OFF', tone: 'neutral', fact: 'платформа не поддерживается' },
+      };
+      const view = spenders.streamState ? map[spenders.streamState] : map.flag_off;
+      statusRows.spenders.set(view);
+    }
+
+    updateReadinessHero(); // Task 8
+  };
+
   // ─── Ordered section registration ───────────────────────────
   // MUST stay immediately before the future-schema barrier block below. Every
   // section is now in the DOM (shell.main → shell.layout → root) BEFORE the
@@ -1848,6 +1901,8 @@ async function render(): Promise<void> {
   // The stored-snapshot signature is what mount fires against: the form fields
   // were initialized from `state.settings`, so live == stored right now.
   void hydrateHubStatusRows(storedHubSignature());
+  // Local storage.session reads — no hub round-trip, no signature guard.
+  void hydrateLocalStatusRows();
 
   renderCleanup = async () => {
     const pendingEdits = flushPendingEdits();
