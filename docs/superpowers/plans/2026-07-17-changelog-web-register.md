@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Rev 2** — double-blind review fixes (2 verified defects):
+**Rev 3** — single-source consolidation (Rev 2's two date/count mechanisms collapse into one committed manifest):
 1. **Release-safe invariants (no frozen snapshot pins).** A routine release adds one card at the top of `changelog.html`, so the rev-1 tests would turn `pnpm check` red on the very next release: `toHaveLength(54)`, the `release-date` `toHaveLength(16)` count, and the index-absolute collapse pins (`slice(0,3)` expanded / `slice(3)` with baked collapsed markup) all break the moment card #55 slides everything down. Fixed by making every invariant **structural/derived, never counted or index-positional**: (a) dropped the bare 54/16 count pins — kept the absent-1.2.x canon loop and derive "must be dated" from version ≥ 1.7.0; (b) **removed baked expand/collapse state entirely** — every card now ships the SAME collapsed `<details class="release-detail">`, and "latest three expanded" is done by a tiny inline `<script>` that sets `.open` on the first three `.release` at load (progressive enhancement; no-JS = all cards collapsed to their readable serif summaries, acceptable). A release is now a **one-card insert with zero churn elsewhere and zero test edits**. The generator stays a one-time scratchpad migration (throwaway is now safe *because* routine releases need no regeneration — they hand-insert one uniform card).
-2. **Real tag dates + a committed test that binds them.** The rev-1 `RELEASE_DATES` map was fabricated. Replaced with the ACTUAL `git for-each-ref` output (only 4 distinct dates: v1.9.9/1.9.8 = 15.07.2026, v1.9.7 = 14.07.2026, v1.9.6/1.9.5/1.9.4 = 12.07.2026, and everything v1.7.0…v1.9.3 = 11.07.2026 — a bulk retro-tag). Added a committed test that shells out via `execFileSync` (established in `tests/announce-cli.test.ts`; declared in `tests/node-shims.d.ts`) to re-derive the dates from `git for-each-ref` and assert each tagged card matches — so no date can be hand-invented and the page can never diverge from the tags.
+2. **One committed manifest is the single source of truth for BOTH the card sequence and the dates.** Rev 2 shipped two separate mechanisms — an `execFileSync` test that re-derived dates from `git for-each-ref`, and a `>= 54` monotonic floor guarding only against dropped cards. Rev 3 replaces BOTH with one committed artifact, `tests/fixtures/changelog-manifest.ts`: an ordered `{ version, date? }[]` for every card, top-first (all 54 entries; dates `DD.MM.YYYY` for 1.7.0+ only, transcribed once from the real `git for-each-ref` tag dates — only 4 distinct values, a bulk retro-tag on 2026-07-11 covering everything through 1.9.3). One test asserts the page's card-version sequence EQUALS the manifest sequence exactly (order + count — catching deletions, insertions, and reordering forever, which no floor can) and that every manifest date renders in its card. A release is now TWO mechanical edits in one commit — one card in `changelog.html`, one line in the manifest — and `pnpm check` enforces they agree. **No test shells out to git**, so the suite is fully CI-enforceable on a shallow checkout (no `fetch-depth`/`fetch-tags`, no local-only caveat).
 
 **Rev 1** — initial plan from spec §11 + a full artifact audit: `changelog.html` (54 release cards, Inter font, own blue-bearing palette, no dates, no anchors), `install.html` (the family web-register donor: `--paper/#f6f2ea … --clay/#c4704b`, Fraunces + Hanken Grotesk, goose mascot), `scripts/deploy.sh` (`stamp_changelog_page_version` — two byte-exact slots) **and** `scripts/deploy-pages.sh` (the standalone page-only deploy — a second stamper over the same two slots), `tests/release-pages.test.ts` (slot-cardinality pins), and `CHANGELOG.md` (62 versions vs the page's 54 — the eight 1.2.x deliberately absent).
 
@@ -22,8 +22,8 @@
 - `pnpm check` (typecheck + lint + gates + tests + build) green before EVERY commit; `tests/release-pages.test.ts` is part of that suite. The page rebuild lands as a SINGLE commit (`changelog.html` + the extended test) — do not commit a red suite by splitting the test from the page it pins.
 - **Byte-exact stamp slots (the deploy invariant):** the committed page MUST contain, matchable exactly once, `<span class="nav-version">v1.7.1</span>` and `<p>v1.7.1 &middot; Gosling Agency &middot; Kernel-served AI</p>`. These two slots are stamped by BOTH `scripts/deploy.sh` (`stamp_changelog_page_version`, regex `/(<span class="nav-version">)v[^<]+(<\/span>)/` and `/(<p>)v[^<]+( &middot; Gosling Agency &middot; Kernel-served AI<\/p>)/`) AND `scripts/deploy-pages.sh` (generic `stamp_version`, regex `(<span class="nav-version">v)[^<]+(</span>)` and `(<p>v)[^<]+( &middot; Gosling Agency &middot; Kernel-served AI</p>)`). Both forms target the same markup; keep the footer `<p>` **attribute-less** and the `v` immediately after `<p>` / inside the span. **Neither deploy script may be edited.**
 - **No text rewrites:** every release summary and every changes-list `<li>` transfers verbatim. The only text the transform ADDS is date spans, the «Подробнее» collapse toggle, and anchor ids/`<details>` wrappers (attributes + structure, never prose). Task 3's diff-verify proves it and aborts on any drift.
-- **Canon (spec §11):** `CHANGELOG.md` stays the full 62-version archive; the page keeps its cards (54 at migration, **+1 per release** — never a pinned count). The eight 1.2.x releases the page never showed (1.2.14, 1.2.13, 1.2.12, 1.2.11, 1.2.10, 1.2.9, 1.2.6, 1.2.5) stay absent — do NOT backfill. The page = "what users saw"; the markdown = full history. This divergence is recorded, deliberate. The absent-1.2.x negative loop (not a card count) is what the test pins.
-- **Dates policy (spec §11):** format `DD.MM.YYYY`, for **every** release ≥ 1.7.0 (16 dated cards at migration; each new release adds one — the invariant is `hasDate ⇔ version ≥ 1.7.0`, derived, never a fixed count). Every older card stays dateless. The 1.7.0+ tags were created in a **bulk retro-tagging on 2026-07-11** — everything through 1.9.3 shares that `creatordate`; only 1.9.4+ were tagged close to their real release. So `creatordate` is an imperfect but **committed, machine-verifiable** proxy: dates are read straight from `git for-each-ref` (real values below in Task 1), never hand-invented, and a committed test binds each dated card to its tag so the page can never diverge. Many dates therefore repeat (a dozen cards show 11.07.2026) — that is honest; do NOT "spread them out." Future releases stamp their own tag date on release.
+- **Canon (spec §11):** `CHANGELOG.md` stays the full 62-version archive; the page keeps its cards (54 at migration, **+1 per release**). The eight 1.2.x releases the page never showed (1.2.14, 1.2.13, 1.2.12, 1.2.11, 1.2.10, 1.2.9, 1.2.6, 1.2.5) stay absent — do NOT backfill. The page = "what users saw"; the markdown = full history. This divergence is recorded, deliberate. The absent-1.2.x negative loop stays; on top of it the committed manifest `tests/fixtures/changelog-manifest.ts` pins the EXACT card-version sequence (order + count), so a dropped, inserted, or reordered card fails `pnpm check` — the page and the manifest move together, one line per release.
+- **Dates policy (spec §11):** format `DD.MM.YYYY`, for **every** release ≥ 1.7.0 (16 dated cards at migration; each new release adds one — the invariant is `hasDate ⇔ version ≥ 1.7.0`). Every older card stays dateless. The 1.7.0+ tags were created in a **bulk retro-tagging on 2026-07-11** — everything through 1.9.3 shares that `creatordate`; only 1.9.4+ were tagged close to their real release. So `creatordate` is an imperfect but honest proxy: the real `git for-each-ref` tag dates are transcribed **once** into the committed manifest `tests/fixtures/changelog-manifest.ts` (Task 1) — never re-derived from git at test time — and the release-pages test binds each dated card to its manifest date, so the page can never diverge from the manifest and no test depends on tags being present in a shallow checkout. Many dates therefore repeat (a dozen cards show 11.07.2026) — that is honest; do NOT "spread them out." A future release adds its own tag date as one manifest line alongside its card.
 - **Fonts:** the web register keeps the Google Fonts CDN (Fraunces + Hanken Grotesk) exactly as `install.html` does. The local-woff2 mandate (spec §2.5) is scoped to EXTENSION pages (options/popup/debug-prompt) — `changelog.html`/`install.html`/`guide.html` are hosted web pages and are out of that scope. Do NOT bundle fonts here.
 - **Track independence:** no `src/` changes, no storage schema, no `manifest.json`/`package.json` bump, no vendored-SDK touch. Pure web page + test + decision doc.
 - **Ordering (spec §13):** the rebuilt anchored `changelog.html` must be DEPLOYED before (or together with) the P2 options release that adds the «Версия → Changelog» button linking `changelog.html#v<major>-<minor>-<patch>` — a link must not ship before its target exists. A standalone page-only deploy IS available: `scripts/deploy-pages.sh` stamps + scp's `changelog.html` (with `install.html`/`guide.html`/`mascot.png`) without rebuilding or re-signing the extension, so the owner can push the anchors live ahead of the P2 release. Task 6 records this.
@@ -34,29 +34,34 @@
 changelog.html                    (rebuild in place: family <head>/CSS + prefers-color-scheme dark;
                                     body cards re-marked — anchors, dates, collapse, «Технически» <details>;
                                     nav/hero/footer restyled to family tokens, stamp slots byte-exact)
+tests/fixtures/changelog-manifest.ts  (NEW committed artifact: an ordered {version, date?}[] for
+                                    every card, top-first — the single source of truth for the
+                                    card SEQUENCE and the 1.7.0+ dates. Read by build.mjs and
+                                    asserted by release-pages.test.ts; a release adds one line here)
 tests/release-pages.test.ts       (extend: a new 'changelog web register' describe block — anchors,
-                                    dates, version order, collapse, tech-details, palette/no-blue,
-                                    dark theme, serif summary; plus a dual-deploy stamp dry-run)
+                                    manifest-sequence + dates, version order, collapse, tech-details,
+                                    palette/no-blue, dark theme, serif summary; plus a dual-deploy stamp dry-run)
 docs/decisions.md                 (append the changelog-register decision entry + summary-table row)
 
 <scratchpad>/changelog/shell.mjs  (NOT committed — family <head>/CSS + NAV/HERO/FOOTER templates,
                                     the two byte-exact stamp slots live here)
-<scratchpad>/changelog/build.mjs  (NOT committed — reads changelog.html, transforms the 54 cards,
-                                    assembles from shell templates, runs the text-preservation
-                                    assertion, writes changelog.html)
+<scratchpad>/changelog/build.mjs  (NOT committed — reads changelog.html + the committed manifest,
+                                    transforms the 54 cards, assembles from shell templates, runs the
+                                    text-preservation assertion, writes changelog.html)
 ```
 
 `<scratchpad>` = the session scratchpad directory (outside the repo; the two `.mjs` files are throwaway build tooling, never staged). All CSS is inlined into `changelog.html`'s `<style>` — the served page stays self-contained, exactly as today.
 
 ---
 
-### Task 1: Derive the release-date map from Git tags
+### Task 1: Transcribe the committed release manifest (`tests/fixtures/changelog-manifest.ts`)
 
-The 16 tags (v1.7.0 … v1.9.9) are the only trustworthy dates; the map feeds Task 3's `build.mjs`. This is the one non-deterministic, tag-dependent step — isolate it here so the transform script stays a pure function of its inputs.
+The manifest is the ONE committed source of truth for both the card sequence and the 1.7.0+ dates: an ordered `{ version, date? }[]` for every card, top-first. It is read by Task 3's `build.mjs` and asserted by Task 4's test — so it is the only place a date or a card order is transcribed, and `git` is touched exactly once (here, by a human, not by any test).
 
-**Files:** none committed (produces a value pasted into Task 3's script).
+**Files:**
+- Create (COMMITTED, lands in the Task 4 atomic commit): `tests/fixtures/changelog-manifest.ts`
 
-- [ ] **Step 1: List the tags with dates.**
+- [ ] **Step 1: List the tags with dates** (the 16 dated releases; 1.7.0+ only is tagged).
 
 Run:
 ```bash
@@ -81,28 +86,91 @@ v1.8.0 11.07.2026
 v1.7.0 11.07.2026
 v1.7.1 11.07.2026
 ```
-Only **4 distinct dates**: the whole back catalogue through 1.9.3 was bulk retro-tagged on **11.07.2026**, then 1.9.4–1.9.6 = 12.07, 1.9.7 = 14.07, 1.9.8/1.9.9 = 15.07. Re-run the command and use its output verbatim; if the count is not 16 or the earliest tag is not `v1.7.0`, STOP and reconcile with the owner: the dates policy assumes exactly these tags. (These values are ALSO independently re-derived by the committed Task 4 test — see below — so a stale paste here is caught, not shipped.)
+Only **4 distinct dates**: the whole back catalogue through 1.9.3 was bulk retro-tagged on **11.07.2026**, then 1.9.4–1.9.6 = 12.07, 1.9.7 = 14.07, 1.9.8/1.9.9 = 15.07. Re-run the command and use its output verbatim; if the count is not 16 or the earliest tag is not `v1.7.0`, STOP and reconcile with the owner: the dates policy assumes exactly these tags.
 
-- [ ] **Step 2: Record the map** as the `RELEASE_DATES` constant for Task 3 (strip the leading `v`, `DD.MM.YYYY` values verbatim from the command):
+- [ ] **Step 2: List the page's card order** (the full 54-entry sequence, top-first — the manifest must mirror it exactly at migration):
 
-```js
-// Regenerated from: git for-each-ref --sort=-creatordate \
-//   --format='%(refname:short) %(creatordate:format:%d.%m.%Y)' 'refs/tags/v*'
-// Only 1.7.0+ is tagged; a bulk retro-tag on 2026-07-11 covers everything
-// through 1.9.3 (creatordate is a committed, verifiable proxy, not exact).
-// The Task 4 committed test re-derives this from git and asserts the page
-// matches — so this transcription cannot silently drift.
-const RELEASE_DATES = {
-  '1.9.9': '15.07.2026', '1.9.8': '15.07.2026', '1.9.7': '14.07.2026',
-  '1.9.6': '12.07.2026', '1.9.5': '12.07.2026', '1.9.4': '12.07.2026',
-  '1.9.3': '11.07.2026', '1.9.2': '11.07.2026', '1.9.1': '11.07.2026',
-  '1.9.0': '11.07.2026', '1.8.3': '11.07.2026', '1.8.2': '11.07.2026',
-  '1.8.1': '11.07.2026', '1.8.0': '11.07.2026', '1.7.1': '11.07.2026',
-  '1.7.0': '11.07.2026',
-};
+```bash
+grep -oE '<!-- [0-9]+\.[0-9]+\.[0-9]+ -->' changelog.html | sed -E 's/<!-- (.+) -->/\1/'
+```
+Expected: 54 versions, newest-first descending (1.9.9 … 1.0.0), with the eight absent 1.2.x releases already missing (1.2.14/13/12/11/10/9/6/5).
+
+- [ ] **Step 3: Write the committed manifest** `tests/fixtures/changelog-manifest.ts` — the Step 2 order with the Step 1 dates attached to 1.7.0+ (a `.ts` const with a type, lint-friendlier than JSON; imported by the test, parsed as text by the throwaway `build.mjs`):
+
+```ts
+// The committed source of truth for changelog.html: every release card on the
+// page, in page order (top = newest), and — for 1.7.0+ ONLY — its date.
+// Dates are DD.MM.YYYY, transcribed ONCE from the real git tag dates:
+//   git for-each-ref --sort=-creatordate \
+//     --format='%(refname:short) %(creatordate:format:%d.%m.%Y)' 'refs/tags/v*'
+// A bulk retro-tag on 2026-07-11 covers everything through 1.9.3, so many dates
+// repeat — honest, not spread out. A release adds ONE entry at the top here AND
+// ONE card to changelog.html in the same commit; release-pages.test.ts asserts
+// the page's card sequence equals this array exactly and every date matches.
+export interface ChangelogRelease {
+  version: string;
+  date?: string; // DD.MM.YYYY, present iff version >= 1.7.0
+}
+
+export const CHANGELOG_MANIFEST: readonly ChangelogRelease[] = [
+  { version: '1.9.9', date: '15.07.2026' },
+  { version: '1.9.8', date: '15.07.2026' },
+  { version: '1.9.7', date: '14.07.2026' },
+  { version: '1.9.6', date: '12.07.2026' },
+  { version: '1.9.5', date: '12.07.2026' },
+  { version: '1.9.4', date: '12.07.2026' },
+  { version: '1.9.3', date: '11.07.2026' },
+  { version: '1.9.2', date: '11.07.2026' },
+  { version: '1.9.1', date: '11.07.2026' },
+  { version: '1.9.0', date: '11.07.2026' },
+  { version: '1.8.3', date: '11.07.2026' },
+  { version: '1.8.2', date: '11.07.2026' },
+  { version: '1.8.1', date: '11.07.2026' },
+  { version: '1.8.0', date: '11.07.2026' },
+  { version: '1.7.1', date: '11.07.2026' },
+  { version: '1.7.0', date: '11.07.2026' },
+  { version: '1.6.0' },
+  { version: '1.5.6' },
+  { version: '1.5.5' },
+  { version: '1.5.4' },
+  { version: '1.5.3' },
+  { version: '1.5.2' },
+  { version: '1.5.1' },
+  { version: '1.5.0' },
+  { version: '1.4.1' },
+  { version: '1.4.0' },
+  { version: '1.3.14' },
+  { version: '1.3.13' },
+  { version: '1.3.12' },
+  { version: '1.3.11' },
+  { version: '1.3.10' },
+  { version: '1.3.9' },
+  { version: '1.3.8' },
+  { version: '1.3.7' },
+  { version: '1.3.6' },
+  { version: '1.3.5' },
+  { version: '1.3.4' },
+  { version: '1.3.3' },
+  { version: '1.3.2' },
+  { version: '1.3.1' },
+  { version: '1.3.0' },
+  { version: '1.2.17' },
+  { version: '1.2.15' },
+  { version: '1.2.2' },
+  { version: '1.2.1' },
+  { version: '1.2.0' },
+  { version: '1.1.6' },
+  { version: '1.1.5' },
+  { version: '1.1.4' },
+  { version: '1.1.3' },
+  { version: '1.1.2' },
+  { version: '1.1.1' },
+  { version: '1.1.0' },
+  { version: '1.0.0' },
+];
 ```
 
-No commit — this value is consumed by Task 3.
+54 entries (16 dated, 38 dateless). The file is committed in Task 4's atomic commit (the test imports it, so they must land together). It cannot silently drift: Task 3's `build.mjs` cross-checks its migrated card sequence against it, and Task 4's test asserts the page equals it.
 
 ---
 
@@ -324,7 +392,7 @@ No commit (scratchpad only).
 
 ### Task 3: The transformation script + text-preservation diff
 
-Produces `<scratchpad>/changelog/build.mjs`: reads the current `changelog.html`, splits the timeline into its 54 cards on the `<!-- x.y.z -->` markers (unambiguous delimiters — no fragile nested-`</div>` counting), applies four **pure** per-card operations, re-assembles with the Task 2 shell, runs the text-preservation assertion, and writes `changelog.html` only if it passes.
+Produces `<scratchpad>/changelog/build.mjs`: reads the current `changelog.html` AND the committed manifest (Task 1) for its dates, splits the timeline into its 54 cards on the `<!-- x.y.z -->` markers (unambiguous delimiters — no fragile nested-`</div>` counting), applies four **pure** per-card operations, re-assembles with the Task 2 shell, runs the text-preservation assertion, and writes `changelog.html` only if it passes.
 
 The four per-card operations (each touches zero card text):
 1. **Anchor + milestone class:** `<div class="release">` → `<div class="release[ milestone]" id="v<slug>">` (slug = version with dots→dashes). `milestone` is added iff the card already carries a `release-badge milestone` span (today only 1.6.0 — auto-detected, never hardcoded).
@@ -336,31 +404,32 @@ The four per-card operations (each touches zero card text):
 - Create: `<scratchpad>/changelog/build.mjs` (not committed)
 
 **Interfaces:**
-- Consumes: `./shell.mjs`, `RELEASE_DATES` (Task 1), the repo `changelog.html` path via `process.argv[2]`.
+- Consumes: `./shell.mjs`, the repo `changelog.html` path via `process.argv[2]`, and the committed manifest `tests/fixtures/changelog-manifest.ts` path via `process.argv[3]` (parsed as text for its dates + sequence).
 - Produces: rewritten `changelog.html` (in place) + a stdout report; throws (no write) on any text drift.
 
-- [ ] **Step 1: Write `build.mjs`** (complete — paste the Task 1 `RELEASE_DATES` into the marked slot):
+- [ ] **Step 1: Write `build.mjs`** (complete — it reads the committed manifest for dates + the expected sequence; nothing to paste):
 
 ```js
 import { readFileSync, writeFileSync } from 'node:fs';
 import { HEAD, NAV, HERO, FOOTER } from './shell.mjs';
 
-// ── PASTE the Task 1 map here (regenerate from git for-each-ref) ──
-// Bulk retro-tag on 2026-07-11 covers everything through 1.9.3.
-// The committed Task 4 test re-derives these from git and asserts the page
-// matches, so a stale/fabricated paste is caught before it ships.
-const RELEASE_DATES = {
-  '1.9.9': '15.07.2026', '1.9.8': '15.07.2026', '1.9.7': '14.07.2026',
-  '1.9.6': '12.07.2026', '1.9.5': '12.07.2026', '1.9.4': '12.07.2026',
-  '1.9.3': '11.07.2026', '1.9.2': '11.07.2026', '1.9.1': '11.07.2026',
-  '1.9.0': '11.07.2026', '1.8.3': '11.07.2026', '1.8.2': '11.07.2026',
-  '1.8.1': '11.07.2026', '1.8.0': '11.07.2026', '1.7.1': '11.07.2026',
-  '1.7.0': '11.07.2026',
-};
-
 const target = process.argv[2];
-if (!target) throw new Error('usage: node build.mjs <path-to-changelog.html>');
+const manifestPath = process.argv[3];
+if (!target || !manifestPath) {
+  throw new Error('usage: node build.mjs <changelog.html> <tests/fixtures/changelog-manifest.ts>');
+}
 const original = readFileSync(target, 'utf8');
+
+// ── Read the committed manifest (the single source of truth for the card
+//    sequence + the 1.7.0+ dates). build.mjs is a throwaway node:fs script, so
+//    it parses the .ts manifest as TEXT rather than importing it — the manifest,
+//    not this script, is the committed artifact. Task 4's test asserts the page
+//    and the manifest agree, so a stale/fabricated build can't ship. ──
+const manifestSrc = readFileSync(manifestPath, 'utf8');
+const MANIFEST = [...manifestSrc.matchAll(/\{\s*version:\s*'([^']+)'(?:\s*,\s*date:\s*'([^']+)')?\s*\}/g)]
+  .map((m) => ({ version: m[1], date: m[2] || null }));
+if (MANIFEST.length === 0) throw new Error('manifest parse produced 0 entries');
+const RELEASE_DATES = Object.fromEntries(MANIFEST.filter((e) => e.date).map((e) => [e.version, e.date]));
 
 // Extract the timeline inner and split into cards on the version comments.
 const tOpen = original.indexOf('<div class="timeline">');
@@ -377,9 +446,15 @@ const cards = [];
 for (let i = 1; i < parts.length; i += 2) {
   cards.push({ version: parts[i], body: parts[i + 1] });
 }
-// One-time migration input guard (scratchpad script, run once against today's
-// page) — NOT a durable pin. The committed test never asserts a card count.
-if (cards.length !== 54) throw new Error(`expected 54 cards at migration, got ${cards.length}`);
+// Cross-check the migrated card sequence against the committed manifest: the
+// throwaway script must produce EXACTLY the sequence the committed test pins,
+// so any order/count drift is caught at build time. (The durable pin is the
+// test, not this script — this just fails the build early on a mismatch.)
+const cardVersions = cards.map((c) => c.version).join(',');
+const manifestVersions = MANIFEST.map((e) => e.version).join(',');
+if (cardVersions !== manifestVersions) {
+  throw new Error(`card sequence != manifest\n  cards:    ${cardVersions}\n  manifest: ${manifestVersions}`);
+}
 
 function transformCard(version, body) {
   const slug = 'v' + version.replace(/\./g, '-');
@@ -466,7 +541,7 @@ console.log(`  dated: ${cards.filter((c) => RELEASE_DATES[c.version]).length} | 
 Run (from the repo root; `$SCRATCH` = the scratchpad dir):
 ```bash
 cp changelog.html "$SCRATCH/changelog.before.html"
-node "$SCRATCH/changelog/build.mjs" "$SCRATCH/changelog.before.html"
+node "$SCRATCH/changelog/build.mjs" "$SCRATCH/changelog.before.html" "$(pwd)/tests/fixtures/changelog-manifest.ts"
 ```
 Expected: no throw; a report like
 ```
@@ -488,12 +563,11 @@ Test-first: add the new invariants to `tests/release-pages.test.ts`, watch them 
 - Modify: `tests/release-pages.test.ts`
 - Modify: `changelog.html` (generated by `build.mjs`)
 
-- [ ] **Step 1: Append the new describe block** to `tests/release-pages.test.ts`. First add two imports at the top of the file — the same `node:child_process` shim surface `tests/announce-cli.test.ts` already uses (both are declared in `tests/node-shims.d.ts`):
+- [ ] **Step 1: Append the new describe block** to `tests/release-pages.test.ts`. First add ONE import at the top of the file — the committed manifest (repo convention imports intra-`tests` modules with a `.js` extension under `"moduleResolution": "Bundler"`, e.g. `./helpers/options-page.js`):
 ```ts
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { CHANGELOG_MANIFEST } from './fixtures/changelog-manifest.js';
 ```
-Then append the new describe block after the existing `describe` (reuse its `root` / `readRepoFile`). No `any`; string/regex only, matching the file's style. **Note the deliberate design (review defect fixes): NO test pins a card count or a dated-card count, and NO test keys off document index — every invariant is structural or derived from the version, so a routine one-card release stays green with zero test edits.**
+Then append the new describe block after the existing `describe` (reuse its `root` / `readRepoFile`). No `any`; string/regex only, matching the file's style. **Note the deliberate design: NO test shells out to git and NO test keys off a document index. The exact card SEQUENCE (order + count) and every date live in the committed manifest, and one test asserts the page equals it — a release edits `changelog.html` AND the manifest in the same commit, and `pnpm check` enforces they match (fully CI-enforceable on a shallow checkout).**
 
 ```ts
 describe('changelog web register', () => {
@@ -513,14 +587,20 @@ describe('changelog web register', () => {
     return 0;
   };
 
+  it('matches the committed manifest card sequence exactly (order + count)', () => {
+    // The single durable pin: catches any dropped, inserted, or reordered card
+    // forever — a release adds one card here AND one manifest line, together.
+    expect(cards.map((c) => c.version)).toEqual(CHANGELOG_MANIFEST.map((e) => e.version));
+  });
+
   it('does not backfill the eight absent 1.2.x releases (canon: page = what users saw)', () => {
     const versions = cards.map((c) => c.version);
     for (const absent of ['1.2.14', '1.2.13', '1.2.12', '1.2.11', '1.2.10', '1.2.9', '1.2.6', '1.2.5']) {
       expect(versions).not.toContain(absent);
     }
-    // Monotonic floor, NOT an exact count pin: the page grows by one per release,
-    // so this stays green forever and only trips if a card is dropped (regression).
-    expect(cards.length).toBeGreaterThanOrEqual(54);
+    // Explicit canon guard on top of the sequence pin: even if a future edit added
+    // 1.2.x to BOTH the page and the manifest (so the sequence test still passed),
+    // this negative loop would still fail — the divergence is deliberate, forever.
   });
 
   it('anchors every release uniquely and exposes the current (newest) version anchor', () => {
@@ -541,52 +621,23 @@ describe('changelog web register', () => {
     }
   });
 
-  it('dates every 1.7.0+ release as DD.MM.YYYY and leaves older cards dateless (derived, never counted)', () => {
-    for (const { version, body } of cards) {
+  it('renders every manifest date on its card and dates every 1.7.0+ release (no fabricated dates)', () => {
+    const bodyByVersion = new Map(cards.map((c) => [c.version, c.body]));
+    for (const { version, date } of CHANGELOG_MANIFEST) {
+      const body = bodyByVersion.get(version)!;
       const m = body.match(/<span class="release-date">([^<]+)<\/span>/);
-      if (cmp(version, '1.7.0') >= 0) {
-        expect(m, `${version} must be dated`).not.toBeNull();
-        expect(m![1]!).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
+      if (date) {
+        expect(m, `${version} must render its manifest date ${date}`).not.toBeNull();
+        expect(m![1]!, `${version} date must equal the manifest`).toBe(date);
       } else {
         expect(m, `${version} must be dateless`).toBeNull();
       }
+      // The manifest itself must obey the policy: date present iff version >= 1.7.0.
+      expect(Boolean(date), `${version} date presence must equal (version >= 1.7.0)`).toBe(cmp(version, '1.7.0') >= 0);
+      if (date) expect(date, `${version} date format`).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
     }
-    // No fixed count: the invariant is hasDate ⇔ version ≥ 1.7.0, so a new
-    // release (which is ≥ 1.7.0 and dated) keeps this green without an edit.
-  });
-
-  it('binds every tagged card to its REAL git creatordate (no fabricated map)', () => {
-    // Source of truth = the tags themselves; re-derive here so no date can be
-    // hand-invented. Shelling out mirrors tests/announce-cli.test.ts.
-    const tagDates: Record<string, string> = {};
-    try {
-      const out = execFileSync(
-        'git',
-        ['for-each-ref', '--sort=-creatordate',
-          '--format=%(refname:short) %(creatordate:format:%d.%m.%Y)', 'refs/tags/v*'],
-        { cwd: fileURLToPath(root), encoding: 'utf8' },
-      );
-      for (const line of out.split('\n')) {
-        const m = line.match(/^v(\d+\.\d+\.\d+)\s+(\d{2}\.\d{2}\.\d{4})$/);
-        if (m) tagDates[m[1]!] = m[2]!;
-      }
-    } catch {
-      // git unavailable — fall through to the shallow-checkout guard below.
-    }
-    const tags = Object.keys(tagDates);
-    if (tags.length === 0) return; // shallow CI checkout without tags: the derived date test above still guards format + coverage
-    const onPage = new Set(cards.map((c) => c.version));
-    let checked = 0;
-    for (const version of tags) {
-      if (!onPage.has(version)) continue; // a tag for a version the page never showed
-      const card = cards.find((c) => c.version === version)!;
-      expect(card.body, `${version} date must equal its git tag date ${tagDates[version]}`)
-        .toContain(`<span class="release-date">${tagDates[version]}</span>`);
-      checked += 1;
-    }
-    // Direction is tags → page (not page → tags): a just-added, not-yet-tagged
-    // release card isn't required to have a tag; existing tags must match exactly.
-    expect(checked, 'at least the tagged releases must be cross-checked').toBeGreaterThan(0);
+    // No git shelling, no fixed count: dates are the committed manifest, and the
+    // sequence test above guarantees the page's cards are exactly these versions.
   });
 
   it('wraps every card in the uniform collapsed <details> — no baked open, no index logic', () => {
@@ -647,9 +698,9 @@ Expected: the `changelog web register` block FAILS (anchors/dates/palette/collap
 
 Run (from repo root):
 ```bash
-node "$SCRATCH/changelog/build.mjs" "$(pwd)/changelog.html"
+node "$SCRATCH/changelog/build.mjs" "$(pwd)/changelog.html" "$(pwd)/tests/fixtures/changelog-manifest.ts"
 ```
-Expected: the same report as Task 3 Step 2 (`cards: 54 | li preserved: 317 | summaries: 42 | dated: 16 | collapse-details: 54 | tech-details: 28 | milestones: 1`), no throw.
+Expected: the same report as Task 3 Step 2 (`cards: 54 | li preserved: 317 | summaries: 42 | dated: 16 | collapse-details: 54 | tech-details: 28 | milestones: 1`), no throw (the build also cross-checks its card sequence against the manifest).
 
 - [ ] **Step 4: Run tests + full check**
 
@@ -661,9 +712,10 @@ Expected: the `changelog web register` block PASSES, the original 5 PASS, `pnpm 
 - [ ] **Step 6: Commit (atomic)**
 
 ```bash
-git add changelog.html tests/release-pages.test.ts
+git add changelog.html tests/release-pages.test.ts tests/fixtures/changelog-manifest.ts
 git commit -m "feat(changelog): rebuild as the family web register — anchors, dates, collapse, dark theme"
 ```
+The manifest lands in this same commit — the test imports it, so page + test + manifest are one green commit.
 
 ---
 
@@ -748,12 +800,14 @@ pages only, E<P1>), the goose mascot, and a prefers-color-scheme dark swap
 anchors (the P2 «Версия → Changelog» button targets
 changelog.html#v<major>-<minor>-<patch>). Dates DD.MM.YYYY for every 1.7.0+
 release (16 at migration, +1 per release; the invariant is hasDate ⇔
-version ≥ 1.7.0, never a fixed count); older cards stay dateless — no invented
+version ≥ 1.7.0); older cards stay dateless — no invented
 backfill. The 1.7.0+ tags were bulk retro-tagged on 2026-07-11 (everything
-through 1.9.3 shares that creatordate; only 1.9.4+ track real release), so
-dates are read straight from git for-each-ref and a committed test re-derives
-them and binds each dated card to its tag — no date is hand-invented, many
-repeat, honest. Serif release summaries as the loudest text; groups recolored
+through 1.9.3 shares that creatordate; only 1.9.4+ track real release), so the
+real git for-each-ref tag dates are transcribed ONCE into a committed manifest
+(tests/fixtures/changelog-manifest.ts) — an ordered {version, date?}[] for every
+card, top-first — and the release-pages test binds each dated card to its
+manifest date; no date is hand-invented, no test shells out to git, many repeat,
+honest. Serif release summaries as the loudest text; groups recolored
 Исправлено=green / Изменено=neutral / Новое=clay (the old blue is gone);
 milestones get a clay card border. «Технически» groups collapse into <details>;
 EVERY release card ships the SAME collapsed <details class="release-detail">
@@ -761,17 +815,19 @@ EVERY release card ships the SAME collapsed <details class="release-detail">
 (progressive enhancement; no-JS = every card collapsed to its readable summary)
 — so a routine release is a one-card insert with zero churn elsewhere. CANON:
 CHANGELOG.md stays the full 62-version archive; the page keeps its cards (54 at
-migration, +1/release — never a pinned count; the eight 1.2.x —
-1.2.14/13/12/11/10/9/6/5 — stay absent); page = "what users saw", markdown =
-full history. All release texts transferred verbatim (a build-time diff asserts
-every <li>/summary is byte-identical). DEPLOY: the two stamp slots (nav-version
+migration; a release adds one card AND one manifest line, kept in lockstep by
+the test; the eight 1.2.x — 1.2.14/13/12/11/10/9/6/5 — stay absent); page =
+"what users saw", markdown = full history. All release texts transferred
+verbatim (a build-time diff asserts every <li>/summary is byte-identical).
+DEPLOY: the two stamp slots (nav-version
 span + footer <p>) stay byte-exact for BOTH deploy.sh
 (stamp_changelog_page_version) and deploy-pages.sh (generic stamp_version) —
 neither script edited; release-pages.test.ts pins anchors, the absent-1.2.x
-canon, date format+coverage (derived, not counted), the git-tag date binding
-(execFileSync), uniform collapse, palette, and the dual-stamp dry-run — no test
-pins a card/date count or a document index, so a routine release stays green
-with no test edit. ORDERING: the anchored page deploys before (or with) the
+canon, the exact card SEQUENCE + every date against the committed manifest,
+uniform collapse, palette, and the dual-stamp dry-run — no test shells out to
+git or keys off a document index; a release edits changelog.html AND the
+manifest in one commit and pnpm check enforces they match. ORDERING: the
+anchored page deploys before (or with) the
 P2 release; deploy-pages.sh gives a standalone page-only deploy path so the
 anchors can go live ahead of P2. Spec:
 docs/superpowers/specs/2026-07-16-options-redesign-design.md §11.
@@ -802,10 +858,10 @@ Deploy ordering: this page must ship before or with the P2 options release (the 
 
 ## Self-Review Notes (rev 1)
 
-- **Spec §11 coverage:** family web register look (install.html `--paper/--clay` palette + Fraunces/Hanken + mascot) — Task 2 CSS; versions in mono + `id="v1-9-6"` anchors — Task 3 op 1 / Task 4 test; dates for every 1.7.0+ release as DD.MM.YYYY, older dateless — Task 1 (git-derived) map + Task 3 op 2 + Task 4 date-format test + the git-tag binding test; serif summary as the loudest text — Task 2 `.release-summary`; groups Исправлено=green / Изменено=neutral / Новое=clay via a pure CSS class-color remap (`fixed`/`improved`/`new`), blue gone — Task 2; milestone clay border — Task 2 + Task 3 op 1 (1.6.0, auto-detected); «Технически» → `<details>` and the uniform per-card collapse (latest three opened by the FOOTER script) — Task 3 ops 3–4 + Task 2 script + Task 4 collapse test; prefers-color-scheme dark — Task 2; deploy invariant (both slots byte-exact, both stampers, no edits) — Task 5. All checks in the extended `release-pages.test.ts`.
-- **Canon decision restated:** the page keeps its cards (54 at migration, +1/release); the eight 1.2.x (1.2.14/13/12/11/10/9/6/5) that were never on it are NOT backfilled — pinned by a **negative test on the absent versions** (not a card count, which would break on the next release; a monotonic `>= 54` floor only guards against dropping cards). `CHANGELOG.md` (62) remains the full archive.
-- **Dates decision restated (review defect #2 fix):** the rev-1 date map was fabricated; the real `git for-each-ref` output has only 4 distinct dates (a bulk retro-tag on 2026-07-11 covers everything through 1.9.3). The committed test now RE-DERIVES dates from `git for-each-ref` via `execFileSync` (established in `tests/announce-cli.test.ts`, declared in `tests/node-shims.d.ts`) and binds each tagged card to its creatordate — so no date can be hand-invented and the page can't diverge from the tags. Direction is tags→page (a just-added, not-yet-tagged release card isn't required to have a tag); it skips gracefully on a shallow CI checkout with no tags, where the derived format+coverage test (`hasDate ⇔ version ≥ 1.7.0`, DD.MM.YYYY, no count) still guards. Chose shelling-out over a hardcoded const table because the repo already shells out in tests and the tags are the actual source of truth — a const table would just be a second thing to keep honest.
-- **Release-safety restated (review defect #1 fix):** NO committed test pins a card count, a dated-card count, or a document index. The rev-1 index-absolute collapse pins (`slice(0,3)` expanded / `slice(3)` with baked collapsed markup) are gone: every card now ships the SAME collapsed `<details class="release-detail">`, and "latest three expanded" is a tiny inline FOOTER `<script>` that opens the first three `.release` at load (progressive enhancement; no-JS = all collapsed to readable serif summaries). A routine release is therefore a **one-card manual insert** — zero churn on other cards, zero test edits, `pnpm check` stays green.
+- **Spec §11 coverage:** family web register look (install.html `--paper/--clay` palette + Fraunces/Hanken + mascot) — Task 2 CSS; versions in mono + `id="v1-9-6"` anchors — Task 3 op 1 / Task 4 test; dates for every 1.7.0+ release as DD.MM.YYYY, older dateless — Task 1 committed manifest + Task 3 op 2 + Task 4 manifest-sequence + manifest-date tests; serif summary as the loudest text — Task 2 `.release-summary`; groups Исправлено=green / Изменено=neutral / Новое=clay via a pure CSS class-color remap (`fixed`/`improved`/`new`), blue gone — Task 2; milestone clay border — Task 2 + Task 3 op 1 (1.6.0, auto-detected); «Технически» → `<details>` and the uniform per-card collapse (latest three opened by the FOOTER script) — Task 3 ops 3–4 + Task 2 script + Task 4 collapse test; prefers-color-scheme dark — Task 2; deploy invariant (both slots byte-exact, both stampers, no edits) — Task 5. All checks in the extended `release-pages.test.ts`.
+- **Canon decision restated:** the page keeps its cards (54 at migration, +1/release); the eight 1.2.x (1.2.14/13/12/11/10/9/6/5) that were never on it are NOT backfilled — pinned by a **negative test on the absent versions** AND by the committed manifest, which fixes the EXACT card sequence (order + count). A release adds one card AND one manifest line together, so `pnpm check` catches any drop/insert/reorder, while the negative loop guards the 1.2.x canon even against a deliberate double-edit. `CHANGELOG.md` (62) remains the full archive.
+- **Dates decision restated (rev 3 — one committed manifest):** rev 2's `execFileSync` git-shelling date test and the `>= 54` floor are BOTH replaced by ONE committed artifact, `tests/fixtures/changelog-manifest.ts` — an ordered `{version, date?}[]` for every card. The real `git for-each-ref` tag dates (only 4 distinct — a bulk retro-tag on 2026-07-11 covers everything through 1.9.3) are transcribed into it ONCE, by a human, in Task 1. The release-pages test asserts the page's card sequence equals the manifest and every manifest date renders on its card; the manifest itself is checked to obey `hasDate ⇔ version ≥ 1.7.0`, DD.MM.YYYY. NO test shells out to git, so the suite is fully CI-enforceable on a shallow checkout — the local-only / `fetch-tags` caveat is gone. Chose a committed `.ts` manifest over shelling-out because it makes the release procedure explicit (one card + one line, one commit) and keeps CI hermetic; the throwaway `build.mjs` reads dates from the SAME manifest (parsed as text), so a date lives in exactly one place.
+- **Release-safety restated:** the collapse needs no index and no baked state — every card ships the SAME collapsed `<details class="release-detail">`, and "latest three expanded" is a tiny inline FOOTER `<script>` that opens the first three `.release` at load (progressive enhancement; no-JS = all collapsed to readable serif summaries). The one committed thing a release DOES touch is the manifest: it pins the exact card sequence (order + count) on purpose, and a release adds one card AND one manifest line in the same commit — two mechanical edits `pnpm check` cross-checks. No test keys off a document index or a hand-maintained count divorced from the page, so a routine release stays green with just that one-line manifest edit.
 - **Transformation approach (chosen + justified):** a **one-time** throwaway scratchpad Node migration script, NOT a hand-edit — a manual re-markup of 54 cards across ~1900 lines is exactly the error-prone work the brief warns against. Throwaway is safe here (contra a naive reading of the review): because the migration output is uniform per-card markup and "latest three" is JS-driven, routine releases need NO regeneration — they hand-insert one uniform card. The four operations are pure (insertion + a title tag-swap + a uniform collapse wrapper on every card; the group recolor is a CSS-only remap, so zero group-title edits), and a build-time text-preservation assertion (ordered `<li>` + `release-summary` + `change-group-title` inner-HTML arrays identical old→new) ABORTS the write on any prose drift — the safety net that makes the string approach trustworthy. Card splitting is on the unambiguous `<!-- x.y.z -->` markers, avoiding fragile nested-`</div>` counting. jsdom was rejected: its serializer normalizes entities/whitespace and would threaten the byte-exact `&middot;` stamp slots and reformat the whole file.
 - **Standalone-deploy finding:** `scripts/deploy-pages.sh` DOES provide a page-only path (stamps + scp's changelog.html without rebuild/sign), so the anchors can go live before P2. Its generic `stamp_version` uses a slightly different regex form than `deploy.sh`'s `stamp_changelog_page_version` (the `v` sits inside vs outside group 1) — both target the same slot; Task 5 dry-runs BOTH forms so the page is proven compatible with each.
 - **Atomic-commit rationale:** the invariants are cross-cutting, so the page + its test land in one green commit (Task 4); Tasks 5–6 add only green-passing tests/docs. No commit is ever red — `pnpm check` includes `release-pages.test.ts`.

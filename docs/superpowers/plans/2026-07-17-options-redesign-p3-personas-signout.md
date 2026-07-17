@@ -2,34 +2,38 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Rev 2** — fixes 5 verified double-blind review defects, all in this plan's
-prescriptions (no scope change; structure unchanged):
-1. **TDZ crash at mount (Task 3 Steps 3–4).** The first `renderHubSignInState()`
-   call sat ~2 lines ABOVE the `const hubSignInRow` declaration, but the rewritten
-   render reads `hubSignInRow`/`hubSignedInBlock` → ReferenceError at every options
-   mount. Both nodes are now constructed ABOVE the first call (the relocation is
-   spelled out, mirroring Task 5 Step 5), with a plain mount test pinning it.
-2. **Stale persist could resurrect the wiped key (Task 3 Step 5).** The wipe is now
-   SERIALIZED as the last write behind `settingsSaveChain` (new `queueCredentialWipe`),
-   `queueSettingsSave` gains a pre-`saveSettings` supersession fence so a superseded
-   stale snapshot bails BEFORE it writes, and the handler no longer zeroes the shared
-   `settingsDirty` (unrelated theme/count edits survive). New test: delayed old write +
-   logout + pagehide → key stays empty.
-3. **Missing URL misclassified as already-invalid (Task 2 Step 3).**
-   `revokeDeviceToken` returns 'already-invalid' ONLY when the token is absent;
-   token-present + missing/invalid baseUrl now THROWS → the handler reports
-   'unreachable' (never a false «401»). Separate client test per case.
-4. **personaCatalogFetchedAt misused as ever-loaded (Tasks 4–5).**
-   `classifyPersonaEmptyState` now derives loaded/not-loaded from SOURCE MATCH
-   (stored `personaCatalogSource` === current credential fingerprint), not from
-   `fetchedAt` presence; the footer keeps `fetchedAt` but renders «—» when null.
-   Adds the byte-identical-empty regression case.
-5. **Spec §6 identity line + fake fixtures (Tasks 3, 5).** The signed-in block now
-   renders the `username · role · pages` identity line by consuming P2's
-   `getAgencyHubIdentity` (explicit P3-after-P2 dependency; honest «identity
-   недоступна» fallback + test). DOM-test fixtures compute `personaCatalogSource`
-   with the REAL `personaCatalogSource(settings)` helper (else migrateState hides the
-   catalog), definitionId ≥16 chars.
+**Rev 3** — three DICTATED design changes on top of rev 2 (structure unchanged;
+scope unchanged). These SUPERSEDE rev-2 findings #2, #4 and #5; rev-2 #1 (the TDZ
+relocation of the sign-in/signed-in nodes) and #3 (missing-URL → 'unreachable')
+still stand.
+1. **Sign-out moves to the BACKGROUND (Tasks 1–3).** The whole
+   fence/`queueCredentialWipe`/phantom-version-bump machinery is DELETED. A new
+   `signOutAgencyHub` runtime request does the durable work background-side, in
+   order: capture the current device token + base URL from storage → ALWAYS wipe
+   BOTH custody keys to EMPTY strings via the same `saveSettings` custody write the
+   issue handler uses → only THEN best-effort revoke with the captured token as the
+   bearer (~5s). Wipe-BEFORE-revoke is the point: the background outlives the
+   options page, so a page close during the 5s revoke can no longer strand
+   credentials on disk. New fourth outcome `wipe-failed` (the storage write itself
+   threw, with its message). The options «Выйти» handler is now trivial: flush
+   pending edits (`saveSettingsDebounced.cancel(); await settingsSaveChain`), clear
+   the form-owned key field, send the request, re-read state, map four outcomes to
+   messages. `queueSettingsSave` semantics are UNTOUCHED.
+2. **Catalog empty-state fixed in the CONTROLLER (Tasks 4–5).** Instead of the
+   classifier guessing from source match alone, `persona-catalog.ts` SKIPS the
+   byte-identical early-return when the stored `fetchedAt` is null — so a
+   server-confirmed empty (or any confirmed) response after a rotation always stamps
+   `fetchedAt` via the normal commit path. The classifier then trusts `fetchedAt`
+   again: source mismatch OR (source match + `fetchedAt === null`) → «ещё не
+   загружен»; source match + `fetchedAt !== null` + empty catalog → honest «пустой
+   каталог». Footer still renders «—» when `fetchedAt` is null.
+3. **Identity line rides P2's `statusModel` (Task 3).** The separate
+   `renderHubIdentity`/`hubIdentityInFlight` fetch path is DELETED. The signed-in
+   block's identity line renders from `statusModel.identity` (P2 owns it —
+   signature-guarded, re-hydrated post-persist/post-auth); P3 subscribes the line to
+   P2's `hydrateHubStatusRows` paint pass. «страниц: N» = `identity.pages.length`
+   (`pages` is `string[]` per the P2 contract). A→B staleness protection stays P2's
+   guard — no new guard code in P3.
 
 **Rev 1** — first P3 plan, on top of main with P1 (the desktop-parity shell,
 family primitives, Russian copy, local fonts, «Аккаунты» merge, collapsed
@@ -50,25 +54,28 @@ owner-side creation.
 (bold name + `built-in` badge + mono `vN` + «аккаунтов: N», archived-only-if-
 referenced, honest footer + offline/rotation nuance, restyled
 preservation/export, restyled recovery page) with ZERO change to the E36/E37
-model; and add the single «Выйти» button whose behavior is the sign-out protocol
-(best-effort hub revoke → local wipe to EMPTY custody strings, SERIALIZED as the
-last write through the shared save queue so no stale snapshot resurrects the old
-key, without disturbing unrelated pending edits → four distinct outcome
-messages). No storage migration.
+model; and add the single «Выйти» button whose behavior is the sign-out protocol,
+now executed in the BACKGROUND: capture the current token → durable local wipe to
+EMPTY custody strings (FIRST, so a page close cannot strand credentials) →
+best-effort hub revoke with the captured token (AFTER the wipe) → four distinct
+outcome messages (revoked / already-invalid / unreachable / wipe-failed). No
+storage migration.
 
 **Architecture:** `src/options/index.ts` stays the single orchestrator and the
-ONE central write controller. P3 adds one pure presentation module
-(`src/options/personas.ts`), one runtime request (`revokeAgencyHubDeviceToken`)
-with its client method + background handler, and rewires the persona section
-and the hub sign-in block IN PLACE. Every storage write still flows through the
-existing `saveSettings`/`saveAccountMapping` writers with their custody and
-future-schema discipline; the sign-out wipe writes `{ agencyHubDeviceToken: '',
-agencyHubApiKey: '' }` through the same `saveSettings` writer, but SERIALIZED via a
-dedicated `queueCredentialWipe` — chained behind `settingsSaveChain` as the last
-write and paired with a new pre-`saveSettings` supersession fence in
-`queueSettingsSave` — so a stale queued snapshot can never resurrect the old key,
-while unrelated pending edits (theme/count) keep their own save. Same observed-schema
-guard, same snapshot-version bookkeeping the future-schema barrier already uses.
+ONE central write controller for the settings blob. P3 adds one pure presentation
+module (`src/options/personas.ts`), one runtime request (`signOutAgencyHub`) with
+its client revoke method + background handler, and rewires the persona section and
+the hub sign-in block IN PLACE. The sign-out wipe no longer runs through the
+options page's save queue at all: the BACKGROUND handler writes
+`{ agencyHubDeviceToken: '', agencyHubApiKey: '' }` through the same `saveSettings`
+custody write the `issueAgencyHubDeviceToken` handler already uses (dedicated v13
+custody keys — E19), BEFORE the best-effort revoke, so it is durable across the
+options page closing mid-revoke. Because the wipe left the page's write path, the
+options «Выйти» handler stays trivial (`saveSettingsDebounced.cancel(); await
+settingsSaveChain`, then send the request) and `queueSettingsSave` semantics are
+UNTOUCHED — no supersession fence, no `queueCredentialWipe`, no version bump.
+Custody lives in its own storage keys, so an unrelated pending theme/count/URL edit
+in the settings blob flushes normally and is preserved.
 
 **Tech Stack:** Plain TS + DOM (no framework), esbuild (CSS as text), vitest +
 JSDOM. Runtime plumbing is contract-typed through the vendored `@kernel/sdk`
@@ -98,11 +105,14 @@ device sign-in + «Выйти» protocol; §7 persona presentation; §13.3 P3 ph
   only WRITES EMPTY strings to the EXISTING custody keys
   (`AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY` / `AGENCY_HUB_API_KEY_STORAGE_KEY`); a
   timeout is a code constant, not storage.
-- One central write controller: no new module reads or writes `browser.storage`.
-  The sign-out routes its wipe through `saveSettings` inside `index.ts` (study
-  `persistAgencyHubSettings`, `queueSettingsSave`, `handlePageHide` and the
-  `activateFutureSchemaBarrier` dirty/snapshot bookkeeping before prescribing
-  code — the wipe mirrors that bookkeeping).
+- One central write controller for the settings blob: no new module in `index.ts`
+  reads or writes `browser.storage`. The sign-out wipe is the ONE deliberate write
+  that lives in the BACKGROUND handler instead (it must survive the options page
+  closing mid-revoke): it calls the same `saveSettings` custody write the
+  `issueAgencyHubDeviceToken` handler already performs in `runtime-api.ts` — study
+  that handler's `saveSettings({ agencyHubBaseUrl, agencyHubDeviceToken })` write
+  before prescribing code; the wipe mirrors it with empty custody strings. The
+  options page keeps `queueSettingsSave`/`handlePageHide` UNCHANGED.
 - The E19 custody discipline (dedicated credential keys, dirty-tracking,
   serialized saves, pagehide path), the E36 persona preservation/recovery/export
   machinery, and the E37 future-schema barrier move UNCHANGED. Their tests stay
@@ -123,34 +133,38 @@ device sign-in + «Выйти» protocol; §7 persona presentation; §13.3 P3 ph
   mutations answer 409). The persona copy therefore says «редактирование сейчас
   заморожено» and NEVER «попроси владельца создать».
 - **Cross-plan prerequisite (execution ordering):** P3 executes AFTER P2
-  (spec §13.3). The signed-in hub block's identity line (Task 3, spec §6)
-  consumes P2's `getAgencyHubIdentity` runtime request + `AgencyHubIdentityResponse`
-  type; both exist only once P2 is merged. Rebase the execution worktree onto P2
-  before starting Task 3 — do NOT stub the request in this repo.
+  (spec §13.3). The signed-in hub block's identity line (Task 3, spec §6) renders
+  from P2's shared `statusModel.identity` (`AgencyHubIdentityResponse`), painted by
+  P2's guarded `hydrateHubStatusRows()` — all three (`statusModel`,
+  `hydrateHubStatusRows`, the response type) exist only once P2 is merged. Rebase
+  the execution worktree onto P2 before starting Task 3 — do NOT add a second
+  identity fetch or re-derive the type in this repo.
 
 ## File Structure
 
 ```
-src/shared/types.ts        (modify: revokeAgencyHubDeviceToken in the runtime maps + response interface)
-src/shared/protocol.ts     (modify: register the revoke request in getRuntimeRequestType)
+src/shared/types.ts        (modify: signOutAgencyHub in the runtime maps + response interface with the wipe-failed outcome)
+src/shared/protocol.ts     (modify: register signOutAgencyHub in getRuntimeRequestType)
 src/shared/constants.ts    (modify: AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS)
-src/background/agency-hub-client.ts (modify: revokeDeviceToken method)
-src/background/runtime-api.ts       (modify: revokeAgencyHubDeviceToken handler; import loadStorageState + the timeout + logWarn if absent)
+src/background/agency-hub-client.ts (modify: revokeDeviceToken method — takes the captured token as the bearer)
+src/background/runtime-api.ts       (modify: signOutAgencyHub handler — wipe-then-revoke; import loadStorageState + the timeout + logWarn if absent; saveSettings already imported)
+src/background/persona-catalog.ts   (modify: skip the byte-identical early-return when stored fetchedAt is null, so a confirmed-empty response stamps fetchedAt)
 src/options/personas.ts    (create: pure row/empty-state/relative-time helpers)
-src/options/index.ts       (modify: sign-out block + protocol; persona section rows/footer/empty-states; preservation restyle; recovery restyle)
+src/options/index.ts       (modify: sign-out block + trivial handler; identity line from statusModel; persona section rows/footer/empty-states; preservation restyle; recovery restyle)
 src/options/styles.css     (extend: persona rows/footer/preservation + hub signed-in/token-line classes)
 tests/protocol.test.ts             (modify: register-the-type assertion)
 tests/agency-hub-client.test.ts    (modify: revokeDeviceToken unit tests)
-tests/runtime-api.test.ts          (modify: revoke handler outcome tests)
+tests/runtime-api.test.ts          (modify: signOutAgencyHub handler tests — wipe-then-revoke order, no-token, outcomes, wipe-failed)
+tests/persona-catalog.test.ts      (modify: confirmed-empty-with-null-fetchedAt stamps fetchedAt; byte-identical-with-fetchedAt still skips)
 tests/options-personas.test.ts     (create: pure helper unit tests)
-tests/options-agency-hub.test.ts   (modify: sign-out protocol tests + persona render tests, via its own harness)
+tests/options-agency-hub.test.ts   (modify: sign-out message/render tests + identity-from-statusModel + persona render tests, via its own harness)
 tests/options-persona-recovery.test.ts (verify green; optional restyle assertion — no string weakened)
 docs/decisions.md          (append the E41 entry in the same PR)
 ```
 
 ---
 
-### Task 1: Register the `revokeAgencyHubDeviceToken` runtime request (types + protocol + timeout)
+### Task 1: Register the `signOutAgencyHub` runtime request (types + protocol + timeout)
 
 The E8 lesson: an unregistered request type dies before the handler, silently
 and with every test still green. A new runtime request lands in the type maps,
@@ -164,10 +178,12 @@ the `getRuntimeRequestType` switch, AND `tests/protocol.test.ts` in one task.
 
 ```ts
 // src/shared/types.ts — RuntimeRequestMap / RuntimeResponseMap additions
-//   revokeAgencyHubDeviceToken: undefined;                         // request (no payload)
-//   revokeAgencyHubDeviceToken: AgencyHubDeviceTokenRevokeResponse; // response
-export interface AgencyHubDeviceTokenRevokeResponse {
-  outcome: 'revoked' | 'already-invalid' | 'unreachable';
+//   signOutAgencyHub: undefined;               // request (no payload)
+//   signOutAgencyHub: AgencyHubSignOutResponse; // response
+export interface AgencyHubSignOutResponse {
+  outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed';
+  /** Present only for 'wipe-failed': the storage write's error message. */
+  error?: string;
 }
 ```
 
@@ -176,9 +192,9 @@ export interface AgencyHubDeviceTokenRevokeResponse {
   `tests/protocol.test.ts` (beside the `issueAgencyHubDeviceToken` assertion):
 
 ```ts
-// P3: sign-out revoke — no payload, same E8 lesson as issueAgencyHubDeviceToken.
-expect(getRuntimeRequestType({ type: 'revokeAgencyHubDeviceToken' }))
-  .toBe('revokeAgencyHubDeviceToken');
+// P3: sign-out — no payload, same E8 lesson as issueAgencyHubDeviceToken.
+expect(getRuntimeRequestType({ type: 'signOutAgencyHub' }))
+  .toBe('signOutAgencyHub');
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -192,27 +208,30 @@ before the type-map edit, `pnpm typecheck` would reject the literal).
   response), add:
 
 ```ts
-/** «Выйти» sign-out outcome. The token itself never crosses the runtime
- * boundary in either direction; the background reads it from storage and this
- * response carries only the server-truth discriminant. 'unreachable' = the hub
- * could not confirm revocation (network/timeout/5xx); the options page still
- * wipes locally and the token dies by sliding-expiry. */
-export interface AgencyHubDeviceTokenRevokeResponse {
-  outcome: 'revoked' | 'already-invalid' | 'unreachable';
+/** «Выйти» sign-out outcome. Neither the token nor the wipe cross the runtime
+ * boundary as data — the BACKGROUND reads the token from storage, wipes both
+ * custody keys locally FIRST, then best-effort revokes; this response carries
+ * only the discriminant. 'unreachable' = the hub could not confirm revocation
+ * (network/timeout/5xx/missing base URL) — the local wipe already happened and
+ * the token dies by sliding-expiry. 'wipe-failed' = the durable local wipe threw
+ * (credentials may still be on disk — the loud case); `error` carries its
+ * message. */
+export interface AgencyHubSignOutResponse {
+  outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed';
+  error?: string;
 }
 ```
 
-  In `RuntimeRequestMap` add `revokeAgencyHubDeviceToken: undefined;` and in
-  `RuntimeResponseMap` add
-  `revokeAgencyHubDeviceToken: AgencyHubDeviceTokenRevokeResponse;` (mirror the
-  `issueAgencyHubDeviceToken` lines).
+  In `RuntimeRequestMap` add `signOutAgencyHub: undefined;` and in
+  `RuntimeResponseMap` add `signOutAgencyHub: AgencyHubSignOutResponse;` (mirror
+  the `issueAgencyHubDeviceToken` lines).
 
 - [ ] **Step 4: Register the switch case** in `src/shared/protocol.ts`
   `getRuntimeRequestType`, beside the `issueAgencyHubDeviceToken` case:
 
 ```ts
-case 'revokeAgencyHubDeviceToken':
-  return 'revokeAgencyHubDeviceToken';
+case 'signOutAgencyHub':
+  return 'signOutAgencyHub';
 ```
 
 - [ ] **Step 5: Add the timeout constant** in `src/shared/constants.ts` (a code
@@ -232,17 +251,22 @@ Expected: PASS.
 
 ```bash
 git add src/shared/types.ts src/shared/protocol.ts src/shared/constants.ts tests/protocol.test.ts
-git commit -m "feat(protocol): register revokeAgencyHubDeviceToken runtime request"
+git commit -m "feat(protocol): register signOutAgencyHub runtime request"
 ```
 
 ---
 
-### Task 2: `AgencyHubClient.revokeDeviceToken` + the background handler
+### Task 2: `AgencyHubClient.revokeDeviceToken` + the `signOutAgencyHub` background handler
 
-The revoke network call lives in the background (it owns the SDK client, the
-host permission, and the token custody). The options page never sees the token.
-The client method sends the DEVICE TOKEN as the explicit bearer — never
-`resolveHubBearer`, which could hand over the legacy key that this op rejects.
+The whole sign-out lives in the background (it owns the SDK client, the host
+permission, and the token custody). The options page never sees the token. The
+client `revokeDeviceToken` method sends the DEVICE TOKEN as the explicit bearer —
+never `resolveHubBearer`, which could hand over the legacy key that this op
+rejects. The handler is the sign-out authority: it captures the token + base URL,
+DURABLY WIPES both custody keys FIRST (so a page close mid-revoke cannot strand
+credentials), then best-effort revokes with the CAPTURED token (the stored copy is
+already gone). The client method (Steps 1–4) is unchanged from rev 2; only the
+handler (Steps 5–9) is the new wipe-then-revoke.
 
 **Files:**
 - Modify: `src/background/agency-hub-client.ts`, `src/background/runtime-api.ts`
@@ -402,51 +426,170 @@ Run: `pnpm vitest run tests/agency-hub-client.test.ts`
 Expected: PASS (5).
 
 - [ ] **Step 5: Write the failing handler test** in `tests/runtime-api.test.ts`
-  (mirror the `describe('runtime-api testAgencyHubConnection', …)` block: build a
-  mock `agencyHubClient` with the new spy, install the harness, `send(...)`):
+  (mirror the `describe('runtime-api testAgencyHubConnection', …)` block: seed the
+  custody keys via `mockStorage = createStorage(...)`, build a mock
+  `agencyHubClient` with the `revokeDeviceToken` spy, install the harness,
+  `send(...)`). The custody keys are the dedicated top-level storage keys
+  (`agencyHubDeviceToken` / `agencyHubApiKey`, see `AGENCY_HUB_*_STORAGE_KEY`) that
+  `loadStorageState` reads and `saveSettings` writes; assert the wipe against
+  `mockStorage`. These tests pin the WIPE-BEFORE-REVOKE order — the security point:
 
 ```ts
-describe('runtime-api revokeAgencyHubDeviceToken', () => {
-  it('propagates the client outcome', async () => {
+import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+} from '../src/shared/constants.js';
+
+describe('runtime-api signOutAgencyHub', () => {
+  it('wipes BOTH custody keys and reports "revoked" on a successful revoke', async () => {
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
     const agencyHubClient = {
       testConnection: vi.fn(async () => ({ ok: true })),
       revokeDeviceToken: vi.fn(async () => 'revoked' as const),
     };
     const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
-    const response = await send({ type: 'revokeAgencyHubDeviceToken' });
+    const response = await send({ type: 'signOutAgencyHub' });
     expect(response).toEqual({ outcome: 'revoked' });
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe(''); // EMPTY, not removed
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    // Revoke used the CAPTURED token (the stored copy is already wiped by now).
     expect(agencyHubClient.revokeDeviceToken).toHaveBeenCalledTimes(1);
+    const [passedSettings] = agencyHubClient.revokeDeviceToken.mock.calls[0]!;
+    expect(passedSettings.agencyHubDeviceToken).toBe('agency_hub_device_abc');
   });
 
-  it('maps a thrown revoke to "unreachable"', async () => {
+  it('wipes BEFORE the revoke resolves: a deferred revoke still leaves storage wiped', async () => {
+    // Background durability: the wipe must land even if the page closes mid-revoke.
+    // Model that here by holding the revoke open and asserting the storage is
+    // already wiped before it settles.
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
+    const release = createDeferred<'revoked'>();
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => {
+        // By the time the revoke runs the wipe has already committed.
+        expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+        expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+        return release.promise;
+      }),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    const pending = send({ type: 'signOutAgencyHub' });
+    release.resolve('revoked');
+    expect(await pending).toEqual({ outcome: 'revoked' });
+  });
+
+  it('no token to revoke → "already-invalid", and STILL wipes any leftover apiKey', async () => {
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => 'revoked' as const),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    const response = await send({ type: 'signOutAgencyHub' });
+    expect(response).toEqual({ outcome: 'already-invalid' });
+    expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // nothing to revoke
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe(''); // apiKey still wiped
+  });
+
+  it('maps a 401 revoke to "already-invalid" (still wiped)', async () => {
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc' });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => 'already-invalid' as const),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'already-invalid' });
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+  });
+
+  it('maps a thrown revoke to "unreachable" (already wiped)', async () => {
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc' });
     const agencyHubClient = {
       testConnection: vi.fn(async () => ({ ok: true })),
       revokeDeviceToken: vi.fn(async () => { throw new Error('network down'); }),
     };
     const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
-    const response = await send({ type: 'revokeAgencyHubDeviceToken' });
-    expect(response).toEqual({ outcome: 'unreachable' });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'unreachable' });
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+  });
+
+  it('a failed durable wipe → "wipe-failed" with the error, NO revoke attempted', async () => {
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc' });
+    // Force the custody wipe write to throw.
+    (globalThis as Record<string, unknown>).browser = {
+      ...(globalThis as { browser: Record<string, unknown> }).browser,
+    };
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    // After install, override storage.local.set to reject the empty-string custody write.
+    (globalThis as { browser: { storage: { local: { set: unknown } } } }).browser.storage.local.set =
+      vi.fn(async () => { throw new Error('storage write failed'); });
+    const response = await send({ type: 'signOutAgencyHub' });
+    expect(response).toMatchObject({ outcome: 'wipe-failed' });
+    expect((response as { error?: string }).error).toContain('storage write failed');
+    expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // wipe threw first
   });
 });
 ```
 
   Extend the harness's `agencyHubClient?` option type (near line 43) so
   `revokeDeviceToken?` is accepted (it is already cast `as never` at
-  `registerRuntimeApi`, so only the option's local type needs the field).
+  `registerRuntimeApi`, so only the option's local type needs the field). Import a
+  `createDeferred` helper (define a tiny local one if the file has none). Verify the
+  harness's `storage.local.set` override point against the actual harness (the
+  `set` mock is on `browser.storage.local`, lines ~90–92) and adjust the
+  wipe-failed injection to match its real shape.
 
 - [ ] **Step 6: Run to verify failure** (`pnpm vitest run tests/runtime-api.test.ts`).
 
 - [ ] **Step 7: Implement the handler** in `src/background/runtime-api.ts`, after
   the `issueAgencyHubDeviceToken` block. Add `loadStorageState` to the existing
-  `'../shared/storage.js'` import, add `AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS`
-  to the `'../shared/constants.js'` import, and `import { logWarn } from
-  '../shared/log.js';` if it is not already imported:
+  `'../shared/storage.js'` import (`saveSettings` is already imported), add
+  `AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS` to the `'../shared/constants.js'`
+  import, and `import { logWarn } from '../shared/log.js';` if it is not already
+  imported. The ORDER is the contract — wipe FIRST, revoke AFTER:
 
 ```ts
-if (requestType === 'revokeAgencyHubDeviceToken') {
-  // The token never crosses the runtime boundary. Read the current custody
-  // value from storage and hand it to the device-token-only revoke op.
-  const current = await loadStorageState();
+if (requestType === 'signOutAgencyHub') {
+  // (a) Capture the current token + base URL BEFORE the wipe. The token never
+  // crosses the runtime boundary; the page only sees the outcome.
+  const before = await loadStorageState();
+  const capturedToken = before.settings.agencyHubDeviceToken.trim();
+  const capturedBaseUrl = before.settings.agencyHubBaseUrl;
+
+  // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable step.
+  // The background outlives the options page, so doing the wipe here (not on the
+  // page) means a pagehide during the 5s revoke below can never leave the
+  // credentials on disk. EMPTY strings, never key removal (removal would reopen
+  // the pre-v13 blob fallback — E19). This mirrors the issueAgencyHubDeviceToken
+  // handler's own `saveSettings({ agencyHubDeviceToken })` custody write.
+  try {
+    await saveSettings({ agencyHubDeviceToken: '', agencyHubApiKey: '' });
+  } catch (error) {
+    // The loud case: credentials may still be on disk. Do NOT proceed to revoke.
+    const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
+    logWarn('Sign-out custody wipe failed', { error: message });
+    return { outcome: 'wipe-failed', error: message };
+  }
+
+  // (c) Best-effort revoke AFTER the wipe, with the CAPTURED token as the bearer
+  // (the stored copy is already ''). Nothing to revoke without a token.
+  if (!capturedToken) {
+    return { outcome: 'already-invalid' };
+  }
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(
     () => controller.abort(),
@@ -454,13 +597,13 @@ if (requestType === 'revokeAgencyHubDeviceToken') {
   );
   try {
     const outcome = await agencyHubClient.revokeDeviceToken(
-      current.settings,
+      { agencyHubBaseUrl: capturedBaseUrl, agencyHubDeviceToken: capturedToken },
       controller.signal,
     );
     return { outcome };
   } catch (error) {
-    // Abort/network/5xx — server truth unknown. The options page wipes locally
-    // and the token dies by sliding-expiry.
+    // Abort/network/5xx/missing-base-URL — server truth unknown. Already wiped
+    // locally; the token dies by sliding-expiry.
     logWarn('Device token revoke unreachable', {
       error: error instanceof Error ? error.message.slice(0, 200) : String(error),
     });
@@ -480,24 +623,28 @@ Expected: PASS.
 
 ```bash
 git add src/background/agency-hub-client.ts src/background/runtime-api.ts tests/agency-hub-client.test.ts tests/runtime-api.test.ts
-git commit -m "feat(hub): device-token revoke client method and background handler"
+git commit -m "feat(hub): signOutAgencyHub handler — durable wipe then best-effort revoke"
 ```
 
 ---
 
-### Task 3: «Выйти» sign-out protocol in the options page (spec §6)
+### Task 3: «Выйти» sign-out — trivial options handler over the background protocol (spec §6)
 
-The button is a protocol, not "revoke then wipe". It routes through the SAME
-`saveSettings` writer and the SAME dirty/snapshot bookkeeping the future-schema
-barrier uses. Study `queueSettingsSave` (snapshot versions), `handlePageHide`
-(reads `settingsDirty`/`agencyHubApiKeyDirty`), and `activateFutureSchemaBarrier`
-(clears dirty + bumps snapshot versions) before editing.
+The durable work (capture → wipe → revoke) is the BACKGROUND handler (Task 2).
+The options «Выйти» handler is now trivial: flush pending settings-blob edits,
+drop ownership of the form-owned key field, fire `signOutAgencyHub`, re-read
+state, and map four outcomes to messages. It does NOT touch `queueSettingsSave`,
+adds NO supersession fence, and adds NO `queueCredentialWipe` — that whole rev-2
+machinery is gone. Custody lives in its own storage keys, so a pending
+theme/count/URL edit in the settings blob flushes normally and is preserved.
 
 **Files:**
 - Modify: `src/options/index.ts`, `src/options/styles.css`
 - Test: `tests/options-agency-hub.test.ts` (its own `loadOptionsPage` /
   `getSectionByTitle` / `makeState` / `savedCustody` / `runtimeSendMessageImpl`
-  harness)
+  harness). The durable-wipe/ordering guarantees are BACKGROUND tests (Task 2),
+  not page tests — the page harness's `runtimeSendMessageImpl` is a MOCK of the
+  background, so a page test only sees custody empty if its own mock writes it.
 
 **Interfaces:** no new exports. New DOM inside the hub section's «Вход
 устройства» row: `hubSignedInBlock` (badge «активен» + identity line + mono token
@@ -506,30 +653,25 @@ password + «Войти») hidden while signed in. The token line's prefix is de
 from the stored token; NO exact expiry date (issuance metadata is not persisted,
 `/me` does not return it, sliding expiry makes a stored date a lie).
 
-**Identity line (spec §6) — depends on P2.** The signed-in block renders the
-`username · role · pages` identity line (spec §6), which was previously scoped
-out of P3. It consumes P2's `getAgencyHubIdentity` runtime request; **P3 executes
-after P2 (spec §13.3 phase ordering), so that request and its
-`AgencyHubIdentityResponse` type exist by the time this task lands** — do NOT
-stub the request here; rebase the execution worktree onto P2 first. Field names
-below (`ok`/`username`/`role`/`pages`) follow spec §6; adapt them to P2's actual
-`AgencyHubIdentityResponse` shape at implementation time. On any failure the line
-shows the honest fallback «identity недоступна» — never a blank or a guess.
-
-**Serialized wipe (fixes the stale-persist resurrection).** The «Выйти» wipe is
-NOT a bare `saveSettings`. It is routed through a dedicated `queueCredentialWipe`
-that (a) claims the newest `settingsSnapshotVersion` so every already-queued
-generic persist bails at a new pre-`saveSettings` fence in `queueSettingsSave`,
-(b) chains behind `settingsSaveChain` so its `storage.set` is the LAST write, and
-(c) leaves the shared `settingsDirty` (and any unrelated pending theme/count edit)
-untouched — only the two custody fields are its business.
+**Identity line (spec §6) rides P2's `statusModel` — depends on P2.** The signed-in
+block's `username · role · страниц: N` line renders FROM P2's shared
+`statusModel.identity` (`AgencyHubIdentityResponse`), which P2's guarded
+`hydrateHubStatusRows()` already sets and re-hydrates post-persist/post-auth — it
+is signature-guarded there, so P3 adds NO fetch and NO staleness guard of its own.
+P3 subscribes the line to that same paint pass. `pages` is `string[]` (P2 contract),
+so «страниц: N» = `identity.pages.length`. **P3 executes after P2 (spec §13.3), so
+`statusModel`, `hydrateHubStatusRows`, and the type all exist by the time this task
+lands** — do NOT re-add a `getAgencyHubIdentity` fetch here. Fallback «identity
+недоступна» whenever `statusModel.identity` is null or `!ok` — never a blank or a
+guess.
 
 - [ ] **Step 1: Write failing tests** in `tests/options-agency-hub.test.ts`.
   Build a signed-in state and drive «Выйти» through `runtimeSendMessageImpl`
-  (intercept `revokeAgencyHubDeviceToken`), then assert the custody wipe and the
-  outcome copy. `savedCustody` records every write to the two custody keys; an
-  EMPTY string is recorded, a removed key is not (the app writes `''`, never
-  removes):
+  (intercept `signOutAgencyHub`), then assert the outcome copy and the re-render.
+  The four durability/ordering guarantees are covered in Task 2 (background). Here,
+  a page test that wants to observe the wiped custody makes its `signOutAgencyHub`
+  mock ALSO write the two custody keys empty (standing in for the background), since
+  `savedCustody` only records what the harness's own storage sees:
 
 ```ts
 function getSignOutButton(section: HTMLElement): HTMLButtonElement {
@@ -568,7 +710,14 @@ it('«Выйти»: successful revoke wipes both custody keys to EMPTY strings a
   await loadOptionsPage(
     makeState({ agencyHubDeviceToken: 'agency_hub_device_abc', agencyHubApiKey: 'legacy-key' }),
     { runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'revokeAgencyHubDeviceToken') return { outcome: 'revoked' };
+        if (message.type === 'signOutAgencyHub') {
+          // Stand-in for the background: the REAL handler wipes custody itself
+          // (Task 2); the page harness's mock must mirror that write so
+          // savedCustody observes it.
+          savedCustody.agencyHubDeviceToken = '';
+          savedCustody.agencyHubApiKey = '';
+          return { outcome: 'revoked' };
+        }
         if (message.type === 'getSessionsSnapshot') return [];
         return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
       } },
@@ -586,7 +735,10 @@ it('«Выйти»: a 401 says the token was already invalid, and still wipes', 
   await loadOptionsPage(
     makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
     { runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'revokeAgencyHubDeviceToken') return { outcome: 'already-invalid' };
+        if (message.type === 'signOutAgencyHub') {
+          savedCustody.agencyHubDeviceToken = '';
+          return { outcome: 'already-invalid' };
+        }
         if (message.type === 'getSessionsSnapshot') return [];
         return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
       } },
@@ -601,7 +753,10 @@ it('«Выйти»: an unreachable hub wipes locally and says the token dies by 
   await loadOptionsPage(
     makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
     { runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'revokeAgencyHubDeviceToken') return { outcome: 'unreachable' };
+        if (message.type === 'signOutAgencyHub') {
+          savedCustody.agencyHubDeviceToken = '';
+          return { outcome: 'unreachable' };
+        }
         if (message.type === 'getSessionsSnapshot') return [];
         return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
       } },
@@ -612,35 +767,36 @@ it('«Выйти»: an unreachable hub wipes locally and says the token dies by 
   expect(section.textContent).toContain('sliding-expiry');
 });
 
-it('«Выйти»: a failed LOCAL write shows the red saved-flash and does NOT clear the token', async () => {
+it('«Выйти»: a failed LOCAL wipe (background outcome) shows the red saved-flash and keeps the signed-in block', async () => {
   await loadOptionsPage(
     makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
     { runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'revokeAgencyHubDeviceToken') return { outcome: 'revoked' };
+        // The background reports its own storage failure — the token is still on
+        // disk, so the mock does NOT touch savedCustody.
+        if (message.type === 'signOutAgencyHub') return { outcome: 'wipe-failed' };
         if (message.type === 'getSessionsSnapshot') return [];
         return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-      },
-      // Fail exactly the wipe write (the one carrying the empty custody keys).
-      storageSetImpl: async (data) => {
-        if (Object.prototype.hasOwnProperty.call(data, 'agencyHubDeviceToken')
-            && data.agencyHubDeviceToken === '') {
-          throw new Error('storage write failed');
-        }
       } },
   );
   const flash = document.querySelector('[data-saved-flash]') as HTMLElement;
-  getSignOutButton(getSectionByTitle('Agency Hub')).click();
+  const section = getSectionByTitle('Agency Hub');
+  getSignOutButton(section).click();
   await vi.waitFor(() => {
     expect(flash.className).toContain('chatgoose-saved-flash-bad');
   });
+  // Credentials are still present → the signed-in block stays up.
+  expect(section.querySelector('[data-role="hub-signed-in"]')?.hasAttribute('hidden')).toBe(false);
 });
 
-it('signed-in block renders the identity line (username · role · pages) from getAgencyHubIdentity', async () => {
+it('signed-in block renders the identity line (username · role · pages) from P2 statusModel', async () => {
+  // The page harness answers P2's getAgencyHubIdentity (fired by
+  // hydrateHubStatusRows at mount); P3's line is a pure reader of the
+  // resulting statusModel.identity — pages is string[] per the P2 contract.
   await loadOptionsPage(
     makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
     { runtimeSendMessageImpl: async (message) => {
         if (message.type === 'getAgencyHubIdentity') {
-          return { ok: true, username: 'nova', role: 'chatter', pages: 3 };
+          return { ok: true, username: 'nova', role: 'chatter', pages: ['Mia', 'Lina', 'Ari'] };
         }
         if (message.type === 'getSessionsSnapshot') return [];
         return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
@@ -671,26 +827,36 @@ it('identity line falls back to «identity недоступна» when getAgency
   });
 });
 
-it('a delayed stale key write cannot resurrect the wiped key after «Выйти» + pagehide', async () => {
+it('«Выйти» AWAITS the in-flight save chain: a pending key edit lands first, the wipe lands last', async () => {
   const releaseStaleWrite = createDeferred<void>();
   let sawStaleWrite = false;
+  let signOutServed = false;
   await loadOptionsPage(
     makeState({ agencyHubDeviceToken: 'agency_hub_device_abc', agencyHubApiKey: 'old-key' }),
     {
       runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'revokeAgencyHubDeviceToken') return { outcome: 'revoked' };
+        if (message.type === 'signOutAgencyHub') {
+          // The handler must be reached only AFTER the page's own chain settled —
+          // i.e. after the held stale write was released and committed.
+          signOutServed = true;
+          expect(sawStaleWrite).toBe(true);
+          savedCustody.agencyHubDeviceToken = '';
+          savedCustody.agencyHubApiKey = '';
+          return { outcome: 'revoked' };
+        }
         if (message.type === 'getAgencyHubIdentity') {
-          return { ok: true, username: 'u', role: 'chatter', pages: 1 };
+          return { ok: true, username: 'u', role: 'chatter', pages: ['p'] };
         }
         if (message.type === 'getSessionsSnapshot') return [];
         return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
       },
-      // Hold the in-flight stale-key write open across «Выйти» so its custody
-      // set would land AFTER the wipe if ordering were not enforced.
+      // Hold the in-flight edited-key write open across the «Выйти» click: the
+      // handler must WAIT for it (preserving the edit's place in the chain), not
+      // race it — the background wipe then lands strictly afterwards.
       storageSetImpl: async (data) => {
         if (!sawStaleWrite
             && Object.prototype.hasOwnProperty.call(data, 'agencyHubApiKey')
-            && data.agencyHubApiKey === 'stale-key') {
+            && data.agencyHubApiKey === 'edited-key') {
           sawStaleWrite = true;
           await releaseStaleWrite.promise;
         }
@@ -699,27 +865,23 @@ it('a delayed stale key write cannot resurrect the wiped key after «Выйти�
   );
   const section = getSectionByTitle('Agency Hub');
   const keyInput = section.querySelector('input[aria-label="Legacy chatter key"]') as HTMLInputElement;
-  // Queue a stale save carrying a different old key, then flush it into the chain
-  // so its persist is in flight (blocked) when sign-out runs.
-  keyInput.value = 'stale-key';
+  keyInput.value = 'edited-key';
   keyInput.dispatchEvent(new Event('input'));
-  keyInput.dispatchEvent(new Event('change'));
-  getSignOutButton(section).click();
+  keyInput.dispatchEvent(new Event('change'));   // flush → the persist is now in flight (held)
+  getSignOutButton(section).click();             // must await the chain, not bypass it
+  expect(signOutServed).toBe(false);             // still waiting on the held write
   releaseStaleWrite.resolve();
-  window.dispatchEvent(new Event('pagehide'));
   await vi.waitFor(() => {
-    // The wipe is the last word: the custody key never ends up 'stale-key'.
+    expect(signOutServed).toBe(true);
+    // Final custody state: the wipe is the last word.
     expect(savedCustody.agencyHubApiKey).toBe('');
     expect(savedCustody.agencyHubDeviceToken).toBe('');
   });
+  // pagehide after sign-out must not replay the key: dirty flags were cleared.
+  window.dispatchEvent(new Event('pagehide'));
+  expect(savedCustody.agencyHubApiKey).toBe('');
 });
 ```
-
-  (The `storageSetImpl` throw makes `saveSettings` reject; note the harness's
-  `set` records `savedCustody` BEFORE calling `storageSetImpl`, so if that
-  ordering makes the last assertion ambiguous, gate the red-flash test on the
-  flash class alone — the class is the contract. Verify the harness ordering and
-  adjust the throw predicate if needed.)
 
 - [ ] **Step 2: Run to verify failure** (`pnpm vitest run tests/options-agency-hub.test.ts`).
 
@@ -769,36 +931,23 @@ hubSignedInBlock.append(hubSignedInTop, hubIdentityLine, hubTokenLine);
   `const hubSignInRow = …` block that used to live below the call is now GONE —
   it was relocated here; do not leave a duplicate declaration.)
 
-- [ ] **Step 4: Rewrite `renderHubSignInState`** to toggle the two states, mask the
-  token (prefix from the stored token, never the full value, never a date), and
-  render the identity line via P2's `getAgencyHubIdentity`. Define
-  `renderHubIdentity` alongside `renderHubSignInState` (both are only CALLED at or
-  after the first `renderHubSignInState()` invocation from Step 3, so the nodes
-  they read are already constructed):
+- [ ] **Step 4: Rewrite `renderHubSignInState`** to toggle the two states and mask
+  the token (prefix from the stored token, never the full value, never a date).
+  The identity line is a PURE READER of P2's `statusModel.identity` — no fetch,
+  no in-flight flag, no staleness guard of its own (P2's `hydrateHubStatusRows`
+  owns freshness and signature-guarding). Define `renderHubIdentity` alongside
+  `renderHubSignInState`, and add ONE line inside P2's identity paint step (where
+  `hydrateHubStatusRows` writes `statusModel.identity` and paints the Доступ
+  row): `renderHubIdentity();` — so the sign-in block repaints on the same
+  guarded pass:
 
 ```ts
-let hubIdentityInFlight = false;
 const renderHubIdentity = (): void => {
-  if (hubIdentityInFlight) return;   // one request at a time; renders are cheap
-  hubIdentityInFlight = true;
-  hubIdentityLine.textContent = 'identity…';
-  void (async () => {
-    try {
-      // P2 owns getAgencyHubIdentity (spec §6 Доступ row); P3 runs AFTER P2, so
-      // the request + its AgencyHubIdentityResponse exist here. Adapt these field
-      // names to P2's actual response type at implementation time.
-      const identity = await sendRuntimeRequest('getAgencyHubIdentity');
-      if (disposed) return;
-      hubIdentityLine.textContent = identity && identity.ok
-        ? `${identity.username} · ${identity.role} · страниц: ${identity.pages}`
-        : 'identity недоступна';
-    } catch (error) {
-      console.error('Failed to load Agency Hub identity', error);
-      if (!disposed) hubIdentityLine.textContent = 'identity недоступна';
-    } finally {
-      hubIdentityInFlight = false;
-    }
-  })();
+  // Pure reader of P2's guarded statusModel — pages is string[] (P2 contract).
+  const identity = statusModel.identity;
+  hubIdentityLine.textContent = identity && identity.ok
+    ? `${identity.username} · ${identity.role} · страниц: ${identity.pages.length}`
+    : 'identity недоступна';
 };
 
 const renderHubSignInState = (): void => {
@@ -834,121 +983,62 @@ const renderHubSignInState = (): void => {
 hubSignInBlock.append(hubSignInRow, hubSignedInBlock, hubSignInStatus, hubSignInMeta);
 ```
 
-- [ ] **Step 5a: Add a pre-`saveSettings` supersession fence to `queueSettingsSave`.**
-  The existing `persist` calls `saveSettings` UNCONDITIONALLY and only checks
-  `snapshotVersion !== settingsSnapshotVersion` AFTER the write (to gate the UI).
-  That means bumping the version cannot cancel a queued write — a stale snapshot
-  carrying a pre-sign-out `agencyHubApiKey` still lands. Add the SAME check BEFORE
-  the write so a superseded snapshot bails without touching storage. In
-  `queueSettingsSave`, right after the existing `if (futureSchemaObserved !== null)
-  { return; }` guard inside `persist` and BEFORE `const savedSettings = await
-  saveSettings(...)`, insert:
-
-```ts
-      // Pre-write supersession fence. A snapshot may have waited behind an older
-      // write; if a newer one (a later edit, or the sign-out credential wipe) has
-      // since bumped settingsSnapshotVersion, THIS snapshot is stale — bail BEFORE
-      // saveSettings so it can never re-persist an old value (e.g. a pre-sign-out
-      // agencyHubApiKey) over the newer one. (The post-write check below still
-      // gates the UI.) Because agencyHubApiKeyDirty stays set until a matching
-      // write succeeds, the newest queued snapshot always still OWNS the key, so
-      // skipping older ones never drops a real key edit.
-      if (snapshotVersion !== settingsSnapshotVersion) {
-        return;
-      }
-```
-
-- [ ] **Step 5b: Add `queueCredentialWipe`** beside `saveSettingsDebounced` /
-  `flushSettingsSave` (it needs `saveSettingsDebounced`). It is the sign-out
-  authority: it claims the newest snapshot version (so every older queued persist
-  bails at the Step 5a fence), chains its write BEHIND `settingsSaveChain` so its
-  `storage.set` is the LAST one, writes EMPTY strings to the two custody keys, and
-  DOES NOT touch `settingsDirty` (unrelated theme/count edits keep their pending
-  save). Unlike a generic persist it does NOT bail on version — sign-out must win:
-
-```ts
-const queueCredentialWipe = (): Promise<boolean> => {
-  // Drop a pending debounced snapshot timer; claim the newest version so every
-  // already-queued generic persist is now superseded and bails at the Step 5a
-  // fence. Only the two custody fields are ours — settingsDirty is left alone.
-  saveSettingsDebounced.cancel();
-  settingsSnapshotVersion += 1;
-  agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
-  agencyHubApiKeyDirty = false; // the custody field is no longer form-owned
-  let wipeOk = true;
-  const persist = async (): Promise<void> => {
-    // EMPTY strings, never key removal — removal would reopen the fallback to a
-    // legacy value embedded in the pre-v13 settings blob (E19). saveSettings
-    // writes '' to both dedicated custody keys and strips the blob; the
-    // observed-schema guard keeps the future-schema barrier honest.
-    const wiped = await saveSettings(
-      { agencyHubDeviceToken: '', agencyHubApiKey: '' },
-      state.settings,
-      { observedSchemaVersion: futureSchemaObserved ?? state.schemaVersion },
-    );
-    state.settings = {
-      ...state.settings,
-      agencyHubDeviceToken: wiped.agencyHubDeviceToken,
-      agencyHubApiKey: wiped.agencyHubApiKey,
-    };
-    if (!disposed && document.activeElement !== agencyHubKeyInput) {
-      agencyHubKeyInput.value = '';
-    }
-  };
-  // Chain behind any in-flight save (run whether it resolved or rejected) so the
-  // wipe's storage.set is strictly last — LWW then guarantees '' is the final
-  // custody value even if an older write was mid-flight.
-  const execution = settingsSaveChain
-    ? settingsSaveChain.then(persist, persist)
-    : persist();
-  const settled = execution.catch((error: unknown) => {
-    console.error('Failed to wipe hub credentials on sign-out', error);
-    wipeOk = false;
-  });
-  settingsSaveChain = settled;
-  settingsSaveChainSignature = null;
-  void settled.finally(() => {
-    if (settingsSaveChain === settled) {
-      settingsSaveChain = null;
-      settingsSaveChainSignature = null;
-    }
-  });
-  return settled.then(() => wipeOk);
-};
-```
-
-- [ ] **Step 5c: Wire the «Выйти» handler** (register beside the `hubSignInButton`
-  click handler; it forward-references the later-declared `queueCredentialWipe` /
-  `sendRuntimeRequest` — safe, all initialized by click time, the same
-  forward-reference `persistAgencyHubSettings` already relies on):
+- [ ] **Step 5: Wire the «Выйти» handler** (register beside the `hubSignInButton`
+  click handler). The page side is deliberately TRIVIAL: it flushes its own
+  pending writes by AWAITING the existing chain (never cancelling queued
+  persists, never bumping versions — pending theme/count/URL edits must land),
+  releases page ownership of the custody field, and delegates the durable
+  wipe-then-revoke to the background (`signOutAgencyHub`, Tasks 1-2), which
+  survives a page close mid-operation:
 
 ```ts
 hubSignOutButton.addEventListener('click', () => {
   void (async () => {
     hubSignOutButton.disabled = true;
-
-    // (1) Best-effort hub revoke with the explicit device-token bearer + ~5s
-    // timeout (both live in the background handler). The token never crosses the
-    // runtime boundary; the background reads it from custody storage.
-    let outcome: 'revoked' | 'already-invalid' | 'unreachable' = 'unreachable';
+    hubSignInUserInput.disabled = true;
+    hubSignInPasswordInput.disabled = true;
+    agencyHubKeyInput.disabled = true;
+    let outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed' = 'unreachable';
     try {
-      const response = await sendRuntimeRequest('revokeAgencyHubDeviceToken');
-      outcome = response?.outcome ?? 'unreachable';
-    } catch (error) {
-      console.error('Device-token revoke request failed', error);
-      outcome = 'unreachable';
+      // (1) Flush our own pending writes: drop the debounce TIMER only, then
+      // AWAIT the chain. Queued persists run to completion — a pending
+      // theme/count/key edit lands normally, in order.
+      saveSettingsDebounced.cancel();
+      await (settingsSaveChain ?? Promise.resolve());
+
+      // (2) After this point no page write may own the custody field: clear the
+      // dirty flag and the visible input BEFORE the background wipe, so neither
+      // a later change-event nor pagehide can replay the old key.
+      agencyHubApiKeyDirty = false;
+      if (document.activeElement !== agencyHubKeyInput) {
+        agencyHubKeyInput.value = '';
+      }
+
+      // (3) The background does the durable work (Task 2): wipe BOTH custody
+      // keys to EMPTY strings FIRST (storage write survives page close), then
+      // best-effort revoke with the captured token (~5s). The token never
+      // crosses the runtime boundary.
+      try {
+        const response = await sendRuntimeRequest('signOutAgencyHub');
+        outcome = response?.outcome ?? 'unreachable';
+      } catch (error) {
+        console.error('Sign-out request failed', error);
+      }
+
+      // (4) Re-read the truth the background wrote (same pattern as the
+      // sign-in success handler).
+      state.settings = (await loadStorageState()).settings;
+    } finally {
+      hubSignOutButton.disabled = false;
+      hubSignInUserInput.disabled = false;
+      hubSignInPasswordInput.disabled = false;
+      agencyHubKeyInput.disabled = false;
     }
 
-    // (2) Local wipe in EVERY outcome, SERIALIZED as the last write through the
-    // shared save queue (see queueCredentialWipe). It cannot be resurrected by an
-    // in-flight stale persist (that one bails at the Step 5a fence) and it does
-    // not disturb unrelated pending theme/count edits.
-    const localWipeOk = await queueCredentialWipe();
-
-    // (3) One honest message per outcome. The three server outcomes ride the
-    // sign-in status line (spec's status-line pattern); a failed LOCAL write is
-    // the red saved-flash — credentials may still be present, the loud case.
-    if (!localWipeOk) {
+    // (5) One honest message per outcome. The three server outcomes ride the
+    // sign-in meta line; a failed LOCAL wipe is the red saved-flash —
+    // credentials may still be present, the loud case.
+    if (outcome === 'wipe-failed') {
       savedFlash.showError('не удалось стереть креды локально — попробуй ещё раз');
     } else if (outcome === 'revoked') {
       hubSignInMeta.textContent = 'Device token отозван на хабе.';
@@ -958,20 +1048,26 @@ hubSignOutButton.addEventListener('click', () => {
       hubSignInMeta.textContent = 'Хаб недоступен — token стёрт локально, на сервере умрёт по sliding-expiry.';
     }
 
-    hubSignOutButton.disabled = false;
     renderHubSignInState();
     if (!disposed) {
       await refreshAgencyHubPermissionState();
       await runAgencyHubConnectionTest({ force: true });
+      // P2's guarded refresh: the Доступ row and the readiness hero must flip
+      // without a reload (P2 exposes hydrateHubStatusRows + storedHubSignature).
+      void hydrateHubStatusRows(storedHubSignature());
     }
   })();
 });
 ```
 
   (`renderHubSignInState` only rewrites `hubSignInMeta` when it is EMPTY, so the
-  outcome message set just above survives the subsequent render. On a failed
-  wipe the token is still present, so `renderHubSignInState` correctly keeps the
-  signed-in block up while the red flash carries the failure.)
+  outcome message set just above survives the subsequent render. On
+  'wipe-failed' the re-read settings still carry the token, so
+  `renderHubSignInState` correctly keeps the signed-in block up while the red
+  flash carries the failure. NO fence, NO `queueCredentialWipe`, NO version
+  bump: `queueSettingsSave` semantics are untouched — the await in (1) plus the
+  background-side wipe ordering (Task 2) make resurrection impossible by
+  construction.)
 
 - [ ] **Step 6: Add CSS** to `src/options/styles.css`:
 
@@ -994,7 +1090,7 @@ hubSignOutButton.addEventListener('click', () => {
 
 Run: `pnpm vitest run tests/options-agency-hub.test.ts tests/options-accounts.test.ts tests/options-persona-recovery.test.ts`
 Expected: PASS, including the mount, sign-out (revoke/401/unreachable/failed-write),
-identity-line, and delayed-old-write regression tests.
+identity-line, and await-the-chain + pagehide regression tests.
 
 - [ ] **Step 9: Commit**
 
@@ -1572,24 +1668,24 @@ background skips a byte-identical empty refresh, so a server-confirmed empty
 catalog can legitimately carry fetchedAt=null and must still read as empty, not
 «ещё не загружен». Preservation/export and the malformed-snapshot recovery
 gate are restyled on the new tokens without weakening E36/E37; the recovery page
-stays OUTSIDE the shell. The «Выйти» button (spec §6): best-effort hub revoke with
-the explicit device-token bearer (authRevokeCurrentDeviceToken, ~5s, rejects API
+stays OUTSIDE the shell. The «Выйти» button (spec §6 as amended,
+wipe-then-revoke): the page AWAITS its own save chain (pending edits land in
+order — nothing cancelled, no version bumps, queueSettingsSave untouched),
+releases page ownership of the custody field, then delegates to the background
+`signOutAgencyHub`, which durably writes EMPTY strings to both dedicated
+custody keys FIRST (never key removal — the pre-v13 blob fallback, E19; the
+write survives a page close) and only then best-effort revokes with the
+explicit device-token bearer (authRevokeCurrentDeviceToken, ~5s, rejects API
 keys; a cleared base URL with a live token is 'unreachable', never a false
-'already-invalid') → local wipe writing EMPTY strings to the dedicated custody
-keys (never key removal, which would reopen the pre-v13 blob fallback — E19),
-SERIALIZED as the last write through the shared save queue (queueCredentialWipe
-chained behind settingsSaveChain) with a new pre-saveSettings supersession fence
-in queueSettingsSave so a stale queued snapshot cannot resurrect the old key, and
-WITHOUT disturbing unrelated pending edits (shared settingsDirty left intact) →
-four distinct outcomes (revoked / 401 already-invalid / unreachable→sliding-expiry
-/ red flash on a failed LOCAL write). The signed-in block also shows the spec §6
-identity line (username · role · pages) by consuming P2's getAgencyHubIdentity
-request (P3 executes after P2), with an honest «identity недоступна» fallback. No
-exact token expiry is shown (issuance metadata is not persisted, /me omits it,
-sliding expiry makes a stored date a lie); the token line shows a masked prefix +
-«продлевается при работе». New runtime request
-`revokeAgencyHubDeviceToken` (undefined payload) registered in the protocol
-maps + tests. Storage schema stays v14 (no migration; sign-out only WRITES EMPTY
+'already-invalid') → four distinct outcomes (revoked / 401 already-invalid /
+unreachable→sliding-expiry / red flash on 'wipe-failed'). The signed-in block
+also shows the spec §6 identity line (username · role · страниц: N) as a pure
+reader of P2's guarded statusModel.identity (P3 executes after P2), honest
+«identity недоступна» fallback. No exact token expiry is shown (issuance
+metadata is not persisted, /me omits it, sliding expiry makes a stored date a
+lie); the token line shows a masked prefix + «продлевается при работе». New
+runtime request `signOutAgencyHub` (undefined payload) registered in the
+protocol maps + tests. Storage schema stays v14 (no migration; sign-out only WRITES EMPTY
 to existing keys); one central write controller preserved; no new Fansly egress.
 Cross-repo prerequisite: persona authoring stays frozen until core #151 closes
 the legacy-LWW lane — the copy never promises owner-side creation. Spec:
@@ -1637,22 +1733,22 @@ gh pr create --draft --title "Options P3: persona presentation + device-token si
     (existing sign-in row, hidden only when signed in).
   - Signed-in state = «активен» badge + identity line + token line
     (`prefix… · продлевается при работе`) + «Выйти»; the identity line
-    (`username · role · pages`) is now IN P3 (rev 2), rendered by consuming P2's
-    `getAgencyHubIdentity` request — P3 runs AFTER P2, honest «identity недоступна»
-    fallback — Task 3 Steps 3–4.
+    (`username · role · страниц: N`) is now IN P3, rendered as a PURE READER of
+    P2's guarded `statusModel.identity` (P3 runs AFTER P2; no fetch of its own),
+    honest «identity недоступна» fallback — Task 3 Steps 3–4.
   - No exact expiry date; prefix derived from the stored token — Task 3 Step 4
     (`token.slice(0, 24)…`, masked, dateless; a render test asserts the full
     token never appears).
   - DELETE with explicit device-token bearer + ~5s timeout (rejects API keys) —
-    Task 2. Local wipe = EMPTY strings, never key removal — Task 3 Step 5b. The
-    wipe is SERIALIZED as the last write via `queueCredentialWipe` (chained behind
-    `settingsSaveChain`), and `queueSettingsSave` gains a pre-`saveSettings`
-    supersession fence (Step 5a) so a stale queued snapshot carrying the old
-    `agencyHubApiKey` bails BEFORE writing — no resurrection after sign-out; the
-    shared `settingsDirty` is left intact so unrelated theme/count edits survive.
-    Four distinct outcomes — Task 3 Step 5c handler + Task 2 client/handler; the
+    Task 2, which also owns the durable local wipe: EMPTY strings, never key
+    removal, written BEFORE the revoke so a page close mid-operation cannot
+    leave credentials behind (spec §6 as amended, wipe-then-revoke). The page
+    handler (Task 3 Step 5) AWAITS the existing save chain instead of fencing
+    it — pending unrelated edits land in order, the background wipe lands
+    strictly after, and `queueSettingsSave` semantics stay untouched.
+    Four distinct outcomes — Task 3 Step 5 handler + Task 2 client/handler; the
     empty-string custody write is asserted directly (`savedCustody.* === ''`),
-    plus a delayed-old-write + pagehide regression test.
+    plus the await-the-chain + pagehide regression test.
   - Outcome-line vs flash decision (task's open question): the THREE server
     outcomes ride the sign-in status line (spec's status-line pattern in that
     block); the failed-LOCAL-write case is the red `createSavedFlash` toast

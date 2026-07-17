@@ -139,21 +139,30 @@ Label-left rows (desktop pattern, ~150px label column):
     appears only in the transient message right after sign-in (as today).
     A future core current-token-info operation is out of scope
     (cross-repo).
-  - The **«Выйти»** button is a protocol, not "revoke then wipe":
-    1) cancel debounced/queued form snapshots (a stale save must not
-       replay credentials after sign-out);
-    2) `DELETE /auth/device-tokens/current` with the explicit device-token
-       bearer (the operation rejects API keys), ~5s timeout;
-    3) in `finally` — local wipe: custody fields are written as EMPTY
-       strings, not removed as keys (removal would reopen the fallback to
-       a legacy value embedded in the settings blob);
-    4) the pagehide path must not serialize the old key after sign-out
-       (dirty flags cleared before the write);
-    5) toasts distinguish the outcomes: «токен отозван на хабе» / «хаб
+  - The **«Выйти»** button is a protocol — wipe-then-revoke, in the
+    BACKGROUND (amended 2026-07-17; supersedes the earlier
+    revoke-then-wipe order — a pagehide during the ~5s revoke window must
+    not leave credentials on disk; local custody is the security
+    boundary, and an unrevoked kernel token dies via sliding expiry or
+    admin revoke):
+    1) the page flushes its own pending writes by AWAITING the existing
+       save chain (nothing cancelled — pending unrelated edits land in
+       order), then clears the page's ownership of the custody field
+       (dirty flag + visible input) so no later page write can replay
+       the old key;
+    2) the background `signOutAgencyHub` durably writes BOTH custody
+       fields as EMPTY strings first (never key removal — removal would
+       reopen the fallback to a legacy value embedded in the settings
+       blob); the background outlives the page, so a close mid-operation
+       cannot skip the wipe;
+    3) then, best-effort: `DELETE /auth/device-tokens/current` with the
+       explicit device-token bearer (the operation rejects API keys),
+       ~5s timeout;
+    4) outcomes are distinguished: «токен отозван на хабе» / «хаб
        ответил 401 — токен уже был недействителен» / «хаб недоступен —
        токен стёрт локально, на сервере умрёт по sliding-expiry»; a
-       separate red toast when the LOCAL write failed (credentials are
-       still present).
+       separate red toast when the LOCAL wipe itself failed (credentials
+       are still present).
 - **Доступ Firefox** — the host permission as a badge («разрешён» /
   «не выдан» + a «Разрешить» button) instead of today's four paragraphs of
   states. Permission-API error texts stay in the meta line.

@@ -1,5 +1,9 @@
 # Options Redesign P2 — Status Section, Readiness Hero & Changelog Button
 
+> **Rev 3 (2026-07-17)** — auth-event & signature-binding review fixes (verified against this worktree's code); extends the Rev 2 fixes retained below:
+> 1. **Hydration also fires on auth events** — `hydrateHubStatusRows` now triggers from the sign-in success path (immediately after `state.settings = (await loadStorageState()).settings;` in the `issueAgencyHubDeviceToken` handler, `src/options/index.ts:802`) AND from the permission-grant handler, so the Доступ row and readiness hero flip to AUTH the instant a device token is issued — no reload, no remount. It stays a `render()`-scope const reachable by P3's sign-out completion for the same repaint-on-revoke (Task 6; sign-in→AUTH-without-remount test added).
+> 2. **The signature guard binds to the PERSISTED snapshot** — `hydrateHubStatusRows(expectedSignature)` takes the signature of the snapshot its caller just PERSISTED (the post-persist block passes its own `hubSignature` from `mergedSettings`; mount/sign-in/grant pass the signature of the just-read stored settings). It (1) returns BEFORE issuing any request when the live-form signature has already moved on, and (2) re-checks the live signature before painting each row. The numeric generation counter is dropped — the persisted signature is the sole binding. The A→B race test splits into the delayed-START variant (persist A → type B before the run starts → no request issued) and the in-flight variant (started under A, B typed while awaiting → paint dropped) (Task 6).
+>
 > **Rev 2 (2026-07-17)** — double-blind review fixes (all verified against this worktree's code):
 > 1. **No per-keystroke hub storm** — hub-status hydration no longer hooks `input`/`change`; it fires at mount and re-fires only on the post-persist connection-test boundary, so a keystroke costs zero hub requests (Task 6 Step 3).
 > 2. **No stale-hub paint** — hydration runs AFTER the autosave persists (piggybacking `queueSettingsSave`'s post-save hub-signature block) and carries a connection-signature guard re-checked before painting; deferred A→B race test added (Task 6).
@@ -22,7 +26,7 @@
 - **Sessions**: `getSessionsSnapshot` already exists; `connected` means "credentials captured, no 401 since" — the Fansly Статус row copy says «захвачена», never liveness. Reuse `buildSessionLookup`/`formatCaptureStatus` from `sessions.ts`. No new request.
 - **Hub health and credential validity are SEPARATE rows and SEPARATE requests** (never merged into one indicator — spec §14): «Hub (core)» UP/DEGRADED/DOWN from `getAgencyHubHealth`; «Доступ» AUTH/401/НЕТ CREDENTIAL from `getAgencyHubIdentity` (`me`). On 401 a «Войти заново» button scrolls to the hub section.
 - **Контракт row (debug only)**: the health response carries `sdkContractHash: KERNEL_CONTRACT_HASH` (stamped background-side so the OPTIONS bundle imports no SDK) beside the live `contractHash` → MATCH/DRIFT. Visible only when `settings.debugMode`.
-- **Generation guard**: every hub-derived async fill (health/me) carries a connection-signature/generation guard (extend the P1 pattern) so a slow hub A response never paints hub B's status. Rows hydrate independently with skeletons; local reads (sessions/quota/spenders) need no signature guard.
+- **Connection-signature guard**: every hub-derived async fill (health/me) is bound to the PERSISTED connection signature its caller passes (extend the P1 pattern) — the run is dropped before issuing AND again before painting if the live form has moved on, so a slow hub A response never paints hub B's status. There is no separate generation counter. Rows hydrate independently with skeletons; local reads (sessions/quota/spenders) need no signature guard.
 
 **Goal:** Make the options page informative — a read-only «Статус» section (Fansly / Hub / Доступ / AI / Spenders / Контракт rows), a readiness hero that reaches all-green in ≤3 actions, and the Версия «Changelog» button — using data the kernel already provides, with zero new Fansly egress and no storage-schema change.
 
@@ -1034,7 +1038,7 @@ git commit -m "feat(options): read-only Статус section scaffold with statu
 
 ### Task 6: Options — hydrate the Fansly, Hub, Доступ & Контракт rows
 
-Fill the four hub/session rows. Fansly reuses the session snapshot (no request); Hub/Доступ fetch health/me under a shared connection-signature generation guard (a slow hub A must never paint hub B); Контракт compares the health response's two hashes, debug-gated. On 401 the Доступ row grows a «Войти заново» button that scrolls to the hub section.
+Fill the four hub/session rows. Fansly reuses the session snapshot (no request); Hub/Доступ fetch health/me under a shared persisted-snapshot connection-signature guard (a slow hub A must never paint hub B); Контракт compares the health response's two hashes, debug-gated. On 401 the Доступ row grows a «Войти заново» button that scrolls to the hub section.
 
 **Files:**
 - Modify: `src/options/index.ts`
@@ -1042,7 +1046,7 @@ Fill the four hub/session rows. Fansly reuses the session snapshot (no request);
 
 **Interfaces:**
 - Consumes: `sessionsResultPromise` (already awaited by P1's `hydrateAccountSections`), `buildSessionLookup`/`formatCaptureStatus` (`sessions.ts`), `buildAgencyHubConnectionSignature` (`agency-hub-settings.ts`), `sendRuntimeRequest`.
-- Produces: `hydrateHubStatusRows()` (guarded, re-runnable) + Fansly fill; both feed a shared `statusModel` consumed by the hero (Task 8).
+- Produces: `hydrateHubStatusRows(expectedSignature: string)` (guarded, re-runnable) + Fansly fill; both feed a shared `statusModel` consumed by the hero (Task 8). `hydrateHubStatusRows` is module-scope reachable for the P3 wiring — it is a `render()`-scope const that P3's sign-out completion calls (a sibling closure) so a revoked device token repaints Доступ to «НЕТ CREDENTIAL» without a reload.
 
 - [ ] **Step 1: Write failing tests** in `tests/options-status.test.ts`:
 
@@ -1143,20 +1147,92 @@ it('renders each hub row independently when one read rejects', async () => {
   expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕИЗВЕСТНО');
 });
 
-it('drops a stale hub-A reply after the URL is re-typed to hub B (signature guard)', async () => {
+it('in-flight variant: a hub-A run started before the field became hub B drops its paint', async () => {
+  // Hydration STARTS under hub A (mount fires it, skeleton shown, both requests
+  // issued via allSettled); the chatter re-types the URL to hub B while A's health
+  // is still awaited; A's reply then lands → the pre-paint re-check (live sig is
+  // now hub B ≠ the expected hub-A snapshot) drops the paint.
   let releaseHealth!: (value: AgencyHubHealthResponse) => void;
   const deferredHealthA = new Promise<AgencyHubHealthResponse>((resolve) => { releaseHealth = resolve; });
   const { document, flushAsync } = await mountOptionsPage({
     settings: { agencyHubBaseUrl: 'https://hub-a.example', agencyHubDeviceToken: 't' },
     runtime: { health: () => deferredHealthA },
   });
-  // The user re-types the hub before A's reply lands (no persist yet).
   const urlInput = document.querySelector('[data-shell-section="hub"] input[type="url"]') as HTMLInputElement;
-  urlInput.value = 'https://hub-b.example';
+  urlInput.value = 'https://hub-b.example'; // typed while A's health is in flight (no persist yet)
   releaseHealth({ ok: true, status: 'ok', dbLatencyMs: 3, contractHash: 'a', sdkContractHash: 'a' });
   await flushAsync();
-  // A's UP paint is dropped: the live form signature is now hub-b, not fired hub-a.
   expect(rowByLabel(document, 'Hub (core)').querySelector('.chatgoose-badge-mono')?.textContent).not.toBe('UP');
+});
+
+it('delayed-START variant: a persisted-B run never issues once the field already shows hub C', async () => {
+  // Count hub reads; hold the post-persist connection test open so the field can
+  // be re-typed DURING the gap before that persist's hydration reaches its first
+  // line. Guard step 1 (live sig ≠ expected) must return before any request.
+  vi.useFakeTimers(); // the 350 ms autosave debounce is drained by flushAsync's runOnlyPendingTimers
+  let healthCalls = 0;
+  let releaseConnTest!: () => void;
+  const conn = new Promise<void>((resolve) => { releaseConnTest = resolve; });
+  const { document, window, flushAsync } = await mountOptionsPage({
+    settings: { agencyHubBaseUrl: 'https://hub-a.example', agencyHubDeviceToken: 't' },
+    runtime: { health: () => { healthCalls += 1; return { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' }; } },
+  });
+  expect(healthCalls).toBe(1); // the mount hydration for hub A
+  // Reassign sendMessage post-mount (the Task 9 pattern) so the connection test
+  // the post-persist block awaits hangs until released, holding the gap open.
+  const browserRef = (window as unknown as { browser: { runtime: { sendMessage: (m: unknown) => Promise<unknown> } } }).browser;
+  browserRef.runtime.sendMessage = vi.fn(async (message: unknown) => {
+    switch ((message as { type?: string }).type) {
+      case 'getAgencyHubHealth': healthCalls += 1; return { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' };
+      case 'getAgencyHubIdentity': return { ok: true, username: 'u', role: 'chatter', pages: [] };
+      case 'testAgencyHubConnection': await conn; return { ok: true };
+      case 'getSessionsSnapshot': return [];
+      case 'getAiQuotaByPage': return {};
+      case 'getSpendersStatus': return null;
+      default: return undefined;
+    }
+  });
+  const urlInput = document.querySelector('[data-shell-section="hub"] input[type="url"]') as HTMLInputElement;
+  urlInput.value = 'https://hub-b.example';
+  urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+  await flushAsync(); // persist B; its post-persist IIFE parks on the hung connection test
+  urlInput.value = 'https://hub-c.example'; // chatter types hub C during the gap (not persisted)
+  releaseConnTest();
+  await flushAsync(); // hydrate(sig B) runs its first line, sees live=hub C, and bails before any request
+  expect(healthCalls).toBe(1); // the stale persisted-B run issued no hub read
+});
+
+it('sign-in success flips Доступ to AUTH in place (no remount)', async () => {
+  const { document, window, flushAsync } = await mountOptionsPage({
+    settings: { agencyHubBaseUrl: 'https://hub.example' }, // URL set, no token yet
+    runtime: { identity: { ok: false, reason: 'no_credential' } },
+  });
+  const access = rowByLabel(document, 'Доступ');
+  expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('НЕТ CREDENTIAL');
+  // After sign-in the background has issued a token; identity now returns AUTH.
+  const browserRef = (window as unknown as { browser: { runtime: { sendMessage: (m: unknown) => Promise<unknown> } } }).browser;
+  browserRef.runtime.sendMessage = vi.fn(async (message: unknown) => {
+    switch ((message as { type?: string }).type) {
+      case 'issueAgencyHubDeviceToken': return { ok: true, keyPrefix: 'abc', expiresAt: Date.now() + 86_400_000 };
+      case 'getAgencyHubIdentity': return { ok: true, username: 'lilly-chatter', role: 'chatter', pages: ['Lilly'] };
+      case 'getAgencyHubHealth': return { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' };
+      case 'getSessionsSnapshot': return [];
+      case 'getAiQuotaByPage': return {};
+      case 'getSpendersStatus': return null;
+      default: return undefined;
+    }
+  });
+  const hub = document.querySelector('[data-shell-section="hub"]')!;
+  (hub.querySelector('input[placeholder="Логин Hub"]') as HTMLInputElement).value = 'lilly-chatter';
+  (hub.querySelector('input[placeholder="Пароль Hub"]') as HTMLInputElement).value = 'pw';
+  const signIn = Array.from(hub.querySelectorAll('button')).find((b) => b.textContent === 'Войти и выпустить token') as HTMLButtonElement;
+  signIn.click();
+  await flushAsync();
+  // The SAME Доступ element (no page rebuild) now shows AUTH — hydrateHubStatusRows
+  // fired from the sign-in success path, not a remount.
+  expect(rowByLabel(document, 'Доступ')).toBe(access);
+  expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('AUTH');
+  expect(access.textContent).toContain('lilly-chatter');
 });
 ```
 
@@ -1221,20 +1297,31 @@ it('drops a stale hub-A reply after the URL is re-typed to hub B (signature guar
   Hub + Доступ + Контракт — one guarded fetch (both hub calls share the signature):
 
 ```ts
-  let statusHubGeneration = 0;
-  // The connection signature the rows are currently painting FOR. Captured at
-  // fire, re-checked before painting: it guards the window between a hub-field
-  // edit and that edit's own post-persist re-hydration, so a slow hub-A reply
-  // can never paint while the field already shows hub B.
+  // The live connection signature the hub fields currently show. The guard binds
+  // to the PERSISTED snapshot: the caller passes the signature of what it just
+  // persisted, and this run is valid only while the live form still equals it.
   const currentHubSignature = (): string =>
     buildAgencyHubConnectionSignature(
       agencyHubUrlInput.value,
       agencyHubKeyInput.value,
       state.settings.agencyHubDeviceToken,
     );
-  const hydrateHubStatusRows = async (): Promise<void> => {
-    const generation = ++statusHubGeneration;
-    const signature = currentHubSignature();
+  // The signature of the SAVED settings — what mount, the sign-in success path,
+  // and the permission grant pass as their expected snapshot (no unsaved edit is
+  // in play at those moments; the form equals stored). The post-persist caller
+  // instead passes its own freshly-computed `hubSignature` from `mergedSettings`.
+  const storedHubSignature = (): string =>
+    buildAgencyHubConnectionSignature(
+      state.settings.agencyHubBaseUrl,
+      state.settings.agencyHubApiKey,
+      state.settings.agencyHubDeviceToken,
+    );
+  const hydrateHubStatusRows = async (expectedSignature: string): Promise<void> => {
+    // (1) Delayed-START guard — BEFORE issuing any request. If the live form has
+    // already moved on from the snapshot this run was fired for, skip entirely:
+    // the user is mid-edit and a newer persist will re-trigger with its own
+    // signature. Firing a doomed pair of hub requests here is the storm we avoid.
+    if (disposed || currentHubSignature() !== expectedSignature) return;
     for (const row of [statusRows.hub, statusRows.access]) row.skeleton();
     statusRows.hub.setAction(null);
     // Independent sources (§12): a rejected transport on ONE read must not leave
@@ -1244,10 +1331,12 @@ it('drops a stale hub-A reply after the URL is re-typed to hub B (signature guar
       sendRuntimeRequest('getAgencyHubHealth'),
       sendRuntimeRequest('getAgencyHubIdentity'),
     ]);
-    // Drop a superseded run (generation) AND a run whose form has since changed
-    // (signature) — the reads pull SAVED settings background-side, so painting
-    // is only valid while the form still matches what this run fired for.
-    if (disposed || generation !== statusHubGeneration || signature !== currentHubSignature()) return;
+    // (2) In-flight guard — re-check before PAINTING. The reads pull SAVED
+    // settings background-side, so a paint is only valid while the live form
+    // still equals the persisted snapshot this run fired for; a mid-flight edit
+    // drops the result (that edit's own persist re-runs hydration). No generation
+    // counter — the persisted signature is the sole binding.
+    if (disposed || currentHubSignature() !== expectedSignature) return;
     const health: AgencyHubHealthResponse = healthResult.status === 'fulfilled'
       ? healthResult.value
       : { ok: false, reason: 'unreachable' };
@@ -1323,13 +1412,14 @@ it('drops a stale hub-A reply after the URL is re-typed to hub B (signature guar
   };
 ```
 
-  Add the type imports at the top of `index.ts`: `AgencyHubHealthResponse`, `AgencyHubIdentityResponse` (from `../shared/types.js`); `buildAgencyHubConnectionSignature` and `createButton` are already imported. **Never hook `input`/`change`** — each hydration fires TWO hub requests, so per-keystroke firing on a 40-char key would be an ~80-request 401 storm. Trigger it exactly where the connection test already runs against PERSISTED settings:
+  Add the type imports at the top of `index.ts`: `AgencyHubHealthResponse`, `AgencyHubIdentityResponse` (from `../shared/types.js`); `buildAgencyHubConnectionSignature` and `createButton` are already imported. Each caller passes the signature of the snapshot it just PERSISTED. **Never hook `input`/`change`** — each hydration fires TWO hub requests, so per-keystroke firing on a 40-char key would be an ~80-request 401 storm. Trigger it exactly where the code already acts on PERSISTED settings:
 
-  1. **At mount:** `void hydrateHubStatusRows();` right after `void hydrateAccountSections();`.
-  2. **After every persisted hub change:** inside `queueSettingsSave`'s post-save block — the `if (hubSignature !== lastAgencyHubConnectionSignature)` IIFE that already `await`s `refreshAgencyHubPermissionState()` then `runAgencyHubConnectionTest({ force: true })` — append `await hydrateHubStatusRows();` after the connection test. This is the ONLY place hydration reads the hub the field now shows: it runs AFTER the 350 ms autosave persists, so the background read can never see hub A while the field shows hub B (fixes the stale-paint race — before this the input handler fired hydration BEFORE persist).
-  3. **On a permission grant:** in `handlePermissionChanged`, after its `runAgencyHubConnectionTest({ force: true })`, add `void hydrateHubStatusRows();` (a granted origin flips `no_permission` → live without a reload).
+  1. **At mount:** right after `void hydrateAccountSections();` (currently `src/options/index.ts:1638`): `void hydrateHubStatusRows(storedHubSignature());` — the signature of the just-read stored settings.
+  2. **After every persisted hub change:** inside `queueSettingsSave`'s post-save block — the `if (hubSignature !== lastAgencyHubConnectionSignature)` IIFE (`src/options/index.ts:988`) that already `await`s `refreshAgencyHubPermissionState()` then `runAgencyHubConnectionTest({ force: true })` — append `await hydrateHubStatusRows(hubSignature);` after the connection test, passing the SAME `hubSignature` already computed from `mergedSettings` (lines 983–987). It runs AFTER the 350 ms autosave persists, so the background read can never see hub A while the field shows hub B (fixes the stale-paint race — before this the input handler fired hydration BEFORE persist).
+  3. **On a permission grant:** in `handlePermissionChanged`'s IIFE, after its `await runAgencyHubConnectionTest({ force: true })` (`src/options/index.ts:1104`), add `void hydrateHubStatusRows(storedHubSignature());` (a granted origin flips `no_permission` → live without a reload).
+  4. **On sign-in success:** in the `issueAgencyHubDeviceToken` success handler, immediately after `state.settings = (await loadStorageState()).settings;` (`src/options/index.ts:802`), add `void hydrateHubStatusRows(storedHubSignature());` — the freshly-issued device token makes `checkIdentity` return AUTH, so the Доступ row and hero flip in place without a reload or remount. P3's «Выйти» reuses the same call after the token is revoked (Доступ falls back to «НЕТ CREDENTIAL»).
 
-  `hydrateHubStatusRows` is a `const` in `render()` scope; the IIFE and permission handler reference it as a closure (they run post-mount, after the const initializes — no TDZ, mirroring how `runAgencyHubConnectionTest` is already referenced from `queueSettingsSave`). The connection-signature guard inside the function is the belt to that suspenders. Define a no-op `updateReadinessHero = (): void => undefined;` placeholder here (Task 8 replaces the body).
+  `hydrateHubStatusRows` is a `const` in `render()` scope; the two IIFEs, the permission handler, and the sign-in handler reference it as a closure (they run post-mount, after the const initializes — no TDZ, mirroring how `runAgencyHubConnectionTest` is already referenced from `queueSettingsSave`). The persisted-signature guard inside the function — re-checked before issuing AND before painting — is the belt to that suspenders; there is no separate generation counter. Define a no-op `updateReadinessHero = (): void => undefined;` placeholder here (Task 8 replaces the body).
 
 - [ ] **Step 4: Run** — `pnpm vitest run tests/options-status.test.ts tests/options-shell-mount.test.ts tests/options-accounts.test.ts` → PASS. (The accounts harness answers the new requests with `currentSessions` by default; the hub rows fall back to honest unknown states there — assert nothing broke.)
 
@@ -1775,10 +1865,13 @@ contractHash to a background-stamped KERNEL_CONTRACT_HASH, so the options bundle
 imports no SDK. Health and credential validity stay SEPARATE rows and requests
 (never one indicator): no_permission is first-class (checkIdentity propagates it,
 the Hub row owns the «Разрешить доступ» grant, the Доступ badge stays neutral),
-so a fresh install is never a false red. Hub-status hydration fires at mount and
-on the post-persist connection-test boundary only (never per-keystroke), under a
-connection-signature + generation guard, so it reads the persisted hub and no
-stale reply paints a re-typed field. Readiness step 3 checks only accounts with
+so a fresh install is never a false red. Hub-status hydration fires at mount, on
+the post-persist connection-test boundary, and on the auth events (sign-in
+success, permission grant) — never per-keystroke — each caller passing the
+signature of the snapshot it persisted; the guard binds to that signature
+(checked before issuing AND before painting, no generation counter), so a
+re-typed field never gets a stale paint and a freshly-issued device token flips
+Доступ to AUTH in place. Readiness step 3 checks only accounts with
 captured sessions (an offline archived mapping never blocks all-green). Quota and
 spenders observations are storage.session-scale — schema stays v14; no new Fansly
 egress (DP 1-B). The Версия «Changelog» button links the anchored changelog page,
@@ -1816,5 +1909,5 @@ gh pr create --draft --title "Options P2: Статус section, readiness hero, 
 - **Spec coverage of the P2 slice.** §4 readiness hero — Task 8 (route + pulse, same data sources, actions-not-diagnoses, `tabs.create`/scroll actions). §5 «Статус» rows — Tasks 5–7 cover every table row with its exact source and honest empty state: Fansly (`getSessionsSnapshot`, «захвачена», worker-restart id degradation inherited from P1's `formatAccountHeading`), Hub (`/health` via `raw`, DB latency label, DEGRADED path), Доступ (`me`, 401 «Войти заново»), AI (per-page map, amber ≤20 / red at 0, NO micro-USD — E14), Spenders (observation tracker, «доска ещё не открывалась»), Контракт (debug-only MATCH/DRIFT). §9 Версия Changelog button — Task 9. §12 data/failure modes — four independent runtime reads, each failing to an honest unknown; storage stays v14; no new Fansly egress. §13.2 + §14 acceptance — health and credential validity are never merged (separate rows AND separate requests); the hero reaches all-green in ≤3 actions.
 - **Type consistency across tasks.** The four response types (`AgencyHubHealthResponse`, `AgencyHubIdentityResponse`, `Record<string, AiQuotaStatus>`, `SpendersObservation | null`) are defined once in `types.ts` (Tasks 1–3) and consumed by the mount helper (Task 4), the row hydration (Tasks 6–7), and the hero (Task 8) under the same names. `statusModel` is the single in-memory record both rows and hero read; `BadgeTone` is reused from `dom.ts` for row tones. All four requests carry `undefined` payloads → `OptionalRuntimeRequestType`, callable as `sendRuntimeRequest('…')` with no second argument. `KERNEL_CONTRACT_HASH` is imported only in the background client; the options bundle compares two strings already present in the health response (keeps the AI-cutover gate trivially green).
 - **Verified against code, not assumed.** `raw`/`me`/`routeSchemas.health.response[200]`/`KernelApiError` shapes were read from `vendor/kernel-sdk/dist`; the runtime-request registry + exhaustive `protocol.test.ts`, the `quota-tracker.ts` storage.session pattern, the `spenders-service.getList` resolve/reject boundary, the P1 ordered `shell.addSection` block and connection-signature guard, and the two test harnesses (`mountOptionsPage`, the accounts `loadOptionsPage`/`onRuntimeRequest` hook) were all confirmed in the worktree.
-- **Risky spots flagged.** (1) The `getList` wrapper (Task 3) must skip `AbortError` recording or a closed tab would log a false FAIL — the test pins both branches. (2) The section-registration line (Task 5) MUST stay inside the pre-barrier block or a v15 observed during the initial read would not disable the new status buttons (P1's documented invariant); the P1 barrier catch-up test still guards this. (3) Hub-status hydration NEVER fires on `input`/`change` (that would be a per-keystroke two-request storm); it fires at mount and re-fires only on the post-persist connection-test boundary, so it reads the PERSISTED hub, and a connection-signature guard (captured at fire, re-checked before painting) plus the generation counter drop any reply whose form has since changed — local reads (sessions/quota/spenders) carry neither guard. Both hydration pairs use `Promise.allSettled`, so one rejected source renders its own honest-unknown state instead of stranding the sibling row as a skeleton. (4) `no_permission` is first-class end-to-end: `checkIdentity` propagates it (never folded into `unreachable`), the Hub row owns the grant («НЕТ ДОСТУПА» + «Разрешить доступ»), the Доступ credential badge stays neutral «НЕИЗВЕСТНО», and hero step 1 offers the permission action — so a fresh install (permissions.contains defaults false) is never a false red. (5) Readiness `mappedDone` reads `statusModel.fanslyCapturedAccountIds` (captured-session accounts only), so an offline archived-mapping account cannot block «Всё работает».
+- **Risky spots flagged.** (1) The `getList` wrapper (Task 3) must skip `AbortError` recording or a closed tab would log a false FAIL — the test pins both branches. (2) The section-registration line (Task 5) MUST stay inside the pre-barrier block or a v15 observed during the initial read would not disable the new status buttons (P1's documented invariant); the P1 barrier catch-up test still guards this. (3) Hub-status hydration NEVER fires on `input`/`change` (that would be a per-keystroke two-request storm); it fires at mount, on the post-persist connection-test boundary, and on the two auth events (sign-in success, permission grant), always against PERSISTED settings. Each caller passes the signature of the snapshot it persisted, and the guard binds to it: a run whose live-form signature no longer matches is dropped BEFORE issuing requests (delayed-START) and re-checked again before painting (in-flight) — no separate generation counter. Local reads (sessions/quota/spenders) carry no signature guard. Both hydration pairs use `Promise.allSettled`, so one rejected source renders its own honest-unknown state instead of stranding the sibling row as a skeleton. (4) `no_permission` is first-class end-to-end: `checkIdentity` propagates it (never folded into `unreachable`), the Hub row owns the grant («НЕТ ДОСТУПА» + «Разрешить доступ»), the Доступ credential badge stays neutral «НЕИЗВЕСТНО», and hero step 1 offers the permission action — so a fresh install (permissions.contains defaults false) is never a false red. (5) Readiness `mappedDone` reads `statusModel.fanslyCapturedAccountIds` (captured-session accounts only), so an offline archived-mapping account cannot block «Всё работает».
 - **Deliberately out of P2 (do not build here).** P3: the persona catalog row presentation (§7) and the «Выйти» sign-out protocol (§6) with `authRevokeCurrentDeviceToken`. Parallel track: the `changelog.html` web-register port (§11) — P2 only adds the button that links its anchors, gated on that page deploying first. No storage migration in any phase.
