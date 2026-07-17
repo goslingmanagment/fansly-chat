@@ -174,12 +174,19 @@ function renderLegacyPersonaRecovery(): void {
   subtitle.textContent = 'Сохранённый снапшот легаси-персон повреждён. Обычные настройки и доступ к Agency Hub отключены, чтобы снапшот нельзя было перезаписать.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
+  // New-token status badge only — never a second h1/subtitle string, never an h2.
+  hero.append(createBadge('режим восстановления', 'bad'));
 
   const recovery = createSection(
     'Экспорт легаси-персон',
     'Экспортируй повреждённое сохранённое значение вместе с текущими легаси-персонами, привязками и алиасами для ручного восстановления.',
   );
-  recovery.append(createLegacyPersonaExportControls());
+  // Reuse Task 5's preservation wrapper so the export block rides the new tokens
+  // (a <span> cap, never an <h2> — the single-h2 gate invariant holds).
+  const preservationBlock = document.createElement('div');
+  preservationBlock.className = 'chatgoose-preservation';
+  preservationBlock.append(createLegacyPersonaExportControls());
+  recovery.append(preservationBlock);
   root.append(hero, recovery);
 }
 
