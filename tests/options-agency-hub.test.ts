@@ -909,15 +909,28 @@ describe('Options page - persona catalog presentation (P3)', () => {
     expect(rotated).not.toContain('удалена');
   });
 
-  it('server-confirmed empty (source synced, fetchedAt never advanced) → «пустой каталог», NOT «ещё не загружен»', async () => {
-    // Finding #4 regression: after a byte-identical empty refresh the background
-    // skips the write and personaCatalogFetchedAt stays null, yet the source DOES
-    // match the current creds — so the section must report empty-catalog, not
-    // awaiting-refresh.
+  it('source synced but no fetch confirmed yet (fetchedAt null) → «ещё не загружен», NOT «пустой каталог»', async () => {
+    // clearForSource stamps the new source with fetchedAt null BEFORE any request,
+    // and a FAILED refresh leaves exactly that {source-match, null} triple. Calling
+    // it «пустой каталог» would be dishonest — nothing was fetched. The background
+    // now stamps fetchedAt on every confirmed response (even a byte-identical empty
+    // one), so a null fetchedAt reliably means not-yet-loaded, never server-empty.
     const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
     const source = personaCatalogSource(base.settings)!;
     await loadOptionsPage({ ...base,
       personaCatalog: [], personaCatalogSource: source, personaCatalogFetchedAt: null });
+    const notLoaded = getSectionByTitle('Персоны').textContent ?? '';
+    expect(notLoaded).toContain('ещё не загружен');
+    expect(notLoaded).not.toContain('пустой каталог');
+  });
+
+  it('server-confirmed empty (source synced AND a fetch landed, fetchedAt stamped) → «пустой каталог»', async () => {
+    // Only once a fetch has actually confirmed an empty catalog for THESE creds
+    // (source match AND fetchedAt !== null) is «пустой каталог» the honest verdict.
+    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
+    const source = personaCatalogSource(base.settings)!;
+    await loadOptionsPage({ ...base,
+      personaCatalog: [], personaCatalogSource: source, personaCatalogFetchedAt: new Date().toISOString() });
     const confirmed = getSectionByTitle('Персоны').textContent ?? '';
     expect(confirmed).toContain('пустой каталог');
     expect(confirmed).not.toContain('ещё не загружен');

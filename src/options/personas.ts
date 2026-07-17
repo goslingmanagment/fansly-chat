@@ -51,28 +51,37 @@ export function buildPersonaRowViews(
 
 /** Distinguish an empty section's cause. The catalog cache is bound to the exact
  * source (baseUrl|sha256(bearer)) — an authority boundary, not an offline cache.
- * The "loaded for THESE creds" signal is SOURCE MATCH (the stored
- * personaCatalogSource equals the source derived from the current credentials),
- * NOT fetchedAt presence: the background controller SKIPS the write when a
- * refreshed catalog is byte-identical to what is stored, so a server-confirmed
- * EMPTY catalog can legitimately carry fetchedAt === null (e.g. right after a
- * rotation where the cleared cache was also empty). Keying on fetchedAt would then
- * wrongly claim «ещё не загружен» forever. So: source mismatch = not yet synced
- * for these creds (rotation/first load, NOT «persona deleted»); source match =
- * the server's real answer for these creds. */
+ * "Loaded for THESE creds" needs BOTH signals: the stored personaCatalogSource
+ * must equal the source derived from the current credentials AND a fetch must
+ * have actually landed (fetchedAt !== null). clearForSource stamps the new source
+ * with fetchedAt === null before any request, so right after a rotation the source
+ * can already match while nothing has been fetched — and a FAILED refresh leaves
+ * exactly that {source: match, fetchedAt: null} triple. Reporting «пустой каталог»
+ * then would be dishonest (the server never answered), so the background
+ * controller now stamps fetchedAt on every confirmed response (even a
+ * byte-identical empty one). So: source mismatch OR fetchedAt === null = not yet
+ * synced for these creds (rotation/first load/failed refresh, NOT «persona
+ * deleted»); source match AND fetchedAt !== null = the server's real (empty)
+ * answer for these creds. */
 export function classifyPersonaEmptyState(
-  args: { currentSource: string | null; storedSource: string | null },
+  args: {
+    currentSource: string | null;
+    storedSource: string | null;
+    fetchedAt: string | null;
+  },
 ): PersonaEmptyState {
   if (args.currentSource === null) return 'no-credentials';
-  if (args.storedSource !== args.currentSource) return 'awaiting-refresh';
+  if (args.storedSource !== args.currentSource || args.fetchedAt === null) {
+    return 'awaiting-refresh';
+  }
   return 'empty-catalog';
 }
 
 /** Footer relative time. Deliberately "изменялся": personaCatalogFetchedAt is
  * last-CHANGED (a byte-identical refresh does not advance it), never last-checked.
- * A null timestamp is NOT "never loaded" (classifyPersonaEmptyState decides that
- * from source match now) — it just means there is no change date to show, so
- * render a dash. */
+ * A null timestamp shown here is only "no change date to display" — render a dash.
+ * classifyPersonaEmptyState reads the same null as one of two not-loaded signals
+ * (alongside source mismatch), but only there; the footer stays purely cosmetic. */
 export function formatCatalogChangedAt(
   fetchedAt: string | null,
   now: number = Date.now(),

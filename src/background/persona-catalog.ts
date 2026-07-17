@@ -137,8 +137,17 @@ export function createPersonaCatalogController(options: {
 
     if (generation !== latestGeneration) return;
     const storedCatalog = normalizePersonaCatalog(stored[PERSONA_CATALOG_STORAGE_KEY]);
+    // The byte-identical early-return is a write-suppression optimization, but it
+    // must NOT swallow the FIRST confirmed response after a clear. clearForSource
+    // wrote {catalog: [], source, fetchedAt: null}, so a server-confirmed EMPTY
+    // catalog is byte-identical to that cleared cache; skipping the commit would
+    // leave fetchedAt === null forever and the Options classifier would keep
+    // reporting «ещё не загружен» for a source the server has actually answered.
+    // Suppress only once a prior fetch already stamped fetchedAt (a null stored
+    // fetchedAt is never-loaded, and a confirmed response must stamp it).
     if (
       storedSource === source &&
+      stored[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY] != null &&
       JSON.stringify(storedCatalog) === JSON.stringify(catalog)
     ) {
       return;

@@ -46,22 +46,29 @@ describe('buildPersonaRowViews', () => {
 });
 
 describe('classifyPersonaEmptyState', () => {
-  // The distinction is SOURCE MATCH, never fetchedAt presence: personaCatalogFetchedAt
-  // is last-CHANGED and a byte-identical empty refresh never advances it.
+  // "Loaded for THESE creds" needs BOTH source match AND a landed fetch
+  // (fetchedAt !== null). clearForSource stamps the new source with fetchedAt null
+  // before any request, and a failed refresh leaves that {match, null} triple —
+  // so source match alone must NOT be read as "server returned an empty catalog".
+  const fetched = '2026-07-17T12:00:00Z';
   it('no bearer/address → no-credentials (even with a leftover stored source)', () => {
-    expect(classifyPersonaEmptyState({ currentSource: null, storedSource: null }))
+    expect(classifyPersonaEmptyState({ currentSource: null, storedSource: null, fetchedAt: null }))
       .toBe('no-credentials');
-    expect(classifyPersonaEmptyState({ currentSource: null, storedSource: 'http://h|old' }))
+    expect(classifyPersonaEmptyState({ currentSource: null, storedSource: 'http://h|old', fetchedAt: fetched }))
       .toBe('no-credentials');
   });
   it('creds set but catalog not synced to THESE creds → awaiting-refresh (rotation/first load)', () => {
-    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: null }))
+    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: null, fetchedAt: null }))
       .toBe('awaiting-refresh');
-    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: 'http://h|old' }))
+    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: 'http://h|old', fetchedAt: fetched }))
       .toBe('awaiting-refresh');
   });
-  it('creds set, catalog synced to these creds, server returned zero → empty-catalog (even when fetchedAt never advanced)', () => {
-    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: 'http://h|new' }))
+  it('source matches but nothing fetched yet (cleared cache / failed refresh) → awaiting-refresh, never «пустой каталог»', () => {
+    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: 'http://h|new', fetchedAt: null }))
+      .toBe('awaiting-refresh');
+  });
+  it('source matches AND a fetch landed, server returned zero → empty-catalog', () => {
+    expect(classifyPersonaEmptyState({ currentSource: 'http://h|new', storedSource: 'http://h|new', fetchedAt: fetched }))
       .toBe('empty-catalog');
   });
 });

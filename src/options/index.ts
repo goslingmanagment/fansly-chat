@@ -1325,6 +1325,7 @@ async function render(): Promise<void> {
       empty.textContent = PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
         currentSource: personaCatalogSource(state.settings),
         storedSource: state.personaCatalogSource,
+        fetchedAt: state.personaCatalogFetchedAt,
       })];
       personalitiesList.append(empty);
       return;
@@ -2031,6 +2032,13 @@ async function render(): Promise<void> {
         if (disposed || generation !== catalogReadGeneration) {
           return;
         }
+        // The empty-state classifier derives the CURRENT source from
+        // state.settings (personaCatalogSource); a live rotation that lands here
+        // with a stale settings snapshot would compare the OLD source and could
+        // misreport «пустой каталог». readStorageState already returned the fresh,
+        // credential-merged settings — adopt them so the source comparison (hence
+        // «ещё не загружен» vs «пустой каталог») is honest.
+        state.settings = refreshedState.settings;
         state.personaCatalog = refreshedState.personaCatalog;
         state.personaCatalogSource = refreshedState.personaCatalogSource;
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;

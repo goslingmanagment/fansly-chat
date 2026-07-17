@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
+  PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
+  PERSONA_CATALOG_SOURCE_STORAGE_KEY,
+  PERSONA_CATALOG_STORAGE_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
@@ -631,6 +634,101 @@ describe('Options page settings and read-only personas', () => {
       expect(currentState.accountMappings).toEqual({ account: 'source-a-persona' });
     },
   );
+
+  async function loadRotatableCatalogPage(): Promise<{
+    settingsA: PersistedState['settings'];
+    settingsB: PersistedState['settings'];
+  }> {
+    const settingsA = {
+      ...makeState().settings,
+      agencyHubBaseUrl: 'https://hub-a.example.test',
+      agencyHubDeviceToken: 'device-a',
+    };
+    await loadOptionsPage({
+      state: makeState({
+        settings: settingsA,
+        personaCatalog: [{
+          key: 'source-a-persona',
+          displayName: 'Source A',
+          definitionId: 'v1:source-a-persona',
+          version: 1,
+          status: 'active',
+        }],
+        personaCatalogSource: personaCatalogSource(settingsA),
+        personaCatalogFetchedAt: '2026-07-13T12:00:00.000Z',
+        accountMappings: {},
+        knownAccounts: [],
+      }),
+      sessions: [],
+    });
+    expect(getSectionByTitle('Персоны').textContent).toContain('Source A');
+    return { settingsA, settingsB: { ...settingsA, agencyHubDeviceToken: 'device-b' } };
+  }
+
+  it('a live rotation to an unconfirmed source reports «ещё не загружен», never «пустой каталог»', async () => {
+    const { settingsA, settingsB } = await loadRotatableCatalogPage();
+
+    // Rotation performed elsewhere: the new creds and the cleared catalog land
+    // together — new source, empty catalog, fetchedAt null (the clearForSource
+    // triple, exactly what a still-in-flight or failed refresh leaves behind).
+    currentState = {
+      ...currentState,
+      settings: settingsB,
+      personaCatalog: [],
+      personaCatalogSource: personaCatalogSource(settingsB),
+      personaCatalogFetchedAt: null,
+    };
+    emitStorageChanges({
+      settings: { oldValue: settingsA, newValue: settingsB },
+      [PERSONA_CATALOG_STORAGE_KEY]: { oldValue: [{ key: 'source-a-persona' }], newValue: [] },
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: {
+        oldValue: personaCatalogSource(settingsA),
+        newValue: personaCatalogSource(settingsB),
+      },
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: { oldValue: '2026-07-13T12:00:00.000Z', newValue: null },
+    });
+
+    await vi.waitFor(() => {
+      expect(getSectionByTitle('Персоны')
+        .querySelector('[data-role="persona-empty"]')?.textContent)
+        .toContain('ещё не загружен');
+    });
+    expect(getSectionByTitle('Персоны').textContent ?? '').not.toContain('пустой каталог');
+    expect(getSectionByTitle('Персоны').textContent ?? '').not.toContain('Source A');
+  });
+
+  it('a live rotation whose refresh confirms an empty catalog reports «пустой каталог» (fresh settings, honest verdict)', async () => {
+    const { settingsA, settingsB } = await loadRotatableCatalogPage();
+
+    // Same rotation, but this time the background refresh COMPLETED and confirmed
+    // an empty catalog for the new creds — fetchedAt is stamped. The verdict must
+    // flip to «пустой каталог», which is only correct if the handler adopted the
+    // fresh settings (a stale source would keep it stuck on «ещё не загружен»).
+    currentState = {
+      ...currentState,
+      settings: settingsB,
+      personaCatalog: [],
+      personaCatalogSource: personaCatalogSource(settingsB),
+      personaCatalogFetchedAt: '2026-07-13T13:00:00.000Z',
+    };
+    emitStorageChanges({
+      settings: { oldValue: settingsA, newValue: settingsB },
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: {
+        oldValue: personaCatalogSource(settingsA),
+        newValue: personaCatalogSource(settingsB),
+      },
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: {
+        oldValue: '2026-07-13T12:00:00.000Z',
+        newValue: '2026-07-13T13:00:00.000Z',
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(getSectionByTitle('Персоны')
+        .querySelector('[data-role="persona-empty"]')?.textContent)
+        .toContain('пустой каталог');
+    });
+  });
 
   it('copies a complete legacy JSON export including raw persona text and mappings', async () => {
     await loadOptionsPage({ state: makeState({ accountMappings: { creator: 'p1' } }), sessions: [] });
