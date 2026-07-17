@@ -1,4 +1,7 @@
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
@@ -16,6 +19,7 @@ import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-ca
 import { readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
+import { logWarn } from '../shared/log.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
@@ -33,6 +37,26 @@ import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
+
+// Serialize the two device-token custody mutations — sign-in (issue + store) and
+// sign-out (capture + wipe + revoke) — through one FIFO promise queue. Without
+// it, a sign-in landing mid-sign-out could interleave so a freshly issued token
+// is stored locally, then the sign-out's wipe erases it while its revoke kills a
+// DIFFERENT (captured) token — leaving a live, un-revocable token orphaned on the
+// hub. Under the lock each critical section (which captures the token to revoke
+// only INSIDE the section, right before the wipe) runs to completion before the
+// next begins, so the two never observe each other's half-written state.
+let agencyHubCustodyQueue: Promise<unknown> = Promise.resolve();
+function withAgencyHubCustodyLock<T>(critical: () => Promise<T>): Promise<T> {
+  // Chain onto the tail regardless of how the previous holder settled, so one
+  // rejection never poisons the queue for the next waiter.
+  const run = agencyHubCustodyQueue.then(critical, critical);
+  agencyHubCustodyQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
@@ -351,40 +375,110 @@ export function registerRuntimeApi({
       }
 
       if (requestType === 'issueAgencyHubDeviceToken') {
-        const input = isObjectRecord(message) &&
-          typeof message.baseUrl === 'string' &&
-          typeof message.username === 'string' &&
-          typeof message.password === 'string'
-          ? { baseUrl: message.baseUrl, username: message.username, password: message.password }
-          : null;
-        const baseUrl = input ? normalizeAgencyHubBaseUrl(input.baseUrl) : null;
-        if (!input || !baseUrl || !input.username.trim() || !input.password) {
-          return { ok: false, error: createUserError('hub_request_failed') };
-        }
-        try {
-          const issued = await issueAgencyHubDeviceToken({
-            baseUrl,
-            username: input.username,
-            password: input.password,
-            label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
-          });
-          // The token never crosses the runtime-message boundary — it lands
-          // straight in settings storage (same custody class as the key).
-          await saveSettings({ agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token });
-          return {
-            ok: true,
-            keyPrefix: issued.keyPrefix,
-            label: issued.label,
-            expiresAt: issued.expiresAt,
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            error: error instanceof ChatGooseError
-              ? toUserError(error)
-              : createUserError('hub_request_failed'),
-          };
-        }
+        // Serialized against signOutAgencyHub so a concurrent sign-out cannot wipe
+        // the token this handler is about to store, nor revoke a token this one
+        // just replaced (Task 4 mutex).
+        return withAgencyHubCustodyLock(async () => {
+          const input = isObjectRecord(message) &&
+            typeof message.baseUrl === 'string' &&
+            typeof message.username === 'string' &&
+            typeof message.password === 'string'
+            ? { baseUrl: message.baseUrl, username: message.username, password: message.password }
+            : null;
+          const baseUrl = input ? normalizeAgencyHubBaseUrl(input.baseUrl) : null;
+          if (!input || !baseUrl || !input.username.trim() || !input.password) {
+            return { ok: false, error: createUserError('hub_request_failed') };
+          }
+          try {
+            const issued = await issueAgencyHubDeviceToken({
+              baseUrl,
+              username: input.username,
+              password: input.password,
+              label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
+            });
+            // The token never crosses the runtime-message boundary — it lands
+            // straight in settings storage (same custody class as the key).
+            await saveSettings({ agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token });
+            return {
+              ok: true,
+              keyPrefix: issued.keyPrefix,
+              label: issued.label,
+              expiresAt: issued.expiresAt,
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              error: error instanceof ChatGooseError
+                ? toUserError(error)
+                : createUserError('hub_request_failed'),
+            };
+          }
+        });
+      }
+
+      if (requestType === 'signOutAgencyHub') {
+        // Serialized against issueAgencyHubDeviceToken (Task 4 mutex): the token is
+        // captured INSIDE this critical section, immediately before the wipe, so a
+        // concurrent sign-in can neither slip a fresh token past the wipe nor have
+        // its token revoked here by mistake.
+        return withAgencyHubCustodyLock(async () => {
+          // (a) Capture the current token + base URL BEFORE the wipe. The token never
+          // crosses the runtime boundary; the page only sees the outcome.
+          // readStorageState, not loadStorageState: this is a pure read, and the
+          // repair-write in loadStorageState could clobber a concurrent
+          // rekey/reconcile with a pre-rekey snapshot (same rule as the sibling
+          // hub handlers above).
+          const before = await readStorageState();
+          const capturedToken = before.settings.agencyHubDeviceToken.trim();
+          const capturedBaseUrl = before.settings.agencyHubBaseUrl;
+
+          // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable step.
+          // Write ONLY the two top-level custody storage keys, never the settings blob:
+          // a blob rewrite from the read snapshot above would clobber a parallel tab's
+          // uiTheme/URL save that landed between the read and this set (RMW race). The
+          // background outlives the options page, so doing the wipe here (not on the
+          // page) means a pagehide during the 5s revoke below can never leave the
+          // credentials on disk. EMPTY strings, never key removal (removal would reopen
+          // the pre-v13 blob fallback — E19).
+          try {
+            await browser.storage.local.set({
+              [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+              [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+            });
+          } catch (error) {
+            // The loud case: credentials may still be on disk. Do NOT proceed to revoke.
+            const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
+            logWarn('Sign-out custody wipe failed', { error: message });
+            return { outcome: 'wipe-failed', error: message };
+          }
+
+          // (c) Best-effort revoke AFTER the wipe, with the CAPTURED token as the bearer
+          // (the stored copy is already ''). Nothing to revoke without a token.
+          if (!capturedToken) {
+            return { outcome: 'already-invalid' };
+          }
+          const controller = new AbortController();
+          const timeout = globalThis.setTimeout(
+            () => controller.abort(),
+            AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
+          );
+          try {
+            const outcome = await agencyHubClient.revokeDeviceToken(
+              { agencyHubBaseUrl: capturedBaseUrl, agencyHubDeviceToken: capturedToken },
+              controller.signal,
+            );
+            return { outcome };
+          } catch (error) {
+            // Abort/network/5xx/missing-base-URL — server truth unknown. Already wiped
+            // locally; the token dies by sliding-expiry.
+            logWarn('Device token revoke unreachable', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return { outcome: 'unreachable' };
+          } finally {
+            globalThis.clearTimeout(timeout);
+          }
+        });
       }
 
       if (requestType === 'resolveFanChat') {

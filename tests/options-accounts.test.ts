@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
+  PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
+  PERSONA_CATALOG_SOURCE_STORAGE_KEY,
+  PERSONA_CATALOG_STORAGE_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
@@ -300,9 +303,11 @@ describe('Options page account sections', () => {
       expect(accountsSection.textContent).toContain('ID аккаунта: canonical');
     });
 
-    // Session hydration must not rebuild unrelated catalog UI.
+    // Session hydration refreshes «аккаунтов: N» on the read-only catalog (no
+    // editable inputs there), so the row may be rebuilt — but its content is
+    // preserved and no form state is touched.
     expect(getSectionByTitle('Персоны')
-      .querySelector('[data-persona-key="p1"]')).toBe(personalityCard);
+      .querySelector<HTMLElement>('[data-persona-key="p1"]')?.textContent).toContain('Closer');
     expect(currentState.personalities[0]?.name).toBe('Closer');
   });
 
@@ -493,7 +498,9 @@ describe('Options page settings and read-only personas', () => {
 
     const section = getSectionByTitle('Персоны');
     expect(section.textContent).toContain('Closer');
-    expect(section.textContent).toContain('версия 1');
+    // P3 human row: mono version badge replaces the raw «версия 1» meta line.
+    expect(section.querySelector('[data-persona-key="p1"] .chatgoose-badge-mono')?.textContent)
+      .toBe('v1');
     expect(section.querySelector('input[data-role="name"]')).toBeNull();
     expect(section.querySelector('textarea[data-role="content"]')).toBeNull();
     expect(Array.from(section.querySelectorAll('button')).map((button) => button.textContent))
@@ -528,9 +535,13 @@ describe('Options page settings and read-only personas', () => {
     });
 
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Персоны').textContent)
-        .toContain('версия 2 • в архиве');
+      // Archived-and-still-referenced → dimmed row + mono v2 + replacement hint.
+      const row = getSectionByTitle('Персоны').querySelector<HTMLElement>('[data-persona-key="p1"]');
+      expect(row?.className).toContain('chatgoose-persona-row-archived');
+      expect(row?.textContent).toContain('в архиве · выбери замену');
     });
+    expect(getSectionByTitle('Персоны')
+      .querySelector('[data-persona-key="p1"] .chatgoose-badge-mono')?.textContent).toBe('v2');
     const mappingSelect = getSectionByTitle('Аккаунты')
       .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
     const archivedOption = Array.from(mappingSelect.options)
@@ -604,10 +615,15 @@ describe('Options page settings and read-only personas', () => {
       emitStorageChanges(changes);
 
       await vi.waitFor(() => {
-        expect(getSectionByTitle('Персоны').textContent)
-          .toContain('Каталог персон пуст');
+        // Rotated to source B without a catalog event: the stored source (A) no
+        // longer matches, so the source-A rows drop and an honest empty state
+        // (never «персона удалена») replaces them.
+        expect(getSectionByTitle('Персоны')
+          .querySelector('[data-persona-key="source-a-persona"]')).toBeNull();
       });
-      expect(getSectionByTitle('Персоны').textContent).not.toContain('Source A');
+      const droppedSection = getSectionByTitle('Персоны').textContent ?? '';
+      expect(droppedSection).not.toContain('Source A');
+      expect(droppedSection).not.toContain('удалена');
 
       const mappingSelect = getSectionByTitle('Аккаунты')
         .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
@@ -618,6 +634,101 @@ describe('Options page settings and read-only personas', () => {
       expect(currentState.accountMappings).toEqual({ account: 'source-a-persona' });
     },
   );
+
+  async function loadRotatableCatalogPage(): Promise<{
+    settingsA: PersistedState['settings'];
+    settingsB: PersistedState['settings'];
+  }> {
+    const settingsA = {
+      ...makeState().settings,
+      agencyHubBaseUrl: 'https://hub-a.example.test',
+      agencyHubDeviceToken: 'device-a',
+    };
+    await loadOptionsPage({
+      state: makeState({
+        settings: settingsA,
+        personaCatalog: [{
+          key: 'source-a-persona',
+          displayName: 'Source A',
+          definitionId: 'v1:source-a-persona',
+          version: 1,
+          status: 'active',
+        }],
+        personaCatalogSource: personaCatalogSource(settingsA),
+        personaCatalogFetchedAt: '2026-07-13T12:00:00.000Z',
+        accountMappings: {},
+        knownAccounts: [],
+      }),
+      sessions: [],
+    });
+    expect(getSectionByTitle('Персоны').textContent).toContain('Source A');
+    return { settingsA, settingsB: { ...settingsA, agencyHubDeviceToken: 'device-b' } };
+  }
+
+  it('a live rotation to an unconfirmed source reports «ещё не загружен», never «пустой каталог»', async () => {
+    const { settingsA, settingsB } = await loadRotatableCatalogPage();
+
+    // Rotation performed elsewhere: the new creds and the cleared catalog land
+    // together — new source, empty catalog, fetchedAt null (the clearForSource
+    // triple, exactly what a still-in-flight or failed refresh leaves behind).
+    currentState = {
+      ...currentState,
+      settings: settingsB,
+      personaCatalog: [],
+      personaCatalogSource: personaCatalogSource(settingsB),
+      personaCatalogFetchedAt: null,
+    };
+    emitStorageChanges({
+      settings: { oldValue: settingsA, newValue: settingsB },
+      [PERSONA_CATALOG_STORAGE_KEY]: { oldValue: [{ key: 'source-a-persona' }], newValue: [] },
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: {
+        oldValue: personaCatalogSource(settingsA),
+        newValue: personaCatalogSource(settingsB),
+      },
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: { oldValue: '2026-07-13T12:00:00.000Z', newValue: null },
+    });
+
+    await vi.waitFor(() => {
+      expect(getSectionByTitle('Персоны')
+        .querySelector('[data-role="persona-empty"]')?.textContent)
+        .toContain('ещё не загружен');
+    });
+    expect(getSectionByTitle('Персоны').textContent ?? '').not.toContain('пустой каталог');
+    expect(getSectionByTitle('Персоны').textContent ?? '').not.toContain('Source A');
+  });
+
+  it('a live rotation whose refresh confirms an empty catalog reports «пустой каталог» (fresh settings, honest verdict)', async () => {
+    const { settingsA, settingsB } = await loadRotatableCatalogPage();
+
+    // Same rotation, but this time the background refresh COMPLETED and confirmed
+    // an empty catalog for the new creds — fetchedAt is stamped. The verdict must
+    // flip to «пустой каталог», which is only correct if the handler adopted the
+    // fresh settings (a stale source would keep it stuck on «ещё не загружен»).
+    currentState = {
+      ...currentState,
+      settings: settingsB,
+      personaCatalog: [],
+      personaCatalogSource: personaCatalogSource(settingsB),
+      personaCatalogFetchedAt: '2026-07-13T13:00:00.000Z',
+    };
+    emitStorageChanges({
+      settings: { oldValue: settingsA, newValue: settingsB },
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: {
+        oldValue: personaCatalogSource(settingsA),
+        newValue: personaCatalogSource(settingsB),
+      },
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: {
+        oldValue: '2026-07-13T12:00:00.000Z',
+        newValue: '2026-07-13T13:00:00.000Z',
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(getSectionByTitle('Персоны')
+        .querySelector('[data-role="persona-empty"]')?.textContent)
+        .toContain('пустой каталог');
+    });
+  });
 
   it('copies a complete legacy JSON export including raw persona text and mappings', async () => {
     await loadOptionsPage({ state: makeState({ accountMappings: { creator: 'p1' } }), sessions: [] });

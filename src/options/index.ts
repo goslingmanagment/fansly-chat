@@ -31,11 +31,18 @@ import {
   formatAccountMeta,
   formatCaptureStatus,
 } from './sessions.js';
+import {
+  buildPersonaRowViews,
+  classifyPersonaEmptyState,
+  formatCatalogChangedAt,
+  type PersonaEmptyState,
+} from './personas.js';
 import { buildShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
+import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
   getUserErrorDescription,
@@ -94,6 +101,20 @@ let renderCleanup: (() => Promise<void>) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
 let uiThemeInstalled = false;
+
+// Classified empty-section copy. The frozen-editing honesty holds everywhere —
+// never promise owner-side creation (persona authoring stays frozen until core
+// #151 closes the legacy-LWW lane).
+const PERSONA_EMPTY_COPY: Record<PersonaEmptyState, string> = {
+  'no-credentials': 'Каталог персон пуст — подключись к Hub выше, чтобы загрузить голоса.',
+  'awaiting-refresh': 'Каталог для новых кредов ещё не загружен — обновится после первой успешной проверки соединения.',
+  'empty-catalog': 'Сервер вернул пустой каталог. Редактирование голосов сейчас заморожено.',
+};
+
+// buildPersonaRowViews hides archived-and-unreferenced personas, so the raw
+// catalog can be non-empty while zero rows render. That is NOT a server-empty
+// catalog — say so honestly instead of «пустой каталог».
+const PERSONA_ALL_ARCHIVED_COPY = 'Все голоса каталога в архиве.';
 
 function createLegacyPersonaExportControls(): DocumentFragment {
   const fragment = document.createDocumentFragment();
@@ -158,12 +179,19 @@ function renderLegacyPersonaRecovery(): void {
   subtitle.textContent = 'Сохранённый снапшот легаси-персон повреждён. Обычные настройки и доступ к Agency Hub отключены, чтобы снапшот нельзя было перезаписать.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
+  // New-token status badge only — never a second h1/subtitle string, never an h2.
+  hero.append(createBadge('режим восстановления', 'bad'));
 
   const recovery = createSection(
     'Экспорт легаси-персон',
     'Экспортируй повреждённое сохранённое значение вместе с текущими легаси-персонами, привязками и алиасами для ручного восстановления.',
   );
-  recovery.append(createLegacyPersonaExportControls());
+  // Reuse Task 5's preservation wrapper so the export block rides the new tokens
+  // (a <span> cap, never an <h2> — the single-h2 gate invariant holds).
+  const preservationBlock = document.createElement('div');
+  preservationBlock.className = 'chatgoose-preservation';
+  preservationBlock.append(createLegacyPersonaExportControls());
+  recovery.append(preservationBlock);
   root.append(hero, recovery);
 }
 
@@ -509,6 +537,12 @@ async function render(): Promise<void> {
     );
 
     if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
+      // Bump the version BEFORE returning: an in-flight pre-sign-out test that
+      // captured the old version must fail its `version !== agencyHubConnectionVersion`
+      // guard when it resolves, or it would repaint «Соединение OK» over the now
+      // signed-out state. The old early-return skipped this bump, leaving the
+      // stale test's version still current.
+      agencyHubConnectionVersion += 1;
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
       renderAgencyHubConnectionState();
@@ -776,6 +810,22 @@ async function render(): Promise<void> {
     })();
   });
 
+  // Shared read-only model the Статус rows and the readiness hero both read
+  // (painted below in hydrateHubStatusRows / the Fansly row; the hero re-renders
+  // from this). Declared HERE — above the hub sign-in block — so renderHubIdentity,
+  // a pure reader of statusModel.identity, can run at the very first
+  // renderHubSignInState() mount paint without a temporal-dead-zone ReferenceError.
+  const statusModel: {
+    fanslyAccounts: number;
+    // The account ids that currently have a CAPTURED session — the hero's step-3
+    // readiness reads only this set, never every knownAccount (an offline
+    // historical account with an archived mapping must not block «Всё работает»).
+    fanslyCapturedAccountIds: string[];
+    fanslyFreshest: SessionSnapshotEntry | undefined;
+    health: AgencyHubHealthResponse | null;
+    identity: AgencyHubIdentityResponse | null;
+  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
+
   // ── Stage 32: one-time device-token sign-in (preferred over the key) ──
   const hubSignInUserInput = document.createElement('input');
   hubSignInUserInput.type = 'text';
@@ -797,16 +847,66 @@ async function render(): Promise<void> {
   hubSignInMeta.style.color = 'var(--chatgoose-ink-mid)';
   hubSignInMeta.style.fontSize = '13px';
 
+  // TDZ fix: construct BOTH the sign-in row and the signed-in block ABOVE the
+  // first renderHubSignInState() call — that call reads .hidden on each, so
+  // leaving either below would throw a ReferenceError at every options mount.
+  const hubSignInRow = document.createElement('div');
+  // Shared toggle class: its author-origin `[hidden] { display: none !important }`
+  // rule (styles.css) beats the inline display below, so `.hidden = true` really
+  // hides the row instead of being overridden by the inline author style.
+  hubSignInRow.className = 'chatgoose-hub-signin-toggle';
+  hubSignInRow.style.display = 'flex';
+  hubSignInRow.style.gap = '8px';
+  hubSignInRow.style.flexWrap = 'wrap';
+  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
+
+  const hubSignOutButton = createButton('Выйти', true, true); // ghost + danger
+  const hubActiveBadge = createBadge('активен', 'green');
+  const hubIdentityLine = document.createElement('div');   // spec §6: username · role · pages
+  hubIdentityLine.dataset.role = 'hub-identity-line';
+  hubIdentityLine.className = 'chatgoose-hub-identity-line';
+  const hubTokenLine = document.createElement('div');
+  hubTokenLine.dataset.role = 'hub-token-line';
+  hubTokenLine.className = 'chatgoose-hub-token-line';
+  const hubSignedInTop = document.createElement('div');
+  hubSignedInTop.style.display = 'flex';
+  hubSignedInTop.style.gap = '8px';
+  hubSignedInTop.style.alignItems = 'center';
+  hubSignedInTop.append(hubActiveBadge, hubSignOutButton);
+  const hubSignedInBlock = document.createElement('div');
+  hubSignedInBlock.dataset.role = 'hub-signed-in';
+  // Same shared toggle class as the sign-in row: the `!important` hidden rule
+  // beats this inline `display: grid` so the signed-in block truly hides.
+  hubSignedInBlock.className = 'chatgoose-hub-signin-toggle';
+  hubSignedInBlock.style.display = 'grid';
+  hubSignedInBlock.style.gap = '6px';
+  hubSignedInBlock.append(hubSignedInTop, hubIdentityLine, hubTokenLine);
+
+  const renderHubIdentity = (): void => {
+    // Pure reader of P2's guarded statusModel — pages is string[] (P2 contract).
+    const identity = statusModel.identity;
+    hubIdentityLine.textContent = identity && identity.ok
+      ? `${identity.username} · ${identity.role} · страниц: ${identity.pages.length}`
+      : 'identity недоступна';
+  };
+
   const renderHubSignInState = (): void => {
-    const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
-    hubSignInStatus.textContent = hasToken
+    const token = state.settings.agencyHubDeviceToken.trim();
+    const signedIn = Boolean(token);
+    hubSignInRow.hidden = signedIn;         // hide username/password/«Войти»…
+    hubSignedInBlock.hidden = !signedIn;    // …and show the badge/identity/token/«Выйти»
+    if (signedIn) {
+      // Masked prefix only. No expiry date: issuance metadata is not persisted,
+      // /me does not return it, and sliding expiry makes a stored date a lie.
+      hubTokenLine.textContent = `${token.slice(0, 24)}… · продлевается при работе`;
+      renderHubIdentity();                  // spec §6: username · role · pages
+    }
+    hubSignInStatus.textContent = signedIn
       ? 'Device token активен ✓'
       : 'Device token ещё не выпущен.';
-    hubSignInStatus.style.color = hasToken
-      ? 'var(--chatgoose-green)'
-      : 'var(--chatgoose-ink)';
+    hubSignInStatus.style.color = signedIn ? 'var(--chatgoose-green)' : 'var(--chatgoose-ink)';
     if (!hubSignInMeta.textContent) {
-      hubSignInMeta.textContent = hasToken
+      hubSignInMeta.textContent = signedIn
         ? 'Запросы к Hub используют device token; legacy-ключ — запасной вариант.'
         : 'Войди один раз, чтобы выпустить привязанный к устройству token — больше не нужно вставлять ключ, и он переживает ротацию ключа.';
     }
@@ -852,18 +952,90 @@ async function render(): Promise<void> {
       }
     })();
   });
-  renderHubSignInState();
+  hubSignOutButton.addEventListener('click', () => {
+    void (async () => {
+      hubSignOutButton.disabled = true;
+      hubSignInUserInput.disabled = true;
+      hubSignInPasswordInput.disabled = true;
+      agencyHubKeyInput.disabled = true;
+      let outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed' = 'unreachable';
+      try {
+        // (1) Flush our own pending writes and AWAIT them. flushSettingsSave()
+        // RUNS any debounced-but-not-yet-fired edit (a <350ms typed change with
+        // no blur/change event) before awaiting the chain — using .cancel() here
+        // instead would DROP that pending snapshot, silently losing the edit.
+        await flushSettingsSave();
 
-  const hubSignInRow = document.createElement('div');
-  hubSignInRow.style.display = 'flex';
-  hubSignInRow.style.gap = '8px';
-  hubSignInRow.style.flexWrap = 'wrap';
-  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
+        // (2) After this point no page write may own the custody field: clear the
+        // dirty flag and the visible input BEFORE the background wipe, so neither
+        // a later change-event nor pagehide can replay the old key.
+        agencyHubApiKeyDirty = false;
+        if (document.activeElement !== agencyHubKeyInput) {
+          agencyHubKeyInput.value = '';
+        }
+
+        // (3) The background does the durable work (Task 2): wipe BOTH custody
+        // keys to EMPTY strings FIRST (storage write survives page close), then
+        // best-effort revoke with the captured token (~5s). The token never
+        // crosses the runtime boundary.
+        try {
+          const response = await sendRuntimeRequest('signOutAgencyHub');
+          outcome = response?.outcome ?? 'unreachable';
+        } catch (error) {
+          // The REQUEST itself failed — the background may have wiped nothing.
+          // Claiming «стёрт локально» here would be a lie; treat it like a
+          // failed wipe (loud, credentials possibly still present).
+          console.error('Sign-out request failed', error);
+          outcome = 'wipe-failed';
+        }
+
+        // (4) Re-read the truth the background wrote (same pattern as the
+        // sign-in success handler).
+        state.settings = (await loadStorageState()).settings;
+      } finally {
+        hubSignOutButton.disabled = false;
+        hubSignInUserInput.disabled = false;
+        hubSignInPasswordInput.disabled = false;
+        agencyHubKeyInput.disabled = false;
+      }
+
+      // (5) One honest message per outcome. The three server outcomes ride the
+      // sign-in meta line; a failed LOCAL wipe is the red saved-flash —
+      // credentials may still be present, the loud case.
+      if (outcome === 'wipe-failed') {
+        savedFlash.showError('не удалось выполнить выход — попробуй ещё раз');
+        // Restore the visible key field from re-read truth: on a failed wipe
+        // the key may still be on disk, and an empty input would misreport it.
+        if (document.activeElement !== agencyHubKeyInput) {
+          agencyHubKeyInput.value = state.settings.agencyHubApiKey;
+        }
+      } else if (outcome === 'revoked') {
+        hubSignInMeta.textContent = 'Device token отозван на хабе.';
+      } else if (outcome === 'already-invalid') {
+        // already-invalid covers 401, 403 AND the no-token-to-revoke case, so a
+        // hard-coded «Хаб ответил 401» would fabricate a status the hub never sent.
+        hubSignInMeta.textContent = 'Token уже недействителен или отсутствует — стёрт локально.';
+      } else {
+        hubSignInMeta.textContent = 'Хаб недоступен — token стёрт локально, на сервере умрёт по sliding-expiry.';
+      }
+
+      renderHubSignInState();
+      if (!disposed) {
+        await refreshAgencyHubPermissionState();
+        await runAgencyHubConnectionTest({ force: true });
+        // P2's guarded refresh: the Доступ row and the readiness hero must flip
+        // without a reload (P2 exposes hydrateHubStatusRows + storedHubSignature).
+        void hydrateHubStatusRows(storedHubSignature());
+      }
+    })();
+  });
+
+  renderHubSignInState();
 
   const hubSignInBlock = document.createElement('div');
   hubSignInBlock.style.display = 'grid';
   hubSignInBlock.style.gap = '7px';
-  hubSignInBlock.append(hubSignInRow, hubSignInStatus, hubSignInMeta);
+  hubSignInBlock.append(hubSignInRow, hubSignedInBlock, hubSignInStatus, hubSignInMeta);
 
   const permissionBadge = createBadge('…', 'neutral');
   permissionBadge.dataset.hubPermissionBadge = 'true';
@@ -1171,37 +1343,82 @@ async function render(): Promise<void> {
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
   const renderPersonaCatalog = (): void => {
+    personaChangedLine.textContent = formatCatalogChangedAt(state.personaCatalogFetchedAt);
     personalitiesList.replaceChildren();
-    if (state.personaCatalog.length === 0) {
+    const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
+    if (rows.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'Каталог персон пуст — проверь подключение к Hub. Голоса приходят с сервера; их редактирование сейчас заморожено.';
+      empty.dataset.role = 'persona-empty';
       empty.style.color = 'var(--chatgoose-ink-mid)';
+      empty.style.fontSize = '12.5px';
+      // rawCount > 0 with zero rows means every persona was archived AND
+      // unreferenced (filtered out) — a real, non-empty catalog. Only a genuinely
+      // empty raw catalog defers to the credential/fetch-state classifier.
+      empty.textContent = state.personaCatalog.length > 0
+        ? PERSONA_ALL_ARCHIVED_COPY
+        : PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
+            currentSource: personaCatalogSource(state.settings),
+            storedSource: state.personaCatalogSource,
+            fetchedAt: state.personaCatalogFetchedAt,
+          })];
       personalitiesList.append(empty);
       return;
     }
-    for (const persona of state.personaCatalog) {
-      const card = document.createElement('div');
-      card.className = 'chatgoose-card';
-      card.dataset.personaKey = persona.key;
-      const heading = document.createElement('div');
-      heading.textContent = persona.displayName;
-      heading.style.fontWeight = '700';
-      const meta = document.createElement('div');
-      meta.textContent = `${persona.key} • версия ${persona.version} • ${persona.status === 'active' ? 'активна' : 'в архиве'}`;
-      meta.style.fontSize = '12px';
-      meta.style.color = persona.status === 'active'
-        ? 'var(--chatgoose-ink-mid)'
-        : 'var(--chatgoose-bad)';
-      card.append(heading, meta);
-      personalitiesList.append(card);
+    for (const view of rows) {
+      const row = document.createElement('div');
+      row.className = view.archived
+        ? 'chatgoose-persona-row chatgoose-persona-row-archived'
+        : 'chatgoose-persona-row';
+      row.dataset.personaKey = view.key;
+      const main = document.createElement('div');
+      main.className = 'chatgoose-persona-main';
+      const name = document.createElement('span');
+      name.className = 'chatgoose-persona-name';
+      name.textContent = view.displayName;
+      main.append(name);
+      if (view.builtin) {
+        main.append(createBadge('built-in', 'neutral'));
+      }
+      main.append(createBadge(`v${view.version}`, 'neutral', true));
+      const count = document.createElement('span');
+      count.className = 'chatgoose-persona-count';
+      count.textContent = `аккаунтов: ${view.accountCount}`;
+      main.append(count);
+      row.append(main);
+      if (view.archived) {
+        const hint = document.createElement('div');
+        hint.className = 'chatgoose-persona-hint';
+        hint.textContent = 'в архиве · выбери замену';
+        row.append(hint);
+      }
+      personalitiesList.append(row);
     }
   };
-  renderPersonaCatalog();
 
   const preservationNote = document.createElement('div');
   preservationNote.textContent = 'Легаси-тексты персон сохранены на этом устройстве без изменений. Экспортируй их перед удалением расширения или очисткой браузера.';
   preservationNote.style.color = 'var(--chatgoose-ink-mid)';
   preservationNote.style.fontSize = '13px';
+
+  // Footer nodes: constructed BEFORE the first renderPersonaCatalog() call,
+  // which writes personaChangedLine.textContent on every render.
+  const personaFrozenNote = document.createElement('div');
+  personaFrozenNote.textContent = 'Редактирование голосов сейчас заморожено — включится владельческой консолью хаба.';
+  const personaChangedLine = document.createElement('div');
+  personaChangedLine.dataset.role = 'persona-changed';
+  const personaFooter = document.createElement('div');
+  personaFooter.className = 'chatgoose-persona-footer';
+  personaFooter.append(personaFrozenNote, personaChangedLine);
+
+  const preservationBlock = document.createElement('div');
+  preservationBlock.className = 'chatgoose-preservation';
+  preservationBlock.append(
+    createCap('Легаси-тексты'),
+    preservationNote,
+    createLegacyPersonaExportControls(),
+  );
+
+  renderPersonaCatalog();
 
   const flushPendingEdits = (): Promise<void> => {
     void flushSettingsSave();
@@ -1253,11 +1470,7 @@ async function render(): Promise<void> {
   window.addEventListener('pagehide', handlePageHide);
   cleanupTasks.push(() => window.removeEventListener('pagehide', handlePageHide));
 
-  personalitiesSection.append(
-    personalitiesList,
-    preservationNote,
-    createLegacyPersonaExportControls(),
-  );
+  personalitiesSection.append(personalitiesList, personaFooter, preservationBlock);
 
   // ─── Аккаунты (merged: mappings + live capture status) ─────
   const mappingsSection = createSection(
@@ -1434,19 +1647,6 @@ async function render(): Promise<void> {
     statusRows.spenders.root,
     statusRows.contract.root,
   );
-
-  // Shared read-only model the Статус rows and the readiness hero both read.
-  // Rows are painted directly here; the hero (Task 8) re-renders from this.
-  const statusModel: {
-    fanslyAccounts: number;
-    // The account ids that currently have a CAPTURED session — the hero's step-3
-    // readiness reads only this set, never every knownAccount (an offline
-    // historical account with an archived mapping must not block «Всё работает»).
-    fanslyCapturedAccountIds: string[];
-    fanslyFreshest: SessionSnapshotEntry | undefined;
-    health: AgencyHubHealthResponse | null;
-    identity: AgencyHubIdentityResponse | null;
-  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
 
   // Task 8: the hero must not invent a verdict from zero data. Until the first
   // real datum lands — a hub identity read OR the Fansly row painting — it holds
@@ -1648,6 +1848,9 @@ async function render(): Promise<void> {
       : { ok: false, reason: 'unreachable' };
     statusModel.health = health;
     statusModel.identity = identity;
+    // P3: the sign-in block's identity line rides this SAME guarded paint pass —
+    // a pure reader of statusModel.identity, no fetch or staleness guard of its own.
+    renderHubIdentity();
 
     // Hub (core)
     if (health.ok) {
@@ -1863,6 +2066,13 @@ async function render(): Promise<void> {
         if (disposed || generation !== catalogReadGeneration) {
           return;
         }
+        // The empty-state classifier derives the CURRENT source from
+        // state.settings (personaCatalogSource); a live rotation that lands here
+        // with a stale settings snapshot would compare the OLD source and could
+        // misreport «пустой каталог». readStorageState already returned the fresh,
+        // credential-merged settings — adopt them so the source comparison (hence
+        // «ещё не загружен» vs «пустой каталог») is honest.
+        state.settings = refreshedState.settings;
         state.personaCatalog = refreshedState.personaCatalog;
         state.personaCatalogSource = refreshedState.personaCatalogSource;
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
@@ -1983,6 +2193,8 @@ async function render(): Promise<void> {
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
             renderAccountMappings(sessions, hydrationFailed);
+            // Keep «аккаунтов: N» in the persona catalog in sync with the new mapping.
+            renderPersonaCatalog();
             // A fresh mapping can flip step 3 (persona assigned) from open to
             // done, so repaint the hero from the same statusModel + account state.
             updateReadinessHero();
@@ -2041,6 +2253,10 @@ async function render(): Promise<void> {
         lastSeenAt: Number(captureAt),
       });
     }
+    // The persona-catalog footer shows a relative "изменялся N мин назад" that
+    // otherwise only re-renders on a catalog change — reuse THIS minute tick so a
+    // long-open options page doesn't freeze it. Reuses the interval, adds none.
+    personaChangedLine.textContent = formatCatalogChangedAt(state.personaCatalogFetchedAt);
   };
   const captureTicker = window.setInterval(refreshCaptureLines, 60_000);
   cleanupTasks.push(() => window.clearInterval(captureTicker));
@@ -2073,6 +2289,8 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
+      // Keep «аккаунтов: N» in sync with the reconciled account mappings.
+      renderPersonaCatalog();
       paintFanslyStatusRow(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);

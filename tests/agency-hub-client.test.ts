@@ -1216,3 +1216,75 @@ describe('AgencyHubClient.checkIdentity', () => {
       .toEqual({ ok: false, reason: 'no_permission' });
   });
 });
+
+describe('AgencyHubClient.revokeDeviceToken', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).browser;
+  });
+
+  it('revokeDeviceToken returns "revoked" on a 200 body', async () => {
+    const fetchImpl = vi.fn(async (_url: URL | string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ revoked: true }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
+    const outcome = await client.revokeDeviceToken(
+      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'agency_hub_device_abc' },
+      new AbortController().signal,
+    );
+    expect(outcome).toBe('revoked');
+    // The DELETE bearer is the device token itself, never a key.
+    const [, init] = fetchImpl.mock.calls[0]!;
+    expect((init as RequestInit).method).toBe('DELETE');
+  });
+
+  it('revokeDeviceToken maps 401 to "already-invalid" (token already dead)', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'Unauthorized', message: 'x', statusCode: 401 }), {
+        status: 401, headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
+    const outcome = await client.revokeDeviceToken(
+      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'agency_hub_device_abc' },
+      new AbortController().signal,
+    );
+    expect(outcome).toBe('already-invalid');
+  });
+
+  it('revokeDeviceToken returns "already-invalid" when there is no token to revoke', async () => {
+    const fetchImpl = vi.fn();
+    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
+    const outcome = await client.revokeDeviceToken(
+      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: '' },
+      new AbortController().signal,
+    );
+    expect(outcome).toBe('already-invalid');
+    expect(fetchImpl).not.toHaveBeenCalled(); // nothing sent — no request without a token
+  });
+
+  it('revokeDeviceToken THROWS when the token is present but the base URL is cleared (unreachable, NOT already-invalid)', async () => {
+    const fetchImpl = vi.fn();
+    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
+    // Token still live server-side, no address to revoke it → the caller must
+    // report 'unreachable' and wipe locally; it must never claim a 401 the hub
+    // never returned.
+    await expect(client.revokeDeviceToken(
+      { agencyHubBaseUrl: '', agencyHubDeviceToken: 'agency_hub_device_abc' },
+      new AbortController().signal,
+    )).rejects.toBeTruthy();
+    expect(fetchImpl).not.toHaveBeenCalled(); // no request without a base URL
+  });
+
+  it('revokeDeviceToken throws on a network failure (caller maps it to unreachable)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fetchImpl = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
+    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.revokeDeviceToken(
+      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'agency_hub_device_abc' },
+      new AbortController().signal,
+    )).rejects.toBeTruthy();
+  });
+});

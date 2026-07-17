@@ -26,6 +26,10 @@ describe('protocol boundary guards', () => {
       }),
     ).toBe('issueAgencyHubDeviceToken');
 
+    // P3: sign-out — no payload, same E8 lesson as issueAgencyHubDeviceToken.
+    expect(getRuntimeRequestType({ type: 'signOutAgencyHub' }))
+      .toBe('signOutAgencyHub');
+
     // E23: the board's lazy chat resolve — same E8 lesson: a request type
     // without its protocol case dies silently before the handler.
     expect(
