@@ -16,7 +16,7 @@ import {
 } from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
-import { loadStorageState, readStorageState, saveSettings } from '../shared/storage.js';
+import { readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { logWarn } from '../shared/log.js';
