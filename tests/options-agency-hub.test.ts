@@ -143,6 +143,13 @@ function getTestConnectionButton(section: HTMLElement): HTMLButtonElement {
   return button;
 }
 
+function getSignOutButton(section: HTMLElement): HTMLButtonElement {
+  const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button'))
+    .find((candidate) => candidate.textContent === 'Выйти');
+  if (!button) throw new Error('Missing «Выйти» button');
+  return button;
+}
+
 async function loadOptionsPage(
   state: PersistedState,
   options: LoadOptionsPageOptions = {},
@@ -616,5 +623,218 @@ describe('Options page - Agency Hub section', () => {
     const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
     expect(badge?.textContent).toBe('нет адреса');
     expect(badge?.className).toContain('chatgoose-badge-neutral');
+  });
+});
+
+describe('Options page - device-token sign-out (P3)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    installDom();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('mounts signed-OUT without a ReferenceError: renderHubSignInState runs at mount', async () => {
+    // Pins the TDZ fix: the first renderHubSignInState() reads hubSignInRow and
+    // hubSignedInBlock, so both must be constructed ABOVE that call. If they are
+    // not, the module throws at mount and this load never resolves the section.
+    await loadOptionsPage(makeState()); // default agencyHubDeviceToken: '' → signed out
+    const section = getSectionByTitle('Agency Hub');
+    const userInput = section.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+    expect(userInput.closest('[hidden]')).toBeNull(); // sign-in row visible while signed out
+    expect(section.querySelector('[data-role="hub-signed-in"]')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('signed-in state shows the active badge, a masked token line and «Выйти»; hides sign-in inputs', async () => {
+    await loadOptionsPage(makeState({ agencyHubDeviceToken: 'agency_hub_device_abcdef0123456789' }));
+    const section = getSectionByTitle('Agency Hub');
+    expect(section.querySelector('.chatgoose-badge-green')?.textContent).toBe('активен');
+    expect(section.querySelector('[data-role="hub-token-line"]')?.textContent)
+      .toContain('продлевается при работе');
+    expect(section.querySelector('[data-role="hub-token-line"]')?.textContent)
+      .not.toContain('agency_hub_device_abcdef0123456789'); // masked prefix, no full token
+    expect(section.querySelector('[data-role="hub-identity-line"]')).not.toBeNull(); // identity line present
+    const userInput = section.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+    expect(userInput.closest('[hidden]')).not.toBeNull(); // sign-in row hidden while signed in
+    getSignOutButton(section); // present
+  });
+
+  it('«Выйти»: successful revoke wipes both custody keys to EMPTY strings and reports it', async () => {
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc', agencyHubApiKey: 'legacy-key' }),
+      { runtimeSendMessageImpl: async (message) => {
+          if (message.type === 'signOutAgencyHub') {
+            // Stand-in for the background: the REAL handler wipes custody itself
+            // (Task 2); the page harness's mock must mirror that write so
+            // savedCustody observes it.
+            savedCustody.agencyHubDeviceToken = '';
+            savedCustody.agencyHubApiKey = '';
+            return { outcome: 'revoked' };
+          }
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        } },
+    );
+    const section = getSectionByTitle('Agency Hub');
+    getSignOutButton(section).click();
+    await vi.waitFor(() => {
+      expect(savedCustody.agencyHubDeviceToken).toBe(''); // EMPTY string, not undefined/absent
+      expect(savedCustody.agencyHubApiKey).toBe('');
+    });
+    expect(section.textContent).toContain('отозван на хабе');
+  });
+
+  it('«Выйти»: a 401 says the token was already invalid, and still wipes', async () => {
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
+      { runtimeSendMessageImpl: async (message) => {
+          if (message.type === 'signOutAgencyHub') {
+            savedCustody.agencyHubDeviceToken = '';
+            return { outcome: 'already-invalid' };
+          }
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        } },
+    );
+    const section = getSectionByTitle('Agency Hub');
+    getSignOutButton(section).click();
+    await vi.waitFor(() => expect(savedCustody.agencyHubDeviceToken).toBe(''));
+    expect(section.textContent).toContain('401');
+  });
+
+  it('«Выйти»: an unreachable hub wipes locally and says the token dies by sliding-expiry', async () => {
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
+      { runtimeSendMessageImpl: async (message) => {
+          if (message.type === 'signOutAgencyHub') {
+            savedCustody.agencyHubDeviceToken = '';
+            return { outcome: 'unreachable' };
+          }
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        } },
+    );
+    const section = getSectionByTitle('Agency Hub');
+    getSignOutButton(section).click();
+    await vi.waitFor(() => expect(savedCustody.agencyHubDeviceToken).toBe(''));
+    expect(section.textContent).toContain('sliding-expiry');
+  });
+
+  it('«Выйти»: a failed LOCAL wipe (background outcome) shows the red saved-flash and keeps the signed-in block', async () => {
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
+      { runtimeSendMessageImpl: async (message) => {
+          // The background reports its own storage failure — the token is still on
+          // disk, so the mock does NOT touch savedCustody.
+          if (message.type === 'signOutAgencyHub') return { outcome: 'wipe-failed' };
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        } },
+    );
+    const flash = document.querySelector('[data-saved-flash]') as HTMLElement;
+    const section = getSectionByTitle('Agency Hub');
+    getSignOutButton(section).click();
+    await vi.waitFor(() => {
+      expect(flash.className).toContain('chatgoose-saved-flash-bad');
+    });
+    // Credentials are still present → the signed-in block stays up.
+    expect(section.querySelector('[data-role="hub-signed-in"]')?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('signed-in block renders the identity line (username · role · pages) from P2 statusModel', async () => {
+    // The page harness answers P2's getAgencyHubIdentity (fired by
+    // hydrateHubStatusRows at mount); P3's line is a pure reader of the
+    // resulting statusModel.identity — pages is string[] per the P2 contract.
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
+      { runtimeSendMessageImpl: async (message) => {
+          if (message.type === 'getAgencyHubIdentity') {
+            return { ok: true, username: 'nova', role: 'chatter', pages: ['Mia', 'Lina', 'Ari'] };
+          }
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        } },
+    );
+    const section = getSectionByTitle('Agency Hub');
+    await vi.waitFor(() => {
+      expect(section.querySelector('[data-role="hub-identity-line"]')?.textContent)
+        .toBe('nova · chatter · страниц: 3');
+    });
+  });
+
+  it('identity line falls back to «identity недоступна» when getAgencyHubIdentity fails', async () => {
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
+      { runtimeSendMessageImpl: async (message) => {
+          if (message.type === 'getAgencyHubIdentity') {
+            return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+          }
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        } },
+    );
+    const section = getSectionByTitle('Agency Hub');
+    await vi.waitFor(() => {
+      expect(section.querySelector('[data-role="hub-identity-line"]')?.textContent)
+        .toBe('identity недоступна');
+    });
+  });
+
+  it('«Выйти» AWAITS the in-flight save chain: a pending key edit lands first, the wipe lands last', async () => {
+    const releaseStaleWrite = createDeferred<void>();
+    let sawStaleWrite = false;
+    let signOutServed = false;
+    await loadOptionsPage(
+      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc', agencyHubApiKey: 'old-key' }),
+      {
+        runtimeSendMessageImpl: async (message) => {
+          if (message.type === 'signOutAgencyHub') {
+            // The handler must be reached only AFTER the page's own chain settled —
+            // i.e. after the held stale write was released and committed.
+            signOutServed = true;
+            expect(sawStaleWrite).toBe(true);
+            savedCustody.agencyHubDeviceToken = '';
+            savedCustody.agencyHubApiKey = '';
+            return { outcome: 'revoked' };
+          }
+          if (message.type === 'getAgencyHubIdentity') {
+            return { ok: true, username: 'u', role: 'chatter', pages: ['p'] };
+          }
+          if (message.type === 'getSessionsSnapshot') return [];
+          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
+        },
+        // Hold the in-flight edited-key write open across the «Выйти» click: the
+        // handler must WAIT for it (preserving the edit's place in the chain), not
+        // race it — the background wipe then lands strictly afterwards.
+        storageSetImpl: async (data) => {
+          if (!sawStaleWrite
+              && Object.prototype.hasOwnProperty.call(data, 'agencyHubApiKey')
+              && data.agencyHubApiKey === 'edited-key') {
+            sawStaleWrite = true;
+            await releaseStaleWrite.promise;
+          }
+        },
+      },
+    );
+    const section = getSectionByTitle('Agency Hub');
+    const keyInput = section.querySelector('input[aria-label="Legacy chatter key"]') as HTMLInputElement;
+    keyInput.value = 'edited-key';
+    keyInput.dispatchEvent(new Event('input'));
+    keyInput.dispatchEvent(new Event('change'));   // flush → the persist is now in flight (held)
+    getSignOutButton(section).click();             // must await the chain, not bypass it
+    expect(signOutServed).toBe(false);             // still waiting on the held write
+    releaseStaleWrite.resolve();
+    await vi.waitFor(() => {
+      expect(signOutServed).toBe(true);
+      // Final custody state: the wipe is the last word.
+      expect(savedCustody.agencyHubApiKey).toBe('');
+      expect(savedCustody.agencyHubDeviceToken).toBe('');
+    });
+    // pagehide after sign-out must not replay the key: dirty flags were cleared.
+    window.dispatchEvent(new Event('pagehide'));
+    expect(savedCustody.agencyHubApiKey).toBe('');
   });
 });

@@ -776,6 +776,22 @@ async function render(): Promise<void> {
     })();
   });
 
+  // Shared read-only model the Статус rows and the readiness hero both read
+  // (painted below in hydrateHubStatusRows / the Fansly row; the hero re-renders
+  // from this). Declared HERE — above the hub sign-in block — so renderHubIdentity,
+  // a pure reader of statusModel.identity, can run at the very first
+  // renderHubSignInState() mount paint without a temporal-dead-zone ReferenceError.
+  const statusModel: {
+    fanslyAccounts: number;
+    // The account ids that currently have a CAPTURED session — the hero's step-3
+    // readiness reads only this set, never every knownAccount (an offline
+    // historical account with an archived mapping must not block «Всё работает»).
+    fanslyCapturedAccountIds: string[];
+    fanslyFreshest: SessionSnapshotEntry | undefined;
+    health: AgencyHubHealthResponse | null;
+    identity: AgencyHubIdentityResponse | null;
+  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
+
   // ── Stage 32: one-time device-token sign-in (preferred over the key) ──
   const hubSignInUserInput = document.createElement('input');
   hubSignInUserInput.type = 'text';
@@ -797,16 +813,59 @@ async function render(): Promise<void> {
   hubSignInMeta.style.color = 'var(--chatgoose-ink-mid)';
   hubSignInMeta.style.fontSize = '13px';
 
+  // TDZ fix: construct BOTH the sign-in row and the signed-in block ABOVE the
+  // first renderHubSignInState() call — that call reads .hidden on each, so
+  // leaving either below would throw a ReferenceError at every options mount.
+  const hubSignInRow = document.createElement('div');
+  hubSignInRow.style.display = 'flex';
+  hubSignInRow.style.gap = '8px';
+  hubSignInRow.style.flexWrap = 'wrap';
+  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
+
+  const hubSignOutButton = createButton('Выйти', true, true); // ghost + danger
+  const hubActiveBadge = createBadge('активен', 'green');
+  const hubIdentityLine = document.createElement('div');   // spec §6: username · role · pages
+  hubIdentityLine.dataset.role = 'hub-identity-line';
+  hubIdentityLine.className = 'chatgoose-hub-identity-line';
+  const hubTokenLine = document.createElement('div');
+  hubTokenLine.dataset.role = 'hub-token-line';
+  hubTokenLine.className = 'chatgoose-hub-token-line';
+  const hubSignedInTop = document.createElement('div');
+  hubSignedInTop.style.display = 'flex';
+  hubSignedInTop.style.gap = '8px';
+  hubSignedInTop.style.alignItems = 'center';
+  hubSignedInTop.append(hubActiveBadge, hubSignOutButton);
+  const hubSignedInBlock = document.createElement('div');
+  hubSignedInBlock.dataset.role = 'hub-signed-in';
+  hubSignedInBlock.style.display = 'grid';
+  hubSignedInBlock.style.gap = '6px';
+  hubSignedInBlock.append(hubSignedInTop, hubIdentityLine, hubTokenLine);
+
+  const renderHubIdentity = (): void => {
+    // Pure reader of P2's guarded statusModel — pages is string[] (P2 contract).
+    const identity = statusModel.identity;
+    hubIdentityLine.textContent = identity && identity.ok
+      ? `${identity.username} · ${identity.role} · страниц: ${identity.pages.length}`
+      : 'identity недоступна';
+  };
+
   const renderHubSignInState = (): void => {
-    const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
-    hubSignInStatus.textContent = hasToken
+    const token = state.settings.agencyHubDeviceToken.trim();
+    const signedIn = Boolean(token);
+    hubSignInRow.hidden = signedIn;         // hide username/password/«Войти»…
+    hubSignedInBlock.hidden = !signedIn;    // …and show the badge/identity/token/«Выйти»
+    if (signedIn) {
+      // Masked prefix only. No expiry date: issuance metadata is not persisted,
+      // /me does not return it, and sliding expiry makes a stored date a lie.
+      hubTokenLine.textContent = `${token.slice(0, 24)}… · продлевается при работе`;
+      renderHubIdentity();                  // spec §6: username · role · pages
+    }
+    hubSignInStatus.textContent = signedIn
       ? 'Device token активен ✓'
       : 'Device token ещё не выпущен.';
-    hubSignInStatus.style.color = hasToken
-      ? 'var(--chatgoose-green)'
-      : 'var(--chatgoose-ink)';
+    hubSignInStatus.style.color = signedIn ? 'var(--chatgoose-green)' : 'var(--chatgoose-ink)';
     if (!hubSignInMeta.textContent) {
-      hubSignInMeta.textContent = hasToken
+      hubSignInMeta.textContent = signedIn
         ? 'Запросы к Hub используют device token; legacy-ключ — запасной вариант.'
         : 'Войди один раз, чтобы выпустить привязанный к устройству token — больше не нужно вставлять ключ, и он переживает ротацию ключа.';
     }
@@ -852,18 +911,79 @@ async function render(): Promise<void> {
       }
     })();
   });
-  renderHubSignInState();
+  hubSignOutButton.addEventListener('click', () => {
+    void (async () => {
+      hubSignOutButton.disabled = true;
+      hubSignInUserInput.disabled = true;
+      hubSignInPasswordInput.disabled = true;
+      agencyHubKeyInput.disabled = true;
+      let outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed' = 'unreachable';
+      try {
+        // (1) Flush our own pending writes: drop the debounce TIMER only, then
+        // AWAIT the chain. Queued persists run to completion — a pending
+        // theme/count/key edit lands normally, in order.
+        saveSettingsDebounced.cancel();
+        await (settingsSaveChain ?? Promise.resolve());
 
-  const hubSignInRow = document.createElement('div');
-  hubSignInRow.style.display = 'flex';
-  hubSignInRow.style.gap = '8px';
-  hubSignInRow.style.flexWrap = 'wrap';
-  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
+        // (2) After this point no page write may own the custody field: clear the
+        // dirty flag and the visible input BEFORE the background wipe, so neither
+        // a later change-event nor pagehide can replay the old key.
+        agencyHubApiKeyDirty = false;
+        if (document.activeElement !== agencyHubKeyInput) {
+          agencyHubKeyInput.value = '';
+        }
+
+        // (3) The background does the durable work (Task 2): wipe BOTH custody
+        // keys to EMPTY strings FIRST (storage write survives page close), then
+        // best-effort revoke with the captured token (~5s). The token never
+        // crosses the runtime boundary.
+        try {
+          const response = await sendRuntimeRequest('signOutAgencyHub');
+          outcome = response?.outcome ?? 'unreachable';
+        } catch (error) {
+          console.error('Sign-out request failed', error);
+        }
+
+        // (4) Re-read the truth the background wrote (same pattern as the
+        // sign-in success handler).
+        state.settings = (await loadStorageState()).settings;
+      } finally {
+        hubSignOutButton.disabled = false;
+        hubSignInUserInput.disabled = false;
+        hubSignInPasswordInput.disabled = false;
+        agencyHubKeyInput.disabled = false;
+      }
+
+      // (5) One honest message per outcome. The three server outcomes ride the
+      // sign-in meta line; a failed LOCAL wipe is the red saved-flash —
+      // credentials may still be present, the loud case.
+      if (outcome === 'wipe-failed') {
+        savedFlash.showError('не удалось стереть креды локально — попробуй ещё раз');
+      } else if (outcome === 'revoked') {
+        hubSignInMeta.textContent = 'Device token отозван на хабе.';
+      } else if (outcome === 'already-invalid') {
+        hubSignInMeta.textContent = 'Хаб ответил 401 — token уже был недействителен.';
+      } else {
+        hubSignInMeta.textContent = 'Хаб недоступен — token стёрт локально, на сервере умрёт по sliding-expiry.';
+      }
+
+      renderHubSignInState();
+      if (!disposed) {
+        await refreshAgencyHubPermissionState();
+        await runAgencyHubConnectionTest({ force: true });
+        // P2's guarded refresh: the Доступ row and the readiness hero must flip
+        // without a reload (P2 exposes hydrateHubStatusRows + storedHubSignature).
+        void hydrateHubStatusRows(storedHubSignature());
+      }
+    })();
+  });
+
+  renderHubSignInState();
 
   const hubSignInBlock = document.createElement('div');
   hubSignInBlock.style.display = 'grid';
   hubSignInBlock.style.gap = '7px';
-  hubSignInBlock.append(hubSignInRow, hubSignInStatus, hubSignInMeta);
+  hubSignInBlock.append(hubSignInRow, hubSignedInBlock, hubSignInStatus, hubSignInMeta);
 
   const permissionBadge = createBadge('…', 'neutral');
   permissionBadge.dataset.hubPermissionBadge = 'true';
@@ -1435,19 +1555,6 @@ async function render(): Promise<void> {
     statusRows.contract.root,
   );
 
-  // Shared read-only model the Статус rows and the readiness hero both read.
-  // Rows are painted directly here; the hero (Task 8) re-renders from this.
-  const statusModel: {
-    fanslyAccounts: number;
-    // The account ids that currently have a CAPTURED session — the hero's step-3
-    // readiness reads only this set, never every knownAccount (an offline
-    // historical account with an archived mapping must not block «Всё работает»).
-    fanslyCapturedAccountIds: string[];
-    fanslyFreshest: SessionSnapshotEntry | undefined;
-    health: AgencyHubHealthResponse | null;
-    identity: AgencyHubIdentityResponse | null;
-  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
-
   // Task 8: the hero must not invent a verdict from zero data. Until the first
   // real datum lands — a hub identity read OR the Fansly row painting — it holds
   // a quiet loading line instead of claiming «До работы — N шагов».
@@ -1648,6 +1755,9 @@ async function render(): Promise<void> {
       : { ok: false, reason: 'unreachable' };
     statusModel.health = health;
     statusModel.identity = identity;
+    // P3: the sign-in block's identity line rides this SAME guarded paint pass —
+    // a pure reader of statusModel.identity, no fetch or staleness guard of its own.
+    renderHubIdentity();
 
     // Hub (core)
     if (health.ok) {
