@@ -39,6 +39,7 @@ import {
   toUserError,
 } from '../shared/errors.js';
 import {
+  featureIncludesFanBio,
   featureRequiresDraft,
   featureUsesPingSegment,
   getFeaturePolicy,
@@ -631,6 +632,23 @@ export class OperationCoordinator {
         if (context && this.acceptance) {
           this.acceptance.enqueue({
             ...context,
+            // Prefer the live context's ref; fall back to the client-carried one.
+            requestId: context.requestId ?? message.generationRef ?? null,
+            action: message.action,
+            at: new Date().toISOString(),
+          });
+        } else if (message.generationRef && this.acceptance) {
+          // The in-memory op→ref context is gone (SW restart / 50-entry eviction),
+          // but the coach feed still holds the generation ref, so correlate via it
+          // (P2). pageLabel is not cheaply recoverable here (a Hub round-trip); the
+          // kernel matches by generationRef, so a degraded pageLabel is acceptable.
+          const ctx = this.tabContexts.get(tabId);
+          this.acceptance.enqueue({
+            operationId: message.operationId,
+            requestId: message.generationRef,
+            feature: 'coach-chat',
+            pageLabel: '',
+            conversationRef: ctx?.groupId ?? '',
             action: message.action,
             at: new Date().toISOString(),
           });
@@ -2254,7 +2272,10 @@ export class OperationCoordinator {
             payload.domFanDisplayName ||
             'fan';
           kernelFanName = kernelFanDisplayName(account);
-          if (payload.feature === 'hi-greeting' && account?.about?.trim()) {
+          // Bio inclusion is a per-feature policy (spec §7): hi-greeting, help-me,
+          // and coach-chat — NOT a hardcoded hi-greeting check (that omitted the
+          // bio for coach + help-me, the bug this fixes).
+          if (featureIncludesFanBio(payload.feature) && account?.about?.trim()) {
             fanBio = account.about.trim();
           }
           completeStage(
@@ -2605,6 +2626,10 @@ export class OperationCoordinator {
           ? { coachHistory: payload.coachHistory }
           : {}),
         ...(isShortRecap ? { summaryMode: 'short' as const } : {}),
+        // The REQUESTED window (kernel records requestedCount from this): the
+        // short const for a short recap, else the feature's window (deep for a
+        // full recap). Distinct from clientContext.messageCount (the kept count).
+        messageCount: effectiveMessageCount,
         // E28: ask only in debug mode. The kernel answers only inside an
         // owner-set time-bounded window, so this is a request, not a right.
         debugPromptEcho: profiler.enabled,

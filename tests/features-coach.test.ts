@@ -29,6 +29,8 @@ describe('coach-chat feature registration', () => {
       supportsReplyTone: false,
       requiresDraft: false,
       usesPingSegment: false,
+      // Coach carries the fan bio (spec §7 includesFanBio policy).
+      includesFanBio: true,
     });
   });
 

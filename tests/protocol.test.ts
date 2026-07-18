@@ -197,6 +197,18 @@ describe('protocol boundary guards', () => {
     expect(isContentPortMessage({ ...base, viewCachedOnly: 'yes' })).toBe(false);
   });
 
+  it('accepts operation:acceptance with an optional generationRef; rejects a non-string', () => {
+    const base = {
+      type: 'operation:acceptance',
+      operationId: 'op-1',
+      action: 'inserted' as const,
+      partIndex: 0,
+    };
+    expect(isContentPortMessage(base)).toBe(true);
+    expect(isContentPortMessage({ ...base, generationRef: 'gen-1' })).toBe(true);
+    expect(isContentPortMessage({ ...base, generationRef: 42 })).toBe(false);
+  });
+
   it('rejects malformed coach fields on operation:start', () => {
     const base = {
       type: 'operation:start',

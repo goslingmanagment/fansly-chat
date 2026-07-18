@@ -404,7 +404,8 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
       return (
         typeof message.operationId === 'string' &&
         (message.action === 'copied' || message.action === 'inserted') &&
-        typeof message.partIndex === 'number'
+        typeof message.partIndex === 'number' &&
+        isOptionalString(message, 'generationRef')
       );
     case 'operation:cancel':
     case 'compare:cancel':

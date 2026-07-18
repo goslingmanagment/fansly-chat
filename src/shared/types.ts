@@ -1134,6 +1134,10 @@ export interface OperationAcceptancePayload extends PortEnvelopeBase {
   operationId: string;
   action: 'copied' | 'inserted';
   partIndex: number;
+  /** Coach only: the exchange's kernel generation ref, so the background can
+   * correlate the acceptance even when its in-memory op→ref map is gone (SW
+   * restart / eviction). Absent for the short-lived inline/overlay part paths. */
+  generationRef?: string;
 }
 
 // Background → Content
@@ -1374,6 +1378,12 @@ export type CoachOverlayFeedItem =
       /** The exchange's own op id: the render key AND the acceptance-attribution
        * id for its draft cards (NEVER the session's live/top-level op). */
       operationId: string;
+      /** The kernel generation ref for this exchange (spec §3). Threaded to draft
+       * acceptance as a correlation FALLBACK: the background's op→ref map is a
+       * bounded in-memory cache that dies with the service worker, so a copy /
+       * insert after an SW restart or 50-entry eviction would otherwise lose its
+       * attribution. */
+      generationRef?: string;
       question: string;
       answerProse: string;
       drafts: CoachOverlayDraft[];

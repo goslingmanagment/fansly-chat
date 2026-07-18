@@ -63,6 +63,12 @@ export interface KernelFeatureRequest {
   /** fan-summary: sent ONLY as 'short' (a full run omits it — an old kernel
    * then never sees the field, keeping rollback safe). */
   summaryMode?: 'short';
+  /** The REQUESTED transcript window (deepMessageCount for a full recap, the
+   * short const for a short recap, the quick window otherwise) — distinct from
+   * `clientContext.messageCount` (the KEPT count). The kernel records it as the
+   * recap's `requestedCount`; without it core falls back to its own default and
+   * recap-status mode matching breaks (a full recap at 3000 recorded as 1500). */
+  messageCount?: number;
   clientContext: KernelFeatureClientContext;
   /** Debug mode only (E28): ask the kernel to echo the prompt it assembled.
    * Rides a capability HEADER, never the request body — an old kernel ignores
@@ -344,6 +350,11 @@ export function createKernelFeatureGateway(
             // Only ever 'short'; a full recap omits the field entirely so an old
             // kernel (which never learned it) still runs a legacy full summary.
             ...(request.summaryMode === 'short' ? { summaryMode: 'short' } : {}),
+            // Top-level REQUESTED window (kernel records it as requestedCount);
+            // clientContext.messageCount below is the KEPT count.
+            ...(request.messageCount !== undefined
+              ? { messageCount: request.messageCount }
+              : {}),
             isRegeneration: request.isRegeneration ?? false,
             clientContext: {
               transcript: request.clientContext.transcript,
