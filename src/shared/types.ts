@@ -1477,8 +1477,9 @@ export type OverlayViewModel =
     }
   | {
       // Coach chat mode (spec §3) — rendered exclusively by
-      // OverlayController.renderCoach off the CoachSession store. Coach models
-      // BYPASS CompletedOverlayCache and overlayRawText entirely (spec §10).
+      // OverlayController's coach render path (createCoachView / updateCoachView)
+      // off the CoachSession store. Coach models BYPASS CompletedOverlayCache
+      // and overlayRawText entirely (spec §10).
       kind: 'coach';
       fanDisplayName: string;
       /** Non-null == a turn is streaming: drives Esc=cancel-and-stay-open and

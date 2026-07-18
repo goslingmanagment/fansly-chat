@@ -247,6 +247,10 @@ describe('OverlayController — coach chat mode', () => {
         composerEnabled: false,
       }),
     );
+    // takeRecords() drains SYNCHRONOUSLY — the observer callback only fires in a
+    // microtask, so without this the assertion would be vacuous (records stays
+    // [] because disconnect() empties the queue before the microtask runs).
+    records.push(...observer.takeRecords());
     observer.disconnect();
 
     expect(requireElement<HTMLDivElement>('.chatgoose-coach-pending')).toBe(pending);
@@ -274,6 +278,18 @@ describe('OverlayController — coach chat mode', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(callbacks.onClose).toHaveBeenCalledOnce();
     expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores Escape fired during an IME composition', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+
+    const composing = new KeyboardEvent('keydown', { key: 'Escape' });
+    Object.defineProperty(composing, 'isComposing', { value: true });
+    document.dispatchEvent(composing);
+
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(callbacks.onCancel).not.toHaveBeenCalled();
   });
 
   it('keeps a stable DOM node per exchange as the feed grows (keyed rendering)', () => {
@@ -333,6 +349,39 @@ describe('OverlayController — coach chat mode', () => {
     expect(feed.scrollTop).toBe(40);
   });
 
+  it('pins the feed to the bottom on a (re)open rebuild — JSDOM cannot measure scroll, so assert the call', () => {
+    // The feed is only measurable after attach (createCoachView runs while
+    // detached), so the rebuild branch must scroll AFTER replaceChildren.
+    const scrollSpy = vi.spyOn(
+      OverlayController.prototype as unknown as { scrollCoachFeedToBottom: () => void },
+      'scrollCoachFeedToBottom',
+    );
+    const { controller } = makeController();
+
+    // First coach render == a rebuild: it MUST scroll to bottom after attach.
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
+      }),
+    );
+    expect(scrollSpy).toHaveBeenCalled();
+
+    // A pure in-place update (same coach view) must NOT force-scroll — that is
+    // gated on the near-bottom heuristic, not the rebuild path.
+    scrollSpy.mockClear();
+    const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
+    Object.defineProperty(feed, 'clientHeight', { configurable: true, get: () => 100 });
+    Object.defineProperty(feed, 'scrollHeight', { configurable: true, get: () => 400 });
+    feed.scrollTop = 10; // far from the bottom
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
+        recapStatusLine: 'Full: 1d',
+      }),
+    );
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
   it('renders coach prose via textContent so markdown/backticks never become HTML', () => {
     const { controller } = makeController();
     controller.render(
@@ -390,6 +439,53 @@ describe('OverlayController — coach chat mode', () => {
       expect(mockInsert).toHaveBeenCalledWith('Draft body');
     });
     expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 1);
+    // Spec §3: after insert the overlay collapses (session retained by the store).
+    expect(callbacks.onClose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the overlay open and surfaces an inline error when a draft insert fails', async () => {
+    const { controller, callbacks } = makeController();
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
+    vi.mocked(insertIntoFanslyTextarea).mockRejectedValueOnce(
+      new DOMException('blocked', 'NotAllowedError'),
+    );
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 0 }])],
+      }),
+    );
+
+    const insert = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+    ).find((button) => /insert/i.test(button.textContent ?? ''));
+    insert!.click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chatgoose-inline-error')?.classList.contains('chatgoose-hidden')).toBe(false);
+    });
+    // A failed insert must NOT collapse and must NOT record acceptance.
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
+    // The coach surface is still mounted.
+    expect(document.querySelector('.chatgoose-coach-feed')).not.toBeNull();
+  });
+
+  it('draft Copy does NOT collapse the overlay', async () => {
+    const { controller, callbacks } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Hey love', index: 0 }])],
+      }),
+    );
+    const copy = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+    ).find((button) => button.textContent === 'Copy');
+    copy!.click();
+
+    await vi.waitFor(() => {
+      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0);
+    });
+    expect(callbacks.onClose).not.toHaveBeenCalled();
   });
 
   it('draft Insert over a non-empty Fansly composer requires a two-step inline confirm', async () => {

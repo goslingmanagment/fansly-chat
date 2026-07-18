@@ -298,7 +298,9 @@ export class OverlayController {
 
   constructor(private readonly callbacks: OverlayCallbacks) {
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && this.model.kind !== 'hidden') {
+      // Escape during an IME composition cancels the composition, not the
+      // overlay — never dismiss mid-compose (matters for the coach composer).
+      if (event.key === 'Escape' && this.model.kind !== 'hidden' && !event.isComposing) {
         this.handleDismiss();
       }
     });
@@ -644,6 +646,10 @@ export class OverlayController {
       const view = this.createCoachView(model);
       this.bodyEl.replaceChildren(view.root);
       this.currentView = view;
+      // A rebuild is a (re)open: the feed is only measurable once attached
+      // (createCoachView runs updateCoachView while detached → scrollHeight 0),
+      // so pin it to the newest turn HERE, after attach.
+      this.scrollCoachFeedToBottom(view);
       return 'rebuild-coach';
     }
 
@@ -1235,8 +1241,15 @@ export class OverlayController {
     this.reconcileCoachEmptyState(view, model);
 
     if (wasNearBottom) {
-      view.feedEl.scrollTop = Math.max(0, view.feedEl.scrollHeight - view.feedEl.clientHeight);
+      this.scrollCoachFeedToBottom(view);
     }
+  }
+
+  /** Pin the feed to its newest turn. Called unconditionally on a (re)open
+   * rebuild (after attach) and on an incremental update only when the chatter
+   * was already at the bottom. */
+  private scrollCoachFeedToBottom(view: CoachViewState): void {
+    view.feedEl.scrollTop = Math.max(0, view.feedEl.scrollHeight - view.feedEl.clientHeight);
   }
 
   private reconcileCoachFeed(view: CoachViewState, sv: CoachOverlaySessionView): void {
@@ -1349,6 +1362,8 @@ export class OverlayController {
     }
     textarea.value = '';
     this.autosizeCoachComposer(textarea);
+    // Keep the orchestrator's persisted composerText in sync with the clear.
+    this.callbacks.onCoachComposerInput?.('');
     this.callbacks.onCoachSubmit?.(question);
   }
 
@@ -1538,6 +1553,13 @@ export class OverlayController {
       insert.textContent = getActiveConversationDraftText().trim() ? 'Replace draft…' : 'Insert';
     };
     keep.addEventListener('click', () => disarm());
+    // Moving focus away from an armed Replace abandons the confirm (outside
+    // click / blur), so a stale "Confirm replace" never lingers.
+    insert.addEventListener('blur', () => {
+      if (armed) {
+        disarm();
+      }
+    });
     insert.addEventListener('click', () => {
       const hasDraft = getActiveConversationDraftText().trim() !== '';
       if (hasDraft && !armed) {
@@ -1581,9 +1603,14 @@ export class OverlayController {
       this.inlineError = null;
       this.callbacks.onAcceptance?.(exchangeOperationId, action, draft.index);
       if (action === 'inserted') {
+        // Spec §3: after insert the overlay collapses and the Fansly composer
+        // is focused. Closing does NOT touch the store — the session is retained
+        // and reopens intact. Copy leaves the overlay open.
         this.queueComposerFocus();
+        this.callbacks.onClose();
       }
     } catch (error) {
+      // A failed insert must NOT close — surface the error inline and stay open.
       this.inlineError = toUserError(error);
       this.render(this.model, true);
     }
