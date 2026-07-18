@@ -5865,6 +5865,23 @@ describe('OperationCoordinator', () => {
     expect(fanslyClient.getMessagePage).not.toHaveBeenCalled();
   });
 
+  it('coach follow-up turn refreshes via a single page, not a full reload', async () => {
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+    });
+
+    // Turn 1 seeds the window via the full-window loader.
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-1' }));
+    // Turn 2 (same coach session) reconciles against the cache with one page.
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-2' }));
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(2);
+    // The full-window loader ran ONCE (the seed); the follow-up used the
+    // single-page refresh loader instead of paginating the whole window again.
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getMessagePage).toHaveBeenCalled();
+  });
+
   it('coach is blocked before the kernel call when the fan is unresolved', async () => {
     const { coordinator, kernelGateway, port, fanslyClient } = await createCoordinatorHarness();
     // Group has only the creator — no distinct fan → fanAccountId null.
