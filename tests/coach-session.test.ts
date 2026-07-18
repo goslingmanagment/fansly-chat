@@ -126,20 +126,27 @@ describe('CoachSessionStore — commit discipline', () => {
   });
 
   it('records a failed attempt in the feed ONLY — question retained, partial text discarded', () => {
-    store.recordFailedAttempt(session, 'question that failed', 'output_exhausted', true);
+    store.beginPending(session, 'question that failed', 'op-fail');
+    const returned = store.recordFailedAttempt(
+      session,
+      'op-fail',
+      'question that failed',
+      'output_exhausted',
+      true,
+    );
 
     // Never enters the wire/canonical dialog.
     expect(session.completedExchanges).toHaveLength(0);
     expect(session.feedItems).toHaveLength(1);
     const item = session.feedItems[0] as CoachFailedAttemptFeedItem;
+    expect(returned).toBe(item);
     expect(item.kind).toBe('failed-attempt');
     expect(item.question).toBe('question that failed');
     expect(item.errorCode).toBe('output_exhausted');
     expect(item.retryable).toBe(true);
-    // Structurally impossible to have stored any partial answer text.
-    expect(Object.keys(item)).toEqual(
-      expect.arrayContaining(['kind', 'question', 'errorCode', 'retryable']),
-    );
+    // Structurally impossible to have stored any partial answer text: the item
+    // carries EXACTLY these four keys, nothing answer-shaped.
+    expect(Object.keys(item)).toEqual(['kind', 'question', 'errorCode', 'retryable']);
     expect('answerRaw' in item).toBe(false);
     expect('answer' in item).toBe(false);
   });
@@ -188,10 +195,32 @@ describe('CoachSessionStore — pending lifecycle', () => {
     expect(session.pending).toBeUndefined();
   });
 
-  it('clears pending on a failed attempt', () => {
+  it('clears pending on a failed attempt whose operationId matches', () => {
     store.beginPending(session, 'q', 'op-1');
-    store.recordFailedAttempt(session, 'q', 'cancelled', true);
+    const item = store.recordFailedAttempt(session, 'op-1', 'q', 'cancelled', true);
+    expect(item).not.toBeNull();
     expect(session.pending).toBeUndefined();
+  });
+
+  it('ignores a stale failure whose operationId no longer matches the live pending (cancel → retry race)', () => {
+    // Attempt A is cancelled and retried as B; A's terminal failure lands LATE.
+    store.beginPending(session, 'the question', 'op-A');
+    store.clearPending(session); // cancel A
+    const attemptB = store.beginPending(session, 'the question', 'op-B'); // retry as B
+
+    const result = store.recordFailedAttempt(session, 'op-A', 'the question', 'cancelled', true);
+
+    // Stale ⇒ ignored wholesale: no feed item for the abandoned attempt…
+    expect(result).toBeNull();
+    expect(session.feedItems).toHaveLength(0);
+    // …and the NEW live attempt's pending marker is untouched.
+    expect(session.pending).toBe(attemptB);
+  });
+
+  it('ignores a failure when nothing is in flight (no pending)', () => {
+    const result = store.recordFailedAttempt(session, 'op-x', 'q', 'err', true);
+    expect(result).toBeNull();
+    expect(session.feedItems).toHaveLength(0);
   });
 
   it('never serializes a pending attempt to the wire', () => {
@@ -248,9 +277,13 @@ describe('CoachSessionStore — reset semantics', () => {
     };
     session.recapStatus = recap;
     session.composerText = 'half-typed question';
-    store.beginPending(session, 'q', 'op-1');
-    store.commitExchange(session, { operationId: 'op-2', generationRef: 'g', question: 'q', answerRaw: 'a' });
-    store.recordFailedAttempt(session, 'q', 'e', true);
+    // Populate every structure the reset must clear: a committed exchange (feed +
+    // wire), a recorded failure (feed), and a live pending marker.
+    store.beginPending(session, 'qc', 'op-commit');
+    store.commitExchange(session, { operationId: 'op-commit', generationRef: 'g', question: 'qc', answerRaw: 'a' });
+    store.beginPending(session, 'qf', 'op-fail');
+    store.recordFailedAttempt(session, 'op-fail', 'qf', 'e', true);
+    store.beginPending(session, 'qp', 'op-pending');
 
     store.resetSession(session);
 

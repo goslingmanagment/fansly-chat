@@ -33,16 +33,21 @@ export const COACH_COMPLETED_EXCHANGES_CAP = 50;
 /** A committed Q/A turn (spec §3). The answer is the RAW completed text — the
  * ≤10k replay projection is applied lazily by `serializeForWire`, never stored,
  * so a re-projection on a later turn stays stable. */
+// `readonly` is structural, not cosmetic: the exact same `CoachExchange` object
+// is shared by identity between `completedExchanges` (the wire source) and the
+// feed's `exchange` item, so a downstream (T9) mutation of any field would
+// silently corrupt replayed wire history. Freezing the fields makes that a
+// compile error.
 export interface CoachExchange {
-  operationId: string;
+  readonly operationId: string;
   /** From the stream meta; survives an SW restart with the session (the
    * background op→ref map dies with the worker, so the ref lives here). */
-  generationRef: string;
-  question: string;
-  answerRaw: string;
+  readonly generationRef: string;
+  readonly question: string;
+  readonly answerRaw: string;
   /** Parsed on completion; never parsed from a failed attempt (spec §3). */
-  drafts: CoachDraft[];
-  completedAt: number;
+  readonly drafts: readonly CoachDraft[];
+  readonly completedAt: number;
 }
 
 /** The feed's reference to a committed exchange: the live `CoachExchange` object
@@ -128,13 +133,17 @@ export interface CoachSessionStore {
    * clears a matching pending marker. Returns the committed exchange. */
   commitExchange(session: CoachSession, input: CoachCommitInput): CoachExchange;
   /** Records a failed/cancelled turn as a feed-only item (question retained,
-   * partial text discarded) and clears any pending marker. */
+   * partial text discarded) and clears the pending marker — but ONLY if
+   * `operationId` is still the live in-flight attempt. A terminal failure for a
+   * superseded operation (cancel → retry race, T9/T10) is stale: it is ignored
+   * entirely (no feed item, pending untouched) and returns `null`. */
   recordFailedAttempt(
     session: CoachSession,
+    operationId: string,
     question: string,
     errorCode: string,
     retryable: boolean,
-  ): CoachFailedAttemptFeedItem;
+  ): CoachFailedAttemptFeedItem | null;
   /** Appends a `running` recap step to the feed and returns the live item so the
    * caller can transition its `status` to done/failed. */
   recordRecapStep(
@@ -242,7 +251,16 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       return exchange;
     },
 
-    recordFailedAttempt(session, question, errorCode, retryable) {
+    recordFailedAttempt(session, operationId, question, errorCode, retryable) {
+      // Guard on the live pending marker. A terminal failure that arrives after
+      // its attempt was cancelled-and-retried (or otherwise superseded) is stale:
+      // the chatter has already moved on, so recording a `failed-attempt` for the
+      // ABANDONED attempt would confuse the feed AND clearing pending would kill
+      // the *new* live attempt's marker. Ignore it wholesale. (No pending at all
+      // ⇒ nothing is in flight ⇒ also ignored.)
+      if (session.pending?.operationId !== operationId) {
+        return null;
+      }
       const item: CoachFailedAttemptFeedItem = {
         kind: 'failed-attempt',
         question,
