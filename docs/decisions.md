@@ -60,6 +60,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E41 | 2026-07-17 | Options P2 informativeness: read-only «Статус» section + readiness hero, four independent runtime reads (health raw-503, me, per-page quota, spenders observations), persisted-signature hydration guard, no_permission first-class — schema stays v14, read-only throughout |
 | E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
 | E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
+| E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
 
 ## Entries
 
@@ -985,3 +986,17 @@ family tokens but stays OUTSIDE the shell. Schema stays v14; E36/E37
 preservation/recovery/export machinery verbatim. Spec:
 docs/superpowers/specs/2026-07-16-options-redesign-design.md (§6 as
 amended wipe-then-revoke, §7, §13.3).
+
+**E44 (2026-07-18).** Release 1.9.10 accidentally carried the E40–E43
+Settings/Options preview from `main`, although that work belongs to the 2.0
+release line. Published history is immutable: tag/feed version 1.9.10 remains a
+real release and is not deleted or reused. Release 1.9.11 is therefore a
+forward-version corrective release that restores application, popup, Options,
+and background behavior to v1.9.9; the exact 1.9.10 tree is preserved on
+`release/2.0-options` for continued 2.0 work. The storage schema remains v14,
+so this is not a data-schema downgrade and no credential, mapping, persona
+snapshot, or cache cleanup is introduced. The generated kernel SDK snapshot
+remains aligned to the currently deployed Core contract as release evidence;
+keeping generated contract bytes does not enable any E40–E43 call path. The
+E40–E43 technical decisions and their hand-curated plans/spec stay in history
+with explicit 2.0-deferred banners rather than being deleted.

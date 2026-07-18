@@ -11,10 +11,6 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: 12 })).toBe('getPopupStatus');
     expect(getRuntimeRequestType({ type: 'getSessionsSnapshot' })).toBe('getSessionsSnapshot');
     expect(getRuntimeRequestType({ type: 'testAgencyHubConnection' })).toBe('testAgencyHubConnection');
-    expect(getRuntimeRequestType({ type: 'getAgencyHubHealth' })).toBe('getAgencyHubHealth');
-    expect(getRuntimeRequestType({ type: 'getAgencyHubIdentity' })).toBe('getAgencyHubIdentity');
-    expect(getRuntimeRequestType({ type: 'getAiQuotaByPage' })).toBe('getAiQuotaByPage');
-    expect(getRuntimeRequestType({ type: 'getSpendersStatus' })).toBe('getSpendersStatus');
     // 1.6.0 shipped without this case — options-page device-token sign-in
     // was unreachable (found by the Stage 35 map regeneration).
     expect(
@@ -25,10 +21,6 @@ describe('protocol boundary guards', () => {
         password: 'p',
       }),
     ).toBe('issueAgencyHubDeviceToken');
-
-    // P3: sign-out — no payload, same E8 lesson as issueAgencyHubDeviceToken.
-    expect(getRuntimeRequestType({ type: 'signOutAgencyHub' }))
-      .toBe('signOutAgencyHub');
 
     // E23: the board's lazy chat resolve — same E8 lesson: a request type
     // without its protocol case dies silently before the handler.

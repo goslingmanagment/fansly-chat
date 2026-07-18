@@ -1308,17 +1308,17 @@ describe('ChatGooseContentApp', () => {
         error: {
           key: 'hub_request_failed',
           code: 'CG-HUB-07',
-          message: 'Запрос к Agency Hub не удался.',
+          message: 'Agency Hub request failed.',
         },
       },
     });
 
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-HUB-08');
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'Синхронизация с Hub не удалась, сводка осталась доступна локально.',
+      'Hub sync failed, summary remains available locally.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'Latest Hub error: CG-HUB-07: Запрос к Agency Hub не удался.',
+      'Latest Hub error: CG-HUB-07: Agency Hub request failed.',
     );
   });
 

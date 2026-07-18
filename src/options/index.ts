@@ -9,40 +9,24 @@ import {
   type AgencyHubConnectionFeedback,
   type AgencyHubPermissionFeedback,
 } from './agency-hub-settings.js';
-import { COPY } from './copy.js';
 import {
-  createBadge,
   createButton,
-  createCap,
-  createChipGroup,
-  createLabelRow,
-  createSavedFlash,
   createSection,
-  createStatusRow,
-  createToggle,
   createVersionTag,
   debounce,
   injectStyles,
-  type BadgeTone,
+  labeledField,
 } from './dom.js';
 import {
+  buildConnectionRows,
   buildSessionLookup,
   formatAccountHeading,
   formatAccountMeta,
-  formatCaptureStatus,
 } from './sessions.js';
-import {
-  buildPersonaRowViews,
-  classifyPersonaEmptyState,
-  formatCatalogChangedAt,
-  type PersonaEmptyState,
-} from './personas.js';
-import { buildShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
-import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
   getUserErrorDescription,
@@ -69,13 +53,9 @@ import {
 } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
-  AgencyHubHealthResponse,
-  AgencyHubIdentityResponse,
-  AiQuotaStatus,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
   Settings,
-  SpendersStreamState,
   UiThemeSetting,
 } from '../shared/types.js';
 
@@ -88,33 +68,10 @@ if (!(rootElement instanceof HTMLElement)) {
 
 const root = rootElement;
 
-// The settings tab has no live session port, so the Fansly step can otherwise
-// only close on a full reload. A focus/visibility re-poll closes it in place;
-// throttle it so rapid tab-switching cannot storm getSessionsSnapshot.
-const SESSIONS_REPOLL_MIN_INTERVAL_MS = 5_000;
-
-type SessionsResult =
-  | { ok: true; sessions: SessionSnapshotEntry[] }
-  | { ok: false; error: unknown };
-
 let renderCleanup: (() => Promise<void>) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
 let uiThemeInstalled = false;
-
-// Classified empty-section copy. The frozen-editing honesty holds everywhere —
-// never promise owner-side creation (persona authoring stays frozen until core
-// #151 closes the legacy-LWW lane).
-const PERSONA_EMPTY_COPY: Record<PersonaEmptyState, string> = {
-  'no-credentials': 'Каталог персон пуст — подключись к Hub выше, чтобы загрузить голоса.',
-  'awaiting-refresh': 'Каталог для новых кредов ещё не загружен — обновится после первой успешной проверки соединения.',
-  'empty-catalog': 'Сервер вернул пустой каталог. Редактирование голосов сейчас заморожено.',
-};
-
-// buildPersonaRowViews hides archived-and-unreferenced personas, so the raw
-// catalog can be non-empty while zero rows render. That is NOT a server-empty
-// catalog — say so honestly instead of «пустой каталог».
-const PERSONA_ALL_ARCHIVED_COPY = 'Все голоса каталога в архиве.';
 
 function createLegacyPersonaExportControls(): DocumentFragment {
   const fragment = document.createDocumentFragment();
@@ -128,7 +85,7 @@ function createLegacyPersonaExportControls(): DocumentFragment {
     null,
     2,
   );
-  const downloadExport = createButton('Скачать JSON легаси-персон', true);
+  const downloadExport = createButton('Download legacy persona JSON', true);
   downloadExport.addEventListener('click', () => {
     downloadExport.disabled = true;
     void exportJson().then((json) => {
@@ -138,23 +95,23 @@ function createLegacyPersonaExportControls(): DocumentFragment {
       link.download = `chatgoose-legacy-personas-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      exportStatus.textContent = 'JSON легаси-персон скачан.';
+      exportStatus.textContent = 'Legacy persona JSON downloaded.';
     }).catch((error: unknown) => {
       console.error('Failed to export legacy persona data', error);
-      exportStatus.textContent = 'Экспорт не удался. Перезагрузи настройки и попробуй снова.';
+      exportStatus.textContent = 'Export failed. Reload Settings and try again.';
     }).finally(() => {
       downloadExport.disabled = false;
     });
   });
-  const copyExport = createButton('Скопировать JSON легаси-персон', true);
+  const copyExport = createButton('Copy legacy persona JSON', true);
   copyExport.addEventListener('click', () => {
     copyExport.disabled = true;
     void exportJson().then(async (json) => {
       await navigator.clipboard.writeText(json);
-      exportStatus.textContent = 'JSON легаси-персон скопирован.';
+      exportStatus.textContent = 'Legacy persona JSON copied.';
     }).catch((error: unknown) => {
       console.error('Failed to copy legacy persona data', error);
-      exportStatus.textContent = 'Копирование не удалось. Используй «Скачать».';
+      exportStatus.textContent = 'Copy failed. Use Download instead.';
     }).finally(() => {
       copyExport.disabled = false;
     });
@@ -174,24 +131,17 @@ function renderLegacyPersonaRecovery(): void {
   hero.style.display = 'grid';
   hero.style.gap = '8px';
   const title = document.createElement('h1');
-  title.textContent = 'Восстановление персон';
+  title.textContent = 'ChatGoose Persona Recovery';
   const subtitle = document.createElement('div');
-  subtitle.textContent = 'Сохранённый снапшот легаси-персон повреждён. Обычные настройки и доступ к Agency Hub отключены, чтобы снапшот нельзя было перезаписать.';
+  subtitle.textContent = 'The preserved legacy persona snapshot is malformed. Normal Settings and Agency Hub access are disabled so the snapshot cannot be overwritten.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
-  // New-token status badge only — never a second h1/subtitle string, never an h2.
-  hero.append(createBadge('режим восстановления', 'bad'));
 
   const recovery = createSection(
-    'Экспорт легаси-персон',
-    'Экспортируй повреждённое сохранённое значение вместе с текущими легаси-персонами, привязками и алиасами для ручного восстановления.',
+    'Legacy Persona Recovery',
+    'Export the malformed preserved value together with the current legacy persona data, mappings, and aliases for manual recovery.',
   );
-  // Reuse Task 5's preservation wrapper so the export block rides the new tokens
-  // (a <span> cap, never an <h2> — the single-h2 gate invariant holds).
-  const preservationBlock = document.createElement('div');
-  preservationBlock.className = 'chatgoose-preservation';
-  preservationBlock.append(createLegacyPersonaExportControls());
-  recovery.append(preservationBlock);
+  recovery.append(createLegacyPersonaExportControls());
   root.append(hero, recovery);
 }
 
@@ -203,9 +153,6 @@ async function render(): Promise<void> {
   let disposed = false;
   let futureSchemaObserved: number | null = null;
   let applyFutureSchemaBarrierToUi: ((storedVersion: number) => void) | null = null;
-  // Wall-clock of the last getSessionsSnapshot dispatch (mount or re-poll); the
-  // focus/visibility re-poll reads it to enforce the throttle window.
-  let lastSessionsPollAt = 0;
   try {
     // Recovery must be decided before session discovery or a Hub connection
     // test can trigger network traffic. The malformed value remains untouched.
@@ -250,17 +197,15 @@ async function render(): Promise<void> {
   // to five seconds resolving a Fansly identity. It also owns identity
   // rekey/reconcile, so account controls stay in a loading state until it has
   // finished and we have re-read the resulting storage state.
-  const loadSessionsResult = (): Promise<SessionsResult> => {
-    lastSessionsPollAt = Date.now();
-    return sendRuntimeRequest('getSessionsSnapshot')
-      .then((sessions): SessionsResult => (
-        Array.isArray(sessions)
-          ? { ok: true, sessions }
-          : { ok: false, error: new Error('Invalid sessions snapshot response') }
-      ))
-      .catch((error: unknown): SessionsResult => ({ ok: false, error }));
-  };
-  const sessionsResultPromise = loadSessionsResult();
+  const sessionsResultPromise = sendRuntimeRequest('getSessionsSnapshot')
+    .then((sessions):
+      | { ok: true; sessions: SessionSnapshotEntry[] }
+      | { ok: false; error: unknown } => (
+      Array.isArray(sessions)
+        ? { ok: true, sessions }
+        : { ok: false, error: new Error('Invalid sessions snapshot response') }
+    ))
+    .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error }));
   // This first read must stay non-mutating. Session discovery owns account
   // identity reconciliation and runs concurrently; a full-state migration
   // write from an older snapshot could otherwise restore pre-rekey mappings.
@@ -283,72 +228,37 @@ async function render(): Promise<void> {
   hero.style.gap = '8px';
   hero.style.position = 'relative';
   const title = document.createElement('h1');
-  title.textContent = COPY.pageTitle;
+  title.textContent = 'ChatGoose Settings';
   title.style.margin = '0';
   const subtitle = document.createElement('div');
-  subtitle.textContent = COPY.pageSubtitle;
+  subtitle.textContent = 'Configure generation, Agency Hub, persona mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
   hero.append(createVersionTag(extensionVersion), title, subtitle);
   root.append(hero);
 
-  // ─── Readiness hero (route → pulse) ─────────────────────────
-  // Derives entirely from the SAME `statusModel` the Статус rows paint from —
-  // zero new requests, no own fetch. Rendered by `updateReadinessHero` below.
-  const readinessHero = document.createElement('section');
-  readinessHero.className = 'chatgoose-readiness';
-  readinessHero.dataset.readinessHero = 'true';
-  root.append(readinessHero);
-
-  // ─── Shell (nav + main) ─────────────────────────────────────
-  // Nav order == card order == the registration order below. Sections are
-  // built in place further down and registered as one ordered block, anchored
-  // immediately before the future-schema barrier so its catch-up can find and
-  // disable the real controls (see the registration block for the invariant).
-  const shell = buildShell([
-    { id: 'status', title: COPY.nav.status },
-    { id: 'hub', title: COPY.nav.hub },
-    { id: 'personas', title: COPY.nav.personas },
-    { id: 'accounts', title: COPY.nav.accounts },
-    { id: 'generation', title: COPY.nav.generation },
-    { id: 'appearance', title: COPY.nav.appearance },
-    { id: 'version', title: COPY.nav.version },
-  ]);
-  root.append(shell.layout);
-  cleanupTasks.push(() => shell.dispose());
-
-  // Central save feedback. Mounted once per render as a direct child of root,
-  // never on the legacy-persona recovery page path. Success save paths call
-  // showSaved(); caught save errors ALSO call showError() beside (never
-  // replacing) their existing console.error.
-  const savedFlash = createSavedFlash();
-  savedFlash.root.dataset.savedFlash = 'true';
-  root.append(savedFlash.root);
-
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
-    COPY.sections.appearanceTitle,
-    COPY.sections.appearanceHint,
+    'Appearance',
+    'One family look, light and dark. System follows your OS.',
   );
-  // The chip group's hidden <select> is `themeSelect` — the SAME binding the
-  // form signature, listener array, and pagehide path already read. Clicking a
-  // chip fires input/change on that select, so the central save controller
-  // persists uiTheme with zero edits to the save logic below.
-  const themeChips = createChipGroup(
-    [
-      { value: 'system', label: 'Системная' },
-      { value: 'light', label: 'Светлая' },
-      { value: 'dark', label: 'Тёмная' },
-    ],
-    state.settings.uiTheme,
-  );
-  const themeSelect = themeChips.input;
-  appearanceSection.append(themeChips.root);
+  const themeSelect = document.createElement('select');
+  themeSelect.className = 'chatgoose-select';
+  const themeChoices: Array<{ value: UiThemeSetting; label: string }> = [
+    { value: 'system', label: 'System' },
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+  ];
+  for (const choice of themeChoices) {
+    const option = document.createElement('option');
+    option.value = choice.value;
+    option.textContent = choice.label;
+    themeSelect.append(option);
+  }
+  themeSelect.value = state.settings.uiTheme;
+  appearanceSection.append(labeledField('Theme', themeSelect));
 
   // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
-  const apiSection = createSection(
-    COPY.sections.generationTitle,
-    COPY.sections.generationHint,
-  );
+  const apiSection = createSection('Generation');
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -378,38 +288,29 @@ async function render(): Promise<void> {
   deepInput.max = '3000';
   deepInput.value = String(state.settings.deepMessageCount);
 
-  const countsGrid = document.createElement('div');
-  countsGrid.className = 'chatgoose-counts-grid';
-  const countField = (label: string, input: HTMLInputElement): HTMLElement => {
-    input.classList.add('chatgoose-num');
-    const wrap = document.createElement('label');
-    wrap.className = 'chatgoose-count-field';
-    const text = document.createElement('span');
-    text.textContent = label;
-    wrap.append(text, input);
-    return wrap;
-  };
-  countsGrid.append(
-    countField('Reply + Help', quickInput),
-    countField('Ping', pingInput),
-    countField('Fix', improveInput),
-    countField('Deep — Summary, Review', deepInput),
-  );
-
-  // `debugInput` keeps its name: it is now the toggle's hidden checkbox, still
-  // in the listener array and form signature, so no save logic changes.
-  const advanced = document.createElement('div');
-  advanced.className = 'chatgoose-advanced';
-  const debugToggle = createToggle('Debug mode', 'окно отладки промпта');
-  const debugInput = debugToggle.input;
+  const debugInput = document.createElement('input');
+  debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
-  advanced.append(createCap('Дополнительно'), debugToggle.root);
-  apiSection.append(countsGrid, advanced);
+
+  const debugLabel = document.createElement('label');
+  debugLabel.style.display = 'flex';
+  debugLabel.style.gap = '10px';
+  debugLabel.style.alignItems = 'center';
+  debugLabel.style.fontWeight = '600';
+  debugLabel.append(debugInput, document.createTextNode('Enable debug mode'));
+
+  apiSection.append(
+    labeledField('Reply + Help message count', quickInput),
+    labeledField('Ping message count', pingInput),
+    labeledField('Fix message count', improveInput),
+    labeledField('Deep feature message count', deepInput),
+    debugLabel,
+  );
 
   // ─── Agency Hub ───────────────────────────────────────────
   const agencyHubSection = createSection(
-    COPY.sections.hubTitle,
-    COPY.sections.hubHint,
+    'Agency Hub',
+    'Push Fan Summary results to Agency Hub for durable storage and version history.',
   );
   const agencyHubUrlInput = document.createElement('input');
   agencyHubUrlInput.type = 'url';
@@ -421,15 +322,12 @@ async function render(): Promise<void> {
   agencyHubKeyInput.type = 'password';
   agencyHubKeyInput.autocomplete = 'off';
   agencyHubKeyInput.className = 'chatgoose-input';
-  // The field lives inside a collapsed <details>; give it a standalone
-  // accessible name since its <summary> label is not programmatically linked.
-  agencyHubKeyInput.setAttribute('aria-label', 'Legacy chatter key');
   agencyHubKeyInput.value = state.settings.agencyHubApiKey;
 
-  const agencyHubToggle = createButton('Показать', true);
+  const agencyHubToggle = createButton('Show', true);
   agencyHubToggle.addEventListener('click', () => {
     agencyHubKeyInput.type = agencyHubKeyInput.type === 'password' ? 'text' : 'password';
-    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password' ? 'Показать' : 'Скрыть';
+    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password' ? 'Show' : 'Hide';
   });
 
   const agencyHubKeyRow = document.createElement('div');
@@ -446,7 +344,7 @@ async function render(): Promise<void> {
   agencyHubPermissionMeta.style.color = 'var(--chatgoose-ink-mid)';
   agencyHubPermissionMeta.style.fontSize = '13px';
 
-  const agencyHubPermissionButton = createButton('Разрешить доступ', true);
+  const agencyHubPermissionButton = createButton('Grant Access', true);
   const agencyHubConnectionStatus = document.createElement('div');
   agencyHubConnectionStatus.style.fontWeight = '600';
   agencyHubConnectionStatus.style.fontSize = '14px';
@@ -455,13 +353,15 @@ async function render(): Promise<void> {
   agencyHubConnectionMeta.style.color = 'var(--chatgoose-ink-mid)';
   agencyHubConnectionMeta.style.fontSize = '13px';
 
-  const agencyHubConnectionButton = createButton('Проверить соединение', true);
+  const agencyHubConnectionButton = createButton('Test Connection', true);
+  const agencyHubActionRow = document.createElement('div');
+  agencyHubActionRow.style.display = 'flex';
+  agencyHubActionRow.style.gap = '8px';
+  agencyHubActionRow.style.flexWrap = 'wrap';
+  agencyHubActionRow.append(agencyHubPermissionButton, agencyHubConnectionButton);
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
-  // Monotonic run id for hydrateHubStatusRows: a newer run bumps it, so an older
-  // same-signature run that resolves out of order drops its paint (see below).
-  let agencyHubHydrationRun = 0;
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
@@ -472,32 +372,32 @@ async function render(): Promise<void> {
 
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
-        agencyHubConnectionStatus.textContent = 'Ещё не проверялось.';
+        agencyHubConnectionStatus.textContent = 'Not tested yet.';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
-        agencyHubConnectionMeta.textContent = 'Сохрани адрес Hub и ключ, чтобы запустить живой тест соединения.';
+        agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
         return;
       case 'pending':
-        agencyHubConnectionStatus.textContent = 'Статус соединения обновляется…';
+        agencyHubConnectionStatus.textContent = 'Connection status updating…';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
-        agencyHubConnectionMeta.textContent = 'Сохраняю изменения Agency Hub перед следующим живым тестом.';
+        agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
         return;
       case 'testing':
-        agencyHubConnectionStatus.textContent = 'Проверяю соединение…';
+        agencyHubConnectionStatus.textContent = 'Testing connection…';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
-        agencyHubConnectionMeta.textContent = 'Проверяю доступность Hub, разрешения и ключ.';
+        agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
         return;
       case 'connected':
-        agencyHubConnectionStatus.textContent = 'Соединение OK ✓';
+        agencyHubConnectionStatus.textContent = 'Connected ✓';
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-green)';
-        agencyHubConnectionMeta.textContent = `Живой тест соединения прошёл: ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
+        agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
-        agencyHubConnectionStatus.textContent = `Соединение не удалось: ${failedError.code}`;
+        agencyHubConnectionStatus.textContent = `Connection failed: ${failedError.code}`;
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-bad)';
         const serverEcho = typeof failedError.httpStatus === 'number'
-          ? `Hub ответил ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
+          ? `Hub responded ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
           : null;
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -537,12 +437,6 @@ async function render(): Promise<void> {
     );
 
     if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
-      // Bump the version BEFORE returning: an in-flight pre-sign-out test that
-      // captured the old version must fail its `version !== agencyHubConnectionVersion`
-      // guard when it resolves, or it would repaint «Соединение OK» over the now
-      // signed-out state. The old early-return skipped this bump, leaving the
-      // stale test's version still current.
-      agencyHubConnectionVersion += 1;
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
       renderAgencyHubConnectionState();
@@ -595,18 +489,13 @@ async function render(): Promise<void> {
       agencyHubConnectionFeedback = {
         kind: 'failed',
         error: createUserError('hub_request_failed', {
-          description: 'Не удалось выполнить проверку соединения.',
+          description: 'The connection test could not be completed.',
         }),
       };
       lastAgencyHubConnectionSignature = null;
     }
 
     renderAgencyHubConnectionState();
-    // The connection outcome gates the hero's hub step (hubDone now requires a
-    // `connected` feedback), so repaint the hero whenever the test result lands.
-    // Safe forward reference: this runs only after render() has defined the hero
-    // updater (mount-tail test and all post-mount user triggers fire far later).
-    updateReadinessHero();
   };
 
   let agencyHubPermissionRefreshVersion = 0;
@@ -627,38 +516,18 @@ async function render(): Promise<void> {
       agencyHubPermissionFeedback = null;
     }
 
-    agencyHubPermissionButton.textContent = permissionGranted ? 'Переподключить' : 'Разрешить доступ';
+    agencyHubPermissionButton.textContent = permissionGranted ? 'Reconnect' : 'Grant Access';
     agencyHubPermissionButton.disabled = !originPattern;
 
-    // Badge reflection computed ONCE here — after the staleness guard (a
-    // superseded refresh must not restamp it) but before the seven status
-    // early returns below, so no forgotten branch can strand it on the «…»
-    // placeholder. permissionBadge is created in the section composition
-    // below and only ever read here, long after that runs (E37 barrier).
-    const setPermissionBadge = (label: string, tone: 'green' | 'amber' | 'neutral'): void => {
-      permissionBadge.textContent = label;
-      permissionBadge.className = `chatgoose-badge chatgoose-badge-${tone}`;
-      permissionBadge.dataset.hubPermissionBadge = 'true';
-    };
-    if (!originPattern) {
-      setPermissionBadge('нет адреса', 'neutral'); // empty or invalid hub URL
-    } else if (permissionGranted) {
-      setPermissionBadge('разрешён', 'green'); // covers granted+no-credential too
-    } else if (permissionCheck.errorMessage) {
-      setPermissionBadge('не удалось проверить', 'neutral'); // a failed check is NOT a proven «не выдан»
-    } else {
-      setPermissionBadge('не выдан', 'amber');
-    }
-
     if (!agencyHubUrlInput.value.trim()) {
-      agencyHubPermissionStatus.textContent = 'Синк отключён: добавь адрес Agency Hub.';
-      agencyHubPermissionMeta.textContent = 'Укажи базовый адрес Hub и выдай доступ к этому origin.';
+      agencyHubPermissionStatus.textContent = 'Sync disabled: add an Agency Hub URL.';
+      agencyHubPermissionMeta.textContent = 'Enter the Hub base URL, then grant host access for that origin.';
       return;
     }
 
     if (!normalizedBaseUrl) {
-      agencyHubPermissionStatus.textContent = 'Синк отключён: неверный адрес Agency Hub.';
-      agencyHubPermissionMeta.textContent = 'Укажи полный http:// или https:// адрес.';
+      agencyHubPermissionStatus.textContent = 'Sync disabled: invalid Agency Hub URL.';
+      agencyHubPermissionMeta.textContent = 'Use a full http:// or https:// base URL.';
       return;
     }
 
@@ -669,9 +538,9 @@ async function render(): Promise<void> {
           : null;
 
       if (permissionCheck.errorMessage) {
-        agencyHubPermissionStatus.textContent = 'Синк отключён: не удалось проверить доступ к хосту.';
+        agencyHubPermissionStatus.textContent = 'Sync disabled: host access could not be verified.';
         agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-          `Firefox вернул ошибку при проверке ${originPattern}: ${permissionCheck.errorMessage}.`,
+          `Firefox returned an error while checking ${originPattern}: ${permissionCheck.errorMessage}.`,
           permissionScopeNote,
         );
         return;
@@ -680,23 +549,23 @@ async function render(): Promise<void> {
       if (permissionFeedback) {
         switch (permissionFeedback.kind) {
           case 'denied':
-            agencyHubPermissionStatus.textContent = 'Синк отключён: доступ к хосту не выдан.';
+            agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
             agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              `Firefox не выдал доступ к ${originPattern}. Нажми «Разрешить доступ», чтобы повторить.`,
+              `Firefox did not grant access for ${originPattern}. Click Grant Access to try again.`,
               permissionScopeNote,
             );
             return;
           case 'request_error':
-            agencyHubPermissionStatus.textContent = 'Синк отключён: не удалось запросить доступ к хосту.';
+            agencyHubPermissionStatus.textContent = 'Sync disabled: failed to request host access.';
             agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              `Firefox вернул ошибку при запросе ${originPattern}: ${permissionFeedback.errorMessage}.`,
+              `Firefox returned an error while requesting ${originPattern}: ${permissionFeedback.errorMessage}.`,
               permissionScopeNote,
             );
             return;
           case 'unsupported':
-            agencyHubPermissionStatus.textContent = 'Синк отключён: запрос доступа к хосту недоступен.';
+            agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
             agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              'Эта сборка браузера не предоставляет browser.permissions.request для доступа к Agency Hub.',
+              'This browser build does not expose browser.permissions.request for Agency Hub access.',
               permissionScopeNote,
             );
             return;
@@ -704,26 +573,26 @@ async function render(): Promise<void> {
       }
 
       if (typeof browser.permissions?.request !== 'function') {
-        agencyHubPermissionStatus.textContent = 'Синк отключён: запрос доступа к хосту недоступен.';
+        agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
         agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-          'Эта сборка браузера не предоставляет browser.permissions.request для доступа к Agency Hub.',
+          'This browser build does not expose browser.permissions.request for Agency Hub access.',
           permissionScopeNote,
         );
         return;
       }
 
-      agencyHubPermissionStatus.textContent = 'Синк отключён: доступ к хосту не выдан.';
+      agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Выдай доступ к ${originPattern}, чтобы ChatGoose мог отправлять сводки.`,
+        `Grant access for ${originPattern} before ChatGoose can push summaries.`,
         permissionScopeNote,
       );
       return;
     }
 
     if (!hasApiKey) {
-      agencyHubPermissionStatus.textContent = 'Синк отключён: нет учётных данных Agency Hub.';
+      agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub credential missing.';
       agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Доступ к ${originPattern} выдан, но ChatGoose нужны учётные данные — войди или добавь ключ Hub.`,
+        `Host access is granted for ${originPattern}, but ChatGoose still needs a credential — sign in or add the hub key.`,
         permissionScopeNote,
       );
       return;
@@ -731,9 +600,9 @@ async function render(): Promise<void> {
 
     // Never claim readiness here: this is a local check (permission + a
     // non-empty credential) — only the live connection test below proves sync.
-    agencyHubPermissionStatus.textContent = 'Доступ к хосту выдан.';
+    agencyHubPermissionStatus.textContent = 'Host access granted.';
     agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-      `ChatGoose может достучаться до ${originPattern}. Синк заработает, когда пройдёт проверка соединения ниже.`,
+      `ChatGoose can reach ${originPattern}. Sync goes live once the connection test below passes.`,
       permissionScopeNote,
     );
   };
@@ -810,36 +679,20 @@ async function render(): Promise<void> {
     })();
   });
 
-  // Shared read-only model the Статус rows and the readiness hero both read
-  // (painted below in hydrateHubStatusRows / the Fansly row; the hero re-renders
-  // from this). Declared HERE — above the hub sign-in block — so renderHubIdentity,
-  // a pure reader of statusModel.identity, can run at the very first
-  // renderHubSignInState() mount paint without a temporal-dead-zone ReferenceError.
-  const statusModel: {
-    fanslyAccounts: number;
-    // The account ids that currently have a CAPTURED session — the hero's step-3
-    // readiness reads only this set, never every knownAccount (an offline
-    // historical account with an archived mapping must not block «Всё работает»).
-    fanslyCapturedAccountIds: string[];
-    fanslyFreshest: SessionSnapshotEntry | undefined;
-    health: AgencyHubHealthResponse | null;
-    identity: AgencyHubIdentityResponse | null;
-  } = { fanslyAccounts: 0, fanslyCapturedAccountIds: [], fanslyFreshest: undefined, health: null, identity: null };
-
   // ── Stage 32: one-time device-token sign-in (preferred over the key) ──
   const hubSignInUserInput = document.createElement('input');
   hubSignInUserInput.type = 'text';
   hubSignInUserInput.autocomplete = 'username';
   hubSignInUserInput.className = 'chatgoose-input';
-  hubSignInUserInput.placeholder = 'Логин Hub';
+  hubSignInUserInput.placeholder = 'Hub username';
 
   const hubSignInPasswordInput = document.createElement('input');
   hubSignInPasswordInput.type = 'password';
   hubSignInPasswordInput.autocomplete = 'current-password';
   hubSignInPasswordInput.className = 'chatgoose-input';
-  hubSignInPasswordInput.placeholder = 'Пароль Hub';
+  hubSignInPasswordInput.placeholder = 'Hub password';
 
-  const hubSignInButton = createButton('Войти и выпустить token', true);
+  const hubSignInButton = createButton('Sign in & issue device token', true);
   const hubSignInStatus = document.createElement('div');
   hubSignInStatus.style.fontWeight = '600';
   hubSignInStatus.style.fontSize = '14px';
@@ -847,68 +700,18 @@ async function render(): Promise<void> {
   hubSignInMeta.style.color = 'var(--chatgoose-ink-mid)';
   hubSignInMeta.style.fontSize = '13px';
 
-  // TDZ fix: construct BOTH the sign-in row and the signed-in block ABOVE the
-  // first renderHubSignInState() call — that call reads .hidden on each, so
-  // leaving either below would throw a ReferenceError at every options mount.
-  const hubSignInRow = document.createElement('div');
-  // Shared toggle class: its author-origin `[hidden] { display: none !important }`
-  // rule (styles.css) beats the inline display below, so `.hidden = true` really
-  // hides the row instead of being overridden by the inline author style.
-  hubSignInRow.className = 'chatgoose-hub-signin-toggle';
-  hubSignInRow.style.display = 'flex';
-  hubSignInRow.style.gap = '8px';
-  hubSignInRow.style.flexWrap = 'wrap';
-  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
-
-  const hubSignOutButton = createButton('Выйти', true, true); // ghost + danger
-  const hubActiveBadge = createBadge('активен', 'green');
-  const hubIdentityLine = document.createElement('div');   // spec §6: username · role · pages
-  hubIdentityLine.dataset.role = 'hub-identity-line';
-  hubIdentityLine.className = 'chatgoose-hub-identity-line';
-  const hubTokenLine = document.createElement('div');
-  hubTokenLine.dataset.role = 'hub-token-line';
-  hubTokenLine.className = 'chatgoose-hub-token-line';
-  const hubSignedInTop = document.createElement('div');
-  hubSignedInTop.style.display = 'flex';
-  hubSignedInTop.style.gap = '8px';
-  hubSignedInTop.style.alignItems = 'center';
-  hubSignedInTop.append(hubActiveBadge, hubSignOutButton);
-  const hubSignedInBlock = document.createElement('div');
-  hubSignedInBlock.dataset.role = 'hub-signed-in';
-  // Same shared toggle class as the sign-in row: the `!important` hidden rule
-  // beats this inline `display: grid` so the signed-in block truly hides.
-  hubSignedInBlock.className = 'chatgoose-hub-signin-toggle';
-  hubSignedInBlock.style.display = 'grid';
-  hubSignedInBlock.style.gap = '6px';
-  hubSignedInBlock.append(hubSignedInTop, hubIdentityLine, hubTokenLine);
-
-  const renderHubIdentity = (): void => {
-    // Pure reader of P2's guarded statusModel — pages is string[] (P2 contract).
-    const identity = statusModel.identity;
-    hubIdentityLine.textContent = identity && identity.ok
-      ? `${identity.username} · ${identity.role} · страниц: ${identity.pages.length}`
-      : 'identity недоступна';
-  };
-
   const renderHubSignInState = (): void => {
-    const token = state.settings.agencyHubDeviceToken.trim();
-    const signedIn = Boolean(token);
-    hubSignInRow.hidden = signedIn;         // hide username/password/«Войти»…
-    hubSignedInBlock.hidden = !signedIn;    // …and show the badge/identity/token/«Выйти»
-    if (signedIn) {
-      // Masked prefix only. No expiry date: issuance metadata is not persisted,
-      // /me does not return it, and sliding expiry makes a stored date a lie.
-      hubTokenLine.textContent = `${token.slice(0, 24)}… · продлевается при работе`;
-      renderHubIdentity();                  // spec §6: username · role · pages
-    }
-    hubSignInStatus.textContent = signedIn
-      ? 'Device token активен ✓'
-      : 'Device token ещё не выпущен.';
-    hubSignInStatus.style.color = signedIn ? 'var(--chatgoose-green)' : 'var(--chatgoose-ink)';
+    const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
+    hubSignInStatus.textContent = hasToken
+      ? 'Device token active ✓'
+      : 'No device token yet.';
+    hubSignInStatus.style.color = hasToken
+      ? 'var(--chatgoose-green)'
+      : 'var(--chatgoose-ink)';
     if (!hubSignInMeta.textContent) {
-      hubSignInMeta.textContent = signedIn
-        ? 'Запросы к Hub используют device token; legacy-ключ — запасной вариант.'
-        : 'Войди один раз, чтобы выпустить привязанный к устройству token — больше не нужно вставлять ключ, и он переживает ротацию ключа.';
+      hubSignInMeta.textContent = hasToken
+        ? 'Hub requests use the device token; the legacy API key is the fallback.'
+        : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
     }
   };
 
@@ -917,11 +720,11 @@ async function render(): Promise<void> {
       const username = hubSignInUserInput.value.trim();
       const password = hubSignInPasswordInput.value;
       if (!username || !password || !agencyHubUrlInput.value.trim()) {
-        hubSignInMeta.textContent = 'Сначала укажи адрес Hub, логин и пароль.';
+        hubSignInMeta.textContent = 'Enter the Hub base URL, username, and password first.';
         return;
       }
       hubSignInButton.disabled = true;
-      hubSignInMeta.textContent = 'Вхожу…';
+      hubSignInMeta.textContent = 'Signing in…';
       try {
         // Finish the shared local form write before the background issues a
         // device token from those Hub inputs. This prevents a delayed local
@@ -937,14 +740,11 @@ async function render(): Promise<void> {
           // returns only metadata; a placeholder here would later be SENT as
           // the bearer by the connection test (1.7.0 audit finding).
           state.settings = (await loadStorageState()).settings;
-          // The freshly-issued device token makes checkIdentity return AUTH, so
-          // the Доступ row (and the hero) flip in place — no reload, no remount.
-          void hydrateHubStatusRows(storedHubSignature());
           hubSignInPasswordInput.value = '';
           hubSignInMeta.textContent =
-            `Device token ${response.keyPrefix}… выпущен (истекает ${new Date(response.expiresAt).toLocaleDateString()}).`;
+            `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
         } else {
-          hubSignInMeta.textContent = `Вход не удался: ${response.error.message}`;
+          hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
         }
       } finally {
         hubSignInButton.disabled = false;
@@ -952,122 +752,25 @@ async function render(): Promise<void> {
       }
     })();
   });
-  hubSignOutButton.addEventListener('click', () => {
-    void (async () => {
-      hubSignOutButton.disabled = true;
-      hubSignInUserInput.disabled = true;
-      hubSignInPasswordInput.disabled = true;
-      agencyHubKeyInput.disabled = true;
-      let outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed' = 'unreachable';
-      try {
-        // (1) Flush our own pending writes and AWAIT them. flushSettingsSave()
-        // RUNS any debounced-but-not-yet-fired edit (a <350ms typed change with
-        // no blur/change event) before awaiting the chain — using .cancel() here
-        // instead would DROP that pending snapshot, silently losing the edit.
-        await flushSettingsSave();
-
-        // (2) After this point no page write may own the custody field: clear the
-        // dirty flag and the visible input BEFORE the background wipe, so neither
-        // a later change-event nor pagehide can replay the old key.
-        agencyHubApiKeyDirty = false;
-        if (document.activeElement !== agencyHubKeyInput) {
-          agencyHubKeyInput.value = '';
-        }
-
-        // (3) The background does the durable work (Task 2): wipe BOTH custody
-        // keys to EMPTY strings FIRST (storage write survives page close), then
-        // best-effort revoke with the captured token (~5s). The token never
-        // crosses the runtime boundary.
-        try {
-          const response = await sendRuntimeRequest('signOutAgencyHub');
-          outcome = response?.outcome ?? 'unreachable';
-        } catch (error) {
-          // The REQUEST itself failed — the background may have wiped nothing.
-          // Claiming «стёрт локально» here would be a lie; treat it like a
-          // failed wipe (loud, credentials possibly still present).
-          console.error('Sign-out request failed', error);
-          outcome = 'wipe-failed';
-        }
-
-        // (4) Re-read the truth the background wrote (same pattern as the
-        // sign-in success handler).
-        state.settings = (await loadStorageState()).settings;
-      } finally {
-        hubSignOutButton.disabled = false;
-        hubSignInUserInput.disabled = false;
-        hubSignInPasswordInput.disabled = false;
-        agencyHubKeyInput.disabled = false;
-      }
-
-      // (5) One honest message per outcome. The three server outcomes ride the
-      // sign-in meta line; a failed LOCAL wipe is the red saved-flash —
-      // credentials may still be present, the loud case.
-      if (outcome === 'wipe-failed') {
-        savedFlash.showError('не удалось выполнить выход — попробуй ещё раз');
-        // Restore the visible key field from re-read truth: on a failed wipe
-        // the key may still be on disk, and an empty input would misreport it.
-        if (document.activeElement !== agencyHubKeyInput) {
-          agencyHubKeyInput.value = state.settings.agencyHubApiKey;
-        }
-      } else if (outcome === 'revoked') {
-        hubSignInMeta.textContent = 'Device token отозван на хабе.';
-      } else if (outcome === 'already-invalid') {
-        // already-invalid covers 401, 403 AND the no-token-to-revoke case, so a
-        // hard-coded «Хаб ответил 401» would fabricate a status the hub never sent.
-        hubSignInMeta.textContent = 'Token уже недействителен или отсутствует — стёрт локально.';
-      } else {
-        hubSignInMeta.textContent = 'Хаб недоступен — token стёрт локально, на сервере умрёт по sliding-expiry.';
-      }
-
-      renderHubSignInState();
-      if (!disposed) {
-        await refreshAgencyHubPermissionState();
-        await runAgencyHubConnectionTest({ force: true });
-        // P2's guarded refresh: the Доступ row and the readiness hero must flip
-        // without a reload (P2 exposes hydrateHubStatusRows + storedHubSignature).
-        void hydrateHubStatusRows(storedHubSignature());
-      }
-    })();
-  });
-
   renderHubSignInState();
 
-  const hubSignInBlock = document.createElement('div');
-  hubSignInBlock.style.display = 'grid';
-  hubSignInBlock.style.gap = '7px';
-  hubSignInBlock.append(hubSignInRow, hubSignedInBlock, hubSignInStatus, hubSignInMeta);
-
-  const permissionBadge = createBadge('…', 'neutral');
-  permissionBadge.dataset.hubPermissionBadge = 'true';
-  const permissionBlock = document.createElement('div');
-  permissionBlock.style.display = 'grid';
-  permissionBlock.style.gap = '6px';
-  const permissionTop = document.createElement('div');
-  permissionTop.style.display = 'flex';
-  permissionTop.style.gap = '8px';
-  permissionTop.style.alignItems = 'center';
-  permissionTop.append(permissionBadge, agencyHubPermissionButton);
-  permissionBlock.append(permissionTop, agencyHubPermissionStatus, agencyHubPermissionMeta);
-
-  const legacyDetails = document.createElement('details');
-  legacyDetails.className = 'chatgoose-hub-legacy';
-  const legacySummary = document.createElement('summary');
-  legacySummary.textContent = 'Legacy chatter key — на период миграции';
-  legacyDetails.append(legacySummary, agencyHubKeyRow);
-
-  const testLine = document.createElement('div');
-  testLine.dataset.hubTestLine = 'true';
-  testLine.append(agencyHubConnectionStatus, agencyHubConnectionMeta);
-  const hubFooter = document.createElement('div');
-  hubFooter.className = 'chatgoose-hub-footer';
-  hubFooter.append(testLine, agencyHubConnectionButton);
+  const hubSignInRow = document.createElement('div');
+  hubSignInRow.style.display = 'flex';
+  hubSignInRow.style.gap = '8px';
+  hubSignInRow.style.flexWrap = 'wrap';
+  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
 
   agencyHubSection.append(
-    createLabelRow('Адрес Hub', agencyHubUrlInput),
-    createLabelRow('Вход устройства', hubSignInBlock),
-    createLabelRow('Доступ Firefox', permissionBlock),
-    legacyDetails,
-    hubFooter,
+    labeledField('Agency Hub base URL', agencyHubUrlInput),
+    labeledField('Sign in (device token)', hubSignInRow),
+    hubSignInStatus,
+    hubSignInMeta,
+    labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
+    agencyHubPermissionStatus,
+    agencyHubPermissionMeta,
+    agencyHubConnectionStatus,
+    agencyHubConnectionMeta,
+    agencyHubActionRow,
   );
 
   // ─── AI Models ───────────────────────────────────────────
@@ -1083,7 +786,7 @@ async function render(): Promise<void> {
     deepInput.value,
     debugInput.checked,
   ]);
-  const collectSettingsPatch = (): Partial<Settings> => {
+  const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
     const patch: Partial<Settings> = {
       uiTheme: themeSelect.value as UiThemeSetting,
       agencyHubBaseUrl: agencyHubUrlInput.value,
@@ -1096,7 +799,10 @@ async function render(): Promise<void> {
     // The API key has its own custody key. A theme/count save from a stale
     // Options tab must not write the old visible value over a rotation made by
     // another tab or the background. Only an explicit edit owns this field.
-    if (agencyHubApiKeyDirty) {
+    if (
+      agencyHubApiKeyDirty ||
+      (forceHubSnapshot && agencyHubKeyInput.value !== state.settings.agencyHubApiKey)
+    ) {
       patch.agencyHubApiKey = agencyHubKeyInput.value;
     }
     return patch;
@@ -1122,7 +828,7 @@ async function render(): Promise<void> {
   let settingsSnapshotVersion = 0;
   let agencyHubApiKeySnapshotVersion = 0;
   let settingsSaveChainSignature: string | null = null;
-  const queueSettingsSave = (): Promise<void> => {
+  const queueSettingsSave = (forceHubSnapshot = false): Promise<void> => {
     if (futureSchemaObserved !== null) {
       settingsDirty = false;
       return Promise.resolve();
@@ -1131,7 +837,7 @@ async function render(): Promise<void> {
     // storage read must not be allowed to finish after a newer edit and put an
     // older form snapshot back into storage.
     const formSignature = settingsFormSignature();
-    const patch = collectSettingsPatch();
+    const patch = collectSettingsPatch(forceHubSnapshot);
     const snapshotVersion = ++settingsSnapshotVersion;
     if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
       agencyHubApiKeySnapshotVersion = snapshotVersion;
@@ -1165,7 +871,6 @@ async function render(): Promise<void> {
         return;
       }
       state.settings = mergedSettings;
-      savedFlash.showSaved();
 
       if (disposed) {
         return;
@@ -1203,10 +908,6 @@ async function render(): Promise<void> {
           if (!disposed) {
             await runAgencyHubConnectionTest({ force: true });
           }
-          // Repaint Статус against the snapshot THIS persist wrote. The guard
-          // inside binds to `hubSignature`, so a run this persist fired against
-          // hub B silently drops if the live field has since moved to hub C.
-          await hydrateHubStatusRows(hubSignature);
         })().catch((error: unknown) => {
           console.error('Failed to refresh Agency Hub status after Settings save', error);
         });
@@ -1218,7 +919,6 @@ async function render(): Promise<void> {
     const settled = execution
       .catch((error: unknown) => {
         console.error('Failed to save Settings changes', error);
-        savedFlash.showError('настройки не сохранились — повтори');
       });
     settingsSaveChain = settled;
     settingsSaveChainSignature = formSignature;
@@ -1254,11 +954,11 @@ async function render(): Promise<void> {
       return settingsSaveChain;
     }
 
-    // Hub actions are explicit persistence boundaries for form-owned fields.
-    // The custody key itself is included only after its input emitted an edit;
-    // a stale programmatic value must never become credential ownership.
+    // Hub actions are explicit persistence boundaries. They must save even
+    // when values were assigned programmatically (no input/change event), or
+    // when the current form differs from the active queued snapshot.
     saveSettingsDebounced.cancel();
-    return queueSettingsSave();
+    return queueSettingsSave(true);
   };
 
   [
@@ -1315,10 +1015,6 @@ async function render(): Promise<void> {
       void (async () => {
         await refreshAgencyHubPermissionState();
         await runAgencyHubConnectionTest({ force: true });
-        // A granted origin flips a `no_permission` Hub/Доступ verdict to live
-        // without a reload. No unsaved edit is in play at a permission event,
-        // so the stored-settings signature is the expected snapshot.
-        await hydrateHubStatusRows(storedHubSignature());
       })();
     };
 
@@ -1329,10 +1025,14 @@ async function render(): Promise<void> {
       browser.permissions.onRemoved.removeListener(handlePermissionChanged);
     });
   }
+  root.append(appearanceSection);
+  root.append(apiSection);
+  root.append(agencyHubSection);
+
   // ─── Persona catalog (server-owned, metadata only) ─────────
   const personalitiesSection = createSection(
-    COPY.sections.personasTitle,
-    'Голоса управляются на сервере агентства; здесь — только каталог и привязки аккаунтов.',
+    'Model Personalities',
+    'Global personalities are managed by Agency Hub admins. This extension only reads the catalog and stores account mappings.',
   );
   const personalitiesList = document.createElement('div');
   personalitiesList.style.display = 'grid';
@@ -1340,82 +1040,37 @@ async function render(): Promise<void> {
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
   const renderPersonaCatalog = (): void => {
-    personaChangedLine.textContent = formatCatalogChangedAt(state.personaCatalogFetchedAt);
     personalitiesList.replaceChildren();
-    const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
-    if (rows.length === 0) {
+    if (state.personaCatalog.length === 0) {
       const empty = document.createElement('div');
-      empty.dataset.role = 'persona-empty';
+      empty.textContent = 'No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.';
       empty.style.color = 'var(--chatgoose-ink-mid)';
-      empty.style.fontSize = '12.5px';
-      // rawCount > 0 with zero rows means every persona was archived AND
-      // unreferenced (filtered out) — a real, non-empty catalog. Only a genuinely
-      // empty raw catalog defers to the credential/fetch-state classifier.
-      empty.textContent = state.personaCatalog.length > 0
-        ? PERSONA_ALL_ARCHIVED_COPY
-        : PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
-            currentSource: personaCatalogSource(state.settings),
-            storedSource: state.personaCatalogSource,
-            fetchedAt: state.personaCatalogFetchedAt,
-          })];
       personalitiesList.append(empty);
       return;
     }
-    for (const view of rows) {
-      const row = document.createElement('div');
-      row.className = view.archived
-        ? 'chatgoose-persona-row chatgoose-persona-row-archived'
-        : 'chatgoose-persona-row';
-      row.dataset.personaKey = view.key;
-      const main = document.createElement('div');
-      main.className = 'chatgoose-persona-main';
-      const name = document.createElement('span');
-      name.className = 'chatgoose-persona-name';
-      name.textContent = view.displayName;
-      main.append(name);
-      if (view.builtin) {
-        main.append(createBadge('built-in', 'neutral'));
-      }
-      main.append(createBadge(`v${view.version}`, 'neutral', true));
-      const count = document.createElement('span');
-      count.className = 'chatgoose-persona-count';
-      count.textContent = `аккаунтов: ${view.accountCount}`;
-      main.append(count);
-      row.append(main);
-      if (view.archived) {
-        const hint = document.createElement('div');
-        hint.className = 'chatgoose-persona-hint';
-        hint.textContent = 'в архиве · выбери замену';
-        row.append(hint);
-      }
-      personalitiesList.append(row);
+    for (const persona of state.personaCatalog) {
+      const card = document.createElement('div');
+      card.className = 'chatgoose-card';
+      card.dataset.personaKey = persona.key;
+      const heading = document.createElement('div');
+      heading.textContent = persona.displayName;
+      heading.style.fontWeight = '700';
+      const meta = document.createElement('div');
+      meta.textContent = `${persona.key} • version ${persona.version} • ${persona.status}`;
+      meta.style.fontSize = '12px';
+      meta.style.color = persona.status === 'active'
+        ? 'var(--chatgoose-ink-mid)'
+        : 'var(--chatgoose-bad)';
+      card.append(heading, meta);
+      personalitiesList.append(card);
     }
   };
+  renderPersonaCatalog();
 
   const preservationNote = document.createElement('div');
-  preservationNote.textContent = 'Легаси-тексты персон сохранены на этом устройстве без изменений. Экспортируй их перед удалением расширения или очисткой браузера.';
+  preservationNote.textContent = 'Legacy local persona text is preserved unchanged on this device. Export it before removing the extension or clearing browser data.';
   preservationNote.style.color = 'var(--chatgoose-ink-mid)';
   preservationNote.style.fontSize = '13px';
-
-  // Footer nodes: constructed BEFORE the first renderPersonaCatalog() call,
-  // which writes personaChangedLine.textContent on every render.
-  const personaFrozenNote = document.createElement('div');
-  personaFrozenNote.textContent = 'Редактирование голосов сейчас заморожено — включится владельческой консолью хаба.';
-  const personaChangedLine = document.createElement('div');
-  personaChangedLine.dataset.role = 'persona-changed';
-  const personaFooter = document.createElement('div');
-  personaFooter.className = 'chatgoose-persona-footer';
-  personaFooter.append(personaFrozenNote, personaChangedLine);
-
-  const preservationBlock = document.createElement('div');
-  preservationBlock.className = 'chatgoose-preservation';
-  preservationBlock.append(
-    createCap('Легаси-тексты'),
-    preservationNote,
-    createLegacyPersonaExportControls(),
-  );
-
-  renderPersonaCatalog();
 
   const flushPendingEdits = (): Promise<void> => {
     void flushSettingsSave();
@@ -1467,22 +1122,38 @@ async function render(): Promise<void> {
   window.addEventListener('pagehide', handlePageHide);
   cleanupTasks.push(() => window.removeEventListener('pagehide', handlePageHide));
 
-  personalitiesSection.append(personalitiesList, personaFooter, preservationBlock);
-
-  // ─── Аккаунты (merged: mappings + live capture status) ─────
-  const mappingsSection = createSection(
-    COPY.sections.accountsTitle,
-    COPY.sections.accountsHint,
+  personalitiesSection.append(
+    personalitiesList,
+    preservationNote,
+    createLegacyPersonaExportControls(),
   );
+  root.append(personalitiesSection);
+
+  // ─── Account Mappings ──────────────────────────────────────
+  const mappingsSection = createSection('Account Mappings');
   mappingsSection.dataset.sessionHydration = 'loading';
   const mappingsTable = document.createElement('div');
   mappingsTable.style.display = 'grid';
   mappingsTable.style.gap = '12px';
   const mappingsLoading = document.createElement('div');
-  mappingsLoading.textContent = 'Загружаю аккаунты Fansly…';
+  mappingsLoading.textContent = 'Loading Fansly accounts…';
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
+  root.append(mappingsSection);
+
+  // ─── Connection Status ─────────────────────────────────────
+  const connectionsSection = createSection('Connection Status');
+  connectionsSection.dataset.sessionHydration = 'loading';
+  const sessionsGrid = document.createElement('div');
+  sessionsGrid.style.display = 'grid';
+  sessionsGrid.style.gap = '10px';
+  const connectionsLoading = document.createElement('div');
+  connectionsLoading.textContent = 'Loading live connection status…';
+  connectionsLoading.style.color = 'var(--chatgoose-ink-mid)';
+  sessionsGrid.append(connectionsLoading);
+  connectionsSection.append(sessionsGrid);
+  root.append(connectionsSection);
 
   cleanupTasks.push(() => {
     disposed = true;
@@ -1519,14 +1190,14 @@ async function render(): Promise<void> {
   ): { label: string; usable: boolean } | null => {
     const unmapped = document.createElement('option');
     unmapped.value = '';
-    unmapped.textContent = '— не назначена —';
+    unmapped.textContent = 'Unmapped';
     select.replaceChildren(unmapped);
     for (const view of views) {
       const option = document.createElement('option');
       option.value = view.personality.key;
       option.textContent = view.usable
         ? view.label
-        : `${view.label} · в архиве`;
+        : `${view.label} · archived`;
       option.disabled = !view.usable;
       select.append(option);
     }
@@ -1537,7 +1208,7 @@ async function render(): Promise<void> {
     if (selectedPersonalityId && !selectedView) {
       const missing = document.createElement('option');
       missing.value = selectedPersonalityId;
-      missing.textContent = `Персона недоступна · ${selectedPersonalityId}`;
+      missing.textContent = `Unavailable persona · ${selectedPersonalityId}`;
       missing.disabled = true;
       select.append(missing);
       select.value = selectedPersonalityId;
@@ -1547,41 +1218,6 @@ async function render(): Promise<void> {
     return selectedView
       ? { label: selectedView.label, usable: selectedView.usable }
       : null;
-  };
-
-  // [data-role="mapping-info"] carries persona availability ONLY (label /
-  // archived / unavailable). Session state lives in the identity block's
-  // capture line — the old "• Connected|Disconnected" tail is gone from both
-  // build sites so the two views never disagree.
-  const formatMappingInfo = (
-    view: { label: string; usable: boolean } | null,
-  ): string => `${view?.label ?? '— не назначена —'}${view && !view.usable ? ' · недоступна' : ''}`;
-
-  // The amber "AI отключён" badge tracks the mapping select, not the session.
-  // It lives inside the identity block (never a fifth grid child) and toggles
-  // wherever the select's value can change: render, change handler, catalog
-  // refresh.
-  const syncAccountAiBadge = (select: HTMLSelectElement): void => {
-    const identity = select
-      .closest<HTMLElement>('[data-account-mapping-row]')
-      ?.querySelector<HTMLElement>('[data-role="account-identity"]');
-    if (!identity) {
-      return;
-    }
-    const existing = identity.querySelector('.chatgoose-badge-amber');
-    if (select.value === '') {
-      if (!existing) {
-        identity.append(createBadge('AI отключён', 'amber'));
-      }
-    } else if (existing) {
-      existing.remove();
-    }
-  };
-
-  const accountAvatarInitials = (heading: string): string => {
-    const words = heading.replace(/^@+/, '').trim().split(/\s+/).filter(Boolean);
-    const initials = words.slice(0, 2).map((word) => word.charAt(0)).join('');
-    return initials ? initials.toUpperCase() : '?';
   };
 
   refreshAccountMappingPersonalityOptions = (): void => {
@@ -1600,420 +1236,10 @@ async function render(): Promise<void> {
       const info = select.closest<HTMLElement>('[data-account-mapping-row]')
         ?.querySelector<HTMLElement>('[data-role="mapping-info"]');
       if (info) {
-        info.textContent = formatMappingInfo(selectedView);
+        info.textContent = `${selectedView?.label ?? 'Unmapped'}${selectedView && !selectedView.usable ? ' · unavailable' : ''} • ${select.dataset.connected === 'true' ? 'Connected' : 'Disconnected'}`;
       }
-      syncAccountAiBadge(select);
     }
   };
-
-  // ─── Version ────────────────────────────────────────────────
-  const versionSection = createSection(COPY.sections.versionTitle, COPY.sections.versionHint);
-  const versionLine = document.createElement('div');
-  versionLine.className = 'chatgoose-num';
-  versionLine.style.fontSize = '12px';
-  versionLine.style.color = 'var(--chatgoose-ink-mid)';
-  versionLine.textContent = `v ${extensionVersion} · канал: self-hosted feed`;
-  // The anchored changelog.html deploys via the parallel changelog track; the
-  // anchor is `v<major>-<minor>-<patch>` derived from the manifest version.
-  const changelogButton = createButton(COPY.version.changelogButton, true);
-  changelogButton.addEventListener('click', () => {
-    const anchor = `v${extensionVersion.replace(/\./g, '-')}`;
-    void browser.tabs.create({ url: `https://ext.gosling-agency.ru/changelog.html#${anchor}` });
-  });
-  versionSection.append(versionLine, changelogButton);
-
-  // ─── Статус (read-only state rows) ─────────────────────────
-  const statusSection = createSection(COPY.sections.statusTitle, COPY.sections.statusHint);
-  const statusRows = {
-    fansly: createStatusRow(COPY.status.fanslyLabel),
-    hub: createStatusRow(COPY.status.hubLabel),
-    access: createStatusRow(COPY.status.accessLabel),
-    ai: createStatusRow(COPY.status.aiLabel),
-    spenders: createStatusRow(COPY.status.spendersLabel),
-    contract: createStatusRow(COPY.status.contractLabel),
-  };
-  for (const row of Object.values(statusRows)) row.skeleton();
-  // The Контракт row is debug-only (spec §5). Hide it unless debugMode; the
-  // row still hydrates so toggling debug and reloading shows a live value.
-  if (!state.settings.debugMode) statusRows.contract.root.hidden = true;
-  statusSection.append(
-    statusRows.fansly.root,
-    statusRows.hub.root,
-    statusRows.access.root,
-    statusRows.ai.root,
-    statusRows.spenders.root,
-    statusRows.contract.root,
-  );
-
-  // Task 8: the hero must not invent a verdict from zero data. Until the first
-  // real datum lands — a hub identity read OR the Fansly row painting — it holds
-  // a quiet loading line instead of claiming «До работы — N шагов».
-  let fanslyRowPainted = false;
-
-  const isAccountPersonaMapped = (accountId: string): boolean => {
-    const mappedKey = state.accountMappings[accountId] ?? '';
-    return Boolean(mappedKey) && state.personaCatalog.some(
-      (persona) => persona.key === mappedKey && persona.status === 'active',
-    );
-  };
-
-  const pluralizeSteps = (count: number): string => {
-    const mod10 = count % 10;
-    const mod100 = count % 100;
-    if (mod10 === 1 && mod100 !== 11) return 'шаг';
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'шага';
-    return 'шагов';
-  };
-  const updateReadinessHero = (): void => {
-    // Loading: no hub identity yet AND the Fansly row has not painted. Render a
-    // quiet skeleton line — never a step count or an action — so a pre-hydration
-    // mount does not flash a fabricated «До работы — 3 шага».
-    if (statusModel.identity === null && !fanslyRowPainted) {
-      readinessHero.dataset.heroState = 'loading';
-      readinessHero.replaceChildren();
-      const line = document.createElement('span');
-      line.className = 'chatgoose-readiness-loading';
-      line.textContent = '…';
-      readinessHero.append(line);
-      return;
-    }
-    // Hub step is done only when the hub is FULLY healthy (not degraded), the
-    // credential is valid, AND a live connection test actually passed. A DEGRADED
-    // core, an AUTH identity while /health is DOWN, or a failed/never-run
-    // connection test each leaves the step open — «Всё работает» must not paint
-    // all-green over any of them.
-    const hubDone = statusModel.health?.ok === true && statusModel.health.status === 'ok' &&
-      statusModel.identity?.ok === true && agencyHubConnectionFeedback.kind === 'connected';
-    const fanslyDone = statusModel.fanslyCapturedAccountIds.length > 0;
-    // ONLY accounts with a captured session need an active persona (spec §4).
-    // An offline historical account carrying an archived mapping has no captured
-    // session, so it is absent from this set and never blocks «Всё работает».
-    const mappedDone = fanslyDone &&
-      statusModel.fanslyCapturedAccountIds.every((id) => isAccountPersonaMapped(id));
-
-    // On a fresh install the real step-1 blocker is the host-permission grant,
-    // not sign-in — offer «Разрешить доступ» (still anchored to the hub section)
-    // when checkHealth/checkIdentity reported no_permission, so the hero never
-    // mislabels the action as «Войти».
-    const permissionBlocked =
-      (statusModel.health?.ok === false && statusModel.health.reason === 'no_permission') ||
-      (statusModel.identity?.ok === false && statusModel.identity.reason === 'no_permission');
-
-    const steps = [
-      { done: hubDone,
-        label: permissionBlocked ? COPY.hero.step1Permission : COPY.hero.step1,
-        action: permissionBlocked ? COPY.hero.step1PermissionAction : COPY.hero.step1Action,
-        run: () => agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
-      { done: fanslyDone, label: COPY.hero.step2, action: COPY.hero.step2Action,
-        run: () => { void browser.tabs.create({ url: 'https://fansly.com' }); } },
-      { done: mappedDone, label: COPY.hero.step3, action: COPY.hero.step3Action,
-        run: () => mappingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
-    ];
-    const open = steps.filter((step) => !step.done);
-    readinessHero.replaceChildren();
-
-    if (open.length === 0) {
-      readinessHero.dataset.heroState = 'pulse';
-      const dot = document.createElement('span');
-      dot.className = 'chatgoose-readiness-dot';
-      const line = document.createElement('span');
-      line.className = 'chatgoose-readiness-pulse';
-      line.textContent = COPY.hero.allGood;
-      const facts = document.createElement('span');
-      facts.className = 'chatgoose-num chatgoose-readiness-facts';
-      const spendersBadge = statusRows.spenders.root.querySelector('.chatgoose-badge-mono')?.textContent ?? '—';
-      facts.textContent = `Fansly ${statusModel.fanslyAccounts} · Hub ✓ · Spenders ${spendersBadge}`;
-      const expand = createButton(COPY.hero.expand, true);
-      expand.addEventListener('click', () => statusSection.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-      readinessHero.append(dot, line, facts, expand);
-      return;
-    }
-
-    readinessHero.dataset.heroState = 'route';
-    const heading = document.createElement('h2');
-    heading.className = 'chatgoose-readiness-heading';
-    heading.textContent = `${COPY.hero.stepsPrefix} ${open.length} ${pluralizeSteps(open.length)}`;
-    readinessHero.append(heading);
-    for (const step of steps) {
-      const stepRow = document.createElement('div');
-      stepRow.className = 'chatgoose-readiness-step';
-      stepRow.dataset.done = String(step.done);
-      const mark = document.createElement('span');
-      mark.textContent = step.done ? '✓' : '•';
-      const text = document.createElement('span');
-      text.textContent = step.label;
-      stepRow.append(mark, text);
-      if (!step.done) {
-        const button = createButton(step.action, true);
-        button.addEventListener('click', step.run);
-        stepRow.append(button);
-      }
-      readinessHero.append(stepRow);
-    }
-  };
-  updateReadinessHero(); // initial paint: loading skeleton until the first datum
-
-  const paintFanslyStatusRow = (sessions: SessionSnapshotEntry[], failed: boolean): void => {
-    // Either branch below paints a real Fansly state — that is enough to lift the
-    // hero out of its loading skeleton even before the hub identity read lands.
-    fanslyRowPainted = true;
-    if (failed) {
-      // A failed re-poll invalidates the last successful live snapshot. Keeping
-      // those captured ids would leave the readiness hero green while this row
-      // honestly says OFF, so clear the shared model before repainting.
-      statusModel.fanslyCapturedAccountIds = [];
-      statusModel.fanslyAccounts = 0;
-      statusModel.fanslyFreshest = undefined;
-      statusRows.fansly.set({ badge: 'OFF', tone: 'neutral', fact: 'живой статус недоступен' });
-      updateReadinessHero();
-      return;
-    }
-    const lookup = buildSessionLookup(sessions);
-    // The captured-session account ids drive BOTH the Fansly row count and the
-    // hero's step-3 readiness. An account with no captured session needs no
-    // persona (spec §4), so it must never enter this set.
-    const capturedAccountIds = state.knownAccounts.filter(
-      (id) => lookup.get(id)?.connected === true,
-    );
-    statusModel.fanslyCapturedAccountIds = capturedAccountIds;
-    statusModel.fanslyAccounts = capturedAccountIds.length;
-    statusModel.fanslyFreshest = capturedAccountIds
-      .map((id) => lookup.get(id))
-      .filter((s): s is SessionSnapshotEntry => Boolean(s))
-      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
-    if (capturedAccountIds.length === 0) {
-      statusRows.fansly.set({ badge: 'OFF', tone: 'amber', fact: COPY.status.fanslyEmpty });
-    } else {
-      statusRows.fansly.set({
-        badge: 'CAPTURED',
-        tone: 'green',
-        fact: `${capturedAccountIds.length} акк.`,
-        detail: formatCaptureStatus(statusModel.fanslyFreshest),
-      });
-    }
-    updateReadinessHero(); // Task 8 (no-op until then)
-  };
-
-  // The live connection signature the hub fields currently show. The guard binds
-  // to the PERSISTED snapshot: the caller passes the signature of what it just
-  // persisted, and this run is valid only while the live form still equals it.
-  const currentHubSignature = (): string =>
-    buildAgencyHubConnectionSignature(
-      agencyHubUrlInput.value,
-      agencyHubKeyInput.value,
-      state.settings.agencyHubDeviceToken,
-    );
-  // The signature of the SAVED settings — what mount, the sign-in success path,
-  // and the permission grant pass as their expected snapshot (no unsaved edit is
-  // in play at those moments; the form equals stored). The post-persist caller
-  // instead passes its own freshly-computed `hubSignature` from `mergedSettings`.
-  const storedHubSignature = (): string =>
-    buildAgencyHubConnectionSignature(
-      state.settings.agencyHubBaseUrl,
-      state.settings.agencyHubApiKey,
-      state.settings.agencyHubDeviceToken,
-    );
-  const hydrateHubStatusRows = async (expectedSignature: string): Promise<void> => {
-    // Stamp a monotonic run id. Two runs can share the same expectedSignature
-    // (a permission grant firing while a post-persist run is still in flight);
-    // the signature guard alone cannot order them, so the newest run wins and an
-    // older run whose reply lands later has its paint dropped.
-    const run = ++agencyHubHydrationRun;
-    // (1) Delayed-START guard — BEFORE issuing any request. If the live form has
-    // already moved on from the snapshot this run was fired for, skip entirely:
-    // the user is mid-edit and a newer persist will re-trigger with its own
-    // signature. Firing a doomed pair of hub requests here is the storm we avoid.
-    if (disposed || currentHubSignature() !== expectedSignature) return;
-    for (const row of [statusRows.hub, statusRows.access]) row.skeleton();
-    statusRows.hub.setAction(null);
-    // Independent sources (§12): a rejected transport on ONE read must not leave
-    // the OTHER row a skeleton nor surface as an unhandled rejection. allSettled
-    // lets each row render its own honest state.
-    const [healthResult, identityResult] = await Promise.allSettled([
-      sendRuntimeRequest('getAgencyHubHealth'),
-      sendRuntimeRequest('getAgencyHubIdentity'),
-    ]);
-    // (2) In-flight guard — re-check before PAINTING. The reads pull SAVED
-    // settings background-side, so a paint is only valid while the live form
-    // still equals the persisted snapshot this run fired for; a mid-flight edit
-    // drops the result (that edit's own persist re-runs hydration). The run id
-    // additionally drops a same-signature run that a newer run has superseded.
-    if (disposed || run !== agencyHubHydrationRun || currentHubSignature() !== expectedSignature) return;
-    // A fulfilled read still has to be a well-formed response — a transport that
-    // resolves `undefined` (a harness with no handler, a truncated frame) is a
-    // failure, never invented into a verdict: fall to honest «unreachable».
-    const isOkResponse = (value: unknown): value is { ok: boolean } =>
-      typeof value === 'object' && value !== null && 'ok' in value;
-    const health: AgencyHubHealthResponse = healthResult.status === 'fulfilled' && isOkResponse(healthResult.value)
-      ? healthResult.value
-      : { ok: false, reason: 'unreachable' };
-    const identity: AgencyHubIdentityResponse = identityResult.status === 'fulfilled' && isOkResponse(identityResult.value)
-      ? identityResult.value
-      : { ok: false, reason: 'unreachable' };
-    statusModel.health = health;
-    statusModel.identity = identity;
-    // P3: the sign-in block's identity line rides this SAME guarded paint pass —
-    // a pure reader of statusModel.identity, no fetch or staleness guard of its own.
-    renderHubIdentity();
-
-    // Hub (core)
-    if (health.ok) {
-      statusRows.hub.set({
-        badge: health.status === 'degraded' ? 'DEGRADED' : 'UP',
-        tone: health.status === 'degraded' ? 'amber' : 'green',
-        fact: health.status === 'degraded' ? 'ядро деградировано' : 'ядро отвечает',
-        detail: health.dbLatencyMs === null ? undefined : `DB latency ${health.dbLatencyMs} мс`,
-      });
-    } else if (health.reason === 'no_base_url') {
-      statusRows.hub.set({ badge: 'DOWN', tone: 'neutral', fact: COPY.status.hubEmpty });
-    } else if (health.reason === 'no_permission') {
-      // A fresh install has no host permission (permissions.contains defaults
-      // false) — that is NOT a down core. Distinct amber badge + a grant action
-      // anchored to the hub section (where the permission button lives), so the
-      // renderer never falls through to a false red «ядро недоступно».
-      statusRows.hub.set({ badge: 'НЕТ ДОСТУПА', tone: 'amber', fact: COPY.status.hubNoPermission });
-      const grant = createButton(COPY.status.grantAccess, true);
-      grant.addEventListener('click', () => {
-        agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-      statusRows.hub.setAction(grant);
-    } else {
-      statusRows.hub.set({ badge: 'DOWN', tone: 'bad', fact: 'ядро недоступно' });
-    }
-
-    // Доступ — CREDENTIAL validity only, never a hub-health verdict (§14).
-    statusRows.access.setAction(null);
-    if (identity.ok) {
-      statusRows.access.set({
-        badge: 'AUTH',
-        tone: 'green',
-        fact: `${identity.username} · ${identity.role}`,
-        detail: `pages: ${identity.pages.length}`,
-      });
-    } else if (identity.reason === 'unauthorized') {
-      statusRows.access.set({ badge: '401', tone: 'bad', fact: 'credential отклонён хабом' });
-      const reLogin = createButton(COPY.status.reLogin, true);
-      reLogin.addEventListener('click', () => {
-        agencyHubSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-      statusRows.access.setAction(reLogin);
-    } else if (identity.reason === 'no_credential') {
-      statusRows.access.set({ badge: 'НЕТ CREDENTIAL', tone: 'neutral', fact: COPY.status.accessEmpty });
-    } else if (identity.reason === 'no_base_url') {
-      // A credential is present but the hub address is blank — nothing is wrong
-      // with the credential, so the badge stays neutral «НЕИЗВЕСТНО» and the fact
-      // names the real gap (the missing address), not a false «нет credential».
-      statusRows.access.set({ badge: 'НЕИЗВЕСТНО', tone: 'neutral', fact: COPY.status.hubEmpty });
-    } else {
-      // no_permission and unreachable are HUB-health conditions, not credential
-      // verdicts — the Доступ badge stays neutral «НЕИЗВЕСТНО» (the blocker is
-      // surfaced on the Hub row), never a red «НЕТ CREDENTIAL».
-      statusRows.access.set({ badge: 'НЕИЗВЕСТНО', tone: 'neutral', fact: COPY.status.accessUnknown });
-    }
-
-    // Контракт (debug only; derived from the same health response)
-    if (health.ok) {
-      const match = health.contractHash === health.sdkContractHash;
-      statusRows.contract.set({
-        badge: match ? 'MATCH' : 'DRIFT',
-        tone: match ? 'green' : 'bad',
-        fact: match ? 'контракт совпадает' : 'контракт разошёлся с SDK',
-      });
-    } else {
-      statusRows.contract.set({ badge: '—', tone: 'neutral', fact: 'контракт неизвестен' });
-    }
-
-    updateReadinessHero(); // Task 8
-  };
-
-  const hydrateLocalStatusRows = async (): Promise<void> => {
-    // Independent sources (§12): one rejected local read must not strand the
-    // other row as a skeleton or raise an unhandled rejection. A rejected source
-    // falls to its honest-unknown render ({} / null), never a stuck skeleton.
-    const [quotaResult, spendersResult] = await Promise.allSettled([
-      sendRuntimeRequest('getAiQuotaByPage'),
-      sendRuntimeRequest('getSpendersStatus'),
-    ]);
-    if (disposed) return;
-    const quotaByPage = quotaResult.status === 'fulfilled' ? quotaResult.value : {};
-    const spenders = spendersResult.status === 'fulfilled' ? spendersResult.value : null;
-
-    // AI — per page, requests only; NO micro-USD (E14). Empty map = unknown.
-    const quotaEntries = quotaByPage && typeof quotaByPage === 'object'
-      ? Object.values(quotaByPage)
-      : [];
-    if (quotaEntries.length === 0) {
-      statusRows.ai.set({ badge: 'KERNEL', tone: 'neutral', fact: COPY.status.aiEmpty });
-    } else {
-      const worst = quotaEntries.reduce<AiQuotaStatus | null>((acc, entry) =>
-        acc === null || (entry.remainingRequestsToday ?? Infinity) < (acc.remainingRequestsToday ?? Infinity)
-          ? entry : acc, null);
-      const remaining = worst?.remainingRequestsToday ?? null;
-      let tone: BadgeTone;
-      let fact: string;
-      if (remaining === null) {
-        // No numeric cap reported for the worst page — a GREEN badge would falsely
-        // claim headroom we never saw. Stay neutral and say the limit is unknown.
-        tone = 'neutral';
-        fact = 'лимит не сообщён';
-      } else if (remaining === 0) {
-        // Exhausted: red, and name the reset boundary — the kernel resets the day's
-        // budget at 00:00 UTC (the popup's exhausted-row precedent).
-        tone = 'bad';
-        fact = 'осталось 0 · сброс 00:00 UTC';
-      } else {
-        tone = remaining <= 20 ? 'amber' : 'green';
-        fact = `${quotaEntries.length} стр.`;
-      }
-      statusRows.ai.set({ badge: 'KERNEL', tone, fact });
-      statusRows.ai.setDetailLines(quotaEntries.map((entry) =>
-        entry.remainingRequestsToday === null
-          ? `${entry.pageLabel} · лимит не сообщён`
-          : `${entry.pageLabel} · осталось ${entry.remainingRequestsToday}`));
-    }
-
-    // Spenders — freshest observation → RAMPED / FLAG OFF / NOT ALLOWLISTED / FAIL.
-    // A null observation is «not yet observed», NOT «flag off»: no board has been
-    // opened for this hub, so paint a neutral em-dash — inventing FLAG OFF here
-    // would claim the projection is disabled when we have never looked.
-    if (!spenders) {
-      statusRows.spenders.set({ badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty });
-    } else if (spenders.outcome === 'fail') {
-      statusRows.spenders.set({ badge: 'FAIL', tone: 'bad', fact: 'последняя сборка доски не удалась' });
-    } else {
-      const map: Record<SpendersStreamState, { badge: string; tone: BadgeTone; fact: string }> = {
-        ramped: { badge: 'RAMPED', tone: 'green', fact: 'данные идут' },
-        flag_off: { badge: 'FLAG OFF', tone: 'neutral', fact: 'проекция выключена' },
-        not_allowlisted: { badge: 'NOT ALLOWLISTED', tone: 'amber', fact: 'страница не в allowlist' },
-        unsupported_platform: { badge: 'FLAG OFF', tone: 'neutral', fact: 'платформа не поддерживается' },
-      };
-      // FLAG OFF only from a real flag_off observation; a null streamState on a
-      // successful outcome is «not yet observed», so keep the neutral em-dash.
-      const view = spenders.streamState
-        ? map[spenders.streamState]
-        : { badge: '—', tone: 'neutral' as BadgeTone, fact: COPY.status.spendersEmpty };
-      statusRows.spenders.set(view);
-    }
-
-    updateReadinessHero(); // Task 8
-  };
-
-  // ─── Ordered section registration ───────────────────────────
-  // MUST stay immediately before the future-schema barrier block below. Every
-  // section is now in the DOM (shell.main → shell.layout → root) BEFORE the
-  // barrier's catch-up runs `activateFutureSchemaBarrier(futureSchemaObserved)`,
-  // so its one-shot `root.querySelectorAll('input, select, button, textarea')`
-  // sweep disables the REAL controls. Move this block after the barrier and a
-  // v15 observed during the initial storage read would disable nothing real —
-  // the re-entry guard makes that first (empty) sweep the only one. Registration
-  // order == nav order == card DOM order == the mount test's expectation.
-  shell.addSection('status', statusSection);
-  shell.addSection('hub', agencyHubSection);
-  shell.addSection('personas', personalitiesSection);
-  shell.addSection('accounts', mappingsSection);
-  shell.addSection('generation', apiSection);
-  shell.addSection('appearance', appearanceSection);
-  shell.addSection('version', versionSection);
 
   if (
     typeof browser.storage.onChanged?.addListener === 'function' &&
@@ -2036,7 +1262,7 @@ async function render(): Promise<void> {
       const warning = document.createElement('div');
       warning.dataset.futureSchemaBarrier = 'true';
       warning.setAttribute('role', 'alert');
-      warning.textContent = `Настройки открыты в более новой версии схемы (v${storedVersion}) — эта вкладка больше не сохраняет изменения. Перезагрузи страницу.`;
+      warning.textContent = `Settings were upgraded by a newer ChatGoose build (storage v${storedVersion}). Reload this page before editing.`;
       warning.style.margin = '16px 20px 0';
       warning.style.padding = '12px';
       warning.style.border = '1px solid var(--chatgoose-bad)';
@@ -2052,10 +1278,6 @@ async function render(): Promise<void> {
       changes: Record<string, browser.storage.StorageChange>,
       areaName: string,
     ): void => {
-      const apiKeyChanged = Boolean(changes[AGENCY_HUB_API_KEY_STORAGE_KEY]);
-      const credentialsChanged = apiKeyChanged || Boolean(
-        changes[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY],
-      );
       if (
         areaName !== 'local' ||
         !(
@@ -2074,55 +1296,11 @@ async function render(): Promise<void> {
         if (disposed || generation !== catalogReadGeneration) {
           return;
         }
-        // The empty-state classifier derives the CURRENT source from
-        // state.settings (personaCatalogSource); a live rotation that lands here
-        // with a stale settings snapshot would compare the OLD source and could
-        // misreport «пустой каталог». readStorageState already returned the fresh,
-        // credential-merged settings — adopt them so the source comparison (hence
-        // «ещё не загружен» vs «пустой каталог») is honest.
-        state.settings = refreshedState.settings;
-        if (apiKeyChanged) {
-          const refreshedApiKey = refreshedState.settings.agencyHubApiKey;
-          // An empty custody value is a sign-out tombstone and wins even over a
-          // focused/dirty legacy-key field. For a non-empty rotation, preserve a
-          // genuinely different in-progress edit; otherwise mirror storage.
-          if (
-            refreshedApiKey === '' ||
-            !agencyHubApiKeyDirty ||
-            agencyHubKeyInput.value.trim() === refreshedApiKey
-          ) {
-            agencyHubApiKeyDirty = false;
-            agencyHubKeyInput.value = refreshedApiKey;
-          }
-        }
         state.personaCatalog = refreshedState.personaCatalog;
         state.personaCatalogSource = refreshedState.personaCatalogSource;
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
         renderPersonaCatalog();
         refreshAccountMappingPersonalityOptions?.();
-        // A repopulated catalog can flip step 3 (persona assigned) from open to
-        // done — a mapping that was hidden by migrateState now resolves to an
-        // active persona — so repaint the hero from the fresh catalog state.
-        updateReadinessHero();
-        if (credentialsChanged) {
-          // Credential custody changed outside this page (including sign-out in
-          // another Options tab). Revoke stale signed-in/connected UI now, then
-          // rehydrate against the exact stored credential snapshot.
-          hubSignInMeta.textContent = '';
-          renderHubSignInState();
-          markAgencyHubConnectionPending();
-          updateReadinessHero();
-          const expectedSignature = storedHubSignature();
-          const statusHydration = hydrateHubStatusRows(expectedSignature);
-          void (async () => {
-            await refreshAgencyHubPermissionState();
-            if (disposed) return;
-            await runAgencyHubConnectionTest({ force: true });
-            await statusHydration;
-          })().catch((error: unknown) => {
-            console.error('Failed to refresh Agency Hub after credential storage update', error);
-          });
-        }
       }).catch((error: unknown) => {
         console.error('Failed to apply live persona catalog update', error);
       });
@@ -2147,43 +1325,30 @@ async function render(): Promise<void> {
 
     if (hydrationFailed) {
       const warning = document.createElement('div');
-      warning.textContent = 'Не удалось обновить живой статус аккаунтов — показаны маппинги из локального хранилища';
+      warning.textContent = 'Live account refresh failed. Showing mappings from local storage.';
       warning.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(warning);
     }
 
     state.knownAccounts.forEach((accountId) => {
       const session = sessionsByAccountId.get(accountId);
-      const heading = formatAccountHeading(accountId, session);
       const row = document.createElement('div');
       row.dataset.accountMappingRow = accountId;
-      // Four columns: avatar, identity block, select, mapping-info. The amber
-      // badge lives INSIDE the identity block, never as a fifth grid child.
       row.style.display = 'grid';
-      row.style.gridTemplateColumns = 'auto minmax(0, 1fr) minmax(220px, 320px) auto';
+      row.style.gridTemplateColumns = '1fr minmax(220px, 320px) auto';
       row.style.gap = '12px';
       row.style.alignItems = 'center';
       row.style.padding = '12px';
       row.style.borderRadius = 'var(--chatgoose-radius-card)';
       row.style.background = 'var(--chatgoose-bg2)';
       row.style.border = '1px solid var(--chatgoose-line)';
-      // Raw timestamp for the minute ticker; only connected rows have a live
-      // capture to age. Disconnected rows keep a static "нет сессии".
-      if (session?.connected) {
-        row.dataset.captureAt = String(session.lastSeenAt);
-      }
-
-      const avatar = document.createElement('div');
-      avatar.className = 'chatgoose-avatar';
-      avatar.textContent = accountAvatarInitials(heading);
 
       const label = document.createElement('div');
-      label.dataset.role = 'account-identity';
       label.style.display = 'grid';
       label.style.gap = '4px';
 
       const labelTitle = document.createElement('div');
-      labelTitle.textContent = heading;
+      labelTitle.textContent = formatAccountHeading(accountId, session);
       labelTitle.style.fontWeight = '600';
 
       const labelMeta = document.createElement('div');
@@ -2191,22 +1356,12 @@ async function render(): Promise<void> {
       labelMeta.style.fontSize = '12px';
       labelMeta.style.color = 'var(--chatgoose-ink-mid)';
 
-      const captureLine = document.createElement('div');
-      captureLine.dataset.role = 'capture-status';
-      // When the live snapshot failed we never verified the session, so do not
-      // render a proven "нет сессии". Show the honest unknown state; no
-      // dataset.captureAt is stamped above, so the minute ticker skips it.
-      captureLine.textContent = hydrationFailed
-        ? 'статус неизвестен'
-        : formatCaptureStatus(session);
-      captureLine.style.fontSize = '12px';
-      captureLine.style.color = 'var(--chatgoose-ink-mid)';
-
-      label.append(labelTitle, labelMeta, captureLine);
+      label.append(labelTitle, labelMeta);
 
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
       select.dataset.accountId = accountId;
+      select.dataset.connected = session?.connected ? 'true' : 'false';
       const mappedView = populateMappingSelect(
         select,
         state.accountMappings[accountId] ?? '',
@@ -2214,15 +1369,11 @@ async function render(): Promise<void> {
       );
       select.addEventListener('change', () => {
         const selectedPersonalityId = select.value || null;
-        // Reflect the mapping change on the badge immediately, before the
-        // async save round-trips.
-        syncAccountAiBadge(select);
         select.disabled = true;
         select.dataset.mappingPending = 'true';
         void (async () => {
           try {
             await saveAccountMapping(accountId, selectedPersonalityId);
-            savedFlash.showSaved();
             const refreshedState = await loadStorageState();
             if (disposed) {
               return;
@@ -2234,14 +1385,8 @@ async function render(): Promise<void> {
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
             renderAccountMappings(sessions, hydrationFailed);
-            // Keep «аккаунтов: N» in the persona catalog in sync with the new mapping.
-            renderPersonaCatalog();
-            // A fresh mapping can flip step 3 (persona assigned) from open to
-            // done, so repaint the hero from the same statusModel + account state.
-            updateReadinessHero();
           } catch (error) {
             console.error('Failed to save account mapping', error);
-            savedFlash.showError('маппинг не сохранился');
             if (!disposed) {
               select.dataset.mappingPending = 'false';
               select.disabled = false;
@@ -2255,66 +1400,80 @@ async function render(): Promise<void> {
       info.dataset.role = 'mapping-info';
       info.style.fontSize = '12px';
       info.style.color = 'var(--chatgoose-ink-mid)';
-      info.textContent = formatMappingInfo(mappedView);
+      info.textContent = `${mappedView?.label ?? 'Unmapped'}${mappedView && !mappedView.usable ? ' · unavailable' : ''} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
 
-      row.append(avatar, label, select, info);
-      // append() first so closest('[data-account-mapping-row]') resolves.
-      syncAccountAiBadge(select);
+      row.append(label, select, info);
       mappingsTable.append(row);
     });
 
     if (state.knownAccounts.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'Аккаунты не обнаружены — открой fansly.com с аккаунтом модели.';
+      empty.textContent = 'No Fansly accounts detected yet.';
       empty.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(empty);
     }
   };
 
-  // One ticker for the whole section rewrites every connected row's capture
-  // line from its stored timestamp, so a long-open tab does not freeze on
-  // "захвачена 5 мин назад". Rebuilds re-query the live DOM, so a single
-  // interval survives mapping changes; its teardown is registered below.
-  const refreshCaptureLines = (): void => {
-    for (const row of mappingsTable.querySelectorAll<HTMLElement>('[data-account-mapping-row]')) {
-      const captureAt = row.dataset.captureAt;
-      if (!captureAt) {
-        continue;
-      }
-      const captureLine = row.querySelector<HTMLElement>('[data-role="capture-status"]');
-      if (!captureLine) {
-        continue;
-      }
-      captureLine.textContent = formatCaptureStatus({
-        legacyAccountId: '',
-        resolvedAccountId: null,
-        username: null,
-        displayName: null,
-        connected: true,
-        lastSeenAt: Number(captureAt),
-      });
-    }
-    // The persona-catalog footer shows a relative "изменялся N мин назад" that
-    // otherwise only re-renders on a catalog change — reuse THIS minute tick so a
-    // long-open options page doesn't freeze it. Reuses the interval, adds none.
-    personaChangedLine.textContent = formatCatalogChangedAt(state.personaCatalogFetchedAt);
-  };
-  const captureTicker = window.setInterval(refreshCaptureLines, 60_000);
-  cleanupTasks.push(() => window.clearInterval(captureTicker));
+  const renderConnections = (
+    sessions: SessionSnapshotEntry[],
+    hydrationFailed: boolean,
+  ): void => {
+    sessionsGrid.replaceChildren();
+    connectionsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
 
-  // Paint the account section + Fansly status row from ONE sessions result.
-  // Shared by the mount hydration and the focus/visibility re-poll so the
-  // identity-rekey read path (loadStorageState after the snapshot resolves) is
-  // never duplicated: the snapshot request owns rekey background-side, and this
-  // reads the reconciled state exactly once afterward.
-  const applySessionsResult = async (result: SessionsResult): Promise<void> => {
+    if (hydrationFailed) {
+      const error = document.createElement('div');
+      error.textContent = 'Could not load live connection status. Reload Settings to try again.';
+      error.style.color = 'var(--chatgoose-bad)';
+      sessionsGrid.append(error);
+      return;
+    }
+
+    const connectionRows = buildConnectionRows(sessions);
+    connectionRows
+      .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
+      .forEach(({ accountId, session }) => {
+        const card = document.createElement('div');
+        card.className = 'chatgoose-card';
+        card.style.display = 'grid';
+        card.style.gap = '6px';
+        const heading = document.createElement('div');
+        heading.style.display = 'flex';
+        heading.style.justifyContent = 'space-between';
+        heading.style.alignItems = 'center';
+        const left = document.createElement('div');
+        left.textContent = formatAccountHeading(accountId, session);
+        left.style.fontWeight = '600';
+        const right = document.createElement('div');
+        right.textContent = session.connected ? 'Connected' : 'Disconnected';
+        right.style.color = session.connected ? 'var(--chatgoose-green)' : 'var(--chatgoose-bad)';
+        heading.append(left, right);
+        const meta = document.createElement('div');
+        meta.textContent = formatAccountMeta(accountId, session);
+        meta.style.fontSize = '12px';
+        meta.style.color = 'var(--chatgoose-ink-mid)';
+        card.append(heading, meta);
+        sessionsGrid.append(card);
+      });
+
+    if (connectionRows.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No active sessions captured yet.';
+      empty.style.color = 'var(--chatgoose-ink-mid)';
+      sessionsGrid.append(empty);
+    }
+  };
+
+  const hydrateAccountSections = async (): Promise<void> => {
+    const result = await sessionsResultPromise;
     if (disposed) {
       return;
     }
+
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       renderAccountMappings([], true);
-      paintFanslyStatusRow([], true);
+      renderConnections([], true);
       return;
     }
 
@@ -2330,64 +1489,17 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
-      // Keep «аккаунтов: N» in sync with the reconciled account mappings.
-      renderPersonaCatalog();
-      paintFanslyStatusRow(result.sessions, false);
+      renderConnections(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);
       if (!disposed) {
         renderAccountMappings([], true);
-        paintFanslyStatusRow([], true);
+        renderConnections([], true);
       }
     }
   };
 
-  const hydrateAccountSections = async (): Promise<void> => {
-    await applySessionsResult(await sessionsResultPromise);
-  };
-
-  // Re-poll sessions when the tab regains focus/visibility, throttled so it only
-  // fires once per window. A chatter who connects a model in another tab and
-  // returns here should see the Fansly step close without a reload — but the
-  // re-poll rides the SAME snapshot+paint flow above (rekey stays background-side),
-  // so no live-read logic is duplicated. The in-flight guard collapses a paired
-  // focus + visibilitychange into a single poll.
-  let sessionsRepollInFlight = false;
-  const repollSessions = async (): Promise<void> => {
-    if (disposed || sessionsRepollInFlight) {
-      return;
-    }
-    if (Date.now() - lastSessionsPollAt < SESSIONS_REPOLL_MIN_INTERVAL_MS) {
-      return;
-    }
-    sessionsRepollInFlight = true;
-    try {
-      await applySessionsResult(await loadSessionsResult());
-    } finally {
-      sessionsRepollInFlight = false;
-    }
-  };
-  const handleVisibilityRepoll = (): void => {
-    if (document.visibilityState === 'visible') {
-      void repollSessions();
-    }
-  };
-  const handleFocusRepoll = (): void => {
-    void repollSessions();
-  };
-  document.addEventListener('visibilitychange', handleVisibilityRepoll);
-  window.addEventListener('focus', handleFocusRepoll);
-  cleanupTasks.push(() => {
-    document.removeEventListener('visibilitychange', handleVisibilityRepoll);
-    window.removeEventListener('focus', handleFocusRepoll);
-  });
-
   void hydrateAccountSections();
-  // The stored-snapshot signature is what mount fires against: the form fields
-  // were initialized from `state.settings`, so live == stored right now.
-  void hydrateHubStatusRows(storedHubSignature());
-  // Local storage.session reads — no hub round-trip, no signature guard.
-  void hydrateLocalStatusRows();
 
   renderCleanup = async () => {
     const pendingEdits = flushPendingEdits();
@@ -2409,10 +1521,6 @@ async function render(): Promise<void> {
       state.personaCatalogFetchedAt = refreshedCatalogState.personaCatalogFetchedAt;
       renderPersonaCatalog();
       refreshAccountMappingPersonalityOptions?.();
-      // The connection test just repopulated the catalog; a mapping that was
-      // hidden by migrateState may now resolve to an active persona, flipping
-      // step 3 done. Repaint the hero so it can reach pulse without a remount.
-      updateReadinessHero();
     }
   } catch (error) {
     console.error('Failed to refresh persona catalog view', error);

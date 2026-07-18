@@ -823,7 +823,7 @@ describe('OverlayController', () => {
       syncError: {
         key: 'hub_request_failed',
         code: 'CG-HUB-07',
-        message: 'Запрос к Agency Hub не удался.',
+        message: 'Agency Hub request failed.',
       },
     }));
 

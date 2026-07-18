@@ -53,7 +53,7 @@ export async function issueAgencyHubDeviceToken(
   } catch (error) {
     if (error instanceof KernelApiError && (error.status === 401 || error.status === 403)) {
       throw new ChatGooseError('hub_invalid_api_key', {
-        details: { status: error.status, responseSnippet: 'Неверный логин или пароль.' },
+        details: { status: error.status, responseSnippet: 'Invalid username or password.' },
       });
     }
     throw new ChatGooseError('hub_request_failed', {

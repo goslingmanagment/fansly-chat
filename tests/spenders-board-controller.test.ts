@@ -1130,7 +1130,7 @@ describe('SpendersBoardController', () => {
     resolveRefresh({ ok: false, error: createUserError('hub_request_failed') });
     await vi.waitFor(() => {
       expect(document.querySelector('.chatgoose-board-state')?.textContent).toContain(
-        'Запрос к Agency Hub не удался',
+        'Agency Hub request failed',
       );
     });
     expect(internals.progressLabel).toBeNull();
