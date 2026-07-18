@@ -34,6 +34,8 @@ import {
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  COACH_HISTORY_LIMIT_MAX,
+  COACH_HISTORY_LIMIT_MIN,
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
   PERSONA_CATALOG_SOURCE_STORAGE_KEY,
   PERSONA_CATALOG_STORAGE_KEY,
@@ -288,6 +290,39 @@ async function render(): Promise<void> {
   deepInput.max = '3000';
   deepInput.value = String(state.settings.deepMessageCount);
 
+  const coachHistoryInput = document.createElement('input');
+  coachHistoryInput.type = 'number';
+  coachHistoryInput.className = 'chatgoose-input';
+  coachHistoryInput.min = String(COACH_HISTORY_LIMIT_MIN);
+  coachHistoryInput.max = String(COACH_HISTORY_LIMIT_MAX);
+  coachHistoryInput.value = String(state.settings.coachHistoryLimit);
+
+  const coachRecapSelect = document.createElement('select');
+  coachRecapSelect.className = 'chatgoose-select';
+  const coachRecapChoices: Array<{ value: Settings['coachAutoRecap']; label: string }> = [
+    { value: 'off', label: 'Off' },
+    { value: 'short', label: 'Short' },
+    { value: 'full', label: 'Full' },
+  ];
+  for (const choice of coachRecapChoices) {
+    const option = document.createElement('option');
+    option.value = choice.value;
+    option.textContent = choice.label;
+    coachRecapSelect.append(option);
+  }
+  coachRecapSelect.value = state.settings.coachAutoRecap;
+
+  // Full Recap replays the whole deep window before coaching — surface the cost
+  // so it's a deliberate choice, not a surprise on the bill.
+  const coachRecapWarning = document.createElement('div');
+  coachRecapWarning.className = 'chatgoose-section-desc';
+  coachRecapWarning.textContent =
+    'Full Recap loads up to 3000 messages — slow and expensive.';
+  const updateCoachRecapWarning = (): void => {
+    coachRecapWarning.hidden = coachRecapSelect.value !== 'full';
+  };
+  updateCoachRecapWarning();
+
   const debugInput = document.createElement('input');
   debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
@@ -304,6 +339,9 @@ async function render(): Promise<void> {
     labeledField('Ping message count', pingInput),
     labeledField('Fix message count', improveInput),
     labeledField('Deep feature message count', deepInput),
+    labeledField('Coach dialog memory (exchanges)', coachHistoryInput),
+    labeledField('Auto-Recap before coaching', coachRecapSelect),
+    coachRecapWarning,
     debugLabel,
   );
 
@@ -784,6 +822,8 @@ async function render(): Promise<void> {
     pingInput.value,
     improveInput.value,
     deepInput.value,
+    coachHistoryInput.value,
+    coachRecapSelect.value,
     debugInput.checked,
   ]);
   const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
@@ -794,6 +834,8 @@ async function render(): Promise<void> {
       pingMessageCount: Number(pingInput.value),
       improveMessageCount: Number(improveInput.value),
       deepMessageCount: Number(deepInput.value),
+      coachHistoryLimit: Number(coachHistoryInput.value),
+      coachAutoRecap: coachRecapSelect.value as Settings['coachAutoRecap'],
       debugMode: debugInput.checked,
     };
     // The API key has its own custody key. A theme/count save from a stale
@@ -893,6 +935,11 @@ async function render(): Promise<void> {
       writeCount(pingInput, mergedSettings.pingMessageCount);
       writeCount(improveInput, mergedSettings.improveMessageCount);
       writeCount(deepInput, mergedSettings.deepMessageCount);
+      writeCount(coachHistoryInput, mergedSettings.coachHistoryLimit);
+      if (document.activeElement !== coachRecapSelect) {
+        coachRecapSelect.value = mergedSettings.coachAutoRecap;
+        updateCoachRecapWarning();
+      }
 
       const hubSignature = buildAgencyHubConnectionSignature(
         mergedSettings.agencyHubBaseUrl,
@@ -961,6 +1008,9 @@ async function render(): Promise<void> {
     return queueSettingsSave(true);
   };
 
+  // Toggle the cost warning the moment the picker changes, ahead of any save.
+  coachRecapSelect.addEventListener('change', updateCoachRecapWarning);
+
   [
     themeSelect,
     agencyHubUrlInput,
@@ -969,6 +1019,8 @@ async function render(): Promise<void> {
     pingInput,
     improveInput,
     deepInput,
+    coachHistoryInput,
+    coachRecapSelect,
     debugInput,
   ].forEach((element) => {
     element.addEventListener('input', () => {
