@@ -120,25 +120,20 @@ function toOldestFirst(
   return [...newestFirstPages].reverse();
 }
 
-interface OverlapMerge {
-  pages: FanslyMessagePageResponse[];
-  /** True when the fresh region covered every cached message (the whole window
-   * is now fresh, so its oldest edge — and thus reachedEnd — is redefined). */
-  replacedEntireCache: boolean;
-}
-
 /**
- * Region-replace: keep cached messages strictly OLDER than the fresh region's
- * oldest id, then append the fresh pages (oldest-first) after them. The
- * partition is clean (cached `< freshOldestId`, fresh `>= freshOldestId`), so
- * no id appears twice and the result stays globally oldest-first with the
- * freshest page last.
+ * Region-replace (used only for a NON-exhaustive overlapping fetch): keep cached
+ * messages strictly OLDER than the fresh region's oldest id, then append the
+ * fresh pages (oldest-first) after them. The partition is clean (cached
+ * `< freshOldestId`, fresh `>= freshOldestId`), so no id appears twice and the
+ * result stays globally oldest-first with the freshest page last. An exhaustive
+ * (short) fetch never comes here — it proves nothing exists below its oldest
+ * edge, so it snapshot-replaces instead (see `refresh`).
  */
 function mergeOverlap(
   cachePagesOldestFirst: FanslyMessagePageResponse[],
   freshPagesNewestFirst: FanslyMessagePageResponse[],
   freshOldestId: string,
-): OverlapMerge {
+): FanslyMessagePageResponse[] {
   const retainedPages = cachePagesOldestFirst
     .map((page) => ({
       ...page,
@@ -148,10 +143,7 @@ function mergeOverlap(
     }))
     .filter((page) => page.messages.length > 0);
 
-  return {
-    pages: [...retainedPages, ...toOldestFirst(freshPagesNewestFirst)],
-    replacedEntireCache: retainedPages.length === 0,
-  };
+  return [...retainedPages, ...toOldestFirst(freshPagesNewestFirst)];
 }
 
 export class CoachTranscriptCache {
@@ -222,39 +214,35 @@ export class CoachTranscriptCache {
       pagesFetched += 1;
       const freshOldestId = extractOldestMessageId(page.messages ?? []);
 
+      if (reachedEnd) {
+        // A short/empty page proves nothing exists below its oldest edge, so
+        // the fresh pages ARE the whole conversation now — replace the snapshot
+        // entirely, WHETHER OR NOT they overlap the cache. This is what discards
+        // cached rows a mass-unsend removed below the fresh oldest edge; keeping
+        // them (via a region-merge) would send phantom messages to the kernel.
+        const window: CoachTranscriptWindow = {
+          pages: toOldestFirst(freshPages),
+          reachedEnd: true,
+        };
+        this.store(key, parts, window);
+        return { status: 'refreshed', window: this.cloneWindow(window) };
+      }
+
       const overlaps =
         cacheNewestId !== null &&
         freshOldestId !== null &&
         compareMessageIds(freshOldestId, cacheNewestId) <= 0;
 
       if (overlaps) {
-        const merged = mergeOverlap(
-          entry.window.pages,
-          freshPages,
-          freshOldestId,
-        );
         const window: CoachTranscriptWindow = {
-          pages: merged.pages,
-          // The tail refresh leaves the oldest edge untouched, so its coverage
-          // stands. When the fresh region covers the WHOLE cache it re-fetches
-          // back to at-or-before the old oldest id (replacedEntireCache ⟺
-          // freshOldestId ≤ cacheOldestId); since a conversation never gains
-          // OLDER messages, a previously-confirmed end still holds, and a fresh
-          // short page can newly confirm it.
-          reachedEnd: merged.replacedEntireCache
-            ? reachedEnd || entry.window.reachedEnd
-            : entry.window.reachedEnd,
-        };
-        this.store(key, parts, window);
-        return { status: 'refreshed', window: this.cloneWindow(window) };
-      }
-
-      if (reachedEnd) {
-        // Provider end reached without overlapping the cache: the fresh pages
-        // ARE the whole conversation now → replace the snapshot entirely.
-        const window: CoachTranscriptWindow = {
-          pages: toOldestFirst(freshPages),
-          reachedEnd: true,
+          pages: mergeOverlap(entry.window.pages, freshPages, freshOldestId),
+          // A non-exhaustive tail refresh leaves the oldest edge untouched, so
+          // its coverage stands. Even when the fresh region covers the WHOLE
+          // cache it re-fetches back to at-or-before the old oldest id (a
+          // conversation never gains OLDER messages), so a previously-confirmed
+          // end still holds; and since this page was NOT short we cannot newly
+          // confirm an end here.
+          reachedEnd: entry.window.reachedEnd,
         };
         this.store(key, parts, window);
         return { status: 'refreshed', window: this.cloneWindow(window) };
@@ -264,7 +252,10 @@ export class CoachTranscriptCache {
       before = freshOldestId;
       if (before === null || pagesFetched >= maxRefreshPages) {
         // Cannot page (no cursor) or exhausted the budget without reconnecting:
-        // hand off to a clean full reload rather than guess. Entry left intact.
+        // the cached window's continuity is known-broken, so EVICT it (keeping
+        // it would make the caller's full reload a stale cache hit) and hand off
+        // to a clean full reload — decided before any kernel call.
+        this.entries.delete(key);
         return { status: 'reload-required' };
       }
     }

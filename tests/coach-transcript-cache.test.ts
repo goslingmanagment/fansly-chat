@@ -178,14 +178,16 @@ describe('CoachTranscriptCache — refresh overlap-and-replace', () => {
     expect(result.window.reachedEnd).toBe(true);
   });
 
-  it('lets the fresh page maps override stale media/purchase evidence', async () => {
+  it('lets the fresh page maps override stale media even when the referencing message is a RETAINED old row', async () => {
     const cache = new CoachTranscriptCache();
+    // Seed: message 10 references media X (stale price $5.00) and stays BELOW
+    // the fresh page's oldest edge, so its page is retained across the merge.
     await cache.getOrSeed(
       key(),
       fullWindow(
         [
-          makePage([50], {
-            messages: [makeMsg(50, { attachments: [ppvAttachment('X')] })],
+          makePage([20, 10], {
+            messages: [makeMsg(20), makeMsg(10, { attachments: [ppvAttachment('X')] })],
             media: [ppvMedia('X', 5000)],
           }),
         ],
@@ -193,11 +195,15 @@ describe('CoachTranscriptCache — refresh overlap-and-replace', () => {
       ),
     );
 
+    // Fresh page overlaps at 20 (so 10's page is retained) and re-declares X at
+    // the new price. The merged window keeps the retained old page (X@5000)
+    // FIRST and the fresh page (X@9000) LAST, so collectPageMaps' last-write
+    // must resolve X to the fresh price for the retained message 10's label.
     const loadPage = vi.fn(
       async (): Promise<CoachTranscriptPageResult> => ({
-        page: makePage([50], {
-          messages: [makeMsg(50, { attachments: [ppvAttachment('X')] })],
-          media: [ppvMedia('X', 9000)], // price changed
+        page: makePage([30, 20], {
+          messages: [makeMsg(30), makeMsg(20)],
+          media: [ppvMedia('X', 9000)],
         }),
         reachedEnd: false,
       }),
@@ -207,15 +213,45 @@ describe('CoachTranscriptCache — refresh overlap-and-replace', () => {
     expect(result.status).toBe('refreshed');
     if (result.status !== 'refreshed') return;
 
-    const transcript = normalizeTranscript(
-      result.window.pages,
-      MODEL_ID,
-      FAN_ID,
-    )
+    // Message 10 is retained (proving the retained-old-page path).
+    expect(normalizedIds(result.window)).toEqual(['10', '20', '30']);
+    const transcript = normalizeTranscript(result.window.pages, MODEL_ID, FAN_ID)
       .map((m) => m.labels.join(' '))
       .join('\n');
     expect(transcript).toContain('$9.00');
     expect(transcript).not.toContain('$5.00');
+  });
+
+  it('snapshot-replaces on an exhaustive (short) page that ALSO overlaps, discarding phantom rows below its edge', async () => {
+    const cache = new CoachTranscriptCache();
+    await cache.getOrSeed(
+      key(),
+      fullWindow([makePage([50, 40, 30]), makePage([20, 10])], true),
+    );
+
+    // A mass-unsend leaves only [40', 50'] — a SHORT page that overlaps the
+    // cache at 40. Because it is exhaustive it proves nothing exists below 40,
+    // so the merge must NOT retain the cached 10/20/30.
+    const loadPage = vi.fn(
+      async (): Promise<CoachTranscriptPageResult> => ({
+        page: makePage([50, 40], {
+          messages: [
+            makeMsg(50, { content: 'EDITED-50' }),
+            makeMsg(40, { content: 'EDITED-40' }),
+          ],
+        }),
+        reachedEnd: true,
+      }),
+    );
+
+    const result = await cache.refresh(key(), loadPage);
+    expect(result.status).toBe('refreshed');
+    if (result.status !== 'refreshed') return;
+
+    expect(normalizedIds(result.window)).toEqual(['40', '50']);
+    expect(textOf(result.window, 40)).toBe('EDITED-40');
+    expect(result.window.reachedEnd).toBe(true);
+    expect(loadPage).toHaveBeenCalledTimes(1);
   });
 
   it('keeps paging when the fresh page does not overlap, then merges', async () => {
@@ -288,10 +324,14 @@ describe('CoachTranscriptCache — refresh overlap-and-replace', () => {
 
     const result = await cache.refresh(key({ quickMessageCount: 25 }), loadPage);
     expect(result.status).toBe('reload-required');
-    // Bounded egress — did not page forever.
-    expect(loadPage.mock.calls.length).toBeLessThanOrEqual(3);
-    // Entry left intact for the caller's full reload.
-    expect(cache.peek(key({ quickMessageCount: 25 }))).toBeDefined();
+    // Bounded egress — exactly the budget: estimateTargetPages(25) + 1 = 2.
+    expect(loadPage).toHaveBeenCalledTimes(2);
+    // Known-broken continuity is EVICTED so the caller's full reload actually
+    // reloads instead of hitting the stale window.
+    expect(cache.peek(key({ quickMessageCount: 25 }))).toBeUndefined();
+    const reseed = vi.fn(fullWindow([makePage([300, 290])], false));
+    await cache.getOrSeed(key({ quickMessageCount: 25 }), reseed);
+    expect(reseed).toHaveBeenCalledTimes(1);
   });
 
   it('returns miss without paging when the key was never seeded', async () => {
