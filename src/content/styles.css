@@ -1141,6 +1141,39 @@
   color: var(--chatgoose-bad);
 }
 
+/* Per-session auto-recap override cycle button (spec §5). */
+.chatgoose-coach-autorecap {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Recap coverage header on a generated recap result (spec §5). */
+.chatgoose-recap-coverage {
+  font-size: 12px;
+  color: var(--chatgoose-ink-low);
+  margin-top: -4px;
+}
+
+/* Standalone Recap start dialog (spec §5). */
+.chatgoose-recap-picker {
+  gap: 14px;
+}
+
+.chatgoose-recap-picker-prompt {
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-recap-picker-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-recap-picker-full {
+  font-weight: 600;
+}
+
 .chatgoose-coach-empty {
   display: flex;
   flex-direction: column;

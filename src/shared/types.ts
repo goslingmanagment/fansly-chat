@@ -100,6 +100,15 @@ export interface FanSummaryMeta {
   stale: boolean;
   cached: boolean;
   syncStatus?: FanSummarySyncStatus;
+  /** Recap coverage of the generated summary (spec §5/§6): 'full-history' when
+   * the provider reached the oldest edge with no window/char trimming, else
+   * 'window'. Drives the recap coverage header. Only present on freshly
+   * GENERATED recaps (a cache hit does not persist coverage). */
+  transcriptCoverage?: 'full-history' | 'window';
+  /** The KEPT message count fed to the kernel (post char-cap trim) — the N in
+   * the coverage header «вся переписка (N сообщений)» / «последние N». Present
+   * alongside {@link transcriptCoverage} on generated recaps only. */
+  keptCount?: number;
 }
 
 export interface SummaryCacheEntry {
@@ -668,6 +677,7 @@ export type UserErrorKey =
   | 'hi_too_many_messages'
   | 'coach_requires_newer_hub'
   | 'coach_fan_unresolved'
+  | 'no_saved_recap'
   | 'insertion_failed'
   | 'unknown_error';
 
@@ -1080,6 +1090,11 @@ export interface OperationStartPayload extends PortEnvelopeBase {
    * a rolling dialog refreshes only the newest tail. Absent ⇒ no session
    * isolation (a stable empty key), so the cache degrades to a per-tab window. */
   coachSessionId?: string;
+  /** fan-summary only: «Открыть последний» (spec §5). When true the background
+   * serves the stored recap from the local summary cache and NEVER generates —
+   * a cache miss fails with `no_saved_recap` instead of paginating + calling the
+   * kernel. Keeps the standalone "view last recap" action AI-spend-free. */
+  viewCachedOnly?: boolean;
 }
 
 export interface CompareStartPayload extends PortEnvelopeBase {
@@ -1374,7 +1389,16 @@ export type CoachOverlayFeedItem =
       mode: 'short' | 'full';
       origin: 'auto' | 'explicit';
       status: 'running' | 'done' | 'failed';
+      /** Fallback copy shown when an auto-recap FAILED but the chain proceeded
+       * to the coach turn with an older/no recap (spec §5 failure taxonomy),
+       * e.g. «обновить Recap не удалось — использую рекап от 3 дн». Absent for
+       * running/done steps and for chain-stopping failures. */
+      note?: string;
     };
+
+/** Per-session auto-recap override (spec §5): `inherit` falls back to the
+ * `coachAutoRecap` setting; the others force a mode for THIS session only. */
+export type CoachAutoRecapOverride = 'inherit' | 'off' | 'short' | 'full';
 
 /** The coach overlay's session projection (spec §3). Built by the content
  * orchestrator (T10) from the `CoachSession` store; the renderer keeps no
@@ -1392,6 +1416,8 @@ export interface CoachOverlaySessionView {
   composerText: string;
   /** False while a turn streams — the composer is locked (spec §3). */
   composerEnabled: boolean;
+  /** Per-session auto-recap override (spec §5); drives the topbar cycle control. */
+  autoRecapOverride: CoachAutoRecapOverride;
   /** `(accountId, groupId)` session identity; a change swaps the whole feed. */
   sessionKey: string;
 }
@@ -1486,6 +1512,17 @@ export type OverlayViewModel =
        * the composer lock. Null == idle: Esc=close. NEVER an acceptance id. */
       operationId: string | null;
       sessionView: CoachOverlaySessionView;
+    }
+  | {
+      // Standalone Recap start dialog (spec §5): ⌘⇧S / the Recap button opens
+      // this instead of instantly generating. Полный (focused; Enter keeps the
+      // old ⌘⇧S+Enter muscle memory) / Короткий / «Открыть последний». Esc
+      // cancels. Creates NO generation until a mode is picked.
+      kind: 'recap-picker';
+      fanDisplayName: string;
+      /** Freshest-usable recap metadata (spec §5 read), or null until it loads.
+       * Gates + labels «Открыть последний» and picks its mode. */
+      recapStatus: RecapStatusResponse | null;
     };
 
 export type CompletedOverlayViewModel = Extract<

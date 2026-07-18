@@ -291,6 +291,55 @@ describe('OverlayController', () => {
     Reflect.deleteProperty(globalThis, '__CHATGOOSE_OVERLAY_DEBUG__');
   });
 
+  it('renders the recap coverage header for a full-history recap («вся переписка»)', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const model = createSummaryReadOnlyModel();
+    model.summaryMeta = {
+      ...model.summaryMeta!,
+      transcriptCoverage: 'full-history',
+      keptCount: 412,
+    };
+    controller.render(model);
+
+    const coverage = requireElement<HTMLDivElement>('.chatgoose-recap-coverage');
+    expect(coverage.textContent).toBe('вся переписка (412 сообщений)');
+  });
+
+  it('renders the recap coverage header for a windowed recap («последние N»)', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    const model = createSummaryReadOnlyModel();
+    model.summaryMeta = {
+      ...model.summaryMeta!,
+      transcriptCoverage: 'window',
+      keptCount: 3000,
+    };
+    controller.render(model);
+
+    const coverage = requireElement<HTMLDivElement>('.chatgoose-recap-coverage');
+    expect(coverage.textContent).toBe('последние 3000 — история длиннее');
+  });
+
+  it('omits the coverage header when the recap carries no coverage (e.g. a cache hit)', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+    controller.render(createSummaryReadOnlyModel());
+    expect(document.querySelector('.chatgoose-recap-coverage')).toBeNull();
+  });
+
   it('reuses the mounted overlay shell for same-operation loading updates', async () => {
     const controller = new OverlayController({
       onClose: () => undefined,

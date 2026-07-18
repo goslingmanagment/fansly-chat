@@ -29,6 +29,7 @@ import type {
   CoachOverlayFeedItem,
   CoachOverlaySessionView,
   OverlayViewModel,
+  RecapStatusResponse,
 } from '../src/shared/types.js';
 
 type CoachModel = Extract<OverlayViewModel, { kind: 'coach' }>;
@@ -53,10 +54,17 @@ function createCoachModel(
       recapStatusLine: '',
       composerText: '',
       composerEnabled: true,
+      autoRecapOverride: 'inherit',
       sessionKey: 'acct|group',
       ...sessionView,
     },
   };
+}
+
+function createRecapPickerModel(
+  recapStatus: RecapStatusResponse | null = null,
+): Extract<OverlayViewModel, { kind: 'recap-picker' }> {
+  return { kind: 'recap-picker', fanDisplayName: 'fan', recapStatus };
 }
 
 function exchangeItem(
@@ -117,8 +125,11 @@ function makeController(overrides?: Partial<ConstructorParameters<typeof Overlay
     onCoachSubmit: vi.fn(),
     onCoachNewDialog: vi.fn(),
     onCoachRecap: vi.fn(),
+    onCoachAutoRecapCycle: vi.fn(),
     onCoachRetry: vi.fn(),
     onCoachComposerInput: vi.fn(),
+    onRecapPick: vi.fn(),
+    onRecapOpenLast: vi.fn(),
     ...overrides,
   };
   const controller = new OverlayController(callbacks);
@@ -644,5 +655,109 @@ describe('OverlayController — coach chat mode', () => {
     expect(panel.classList.contains('chatgoose-overlay-coach')).toBe(true);
     const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
     expect(window.getComputedStyle(feed).overflowY).toBe('auto');
+  });
+
+  it('renders the per-session auto-recap override cycle button and fires the callback', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ autoRecapOverride: 'inherit' }));
+
+    const auto = requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap');
+    expect(auto.textContent).toBe('Auto-recap: default');
+    auto.click();
+    expect(callbacks.onCoachAutoRecapCycle).toHaveBeenCalledOnce();
+
+    // The label reflects the override value in place.
+    controller.render(createCoachModel({ autoRecapOverride: 'short' }));
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap').textContent).toBe(
+      'Auto-recap: short',
+    );
+  });
+
+  it('appends the fallback note to a failed-but-proceeded recap step', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            kind: 'recap-step',
+            mode: 'full',
+            origin: 'auto',
+            status: 'failed',
+            note: 'обновить Recap не удалось — использую рекап от 3 дн',
+          },
+        ],
+      }),
+    );
+
+    const step = requireElement<HTMLDivElement>('.chatgoose-coach-recap-step');
+    expect(step.textContent).toContain('обновить Recap не удалось — использую рекап от 3 дн');
+  });
+});
+
+describe('OverlayController — recap start dialog (spec §5)', () => {
+  beforeEach(() => {
+    installDom();
+    vi.clearAllMocks();
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('renders Полный / Короткий / «Открыть последний» with a Recap header', () => {
+    const { controller } = makeController();
+    controller.render(createRecapPickerModel());
+
+    expect(requireElement<HTMLDivElement>('.chatgoose-eyebrow').textContent).toBe('Recap');
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-recap-picker button'),
+    );
+    const labels = buttons.map((button) => button.textContent);
+    expect(labels).toContain('Полный');
+    expect(labels).toContain('Короткий');
+    expect(labels).toContain('Открыть последний');
+  });
+
+  it('fires onRecapPick(full)/(short) and onRecapOpenLast from the buttons', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createRecapPickerModel({ full: { generatedAt: 'x', ageMs: 1000, transcriptCoverage: 'window', requestedCount: 3000, keptCount: 200 }, short: null }));
+
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-recap-picker button'),
+    );
+    buttons.find((b) => b.textContent === 'Полный')!.click();
+    buttons.find((b) => b.textContent === 'Короткий')!.click();
+    buttons.find((b) => b.textContent === 'Открыть последний')!.click();
+    expect(callbacks.onRecapPick).toHaveBeenCalledWith('full');
+    expect(callbacks.onRecapPick).toHaveBeenCalledWith('short');
+    expect(callbacks.onRecapOpenLast).toHaveBeenCalledOnce();
+  });
+
+  it('Enter (unmodified) picks Полный — ⌘⇧S+Enter muscle memory', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createRecapPickerModel());
+
+    const picker = requireElement<HTMLDivElement>('.chatgoose-recap-picker');
+    picker.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(callbacks.onRecapPick).toHaveBeenCalledWith('full');
+  });
+
+  it('disables «Открыть последний» when the status is loaded and empty', () => {
+    const { controller } = makeController();
+    controller.render(createRecapPickerModel({ full: null, short: null }));
+
+    const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
+    expect(openLast.disabled).toBe(true);
+  });
+
+  it('keeps «Открыть последний» live while the status is still unknown', () => {
+    const { controller } = makeController();
+    controller.render(createRecapPickerModel(null));
+
+    const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
+    expect(openLast.disabled).toBe(false);
   });
 });

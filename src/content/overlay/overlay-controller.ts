@@ -1,5 +1,6 @@
 import { toUserError } from '../../shared/errors.js';
 import type {
+  CoachAutoRecapOverride,
   CoachOverlayDraft,
   CoachOverlayFeedItem,
   CoachOverlaySessionView,
@@ -71,12 +72,18 @@ interface OverlayCallbacks {
   onCoachNewDialog?: () => void;
   /** Explicit recap refresh from within coach (short/full, spec §5). */
   onCoachRecap?: (mode: 'short' | 'full') => void;
+  /** Cycle the per-session auto-recap override (spec §5 topbar control). */
+  onCoachAutoRecapCycle?: () => void;
   /** Retry a failed/cancelled turn — replays its question (spec §8). */
   onCoachRetry?: (question: string) => void;
   /** Live composer edits, so the orchestrator can persist `composerText`
    * across close/switch (spec §3 "unsent question survives close/switch").
    * Optional: the renderer never depends on it for its own correctness. */
   onCoachComposerInput?: (text: string) => void;
+  /** Standalone Recap start dialog (spec §5): pick a mode to generate. */
+  onRecapPick?: (mode: 'short' | 'full') => void;
+  /** Standalone Recap start dialog (spec §5): «Открыть последний». */
+  onRecapOpenLast?: () => void;
 }
 
 interface PartCardOptions {
@@ -134,6 +141,8 @@ interface CoachViewState {
   itemsEl: HTMLDivElement;
   recapStatusEl: HTMLDivElement;
   recapStatusText: Text;
+  /** The per-session auto-recap override cycle button (spec §5). */
+  autoRecapButton: HTMLButtonElement;
   composerTextarea: HTMLTextAreaElement;
   sendButton: HTMLButtonElement;
   cancelButton: HTMLButtonElement;
@@ -264,10 +273,24 @@ function sameCoachFeedItem(
     return (
       previous.mode === next.mode &&
       previous.origin === next.origin &&
-      previous.status === next.status
+      previous.status === next.status &&
+      previous.note === next.note
     );
   }
   return false;
+}
+
+/** The per-session auto-recap override cycle button label (spec §5). */
+function autoRecapLabel(override: CoachAutoRecapOverride): string {
+  const value =
+    override === 'inherit'
+      ? 'default'
+      : override === 'off'
+        ? 'off'
+        : override === 'short'
+          ? 'short'
+          : 'full';
+  return `Auto-recap: ${value}`;
 }
 
 export class OverlayController {
@@ -582,7 +605,9 @@ export class OverlayController {
         ? titleForFeature(model.feature)
         : model.kind === 'coach'
           ? 'Coach'
-          : 'ChatGoose';
+          : model.kind === 'recap-picker'
+            ? 'Recap'
+            : 'ChatGoose';
     const titleText =
       model.kind === 'error'
         ? 'ChatGoose'
@@ -592,7 +617,9 @@ export class OverlayController {
         ? 'Something went wrong'
         : model.kind === 'coach'
           ? 'Ask about this fan. You send messages manually.'
-          : 'Preview only. You send messages manually.';
+          : model.kind === 'recap-picker'
+            ? 'Choose a recap. Nothing is generated until you pick.'
+            : 'Preview only. You send messages manually.';
 
     if (this.headerEyebrowEl.textContent !== feature) {
       this.headerEyebrowEl.textContent = feature;
@@ -666,7 +693,9 @@ export class OverlayController {
                   ? this.renderHelpMe(model)
                   : model.kind === 'readOnly'
                     ? this.renderReadOnly(model)
-                    : this.renderError(model),
+                    : model.kind === 'recap-picker'
+                      ? this.renderRecapPicker(model)
+                      : this.renderError(model),
           };
 
     this.bodyEl.replaceChildren(nextView.root);
@@ -1126,6 +1155,13 @@ export class OverlayController {
     const fullRecap = this.createCoachButton('Full recap', 'chatgoose-button-secondary', () =>
       this.callbacks.onCoachRecap?.('full'),
     );
+    // Per-session auto-recap override cycle (spec §5): inherit → off → short →
+    // full. Its label is refreshed in updateCoachView.
+    const autoRecap = this.createCoachButton(
+      autoRecapLabel(model.sessionView.autoRecapOverride),
+      'chatgoose-button-secondary chatgoose-coach-autorecap',
+      () => this.callbacks.onCoachAutoRecapCycle?.(),
+    );
     // «Новый диалог» — a two-step inline confirm (spec §3), mirroring the
     // Replace-draft button below: NO window.confirm (it blocks the extension).
     // A NON-EMPTY dialog arms a "Confirm new dialog" state on the first click;
@@ -1166,7 +1202,7 @@ export class OverlayController {
       disarmNewDialog();
       this.callbacks.onCoachNewDialog?.();
     });
-    topbarActions.append(shortRecap, fullRecap, newDialog, newDialogKeep);
+    topbarActions.append(autoRecap, shortRecap, fullRecap, newDialog, newDialogKeep);
     topbar.append(recap, topbarActions);
 
     // Feed — a separately-scrolling log. Committed items live in itemsEl so
@@ -1223,6 +1259,7 @@ export class OverlayController {
       itemsEl: items,
       recapStatusEl: recap,
       recapStatusText: recapText,
+      autoRecapButton: autoRecap,
       composerTextarea: textarea,
       sendButton: send,
       cancelButton: cancel,
@@ -1250,6 +1287,12 @@ export class OverlayController {
       view.recapStatusText.data = sv.recapStatusLine;
     }
     view.recapStatusEl.classList.toggle('chatgoose-hidden', sv.recapStatusLine === '');
+
+    // Auto-recap override label (guarded) + lock while busy.
+    const autoRecapText = autoRecapLabel(sv.autoRecapOverride);
+    if (view.autoRecapButton.textContent !== autoRecapText) {
+      view.autoRecapButton.textContent = autoRecapText;
+    }
 
     // Composer lock + Send/Cancel affordance (all guarded).
     const disabled = !sv.composerEnabled;
@@ -1507,7 +1550,9 @@ export class OverlayController {
     const origin = item.origin === 'auto' ? 'auto' : 'manual';
     const status =
       item.status === 'running' ? 'refreshing…' : item.status === 'done' ? 'updated' : 'failed';
-    return `${mode} (${origin}) · ${status}`;
+    const base = `${mode} (${origin}) · ${status}`;
+    // A failed-but-proceeded auto-recap carries the fallback copy (spec §5).
+    return item.note ? `${base} · ${item.note}` : base;
   }
 
   private createCoachQuestionBubble(question: string): HTMLDivElement {
@@ -1862,6 +1907,63 @@ export class OverlayController {
     return section;
   }
 
+  // ─── Recap start dialog (spec §5) ──────────────────────────────────
+
+  /** The standalone Recap picker (spec §5): Полный (focused; Enter keeps the old
+   * ⌘⇧S+Enter muscle memory) / Короткий / «Открыть последний» (view the stored
+   * recap, no generation). Nothing generates until a mode is picked; Esc cancels
+   * via the overlay's global dismiss. */
+  private renderRecapPicker(
+    model: Extract<OverlayViewModel, { kind: 'recap-picker' }>,
+  ): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'chatgoose-grid chatgoose-recap-picker';
+
+    const prompt = document.createElement('div');
+    prompt.className = 'chatgoose-recap-picker-prompt';
+    prompt.textContent = 'Какой рекап нужен?';
+    section.append(prompt);
+
+    const actions = document.createElement('div');
+    actions.className = 'chatgoose-recap-picker-actions';
+
+    // Полный is the default (focused) — ⌘⇧S+Enter still fires a full recap.
+    const full = this.createCoachButton('Полный', '', () => this.callbacks.onRecapPick?.('full'));
+    full.classList.add('chatgoose-recap-picker-full');
+    const short = this.createCoachButton('Короткий', 'chatgoose-button-secondary', () =>
+      this.callbacks.onRecapPick?.('short'),
+    );
+    const hasStored = Boolean(model.recapStatus && (model.recapStatus.full || model.recapStatus.short));
+    const openLast = this.createCoachButton(
+      'Открыть последний',
+      'chatgoose-button-secondary',
+      () => this.callbacks.onRecapOpenLast?.(),
+    );
+    openLast.classList.add('chatgoose-recap-picker-last');
+    // A loaded-and-empty status greys the button out (nothing to open); an
+    // unloaded status leaves it live (the background is the source of truth).
+    if (model.recapStatus && !hasStored) {
+      openLast.disabled = true;
+    }
+    actions.append(full, short, openLast);
+    section.append(actions);
+
+    // Enter (unmodified) picks Полный — the ⌘⇧S+Enter muscle memory (spec §5).
+    section.addEventListener('keydown', (event) => {
+      if (
+        event.key === 'Enter' &&
+        !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey &&
+        !event.isComposing
+      ) {
+        event.preventDefault();
+        this.callbacks.onRecapPick?.('full');
+      }
+    });
+
+    queueMicrotask(() => full.focus());
+    return section;
+  }
+
   // ─── Read Only (Summary, Review) ───────────────────────────────────
 
   private renderReadOnly(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): HTMLElement {
@@ -1900,6 +2002,20 @@ export class OverlayController {
         ? `Cached ${relativeTime(model.summaryMeta.generatedAt)}`
         : `Generated ${relativeTime(model.summaryMeta.generatedAt)}`;
       section.append(meta);
+
+      // Recap coverage header (spec §5): «вся переписка (N сообщений)» when the
+      // whole history was kept, else «последние N — история длиннее». Present
+      // only on freshly generated recaps (a cache hit carries no coverage).
+      const { transcriptCoverage, keptCount } = model.summaryMeta;
+      if (transcriptCoverage && typeof keptCount === 'number') {
+        const coverage = document.createElement('div');
+        coverage.className = 'chatgoose-recap-coverage';
+        coverage.textContent =
+          transcriptCoverage === 'full-history'
+            ? `вся переписка (${keptCount} сообщений)`
+            : `последние ${keptCount} — история длиннее`;
+        section.append(coverage);
+      }
     }
 
     if (model.reviewMeta && !model.reviewMeta.parseFallback) {

@@ -3535,6 +3535,53 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'ping-analysis')?.detail).toBe('active');
   });
 
+  it('viewCachedOnly serves the stored recap without generating (spec §5 «Открыть последний»)', async () => {
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'view-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
+    // No message pagination for a pure cache view.
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
+  it('viewCachedOnly fails with no_saved_recap when nothing is stored (no generation)', async () => {
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+    delete mockStorage['summary:group-1'];
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'view-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, { key: 'no_saved_recap', code: 'CG-APP-03' });
+    // Fail-closed: no pagination, no kernel call.
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
   it('returns summary-cache profiling for fan summary cache hits in debug mode', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -4233,6 +4280,9 @@ describe('OperationCoordinator', () => {
     expect(completeMessage?.result.summaryMeta).toMatchObject({
       cached: false,
       syncStatus: { state: 'saving' },
+      // Coverage header data (spec §5) rides on every freshly generated recap.
+      keptCount: expect.any(Number),
+      transcriptCoverage: expect.stringMatching(/^(full-history|window)$/),
     });
     expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
 

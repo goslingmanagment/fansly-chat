@@ -136,6 +136,41 @@ function pendingOpId(app: any): string {
   return app.activeCoachSession.pending.operationId as string;
 }
 
+/** Flush pending microtasks + the setTimeout(0)-based rAF shim so the async
+ * recap-status read and the auto-recap chain's follow-up submit settle. */
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function freshSlot(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: new Date().toISOString(),
+    ageMs: 60_000, // 1 min — well under the 24h freshness threshold
+    transcriptCoverage: 'full-history',
+    requestedCount: 3000,
+    keptCount: 200,
+    ...overrides,
+  };
+}
+
+function staleSlot(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: 'old',
+    ageMs: 48 * 60 * 60 * 1000, // 48h — stale
+    transcriptCoverage: 'window',
+    requestedCount: 3000,
+    keptCount: 200,
+    ...overrides,
+  };
+}
+
+/** The last op:start payload the app sent. */
+function lastSent(app: any): any {
+  const calls = (app.port.send as any).mock.calls;
+  return calls.at(-1)?.[0];
+}
+
 describe('Coach orchestration', () => {
   beforeEach(() => {
     mockStorageState = createStorageState();
@@ -504,19 +539,37 @@ describe('Coach orchestration', () => {
     expect(payload.operationId).not.toBe(opId);
   });
 
-  it('onCoachRecap runs a fan-summary op with the chosen summaryMode (T11 upgrades this)', async () => {
+  it('explicit recap refresh (onCoachRecap) runs an in-feed recap step, Coach stays open, no question chains', async () => {
     const app = await makeReadyApp();
     app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
 
     app.handleCoachRecap('short');
 
-    expect(app.coachOverlayModel).toBeNull();
-    const payload = (app.port.send as any).mock.calls.at(-1)[0];
-    expect(payload).toMatchObject({
-      type: 'operation:start',
-      feature: 'fan-summary',
-      summaryMode: 'short',
+    // Coach overlay stays; a running recap step appears; the op is a
+    // forceRegenerate fan-summary with the chosen mode.
+    expect(app.coachOverlayModel.kind).toBe('coach');
+    const step = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'recap-step');
+    expect(step).toMatchObject({ mode: 'short', origin: 'explicit', status: 'running' });
+    const payload = lastSent(app);
+    expect(payload).toMatchObject({ feature: 'fan-summary', summaryMode: 'short', forceRegenerate: true });
+    expect(app.coachRecapChain).not.toBeNull();
+
+    // Completing it marks the step done and chains NO question (explicit).
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'recap body', parts: [] },
     });
+    await flush();
+    expect(step.status).toBe('done');
+    expect(app.coachRecapChain).toBeNull();
+    // No coach-chat op followed the explicit refresh.
+    expect((app.port.send as any).mock.calls.every((c: any) => c[0].feature !== 'coach-chat')).toBe(true);
   });
 
   it('dispatchHotkey handles the coach and recap-picker arms (returns true)', async () => {
@@ -524,6 +577,275 @@ describe('Coach orchestration', () => {
 
     expect(app.dispatchHotkey('coach')).toBe(true);
     expect(app.dispatchHotkey('fan-summary')).toBe(true);
+  });
+
+  // ─── Recap picker (spec §5) ──────────────────────────────────────────
+
+  it('⌘⇧S opens the recap picker without starting a generation', async () => {
+    const app = await makeReadyApp();
+
+    app.dispatchHotkey('fan-summary');
+
+    expect(app.recapPickerModel).not.toBeNull();
+    expect(app.recapPickerModel.kind).toBe('recap-picker');
+    // No op:start went out — the picker is spend-free until a mode is picked.
+    expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.type === 'operation:start')).toBe(false);
+  });
+
+  it('picking Полный / Короткий starts a fan-summary op with summaryMode + forceRegenerate', async () => {
+    const app = await makeReadyApp();
+    app.openRecapPicker();
+    (app.port.send as any).mockClear();
+
+    app.pickStandaloneRecap('full');
+    expect(app.recapPickerModel).toBeNull();
+    expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', summaryMode: 'full', forceRegenerate: true });
+    expect(app.activeFeature).toBe('fan-summary');
+
+    app.clearOperationState(true);
+    app.openRecapPicker();
+    (app.port.send as any).mockClear();
+    app.pickStandaloneRecap('short');
+    expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', summaryMode: 'short', forceRegenerate: true });
+  });
+
+  it('«Открыть последний» dispatches a view-cached-only fan-summary (no forceRegenerate)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: freshSlot(), short: null };
+    app.openRecapPicker();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    app.openLastRecap();
+
+    const payload = lastSent(app);
+    expect(payload).toMatchObject({ feature: 'fan-summary', viewCachedOnly: true, forceRegenerate: false });
+  });
+
+  it('«Открыть последний» toasts when the status is loaded and empty (no op)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: null, short: null };
+    app.openRecapPicker();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    app.openLastRecap();
+
+    expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.type === 'operation:start')).toBe(false);
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-APP-03');
+  });
+
+  it('no_saved_recap surfaces as a toast, not an error overlay', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: null, short: null };
+    app.openRecapPicker();
+    await flush();
+    app.openLastRecap(); // status unknown-less path is empty → but force the op path:
+    // Directly drive the op path with an unknown status to exercise the error map.
+    app.recapPickerModel = null;
+    app.initializeFeatureOperation('fan-summary', 'view-op', 'alice', undefined);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: 'view-op',
+      error: { key: 'no_saved_recap', code: 'CG-APP-03', message: 'No saved recap' },
+    });
+
+    expect(app.deepOverlayModel).toBeNull();
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-APP-03');
+  });
+
+  // ─── Auto-recap chain (spec §5) ──────────────────────────────────────
+
+  it('auto-recap (stale full) runs a recap step FIRST, then auto-submits the question', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('how do I sell this?');
+
+    // No coach turn yet — a recap step is running and the question is held.
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(app.coachRecapChain.pendingQuestion).toBe('how do I sell this?');
+    const step = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'recap-step');
+    expect(step).toMatchObject({ origin: 'auto', mode: 'full', status: 'running' });
+    expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', forceRegenerate: true });
+    expect(app.activeCoachSession.autoRecapAttempted).toBe(true);
+
+    // Recap completes → step done → the held question auto-submits as coach-chat.
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'fresh recap', parts: [] },
+    });
+    await flush();
+    expect(step.status).toBe('done');
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'how do I sell this?' });
+  });
+
+  it('auto-recap mode matching: short is satisfied by a fresh FULL recap (no chain)', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    recapStatusResponse = { full: freshSlot(), short: null };
+    app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('quick q');
+
+    // A fresh full satisfies a short request → no recap chain, straight coach turn.
+    expect(app.coachRecapChain).toBeNull();
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'quick q' });
+  });
+
+  it('auto-recap full is NOT satisfied by a full at a different deepMessageCount', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    // Fresh full but generated at 1500, current deepMessageCount is 3000.
+    recapStatusResponse = { full: freshSlot({ requestedCount: 1500 }), short: null };
+    app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('deep q');
+
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', forceRegenerate: true });
+  });
+
+  it('auto-recap runs at most once per session, even after a failure', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('q1');
+    const recapOpId = app.coachRecapChain.operationId;
+    // Recap fails with a STOP-category error → chain stops, question preserved.
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'session_expired', code: 'CG-FAN-02', message: 'expired' },
+    });
+    await flush();
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.activeCoachSession.autoRecapAttempted).toBe(true);
+
+    // A SECOND question does NOT auto-recap again — it sends a coach turn directly.
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('q2');
+    expect(app.coachRecapChain).toBeNull();
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'q2' });
+  });
+
+  it('failure taxonomy — STOP: an auth failure preserves the question in the composer, no coach turn', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('preserved q');
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'hub_quota_exceeded', code: 'CG-HUB-09', message: 'quota' },
+    });
+    await flush();
+
+    // Chain stopped: no coach-chat op, the question is back in the composer.
+    expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.feature === 'coach-chat')).toBe(false);
+    expect(app.activeCoachSession.composerText).toBe('preserved q');
+    const step = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'recap-step');
+    expect(step.status).toBe('failed');
+    expect(step.note).toBeUndefined();
+  });
+
+  it('failure taxonomy — PROCEED: a recap-specific model failure answers anyway with a fallback note', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    // An older recap exists (short slot), so the note references its age.
+    recapStatusResponse = { full: staleSlot(), short: staleSlot({ ageMs: 3 * 24 * 60 * 60 * 1000 }) };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('answer me anyway');
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'ai_output_unusable', code: 'CG-API-06', message: 'truncated' },
+    });
+    await flush();
+
+    // The step is failed WITH a fallback note, and the coach turn proceeded.
+    const step = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'recap-step');
+    expect(step.status).toBe('failed');
+    expect(step.note).toContain('обновить Recap не удалось');
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'answer me anyway' });
+  });
+
+  it('cancelling the recap chain stops it and preserves the question', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('cancel my recap');
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+
+    app.cancelActiveOperation();
+
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.suppressedTerminalOpIds.has(recapOpId)).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('cancel my recap');
+    const step = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'recap-step');
+    expect(step.status).toBe('failed');
+  });
+
+  it('off (default) auto-recap sends a coach turn directly, no recap step', async () => {
+    const app = await makeReadyApp();
+    // coachAutoRecap is 'off' by default in createStorageState.
+    recapStatusResponse = { full: null, short: null };
+    app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('no auto recap');
+
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.activeCoachSession.feedItems.some((i: any) => i.kind === 'recap-step')).toBe(false);
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat' });
+  });
+
+  it('the per-session override forces auto-recap even when the setting is off', async () => {
+    const app = await makeReadyApp();
+    // Setting off, but the session override cycles to 'full'.
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    // inherit → off → short → full
+    app.cycleCoachAutoRecapOverride();
+    app.cycleCoachAutoRecapOverride();
+    app.cycleCoachAutoRecapOverride();
+    expect(app.activeCoachSession.autoRecapOverride).toBe('full');
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('override on');
+
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', forceRegenerate: true });
   });
 
   it('renders a Coach button in the bar wired to openCoach', async () => {

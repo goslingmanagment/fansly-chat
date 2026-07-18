@@ -181,6 +181,22 @@ describe('protocol boundary guards', () => {
     ).toBe(true);
   });
 
+  it('accepts viewCachedOnly on a fan-summary operation:start; rejects a non-boolean', () => {
+    const base = {
+      type: 'operation:start',
+      operationId: 'op-view-1',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 3,
+      domFanDisplayName: 'Alice',
+    };
+    expect(isContentPortMessage({ ...base, viewCachedOnly: true })).toBe(true);
+    // Absent is fine (optional).
+    expect(isContentPortMessage(base)).toBe(true);
+    // A non-boolean is rejected at the boundary.
+    expect(isContentPortMessage({ ...base, viewCachedOnly: 'yes' })).toBe(false);
+  });
+
   it('rejects malformed coach fields on operation:start', () => {
     const base = {
       type: 'operation:start',

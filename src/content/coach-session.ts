@@ -21,7 +21,11 @@
 
 import { parseCoachDrafts, type CoachDraft } from '../shared/coach-draft.js';
 import { serializeCoachHistory } from '../shared/coach-history.js';
-import type { CoachHistoryEntry, RecapStatusResponse } from '../shared/types.js';
+import type {
+  CoachAutoRecapOverride,
+  CoachHistoryEntry,
+  RecapStatusResponse,
+} from '../shared/types.js';
 
 /** Max live sessions retained in the content-script LRU (spec §3). */
 export const COACH_SESSION_LRU_MAX = 5;
@@ -77,6 +81,10 @@ export interface CoachRecapStepFeedItem {
   mode: 'short' | 'full';
   origin: 'auto' | 'explicit';
   status: 'running' | 'done' | 'failed';
+  /** Fallback copy set when an auto-recap FAILED but the chain still proceeded
+   * to the coach turn (spec §5 "proceed with older/no recap"). Left unset for
+   * running/done steps and for chain-stopping failures. */
+  note?: string;
 }
 
 export type CoachFeedItem =
@@ -109,6 +117,14 @@ export interface CoachSession {
   /** Freshest full/short recap metadata from the §5 metadata read, or null until
    * it has been read. Fan-level, so it is preserved across «Новый диалог». */
   recapStatus: RecapStatusResponse | null;
+  /** Per-session auto-recap override (spec §5); `inherit` defers to the
+   * `coachAutoRecap` setting. A user preference for the session, so «Новый
+   * диалог» PRESERVES it (only the once-per-session guard resets). */
+  autoRecapOverride: CoachAutoRecapOverride;
+  /** Whether the once-per-session auto-recap has already been attempted (spec
+   * §5: "at most once per session, even after failure"). Reset by «Новый
+   * диалог» so the fresh dialog gets its own single auto-recap chance. */
+  autoRecapAttempted: boolean;
 }
 
 /** The completed-stream payload committed as an exchange. */
@@ -151,6 +167,8 @@ export interface CoachSessionStore {
     mode: 'short' | 'full',
     origin: 'auto' | 'explicit',
   ): CoachRecapStepFeedItem;
+  /** Set the per-session auto-recap override (spec §5 topbar control). */
+  setAutoRecapOverride(session: CoachSession, override: CoachAutoRecapOverride): void;
   /** «Новый диалог»: clears the feed, wire list, pending, and composer text, and
    * mints a new `sessionId` (forcing the background reseed). Recap status —
    * fan-level, not dialog-level — is preserved. The caller confirms first. */
@@ -193,6 +211,8 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       composerText: '',
       pending: undefined,
       recapStatus: null,
+      autoRecapOverride: 'inherit',
+      autoRecapAttempted: false,
     };
   }
 
@@ -279,13 +299,20 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       return item;
     },
 
+    setAutoRecapOverride(session, override) {
+      session.autoRecapOverride = override;
+    },
+
     resetSession(session) {
       session.feedItems = [];
       session.completedExchanges = [];
       session.pending = undefined;
       session.composerText = '';
       session.sessionId = newSessionId();
-      // recapStatus intentionally preserved (fan-level, not dialog-level).
+      // A fresh dialog gets its own single auto-recap chance (spec §5).
+      session.autoRecapAttempted = false;
+      // recapStatus (fan-level) and autoRecapOverride (a session preference the
+      // user set) intentionally preserved across «Новый диалог».
     },
 
     resetAll() {

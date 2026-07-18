@@ -137,6 +137,11 @@ export const COACH_ANSWER_MAX_CHARS = 64_000;
  * plain optional string and the kernel body schema is its real gate. */
 export const COACH_QUESTION_MAX_CHARS = 2_000;
 
+/** Staleness threshold for the auto-recap decision (spec §5): a stored recap
+ * older than this is considered stale and the auto-recap chain refreshes it
+ * before the first coach question. 24h. */
+export const COACH_RECAP_FRESH_MS = 24 * 60 * 60 * 1000;
+
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
 export const QUICK_OPERATION_TIMEOUT_MS = 60_000;

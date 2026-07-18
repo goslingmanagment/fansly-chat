@@ -273,9 +273,10 @@ export class InlinePanelController {
   private renderHeaderMeta(
     model: Exclude<InlinePanelViewModel, { kind: 'hidden' }>,
   ): void {
-    if (model.kind === 'compare' || model.kind === 'coach') {
-      // Coach never surfaces inline (it is overlay-only, spec §10) and carries no
-      // spend meta; guard so the widened OverlayViewModel union typechecks here.
+    if (model.kind === 'compare' || model.kind === 'coach' || model.kind === 'recap-picker') {
+      // Coach and the Recap start dialog never surface inline (overlay-only, spec
+      // §10/§5) and carry no spend meta; guard so the widened OverlayViewModel
+      // union typechecks here.
       this.metaEl.replaceChildren();
       this.metaEl.classList.add('chatgoose-hidden');
       return;

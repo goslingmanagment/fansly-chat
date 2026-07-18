@@ -3,6 +3,7 @@ import { ButtonBar } from './button-bar.js';
 import {
   createCoachSessionStore,
   type CoachSession,
+  type CoachRecapStepFeedItem,
 } from './coach-session.js';
 import { getActiveConversationDisplayName, getActiveConversationDom } from './conversation-dom.js';
 import { ConversationMountController } from './conversation-mount-controller.js';
@@ -36,7 +37,7 @@ import {
   type HotkeyAction,
 } from '../shared/hotkeys.js';
 import { createKeymap } from '../shared/keymap.js';
-import { SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
+import { COACH_RECAP_FRESH_MS, SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
 import { parseCoachDrafts } from '../shared/coach-draft.js';
 import { isRecapStatusResponse, sendRuntimeRequest } from '../shared/protocol.js';
 import { projectDebugPromptEcho } from '../shared/kernel-context.js';
@@ -68,6 +69,7 @@ import {
 import { loadStorageState } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  CoachAutoRecapOverride,
   CoachOverlayFeedItem,
   DebugPromptEchoStatus,
   LlmSpendSummary,
@@ -85,9 +87,11 @@ import type {
   OperationStartPayload,
   PromptDebugSnapshot,
   RecapStatusResponse,
+  RecapSlot,
   ReplyMode,
   ReplyTone,
   TabUiState,
+  UserErrorKey,
 } from '../shared/types.js';
 
 function createParts(parts: string[]): OverlayInsertPart[] {
@@ -189,6 +193,112 @@ function formatCoachRecapStatusLine(status: RecapStatusResponse | null): string 
   return parts.join(' · ');
 }
 
+/** The auto-recap mode a session runs with: `inherit` defers to the setting. */
+function resolveEffectiveAutoRecap(
+  override: CoachAutoRecapOverride,
+  setting: 'off' | 'short' | 'full',
+): 'off' | 'short' | 'full' {
+  return override === 'inherit' ? setting : override;
+}
+
+/** A slot is "fresh" when younger than the 24h staleness threshold (spec §5). */
+function recapSlotFresh(slot: RecapSlot | null | undefined): boolean {
+  return Boolean(slot && slot.ageMs <= COACH_RECAP_FRESH_MS);
+}
+
+/** Auto-recap mode matching (spec §5): a `short` request is satisfied by any
+ * fresh short OR full recap; a `full` request only by a fresh full generated at
+ * the CURRENT `deepMessageCount` (a full recap at a different window does not
+ * count). Returns true when no auto-recap refresh is needed. */
+function hasFreshMatchingRecap(
+  status: RecapStatusResponse | null,
+  mode: 'short' | 'full',
+  deepMessageCount: number,
+): boolean {
+  if (!status) {
+    return false;
+  }
+  if (mode === 'short') {
+    return recapSlotFresh(status.short) || recapSlotFresh(status.full);
+  }
+  return recapSlotFresh(status.full) && status.full?.requestedCount === deepMessageCount;
+}
+
+/** «Открыть последний»: the mode of the freshest stored slot (spec §5), or null
+ * when neither slot exists. Ties and full-only both resolve to full (the
+ * durable primary recap). */
+function pickFreshestSlotMode(status: RecapStatusResponse | null): 'short' | 'full' | null {
+  if (!status) {
+    return null;
+  }
+  const full = status.full;
+  const short = status.short;
+  if (full && short) {
+    return short.ageMs < full.ageMs ? 'short' : 'full';
+  }
+  if (full) {
+    return 'full';
+  }
+  if (short) {
+    return 'short';
+  }
+  return null;
+}
+
+/** Age of the freshest stored slot (either mode), or null when none exists — the
+ * «использую рекап от N назад» age for the auto-recap PROCEED note (spec §5). */
+function freshestSlotAgeMs(status: RecapStatusResponse | null): number | null {
+  if (!status) {
+    return null;
+  }
+  const ages = [status.full?.ageMs, status.short?.ageMs].filter(
+    (age): age is number => typeof age === 'number',
+  );
+  return ages.length > 0 ? Math.min(...ages) : null;
+}
+
+/** Auto-recap failure taxonomy (spec §5). A recap step that fails STOPS the
+ * chain (question preserved in the composer) for the ENUMERATED categories —
+ * user cancel / route change (both handled structurally), auth/credential/setup
+ * failure, global quota exhaustion, and transcript-acquisition failure. Every
+ * OTHER recap failure is a "recap-specific model failure or feature ceiling" and
+ * PROCEEDS to the coach turn with the older/no recap (the default). The
+ * extension cannot distinguish a per-feature ceiling from global quota (both are
+ * `hub_quota_exceeded`), so quota is treated as the safe STOP branch. */
+const RECAP_CHAIN_STOP_KEYS: ReadonlySet<UserErrorKey> = new Set<UserErrorKey>([
+  // Auth / credential / setup — the coach turn cannot generate either.
+  'not_connected',
+  'session_expired',
+  'missing_api_key',
+  'invalid_api_key',
+  'hub_missing_api_key',
+  'hub_invalid_api_key',
+  'hub_missing_permission',
+  'hub_invalid_url',
+  'no_mapping',
+  'no_personalities',
+  'hub_page_match_failed',
+  'coach_fan_unresolved',
+  'coach_requires_newer_hub',
+  // Global quota exhaustion.
+  'hub_quota_exceeded',
+  // Transcript-acquisition failure (Fansly-side / network during pagination).
+  'fansly_server_error',
+  'network_error',
+  'timed_out',
+  // Context / route boundary.
+  'chat_changed',
+  'another_operation',
+  'extension_reloaded',
+]);
+
+function classifyRecapChainFailure(errorKey: string): 'stop' | 'proceed' {
+  return RECAP_CHAIN_STOP_KEYS.has(errorKey as UserErrorKey) ? 'stop' : 'proceed';
+}
+
+/** The topbar auto-recap override cycle order (spec §5 per-session control). */
+const AUTO_RECAP_CYCLE: readonly CoachAutoRecapOverride[] = ['inherit', 'off', 'short', 'full'];
+
 export class ChatGooseContentApp {
   private routeNonce = 0;
   private boardContextGeneration = 0;
@@ -247,6 +357,27 @@ export class ChatGooseContentApp {
   // for the pending render only; the committed answer uses the completion's
   // authoritative rawText (never this) so a dropped/late chunk cannot corrupt it.
   private coachPendingAnswerText = '';
+  // The standalone Recap start dialog (spec §5), or null when it is closed. Set
+  // only while fully idle (openRecapPicker guards on another op); the planner
+  // renders it above the idle surfaces and clears on any op start.
+  private recapPickerModel: Extract<OverlayViewModel, { kind: 'recap-picker' }> | null = null;
+  // An in-flight coach recap step (spec §5 orchestration): a fan-summary op that
+  // runs INSIDE the coach feed as a visible recap-step, keeping the coach overlay
+  // rendered (activeFeature is 'fan-summary', so the planner needs the chain flag
+  // to keep coach on top). `pendingQuestion` is the auto-recap's held question,
+  // auto-submitted after the step resolves; null for an explicit refresh.
+  private coachRecapChain:
+    | {
+        operationId: string;
+        session: CoachSession;
+        step: CoachRecapStepFeedItem;
+        origin: 'auto' | 'explicit';
+        pendingQuestion: string | null;
+      }
+    | null = null;
+  // Synchronous re-entrancy guard for submitCoachQuestion across its settings
+  // await (the auto-recap decision needs live settings before arming anything).
+  private coachSubmitInFlight = false;
 
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
@@ -278,7 +409,15 @@ export class ChatGooseContentApp {
     },
   });
   private readonly buttonBar = new ButtonBar({
-    onFeatureClick: (feature) => this.startFeature(feature, false),
+    onFeatureClick: (feature) => {
+      // The Recap button opens the start dialog (spec §5/§10), not an instant
+      // generation; every other feature button starts its op directly.
+      if (feature === 'fan-summary') {
+        this.openRecapPicker();
+        return;
+      }
+      this.startFeature(feature, false);
+    },
     onCompareClick: () => {
       void this.startCompare(false);
     },
@@ -361,6 +500,13 @@ export class ChatGooseContentApp {
       void this.openDebugPromptViewer();
     },
     onClose: () => {
+      // Esc/backdrop over the recap start dialog just cancels it (spec §5) — no
+      // generation was started, nothing to tear down.
+      if (this.recapPickerModel) {
+        this.closeRecapPicker();
+        this.renderAll();
+        return;
+      }
       // Idle coach close (Esc/backdrop while not streaming): retain the session
       // in the store for reopen (spec §3), just drop the overlay.
       if (this.coachOverlayModel && this.activeFeature !== 'coach-chat') {
@@ -380,6 +526,12 @@ export class ChatGooseContentApp {
       this.renderAll();
     },
     onCancel: (operationId) => {
+      // A cancellable coach recap chain (spec §5): Esc/Cancel aborts the whole
+      // chain, marks the recap step failed, and preserves the held question.
+      if (this.coachRecapChain) {
+        this.cancelCoachRecapChain();
+        return;
+      }
       // A streaming coach turn's Esc/Cancel cancels the turn but stays open,
       // recording a cancelled failed-attempt (carry-forward 3).
       if (this.activeFeature === 'coach-chat') {
@@ -406,10 +558,13 @@ export class ChatGooseContentApp {
     },
     onCoachNewDialog: () => this.resetCoachSession(),
     onCoachRecap: (mode) => this.handleCoachRecap(mode),
+    onCoachAutoRecapCycle: () => this.cycleCoachAutoRecapOverride(),
     onCoachRetry: (question) => {
       void this.handleCoachRetry(question);
     },
     onCoachComposerInput: (text) => this.handleCoachComposerInput(text),
+    onRecapPick: (mode) => this.pickStandaloneRecap(mode),
+    onRecapOpenLast: () => this.openLastRecap(),
   });
 
   private readonly hotkeyBindings = buildHotkeyBindings(detectLabelPlatform());
@@ -537,16 +692,152 @@ export class ChatGooseContentApp {
     }
   }
 
-  /** TODO(T11): open the recap start dialog (Полный / Короткий / «Открыть
-   * последний»). Until the picker exists, ⌘⇧S preserves the old muscle memory
-   * by starting a full fan-summary directly — but the arm still returns handled
-   * from {@link dispatchHotkey} so the key is never released to the browser
-   * (carry-forward 1). */
+  /** Open the standalone Recap start dialog (spec §5): Полный (focused; Enter
+   * keeps the old ⌘⇧S+Enter muscle memory) / Короткий / «Открыть последний».
+   * Creates NO generation (only the metadata-only recap-status read) until a
+   * mode is picked. Handled always so ⌘⇧S never falls through to the Firefox
+   * screenshot shortcut (carry-forward 1). */
   private openRecapPicker(): void {
     if (!this.currentGroupId) {
       return;
     }
-    this.startFeature('fan-summary', false);
+    // A live op blocks the picker (it would race a second generation) — mirror
+    // the other app actions and toast rather than silently swallowing ⌘⇧S.
+    if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    // Taking over the overlay surface: drop any lingering completed surfaces so
+    // the picker actually renders (mirrors openCoach's takeover).
+    this.deepOverlayModel = null;
+    this.quickInlineVisible = false;
+    this.comparePanelVisible = false;
+    if (this.activeCompareModel && !this.activeCompareModel.operationId) {
+      this.activeCompareModel = null;
+    }
+    this.recapPickerModel = {
+      kind: 'recap-picker',
+      fanDisplayName: getActiveConversationDisplayName() ?? 'fan',
+      recapStatus: null,
+    };
+    this.renderAll();
+    // Metadata-only recap-status read (spec §5) — enables/labels «Открыть
+    // последний»; best-effort, never blocks opening.
+    void this.refreshRecapPickerStatus();
+  }
+
+  /** Close the recap start dialog (Esc/pick). */
+  private closeRecapPicker(): void {
+    this.recapPickerModel = null;
+  }
+
+  /** A picker pick (Полный / Короткий): close the dialog and start a fresh
+   * recap generation. Standalone recaps are explicit refreshes — they bypass the
+   * summary cache (forceRegenerate, spec §5) so the pick always regenerates. */
+  private pickStandaloneRecap(mode: 'short' | 'full'): void {
+    this.closeRecapPicker();
+    this.startStandaloneRecap(mode);
+  }
+
+  /** Fire the metadata-only recap-status read for the OPEN picker (spec §5) and
+   * fold both slots into its model. Best-effort. */
+  private async refreshRecapPickerStatus(): Promise<void> {
+    const groupId = this.currentGroupId;
+    const picker = this.recapPickerModel;
+    if (!groupId || !picker) {
+      return;
+    }
+    try {
+      const status = await sendRuntimeRequest('getRecapStatus', {
+        groupId,
+        fanAccountId: null,
+      });
+      if (!isRecapStatusResponse(status) || this.recapPickerModel !== picker) {
+        return;
+      }
+      this.recapPickerModel = { ...picker, recapStatus: status };
+      this.renderSurfaces();
+    } catch {
+      // Best-effort — the picker just leaves «Открыть последний» disabled.
+    }
+  }
+
+  /** Start a standalone recap generation (spec §5) rendered via the normal
+   * fan-summary overlay path. Always regenerates (explicit refresh bypasses the
+   * cache). Reused by both the picker picks and the ⌘⇧S+Enter muscle memory. */
+  private startStandaloneRecap(mode: 'short' | 'full'): void {
+    if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    if (!this.ensureFeatureCanStart('fan-summary')) {
+      return;
+    }
+    const operationId = crypto.randomUUID();
+    const domFanDisplayName = getActiveConversationDisplayName();
+    this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
+    const payload: OperationStartPayload = {
+      ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, true),
+      summaryMode: mode,
+    };
+    const sent = this.port.send(payload);
+    if (!sent) {
+      this.clearOperationState(true);
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.renderSurfaces();
+      this.renderButtonBar();
+      return;
+    }
+    this.renderButtonBar();
+  }
+
+  /** «Открыть последний» (spec §5): view the freshest STORED recap without any
+   * generation. Dispatches a view-cached-only fan-summary (background serves the
+   * local cache or fails with `no_saved_recap`, which surfaces as a toast). The
+   * mode is the freshest stored slot; when neither slot exists we toast without
+   * even sending the op. */
+  private openLastRecap(): void {
+    const status = this.recapPickerModel?.recapStatus ?? this.activeCoachSession?.recapStatus ?? null;
+    this.closeRecapPicker();
+    let mode: 'short' | 'full';
+    if (status) {
+      const picked = pickFreshestSlotMode(status);
+      if (picked === null) {
+        // Status is loaded and empty — no round-trip needed, just toast.
+        this.showUserErrorToast(getErrorMessage('no_saved_recap'));
+        this.renderAll();
+        return;
+      }
+      mode = picked;
+    } else {
+      // Status unknown (read pending/failed): let the background be the source
+      // of truth — attempt the durable full recap; a real miss 404s to a toast.
+      mode = 'full';
+    }
+    if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    if (!this.ensureFeatureCanStart('fan-summary')) {
+      return;
+    }
+    const operationId = crypto.randomUUID();
+    const domFanDisplayName = getActiveConversationDisplayName();
+    this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
+    const payload: OperationStartPayload = {
+      ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, false),
+      viewCachedOnly: true,
+      ...(mode === 'short' ? { summaryMode: 'short' as const } : {}),
+    };
+    const sent = this.port.send(payload);
+    if (!sent) {
+      this.clearOperationState(true);
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.renderSurfaces();
+      this.renderButtonBar();
+      return;
+    }
+    this.renderButtonBar();
   }
 
   private cycleNextReplyTone(): void {
@@ -561,6 +852,12 @@ export class ChatGooseContentApp {
   }
 
   private cancelActiveOperation(): void {
+    // A coach recap chain is cancellable as a whole (spec §5) — before the
+    // generic coach/feature paths, since its op rides `activeFeature`='fan-summary'.
+    if (this.coachRecapChain) {
+      this.cancelCoachRecapChain();
+      return;
+    }
     if (this.activeFeature === 'coach-chat') {
       this.cancelCoachTurn();
       return;
@@ -673,6 +970,8 @@ export class ChatGooseContentApp {
         cachedInlineModel: this.getCachedInlineModelForCurrentState(),
         deepOverlayModel: this.deepOverlayModel,
         coachOverlayModel: this.coachOverlayModel,
+        coachRecapChainActive: this.coachRecapChain !== null,
+        recapPickerModel: this.recapPickerModel,
       }));
     } finally {
       applyScrollCompensation(this.root, scrollSnapshot);
@@ -1008,10 +1307,12 @@ export class ChatGooseContentApp {
     }
 
     // An idle open coach yields to any other feature (spec §3): close it,
-    // retaining the session in the store for reopen.
+    // retaining the session in the store for reopen. The standalone Recap dialog
+    // is likewise superseded.
     if (this.coachOverlayModel) {
       this.closeCoach();
     }
+    this.recapPickerModel = null;
 
     this.comparePanelVisible = false;
     if (this.activeCompareModel && !this.activeCompareModel.operationId) {
@@ -1289,6 +1590,8 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('coach_fan_unresolved'));
       return;
     }
+    // Opening Coach supersedes the standalone Recap dialog if it is up.
+    this.recapPickerModel = null;
     // Opening Coach as a distinct app action TAKES OVER the overlay surface —
     // mirror startFeature so the coach overlay wins over a cached inline result
     // or a completed compare panel too. Both sit ABOVE the idle-coach floor in
@@ -1322,12 +1625,16 @@ export class ChatGooseContentApp {
     this.coachOverlayModel = null;
     this.activeCoachSession = null;
     this.coachPendingAnswerText = '';
+    // A lingering chain would reference the now-detached session; drop it. (The
+    // op itself, if any, is torn down by the caller's suppression path.)
+    this.coachRecapChain = null;
   }
 
-  /** Send the chatter's question as a coach turn (spec §3). Async only to read
-   * the live `coachHistoryLimit` from storage (the same pattern content already
-   * uses for the compare fingerprint); the single-op gate + pending marker are
-   * armed synchronously before the await so nothing can slip in. */
+  /** Send the chatter's question as a coach turn (spec §3), possibly gated by an
+   * auto-recap chain (spec §5). Async because the auto-recap decision AND the
+   * wire history need live settings (`coachAutoRecap`, `deepMessageCount`,
+   * `coachHistoryLimit`); a synchronous `coachSubmitInFlight` guard blocks a
+   * re-entrant submit across the await. */
   async submitCoachQuestion(question: string): Promise<void> {
     const session = this.activeCoachSession;
     if (!session) {
@@ -1337,7 +1644,12 @@ export class ChatGooseContentApp {
     if (!trimmed) {
       return;
     }
-    if (this.activeFeature || this.activeCompareModel?.operationId) {
+    if (
+      this.activeFeature ||
+      this.activeCompareModel?.operationId ||
+      this.coachRecapChain ||
+      this.coachSubmitInFlight
+    ) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
@@ -1347,9 +1659,50 @@ export class ChatGooseContentApp {
       return;
     }
 
+    this.coachSubmitInFlight = true;
+    let settings;
+    try {
+      ({ settings } = await loadStorageState());
+    } finally {
+      this.coachSubmitInFlight = false;
+    }
+    // A route/persona change during the await tore the session/route down.
+    if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
+      return;
+    }
+    // Defensive re-check: the in-flight guard blocked re-entrant submits, but a
+    // terminal elsewhere could conceivably have armed an op during the await.
+    if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+
+    // Auto-recap chain (spec §5): the FIRST question of a session (with an
+    // effective mode ≠ off) refreshes a stale/absent matching recap FIRST, as a
+    // visible recap step, then auto-submits this question. At most once per
+    // session, even after failure — the decision point flips `autoRecapAttempted`
+    // so a later turn never re-triggers it.
+    const effectiveMode = resolveEffectiveAutoRecap(session.autoRecapOverride, settings.coachAutoRecap);
+    if (!session.autoRecapAttempted && effectiveMode !== 'off') {
+      session.autoRecapAttempted = true;
+      if (!hasFreshMatchingRecap(session.recapStatus, effectiveMode, settings.deepMessageCount)) {
+        this.startCoachRecapChain(session, effectiveMode, 'auto', trimmed);
+        return;
+      }
+    }
+
+    this.sendCoachTurn(session, groupId, trimmed, settings.coachHistoryLimit);
+  }
+
+  /** Arm the single-op markers + pending marker and send a coach turn (spec §3).
+   * Synchronous — settings are already resolved by the caller. */
+  private sendCoachTurn(
+    session: CoachSession,
+    groupId: string,
+    trimmed: string,
+    coachHistoryLimit: number,
+  ): void {
     const operationId = crypto.randomUUID();
-    // Arm the shared single-op markers + the store pending marker synchronously
-    // so a re-entrant submit is blocked immediately.
     this.activeFeature = 'coach-chat';
     this.activeOperationId = operationId;
     this.activePersonaKey = this.tabState?.mappedPersonalityId ?? null;
@@ -1364,13 +1717,7 @@ export class ChatGooseContentApp {
     this.rebuildCoachModel();
     this.renderAll();
 
-    const { settings } = await loadStorageState();
-    // A route/persona change during the await tears the op down (suppress +
-    // clear); only send if THIS op is still the live one.
-    if (this.activeOperationId !== operationId) {
-      return;
-    }
-    const coachHistory = this.coachStore.serializeForWire(session, settings.coachHistoryLimit);
+    const coachHistory = this.coachStore.serializeForWire(session, coachHistoryLimit);
     const domFanDisplayName = getActiveConversationDisplayName();
     const payload: OperationStartPayload = {
       type: 'operation:start',
@@ -1437,37 +1784,188 @@ export class ChatGooseContentApp {
     }
   }
 
-  /** Explicit recap refresh from the coach header (spec §5). T10 trivial path:
-   * run a normal fan-summary generation with the chosen `summaryMode` (it takes
-   * over the overlay; the coach session is retained and reopens afterwards).
-   * TODO(T11): upgrade to an in-feed `recap-step` chain without closing Coach. */
+  /** Explicit recap refresh from the coach header (spec §5): the same machinery
+   * as the auto-recap chain but with origin 'explicit' — a visible in-feed recap
+   * step, no coach-question chaining, Coach stays open. */
   private handleCoachRecap(mode: 'short' | 'full'): void {
-    if (this.activeFeature || this.activeCompareModel?.operationId) {
+    const session = this.activeCoachSession;
+    if (!session) {
+      return;
+    }
+    this.startCoachRecapChain(session, mode, 'explicit', null);
+  }
+
+  /** Cycle the per-session auto-recap override (spec §5 topbar control):
+   * inherit → off → short → full → inherit. */
+  private cycleCoachAutoRecapOverride(): void {
+    const session = this.activeCoachSession;
+    if (!session) {
+      return;
+    }
+    const index = AUTO_RECAP_CYCLE.indexOf(session.autoRecapOverride);
+    const next = AUTO_RECAP_CYCLE[(index + 1) % AUTO_RECAP_CYCLE.length]!;
+    this.coachStore.setAutoRecapOverride(session, next);
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** Run a recap step INSIDE the coach feed (spec §5 orchestration). A
+   * fan-summary op with `summaryMode` + `forceRegenerate` (bypasses the cache)
+   * renders as a `recap-step` feed item while the coach overlay stays on top
+   * (the planner's chain flag). On complete/failure the chain resolves via
+   * {@link handleCoachRecapChainComplete}/{@link handleCoachRecapChainError};
+   * an 'auto' chain auto-submits its held question, an 'explicit' one does not. */
+  private startCoachRecapChain(
+    session: CoachSession,
+    mode: 'short' | 'full',
+    origin: 'auto' | 'explicit',
+    pendingQuestion: string | null,
+  ): void {
+    if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
+    // Prereqs unmet (no connection/mapping/persona): can't refresh. For an auto
+    // chain this is a STOP — preserve the held question in the composer.
     if (!this.ensureFeatureCanStart('fan-summary')) {
+      if (origin === 'auto' && pendingQuestion && session.composerText === '') {
+        session.composerText = pendingQuestion;
+        this.rebuildCoachModel();
+        this.renderAll();
+      }
       return;
     }
-    // Close the coach overlay (session retained) so the summary overlay shows.
-    this.closeCoach();
+    const step = this.coachStore.recordRecapStep(session, mode, origin);
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
+    // Set the chain BEFORE initializeFeatureOperation so its renderSurfaces keeps
+    // the coach overlay on top (the running step is already in the feed).
+    this.coachRecapChain = { operationId, session, step, origin, pendingQuestion };
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
-    // Recap refresh bypasses the completed-overlay cache (spec §5): forceRegenerate.
+    this.rebuildCoachModel();
+    // Recap refresh bypasses the summary/overlay caches (spec §5): forceRegenerate.
     const payload: OperationStartPayload = {
       ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, true),
       summaryMode: mode,
     };
     const sent = this.port.send(payload);
     if (!sent) {
-      this.clearOperationState(true);
+      // The start never reached the background — treat as a STOP: fail the step,
+      // preserve an auto chain's question, and drop the op markers.
+      step.status = 'failed';
+      if (origin === 'auto' && pendingQuestion && session.composerText === '') {
+        session.composerText = pendingQuestion;
+      }
+      this.coachRecapChain = null;
+      this.clearCoachOperationState();
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
-      this.renderSurfaces();
+      this.rebuildCoachModel();
+      this.renderAll();
+      return;
+    }
+    this.renderAll();
+  }
+
+  /** A recap step completed (spec §5): mark it done, refresh the recap status so
+   * the just-generated recap shows, then — for an auto chain — auto-submit the
+   * held question. */
+  private handleCoachRecapChainComplete(operationId: string): void {
+    const chain = this.coachRecapChain;
+    if (!chain || chain.operationId !== operationId) {
+      this.clearCoachOperationState();
       this.renderButtonBar();
       return;
     }
-    this.renderButtonBar();
+    chain.step.status = 'done';
+    this.coachRecapChain = null;
+    this.clearCoachOperationState();
+    if (chain.session === this.activeCoachSession) {
+      // The freshly generated recap changes the status slots — refresh them so a
+      // later decision (and the status line) reflect it.
+      void this.refreshCoachRecapStatus(chain.session);
+    }
+    this.rebuildCoachModel();
+    this.renderAll();
+    if (chain.origin === 'auto' && chain.pendingQuestion && chain.session === this.activeCoachSession) {
+      // autoRecapAttempted is already set, so this submit sends a plain turn.
+      void this.submitCoachQuestion(chain.pendingQuestion);
+    }
+  }
+
+  /** A recap step failed (spec §5 failure taxonomy). STOP categories preserve the
+   * held question in the composer and end the chain; a recap-specific model
+   * failure or feature ceiling PROCEEDS to the coach turn (auto) with a fallback
+   * note. An explicit refresh never chains a question either way. */
+  private handleCoachRecapChainError(
+    message: Extract<BackgroundPortMessage, { type: 'operation:error' | 'operation:discarded' }>,
+  ): void {
+    const chain = this.coachRecapChain;
+    if (!chain || chain.operationId !== message.operationId) {
+      this.clearCoachOperationState();
+      this.renderButtonBar();
+      return;
+    }
+    const errorKey = message.error?.key ?? 'unknown_error';
+    const classification = classifyRecapChainFailure(errorKey);
+    const { origin, pendingQuestion, session, step } = chain;
+    step.status = 'failed';
+    this.coachRecapChain = null;
+    this.clearCoachOperationState();
+
+    if (classification === 'stop') {
+      // Chain-stopping failure: preserve the held question for a manual resend.
+      if (origin === 'auto' && pendingQuestion && session.composerText === '') {
+        session.composerText = pendingQuestion;
+      }
+      this.rebuildCoachModel();
+      this.renderAll();
+      return;
+    }
+
+    // PROCEED: a recap-specific model failure. An auto chain answers anyway using
+    // the older/no recap, with a note; an explicit refresh just shows the failed
+    // step.
+    if (origin === 'auto' && pendingQuestion) {
+      step.note = this.buildRecapFallbackNote(session);
+      this.rebuildCoachModel();
+      this.renderAll();
+      if (session === this.activeCoachSession) {
+        void this.submitCoachQuestion(pendingQuestion);
+      }
+      return;
+    }
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** Cancel the whole recap chain (spec §5 "cancellable as a whole"): a STOP —
+   * fail the step, preserve an auto chain's held question, suppress the op's
+   * terminal. */
+  private cancelCoachRecapChain(): void {
+    const chain = this.coachRecapChain;
+    if (!chain) {
+      return;
+    }
+    this.suppressTerminalOperation(chain.operationId);
+    this.port.send({ type: 'operation:cancel', operationId: chain.operationId });
+    chain.step.status = 'failed';
+    if (chain.origin === 'auto' && chain.pendingQuestion && chain.session.composerText === '') {
+      chain.session.composerText = chain.pendingQuestion;
+    }
+    this.coachRecapChain = null;
+    this.clearCoachOperationState();
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** The «использую рекап от N назад» fallback copy (spec §5): the age of the
+   * freshest existing recap, or the recap-less variant when none exists. */
+  private buildRecapFallbackNote(session: CoachSession): string {
+    const ageMs = freshestSlotAgeMs(session.recapStatus);
+    if (ageMs === null) {
+      return 'обновить Recap не удалось — отвечаю без него';
+    }
+    return `обновить Recap не удалось — использую рекап от ${formatCoachRecapAge(ageMs)}`;
   }
 
   /** Cancel a streaming coach turn (Esc / ⌘⇧X): the terminal that follows is
@@ -1551,6 +2049,16 @@ export class ChatGooseContentApp {
    * in the store. The streaming op itself is torn down by the caller's existing
    * overlay-feature suppression branch. */
   private closeCoachOnRouteChange(): void {
+    // A recap chain (fan-summary op) is torn down below by the overlay-feature
+    // suppression branch; preserve its held question into the composer first.
+    const chain = this.coachRecapChain;
+    if (chain) {
+      if (chain.pendingQuestion && chain.session.composerText === '') {
+        chain.session.composerText = chain.pendingQuestion;
+      }
+      chain.step.status = 'failed';
+      this.coachRecapChain = null;
+    }
     const session = this.activeCoachSession;
     if (session) {
       if (session.pending && !session.composerText) {
@@ -1608,20 +2116,27 @@ export class ChatGooseContentApp {
         mode: item.mode,
         origin: item.origin,
         status: item.status,
+        ...(item.note !== undefined ? { note: item.note } : {}),
       };
     });
     const streaming = Boolean(session.pending);
+    // "Busy" also covers a running recap step for THIS session (spec §5): the
+    // composer locks and the whole chain is cancellable via the top-level op.
+    const chainOpId =
+      this.coachRecapChain?.session === session ? this.coachRecapChain.operationId : null;
+    const busy = streaming || chainOpId !== null;
     return {
       kind: 'coach',
       fanDisplayName: getActiveConversationDisplayName() ?? 'fan',
-      operationId: session.pending?.operationId ?? null,
+      operationId: session.pending?.operationId ?? chainOpId,
       sessionView: {
         feedItems,
         pendingQuestion: session.pending?.question,
         pendingAnswerText: streaming ? this.coachPendingAnswerText : undefined,
         recapStatusLine: formatCoachRecapStatusLine(session.recapStatus),
         composerText: session.composerText,
-        composerEnabled: !streaming,
+        composerEnabled: !busy,
+        autoRecapOverride: session.autoRecapOverride,
         // (creator account, group) identity — a change swaps the whole feed.
         // Coach is context-bound and closes on route/persona change, so the
         // current tab identity always matches the open session's key.
@@ -1726,6 +2241,17 @@ export class ChatGooseContentApp {
             this.suppressTerminalOperation(this.activeOperationId);
             this.port.send({ type: 'operation:cancel', operationId: this.activeOperationId });
             this.clearCoachOperationState();
+          }
+          // A running recap chain (fan-summary op) rides `activeFeature`, so a
+          // persona change already cancelled its op via clearPersonaBoundFeatureState;
+          // an account-only change cancels it here. Either way drop the chain.
+          if (this.coachRecapChain) {
+            if (!personaChanged && this.activeOperationId) {
+              this.suppressTerminalOperation(this.activeOperationId);
+              this.port.send({ type: 'operation:cancel', operationId: this.activeOperationId });
+              this.clearCoachOperationState();
+            }
+            this.coachRecapChain = null;
           }
           this.coachStore.resetAll();
           this.closeCoach();
@@ -2064,6 +2590,12 @@ export class ChatGooseContentApp {
     if (this.activeOperationId !== operationId) {
       return;
     }
+    // A coach recap step (spec §5) is a status pill, not a streamed body — the
+    // recap's fan-summary text never renders in the coach feed. Swallow its
+    // chunks so they neither hit overlayRawText nor the coach pending answer.
+    if (this.coachRecapChain?.operationId === operationId) {
+      return;
+    }
     // Coach streams into the session-scoped pending answer, NOT overlayRawText
     // (carry-forward 6); the keyed coach renderer mutates only the pending node.
     if (this.activeFeature === 'coach-chat') {
@@ -2105,6 +2637,13 @@ export class ChatGooseContentApp {
     }
 
     if (this.activeOperationId !== message.operationId || !this.activeFeature) {
+      return;
+    }
+
+    // A coach recap step (spec §5): resolve the chain (mark done, maybe chain the
+    // held question) — the fan-summary result NEVER renders as a deep overlay.
+    if (this.coachRecapChain?.operationId === message.operationId) {
+      this.handleCoachRecapChainComplete(message.operationId);
       return;
     }
 
@@ -2163,10 +2702,26 @@ export class ChatGooseContentApp {
     }
 
     if (this.activeOperationId === message.operationId) {
+      // A coach recap step failed (spec §5): classify + resolve the chain in the
+      // feed (stop vs proceed) — never a separate error overlay.
+      if (this.coachRecapChain?.operationId === message.operationId) {
+        this.handleCoachRecapChainError(message);
+        return;
+      }
+
       // Coach failures surface as an in-feed failed-attempt (carry-forward 5) —
       // never a separate error overlay while Coach is open.
       if (this.activeFeature === 'coach-chat') {
         this.handleCoachError(message);
+        return;
+      }
+
+      // «Открыть последний» found nothing stored (spec §5): a soft, expected
+      // outcome — toast it rather than showing a full error overlay.
+      if (message.error?.key === 'no_saved_recap') {
+        this.clearOperationState(true);
+        this.showUserErrorToast(getErrorMessage('no_saved_recap'));
+        this.renderAll();
         return;
       }
 
