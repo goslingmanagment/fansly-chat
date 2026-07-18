@@ -1083,7 +1083,7 @@ async function render(): Promise<void> {
     deepInput.value,
     debugInput.checked,
   ]);
-  const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
+  const collectSettingsPatch = (): Partial<Settings> => {
     const patch: Partial<Settings> = {
       uiTheme: themeSelect.value as UiThemeSetting,
       agencyHubBaseUrl: agencyHubUrlInput.value,
@@ -1096,10 +1096,7 @@ async function render(): Promise<void> {
     // The API key has its own custody key. A theme/count save from a stale
     // Options tab must not write the old visible value over a rotation made by
     // another tab or the background. Only an explicit edit owns this field.
-    if (
-      agencyHubApiKeyDirty ||
-      (forceHubSnapshot && agencyHubKeyInput.value !== state.settings.agencyHubApiKey)
-    ) {
+    if (agencyHubApiKeyDirty) {
       patch.agencyHubApiKey = agencyHubKeyInput.value;
     }
     return patch;
@@ -1125,7 +1122,7 @@ async function render(): Promise<void> {
   let settingsSnapshotVersion = 0;
   let agencyHubApiKeySnapshotVersion = 0;
   let settingsSaveChainSignature: string | null = null;
-  const queueSettingsSave = (forceHubSnapshot = false): Promise<void> => {
+  const queueSettingsSave = (): Promise<void> => {
     if (futureSchemaObserved !== null) {
       settingsDirty = false;
       return Promise.resolve();
@@ -1134,7 +1131,7 @@ async function render(): Promise<void> {
     // storage read must not be allowed to finish after a newer edit and put an
     // older form snapshot back into storage.
     const formSignature = settingsFormSignature();
-    const patch = collectSettingsPatch(forceHubSnapshot);
+    const patch = collectSettingsPatch();
     const snapshotVersion = ++settingsSnapshotVersion;
     if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
       agencyHubApiKeySnapshotVersion = snapshotVersion;
@@ -1257,11 +1254,11 @@ async function render(): Promise<void> {
       return settingsSaveChain;
     }
 
-    // Hub actions are explicit persistence boundaries. They must save even
-    // when values were assigned programmatically (no input/change event), or
-    // when the current form differs from the active queued snapshot.
+    // Hub actions are explicit persistence boundaries for form-owned fields.
+    // The custody key itself is included only after its input emitted an edit;
+    // a stale programmatic value must never become credential ownership.
     saveSettingsDebounced.cancel();
-    return queueSettingsSave(true);
+    return queueSettingsSave();
   };
 
   [
@@ -1761,7 +1758,14 @@ async function render(): Promise<void> {
     // hero out of its loading skeleton even before the hub identity read lands.
     fanslyRowPainted = true;
     if (failed) {
+      // A failed re-poll invalidates the last successful live snapshot. Keeping
+      // those captured ids would leave the readiness hero green while this row
+      // honestly says OFF, so clear the shared model before repainting.
+      statusModel.fanslyCapturedAccountIds = [];
+      statusModel.fanslyAccounts = 0;
+      statusModel.fanslyFreshest = undefined;
       statusRows.fansly.set({ badge: 'OFF', tone: 'neutral', fact: 'живой статус недоступен' });
+      updateReadinessHero();
       return;
     }
     const lookup = buildSessionLookup(sessions);
@@ -2048,6 +2052,10 @@ async function render(): Promise<void> {
       changes: Record<string, browser.storage.StorageChange>,
       areaName: string,
     ): void => {
+      const apiKeyChanged = Boolean(changes[AGENCY_HUB_API_KEY_STORAGE_KEY]);
+      const credentialsChanged = apiKeyChanged || Boolean(
+        changes[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY],
+      );
       if (
         areaName !== 'local' ||
         !(
@@ -2073,6 +2081,20 @@ async function render(): Promise<void> {
         // credential-merged settings — adopt them so the source comparison (hence
         // «ещё не загружен» vs «пустой каталог») is honest.
         state.settings = refreshedState.settings;
+        if (apiKeyChanged) {
+          const refreshedApiKey = refreshedState.settings.agencyHubApiKey;
+          // An empty custody value is a sign-out tombstone and wins even over a
+          // focused/dirty legacy-key field. For a non-empty rotation, preserve a
+          // genuinely different in-progress edit; otherwise mirror storage.
+          if (
+            refreshedApiKey === '' ||
+            !agencyHubApiKeyDirty ||
+            agencyHubKeyInput.value.trim() === refreshedApiKey
+          ) {
+            agencyHubApiKeyDirty = false;
+            agencyHubKeyInput.value = refreshedApiKey;
+          }
+        }
         state.personaCatalog = refreshedState.personaCatalog;
         state.personaCatalogSource = refreshedState.personaCatalogSource;
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
@@ -2082,6 +2104,25 @@ async function render(): Promise<void> {
         // done — a mapping that was hidden by migrateState now resolves to an
         // active persona — so repaint the hero from the fresh catalog state.
         updateReadinessHero();
+        if (credentialsChanged) {
+          // Credential custody changed outside this page (including sign-out in
+          // another Options tab). Revoke stale signed-in/connected UI now, then
+          // rehydrate against the exact stored credential snapshot.
+          hubSignInMeta.textContent = '';
+          renderHubSignInState();
+          markAgencyHubConnectionPending();
+          updateReadinessHero();
+          const expectedSignature = storedHubSignature();
+          const statusHydration = hydrateHubStatusRows(expectedSignature);
+          void (async () => {
+            await refreshAgencyHubPermissionState();
+            if (disposed) return;
+            await runAgencyHubConnectionTest({ force: true });
+            await statusHydration;
+          })().catch((error: unknown) => {
+            console.error('Failed to refresh Agency Hub after credential storage update', error);
+          });
+        }
       }).catch((error: unknown) => {
         console.error('Failed to apply live persona catalog update', error);
       });
