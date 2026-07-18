@@ -5894,7 +5894,31 @@ describe('OperationCoordinator', () => {
       (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
         message.type === 'operation:error',
     );
-    expect(errorMessage?.error.key).toBe('unknown_error');
+    expect(errorMessage?.error).toMatchObject({
+      key: 'coach_fan_unresolved',
+      code: 'CG-APP-02',
+    });
+  });
+
+  it('coach caps the merged window to the quick bucket (quickMessageCount)', async () => {
+    // quickMessageCount is 100 in the harness settings; a merged/seeded window
+    // larger than that must be capped to the newest 100 before the kernel call.
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+    });
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(150),
+      pagesLoaded: 6,
+      targetPages: 6,
+      reachedEnd: false,
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.clientContext.messageCount).toBe(100);
+    // The cap is window-trimming → coverage is 'window', never 'full-history'.
+    expect(request.clientContext.transcriptCoverage).toBe('window');
   });
 
   it('fan-summary sends canonical refs when the fan is resolved', async () => {
@@ -6000,7 +6024,6 @@ describe('OperationCoordinator', () => {
     expect(request.summaryMode).toBe('short');
     expect(request.conversationRef).toBe('group-1');
     expect(request.fanRef).toBe('fan-1');
-    expect(request.clientContext.messageCount).toBeLessThanOrEqual(300);
     expect(request.clientContext.messageCount).toBe(300);
     // Clamp = window trim → coverage is 'window', never 'full-history'.
     expect(request.clientContext.transcriptCoverage).toBe('window');

@@ -667,6 +667,7 @@ export type UserErrorKey =
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
   | 'coach_requires_newer_hub'
+  | 'coach_fan_unresolved'
   | 'insertion_failed'
   | 'unknown_error';
 

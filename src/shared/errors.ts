@@ -243,6 +243,15 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Something went wrong.',
     description: 'Try again. If it keeps failing, report the error code.',
   },
+  coach_fan_unresolved: {
+    key: 'coach_fan_unresolved',
+    code: 'CG-APP-02',
+    // Coach needs a resolved fan (fanRef is REQUIRED kernel-side). The group
+    // lookup could not identify the conversation partner — potentially
+    // persistent, so the copy points at reopening the chat, not a blind retry.
+    message: 'Couldn\'t identify the fan in this conversation.',
+    description: 'Reopen the chat and try again.',
+  },
 };
 
 const ERROR_KEYS = new Set<UserErrorKey>(Object.keys(ERROR_REGISTRY) as UserErrorKey[]);

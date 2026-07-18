@@ -2146,7 +2146,7 @@ export class OperationCoordinator {
         // Coach uses canonical refs ONLY with a resolved fan (fanRef is REQUIRED
         // kernel-side); it cannot start otherwise. Fail BEFORE the kernel call
         // so acquiring context never burns a generation (spec §4/§5).
-        throw new ChatGooseError('unknown_error');
+        throw new ChatGooseError('coach_fan_unresolved');
       }
 
       const purchaseEvidence = await loadMediaPurchaseEvidence({
@@ -2169,14 +2169,20 @@ export class OperationCoordinator {
         purchaseEvidence,
       );
 
-      // Short recap (spec §5): the loaded window can slightly overshoot 300
-      // (page granularity is 25), but clientContext.messageCount must be ≤300.
-      // Clamp to the newest 300 BEFORE formatting; a clamp is window-trimming
-      // that forces transcriptCoverage='window'.
-      let shortRecapWindowTrimmed = false;
-      if (isShortRecap && transcriptMessages.length > SHORT_SUMMARY_MESSAGE_COUNT) {
-        transcriptMessages = transcriptMessages.slice(-SHORT_SUMMARY_MESSAGE_COUNT);
-        shortRecapWindowTrimmed = true;
+      // Cap to the window (spec §5 / §6.5 "Sort, cap to the window"), before
+      // formatting. Two overshoot sources: a coach session's MERGED window grows
+      // unbounded over a long dialog with an active fan (each refresh appends
+      // fresh rows, nothing else caps it), and a short recap's page-granular
+      // load can overshoot 300. `effectiveMessageCount` is the target window for
+      // both (coach = quickMessageCount, short = 300). When the cap bites it is
+      // window-trimming, forcing transcriptCoverage='window'.
+      let windowTrimmed = false;
+      if (
+        (payload.feature === 'coach-chat' || isShortRecap) &&
+        transcriptMessages.length > effectiveMessageCount
+      ) {
+        transcriptMessages = transcriptMessages.slice(-effectiveMessageCount);
+        windowTrimmed = true;
       }
 
       if (
@@ -2557,7 +2563,7 @@ export class OperationCoordinator {
       const transcriptCoverage: 'full-history' | 'window' | undefined =
         payload.feature === 'coach-chat' || isShortRecap
           ? (providerReachedEnd &&
-              !shortRecapWindowTrimmed &&
+              !windowTrimmed &&
               keptMessageCount === transcriptMessages.length
               ? 'full-history'
               : 'window')
@@ -2987,20 +2993,20 @@ export class OperationCoordinator {
             const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(
               validated.urlGroupId,
               {
-              summary: rawText,
-              personalityId: personality.key,
-              personaDefinitionId: personality.definitionId,
-              personalityUpdatedAt: personality.version,
-              personaCatalogSource: personaIdentity.personaCatalogSource,
-              generatedAt,
-              spendingDataVerified: true,
-              subscriptionLookupVerified: true,
-              modelId: resolvedModel,
-              fanAccountId,
-              agencyHubSync: initialSyncStatus,
-              // Behind the exhaustion + empty guards ⇒ a complete, trusted
-              // generation. Required by isValidSummaryCacheEntry for a hit.
-              trustedTerminal: true,
+                summary: rawText,
+                personalityId: personality.key,
+                personaDefinitionId: personality.definitionId,
+                personalityUpdatedAt: personality.version,
+                personaCatalogSource: personaIdentity.personaCatalogSource,
+                generatedAt,
+                spendingDataVerified: true,
+                subscriptionLookupVerified: true,
+                modelId: resolvedModel,
+                fanAccountId,
+                agencyHubSync: initialSyncStatus,
+                // Behind the exhaustion + empty guards ⇒ a complete, trusted
+                // generation. Required by isValidSummaryCacheEntry for a hit.
+                trustedTerminal: true,
               },
               isCommitCurrent,
             );
@@ -3040,7 +3046,7 @@ export class OperationCoordinator {
         operationId: payload.operationId,
         result,
         fanDisplayName,
-        ...(generationRef ? { generationRef } : {}),
+        ...(generationRef != null ? { generationRef } : {}),
       }, completedSpend, profiler);
 
       this.clearCompletedOperation(tabId);
