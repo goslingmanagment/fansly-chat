@@ -159,12 +159,44 @@
 
 <div class="timeline">
 
+  <!-- 1.9.10 -->
+  <div class="release" id="v1-9-10">
+    <div class="release-header">
+      <span class="release-version">1.9.10</span>
+      <span class="release-date">18.07.2026</span>
+      <span class="release-badge latest">Текущая</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Настройки стали понятным центром статуса: сразу видно, что работает и какой шаг сделать дальше.
+        </p>
+      </div>
+      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Настройки и статус</div>
+        <ul class="changes-list">
+          <li><strong>Один честный экран готовности.</strong> Hub, доступ, Fansly capture, AI-квоты и Spenders видны вместе; открытые шаги ведут сразу к нужному действию</li>
+          <li><strong>Персоны показаны читаемым каталогом.</strong> Видны имя, версия, архивный статус и число аккаунтов; legacy-тексты остаются доступны для экспорта</li>
+          <li><strong>Явные вход и выход из Agency Hub.</strong> Device token показан отдельно, а выход сначала стирает локальные credential и затем отзывает token</li>
+        </ul>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
+        <ul class="changes-list">
+          <li><strong>Выход не откатывается другой вкладкой Settings.</strong> Устаревшее поле legacy-ключа больше не может вернуть стёртый API key</li>
+          <li><strong>Ошибка Fansly-опроса не оставляет ложное «Всё работает».</strong> Fansly-строка и общий индикатор теперь показывают одну честную картину</li>
+        </ul>
+      </div>
+      </details>
+    </div>
+  </div>
+
   <!-- 1.9.9 -->
   <div class="release" id="v1-9-9">
     <div class="release-header">
       <span class="release-version">1.9.9</span>
       <span class="release-date">15.07.2026</span>
-      <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
