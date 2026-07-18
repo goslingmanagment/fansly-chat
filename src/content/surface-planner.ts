@@ -34,6 +34,12 @@ export interface SurfacePlannerInput {
   quickInlineVisible: boolean;
   cachedInlineModel: CompletedOverlayViewModel | null;
   deepOverlayModel: OverlayViewModel | null;
+  /** The persistent coach chat model, or null when Coach is closed (spec §3).
+   * A STREAMING coach op (`activeFeature === 'coach-chat'`) renders this instead
+   * of the generic loading overlay; an IDLE open coach renders only when no other
+   * feature is active — any other feature's activity wins (the orchestrator
+   * closes the idle coach, retaining the session). */
+  coachOverlayModel: OverlayViewModel | null;
 }
 
 export interface SurfacePlan {
@@ -82,7 +88,16 @@ export function planSurfaces(input: SurfacePlannerInput): SurfacePlan {
     quickInlineVisible,
     cachedInlineModel,
     deepOverlayModel,
+    coachOverlayModel,
   } = input;
+
+  // Coach streaming (spec §3): a live coach turn renders the coach chat model —
+  // its in-feed pending item IS its loading state — never the generic loading
+  // overlay. This must win over the overlay-feature branch below, which would
+  // otherwise show the generic spinner for `usesOverlayFeatureSurface('coach-chat')`.
+  if (activeFeature === 'coach-chat' && coachOverlayModel) {
+    return overlayPlan(coachOverlayModel);
+  }
 
   if (activeFeature && usesOverlayFeatureSurface(activeFeature) && activeLoadingModel) {
     return overlayPlan(activeLoadingModel);
@@ -109,6 +124,15 @@ export function planSurfaces(input: SurfacePlannerInput): SurfacePlan {
 
   if (deepOverlayModel) {
     return overlayPlan(deepOverlayModel);
+  }
+
+  // Idle open coach — lowest overlay precedence: it renders only once every
+  // other feature/compare/cached/deep surface is quiet (spec §3 "another
+  // feature's hotkey closes Coach and proceeds"). The orchestrator normally
+  // clears `coachOverlayModel` when a new op starts, so this is also the
+  // defensive floor that keeps an idle coach from covering active work.
+  if (coachOverlayModel) {
+    return overlayPlan(coachOverlayModel);
   }
 
   return hiddenPlan(quickSurfaceMode === 'overlay');

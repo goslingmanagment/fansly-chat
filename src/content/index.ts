@@ -1,5 +1,9 @@
 import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
+import {
+  createCoachSessionStore,
+  type CoachSession,
+} from './coach-session.js';
 import { getActiveConversationDisplayName, getActiveConversationDom } from './conversation-dom.js';
 import { ConversationMountController } from './conversation-mount-controller.js';
 import { installContentStyles } from './dom-anchor.js';
@@ -33,7 +37,8 @@ import {
 } from '../shared/hotkeys.js';
 import { createKeymap } from '../shared/keymap.js';
 import { SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
-import { sendRuntimeRequest } from '../shared/protocol.js';
+import { parseCoachDrafts } from '../shared/coach-draft.js';
+import { isRecapStatusResponse, sendRuntimeRequest } from '../shared/protocol.js';
 import { projectDebugPromptEcho } from '../shared/kernel-context.js';
 import {
   getCompareCardsFingerprintForPersonality,
@@ -63,6 +68,7 @@ import {
 import { loadStorageState } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  CoachOverlayFeedItem,
   DebugPromptEchoStatus,
   LlmSpendSummary,
   BackgroundPortMessage,
@@ -78,6 +84,7 @@ import type {
   OperationProfilingSnapshot,
   OperationStartPayload,
   PromptDebugSnapshot,
+  RecapStatusResponse,
   ReplyMode,
   ReplyTone,
   TabUiState,
@@ -145,6 +152,43 @@ function getMessageLlmSpend(
   return message.llmSpend;
 }
 
+/** Coarse age label for the coach recap status line (spec §5 «Полный: 3 дн ·
+ * Короткий: 10 мин»). A rough bucket is enough — the authoritative recap picker
+ * lands in T11. */
+function formatCoachRecapAge(ageMs: number): string {
+  const minutes = Math.max(0, Math.floor(ageMs / 60_000));
+  if (minutes < 60) {
+    return `${minutes} мин`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} ч`;
+  }
+  return `${Math.floor(hours / 24)} дн`;
+}
+
+/** The pre-formatted recap freshness line for the coach empty state (spec §5),
+ * or '' when nothing is stored (the renderer hides the line on ''). */
+function formatCoachRecapStatusLine(status: RecapStatusResponse | null): string {
+  if (!status) {
+    return '';
+  }
+  // Honest empty-state (E43): the Hub could not be REACHED (not connected, no
+  // page match, Hub down/absent) — that is NOT "no recap". Surface it distinctly
+  // so the chatter doesn't read a false «нет рекапа» and regenerate needlessly.
+  if (status.state === 'unavailable') {
+    return 'Рекап: не удалось проверить';
+  }
+  const parts: string[] = [];
+  if (status.full) {
+    parts.push(`Полный: ${formatCoachRecapAge(status.full.ageMs)}`);
+  }
+  if (status.short) {
+    parts.push(`Короткий: ${formatCoachRecapAge(status.short.ageMs)}`);
+  }
+  return parts.join(' · ');
+}
+
 export class ChatGooseContentApp {
   private routeNonce = 0;
   private boardContextGeneration = 0;
@@ -187,6 +231,23 @@ export class ChatGooseContentApp {
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
   private deepOverlayModel: OverlayViewModel | null = null;
 
+  // ─── Coach (spec §3) ──────────────────────────────────────────────────────
+  // The content script owns the coach dialog/feed/composer state; the store
+  // holds an LRU of 5 per-fan sessions keyed by (creator account, group).
+  private readonly coachStore = createCoachSessionStore();
+  // The coach chat model rendered in the overlay, or null when Coach is closed.
+  // A coach turn reuses the single active-op markers (`activeFeature` becomes
+  // `'coach-chat'`, `activeOperationId` its op) so all existing route/persona/
+  // cancel machinery applies unchanged; its RESULTS never touch overlayRawText,
+  // buildCompletedOverlayModel, or CompletedOverlayCache (spec §10, carry-fwd 5/6).
+  private coachOverlayModel: OverlayViewModel | null = null;
+  // The open session, mirrored from the store for the lifetime of the overlay.
+  private activeCoachSession: CoachSession | null = null;
+  // The streamed answer of the in-flight coach turn, accumulated chunk-by-chunk
+  // for the pending render only; the committed answer uses the completion's
+  // authoritative rawText (never this) so a dropped/late chunk cannot corrupt it.
+  private coachPendingAnswerText = '';
+
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
     if (nextHasDraftText === this.hasDraftText) {
@@ -226,6 +287,7 @@ export class ChatGooseContentApp {
     },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
     onToneSelect: (tone) => this.armReplyTone(tone),
+    onCoachClick: () => this.openCoach(),
   });
   private readonly mappingBanner = new MappingBanner({
     onOpenSettings: () => {
@@ -299,6 +361,13 @@ export class ChatGooseContentApp {
       void this.openDebugPromptViewer();
     },
     onClose: () => {
+      // Idle coach close (Esc/backdrop while not streaming): retain the session
+      // in the store for reopen (spec §3), just drop the overlay.
+      if (this.coachOverlayModel && this.activeFeature !== 'coach-chat') {
+        this.closeCoach();
+        this.renderAll();
+        return;
+      }
       this.deepOverlayModel = null;
       if (
         !this.activeFeature ||
@@ -311,6 +380,12 @@ export class ChatGooseContentApp {
       this.renderAll();
     },
     onCancel: (operationId) => {
+      // A streaming coach turn's Esc/Cancel cancels the turn but stays open,
+      // recording a cancelled failed-attempt (carry-forward 3).
+      if (this.activeFeature === 'coach-chat') {
+        this.cancelCoachTurn();
+        return;
+      }
       this.port.send({ type: 'operation:cancel', operationId });
       this.quickInlineVisible = false;
       this.clearOperationState(true);
@@ -326,6 +401,15 @@ export class ChatGooseContentApp {
       this.quickInlineVisible = true;
       this.renderSurfaces();
     },
+    onCoachSubmit: (question) => {
+      void this.submitCoachQuestion(question);
+    },
+    onCoachNewDialog: () => this.resetCoachSession(),
+    onCoachRecap: (mode) => this.handleCoachRecap(mode),
+    onCoachRetry: (question) => {
+      void this.handleCoachRetry(question);
+    },
+    onCoachComposerInput: (text) => this.handleCoachComposerInput(text),
   });
 
   private readonly hotkeyBindings = buildHotkeyBindings(detectLabelPlatform());
@@ -436,9 +520,33 @@ export class ChatGooseContentApp {
       case 'cheatsheet':
         this.cheatsheet.toggle();
         return true;
+      case 'coach':
+        // App action (spec §3): open/focus Coach. openCoach itself toasts when
+        // the fan/group is unresolvable — the arm is ALWAYS handled so ⌘⇧C never
+        // falls through to a browser default (carry-forward 1).
+        this.openCoach();
+        return true;
+      case 'fan-summary':
+        // App action (spec §5): opens the recap picker (T11). Handled here so
+        // ⌘⇧S never falls through to the Firefox screenshot shortcut while the
+        // picker is still pending (carry-forward 1).
+        this.openRecapPicker();
+        return true;
       default:
         return false;
     }
+  }
+
+  /** TODO(T11): open the recap start dialog (Полный / Короткий / «Открыть
+   * последний»). Until the picker exists, ⌘⇧S preserves the old muscle memory
+   * by starting a full fan-summary directly — but the arm still returns handled
+   * from {@link dispatchHotkey} so the key is never released to the browser
+   * (carry-forward 1). */
+  private openRecapPicker(): void {
+    if (!this.currentGroupId) {
+      return;
+    }
+    this.startFeature('fan-summary', false);
   }
 
   private cycleNextReplyTone(): void {
@@ -453,6 +561,10 @@ export class ChatGooseContentApp {
   }
 
   private cancelActiveOperation(): void {
+    if (this.activeFeature === 'coach-chat') {
+      this.cancelCoachTurn();
+      return;
+    }
     if (this.activeCompareModel?.operationId) {
       this.port.send({ type: 'compare:cancel', operationId: this.activeCompareModel.operationId });
       this.activeCompareModel = null;
@@ -560,6 +672,7 @@ export class ChatGooseContentApp {
         quickInlineVisible: this.quickInlineVisible,
         cachedInlineModel: this.getCachedInlineModelForCurrentState(),
         deepOverlayModel: this.deepOverlayModel,
+        coachOverlayModel: this.coachOverlayModel,
       }));
     } finally {
       applyScrollCompensation(this.root, scrollSnapshot);
@@ -894,6 +1007,12 @@ export class ChatGooseContentApp {
       return;
     }
 
+    // An idle open coach yields to any other feature (spec §3): close it,
+    // retaining the session in the store for reopen.
+    if (this.coachOverlayModel) {
+      this.closeCoach();
+    }
+
     this.comparePanelVisible = false;
     if (this.activeCompareModel && !this.activeCompareModel.operationId) {
       this.activeCompareModel = null;
@@ -973,6 +1092,11 @@ export class ChatGooseContentApp {
     if (this.activeFeature) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
+    }
+
+    // An idle open coach yields to Compare too (spec §3), session retained.
+    if (this.coachOverlayModel) {
+      this.closeCoach();
     }
 
     if (!this.tabState) {
@@ -1085,6 +1209,11 @@ export class ChatGooseContentApp {
 
     if (changed) {
       this.pendingCompareFingerprint = null;
+      // Coach sessions survive fan switches (LRU keyed): close the overlay and
+      // preserve the pending question into the composer (spec §8). A streaming
+      // coach op is torn down by the overlay-feature suppression branch below,
+      // since `coach-chat` rides `usesOverlayFeatureSurface`.
+      this.closeCoachOnRouteChange();
       if (
         this.activeFeature &&
         usesInlineFeatureSurface(this.activeFeature)
@@ -1135,6 +1264,386 @@ export class ChatGooseContentApp {
     this.renderButtonBar();
   }
 
+  // ─── Coach (spec §3) ────────────────────────────────────────────────
+
+  /** Open (or focus) the coach chat overlay. Creates NO generation and incurs
+   * NO AI spend — it only fires the metadata-only recap-status read (spec §3
+   * invariant). */
+  openCoach(): void {
+    // Already streaming or idle-open: just re-render to focus (spec §3 "focus if
+    // open"); the renderer preserves composer caret/scroll.
+    if (this.activeFeature === 'coach-chat' || this.activeCoachSession) {
+      this.rebuildCoachModel();
+      this.renderSurfaces();
+      return;
+    }
+    // Coach is a single active operation like any other (spec §3): another op in
+    // flight blocks opening.
+    if (this.activeFeature || this.activeCompareModel?.operationId) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    const accountId = this.tabState?.accountId ?? null;
+    const groupId = this.currentGroupId;
+    if (!accountId || !groupId) {
+      this.showUserErrorToast(getErrorMessage('coach_fan_unresolved'));
+      return;
+    }
+    // Opening Coach as a distinct app action takes over the overlay surface,
+    // dropping any completed deep result showing there.
+    this.deepOverlayModel = null;
+    // getOrCreate touches this session as most-recently-used. LRU eviction of a
+    // session with a LIVE pending cannot happen through this path: a streaming
+    // coach turn sets `activeFeature === 'coach-chat'`, which blocks openCoach
+    // above, so a 6th session is never created while one streams (carry-fwd 4).
+    const session = this.coachStore.getOrCreate(accountId, groupId);
+    this.activeCoachSession = session;
+    this.coachPendingAnswerText = '';
+    this.rebuildCoachModel();
+    this.renderAll();
+    // Recap-status read (spec §5): async, best-effort — it must never block or
+    // break opening; null slots are fine.
+    void this.refreshCoachRecapStatus(session);
+  }
+
+  /** Drop the coach overlay while RETAINING the store session for reopen (spec
+   * §3). Does NOT cancel a streaming op — only ever called for an idle coach or
+   * after the op has been torn down elsewhere. */
+  private closeCoach(): void {
+    this.coachOverlayModel = null;
+    this.activeCoachSession = null;
+    this.coachPendingAnswerText = '';
+  }
+
+  /** Send the chatter's question as a coach turn (spec §3). Async only to read
+   * the live `coachHistoryLimit` from storage (the same pattern content already
+   * uses for the compare fingerprint); the single-op gate + pending marker are
+   * armed synchronously before the await so nothing can slip in. */
+  async submitCoachQuestion(question: string): Promise<void> {
+    const session = this.activeCoachSession;
+    if (!session) {
+      return;
+    }
+    const trimmed = question.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (this.activeFeature || this.activeCompareModel?.operationId) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    const groupId = this.currentGroupId;
+    if (!groupId) {
+      this.showUserErrorToast(getErrorMessage('coach_fan_unresolved'));
+      return;
+    }
+
+    const operationId = crypto.randomUUID();
+    // Arm the shared single-op markers + the store pending marker synchronously
+    // so a re-entrant submit is blocked immediately.
+    this.activeFeature = 'coach-chat';
+    this.activeOperationId = operationId;
+    this.activePersonaKey = this.tabState?.mappedPersonalityId ?? null;
+    this.activePersonaDefinitionId = this.tabState?.mappedPersonaDefinitionId ?? null;
+    this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
+    this.activeFanDisplayName = getActiveConversationDisplayName() ?? 'fan';
+    this.lastFeature = 'coach-chat';
+    this.coachStore.beginPending(session, trimmed, operationId);
+    this.coachPendingAnswerText = '';
+    // Carry-forward 7: submit clears the composer (the renderer also emits '').
+    session.composerText = '';
+    this.rebuildCoachModel();
+    this.renderAll();
+
+    const { settings } = await loadStorageState();
+    // A route/persona change during the await tears the op down (suppress +
+    // clear); only send if THIS op is still the live one.
+    if (this.activeOperationId !== operationId) {
+      return;
+    }
+    const coachHistory = this.coachStore.serializeForWire(session, settings.coachHistoryLimit);
+    const domFanDisplayName = getActiveConversationDisplayName();
+    const payload: OperationStartPayload = {
+      type: 'operation:start',
+      operationId,
+      feature: 'coach-chat',
+      groupId,
+      routeNonce: this.routeNonce,
+      domFanDisplayName,
+      forceRegenerate: false,
+      chatterQuestion: trimmed,
+      coachHistory,
+      // Carry-forward 2: the session id keys the background transcript cache; a
+      // per-tab fallback would lose «Новый диалог» reseed isolation.
+      coachSessionId: session.sessionId,
+    };
+    const sent = this.port.send(payload);
+    if (!sent) {
+      // The port is mid-reconnect; the start never reached the background so no
+      // terminal will arrive. The turn never started — clearPending (not a
+      // failed-attempt) and ask the user to retry.
+      this.coachStore.clearPending(session);
+      this.clearCoachOperationState();
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.rebuildCoachModel();
+      this.renderAll();
+    }
+  }
+
+  /** Retry a failed/cancelled turn: replays its question as a FRESH operation
+   * (new UUID, freshly refreshed transcript background-side) — spec §8. */
+  private async handleCoachRetry(question: string): Promise<void> {
+    await this.submitCoachQuestion(question);
+  }
+
+  /** «Новый диалог» (spec §3): reset the open session in place — new sessionId
+   * forces the background transcript reseed. v1 resets IMMEDIATELY (no confirm
+   * dialog: window.confirm blocks the extension, and a two-step in-overlay
+   * confirm is renderer/T9 work outside this task's files — see the report). */
+  private resetCoachSession(): void {
+    const session = this.activeCoachSession;
+    if (!session) {
+      return;
+    }
+    // The composer is locked while streaming, but the topbar New-dialog button
+    // is not — ignore a reset request mid-turn (the turn must terminate first).
+    if (this.activeFeature === 'coach-chat') {
+      return;
+    }
+    this.coachStore.resetSession(session);
+    this.coachPendingAnswerText = '';
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** Live composer edits persisted into the session so the unsent question
+   * survives close/switch (spec §3, carry-forward 7). No re-render: the renderer
+   * owns the textarea; the value is restored on the next model rebuild. */
+  private handleCoachComposerInput(text: string): void {
+    if (this.activeCoachSession) {
+      this.activeCoachSession.composerText = text;
+    }
+  }
+
+  /** Explicit recap refresh from the coach header (spec §5). T10 trivial path:
+   * run a normal fan-summary generation with the chosen `summaryMode` (it takes
+   * over the overlay; the coach session is retained and reopens afterwards).
+   * TODO(T11): upgrade to an in-feed `recap-step` chain without closing Coach. */
+  private handleCoachRecap(mode: 'short' | 'full'): void {
+    if (this.activeFeature || this.activeCompareModel?.operationId) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    if (!this.ensureFeatureCanStart('fan-summary')) {
+      return;
+    }
+    // Close the coach overlay (session retained) so the summary overlay shows.
+    this.closeCoach();
+    const operationId = crypto.randomUUID();
+    const domFanDisplayName = getActiveConversationDisplayName();
+    this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
+    // Recap refresh bypasses the completed-overlay cache (spec §5): forceRegenerate.
+    const payload: OperationStartPayload = {
+      ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, true),
+      summaryMode: mode,
+    };
+    const sent = this.port.send(payload);
+    if (!sent) {
+      this.clearOperationState(true);
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.renderSurfaces();
+      this.renderButtonBar();
+      return;
+    }
+    this.renderButtonBar();
+  }
+
+  /** Cancel a streaming coach turn (Esc / ⌘⇧X): the terminal that follows is
+   * suppressed, and the abandoned attempt becomes a cancelled failed-attempt
+   * feed item. recordFailedAttempt is called DIRECTLY — never clearPending
+   * first, or the guarded record would drop the spec-mandated item
+   * (carry-forward 3). */
+  private cancelCoachTurn(): void {
+    const session = this.activeCoachSession;
+    const operationId = this.activeOperationId;
+    if (!session || !operationId) {
+      return;
+    }
+    const question = session.pending?.question ?? '';
+    this.suppressTerminalOperation(operationId);
+    this.port.send({ type: 'operation:cancel', operationId });
+    this.coachStore.recordFailedAttempt(session, operationId, question, 'cancelled', true);
+    this.clearCoachOperationState();
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** Commit a completed coach stream as an exchange carrying its generationRef
+   * (spec §3). Empty/whitespace output fails closed as a failed-attempt (spec
+   * §8) rather than committing a blank turn. */
+  private handleCoachComplete(
+    message: Extract<BackgroundPortMessage, { type: 'operation:complete' }>,
+  ): void {
+    const session = this.activeCoachSession;
+    const operationId = message.operationId;
+    if (!session || session.pending?.operationId !== operationId) {
+      // Superseded/stale completion — drop it, just release the op markers.
+      this.clearCoachOperationState();
+      this.renderButtonBar();
+      return;
+    }
+    const question = session.pending.question;
+    const answerRaw = message.result.rawText;
+    if (answerRaw.trim().length === 0) {
+      this.coachStore.recordFailedAttempt(session, operationId, question, 'ai_output_unusable', true);
+    } else {
+      this.coachStore.commitExchange(session, {
+        operationId,
+        generationRef: message.generationRef ?? '',
+        question,
+        answerRaw,
+      });
+    }
+    this.clearCoachOperationState();
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** A coach turn failed: surface it as an in-feed failed-attempt (spec §3/§8,
+   * carry-forward 5) — never a separate error overlay. recordFailedAttempt is
+   * called DIRECTLY (carry-forward 3). */
+  private handleCoachError(
+    message: Extract<
+      BackgroundPortMessage,
+      { type: 'operation:error' | 'operation:discarded' }
+    >,
+  ): void {
+    const session = this.activeCoachSession;
+    const operationId = message.operationId;
+    if (!session || session.pending?.operationId !== operationId) {
+      this.clearCoachOperationState();
+      this.renderButtonBar();
+      return;
+    }
+    const question = session.pending.question;
+    const errorCode = message.error?.code ?? 'unknown_error';
+    this.coachStore.recordFailedAttempt(session, operationId, question, errorCode, true);
+    this.clearCoachOperationState();
+    this.rebuildCoachModel();
+    this.renderAll();
+  }
+
+  /** Close the coach overlay on a route change (spec §8): preserve the pending
+   * question in the session's composer (a switch cancels the turn but never
+   * records a failed-attempt), clear the pending marker, and RETAIN the session
+   * in the store. The streaming op itself is torn down by the caller's existing
+   * overlay-feature suppression branch. */
+  private closeCoachOnRouteChange(): void {
+    const session = this.activeCoachSession;
+    if (session) {
+      if (session.pending && !session.composerText) {
+        session.composerText = session.pending.question;
+      }
+      this.coachStore.clearPending(session);
+    }
+    this.coachOverlayModel = null;
+    this.activeCoachSession = null;
+    this.coachPendingAnswerText = '';
+  }
+
+  /** Release the shared single-op markers + the streaming accumulator when a
+   * coach turn ends. Leaves the coach overlay/session intact (the feed +
+   * composer persist) and never touches the deep-overlay path. */
+  private clearCoachOperationState(): void {
+    this.clearOperationState(false);
+    this.coachPendingAnswerText = '';
+  }
+
+  /** Recompute {@link coachOverlayModel} from the open session (or null it out
+   * when Coach is closed). */
+  private rebuildCoachModel(): void {
+    this.coachOverlayModel = this.activeCoachSession
+      ? this.buildCoachModel(this.activeCoachSession)
+      : null;
+  }
+
+  /** Project the content-side {@link CoachSession} into the overlay's coach
+   * view model (spec §3). Prose is the draft-stripped answer; drafts carry their
+   * per-exchange index for acceptance attribution. */
+  private buildCoachModel(session: CoachSession): Extract<OverlayViewModel, { kind: 'coach' }> {
+    const feedItems: CoachOverlayFeedItem[] = session.feedItems.map((item) => {
+      if (item.kind === 'exchange') {
+        const exchange = item.ref;
+        const { prose } = parseCoachDrafts(exchange.answerRaw);
+        return {
+          kind: 'exchange',
+          operationId: exchange.operationId,
+          question: exchange.question,
+          answerProse: prose,
+          drafts: exchange.drafts.map((draft) => ({ text: draft.text, index: draft.index })),
+        };
+      }
+      if (item.kind === 'failed-attempt') {
+        return {
+          kind: 'failed-attempt',
+          question: item.question,
+          errorCode: item.errorCode,
+          retryable: item.retryable,
+        };
+      }
+      return {
+        kind: 'recap-step',
+        mode: item.mode,
+        origin: item.origin,
+        status: item.status,
+      };
+    });
+    const streaming = Boolean(session.pending);
+    return {
+      kind: 'coach',
+      fanDisplayName: getActiveConversationDisplayName() ?? 'fan',
+      operationId: session.pending?.operationId ?? null,
+      sessionView: {
+        feedItems,
+        pendingQuestion: session.pending?.question,
+        pendingAnswerText: streaming ? this.coachPendingAnswerText : undefined,
+        recapStatusLine: formatCoachRecapStatusLine(session.recapStatus),
+        composerText: session.composerText,
+        composerEnabled: !streaming,
+        // (creator account, group) identity — a change swaps the whole feed.
+        // Coach is context-bound and closes on route/persona change, so the
+        // current tab identity always matches the open session's key.
+        sessionKey: `${this.tabState?.accountId ?? ''}|${this.currentGroupId ?? ''}`,
+      },
+    };
+  }
+
+  /** Fire the metadata-only recap-status read (spec §5) and fold the result into
+   * the session's status line. Best-effort: any failure leaves the line hidden
+   * and never disturbs the open dialog. */
+  private async refreshCoachRecapStatus(session: CoachSession): Promise<void> {
+    const groupId = this.currentGroupId;
+    if (!groupId) {
+      return;
+    }
+    try {
+      const status = await sendRuntimeRequest('getRecapStatus', {
+        groupId,
+        // The background resolves the fan for the canonical fanRef (§5); content
+        // has no reliable fan account id, so it sends null.
+        fanAccountId: null,
+      });
+      if (!isRecapStatusResponse(status) || this.activeCoachSession !== session) {
+        return;
+      }
+      session.recapStatus = status;
+      this.rebuildCoachModel();
+      this.renderSurfaces();
+    } catch {
+      // Recap status is best-effort; a failure just leaves the line empty.
+    }
+  }
+
   // ─── Port Messages ──────────────────────────────────────────────────
 
   private personaIdentityChanged(next: TabUiState): boolean {
@@ -1178,6 +1687,9 @@ export class ChatGooseContentApp {
       case 'settings:changed':
       case 'mapping:changed': {
         const personaChanged = this.personaIdentityChanged(message.state);
+        const accountChanged = Boolean(
+          this.tabState && this.tabState.accountId !== message.state.accountId,
+        );
         if (
           message.type === 'settings:changed' ||
           this.tabState?.accountId !== message.state.accountId
@@ -1187,6 +1699,24 @@ export class ChatGooseContentApp {
         }
         if (personaChanged) {
           this.clearPersonaBoundFeatureState();
+        }
+        if (personaChanged || accountChanged) {
+          // Coach sessions must not bleed across persona/account (spec §3):
+          // wipe the whole store and close any open coach overlay. A persona
+          // change already tore any active coach op down via
+          // clearPersonaBoundFeatureState; an account-only change (no persona
+          // change) with a live coach turn is torn down here.
+          if (
+            !personaChanged &&
+            this.activeFeature === 'coach-chat' &&
+            this.activeOperationId
+          ) {
+            this.suppressTerminalOperation(this.activeOperationId);
+            this.port.send({ type: 'operation:cancel', operationId: this.activeOperationId });
+            this.clearCoachOperationState();
+          }
+          this.coachStore.resetAll();
+          this.closeCoach();
         }
         this.tabState = message.state;
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
@@ -1522,6 +2052,14 @@ export class ChatGooseContentApp {
     if (this.activeOperationId !== operationId) {
       return;
     }
+    // Coach streams into the session-scoped pending answer, NOT overlayRawText
+    // (carry-forward 6); the keyed coach renderer mutates only the pending node.
+    if (this.activeFeature === 'coach-chat') {
+      this.coachPendingAnswerText += text;
+      this.rebuildCoachModel();
+      this.scheduleLoadingRender();
+      return;
+    }
     this.overlayRawText += text;
 
     if (this.activeFeature && featureRequiresDraft(this.activeFeature)) {
@@ -1555,6 +2093,13 @@ export class ChatGooseContentApp {
     }
 
     if (this.activeOperationId !== message.operationId || !this.activeFeature) {
+      return;
+    }
+
+    // Coach commits via its own path — it NEVER reaches overlayRawText,
+    // buildCompletedOverlayModel, or CompletedOverlayCache (carry-forwards 5/6).
+    if (this.activeFeature === 'coach-chat') {
+      this.handleCoachComplete(message);
       return;
     }
 
@@ -1606,6 +2151,13 @@ export class ChatGooseContentApp {
     }
 
     if (this.activeOperationId === message.operationId) {
+      // Coach failures surface as an in-feed failed-attempt (carry-forward 5) —
+      // never a separate error overlay while Coach is open.
+      if (this.activeFeature === 'coach-chat') {
+        this.handleCoachError(message);
+        return;
+      }
+
       const feature = this.activeFeature ?? this.lastFeature ?? 'fast-reply';
 
       const errorModel: OverlayViewModel = {

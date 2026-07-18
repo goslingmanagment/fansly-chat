@@ -74,6 +74,7 @@ function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> 
     onCompareRestoreClick: noop,
     onReplyModeToggle: noop,
     onToneSelect: noop,
+    onCoachClick: noop,
     ...overrides,
   });
 }
@@ -161,6 +162,37 @@ describe('ButtonBar toolbar visibility', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
     expect(reply?.querySelector('.chatgoose-spinner')).toBeNull();
     expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(false);
+  });
+
+  it('renders a Coach button after Recap that fires onCoachClick', () => {
+    const onCoachClick = vi.fn();
+    const bar = makeBar({ onCoachClick });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const coach = buttonByLabel(bar.root, 'Coach');
+    expect(coach).toBeDefined();
+
+    // Ordering: Coach sits after Recap.
+    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
+    const recapIndex = buttons.findIndex((b) => b.textContent === 'Recap');
+    const coachIndex = buttons.findIndex((b) => b.textContent === 'Coach');
+    expect(coachIndex).toBeGreaterThan(recapIndex);
+
+    coach!.click();
+    expect(onCoachClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables Coach while another feature operation is active', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
+    expect(buttonByLabel(bar.root, 'Coach')?.disabled).toBe(true);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+    expect(buttonByLabel(bar.root, 'Coach')?.disabled).toBe(false);
   });
 
   it('marks a ready summary on the Recap button', () => {
@@ -389,6 +421,7 @@ describe('ButtonBar improve draft state', () => {
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
     const recapIndex = children.findIndex((child) => labelOf(child) === 'Recap');
+    const coachIndex = children.findIndex((child) => labelOf(child) === 'Coach');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
     );
@@ -401,7 +434,9 @@ describe('ButtonBar improve draft state', () => {
     expect(hiIndex).toBeGreaterThan(fixIndex);
     expect(pingIndex).toBe(hiIndex + 1);
     expect(recapIndex).toBe(pingIndex + 1);
-    expect(personalityIndex).toBe(recapIndex + 1);
+    // Coach joins the fan-side cluster right after Recap (spec §10).
+    expect(coachIndex).toBe(recapIndex + 1);
+    expect(personalityIndex).toBe(coachIndex + 1);
 
     // Meaning-groups are seamed with hairlines, and Recap opens the
     // right-pinned cluster.

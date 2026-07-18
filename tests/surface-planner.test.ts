@@ -47,6 +47,19 @@ const compareModel: CompareInlineViewModel = {
   canRegenerate: true,
 };
 
+const coachModel: OverlayViewModel = {
+  kind: 'coach',
+  fanDisplayName: 'fan',
+  operationId: null,
+  sessionView: {
+    feedItems: [],
+    recapStatusLine: '',
+    composerText: '',
+    composerEnabled: true,
+    sessionKey: 'account-1|group-1',
+  },
+};
+
 function baseInput(overrides: Partial<Parameters<typeof planSurfaces>[0]> = {}) {
   return {
     activeFeature: null,
@@ -58,6 +71,7 @@ function baseInput(overrides: Partial<Parameters<typeof planSurfaces>[0]> = {}) 
     quickInlineVisible: false,
     cachedInlineModel: null,
     deepOverlayModel: null,
+    coachOverlayModel: null,
     ...overrides,
   };
 }
@@ -166,6 +180,45 @@ describe('planSurfaces', () => {
       overlay: { kind: 'hidden' },
       inline: { kind: 'hidden' },
       resetQuickSurfaceMode: true,
+    });
+  });
+
+  it('renders a streaming coach op as the coach model, never the generic loading overlay', () => {
+    expect(planSurfaces(baseInput({
+      activeFeature: 'coach-chat',
+      activeLoadingModel: { ...loadingModel, feature: 'coach-chat' },
+      activeRegenerableLoadingModel: { ...loadingModel, feature: 'coach-chat' },
+      coachOverlayModel: coachModel,
+    }))).toMatchObject({
+      overlay: { kind: 'render', model: coachModel },
+      inline: { kind: 'hidden' },
+    });
+  });
+
+  it('renders an idle open coach when nothing else is active', () => {
+    expect(planSurfaces(baseInput({
+      coachOverlayModel: coachModel,
+    }))).toMatchObject({
+      overlay: { kind: 'render', model: coachModel },
+      inline: { kind: 'hidden' },
+    });
+  });
+
+  it('lets any other feature win over an idle open coach', () => {
+    expect(planSurfaces(baseInput({
+      activeFeature: 'fan-summary',
+      activeLoadingModel: summaryLoadingModel,
+      activeRegenerableLoadingModel: summaryLoadingModel,
+      coachOverlayModel: coachModel,
+    }))).toMatchObject({
+      overlay: { kind: 'render', model: summaryLoadingModel },
+    });
+
+    expect(planSurfaces(baseInput({
+      deepOverlayModel: summaryLoadingModel,
+      coachOverlayModel: coachModel,
+    }))).toMatchObject({
+      overlay: { kind: 'render', model: summaryLoadingModel },
     });
   });
 });
