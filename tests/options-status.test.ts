@@ -531,6 +531,45 @@ describe('options readiness hero (route → pulse)', () => {
     }
   });
 
+  it('drops the all-green hero when a later Fansly session poll fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const { document, window, flushAsync } = await mountOptionsPage({
+        settings: HUB_SETTINGS,
+        state: { knownAccounts: ['acc-1'], accountMappings: { 'acc-1': 'closer' },
+          personaCatalog: [ACTIVE_PERSONA], personaCatalogSource: personaCatalogSource(HUB_SETTINGS) },
+        sessions: [{ legacyAccountId: 'acc-1', resolvedAccountId: 'acc-1', username: 'lilly', displayName: 'Lilly', connected: true, lastSeenAt: Date.now() }],
+        runtime: {
+          health: { ok: true, status: 'ok', dbLatencyMs: 5, contractHash: 'a', sdkContractHash: 'a' },
+          identity: { ok: true, username: 'lilly', role: 'chatter', pages: ['Lilly'] },
+        },
+      });
+      const hero = document.querySelector('[data-readiness-hero]') as HTMLElement;
+      expect(hero.dataset.heroState).toBe('pulse');
+
+      const browserRef = (window as unknown as { browser: { runtime: { sendMessage: (m: unknown) => Promise<unknown> } } }).browser;
+      browserRef.runtime.sendMessage = vi.fn(async (message: unknown) => {
+        if ((message as { type?: string }).type === 'getSessionsSnapshot') {
+          throw new Error('session channel closed');
+        }
+        return undefined;
+      });
+
+      vi.advanceTimersByTime(6_000);
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new window.Event('visibilitychange'));
+      await flushAsync();
+
+      const fansly = rowByLabel(document, 'Fansly');
+      expect(fansly.querySelector('.chatgoose-badge-mono')?.textContent).toBe('OFF');
+      expect(fansly.textContent).toContain('живой статус недоступен');
+      expect(hero.dataset.heroState).toBe('route');
+      expect(hero.textContent).not.toContain('Всё работает');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reaches pulse after the mount-tail connection test repopulates a hidden catalog', async () => {
     // Stored catalog source MISMATCHES the creds → migrateState hides it at mount
     // (step 3 open → route). The connection test then publishes a fresh,

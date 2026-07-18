@@ -13,6 +13,7 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG_MANIFEST: readonly ChangelogRelease[] = [
+  { version: '1.9.10', date: '18.07.2026' },
   { version: '1.9.9', date: '15.07.2026' },
   { version: '1.9.8', date: '15.07.2026' },
   { version: '1.9.7', date: '14.07.2026' },

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
   PERSONA_CATALOG_SOURCE_STORAGE_KEY,
   PERSONA_CATALOG_STORAGE_KEY,
@@ -1044,6 +1046,52 @@ describe('Options page settings and read-only personas', () => {
     await vi.waitFor(() => expect(storageSet.mock.calls.length).toBeGreaterThan(callsBeforeEdit));
     const formWrite = storageSet.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(formWrite.agencyHubApiKey).toBe('new-key');
+  });
+
+  it('does not resurrect a legacy API key after another Options tab signs out', async () => {
+    await loadOptionsPage({
+      state: makeState({
+        settings: {
+          ...makeState().settings,
+          agencyHubBaseUrl: 'https://hub.example.test',
+          agencyHubApiKey: 'legacy-key',
+          agencyHubDeviceToken: 'device-token',
+        },
+      }),
+      sessions: [],
+    });
+
+    const keyInput = getSectionByTitle('Agency Hub')
+      .querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
+    expect(keyInput.value).toBe('legacy-key');
+
+    // The background wipe from tab B is already durable when tab A receives
+    // this event. Its old form snapshot must immediately stop owning the key.
+    (currentState as unknown as Record<string, unknown>)[AGENCY_HUB_API_KEY_STORAGE_KEY] = '';
+    (currentState as unknown as Record<string, unknown>)[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = '';
+    emitStorageChanges({
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-key', newValue: '' },
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: 'device-token', newValue: '' },
+    });
+    await flushMicrotasks();
+
+    const storageSet = vi.mocked(browser.storage.local.set);
+    storageSet.mockClear();
+    const grantButton = Array.from(
+      getSectionByTitle('Agency Hub').querySelectorAll<HTMLButtonElement>('button'),
+    ).find((button) => button.textContent === 'Разрешить доступ')!;
+    grantButton.click();
+
+    await vi.waitFor(() => expect(storageSet).toHaveBeenCalled());
+    expect(keyInput.value).toBe('');
+    expect(getSectionByTitle('Agency Hub')
+      .querySelector<HTMLElement>('[data-role="hub-signed-in"]')?.hidden).toBe(true);
+    expect(storageSet.mock.calls.every(([items]) => !Object.prototype.hasOwnProperty.call(
+      items,
+      AGENCY_HUB_API_KEY_STORAGE_KEY,
+    ))).toBe(true);
+    expect((currentState as unknown as Record<string, unknown>)[AGENCY_HUB_API_KEY_STORAGE_KEY])
+      .toBe('');
   });
 
   it('retries an explicitly edited API key with the next unrelated settings save after a transient failure', async () => {
