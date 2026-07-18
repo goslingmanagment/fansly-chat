@@ -261,6 +261,14 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'No saved recap for this fan yet.',
     description: 'Run Полный or Короткий to generate one.',
   },
+  settings_load_failed: {
+    key: 'settings_load_failed',
+    code: 'CG-APP-04',
+    // A coach submit could not read local settings (browser.storage failure).
+    // The question is preserved in the composer; a retry usually succeeds.
+    message: 'Couldn\'t read your settings.',
+    description: 'Your question is kept — try sending it again.',
+  },
 };
 
 const ERROR_KEYS = new Set<UserErrorKey>(Object.keys(ERROR_REGISTRY) as UserErrorKey[]);

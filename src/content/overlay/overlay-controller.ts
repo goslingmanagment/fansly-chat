@@ -1303,14 +1303,20 @@ export class OverlayController {
     }
     view.recapStatusEl.classList.toggle('chatgoose-hidden', sv.recapStatusLine === '');
 
-    // Auto-recap override label (guarded) + lock while busy.
+    // Composer lock + Send/Cancel affordance (all guarded).
+    const disabled = !sv.composerEnabled;
+
+    // Auto-recap override label (guarded); the control is disabled while the
+    // coach is busy (a streaming turn or a running recap step) — the mode must
+    // not change mid-turn.
     const autoRecapText = autoRecapLabel(sv.autoRecapOverride);
     if (view.autoRecapButton.textContent !== autoRecapText) {
       view.autoRecapButton.textContent = autoRecapText;
     }
+    if (view.autoRecapButton.disabled !== disabled) {
+      view.autoRecapButton.disabled = disabled;
+    }
 
-    // Composer lock + Send/Cancel affordance (all guarded).
-    const disabled = !sv.composerEnabled;
     if (view.composerTextarea.disabled !== disabled) {
       view.composerTextarea.disabled = disabled;
     }

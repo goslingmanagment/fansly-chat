@@ -900,7 +900,8 @@ describe('Coach orchestration', () => {
     expect(app.activeCoachSession.pending).toBeUndefined();
     expect(app.activeFeature).toBeNull();
     expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.type === 'operation:start')).toBe(false);
-    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-07');
+    // A dedicated settings-load toast, not the generic extension_reloaded one.
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-APP-04');
   });
 
   it('P2: a standalone SHORT recap does not mark a full summary available or cache it', async () => {
@@ -968,6 +969,115 @@ describe('Coach orchestration', () => {
     // The overlay model's exchange carries the generationRef for acceptance.
     const exchange = app.coachOverlayModel.sessionView.feedItems.find((i: any) => i.kind === 'exchange');
     expect(exchange.generationRef).toBe('gen-accept-1');
+  });
+
+  // ─── Chain-teardown holes (second review wave) ───────────────────────
+
+  it('«Новый диалог» is refused mid-recap-chain (chain intact, session not reset)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    app.handleCoachRecap('full'); // explicit refresh → running recap step, no coach op
+    expect(app.coachRecapChain).not.toBeNull();
+    const chainBefore = app.coachRecapChain;
+
+    app.resetCoachSession();
+
+    // Refused: chain intact and the running step survives (resetSession would wipe it).
+    expect(app.coachRecapChain).toBe(chainBefore);
+    expect(app.activeCoachSession.feedItems.some((i: any) => i.kind === 'recap-step')).toBe(true);
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('Дождись');
+  });
+
+  it('onClose during an auto-recap chain tears it down cleanly and preserves the question', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('held during insert');
+    expect(app.coachRecapChain).not.toBeNull();
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+
+    // Draft Insert during a running step fires onClose (activeFeature is
+    // 'fan-summary', so the old idle-coach branch would have dropped the chain).
+    app.overlay.callbacks.onClose();
+
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.suppressedTerminalOpIds.has(recapOpId)).toBe(true);
+    expect(app.port.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'operation:cancel', operationId: recapOpId }),
+    );
+    // Question preserved in the retained store session; overlay collapsed.
+    expect(app.coachStore.getOrCreate('account-1', 'group-1').composerText).toBe('held during insert');
+    expect(app.coachOverlayModel).toBeNull();
+  });
+
+  it('onClose during a SHORT recap chain suppresses the terminal — no cache pollution', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    app.handleCoachRecap('short'); // explicit short refresh chain
+    const recapOpId = app.coachRecapChain.operationId;
+
+    app.overlay.callbacks.onClose();
+    expect(app.suppressedTerminalOpIds.has(recapOpId)).toBe(true);
+
+    // The escaped completion is suppressed — it never reaches the full-summary
+    // availability/cache path (the P2-short-cache side door is closed).
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'short body', parts: [], summaryMeta: { generatedAt: 1, stale: false, cached: false } },
+    });
+    expect(app.tabState.hasAvailableSummary).toBeFalsy();
+    expect(
+      app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
+    ).toBeNull();
+  });
+
+  it('«Открыть последний» falls back full → short → toast on a cache miss', async () => {
+    const app = await makeReadyApp();
+    // Unknown status → try the durable full first, then short.
+    app.recapPickerModel = { kind: 'recap-picker', fanDisplayName: 'fan', recapStatus: null };
+
+    app.openLastRecap();
+    let payload = lastSent(app);
+    expect(payload).toMatchObject({ feature: 'fan-summary', viewCachedOnly: true });
+    expect(payload.summaryMode).toBeUndefined(); // full
+    const fullOpId = app.activeOperationId;
+
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: fullOpId,
+      error: { key: 'no_saved_recap', code: 'CG-APP-03', message: 'none' },
+    });
+    payload = lastSent(app);
+    expect(payload).toMatchObject({ feature: 'fan-summary', viewCachedOnly: true, summaryMode: 'short' });
+    const shortOpId = app.activeOperationId;
+
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: shortOpId,
+      error: { key: 'no_saved_recap', code: 'CG-APP-03', message: 'none' },
+    });
+    // No third op — both sizes missed, so toast.
+    expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.type === 'operation:start')).toBe(false);
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-APP-03');
+  });
+
+  it('startCompare clears an open recap picker (mirror startFeature)', async () => {
+    const app = await makeReadyApp();
+    app.openRecapPicker();
+    expect(app.recapPickerModel).not.toBeNull();
+
+    await app.startCompare(false);
+
+    expect(app.recapPickerModel).toBeNull();
   });
 
   it('renders a Coach button in the bar wired to openCoach', async () => {

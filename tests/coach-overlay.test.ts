@@ -722,6 +722,16 @@ describe('OverlayController — coach chat mode', () => {
     );
   });
 
+  it('disables the auto-recap override control while the coach is busy', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap').disabled).toBe(false);
+    // Busy (a streaming turn / running recap step) → locked so the mode can't
+    // change mid-turn.
+    controller.render(createCoachModel({ operationId: 'op-live', composerEnabled: false }));
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap').disabled).toBe(true);
+  });
+
   it('appends the fallback note to a failed-but-proceeded recap step', () => {
     const { controller } = makeController();
     controller.render(

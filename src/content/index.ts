@@ -382,6 +382,10 @@ export class ChatGooseContentApp {
   // «Открыть последний»), or null for a plain full run. A 'short' result must
   // never enter the full summary availability/overlay caches (P2-short-cache).
   private activeSummaryMode: 'short' | 'full' | null = null;
+  // «Открыть последний»: the OTHER recap size to try once if the current
+  // view-cached-only op 404s with no_saved_recap (the local cache may hold one
+  // size but not the other), or null when there is nothing left to fall back to.
+  private viewLastFallbackMode: 'short' | 'full' | null = null;
 
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
@@ -519,6 +523,18 @@ export class ChatGooseContentApp {
       // generation was started, nothing to tear down.
       if (this.recapPickerModel) {
         this.closeRecapPicker();
+        this.renderAll();
+        return;
+      }
+      // A live recap chain runs under `activeFeature === 'fan-summary'`, so an
+      // onClose (e.g. draft Insert during a running step) would otherwise hit the
+      // idle-coach branch below and drop the chain WITHOUT cancelling/suppressing
+      // its op — losing the held question and leaking a short recap into the full
+      // cache. Tear the chain down first (cancel + suppress + preserve the held
+      // question + fail the step), THEN collapse the overlay (the close intent).
+      if (this.coachRecapChain) {
+        this.cancelCoachRecapChain();
+        this.closeCoach();
         this.renderAll();
         return;
       }
@@ -809,13 +825,16 @@ export class ChatGooseContentApp {
 
   /** «Открыть последний» (spec §5): view the freshest STORED recap without any
    * generation. Dispatches a view-cached-only fan-summary (background serves the
-   * local cache or fails with `no_saved_recap`, which surfaces as a toast). The
-   * mode is the freshest stored slot; when neither slot exists we toast without
-   * even sending the op. */
+   * local cache or fails with `no_saved_recap`). It tries the freshest slot
+   * first, then falls back to the OTHER size before giving up with a toast — the
+   * local cache may hold one size but not the other (e.g. a short generated here
+   * while the full lives only on the Hub, or an unknown status defaulting to
+   * full). When neither slot is known to exist we toast without an op. */
   private openLastRecap(): void {
     const status = this.recapPickerModel?.recapStatus ?? this.activeCoachSession?.recapStatus ?? null;
     this.closeRecapPicker();
     let mode: 'short' | 'full';
+    let fallback: 'short' | 'full' | null;
     if (status) {
       const picked = pickFreshestSlotMode(status);
       if (picked === null) {
@@ -825,10 +844,14 @@ export class ChatGooseContentApp {
         return;
       }
       mode = picked;
+      fallback =
+        picked === 'full' ? (status.short ? 'short' : null) : (status.full ? 'full' : null);
     } else {
-      // Status unknown (read pending/failed): let the background be the source
-      // of truth — attempt the durable full recap; a real miss 404s to a toast.
+      // Status unknown (read pending/failed): let the background be the source of
+      // truth — try the durable full recap first, then the short (a real miss on
+      // both 404s to a toast).
       mode = 'full';
+      fallback = 'short';
     }
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
@@ -837,6 +860,14 @@ export class ChatGooseContentApp {
     if (!this.ensureFeatureCanStart('fan-summary')) {
       return;
     }
+    this.viewLastFallbackMode = fallback;
+    this.dispatchViewCachedRecap(mode);
+  }
+
+  /** Send a single view-cached-only recap op (spec §5). Caller has already run
+   * the prereq guards; a `no_saved_recap` terminal retries {@link
+   * viewLastFallbackMode} once (in the error handler) before toasting. */
+  private dispatchViewCachedRecap(mode: 'short' | 'full'): void {
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
@@ -848,6 +879,7 @@ export class ChatGooseContentApp {
     };
     const sent = this.port.send(payload);
     if (!sent) {
+      this.viewLastFallbackMode = null;
       this.clearOperationState(true);
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.renderSurfaces();
@@ -1415,10 +1447,12 @@ export class ChatGooseContentApp {
       return;
     }
 
-    // An idle open coach yields to Compare too (spec §3), session retained.
+    // An idle open coach yields to Compare too (spec §3), session retained; the
+    // standalone Recap dialog is likewise superseded (mirror startFeature).
     if (this.coachOverlayModel) {
       this.closeCoach();
     }
+    this.recapPickerModel = null;
 
     if (!this.tabState) {
       return;
@@ -1639,14 +1673,16 @@ export class ChatGooseContentApp {
   }
 
   /** Drop the coach overlay while RETAINING the store session for reopen (spec
-   * §3). Does NOT cancel a streaming op — only ever called for an idle coach or
-   * after the op has been torn down elsewhere. */
+   * §3). This does NOT itself tear down a streaming coach turn or a recap-chain
+   * op — every caller must have already cancelled/suppressed any live op first
+   * (onClose routes a live chain through cancelCoachRecapChain; route/persona
+   * paths suppress + cancel). The `coachRecapChain = null` below is only a
+   * belt-and-braces reference drop for an ALREADY-torn-down chain, never an op
+   * teardown — reaching here with an un-cancelled op would leak it. */
   private closeCoach(): void {
     this.coachOverlayModel = null;
     this.activeCoachSession = null;
     this.coachPendingAnswerText = '';
-    // A lingering chain would reference the now-detached session; drop it. (The
-    // op itself, if any, is torn down by the caller's suppression path.)
     this.coachRecapChain = null;
   }
 
@@ -1693,7 +1729,7 @@ export class ChatGooseContentApp {
         this.rebuildCoachModel();
         this.renderAll();
       }
-      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      this.showUserErrorToast(getErrorMessage('settings_load_failed'));
       return;
     } finally {
       this.coachSubmitInFlight = false;
@@ -1794,8 +1830,12 @@ export class ChatGooseContentApp {
       return;
     }
     // The composer is locked while streaming, but the topbar New-dialog button
-    // is not — refuse a reset mid-turn (the turn must terminate first) and say so.
-    if (this.activeFeature === 'coach-chat') {
+    // is not — refuse a reset mid-turn (the turn must terminate first) and say
+    // so. A running recap step counts too: it rides `activeFeature ===
+    // 'fan-summary'`, so guard on `coachRecapChain` as well or a mid-step reset
+    // would orphan the chain (running step vanishes, composer locks on an
+    // invisible op, and the OLD held question auto-submits into the reset dialog).
+    if (this.activeFeature === 'coach-chat' || this.coachRecapChain) {
       this.toast.show('Дождись ответа коуча, потом начинай новый диалог.', {
         tone: 'warning',
       });
@@ -2731,6 +2771,10 @@ export class ChatGooseContentApp {
     // show SHORT text as if it were the full recap). It still renders once via
     // deepOverlayModel below (P2-short-cache).
     const isShortSummary = feature === 'fan-summary' && this.activeSummaryMode === 'short';
+    // A served view-cached recap ends any pending open-last fallback.
+    if (feature === 'fan-summary') {
+      this.viewLastFallbackMode = null;
+    }
     if (feature === 'fan-summary' && !isShortSummary && this.tabState) {
       this.tabState = {
         ...this.tabState,
@@ -2785,9 +2829,17 @@ export class ChatGooseContentApp {
       }
 
       // «Открыть последний» found nothing stored (spec §5): a soft, expected
-      // outcome — toast it rather than showing a full error overlay.
+      // outcome. Try the OTHER recap size once if one is pending (the local
+      // cache may hold one size but not the other), else toast — never a full
+      // error overlay.
       if (message.error?.key === 'no_saved_recap') {
+        const fallback = this.viewLastFallbackMode;
+        this.viewLastFallbackMode = null;
         this.clearOperationState(true);
+        if (fallback) {
+          this.dispatchViewCachedRecap(fallback);
+          return;
+        }
         this.showUserErrorToast(getErrorMessage('no_saved_recap'));
         this.renderAll();
         return;

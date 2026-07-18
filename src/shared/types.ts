@@ -678,6 +678,7 @@ export type UserErrorKey =
   | 'coach_requires_newer_hub'
   | 'coach_fan_unresolved'
   | 'no_saved_recap'
+  | 'settings_load_failed'
   | 'insertion_failed'
   | 'unknown_error';
 
