@@ -1,12 +1,15 @@
-// Coach draft-fence parser. The coach-chat template (core:
-// prompts/templates/coach-chat.md) instructs the model to wrap each proposed
-// fan message in a fenced block that starts with a line `\`\`\`draft` and ends
-// with a line `\`\`\``, at most two blocks, each under 1500 characters, with
-// advice text left outside the fences. This module is the client-side reader of
-// that grammar: it lifts the well-formed drafts out into structured buttons and
+// Coach draft-fence parser. The coach-chat prompt template — core
+// apps/runtime/src/modules/ai/prompts/templates/coach-chat.md ("## Rules"
+// section, commit 7e3ac018) — instructs the model to wrap each proposed fan
+// message in a fenced block that starts with a line `\`\`\`draft` and ends with
+// a line `\`\`\``, at most two blocks, each under 1500 characters, with advice
+// text left outside the fences. This module is the client-side reader of that
+// grammar: it lifts the well-formed drafts out into structured buttons and
 // leaves everything else — advice, and any fence that violates the grammar — in
 // the prose, with violating fence markers neutralised so they can neither
-// re-parse as a draft nor render as a code fence.
+// re-parse as a draft nor render as a code fence. The template is not part of
+// the vendored SDK, so the numbers below are pinned against a verbatim fixture
+// in tests/coach-draft.test.ts (a manual re-pin drift guard).
 
 /** Max chars in a single draft fence body before it is treated as a violation
  * (mirrors the template's "under 1500 characters"). */

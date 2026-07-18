@@ -119,8 +119,10 @@ export const COACH_HISTORY_LIMIT_MAX = 20;
  * core; a drift would fail the kernel's own zod bound at request time). */
 export const COACH_ANSWER_MAX_CHARS = 64_000;
 
-/** Wire ceiling for a coach question — the live `chatterQuestion` and each
- * replayed `coachHistory[].question` — mirroring the SDK schema bound. */
+/** Kernel-side ceiling for a coach question, mirroring the SDK schema bound.
+ * Enforced HERE only for replayed `coachHistory[].question` entries (the
+ * boundary array validator); the live `chatterQuestion` is passed through as a
+ * plain optional string and the kernel body schema is its real gate. */
 export const COACH_QUESTION_MAX_CHARS = 2_000;
 
 // ─── Timeouts ────────────────────────────────────────────────────────────
