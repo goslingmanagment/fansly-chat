@@ -37,7 +37,11 @@ export interface PurchaseEvidenceOverride {
   verificationIncomplete?: boolean;
 }
 
-function compareMessageIds(left: string, right: string): number {
+/** Fansly message ids are snowflake-like: numeric strings that increase with
+ * creation time. A numeric-aware compare orders them chronologically even when
+ * the ids differ in length, and is reused by the coach transcript cache to
+ * detect page/window id overlap. */
+export function compareMessageIds(left: string, right: string): number {
   return left.localeCompare(right, 'en', { numeric: true });
 }
 
