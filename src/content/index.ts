@@ -1790,13 +1790,15 @@ export class ChatGooseContentApp {
     const resultKind = getFeaturePolicy(feature).resultKind;
     switch (resultKind) {
       case 'coach-chat':
-        // Coach normally renders via its OWN overlay path (createCoachView off
-        // the CoachSession store); on the full stack handleComplete intercepts a
-        // coach completion before this function, so this arm is dead code there.
-        // But part 1 has no such interceptor yet, so keep slice 1 standalone-
-        // correct: surface the coach advice READ-ONLY instead of falling through
-        // to the reply path — where resultPartTexts('coach-chat') → [] would
-        // discard the answer and show a bogus ai_output_unusable error.
+        // Coach normally renders via its OWN overlay path
+        // (OverlayController.renderCoach off the CoachSession store); on the full
+        // stack handleComplete intercepts a coach completion before this function,
+        // so this arm is dead code there. It is kept as a graceful DEFENSIVE arm
+        // (and makes part 1 standalone-correct, before that interceptor lands):
+        // surface the coach advice READ-ONLY rather than fall through to the reply
+        // path — where resultPartTexts('coach-chat') → [] would discard the answer
+        // and show a bogus ai_output_unusable error. Read-only degrades gracefully
+        // where the earlier throw would crash a misrouted (but complete) result.
         return {
           kind: 'readOnly',
           feature: 'coach-chat',

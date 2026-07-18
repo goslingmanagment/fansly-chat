@@ -1340,6 +1340,62 @@ export interface CompareInlineViewModel {
   canRegenerate: boolean;
 }
 
+/** One draft card inside a rendered coach exchange (spec §3 "Draft cards").
+ * `index` is the draft's position within its exchange answer — the `partIndex`
+ * threaded to `onAcceptance` for copied/inserted provenance. */
+export interface CoachOverlayDraft {
+  text: string;
+  index: number;
+}
+
+/** A rendered coach feed item — the overlay projection of the content-side
+ * `CoachFeedItem` (spec §3 "Session state model"). Exchanges are keyed by their
+ * own `operationId`; failed-attempt / recap-step items by feed index. Prose is
+ * ALWAYS the draft-stripped text and is rendered via `textContent` (never
+ * markdown/innerHTML) — the draft fences are already lifted into `drafts`. */
+export type CoachOverlayFeedItem =
+  | {
+      kind: 'exchange';
+      /** The exchange's own op id: the render key AND the acceptance-attribution
+       * id for its draft cards (NEVER the session's live/top-level op). */
+      operationId: string;
+      question: string;
+      answerProse: string;
+      drafts: CoachOverlayDraft[];
+    }
+  | {
+      kind: 'failed-attempt';
+      question: string;
+      errorCode: string;
+      retryable: boolean;
+    }
+  | {
+      kind: 'recap-step';
+      mode: 'short' | 'full';
+      origin: 'auto' | 'explicit';
+      status: 'running' | 'done' | 'failed';
+    };
+
+/** The coach overlay's session projection (spec §3). Built by the content
+ * orchestrator (T10) from the `CoachSession` store; the renderer keeps no
+ * session state of its own beyond this. */
+export interface CoachOverlaySessionView {
+  feedItems: CoachOverlayFeedItem[];
+  /** The in-flight question, shown as the pending item's bubble while streaming. */
+  pendingQuestion?: string;
+  /** The in-flight answer streamed so far (draft fences are lifted only on
+   * commit, so this is raw prose); rendered via textContent. */
+  pendingAnswerText?: string;
+  /** Pre-formatted recap freshness line, or '' to hide it (spec §5). */
+  recapStatusLine: string;
+  /** Unsent composer text for restore-on-reopen (spec §3). */
+  composerText: string;
+  /** False while a turn streams — the composer is locked (spec §3). */
+  composerEnabled: boolean;
+  /** `(accountId, groupId)` session identity; a change swaps the whole feed. */
+  sessionKey: string;
+}
+
 export type OverlayViewModel =
   | { kind: 'hidden' }
   | {
@@ -1418,6 +1474,17 @@ export type OverlayViewModel =
       llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       error: UserFacingError;
+    }
+  | {
+      // Coach chat mode (spec §3) — rendered exclusively by
+      // OverlayController.renderCoach off the CoachSession store. Coach models
+      // BYPASS CompletedOverlayCache and overlayRawText entirely (spec §10).
+      kind: 'coach';
+      fanDisplayName: string;
+      /** Non-null == a turn is streaming: drives Esc=cancel-and-stay-open and
+       * the composer lock. Null == idle: Esc=close. NEVER an acceptance id. */
+      operationId: string | null;
+      sessionView: CoachOverlaySessionView;
     };
 
 export type CompletedOverlayViewModel = Extract<
