@@ -188,7 +188,14 @@ function buildFanslyClientMock() {
       _messageCount: number,
       _session: unknown,
       _signal?: AbortSignal,
-    ) => ({
+    ): Promise<{
+      pages: FanslyMessagePageResponse[];
+      pagesLoaded: number;
+      targetPages: number;
+      // Optional in the mock so pre-Task-7 overrides that omit it still type;
+      // an absent value degrades transcriptCoverage to 'window' (safe default).
+      reachedEnd?: boolean;
+    }> => ({
       pages: buildMessagePages(30),
       pagesLoaded: 2,
       targetPages: 2,
