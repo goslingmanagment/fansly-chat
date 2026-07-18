@@ -222,6 +222,15 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'This conversation has too many messages for a greeting.',
     description: 'Hi works best for new conversations (10 messages or fewer). Use Reply instead.',
   },
+  coach_requires_newer_hub: {
+    key: 'coach_requires_newer_hub',
+    code: 'CG-HUB-11',
+    // Structured `unknown_ai_feature` (404) from the gateway: THIS page's
+    // Agency Hub predates the coach-chat feature. A generic 404 (missing page /
+    // unauthorized) keeps its own code and must never be relabelled as this.
+    message: 'Coach requires a newer Agency Hub.',
+    description: 'This page\'s Agency Hub does not yet support Coach. Ask a manager to update the Hub.',
+  },
   insertion_failed: {
     key: 'insertion_failed',
     code: 'CG-UI-01',
