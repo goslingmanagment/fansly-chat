@@ -119,7 +119,6 @@ describe('ButtonBar toolbar visibility', () => {
 
     const platform = detectLabelPlatform();
     const replyHotkey = featureHotkeyLabel('fast-reply', platform)!;
-    const recapHotkey = featureHotkeyLabel('fan-summary', platform)!;
 
     const reply = buttonByLabel(bar.root, 'Reply');
     const replyChip = reply?.querySelector('.chatgoose-toolbar-hotkey');
@@ -130,14 +129,15 @@ describe('ButtonBar toolbar visibility', () => {
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
+    // Recap left HOTKEY_FEATURE in the Coach extension phase (plan §Task 2):
+    // ⌘⇧S now opens the recap picker (an app action), not this button's direct
+    // fan-summary start — so featureHotkeyLabel('fan-summary') is null and the
+    // button no longer advertises a (now-mismatched) shortcut chip.
+    expect(featureHotkeyLabel('fan-summary', platform)).toBeNull();
     const recap = buttonByLabel(bar.root, 'Recap');
-    const recapChip = recap?.querySelector('.chatgoose-toolbar-hotkey');
-    expect(recapChip?.textContent).toBe(recapHotkey.short);
-    expect(recapChip?.getAttribute('aria-hidden')).toBe('true');
-    expect(recap?.title).toContain(recapHotkey.full);
-    expect(recap?.getAttribute('aria-keyshortcuts')).toBe(
-      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${recapHotkey.short}`,
-    );
+    expect(recap).toBeDefined();
+    expect(recap?.querySelector('.chatgoose-toolbar-hotkey')).toBeNull();
+    expect(recap?.getAttribute('aria-keyshortcuts')).toBeNull();
 
     // The Split reply-mode flag is a labelled pill with no bound key — no chip,
     // no keyshortcuts.

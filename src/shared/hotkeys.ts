@@ -29,20 +29,26 @@ export type HotkeyAction =
   | 'hi-greeting'
   | 'ping'
   | 'fan-summary'
+  | 'coach'
   | 'chat-review'
   | 'cycle-tone'
   | 'cancel'
   | 'spenders-board'
   | 'cheatsheet';
 
-/** AI feature actions map 1:1 to a FeatureType; the rest are app actions. */
+/**
+ * AI feature actions map 1:1 to a FeatureType; the rest are app actions.
+ * `coach` and `fan-summary` are APP actions (not entries here): `⌘⇧C` opens the
+ * Coach chat and `⌘⇧S` opens the recap picker — neither starts a generation
+ * directly. `dispatchHotkey` routes anything absent from this map as an app
+ * action (arms wired in the Coach extension phase Task 10).
+ */
 export const HOTKEY_FEATURE: Partial<Record<HotkeyAction, FeatureType>> = {
   'fast-reply': 'fast-reply',
   'improve-draft': 'improve-draft',
   'help-me': 'help-me',
   'hi-greeting': 'hi-greeting',
   ping: 'ping',
-  'fan-summary': 'fan-summary',
   'chat-review': 'chat-review',
 };
 
@@ -78,7 +84,8 @@ const AI_HOTKEYS: readonly HotkeyDef[] = [
   { action: 'help-me', letter: 'h', description: 'Help Me (coaching)' },
   { action: 'hi-greeting', letter: 'g', description: 'Hi — greeting openers' },
   { action: 'ping', letter: 'd', description: 'Ping — reactivation message' },
-  { action: 'fan-summary', letter: 's', description: 'Recap — deep fan profile' },
+  { action: 'fan-summary', letter: 's', description: 'Recap — open the recap picker (full / short / last)' },
+  { action: 'coach', letter: 'c', description: 'Coach — ask the AI anything about this fan' },
   { action: 'chat-review', letter: 'v', description: 'Chat review — rate this chat' },
   { action: 'cycle-tone', letter: 'o', description: 'Cycle tone (casual / flirty / upsell / horny)' },
   { action: 'cancel', letter: 'x', description: 'Cancel running AI operation' },
