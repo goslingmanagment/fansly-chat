@@ -1126,10 +1126,47 @@ export class OverlayController {
     const fullRecap = this.createCoachButton('Full recap', 'chatgoose-button-secondary', () =>
       this.callbacks.onCoachRecap?.('full'),
     );
-    const newDialog = this.createCoachButton('New dialog', 'chatgoose-button-secondary', () =>
-      this.callbacks.onCoachNewDialog?.(),
-    );
-    topbarActions.append(shortRecap, fullRecap, newDialog);
+    // «Новый диалог» — a two-step inline confirm (spec §3), mirroring the
+    // Replace-draft button below: NO window.confirm (it blocks the extension).
+    // A NON-EMPTY dialog arms a "Confirm new dialog" state on the first click;
+    // the second click resets. An EMPTY dialog resets immediately. Blur /
+    // outside-click / «Keep» abandons the confirm so a stale armed state never
+    // lingers. Emptiness is read live from the current model at click time.
+    const newDialog = document.createElement('button');
+    newDialog.type = 'button';
+    newDialog.className = 'chatgoose-button chatgoose-button-secondary';
+    newDialog.textContent = 'New dialog';
+    const newDialogKeep = document.createElement('button');
+    newDialogKeep.type = 'button';
+    newDialogKeep.className = 'chatgoose-button chatgoose-button-secondary chatgoose-hidden';
+    newDialogKeep.textContent = 'Keep';
+    let newDialogArmed = false;
+    const disarmNewDialog = (): void => {
+      newDialogArmed = false;
+      newDialog.classList.remove('chatgoose-coach-newdialog-armed');
+      newDialogKeep.classList.add('chatgoose-hidden');
+      newDialog.textContent = 'New dialog';
+    };
+    newDialogKeep.addEventListener('click', () => disarmNewDialog());
+    newDialog.addEventListener('blur', () => {
+      if (newDialogArmed) {
+        disarmNewDialog();
+      }
+    });
+    newDialog.addEventListener('click', () => {
+      const hasContent =
+        this.model.kind === 'coach' && this.model.sessionView.feedItems.length > 0;
+      if (hasContent && !newDialogArmed) {
+        newDialogArmed = true;
+        newDialog.textContent = 'Confirm new dialog';
+        newDialog.classList.add('chatgoose-coach-newdialog-armed');
+        newDialogKeep.classList.remove('chatgoose-hidden');
+        return;
+      }
+      disarmNewDialog();
+      this.callbacks.onCoachNewDialog?.();
+    });
+    topbarActions.append(shortRecap, fullRecap, newDialog, newDialogKeep);
     topbar.append(recap, topbarActions);
 
     // Feed — a separately-scrolling log. Committed items live in itemsEl so

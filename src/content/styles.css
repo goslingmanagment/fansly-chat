@@ -1111,7 +1111,8 @@
   margin-top: 2px;
 }
 
-.chatgoose-coach-draft-armed {
+.chatgoose-coach-draft-armed,
+.chatgoose-coach-newdialog-armed {
   background: var(--chatgoose-warn, var(--chatgoose-amber, var(--chatgoose-clay)));
   color: #fff;
 }

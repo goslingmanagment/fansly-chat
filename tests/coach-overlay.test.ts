@@ -162,8 +162,61 @@ describe('OverlayController — coach chat mode', () => {
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach button'),
     ).find((button) => /new dialog/i.test(button.textContent ?? ''));
     expect(newDialog).toBeDefined();
+    // An EMPTY dialog resets immediately (no arm).
     newDialog!.click();
     expect(callbacks.onCoachNewDialog).toHaveBeenCalledOnce();
+  });
+
+  it('«New dialog» arms a two-step confirm on a non-empty session, then resets on the second click', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
+
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
+    );
+    const newDialog = buttons.find((b) => b.textContent === 'New dialog')!;
+    const keep = buttons.find((b) => b.textContent === 'Keep')!;
+    expect(newDialog).toBeDefined();
+    expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
+
+    // First click ARMS — no reset yet.
+    newDialog.click();
+    expect(newDialog.textContent).toBe('Confirm new dialog');
+    expect(newDialog.classList.contains('chatgoose-coach-newdialog-armed')).toBe(true);
+    expect(keep.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+
+    // Second click CONFIRMS + disarms.
+    newDialog.click();
+    expect(callbacks.onCoachNewDialog).toHaveBeenCalledOnce();
+    expect(newDialog.textContent).toBe('New dialog');
+    expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
+  it('«New dialog» disarms the confirm on blur / «Keep» (outside-click abandon)', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
+
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
+    );
+    const newDialog = buttons.find((b) => b.textContent === 'New dialog')!;
+    const keep = buttons.find((b) => b.textContent === 'Keep')!;
+
+    newDialog.click();
+    expect(newDialog.textContent).toBe('Confirm new dialog');
+
+    // Blur abandons the armed confirm.
+    newDialog.dispatchEvent(new Event('blur'));
+    expect(newDialog.textContent).toBe('New dialog');
+    expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+
+    // Re-arm, then «Keep» abandons it too.
+    newDialog.click();
+    keep.click();
+    expect(newDialog.textContent).toBe('New dialog');
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
   });
 
   it('submits the composer on Enter and clears it, but not on Shift+Enter or while composing', () => {

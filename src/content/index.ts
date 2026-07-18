@@ -1289,9 +1289,18 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('coach_fan_unresolved'));
       return;
     }
-    // Opening Coach as a distinct app action takes over the overlay surface,
-    // dropping any completed deep result showing there.
+    // Opening Coach as a distinct app action TAKES OVER the overlay surface —
+    // mirror startFeature so the coach overlay wins over a cached inline result
+    // or a completed compare panel too. Both sit ABOVE the idle-coach floor in
+    // the planner, so without this openCoach would set all coach state yet
+    // render nothing (a LIVE compare op was already blocked above; only a
+    // completed, operationId-null compare model can linger here).
     this.deepOverlayModel = null;
+    this.quickInlineVisible = false;
+    this.comparePanelVisible = false;
+    if (this.activeCompareModel && !this.activeCompareModel.operationId) {
+      this.activeCompareModel = null;
+    }
     // getOrCreate touches this session as most-recently-used. LRU eviction of a
     // session with a LIVE pending cannot happen through this path: a streaming
     // coach turn sets `activeFeature === 'coach-chat'`, which blocks openCoach
@@ -1397,17 +1406,20 @@ export class ChatGooseContentApp {
   }
 
   /** «Новый диалог» (spec §3): reset the open session in place — new sessionId
-   * forces the background transcript reseed. v1 resets IMMEDIATELY (no confirm
-   * dialog: window.confirm blocks the extension, and a two-step in-overlay
-   * confirm is renderer/T9 work outside this task's files — see the report). */
+   * forces the background transcript reseed. The renderer confirms first with a
+   * two-step arm when the dialog is non-empty; an empty dialog fires straight
+   * through, so no confirm is needed here. */
   private resetCoachSession(): void {
     const session = this.activeCoachSession;
     if (!session) {
       return;
     }
     // The composer is locked while streaming, but the topbar New-dialog button
-    // is not — ignore a reset request mid-turn (the turn must terminate first).
+    // is not — refuse a reset mid-turn (the turn must terminate first) and say so.
     if (this.activeFeature === 'coach-chat') {
+      this.toast.show('Дождись ответа коуча, потом начинай новый диалог.', {
+        tone: 'warning',
+      });
       return;
     }
     this.coachStore.resetSession(session);

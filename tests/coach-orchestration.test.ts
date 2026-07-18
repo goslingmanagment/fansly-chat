@@ -378,6 +378,54 @@ describe('Coach orchestration', () => {
     expect(app.coachStore.getOrCreate('account-1', 'group-1')).toBeDefined();
   });
 
+  it('opens Coach over a cached inline result instead of silently no-opping', async () => {
+    const app = await makeReadyApp();
+    // A completed reply is showing in the inline panel.
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.lastFeature = 'fast-reply';
+    app.quickSurfaceEverOpened = true;
+    app.quickInlineVisible = true;
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'reply-op',
+      fanDisplayName: 'alice',
+      result: { rawText: 'Hi there', parts: ['Hi there'] },
+    });
+    const inlineRoot = app.inlinePanel.root as HTMLElement;
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
+
+    app.openCoach();
+
+    expect(app.coachOverlayModel?.kind).toBe('coach');
+    expect(app.quickInlineVisible).toBe(false);
+    // The coach overlay actually renders; the cached inline panel is hidden.
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(document.querySelector('.chatgoose-coach')).not.toBeNull();
+  });
+
+  it('opens Coach over a completed compare panel', async () => {
+    const app = await makeReadyApp();
+    app.activeCompareModel = {
+      kind: 'compare',
+      fanDisplayName: 'alice',
+      operationId: null,
+      tabs: [],
+      activeCardId: null,
+      progress: null,
+      canCancel: false,
+      canRegenerate: true,
+    };
+    app.comparePanelVisible = true;
+
+    app.openCoach();
+
+    expect(app.coachOverlayModel?.kind).toBe('coach');
+    expect(app.activeCompareModel).toBeNull();
+    expect(app.comparePanelVisible).toBe(false);
+    expect(document.querySelector('.chatgoose-coach')).not.toBeNull();
+  });
+
   it('persona / account mapping change wipes every coach session', async () => {
     const app = await makeReadyApp();
     app.openCoach();
