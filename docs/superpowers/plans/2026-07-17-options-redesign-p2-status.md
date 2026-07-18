@@ -1,5 +1,9 @@
 # Options Redesign P2 — Status Section, Readiness Hero & Changelog Button
 
+> **Release status (2026-07-18): deferred to 2.0.** This work appeared in
+> 1.9.10 by mistake and was removed from production by 1.9.11. Continue from
+> `release/2.0-options`; it is not part of the 1.9.x release line (E44).
+
 > **Rev 3 (2026-07-17)** — auth-event & signature-binding review fixes (verified against this worktree's code); extends the Rev 2 fixes retained below:
 > 1. **Hydration also fires on auth events** — `hydrateHubStatusRows` now triggers from the sign-in success path (immediately after `state.settings = (await loadStorageState()).settings;` in the `issueAgencyHubDeviceToken` handler, `src/options/index.ts:802`) AND from the permission-grant handler, so the Доступ row and readiness hero flip to AUTH the instant a device token is issued — no reload, no remount. It stays a `render()`-scope const reachable by P3's sign-out completion for the same repaint-on-revoke (Task 6; sign-in→AUTH-without-remount test added).
 > 2. **The signature guard binds to the PERSISTED snapshot** — `hydrateHubStatusRows(expectedSignature)` takes the signature of the snapshot its caller just PERSISTED (the post-persist block passes its own `hubSignature` from `mergedSettings`; mount/sign-in/grant pass the signature of the just-read stored settings). It (1) returns BEFORE issuing any request when the live-form signature has already moved on, and (2) re-checks the live signature before painting each row. The numeric generation counter is dropped — the persisted signature is the sole binding. The A→B race test splits into the delayed-START variant (persist A → type B before the run starts → no request issued) and the in-flight variant (started under A, B typed while awaiting → paint dropped) (Task 6).

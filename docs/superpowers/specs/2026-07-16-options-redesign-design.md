@@ -1,8 +1,13 @@
 # Options page and changelog redesign (V3 "status-first")
 
-Date: 2026-07-16. Status: approved by the owner (2026-07-16), after a codex
-cross-review and a re-baseline to main 1.9.9. Docs are written in English by
-owner preference; the product UI copy is Russian (decision §2.3). Mockups:
+> **Release status (2026-07-18): deferred to 2.0.** This work appeared in
+> 1.9.10 by mistake and was removed from production by 1.9.11. Continue from
+> `release/2.0-options`; it is not part of the 1.9.x release line (E44).
+
+Date: 2026-07-16. Status: approved by the owner (2026-07-16) for the 2.0
+release line, after a codex cross-review and a re-baseline to main 1.9.9.
+Docs are written in English by owner preference; the product UI copy is
+Russian (decision §2.3). Mockups:
 artifact «ChatGoose — редизайн настроек» (rev-5, variant V3 chosen).
 
 ## 1. Context and goals

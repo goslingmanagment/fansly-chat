@@ -69,97 +69,26 @@ describe('Options malformed persona snapshot recovery', () => {
     await import('../src/options/index.js');
     await vi.waitFor(() => {
       expect(document.querySelector('h1')?.textContent)
-        .toBe('Восстановление персон');
+        .toBe('ChatGoose Persona Recovery');
     });
 
-    expect(document.body.textContent).toContain('Экспорт легаси-персон');
-    expect(document.body.textContent).toContain('Скачать JSON легаси-персон');
-    expect(document.body.textContent).toContain('Скопировать JSON легаси-персон');
+    expect(document.body.textContent).toContain('Legacy Persona Recovery');
+    expect(document.body.textContent).toContain('Download legacy persona JSON');
+    expect(document.body.textContent).toContain('Copy legacy persona JSON');
     const sectionTitles = Array.from(document.querySelectorAll('h2'))
       .map((heading) => heading.textContent);
-    expect(sectionTitles).toEqual(['Экспорт легаси-персон']);
+    expect(sectionTitles).toEqual(['Legacy Persona Recovery']);
     expect(sendMessage).not.toHaveBeenCalled();
     expect(storageSet).not.toHaveBeenCalled();
 
     const copy = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Скопировать JSON легаси-персон');
+      .find((button) => button.textContent === 'Copy legacy persona JSON');
     copy?.click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const exported = JSON.parse(writeText.mock.calls[0]![0] as string) as Record<string, unknown>;
     expect(exported.preservedSnapshotValid).toBe(false);
     expect(exported.preservedSnapshot).toEqual(malformed);
     expect(JSON.stringify(exported)).toContain('recover me exactly');
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(storageSet).not.toHaveBeenCalled();
-
-    dom.window.close();
-  });
-
-  it('recovery page carries the recovery-mode badge on the new tokens', async () => {
-    vi.resetModules();
-    const dom = new JSDOM(
-      '<!doctype html><html><head></head><body><div id="chatgoose-options-root"></div></body></html>',
-      { url: 'moz-extension://chatgoose/options.html' },
-    );
-    Object.defineProperty(dom.window.navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText: vi.fn(async (_text: string) => undefined) },
-    });
-    vi.stubGlobal('window', dom.window);
-    vi.stubGlobal('document', dom.window.document);
-    vi.stubGlobal('navigator', dom.window.navigator);
-    vi.stubGlobal('HTMLElement', dom.window.HTMLElement);
-    vi.stubGlobal('Event', dom.window.Event);
-
-    const malformed = {
-      schemaVersion: 1,
-      capturedAt: '2026-07-13T12:00:00.000Z',
-      origin: {
-        client: 'chatgoose-firefox-extension',
-        extensionVersion: '1.9.7-test',
-        storageSchemaVersion: 13,
-        agencyHubBaseUrl: 'https://hub.example.test',
-        reason: 'global-personas-became-server-managed',
-      },
-      raw: {
-        personalitiesPresent: true,
-        accountMappingsPresent: true,
-        accountAliasesPresent: true,
-      },
-    };
-    const stored: Record<string, unknown> = {
-      [LEGACY_PERSONA_SNAPSHOT_KEY]: malformed,
-      personalities: [{ id: 'legacy', content: 'recover me exactly' }],
-      accountMappings: { creator: 'legacy' },
-      accountAliases: { old: 'creator' },
-    };
-    const sendMessage = vi.fn(async () => []);
-    const storageSet = vi.fn(async () => undefined);
-    (globalThis as Record<string, unknown>).browser = {
-      storage: {
-        local: {
-          get: vi.fn(async () => structuredClone(stored)),
-          set: storageSet,
-          remove: vi.fn(async () => undefined),
-        },
-      },
-      runtime: {
-        getManifest: vi.fn(() => ({ version: '1.9.7-test' })),
-        sendMessage,
-      },
-    };
-
-    await import('../src/options/index.js');
-    await vi.waitFor(() => {
-      expect(document.querySelector('.chatgoose-badge-bad')?.textContent)
-        .toBe('режим восстановления');
-    });
-    // Pinned gate invariants still hold on the new tokens:
-    expect(document.querySelector('h1')?.textContent).toBe('Восстановление персон');
-    expect(Array.from(document.querySelectorAll('h2'), (h) => h.textContent))
-      .toEqual(['Экспорт легаси-персон']);
-    // The export block still renders and no runtime/Hub request fired.
-    expect(document.body.textContent).toContain('Скачать JSON легаси-персон');
     expect(sendMessage).not.toHaveBeenCalled();
     expect(storageSet).not.toHaveBeenCalled();
 

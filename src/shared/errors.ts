@@ -147,16 +147,16 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_invalid_url: {
     key: 'hub_invalid_url',
     code: 'CG-HUB-01',
-    message: 'Адрес Agency Hub неверный.',
-    description: 'Укажи полный http:// или https:// адрес Agency Hub.',
+    message: 'Agency Hub URL is invalid.',
+    description: 'Use a full http:// or https:// Agency Hub base URL.',
     settingsLink: true,
   },
   hub_missing_api_key: {
     key: 'hub_missing_api_key',
     code: 'CG-HUB-02',
     // Fires when NEITHER credential exists (resolveHubBearer came up empty).
-    message: 'Нет учётных данных Agency Hub.',
-    description: 'Войди, чтобы выпустить device token, или добавь ключ Hub в настройках.',
+    message: 'Agency Hub credential is missing.',
+    description: 'Sign in to issue a device token, or add the Hub API key in Settings.',
     settingsLink: true,
   },
   hub_invalid_api_key: {
@@ -164,57 +164,57 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     code: 'CG-HUB-03',
     // Credential-neutral: outside the connection test we don't know whether
     // the rejected bearer was the device token or the legacy key.
-    message: 'Agency Hub отклонил учётные данные.',
-    description: 'Проверь device token или ключ Hub в настройках и повтори проверку соединения.',
+    message: 'Agency Hub rejected the credential.',
+    description: 'Check the device token or Hub API key in Settings and test the connection again.',
     settingsLink: true,
   },
   hub_missing_permission: {
     key: 'hub_missing_permission',
     code: 'CG-HUB-04',
-    message: 'Доступ к хосту Agency Hub не выдан.',
-    description: 'Выдай доступ к хосту Hub в настройках.',
+    message: 'Agency Hub host access is not granted.',
+    description: 'Grant host access for the configured Hub origin in Settings.',
     settingsLink: true,
   },
   hub_page_match_failed: {
     key: 'hub_page_match_failed',
     code: 'CG-HUB-05',
-    message: 'Не удалось сопоставить страницу Agency Hub.',
-    description: 'ChatGoose не смог сопоставить текущую модель со страницей Hub.',
+    message: 'Agency Hub page mapping failed.',
+    description: 'ChatGoose could not match the current creator to a Hub page.',
     settingsLink: true,
   },
   hub_timeout: {
     key: 'hub_timeout',
     code: 'CG-HUB-06',
-    message: 'Запрос к Agency Hub истёк по таймауту.',
-    description: 'Hub не ответил вовремя. Повтори проверку соединения.',
+    message: 'Agency Hub request timed out.',
+    description: 'The Hub did not respond in time. Try the connection test again.',
   },
   hub_request_failed: {
     key: 'hub_request_failed',
     code: 'CG-HUB-07',
-    message: 'Запрос к Agency Hub не удался.',
-    description: 'Hub вернул ошибку или недоступен.',
+    message: 'Agency Hub request failed.',
+    description: 'The Hub returned an error or could not be reached.',
   },
   hub_sync_failed: {
     key: 'hub_sync_failed',
     code: 'CG-HUB-08',
-    message: 'Синхронизация с Hub не удалась, сводка осталась доступна локально.',
-    description: 'ChatGoose сохранил локальный результат, чтобы можно было продолжить работу.',
+    message: 'Hub sync failed, summary remains available locally.',
+    description: 'ChatGoose kept the local result so the workflow can continue.',
   },
   hub_quota_exceeded: {
     key: 'hub_quota_exceeded',
     code: 'CG-HUB-09',
     // Kernel AI gateway daily cap (429 quota_denied) — per page per UTC day,
     // so "try again shortly" would be wrong advice until midnight UTC.
-    message: 'Достигнут дневной лимит AI-генераций.',
-    description: 'Эта страница исчерпала дневную квоту AI в Agency Hub. Лимит сбрасывается в полночь по UTC. Если это блокирует работу, попроси менеджера поднять лимит.',
+    message: 'Daily AI generation limit reached.',
+    description: 'This page used up its Agency Hub AI quota for today. It resets at midnight UTC. Ask a manager to raise the cap if this blocks work.',
   },
   hub_provider_failed: {
     key: 'hub_provider_failed',
     // The kernel's SSE error frame for provider/egress failures (e.g. a dead
     // page proxy): page-scoped infrastructure, not something a retry fixes.
     code: 'CG-HUB-10',
-    message: 'Agency Hub не смог связаться со своим AI-провайдером.',
-    description: 'AI-подключение на стороне Hub для этой страницы недоступно (прокси или провайдер). Скажи менеджеру — повторные попытки не помогут, пока это не починят.',
+    message: 'Agency Hub could not reach its AI provider.',
+    description: 'The Hub-side AI connection for this page is down (proxy or provider). Tell a manager — retrying will not help until it is repaired.',
   },
   hi_too_many_messages: {
     key: 'hi_too_many_messages',

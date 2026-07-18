@@ -21,8 +21,6 @@ export const PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY = 'personaCatalogFetchedAt';
 // (hydrated at load); only the PERSISTED layout changed.
 export const AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY = 'agencyHubDeviceToken';
 export const AGENCY_HUB_API_KEY_STORAGE_KEY = 'agencyHubApiKey';
-/** «Выйти» best-effort hub revoke budget (spec §6). */
-export const AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS = 5_000;
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,
@@ -81,11 +79,6 @@ export const FANSLY_CUSTOM_NAME_NOTE_TYPE = 12002;
 export const SPENDERS_CACHE_TTL_MS = 10 * 60 * 1000;
 /** Overall budget for one board build. */
 export const SPENDERS_BUILD_TIMEOUT_MS = 120_000;
-/** Abort reason stamped by the runtime-api build-timeout handler. The
- * spenders-service getList wrapper reads `signal.reason` to tell a real timeout
- * (record a FAIL observation, so the Статус row stops showing stale RAMPED)
- * apart from a user-cancel / superseded build (not a board outcome — skip). */
-export const SPENDERS_BUILD_TIMEOUT_REASON = 'spenders-build-timeout';
 /** Budget for lazily resolving a fan's chat via one inbox search on open. */
 export const SPENDERS_RESOLVE_TIMEOUT_MS = 15_000;
 /** How long the Fansly SPA router gets to react to a board chat-open before

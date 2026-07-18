@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SpendersService } from '../src/background/spenders-service.js';
-import {
-  getLatestSpendersObservation,
-  recordSpendersObservation,
-  spendersObservationScope,
-} from '../src/background/spenders-status-tracker.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
-import { normalizeAgencyHubBaseUrl } from '../src/shared/agency-hub.js';
-import { SPENDERS_BUILD_TIMEOUT_REASON } from '../src/shared/constants.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import { monthWindowFor } from '../src/shared/spenders.js';
@@ -249,66 +242,6 @@ describe('SpendersService (kernel source)', () => {
     expect(result.fanCount).toBe(3);
     expect(result.monthWindow).toBe(monthWindowFor(Date.now()));
     expect(typeof result.fetchedAt).toBe('number');
-  });
-
-  it('records a ramped observation on a successful board', async () => {
-    const { service, settings } = makeKernelHarness();
-    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    await service.getList(kernelSession(), new AbortController().signal);
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
-      .toMatchObject({ outcome: 'ok', streamState: 'ramped' });
-  });
-
-  it('records a failure observation when the board build throws', async () => {
-    const { service, settings, kernelSource } = makeKernelHarness();
-    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    // A page-mapping failure makes the kernel build reject with a non-abort error.
-    kernelSource.resolvePageLabelForUsername = vi.fn(async () => {
-      throw new ChatGooseError('hub_page_match_failed');
-    });
-    await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
-      .toMatchObject({ outcome: 'fail', streamState: null });
-  });
-
-  it('binds the recorded observation to the bearer (a same-URL credential swap hides it)', async () => {
-    // Finding 5: the observation getList records is keyed by hub+bearer, so a
-    // different credential on the SAME URL never surfaces the previous board.
-    const { service, settings } = makeKernelHarness();
-    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    await service.getList(kernelSession(), new AbortController().signal);
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
-      .toMatchObject({ outcome: 'ok' });
-    expect(await getLatestSpendersObservation(hub, 'a-different-key')).toBeNull();
-  });
-
-  it('records a FAIL observation when a build-timeout aborts the build', async () => {
-    const { service, settings } = makeKernelHarness();
-    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    // The runtime-api timeout handler aborts with an AbortError DOMException whose
-    // message carries the reason; the wrapper must treat it as a real board
-    // failure, not silently skip it like a user cancel.
-    const controller = new AbortController();
-    controller.abort(new DOMException(SPENDERS_BUILD_TIMEOUT_REASON, 'AbortError'));
-    await expect(service.getList(kernelSession(), controller.signal))
-      .rejects.toMatchObject({ name: 'AbortError' });
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
-      .toMatchObject({ outcome: 'fail', streamState: null });
-  });
-
-  it('does NOT overwrite the observation on a user-cancel / superseded abort', async () => {
-    const { service, settings } = makeKernelHarness();
-    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-    // Seed the exact source getList uses (creator|hub|sha256(bearer)) with a fresh OK board.
-    const sourceIdentity = `creator-1|${spendersObservationScope(hub, settings.agencyHubApiKey)}`;
-    await recordSpendersObservation({ sourceIdentity, streamState: 'ramped', outcome: 'ok' });
-    const controller = new AbortController();
-    controller.abort(); // plain cancel — no timeout reason
-    await expect(service.getList(kernelSession(), controller.signal))
-      .rejects.toMatchObject({ name: 'AbortError' });
-    // The cancel recorded nothing, so the seeded OK observation still stands.
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
-      .toMatchObject({ outcome: 'ok', streamState: 'ramped' });
   });
 
   it('keeps all 1000 returned rows instead of applying a second client-side cutoff', async () => {

@@ -1,8 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgencyHubClient } from '../src/background/agency-hub-client.js';
-import { KERNEL_CONTRACT_HASH } from '@kernel/sdk';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import type { Settings } from '../src/shared/types.js';
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -687,7 +685,7 @@ describe('AgencyHubClient', () => {
     });
     // Copy names the credential that was actually sent (legacy key here) and
     // points at the preferred fix — issuing a device token.
-    expect(result.error?.message).toContain('API-ключ');
+    expect(result.error?.message).toContain('API key');
     expect(result.error?.description).toContain('device token');
     expect(result.error?.serverDetail).toContain('unauthorized');
     // The failure is also visible in the background console.
@@ -719,7 +717,7 @@ describe('AgencyHubClient', () => {
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe('CG-HUB-03');
     expect(result.error?.message).toContain('device token');
-    expect(result.error?.message).not.toContain('API-ключ');
+    expect(result.error?.message).not.toContain('API key');
   });
 
   it('returns a failed result on non-ok or network failures without throwing', async () => {
@@ -1090,201 +1088,5 @@ describe('AgencyHubClient', () => {
       reason: 'aborted',
       baseUrl: 'http://localhost:3000',
     });
-  });
-});
-
-const HUB: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'> = {
-  agencyHubBaseUrl: 'https://hub.example',
-  agencyHubApiKey: '',
-  agencyHubDeviceToken: 'agency_hub_device_abc',
-};
-
-function healthBody(status: 'ok' | 'degraded', latencyMs: number | null) {
-  return {
-    status,
-    timestamp: '2026-07-17T00:00:00.000Z',
-    contractHash: KERNEL_CONTRACT_HASH,
-    capabilities: [],
-    checks: { api: { status: 'ok' }, database: { status: status === 'ok' ? 'ok' : 'error', latencyMs, error: null } },
-  };
-}
-
-// checkHealth/checkIdentity dereference the bare `browser` global inside
-// hasHostPermission BEFORE the try, and vitest has no setupFiles shim, so every
-// test in this file stages `globalThis.browser` by hand (see the existing
-// resolvePageLabelForUsername/testConnection cases). Grant by default; the
-// no_permission cases flip `contains` → false.
-function stubBrowserPermission(granted: boolean): void {
-  (globalThis as Record<string, unknown>).browser = {
-    permissions: { contains: vi.fn(async () => granted) },
-  };
-}
-
-describe('AgencyHubClient.checkHealth', () => {
-  beforeEach(() => stubBrowserPermission(true));
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete (globalThis as Record<string, unknown>).browser;
-  });
-
-  it('reports UP from a 200 body', async () => {
-    const client = new AgencyHubClient(async () => jsonResponse(healthBody('ok', 12), 200));
-    const result = await client.checkHealth(HUB, new AbortController().signal);
-    expect(result).toEqual({
-      ok: true,
-      status: 'ok',
-      dbLatencyMs: 12,
-      contractHash: KERNEL_CONTRACT_HASH,
-      sdkContractHash: KERNEL_CONTRACT_HASH,
-    });
-  });
-
-  it('reads DEGRADED from a 503 body via raw (the typed client would throw first)', async () => {
-    const client = new AgencyHubClient(async () => jsonResponse(healthBody('degraded', null), 503));
-    const result = await client.checkHealth(HUB, new AbortController().signal);
-    expect(result).toMatchObject({ ok: true, status: 'degraded', dbLatencyMs: null });
-  });
-
-  it('is unreachable on a network throw', async () => {
-    const client = new AgencyHubClient(async () => { throw new TypeError('network down'); });
-    expect(await client.checkHealth(HUB, new AbortController().signal)).toEqual({ ok: false, reason: 'unreachable' });
-  });
-
-  it('needs a base URL', async () => {
-    const client = new AgencyHubClient(async () => jsonResponse(healthBody('ok', 1), 200));
-    expect(await client.checkHealth({ ...HUB, agencyHubBaseUrl: '' }, new AbortController().signal))
-      .toEqual({ ok: false, reason: 'no_base_url' });
-  });
-
-  it('reports no_permission when the hub origin is not granted', async () => {
-    stubBrowserPermission(false);
-    const client = new AgencyHubClient(async () => jsonResponse(healthBody('ok', 1), 200));
-    expect(await client.checkHealth(HUB, new AbortController().signal))
-      .toEqual({ ok: false, reason: 'no_permission' });
-  });
-});
-
-describe('AgencyHubClient.checkIdentity', () => {
-  beforeEach(() => stubBrowserPermission(true));
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete (globalThis as Record<string, unknown>).browser;
-  });
-
-  function meBody() {
-    return {
-      authMethod: 'device_token',
-      user: {
-        id: 1,
-        username: 'lilly-chatter',
-        role: 'chatter',
-        mustChangePassword: false,
-        assignedPages: [{ id: 3, label: 'Lilly', platform: 'fansly', modelSlug: 'lilly', modelName: 'Lilly' }],
-      },
-    };
-  }
-
-  it('returns AUTH identity from /auth/me', async () => {
-    const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
-    expect(await client.checkIdentity(HUB, new AbortController().signal))
-      .toEqual({ ok: true, username: 'lilly-chatter', role: 'chatter', pages: ['Lilly'] });
-  });
-
-  it('maps 401 to unauthorized', async () => {
-    const client = new AgencyHubClient(async () => jsonResponse({ error: 'Unauthorized' }, 401));
-    expect(await client.checkIdentity(HUB, new AbortController().signal)).toEqual({ ok: false, reason: 'unauthorized' });
-  });
-
-  it('reports no_credential with no bearer', async () => {
-    const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
-    expect(await client.checkIdentity({ ...HUB, agencyHubDeviceToken: '', agencyHubApiKey: '' }, new AbortController().signal))
-      .toEqual({ ok: false, reason: 'no_credential' });
-  });
-
-  it('reports no_base_url — NOT no_credential — when a bearer is present but the address is blank', async () => {
-    // A credential with no hub address is a MISSING-ADDRESS state, not a bad
-    // credential; conflating them paints a false red «нет credential».
-    const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
-    expect(await client.checkIdentity({ ...HUB, agencyHubBaseUrl: '' }, new AbortController().signal))
-      .toEqual({ ok: false, reason: 'no_base_url' });
-  });
-
-  it('propagates no_permission distinctly (never folded into unreachable)', async () => {
-    stubBrowserPermission(false);
-    const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
-    expect(await client.checkIdentity(HUB, new AbortController().signal))
-      .toEqual({ ok: false, reason: 'no_permission' });
-  });
-});
-
-describe('AgencyHubClient.revokeDeviceToken', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete (globalThis as Record<string, unknown>).browser;
-  });
-
-  it('revokeDeviceToken returns "revoked" on a 200 body', async () => {
-    const fetchImpl = vi.fn(async (_url: URL | string, _init?: RequestInit) =>
-      new Response(JSON.stringify({ revoked: true }), {
-        status: 200, headers: { 'content-type': 'application/json' },
-      }),
-    );
-    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
-    const outcome = await client.revokeDeviceToken(
-      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'agency_hub_device_abc' },
-      new AbortController().signal,
-    );
-    expect(outcome).toBe('revoked');
-    // The DELETE bearer is the device token itself, never a key.
-    const [, init] = fetchImpl.mock.calls[0]!;
-    expect((init as RequestInit).method).toBe('DELETE');
-  });
-
-  it('revokeDeviceToken maps 401 to "already-invalid" (token already dead)', async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(JSON.stringify({ error: 'Unauthorized', message: 'x', statusCode: 401 }), {
-        status: 401, headers: { 'content-type': 'application/json' },
-      }),
-    );
-    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
-    const outcome = await client.revokeDeviceToken(
-      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'agency_hub_device_abc' },
-      new AbortController().signal,
-    );
-    expect(outcome).toBe('already-invalid');
-  });
-
-  it('revokeDeviceToken returns "already-invalid" when there is no token to revoke', async () => {
-    const fetchImpl = vi.fn();
-    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
-    const outcome = await client.revokeDeviceToken(
-      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: '' },
-      new AbortController().signal,
-    );
-    expect(outcome).toBe('already-invalid');
-    expect(fetchImpl).not.toHaveBeenCalled(); // nothing sent — no request without a token
-  });
-
-  it('revokeDeviceToken THROWS when the token is present but the base URL is cleared (unreachable, NOT already-invalid)', async () => {
-    const fetchImpl = vi.fn();
-    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
-    // Token still live server-side, no address to revoke it → the caller must
-    // report 'unreachable' and wipe locally; it must never claim a 401 the hub
-    // never returned.
-    await expect(client.revokeDeviceToken(
-      { agencyHubBaseUrl: '', agencyHubDeviceToken: 'agency_hub_device_abc' },
-      new AbortController().signal,
-    )).rejects.toBeTruthy();
-    expect(fetchImpl).not.toHaveBeenCalled(); // no request without a base URL
-  });
-
-  it('revokeDeviceToken throws on a network failure (caller maps it to unreachable)', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const fetchImpl = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
-    const client = new AgencyHubClient(fetchImpl as unknown as typeof fetch);
-    await expect(client.revokeDeviceToken(
-      { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'agency_hub_device_abc' },
-      new AbortController().signal,
-    )).rejects.toBeTruthy();
   });
 });

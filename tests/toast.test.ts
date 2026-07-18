@@ -42,6 +42,6 @@ describe('toast technical diagnostics', () => {
     expect(dom.window.document.querySelector('.chatgoose-toast-detail')).toBeNull();
     // The primary line still renders as usual.
     expect(dom.window.document.querySelector('.chatgoose-toast-primary')?.textContent)
-      .toBe('CG-HUB-07: Запрос к Agency Hub не удался.');
+      .toBe('CG-HUB-07: Agency Hub request failed.');
   });
 });

@@ -79,7 +79,6 @@ async function ensureStaticFiles() {
   await writeFile(path.join(outdir, 'debug-prompt.html'), debugPromptHtml);
   await writeFile(path.join(outdir, 'manifest.json'), manifest);
   await cp(path.join(root, 'icons'), path.join(outdir, 'icons'), { recursive: true });
-  await cp(path.join(root, 'assets/fonts'), path.join(outdir, 'fonts'), { recursive: true });
 }
 
 async function buildOnce() {
