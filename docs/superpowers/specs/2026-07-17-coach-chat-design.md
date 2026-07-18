@@ -1,6 +1,6 @@
 # Coach — interactive AI coach chat (design spec)
 
-Date: 2026-07-17 · Rev 2: 2026-07-18 · Status: awaiting owner review
+Date: 2026-07-17 · Rev 2.2: 2026-07-18 (option "c": core-side replay projection) · Status: approved by owner
 Scope: chatgoose (extension) + core (kernel)
 Provenance: brainstormed with the owner; codex design review + transcript-sourcing
 follow-up + spec review (rev 2 folds in its verified must-fixes). Every reviewer claim
@@ -101,9 +101,13 @@ interface CoachSession {
   cancelled attempt becomes a `failed-attempt` feed item retaining the question and a
   Retry action; its partial answer text is discarded (one behavior, no "or"). Retry
   reuses the question with a fresh operation id and freshly refreshed transcript.
-- Serializability constraint: core caps coach output (§7) below the per-entry history
-  bound, so every committed answer is always serializable — dropping old exchanges is
-  never needed to "repair" the newest one.
+- Serializability (owner decision 2026-07-18, codex-recommended option "c"): the coach
+  keeps adaptive thinking (16k tokens). A committed answer is bounded only by the WIRE
+  ceiling (§7) — enforced on the stream itself, so verbatim replay is always
+  schema-valid. The model's replay memory is intentionally lossy: CORE projects every
+  accepted history answer to ≤10k chars (head + tail, omission marker) before prompt
+  assembly. The extension sends the same projection as a bandwidth optimization;
+  correctness never depends on it.
 - «Новый диалог» clears the session (confirm if non-empty) and forces a full
   transcript reseed on the next question.
 
@@ -310,12 +314,20 @@ future kernel hybrid — not worth its cost now).
     in `prepareAiFeatureStream`, **rejected** for every other feature. Bounds 1–2000
     chars.
   - `coachHistory: Array<{question: string; answer: string}>` — completed exchanges
-    only, oldest first. Optional in schema; coach-only. Kernel hard ceiling:
-    ≤20 entries, per-entry `question` ≤2000 / `answer` ≤10000 chars, aggregate ≤120k
-    chars. The client's `serializeCoachHistory` trims (drop oldest whole exchanges) to
-    satisfy BOTH the window setting and these bounds, so a valid client never gets
-    rejected. Core caps coach output tokens so a committed answer always fits the
-    per-entry bound (§3 serializability).
+    only, oldest first. Optional in schema; coach-only. Bounds (rev 2.2, option "c"):
+    ≤20 entries; `question` ≤2000; `answer` ≤64_000 chars — a TRANSPORT ceiling, not a
+    prompt bound. The SAME ceiling is enforced on the coach stream: an answer crossing
+    it errors without `done` and is never committed, so any committed answer replays
+    verbatim within schema. NO aggregate-chars reject (the old 120k gate is removed —
+    schema-valid ≠ gate-rejected zones are an API defect): prompt cost is bounded by
+    core's per-entry ≤10k replay projection (head+tail, omission marker) applied
+    before assembly, then the newest-first 60k history budget with EXACT rendered-size
+    accounting (escaping + wrapper overhead included; an oversized newest entry can
+    no longer overshoot the budget, since projection caps every entry first).
+    Transport abuse is the route body limit's job — verify/raise it for the worst
+    case (20×66k + 300k transcript); if raising is rejected, drop the ceiling to
+    32_000 with the same stream enforcement. The client's `serializeCoachHistory`
+    applies the same ≤10k projection as an optimization only.
   - `summaryMode: 'short'` — optional; `fan-summary` only; **sent only for short**
     (omitted = legacy full; an old core never sees the field from a full run).
   - `transcriptCoverage: 'full-history' | 'window'` — optional clientContext addition
@@ -331,7 +343,7 @@ future kernel hybrid — not worth its cost now).
   question; persona consumed; recap attach (§5); chatter question and prior model
   answers pass through the existing prompt-safety escaping/labeling pipeline.
 - **Prompt budget is a runtime policy, not a test:** with worst-case inputs (max
-  transcript + 120k history + full recap + dossier + bio + spend + draft + escaping
+  transcript + max projected history + full recap + dossier + bio + spend + draft + escaping
   expansion), core sheds deterministically — protect the question, safety/methodology,
   and the newest transcript; then drop oldest coach exchanges, then trim/dedupe
   recap/dossier to explicit bounds. Worst case additionally covered by tests.
@@ -458,7 +470,8 @@ Vitest, alongside `pnpm check` (typecheck, lint, gates incl. AI-cutover, build):
 
 - Policy table entries; hotkey table (BOTH new app actions, no feature mapping).
 - Coach session: LRU touch/eviction, keying + account/group/persona isolation,
-  `serializeCoachHistory` window + char-budget trimming, feed/wire separation
+  `serializeCoachHistory` window trimming + ≤10k head/tail projection (optimization
+  parity with core's authoritative projection), feed/wire separation
   (failed attempts and recap steps never serialize), commit rules, composer
   preservation, reset.
 - Transcript cache: overlap-and-replace (edit/delete refresh within the tail),
