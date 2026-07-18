@@ -7,7 +7,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 14;
+export const STORAGE_SCHEMA_VERSION = 15;
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const LEGACY_PERSONA_SNAPSHOT_KEY = 'legacyPersonaSnapshotV1';
@@ -96,9 +96,19 @@ export const PING_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
 export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
 export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
-export const DEEP_DEFAULT_MESSAGE_COUNT = 1500;
+// v15: the deep-window default rose 1500 → 3000. The forward-only migration
+// (src/shared/migrations.ts) bumps a pre-v15 install still on the OLD default
+// to this new one; a user-chosen value is left untouched.
+export const DEEP_DEFAULT_MESSAGE_COUNT = 3000;
 export const DEEP_MIN_MESSAGE_COUNT = 100;
 export const DEEP_MAX_MESSAGE_COUNT = 3000;
+
+// ─── Coach ───────────────────────────────────────────────────────────────
+
+/** How many prior coach turns are retained/replayed by default. */
+export const COACH_HISTORY_LIMIT_DEFAULT = 10;
+export const COACH_HISTORY_LIMIT_MIN = 1;
+export const COACH_HISTORY_LIMIT_MAX = 20;
 
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
@@ -193,6 +203,8 @@ export const DEFAULT_SETTINGS: Settings = {
   debugMode: false,
   promptCachingEnabled: true,
   uiTheme: 'system',
+  coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
+  coachAutoRecap: 'off',
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

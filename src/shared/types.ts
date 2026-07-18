@@ -28,6 +28,10 @@ export interface Settings {
   debugMode: boolean;
   promptCachingEnabled: boolean;
   uiTheme: UiThemeSetting;
+  /** Coach: how many prior coach turns are retained/replayed (clamped [1,20]). */
+  coachHistoryLimit: number;
+  /** Coach: whether an automatic recap runs, and at what depth. */
+  coachAutoRecap: 'off' | 'short' | 'full';
 }
 
 export interface Personality {

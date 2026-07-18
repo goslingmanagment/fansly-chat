@@ -65,6 +65,8 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     personaCatalog: [{

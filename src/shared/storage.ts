@@ -1,6 +1,8 @@
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  COACH_HISTORY_LIMIT_MAX,
+  COACH_HISTORY_LIMIT_MIN,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   IMPROVE_MAX_MESSAGE_COUNT,
@@ -126,10 +128,14 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const rawPing = Number(input.pingMessageCount ?? defaults.pingMessageCount);
   const rawImprove = Number(input.improveMessageCount ?? defaults.improveMessageCount);
   const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
+  const rawCoachHistory = Number(input.coachHistoryLimit ?? defaults.coachHistoryLimit);
   const quick = Number.isFinite(rawQuick) ? rawQuick : defaults.quickMessageCount;
   const ping = Number.isFinite(rawPing) ? rawPing : defaults.pingMessageCount;
   const improve = Number.isFinite(rawImprove) ? rawImprove : defaults.improveMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
+  const coachHistory = Number.isFinite(rawCoachHistory)
+    ? rawCoachHistory
+    : defaults.coachHistoryLimit;
 
   return {
     agencyHubBaseUrl: normalizeAgencyHubBaseUrl(
@@ -152,6 +158,16 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
       input.uiTheme === 'light' || input.uiTheme === 'dark' || input.uiTheme === 'system'
         ? input.uiTheme
         : defaults.uiTheme,
+    coachHistoryLimit: Math.min(
+      COACH_HISTORY_LIMIT_MAX,
+      Math.max(COACH_HISTORY_LIMIT_MIN, coachHistory),
+    ),
+    coachAutoRecap:
+      input.coachAutoRecap === 'short' ||
+      input.coachAutoRecap === 'full' ||
+      input.coachAutoRecap === 'off'
+        ? input.coachAutoRecap
+        : defaults.coachAutoRecap,
   };
 }
 

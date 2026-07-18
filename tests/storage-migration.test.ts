@@ -206,6 +206,94 @@ describe('migrateState', () => {
     expect(result.settings.pingMessageCount).toBe(73);
   });
 
+  // ─── v15: coach fields + deep-window default 1500 → 3000 ────────────────
+  // NOTE ON VERSION NUMBER: the brief specced this as the "v14" migration,
+  // but schema v14 already shipped to production (1.9.9–1.9.11, the persona
+  // catalog move) and lives on `main`. Per the repo's forward-only migration
+  // law this shape change (coach fields + deep default) gets its OWN number,
+  // v15. The brief's semantics are preserved exactly, just keyed on the true
+  // current version: a record already at the current schema never re-runs the
+  // deep-window bump, and a shipped-v14 record with the OLD default upgrades.
+
+  it('v15: bumps a pre-v15 default deep window (1500) to the new default (3000)', () => {
+    const fromV13 = migrateState({
+      schemaVersion: 13,
+      settings: { deepMessageCount: 1500 },
+    });
+    expect(fromV13.settings.deepMessageCount).toBe(3000);
+
+    // The shipped-v14 default (also 1500) must upgrade too — v14 < current.
+    const fromV14 = migrateState({
+      schemaVersion: 14,
+      settings: { deepMessageCount: 1500 },
+    });
+    expect(fromV14.settings.deepMessageCount).toBe(3000);
+  });
+
+  it('v15: preserves a user-modified deep window (1499 stays 1499)', () => {
+    const result = migrateState({
+      schemaVersion: 13,
+      settings: { deepMessageCount: 1499 },
+    });
+    expect(result.settings.deepMessageCount).toBe(1499);
+  });
+
+  it('v15: a missing deep window adopts the new default (3000)', () => {
+    const result = migrateState({
+      schemaVersion: 13,
+      settings: { debugMode: true },
+    });
+    expect(result.settings.deepMessageCount).toBe(3000);
+  });
+
+  it('v15: never re-transforms a record already at the current schema (1500 stays 1500)', () => {
+    const atCurrent = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: { ...createDefaultSettings(), deepMessageCount: 1500 },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+    const result = migrateState(atCurrent);
+    expect(result.settings.deepMessageCount).toBe(1500);
+
+    // Round-trip stability: re-migrating the output must not drift the value.
+    const remigrated = migrateState(result as unknown as Record<string, unknown>);
+    expect(remigrated.settings.deepMessageCount).toBe(1500);
+  });
+
+  it('v15: adds coach fields with defaults when absent from an older record', () => {
+    const result = migrateState({
+      schemaVersion: 13,
+      settings: { debugMode: true },
+    });
+    expect(result.settings.coachHistoryLimit).toBe(createDefaultSettings().coachHistoryLimit);
+    expect(result.settings.coachAutoRecap).toBe('off');
+  });
+
+  it('v15: preserves stored coach fields and coerces junk coachAutoRecap on migration', () => {
+    const kept = migrateState({
+      schemaVersion: 14,
+      settings: { coachHistoryLimit: 5, coachAutoRecap: 'full' },
+    });
+    expect(kept.settings.coachHistoryLimit).toBe(5);
+    expect(kept.settings.coachAutoRecap).toBe('full');
+
+    const junk = migrateState({
+      schemaVersion: 14,
+      settings: { coachAutoRecap: 'weekly' },
+    });
+    expect(junk.settings.coachAutoRecap).toBe('off');
+  });
+
+  it('v15: default settings carry the coach fields and the 3000 deep window', () => {
+    const defaults = createDefaultSettings();
+    expect(defaults.deepMessageCount).toBe(3000);
+    expect(defaults.coachHistoryLimit).toBe(10);
+    expect(defaults.coachAutoRecap).toBe('off');
+  });
+
 
 
 
@@ -346,6 +434,37 @@ describe('sanitizeSettings', () => {
     expect(
       storage.sanitizeSettings({ uiTheme: 'neon' as unknown as 'dark' }).uiTheme,
     ).toBe('system');
+  });
+
+  it('clamps coachHistoryLimit within [1, 20]', () => {
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 0 }).coachHistoryLimit).toBe(1);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 21 }).coachHistoryLimit).toBe(20);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 7 }).coachHistoryLimit).toBe(7);
+  });
+
+  it('falls back to the coachHistoryLimit default for a NaN-producing value', () => {
+    const result = storage.sanitizeSettings({
+      coachHistoryLimit: 'abc' as unknown as number,
+    });
+    expect(result.coachHistoryLimit).toBe(createDefaultSettings().coachHistoryLimit);
+    expect(Number.isFinite(result.coachHistoryLimit)).toBe(true);
+  });
+
+  it('keeps valid coachAutoRecap values and falls back to off for junk', () => {
+    expect(storage.sanitizeSettings({ coachAutoRecap: 'off' }).coachAutoRecap).toBe('off');
+    expect(storage.sanitizeSettings({ coachAutoRecap: 'short' }).coachAutoRecap).toBe('short');
+    expect(storage.sanitizeSettings({ coachAutoRecap: 'full' }).coachAutoRecap).toBe('full');
+    expect(
+      storage.sanitizeSettings({
+        coachAutoRecap: 'weekly' as unknown as 'off',
+      }).coachAutoRecap,
+    ).toBe('off');
+  });
+
+  it('fills coach field defaults when missing', () => {
+    const result = storage.sanitizeSettings({});
+    expect(result.coachHistoryLimit).toBe(createDefaultSettings().coachHistoryLimit);
+    expect(result.coachAutoRecap).toBe('off');
   });
 
   it('trims API key', () => {

@@ -1,6 +1,7 @@
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  COACH_HISTORY_LIMIT_DEFAULT,
   DEEP_DEFAULT_MESSAGE_COUNT,
   IMPROVE_DEFAULT_MESSAGE_COUNT,
   PING_DEFAULT_MESSAGE_COUNT,
@@ -26,6 +27,8 @@ export function createDefaultSettings(): Settings {
     debugMode: false,
     promptCachingEnabled: true,
     uiTheme: 'system',
+    coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
+    coachAutoRecap: 'off',
   };
 }
 
@@ -64,6 +67,13 @@ function migrateSettingsRecord(
   // a string (post-migration truth — a stale v12-shaped settings blob must
   // never resurrect an old token); the blob value is the one-release
   // fallback read for pre-v13 data.
+  // (v14): personaCatalog top-level fields ADDED — no SETTINGS-shape change,
+  // so this per-field normalizer was untouched by it.
+  // v15 (Coach): coachHistoryLimit + coachAutoRecap ADDED; the deep-window
+  // default also rose 1500 → 3000 — but that bump is a RAW pre-normalization
+  // transform (bumpLegacyDeepMessageCountDefault, keyed on the incoming
+  // record's version) so a user-modified value survives; here we only default
+  // the two new fields.
   return {
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
@@ -91,10 +101,43 @@ function migrateSettingsRecord(
       raw?.uiTheme === 'light' || raw?.uiTheme === 'dark' || raw?.uiTheme === 'system'
         ? raw.uiTheme
         : defaults.uiTheme,
+    coachHistoryLimit: Number(raw?.coachHistoryLimit ?? defaults.coachHistoryLimit),
+    coachAutoRecap:
+      raw?.coachAutoRecap === 'short' ||
+      raw?.coachAutoRecap === 'full' ||
+      raw?.coachAutoRecap === 'off'
+        ? raw.coachAutoRecap
+        : defaults.coachAutoRecap,
   };
 }
 
 type MigrationRecord = Record<string, unknown>;
+
+/** The deep-window default before v15. A pre-v15 install still sitting on this
+ * exact value never chose it — it is the old default — so v15 silently adopts
+ * the new one. Any other stored value (including a deliberate 1499) is the
+ * chatter's and is preserved. */
+const PRE_V15_DEEP_MESSAGE_COUNT_DEFAULT = 1500;
+
+/**
+ * v15 RAW transform: run on the incoming settings blob BEFORE field
+ * normalization, and ONLY when the record predates v15. Records already at (or
+ * ahead of) the current schema must never re-run this — otherwise a chatter who
+ * deliberately set 1500 AFTER v15 would be silently bumped on the next load.
+ * Keyed on the INCOMING record's schemaVersion, not the migration target.
+ */
+function bumpLegacyDeepMessageCountDefault(
+  rawSettings: Record<string, unknown>,
+  incomingSchemaVersion: number,
+): Record<string, unknown> {
+  if (incomingSchemaVersion >= STORAGE_SCHEMA_VERSION) {
+    return rawSettings;
+  }
+  if (rawSettings.deepMessageCount !== PRE_V15_DEEP_MESSAGE_COUNT_DEFAULT) {
+    return rawSettings;
+  }
+  return { ...rawSettings, deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT };
+}
 
 export class UnsupportedFutureStorageSchemaError extends Error {
   constructor(readonly storedVersion: number) {
@@ -147,8 +190,22 @@ function normalizePersistedRecord(
     deviceToken: record[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY],
     apiKey: record[AGENCY_HUB_API_KEY_STORAGE_KEY],
   };
-  const settings = record.settings && typeof record.settings === 'object'
-    ? migrateSettingsRecord(record.settings as Record<string, unknown>, custody)
+  // The RAW deep-window bump keys on the record's OWN version, not the target:
+  // a record already at the current schema (or written by a future build) must
+  // not re-run it. `normalizePersistedRecord` is called both for current-schema
+  // records (schemaVersion === STORAGE_SCHEMA_VERSION here) and for older ones
+  // migrating up, so we read the incoming version off the record itself.
+  const incomingSchemaVersion =
+    typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
+  const rawSettings =
+    record.settings && typeof record.settings === 'object'
+      ? bumpLegacyDeepMessageCountDefault(
+          record.settings as Record<string, unknown>,
+          incomingSchemaVersion,
+        )
+      : null;
+  const settings = rawSettings
+    ? migrateSettingsRecord(rawSettings, custody)
     : migrateSettingsRecord(null, custody);
 
   const personalities = Array.isArray(record.personalities) ? record.personalities : defaults.personalities;

@@ -1000,3 +1000,20 @@ remains aligned to the currently deployed Core contract as release evidence;
 keeping generated contract bytes does not enable any E40–E43 call path. The
 E40–E43 technical decisions and their hand-curated plans/spec stay in history
 with explicit 2.0-deferred banners rather than being deleted.
+
+**E45 (2026-07-18).** The Coach feature's settings-shape change ships as storage
+schema **v15**, not v14. v14 already shipped and lives on `main` (E37 persona
+catalog; kept live through the 1.9.11 corrective, E44) — so per the forward-only
+migration law a NEW shape change takes the next number rather than reusing a
+released one. v15 adds two Settings fields (`coachHistoryLimit` default 10,
+clamped [1,20]; `coachAutoRecap` `off|short|full`, junk → `off`) and raises the
+deep-window default `DEEP_DEFAULT_MESSAGE_COUNT` 1500 → 3000. The default bump is
+a RAW pre-normalization transform (`bumpLegacyDeepMessageCountDefault`) keyed on
+the INCOMING record's `schemaVersion`: a pre-v15 record whose `deepMessageCount`
+is exactly the old default 1500 silently adopts 3000, any other stored value
+(including a deliberate 1499) is preserved, and a record already at the current
+schema never re-runs it — so a chatter who sets 1500 AFTER v15 keeps it. Because
+v14 shipped with the 1500 default, this deliberately upgrades in-the-wild v14
+installs on the old default too (14 < 15). E19 credential custody,
+`serializePersistedState`, and the E37 future-schema barrier are untouched: the
+single jump-to-current normalizer auto-targets v15 via the `MIGRATIONS` entry.
