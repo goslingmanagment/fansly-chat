@@ -1,3 +1,4 @@
+import { COACH_QUESTION_MAX_CHARS } from '../../shared/constants.js';
 import { toUserError } from '../../shared/errors.js';
 import type {
   CoachAutoRecapOverride,
@@ -60,8 +61,15 @@ interface OverlayCallbacks {
   onCancel: (operationId: string) => void;
   onRerun: (feature: FeatureType) => void;
   onCollapse: () => void;
-  /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry). */
-  onAcceptance?: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
+  /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry).
+   * `generationRef` (coach only) is the correlation fallback for acceptance
+   * after the background's op→ref map is gone (P2). */
+  onAcceptance?: (
+    operationId: string,
+    action: 'copied' | 'inserted',
+    partIndex: number,
+    generationRef?: string,
+  ) => void;
   /** E28: open the kernel's real prompt on the extension's own page. The token
    * stays with the caller — this surface never learns it, so it cannot leak it
    * into the Fansly DOM it renders into. */
@@ -1190,8 +1198,12 @@ export class OverlayController {
       }
     });
     newDialog.addEventListener('click', () => {
+      // Unsent composer text is also content worth confirming before it is wiped
+      // (resetSession clears composerText too) — not just committed feed items.
       const hasContent =
-        this.model.kind === 'coach' && this.model.sessionView.feedItems.length > 0;
+        this.model.kind === 'coach' &&
+        (this.model.sessionView.feedItems.length > 0 ||
+          this.model.sessionView.composerText.trim().length > 0);
       if (hasContent && !newDialogArmed) {
         newDialogArmed = true;
         newDialog.textContent = 'Confirm new dialog';
@@ -1223,6 +1235,9 @@ export class OverlayController {
     textarea.className = 'chatgoose-coach-input';
     textarea.rows = 2;
     textarea.placeholder = 'Ask about this fan…';
+    // Cap the question at the kernel bound (spec §7) at the DOM level so an
+    // over-long question is prevented up front, not failed late + generic.
+    textarea.maxLength = COACH_QUESTION_MAX_CHARS;
     textarea.value = model.sessionView.composerText;
     textarea.addEventListener('input', () => {
       this.autosizeCoachComposer(textarea);
@@ -1440,6 +1455,13 @@ export class OverlayController {
     if (!question) {
       return;
     }
+    // Defensive guard (maxLength already caps typing/paste): never submit — and
+    // never clear — an over-long question; keep it so the chatter can trim it.
+    if (question.length > COACH_QUESTION_MAX_CHARS) {
+      textarea.classList.add('chatgoose-coach-input-overlimit');
+      return;
+    }
+    textarea.classList.remove('chatgoose-coach-input-overlimit');
     textarea.value = '';
     this.autosizeCoachComposer(textarea);
     // Keep the orchestrator's persisted composerText in sync with the clear.
@@ -1491,7 +1513,7 @@ export class OverlayController {
       const drafts = document.createElement('div');
       drafts.className = 'chatgoose-parts chatgoose-coach-drafts';
       for (const draft of item.drafts) {
-        drafts.append(this.createCoachDraftCard(item.operationId, draft));
+        drafts.append(this.createCoachDraftCard(item.operationId, item.generationRef, draft));
       }
       wrapper.append(drafts);
     }
@@ -1600,7 +1622,11 @@ export class OverlayController {
     return empty;
   }
 
-  private createCoachDraftCard(exchangeOperationId: string, draft: CoachOverlayDraft): HTMLElement {
+  private createCoachDraftCard(
+    exchangeOperationId: string,
+    generationRef: string | undefined,
+    draft: CoachOverlayDraft,
+  ): HTMLElement {
     const card = document.createElement('div');
     card.className = 'chatgoose-card chatgoose-coach-draft';
 
@@ -1652,7 +1678,7 @@ export class OverlayController {
         return;
       }
       disarm();
-      void this.acceptCoachDraft(exchangeOperationId, draft, 'inserted');
+      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'inserted');
     });
     insert.textContent = getActiveConversationDraftText().trim() ? 'Replace draft…' : 'Insert';
 
@@ -1661,7 +1687,7 @@ export class OverlayController {
     copy.className = 'chatgoose-button chatgoose-button-secondary';
     copy.textContent = 'Copy';
     copy.addEventListener('click', () => {
-      void this.acceptCoachDraft(exchangeOperationId, draft, 'copied');
+      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'copied');
     });
 
     actions.append(insert, keep, copy);
@@ -1673,6 +1699,7 @@ export class OverlayController {
    * operationId (spec §3) — NOT the session's live/top-level op. */
   private async acceptCoachDraft(
     exchangeOperationId: string,
+    generationRef: string | undefined,
     draft: CoachOverlayDraft,
     action: 'inserted' | 'copied',
   ): Promise<void> {
@@ -1683,7 +1710,7 @@ export class OverlayController {
         await copyToClipboard(draft.text);
       }
       this.inlineError = null;
-      this.callbacks.onAcceptance?.(exchangeOperationId, action, draft.index);
+      this.callbacks.onAcceptance?.(exchangeOperationId, action, draft.index, generationRef);
       if (action === 'inserted') {
         // Spec §3: after insert the overlay collapses and the Fansly composer
         // is focused. Closing does NOT touch the store — the session is retained

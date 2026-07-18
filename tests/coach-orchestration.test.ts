@@ -848,6 +848,128 @@ describe('Coach orchestration', () => {
     expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', forceRegenerate: true });
   });
 
+  // ─── Review fixes ────────────────────────────────────────────────────
+
+  it('P1: port disconnect recovers a locked coach session (pending → composer)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('mid-stream question');
+    expect(app.activeCoachSession.pending).toBeDefined();
+    // The composer is locked while streaming.
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    app.recoverCoachOnDisconnect();
+
+    // Pending dropped, question restored, composer usable again (no terminal can
+    // repair a dead port, so recovery must).
+    expect(app.activeCoachSession.pending).toBeUndefined();
+    expect(app.activeCoachSession.composerText).toBe('mid-stream question');
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(true);
+    expect(app.coachOverlayModel.operationId).toBeNull();
+  });
+
+  it('P1: port disconnect recovers a coach recap chain (question preserved, step failed)', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('chained question');
+    expect(app.coachRecapChain).not.toBeNull();
+
+    app.recoverCoachOnDisconnect();
+
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.activeCoachSession.composerText).toBe('chained question');
+    const step = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'recap-step');
+    expect(step.status).toBe('failed');
+  });
+
+  it('P2: a settings-load failure after submit restores the question, arms nothing', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    // The renderer clears the composer BEFORE calling submit; then settings fail.
+    app.activeCoachSession.composerText = '';
+    (globalThis.browser.storage.local.get as any).mockRejectedValueOnce(new Error('storage down'));
+
+    await app.submitCoachQuestion('important question');
+
+    expect(app.activeCoachSession.composerText).toBe('important question');
+    expect(app.activeCoachSession.pending).toBeUndefined();
+    expect(app.activeFeature).toBeNull();
+    expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.type === 'operation:start')).toBe(false);
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-07');
+  });
+
+  it('P2: a standalone SHORT recap does not mark a full summary available or cache it', async () => {
+    const app = await makeReadyApp();
+    app.openRecapPicker();
+    app.pickStandaloneRecap('short');
+    const opId = app.activeOperationId;
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: opId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'short recap body',
+        parts: [],
+        summaryMeta: { generatedAt: 1, stale: false, cached: false },
+      },
+    });
+
+    // Shown once, but NOT marked available and NOT cached under fan-summary.
+    expect(app.deepOverlayModel).not.toBeNull();
+    expect(app.tabState.hasAvailableSummary).toBeFalsy();
+    expect(
+      app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
+    ).toBeNull();
+  });
+
+  it('P2 control: a standalone FULL recap DOES mark availability + cache', async () => {
+    const app = await makeReadyApp();
+    app.openRecapPicker();
+    app.pickStandaloneRecap('full');
+    const opId = app.activeOperationId;
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: opId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'full recap body',
+        parts: [],
+        summaryMeta: { generatedAt: 1, stale: false, cached: false },
+      },
+    });
+
+    expect(app.tabState.hasAvailableSummary).toBe(true);
+    expect(
+      app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
+    ).not.toBeNull();
+  });
+
+  it('P2: coach draft acceptance carries the exchange generationRef', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('q');
+    const opId = pendingOpId(app);
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: opId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'A tip.\n```draft\nHey!\n```', parts: [] },
+      generationRef: 'gen-accept-1',
+    });
+
+    // The overlay model's exchange carries the generationRef for acceptance.
+    const exchange = app.coachOverlayModel.sessionView.feedItems.find((i: any) => i.kind === 'exchange');
+    expect(exchange.generationRef).toBe('gen-accept-1');
+  });
+
   it('renders a Coach button in the bar wired to openCoach', async () => {
     const app = await makeReadyApp();
     const openSpy = vi.spyOn(app, 'openCoach').mockImplementation(() => {});

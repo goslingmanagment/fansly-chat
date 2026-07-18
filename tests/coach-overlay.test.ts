@@ -204,6 +204,55 @@ describe('OverlayController — coach chat mode', () => {
     expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
   });
 
+  it('P2: «New dialog» arms (does not reset) when only unsent composer text exists', () => {
+    const { controller, callbacks } = makeController();
+    // Empty feed but a typed-but-unsent question — resetSession would wipe it, so
+    // it must be confirmed just like committed content.
+    controller.render(createCoachModel({ feedItems: [], composerText: '  draft question  ' }));
+
+    const newDialog = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
+    ).find((b) => b.textContent === 'New dialog')!;
+
+    newDialog.click();
+    expect(newDialog.textContent).toBe('Confirm new dialog');
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+  });
+
+  it('P2: the composer caps the question length at the kernel bound', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    expect(textarea.maxLength).toBe(2000);
+  });
+
+  it('P2: coach draft acceptance forwards the exchange generationRef', async () => {
+    const { controller, callbacks } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            kind: 'exchange',
+            operationId: 'exch-1',
+            generationRef: 'gen-ref-77',
+            question: 'q',
+            answerProse: 'advice',
+            drafts: [{ text: 'Hey love!', index: 0 }],
+          },
+        ],
+      }),
+    );
+
+    const copy = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft button'),
+    ).find((b) => b.textContent === 'Copy')!;
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(callbacks.onAcceptance).toHaveBeenCalledWith('exch-1', 'copied', 0, 'gen-ref-77');
+  });
+
   it('«New dialog» disarms the confirm on blur / «Keep» (outside-click abandon)', () => {
     const { controller, callbacks } = makeController();
     controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
@@ -480,7 +529,7 @@ describe('OverlayController — coach chat mode', () => {
     await vi.waitFor(() => {
       expect(mockCopy).toHaveBeenCalledWith('Hey love');
     });
-    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0);
+    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0, undefined);
   });
 
   it('draft Insert into an empty Fansly composer inserts and attributes acceptance per-card', async () => {
@@ -502,7 +551,7 @@ describe('OverlayController — coach chat mode', () => {
     await vi.waitFor(() => {
       expect(mockInsert).toHaveBeenCalledWith('Draft body');
     });
-    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 1);
+    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 1, undefined);
     // Spec §3: after insert the overlay collapses (session retained by the store).
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
@@ -547,7 +596,7 @@ describe('OverlayController — coach chat mode', () => {
     copy!.click();
 
     await vi.waitFor(() => {
-      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0);
+      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0, undefined);
     });
     expect(callbacks.onClose).not.toHaveBeenCalled();
   });
@@ -577,7 +626,7 @@ describe('OverlayController — coach chat mode', () => {
     await vi.waitFor(() => {
       expect(mockInsert).toHaveBeenCalledWith('Draft body');
     });
-    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 0);
+    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 0, undefined);
   });
 
   it('renders a failed-attempt with a Retry that replays the question; non-retryable omits Retry', () => {

@@ -378,6 +378,10 @@ export class ChatGooseContentApp {
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
   // await (the auto-recap decision needs live settings before arming anything).
   private coachSubmitInFlight = false;
+  // The summaryMode of the ACTIVE fan-summary op (standalone recap /
+  // «Открыть последний»), or null for a plain full run. A 'short' result must
+  // never enter the full summary availability/overlay caches (P2-short-cache).
+  private activeSummaryMode: 'short' | 'full' | null = null;
 
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
@@ -402,6 +406,11 @@ export class ChatGooseContentApp {
       this.quickSurfaceMode = 'inline';
       this.suppressedTerminalOpIds.clear();
       this.detachDraftTextareaObserver();
+      // A disconnect kills the port mid-turn: no terminal will ever arrive, so a
+      // coach turn/recap chain left "pending" would lock the composer forever
+      // (streaming is derived from pending). Recover the session before clearing
+      // op state — restore the question, drop the pending marker.
+      this.recoverCoachOnDisconnect();
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
       this.resetNextReplyTone();
@@ -493,8 +502,14 @@ export class ChatGooseContentApp {
     },
   });
   private readonly overlay = new OverlayController({
-    onAcceptance: (operationId, action, partIndex) => {
-      this.port.send({ type: 'operation:acceptance', operationId, action, partIndex });
+    onAcceptance: (operationId, action, partIndex, generationRef) => {
+      this.port.send({
+        type: 'operation:acceptance',
+        operationId,
+        action,
+        partIndex,
+        ...(generationRef ? { generationRef } : {}),
+      });
     },
     onOpenDebugPrompt: () => {
       void this.openDebugPromptViewer();
@@ -776,6 +791,7 @@ export class ChatGooseContentApp {
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
+    this.activeSummaryMode = mode;
     const payload: OperationStartPayload = {
       ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, true),
       summaryMode: mode,
@@ -824,6 +840,7 @@ export class ChatGooseContentApp {
     const operationId = crypto.randomUUID();
     const domFanDisplayName = getActiveConversationDisplayName();
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
+    this.activeSummaryMode = mode;
     const payload: OperationStartPayload = {
       ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, false),
       viewCachedOnly: true,
@@ -1224,6 +1241,9 @@ export class ChatGooseContentApp {
     this.lastFeature = feature;
     this.overlayRawText = '';
     this.activeImproveDraftCacheKey = improveDraftCacheKey ?? null;
+    // Default to a full-summary run; standalone short/«Открыть последний» set
+    // this to 'short' AFTER init so their results bypass the full caches (P2).
+    this.activeSummaryMode = null;
     this.comparePanelVisible = false;
 
     if (usesInlineFeatureSurface(feature)) {
@@ -1663,6 +1683,18 @@ export class ChatGooseContentApp {
     let settings;
     try {
       ({ settings } = await loadStorageState());
+    } catch {
+      // The settings read failed AFTER the renderer already cleared the composer
+      // (it emits onCoachComposerInput('') before onCoachSubmit). Nothing was
+      // armed yet — settings are read first — so restore the question into the
+      // composer so it is not silently lost, and tell the user to retry.
+      if (this.activeCoachSession === session) {
+        session.composerText = trimmed;
+        this.rebuildCoachModel();
+        this.renderAll();
+      }
+      this.showUserErrorToast(getErrorMessage('extension_reloaded'));
+      return;
     } finally {
       this.coachSubmitInFlight = false;
     }
@@ -2071,6 +2103,32 @@ export class ChatGooseContentApp {
     this.coachPendingAnswerText = '';
   }
 
+  /** Port disconnect recovery (P1): a dead port means no terminal will arrive,
+   * so a coach turn or recap chain left in-flight would keep the composer locked
+   * forever (the model derives "busy" from a live pending / chain). Restore the
+   * in-flight question into the composer and drop the pending marker / chain so
+   * the reopened session is usable again. The coach OVERLAY is retained (the feed
+   * survives); the shared op markers are cleared by the caller. */
+  private recoverCoachOnDisconnect(): void {
+    const chain = this.coachRecapChain;
+    if (chain) {
+      if (chain.pendingQuestion && chain.session.composerText === '') {
+        chain.session.composerText = chain.pendingQuestion;
+      }
+      chain.step.status = 'failed';
+      this.coachRecapChain = null;
+    }
+    const session = this.activeCoachSession;
+    if (session?.pending) {
+      if (!session.composerText) {
+        session.composerText = session.pending.question;
+      }
+      this.coachStore.clearPending(session);
+    }
+    this.coachPendingAnswerText = '';
+    this.rebuildCoachModel();
+  }
+
   /** Release the shared single-op markers + the streaming accumulator when a
    * coach turn ends. Leaves the coach overlay/session intact (the feed +
    * composer persist) and never touches the deep-overlay path. */
@@ -2098,6 +2156,8 @@ export class ChatGooseContentApp {
         return {
           kind: 'exchange',
           operationId: exchange.operationId,
+          // Correlation fallback for draft acceptance after SW restart (P2).
+          ...(exchange.generationRef ? { generationRef: exchange.generationRef } : {}),
           question: exchange.question,
           answerProse: prose,
           drafts: exchange.drafts.map((draft) => ({ text: draft.text, index: draft.index })),
@@ -2665,24 +2725,32 @@ export class ChatGooseContentApp {
       getMessageLlmSpend(message) ?? this.activeLlmSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
-    if (feature === 'fan-summary' && this.tabState) {
+    // A SHORT recap (spec §5) shares the fan-summary feature but is a transient
+    // view: it must NOT mark a full summary available nor land in the full
+    // overlay cache (else a later Recap-ready dot / cached-inline restore would
+    // show SHORT text as if it were the full recap). It still renders once via
+    // deepOverlayModel below (P2-short-cache).
+    const isShortSummary = feature === 'fan-summary' && this.activeSummaryMode === 'short';
+    if (feature === 'fan-summary' && !isShortSummary && this.tabState) {
       this.tabState = {
         ...this.tabState,
         hasAvailableSummary: true,
       };
     }
-    const improveDraftCacheKey = this.activeImproveDraftCacheKey;
-    this.completedOverlayCache.set(
-      this.currentGroupId,
-      feature,
-      completedModel,
-      this.overlayCacheIdentity(
-        featureRequiresDraft(feature) ? improveDraftCacheKey : null,
-        this.activePersonaKey ?? this.tabState?.mappedPersonalityId ?? null,
-        this.activePersonaDefinitionId ?? this.tabState?.mappedPersonaDefinitionId ?? null,
-        this.activePersonaSource ?? this.tabState?.mappedPersonaSource ?? null,
-      ),
-    );
+    if (!isShortSummary) {
+      const improveDraftCacheKey = this.activeImproveDraftCacheKey;
+      this.completedOverlayCache.set(
+        this.currentGroupId,
+        feature,
+        completedModel,
+        this.overlayCacheIdentity(
+          featureRequiresDraft(feature) ? improveDraftCacheKey : null,
+          this.activePersonaKey ?? this.tabState?.mappedPersonalityId ?? null,
+          this.activePersonaDefinitionId ?? this.tabState?.mappedPersonaDefinitionId ?? null,
+          this.activePersonaSource ?? this.tabState?.mappedPersonaSource ?? null,
+        ),
+      );
+    }
 
     this.presentCompletedFeature(feature, completedModel);
   }
