@@ -110,6 +110,19 @@ export const COACH_HISTORY_LIMIT_DEFAULT = 10;
 export const COACH_HISTORY_LIMIT_MIN = 1;
 export const COACH_HISTORY_LIMIT_MAX = 20;
 
+/** Wire ceiling for a single replayed coach answer, MIRRORING the vendored
+ * kernel SDK's `COACH_ANSWER_MAX_CHARS` (contracts/routes:
+ * `coachHistory[].answer` and the coach output stream both cap here). That
+ * constant is defined in the SDK but is NOT re-exported through the
+ * `@kernel/sdk` barrel, so the boundary validator mirrors its value here rather
+ * than importing it (the value is pinned by the coach body contract test in
+ * core; a drift would fail the kernel's own zod bound at request time). */
+export const COACH_ANSWER_MAX_CHARS = 64_000;
+
+/** Wire ceiling for a coach question — the live `chatterQuestion` and each
+ * replayed `coachHistory[].question` — mirroring the SDK schema bound. */
+export const COACH_QUESTION_MAX_CHARS = 2_000;
+
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
 export const QUICK_OPERATION_TIMEOUT_MS = 60_000;

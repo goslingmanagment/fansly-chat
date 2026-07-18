@@ -792,6 +792,7 @@ export interface RuntimeRequestMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
+  getRecapStatus: RecapStatusRequest;
   openDebugPrompt: DebugPromptTokenRequest;
   getDebugPromptSnapshot: DebugPromptTokenRequest;
 }
@@ -803,8 +804,33 @@ export interface RuntimeResponseMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
+  getRecapStatus: RecapStatusResponse;
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
+}
+
+/** Coach recap-status metadata read (spec §3/§5): the freshest usable full +
+ * short fan-summary recap for one conversation — metadata only, NO generation
+ * and NO AI spend. The background maps this to the kernel `aiRecapStatus`
+ * query; the content script renders the "recap status line" from it. */
+export interface RecapStatusRequest {
+  groupId: string;
+  fanAccountId: string | null;
+}
+
+/** Freshest-usable recap metadata for one slot (full or short). Mirrors the
+ * SDK's `aiRecapSlotSchema`: metadata only — never the recap text itself. */
+export interface RecapSlot {
+  generatedAt: string;
+  ageMs: number;
+  transcriptCoverage: 'full-history' | 'window' | null;
+  requestedCount: number | null;
+  keptCount: number | null;
+}
+
+export interface RecapStatusResponse {
+  full: RecapSlot | null;
+  short: RecapSlot | null;
 }
 
 /** E28 viewer handshake. The token is the whole authority — it is minted per
@@ -1003,6 +1029,16 @@ export interface RouteChangedPayload extends PortEnvelopeBase {
   routeNonce: number;
 }
 
+/** One replayed coach turn — the shape carried both on the content→background
+ * wire (`OperationStartPayload.coachHistory`) and in the kernel request body.
+ * Bounds are enforced by the protocol guard (`isCoachHistoryEntry`): question
+ * 1..COACH_QUESTION_MAX_CHARS, answer 1..COACH_ANSWER_MAX_CHARS, ≤20 entries.
+ * Answers are already PROJECTED (head+tail) before they land here. */
+export interface CoachHistoryEntry {
+  question: string;
+  answer: string;
+}
+
 export interface OperationStartPayload extends PortEnvelopeBase {
   type: 'operation:start';
   operationId: string;
@@ -1014,6 +1050,14 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;
+  /** coach-chat: the chatter's live question for this turn. */
+  chatterQuestion?: string;
+  /** coach-chat: prior turns replayed as dialog memory (answers projected). */
+  coachHistory?: CoachHistoryEntry[];
+  /** coach-chat: 'short' | 'full' on THIS (content→background) wire. The
+   * background maps 'full' → omit on the kernel wire (the kernel body accepts
+   * only the literal 'short'); 'short' passes through. */
+  summaryMode?: 'short' | 'full';
 }
 
 export interface CompareStartPayload extends PortEnvelopeBase {
@@ -1102,6 +1146,10 @@ export interface CompletePayload extends PortEnvelopeBase {
   fanDisplayName: string;
   llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
+  /** coach-chat: the gateway meta-frame requestId, stored on the exchange so a
+   * later acceptance can correlate the sent draft back to its generation.
+   * Optional — only coach operations fill it. */
+  generationRef?: string;
 }
 
 export interface ErrorPayload extends PortEnvelopeBase {

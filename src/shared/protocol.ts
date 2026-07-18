@@ -1,3 +1,8 @@
+import {
+  COACH_ANSWER_MAX_CHARS,
+  COACH_HISTORY_LIMIT_MAX,
+  COACH_QUESTION_MAX_CHARS,
+} from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
 import type {
   AgencyHubConnectionTestRequest,
@@ -5,6 +10,7 @@ import type {
   ContentPortMessage,
   FeatureType,
   OperationPhase,
+  RecapStatusResponse,
   ReplyMode,
   ReplyTone,
   RuntimeRequestMap,
@@ -50,6 +56,7 @@ const REPLY_TONES = new Set<ReplyTone>([
   'upsell',
   'spicy',
 ]);
+const SUMMARY_MODES = new Set<'short' | 'full'>(['short', 'full']);
 
 export function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -168,6 +175,39 @@ function isTabRouteMessage(record: Record<string, unknown>): boolean {
   return isNullableString(record.groupId) && isNumber(record.routeNonce);
 }
 
+function isBoundedString(value: unknown, min: number, max: number): value is string {
+  return isString(value) && value.length >= min && value.length <= max;
+}
+
+/** coach-chat: one replayed exchange. EXACT keys — an extra key is a producer
+ * bug on a field that rides into the kernel prompt body, so reject rather than
+ * ignore. Bounds mirror the kernel's zod schema (question 1..2000,
+ * answer 1..COACH_ANSWER_MAX_CHARS). */
+function isCoachHistoryEntry(value: unknown): boolean {
+  return isObjectRecord(value) &&
+    hasExactKeys(value, ['question', 'answer']) &&
+    isBoundedString(value.question, 1, COACH_QUESTION_MAX_CHARS) &&
+    isBoundedString(value.answer, 1, COACH_ANSWER_MAX_CHARS);
+}
+
+/** The protocol's first array-valued field: bounds-checked (≤20 entries, each
+ * exact-keyed and length-bounded) so a malformed history dies at the boundary
+ * rather than 400ing the kernel body later. */
+function isOptionalCoachHistory(record: Record<string, unknown>): boolean {
+  const value = record.coachHistory;
+  if (value === undefined) {
+    return true;
+  }
+  return Array.isArray(value) &&
+    value.length <= COACH_HISTORY_LIMIT_MAX &&
+    value.every(isCoachHistoryEntry);
+}
+
+function isOptionalSummaryMode(record: Record<string, unknown>): boolean {
+  return record.summaryMode === undefined ||
+    (isString(record.summaryMode) && SUMMARY_MODES.has(record.summaryMode as 'short' | 'full'));
+}
+
 function isOperationStartMessage(record: Record<string, unknown>): boolean {
   return hasOperationId(record) &&
     isFeatureType(record.feature) &&
@@ -176,7 +216,10 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalString(record, 'draftText') &&
     isOptionalBoolean(record, 'forceRegenerate') &&
     isOptionalReplyMode(record) &&
-    isOptionalReplyTone(record);
+    isOptionalReplyTone(record) &&
+    isOptionalString(record, 'chatterQuestion') &&
+    isOptionalCoachHistory(record) &&
+    isOptionalSummaryMode(record);
 }
 
 function isCompareStartMessage(record: Record<string, unknown>): boolean {
@@ -281,9 +324,38 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         isNullableString(message.displayName)
         ? 'resolveFanChat'
         : null;
+    case 'getRecapStatus':
+      return isString(message.groupId) && isNullableString(message.fanAccountId)
+        ? 'getRecapStatus'
+        : null;
     default:
       return null;
   }
+}
+
+function isRecapCoverage(value: unknown): boolean {
+  return value === null || value === 'full-history' || value === 'window';
+}
+
+/** One recap slot, mirroring the SDK's strict `aiRecapSlotSchema`: metadata
+ * only, EXACT keys (the response is pinned by the vendor contract hash, so an
+ * unexpected key is a producer bug, not forward-compat). */
+function isRecapSlot(value: unknown): boolean {
+  return isObjectRecord(value) &&
+    hasExactKeys(value, ['generatedAt', 'ageMs', 'transcriptCoverage', 'requestedCount', 'keptCount']) &&
+    isString(value.generatedAt) &&
+    isNumber(value.ageMs) &&
+    value.ageMs >= 0 &&
+    isRecapCoverage(value.transcriptCoverage) &&
+    isNullableNumber(value.requestedCount) &&
+    isNullableNumber(value.keptCount);
+}
+
+export function isRecapStatusResponse(value: unknown): value is RecapStatusResponse {
+  return isObjectRecord(value) &&
+    hasExactKeys(value, ['full', 'short']) &&
+    (value.full === null || isRecapSlot(value.full)) &&
+    (value.short === null || isRecapSlot(value.short));
 }
 
 export function isAgencyHubConnectionTestSettings(
@@ -345,7 +417,8 @@ export function isBackgroundPortMessage(message: unknown): message is Background
     case 'operation:complete':
       return hasOperationId(message) &&
         hasFeatureResult(message) &&
-        isString(message.fanDisplayName);
+        isString(message.fanDisplayName) &&
+        isOptionalString(message, 'generationRef');
     case 'operation:error':
     case 'operation:discarded':
       return hasOperationId(message) && hasUserFacingError(message);
