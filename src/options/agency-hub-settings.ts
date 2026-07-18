@@ -52,7 +52,7 @@ export function buildAgencyHubPermissionScopeNote(
     return null;
   }
 
-  return `Firefox выдаёт доступ к хосту целиком, а не по портам, поэтому ${originPattern} покрывает указанный URL ${normalized}.`;
+  return `Firefox grants host access per host rather than per port, so ${originPattern} covers the configured URL ${normalized}.`;
 }
 
 export function buildAgencyHubConnectionSignature(

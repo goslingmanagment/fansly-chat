@@ -786,11 +786,6 @@ export interface RuntimeRequestMap {
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
-  signOutAgencyHub: undefined;
-  getAgencyHubHealth: undefined;
-  getAgencyHubIdentity: undefined;
-  getAiQuotaByPage: undefined;
-  getSpendersStatus: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   openDebugPrompt: DebugPromptTokenRequest;
@@ -802,11 +797,6 @@ export interface RuntimeResponseMap {
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
-  signOutAgencyHub: AgencyHubSignOutResponse;
-  getAgencyHubHealth: AgencyHubHealthResponse;
-  getAgencyHubIdentity: AgencyHubIdentityResponse;
-  getAiQuotaByPage: Record<string, AiQuotaStatus>;
-  getSpendersStatus: SpendersObservation | null;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   openDebugPrompt: OpenDebugPromptResponse;
@@ -843,19 +833,6 @@ export interface AgencyHubDeviceTokenRequest {
 export type AgencyHubDeviceTokenResponse =
   | { ok: true; keyPrefix: string; label: string; expiresAt: string }
   | { ok: false; error: UserFacingError };
-
-/** «Выйти» sign-out outcome. Neither the token nor the wipe cross the runtime
- * boundary as data — the BACKGROUND reads the token from storage, wipes both
- * custody keys locally FIRST, then best-effort revokes; this response carries
- * only the discriminant. 'unreachable' = the hub could not confirm revocation
- * (network/timeout/5xx/missing base URL) — the local wipe already happened and
- * the token dies by sliding-expiry. 'wipe-failed' = the durable local wipe threw
- * (credentials may still be on disk — the loud case); `error` carries its
- * message. */
-export interface AgencyHubSignOutResponse {
-  outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed';
-  error?: string;
-}
 
 export interface GetPopupStatusRequest {
   tabId?: number;
@@ -910,16 +887,6 @@ export interface SpendersSourceStatus {
   consecutiveFailures: number | null;
 }
 
-/** The last board result seen for a source (creator|hub identity). `streamState`
- * is the kernel source state on success; `outcome:'fail'` records a board that
- * errored (streamState null). Session-scale — never persisted, never schema. */
-export interface SpendersObservation {
-  sourceIdentity: string;
-  streamState: SpendersStreamState | null;
-  outcome: 'ok' | 'fail';
-  observedAt: number;
-}
-
 export interface SpendersListResult {
   entries: SpenderListEntry[];
   /** Newest observation across this page/window projection (epoch ms). It is
@@ -964,26 +931,6 @@ export interface AgencyHubConnectionTestResponse {
   ok: boolean;
   error?: UserFacingError;
 }
-
-/** Public /health, read for the «Hub (core)» status row. `sdkContractHash` is
- * stamped background-side (KERNEL_CONTRACT_HASH) so the options bundle imports
- * no SDK to render the debug-only Контракт row (MATCH/DRIFT). */
-export type AgencyHubHealthResponse =
-  | {
-      ok: true;
-      status: 'ok' | 'degraded';
-      dbLatencyMs: number | null;
-      contractHash: string;
-      sdkContractHash: string;
-    }
-  | { ok: false; reason: 'no_base_url' | 'no_permission' | 'unreachable' };
-
-/** Authenticated identity, read for the «Доступ» status row. `no_permission`
- * is propagated distinctly (never folded into `unreachable`) so the renderer
- * can keep the credential badge neutral and surface the grant on the Hub row. */
-export type AgencyHubIdentityResponse =
-  | { ok: true; username: string; role: string; pages: string[] }
-  | { ok: false; reason: 'no_credential' | 'no_base_url' | 'no_permission' | 'unauthorized' | 'unreachable' };
 
 export interface AgencyHubAiUsageEvent {
   clientEventId: string;

@@ -4,139 +4,393 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ChatGoose — Что нового</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-    :root {
-      --paper: #f6f2ea; --paper-2: #fdfbf6; --paper-3: #f1ebe0;
-      --ink: #2a2016; --ink-soft: #6c5d4d; --ink-faint: #a3947f;
-      --clay: #c4704b; --clay-deep: #a8543a;
-      --clay-tint: rgba(196, 112, 75, 0.10); --clay-line: rgba(196, 112, 75, 0.22);
-      --green: #2f7d5b;
-      --line: rgba(42, 32, 22, 0.10); --line-soft: rgba(42, 32, 22, 0.06);
-      --serif: "Fraunces", Georgia, "Times New Roman", serif;
-      --sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-      --shadow: 0 1px 2px rgba(42, 32, 22, 0.04), 0 8px 28px rgba(42, 32, 22, 0.06);
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
 
-    /* Dark theme — a pure token swap (spec §2.4); no per-component dark rules. */
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --paper: #17130e; --paper-2: #201a13; --paper-3: #2a2219;
-        --ink: #ece3d5; --ink-soft: #b8a894; --ink-faint: #8a7c6a;
-        --clay: #d98a64; --clay-deep: #e6a07c;
-        --clay-tint: rgba(217, 138, 100, 0.14); --clay-line: rgba(217, 138, 100, 0.30);
-        --green: #5fb98a;
-        --line: rgba(236, 227, 213, 0.12); --line-soft: rgba(236, 227, 213, 0.07);
-        --shadow: 0 1px 2px rgba(0, 0, 0, 0.30), 0 8px 28px rgba(0, 0, 0, 0.40);
-      }
+    :root {
+      --bg: #F9F5EF;
+      --bg-card: #FFFFFF;
+      --text: #2D2015;
+      --text-secondary: #6B5B4E;
+      --text-muted: #9A8B7C;
+      --accent: #C4704B;
+      --accent-hover: #A85D3B;
+      --accent-soft: #E8A882;
+      --accent-bg: rgba(196, 112, 75, 0.08);
+      --accent-bg-hover: rgba(196, 112, 75, 0.12);
+      --border: rgba(45, 32, 21, 0.08);
+      --shadow-sm: 0 1px 3px rgba(45, 32, 21, 0.04);
+      --shadow-md: 0 4px 16px rgba(45, 32, 21, 0.06);
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --green: #2D8A5E;
+      --green-bg: rgba(45, 138, 94, 0.08);
+      --blue: #4A7AE3;
+      --blue-bg: rgba(74, 122, 227, 0.08);
+      --amber: #B8860B;
+      --amber-bg: rgba(184, 134, 11, 0.08);
     }
 
     body {
-      background: var(--paper); color: var(--ink);
-      font-family: var(--sans); font-size: 15px; line-height: 1.7;
-      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
-    a { color: inherit; text-decoration: none; }
 
-    /* ── Nav ── */
+    /* ─── Navigation ─────────────────────────────────────────────── */
+
     .nav {
-      position: sticky; top: 0; z-index: 100;
-      background: color-mix(in srgb, var(--paper) 85%, transparent);
-      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--line); padding: 0 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(249, 245, 239, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
     }
-    .nav-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; height: 56px; gap: 16px; }
-    .nav-brand { display: flex; align-items: center; gap: 10px; color: var(--ink); flex-shrink: 0; }
-    .nav-brand img { width: 32px; height: 32px; border-radius: 50%; }
-    .nav-brand span { font-family: var(--serif); font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
-    .nav-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
-    .nav-link { font-size: 13px; font-weight: 500; color: var(--ink-soft); padding: 5px 12px; border-radius: 999px; transition: all 0.15s; }
-    .nav-link:hover { color: var(--ink); background: var(--clay-tint); }
-    .nav-version { font-family: var(--mono); font-size: 12px; color: var(--clay-deep); background: var(--clay-tint); border: 1px solid var(--clay-line); padding: 3px 9px; border-radius: 999px; flex-shrink: 0; }
 
-    /* ── Hero ── */
-    .hero { max-width: 720px; margin: 0 auto; padding: 64px 24px 48px; text-align: center; }
-    .hero h1 { font-family: var(--serif); font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
-    .hero-sub { font-size: 16px; color: var(--ink-soft); margin-top: 8px; }
+    .nav-inner {
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      height: 56px;
+      gap: 16px;
+    }
 
-    /* ── Timeline ── */
-    .timeline { max-width: 720px; margin: 0 auto; padding: 0 24px 80px; }
-    .release { position: relative; padding-left: 32px; padding-bottom: 48px; scroll-margin-top: 76px; }
-    .release:last-child { padding-bottom: 0; }
-    .release::before { content: ''; position: absolute; left: 7px; top: 10px; bottom: 0; width: 2px; background: var(--line); }
-    .release:last-child::before { display: none; }
-    .release::after { content: ''; position: absolute; left: 1px; top: 6px; width: 14px; height: 14px; border-radius: 50%; background: var(--paper); border: 2.5px solid var(--clay-line); }
-    .release:first-child::after { background: var(--clay); border-color: var(--clay); }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+      flex-shrink: 0;
+    }
 
-    .release-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-    .release-version { font-family: var(--mono); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
-    .release-date { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--ink-faint); }
-    .release-badge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 9px; border-radius: 999px; }
-    .release-badge.latest { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
-    .release-badge.milestone { background: var(--clay-tint); color: var(--clay-deep); }
+    .nav-brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+    }
 
-    .release-changes { background: var(--paper-2); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; box-shadow: var(--shadow); }
-    .release.milestone .release-changes { border-color: var(--clay); box-shadow: 0 0 0 1px var(--clay-line), var(--shadow); }
+    .nav-brand span {
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+    }
 
-    /* Summary — serif, the loudest text of the card (spec §11). */
-    .release-summary { font-family: var(--serif); font-size: 18px; font-weight: 500; line-height: 1.5; color: var(--ink); margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
-    .release-summary p { margin-bottom: 8px; }
-    .release-summary p:last-child { margin-bottom: 0; }
-    .release-summary em { font-style: italic; color: var(--clay-deep); }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
 
-    .change-group { margin-bottom: 16px; }
-    .change-group:last-child { margin-bottom: 0; }
-    .change-group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-    .change-group-title .dot { width: 6px; height: 6px; border-radius: 50%; }
-    /* Semantic recolor (spec §11): Исправлено green, Изменено neutral, Новое clay. No blue. */
-    .change-group-title.fixed { color: var(--green); }
-    .change-group-title.fixed .dot { background: var(--green); }
-    .change-group-title.improved { color: var(--ink-soft); }
-    .change-group-title.improved .dot { background: var(--ink-faint); }
-    .change-group-title.new { color: var(--clay-deep); }
-    .change-group-title.new .dot { background: var(--clay); }
+    .nav-link {
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      padding: 5px 12px;
+      border-radius: 999px;
+      transition: all 0.15s;
+    }
 
-    .changes-list { list-style: none; }
-    .changes-list li { position: relative; padding-left: 16px; margin-bottom: 6px; font-size: 14px; color: var(--ink-soft); line-height: 1.6; }
-    .changes-list li:last-child { margin-bottom: 0; }
-    .changes-list li::before { content: ''; position: absolute; left: 0; top: 9px; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-faint); }
-    .changes-list li strong { color: var(--ink); font-weight: 600; }
-    .changes-list li code { font-family: var(--mono); font-size: 12.5px; background: var(--paper-3); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--clay-deep); }
-    .changes-list li a { color: var(--clay-deep); text-decoration: underline; text-underline-offset: 2px; }
+    .nav-link:hover {
+      color: var(--text);
+      background: var(--accent-bg);
+    }
 
-    /* Collapse: «Технически» groups + older-than-latest-3 cards → <details>. */
-    summary { list-style: none; cursor: pointer; }
-    summary::-webkit-details-marker { display: none; }
-    .release-detail { margin-top: 2px; }
-    .release-detail-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--clay-deep); }
-    .release-detail-toggle::after { content: '▾'; display: inline-block; transition: transform 0.18s ease; }
-    .release-detail[open] > .release-detail-toggle { margin-bottom: 14px; }
-    .release-detail[open] > .release-detail-toggle::after { transform: rotate(180deg); }
-    details.tech-group > summary::after { content: '▾'; display: inline-block; margin-left: 4px; font-size: 11px; color: var(--ink-faint); transition: transform 0.18s ease; }
-    details.tech-group[open] > summary::after { transform: rotate(180deg); }
+    .nav-version {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--accent-bg);
+      padding: 3px 8px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
 
-    /* ── Footer ── */
-    .footer { max-width: 720px; margin: 0 auto; padding: 32px 24px; border-top: 1px solid var(--line); text-align: center; }
-    .footer-brand { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .footer-brand img { width: 24px; height: 24px; border-radius: 50%; }
-    .footer-brand span { font-family: var(--serif); font-weight: 600; font-size: 15px; color: var(--ink); }
-    .footer p { font-family: var(--mono); font-size: 12.5px; color: var(--ink-faint); }
+    /* ─── Hero ───────────────────────────────────────────────────── */
+
+    .hero {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 48px;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .hero-sub {
+      font-size: 16px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ─── Timeline ───────────────────────────────────────────────── */
+
+    .timeline {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    .release {
+      position: relative;
+      padding-left: 32px;
+      padding-bottom: 48px;
+    }
+
+    .release:last-child {
+      padding-bottom: 0;
+    }
+
+    .release::before {
+      content: '';
+      position: absolute;
+      left: 7px;
+      top: 10px;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .release:last-child::before {
+      display: none;
+    }
+
+    .release::after {
+      content: '';
+      position: absolute;
+      left: 1px;
+      top: 6px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 2.5px solid var(--accent-soft);
+    }
+
+    .release:first-child::after {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .release-header {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .release-version {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .release-date {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .release-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .release-badge.latest {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .release-badge.milestone {
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+
+    .release-changes {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .change-group {
+      margin-bottom: 16px;
+    }
+
+    .change-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .release-summary {
+      font-size: 14.5px;
+      color: var(--text);
+      line-height: 1.65;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px dashed var(--border);
+    }
+
+    .release-summary p {
+      margin-bottom: 8px;
+    }
+
+    .release-summary p:last-child {
+      margin-bottom: 0;
+    }
+
+    .release-summary em {
+      font-style: italic;
+      color: var(--text);
+    }
+
+    .change-group-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .change-group-title.improved {
+      color: var(--blue);
+    }
+
+    .change-group-title.new {
+      color: var(--green);
+    }
+
+    .change-group-title.fixed {
+      color: var(--amber);
+    }
+
+    .change-group-title .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .change-group-title.improved .dot {
+      background: var(--blue);
+    }
+
+    .change-group-title.new .dot {
+      background: var(--green);
+    }
+
+    .change-group-title.fixed .dot {
+      background: var(--amber);
+    }
+
+    .changes-list {
+      list-style: none;
+    }
+
+    .changes-list li {
+      position: relative;
+      padding-left: 16px;
+      margin-bottom: 6px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .changes-list li:last-child {
+      margin-bottom: 0;
+    }
+
+    .changes-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 9px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────── */
+
+    .footer {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .footer-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .footer-brand img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+    }
+
+    .footer-brand span {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .footer p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Responsive ─────────────────────────────────────────────── */
 
     @media (max-width: 480px) {
       .hero { padding: 48px 16px 32px; }
-      .hero h1 { font-size: 30px; }
+      .hero h1 { font-size: 26px; }
       .timeline { padding: 0 16px 60px; }
       .release { padding-left: 28px; }
       .release-changes { padding: 16px 18px; }
+      .release-version { font-size: 19px; }
     }
   </style>
 </head>
 <body>
+
+<!-- ─── Navigation ────────────────────────────────────────────────────── -->
 
 <nav class="nav">
   <div class="nav-inner">
@@ -147,56 +401,78 @@
     <div class="nav-actions">
       <a href="guide.html" class="nav-link">Руководство</a>
       <a href="index.html" class="nav-link">Установить</a>
-      <span class="nav-version">v1.7.1</span>
+      <span class="nav-version">v1.9.11</span>
     </div>
   </div>
 </nav>
+
+<!-- ─── Hero ──────────────────────────────────────────────────────────── -->
 
 <div class="hero">
   <h1>Что нового</h1>
   <p class="hero-sub">История обновлений ChatGoose</p>
 </div>
 
+<!-- ─── Timeline ─────────────────────────────────────────────────────── -->
+
 <div class="timeline">
 
-  <!-- 1.9.10 -->
-  <div class="release" id="v1-9-10">
+  <!-- 1.9.11 -->
+  <div class="release">
     <div class="release-header">
-      <span class="release-version">1.9.10</span>
-      <span class="release-date">18.07.2026</span>
+      <span class="release-version">1.9.11</span>
       <span class="release-badge latest">Текущая</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
         <p>
-          Настройки стали понятным центром статуса: сразу видно, что работает и какой шаг сделать дальше.
+          Возвращает стабильное production-поведение 1.9.9: Settings 2.0 снова отделён от релизной линии 1.9.x.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
-        <div class="change-group-title improved"><span class="dot"></span> Настройки и статус</div>
+        <div class="change-group-title fixed"><span class="dot"></span> Исправляющий релиз</div>
         <ul class="changes-list">
-          <li><strong>Один честный экран готовности.</strong> Hub, доступ, Fansly capture, AI-квоты и Spenders видны вместе; открытые шаги ведут сразу к нужному действию</li>
-          <li><strong>Персоны показаны читаемым каталогом.</strong> Видны имя, версия, архивный статус и число аккаунтов; legacy-тексты остаются доступны для экспорта</li>
-          <li><strong>Явные вход и выход из Agency Hub.</strong> Device token показан отдельно, а выход сначала стирает локальные credential и затем отзывает token</li>
+          <li><strong>Settings 2.0 отложен до 2.0.</strong> Новая оболочка Options, экран статуса, представление персон, выход и web-register changelog убраны из production-ветки и сохранены отдельно</li>
+          <li><strong>Вернулось поведение 1.9.9.</strong> Settings, popup и фоновые runtime-пути снова соответствуют последнему запланированному релизу 1.9.x</li>
+          <li><strong>Локальные данные не откатываются.</strong> Схема storage остаётся v14; credential, привязки и persona snapshot не очищаются</li>
+          <li><strong>Контракт с production Core остаётся точным.</strong> Сгенерированный SDK-снимок не активирует функции Settings 2.0</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.9.10 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version">1.9.10</span>
+    </div>
+    <div class="release-changes">
+      <div class="release-summary">
+        <p>
+          Ранний выпуск интерфейса Settings 2.0; заменён исправляющим релизом 1.9.11 и продолжит развитие в ветке 2.0.
+        </p>
+      </div>
+      <div class="change-group">
+        <div class="change-group-title new"><span class="dot"></span> Settings 2.0 preview</div>
+        <ul class="changes-list">
+          <li>Новая оболочка Options и единый экран готовности показывали Hub, доступ, Fansly capture, AI-квоту и Spenders</li>
+          <li>Персоны показывались как человекочитаемый каталог; вход и выход Agency Hub получили отдельные состояния</li>
         </ul>
       </div>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
-          <li><strong>Выход не откатывается другой вкладкой Settings.</strong> Устаревшее поле legacy-ключа больше не может вернуть стёртый API key</li>
-          <li><strong>Ошибка Fansly-опроса не оставляет ложное «Всё работает».</strong> Fansly-строка и общий индикатор теперь показывают одну честную картину</li>
+          <li>Другая открытая вкладка Settings больше не могла восстановить стёртый legacy API key после выхода</li>
+          <li>Ошибка повторного Fansly-опроса больше не оставляла ложное состояние «Всё работает»</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.9 -->
-  <div class="release" id="v1-9-9">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.9</span>
-      <span class="release-date">15.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -204,22 +480,19 @@
           Панель действий на широких окнах: Recap больше не висит посреди пустоты.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
           <li><strong>Recap и чип персоны — единый правый блок.</strong> Право-прижатие случайно несли два элемента сразу, и на широком композере свободное место делилось пополам: Recap повисал между двумя провалами. Теперь слева действия, справа блок «про фана» (Recap · персона); на узких окнах вид не меняется</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.8 -->
-  <div class="release" id="v1-9-8">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.8</span>
-      <span class="release-date">15.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -227,7 +500,6 @@
           Ошибки AI-генерации теперь называют настоящую причину вместо безликого «Agency Hub request failed».
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Диагностика ошибок</div>
         <ul class="changes-list">
@@ -236,15 +508,13 @@
           <li><strong>Причина с сервера не теряется.</strong> Терминальный error-кадр стрима теперь читается; раньше любая ошибка провайдера выглядела как «оборванный стрим» (CG-HUB-07)</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.7 -->
-  <div class="release" id="v1-9-7">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.7</span>
-      <span class="release-date">14.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -252,7 +522,6 @@
           Глобальными персонами теперь управляет Agency Hub: расширение читает серверный каталог, хранит привязки аккаунтов и страхует старые локальные тексты.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Изменилось поведение</div>
         <ul class="changes-list">
@@ -279,15 +548,13 @@
           <li>Release gate не подпишет XPI, пока production Core не покажет совпадающий <code>contractHash</code> и защищённый persona-catalog route</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.6 -->
-  <div class="release" id="v1-9-6">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.6</span>
-      <span class="release-date">12.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -295,7 +562,6 @@
           Spenders показывает до 1000 платящих и устойчиво переживает частичные сбои, обновления и быстрый поиск.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
@@ -322,15 +588,13 @@
           <li>Firefox-профиль на 1000 строк не нашёл синхронных операций длиннее 50 мс, поэтому виртуализация пока не нужна</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.5 -->
-  <div class="release" id="v1-9-5">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.5</span>
-      <span class="release-date">12.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -338,7 +602,6 @@
           В режиме отладки видно настоящий промпт, который сервер отправил ИИ.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Добавлено</div>
         <ul class="changes-list">
@@ -346,15 +609,13 @@
           <li><strong>Промпт не попадает на страницу Fansly.</strong> В оверлей уходит только сводка (счётчики досье, версия, что отброшено) и одноразовый токен; полный текст живёт в памяти расширения и показывается на своей странице расширения</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.4 -->
-  <div class="release" id="v1-9-4">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.4</span>
-      <span class="release-date">12.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -362,7 +623,6 @@
           Панель действий больше не съезжает при выборе тона.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
@@ -370,15 +630,13 @@
           <li><strong>Подсказки сохранены.</strong> Полное название и русское описание тона по-прежнему доступны при наведении и для экранных дикторов; поведение Reply и ⌘⇧O не менялось</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.3 -->
-  <div class="release" id="v1-9-3">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.3</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -386,7 +644,6 @@
           Первое открытие доски показывает прогресс, а имена перестали перезагружаться после перезапуска браузера.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
@@ -394,15 +651,13 @@
           <li><strong>Имена переживают перезапуск браузера.</strong> Кэш имён переехал в постоянное хранилище (6 часов): раньше после закрытия браузера расширение заново выкачивало все имена, теперь — только новых фанов</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.2 -->
-  <div class="release" id="v1-9-2">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.2</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -410,7 +665,6 @@
           Доска больше не зависает на «Building the board…».
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
@@ -418,15 +672,13 @@
           <li><strong>Имена кэшируются на 6 часов.</strong> Повторные открытия доски и Refresh больше не перезагружают имена — подгружаются только новые фаны</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.1 -->
-  <div class="release" id="v1-9-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.1</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -434,7 +686,6 @@
           Доска Spenders называет фанов вашими именами.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
@@ -442,15 +693,13 @@
           <li><strong>Числовые строки получили имена.</strong> Фаны, которых рейтинг знал только по id (строка с «?» вместо аватара), теперь подписаны своим платформенным именем</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.9.0 -->
-  <div class="release" id="v1-9-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.9.0</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -458,7 +707,6 @@
           Панель действий пересобрана — тоны стали переключателями с эмодзи, Split не слетает при регенерации; доска Spenders видит всех китов ядра, месячный приток и поиск.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Изменилось поведение</div>
         <ul class="changes-list">
@@ -486,15 +734,13 @@
           <li><strong>Доска не пересобирается после простоя.</strong> Кэш переживает рестарт фонового процесса</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.8.3 -->
-  <div class="release" id="v1-8-3">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.8.3</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -502,22 +748,19 @@
           Scan читается как досье, а не как простыня сырого текста.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
           <li><strong>Scan отформатирован.</strong> Ядро отдаёт досье фаната в маркдауне, а панель показывала его сырым — с решётками и дефисами. Теперь заголовки секций, жирные поля («Имя:», «Возраст:»), списки и цитаты рендерятся по-настоящему: секции видно при беглом скролле, нужное поле находится сразу</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.8.2 -->
-  <div class="release" id="v1-8-2">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.8.2</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -525,22 +768,19 @@
           Панель кнопок больше не дёргается при старте генерации.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
           <li><strong>Тулбар не съезжает при генерации.</strong> Спиннер загрузки вставлялся в кнопку рядом с текстом и расширял её — весь ряд прыгал вправо. Теперь спиннер рисуется поверх приглушённого текста кнопки: ширина не меняется, ряд стоит на месте</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.8.1 -->
-  <div class="release" id="v1-8-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.8.1</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -548,7 +788,6 @@
           Кастомные личности работают с ядром, борд честен про невключённые рейтинги, токен устройства не теряется, длинные чаты не роняют генерацию.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
@@ -565,15 +804,13 @@
           <li><strong>Встроенная личность Lora — только для чтения.</strong> Локальные правки встроенной личности молча игнорировались при генерации — карточка честно закрыта; кастомные личности редактируются и синхронизируются</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.8.0 -->
-  <div class="release" id="v1-8-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.8.0</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -581,7 +818,6 @@
           Новый фирменный вид со светлой и тёмной темой, вставка ответа кликом и индикатор дневного лимита ИИ.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
@@ -591,23 +827,21 @@
           <li><strong>Лимит ИИ виден заранее.</strong> Попап показывает, сколько генераций осталось на сегодня: тихий счётчик → янтарный при ≤20 → красный, когда лимит исчерпан (сброс в полночь UTC)</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Настройки: схема v12 (<code>uiTheme</code>); тёмная тема — чистый свап CSS-токенов под одним классом</li>
           <li>Снапшот квоты из meta-фрейма ядра сохраняется вместо выбрасывания; попап отдаёт свежайший за текущий UTC-день</li>
           <li>Инъекция стилей не трогает <code>color-scheme</code> хост-страницы; анимации уважают <code>prefers-reduced-motion</code></li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.7.1 -->
-  <div class="release" id="v1-7-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.7.1</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -615,7 +849,6 @@
           Честные ошибки: дневной лимит ИИ и проблемы соединения с хабом теперь называют себя по имени.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
@@ -623,21 +856,19 @@
           <li><strong>Ошибки соединения с хабом диагностируют себя сами.</strong> В настройках видно HTTP-статус и ответ сервера («Hub responded 401: …»), текст ошибки называет, какой именно credential отклонён (токен устройства или общий ключ), а каждый неудачный запрос к хабу пишется в консоль фона с именем операции</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Продуктовые гейты ядра (мало сообщений, лимит Hi, пинг активному фану, нужен черновик) маппятся по машинным кодам ядра (<code>gate_*</code>), а не по тексту сообщений; текстовый матчинг остался фолбэком для старых ядер</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.7.0 -->
-  <div class="release" id="v1-7-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.7.0</span>
-      <span class="release-date">11.07.2026</span>
     </div>
     <div class="release-changes">
       <div class="release-summary">
@@ -645,7 +876,6 @@
           Починен вход по логину и дочищен легаси-код борда.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
@@ -659,12 +889,11 @@
           <li><strong>Легаси-пересборка борда удалена.</strong> Скрытый флаг <code>spendersLegacyRebuild</code> и старый путь «~150 запросов к Fansly» вырезаны — рейтинг только из ядра</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.6.0 -->
-  <div class="release milestone" id="v1-6-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.6.0</span>
       <span class="release-badge milestone">Веха</span>
@@ -675,7 +904,6 @@
           <strong>Переезд на ядро агентства.</strong> ChatGoose перестал быть одиноким расширением со своими ключами и промптами в кармане — теперь это клиент ядра агентства (Agency Hub): общего сервера, где живёт весь интеллект — промпты, персоналии, модели, лимиты и деньги. На той же платформе работает десктопный ChatGoose для OnlyFans. Два клиента — один мозг.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Что это дало</div>
         <ul class="changes-list">
@@ -687,19 +915,18 @@
           <li><strong>Лимиты и учёт — на ядре.</strong> Квоты генераций и стоимость считает сервер; клиенту нечего подделывать и не с чем расходиться</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Разрешения на <code>api.anthropic.com</code> и <code>openrouter.ai</code> удалены из манифеста</li>
           <li>Выбор модели и «reasoning» на клиенте убраны — моделями управляет ядро</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.6 -->
-  <div class="release" id="v1-5-6">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.6</span>
     </div>
@@ -709,7 +936,6 @@
           Финальная правка панели после отката к старой раскладке: кнопки снова выглядят чисто по умолчанию, а подсказки хоткеев появляются только при наведении или фокусе.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
@@ -718,20 +944,19 @@
           <li><strong><code>⌘⇧O</code></strong> теперь описан как цикл <code>Flirty / Upsell / Horny</code>, потому обычный reply — это дефолт, а не отдельный <code>Casual</code>-режим</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Хоткей-чипы рендерятся как декоративные <code>.chatgoose-toolbar-hotkey</code> и показываются CSS-ом на <code>:hover</code>/<code>:focus-visible</code>, без изменения ширины кнопок</li>
           <li><code>Scan</code> прячет зелёную ready-точку на hover/focus, чтобы она не накладывалась на хоткей-чип</li>
           <li>Точечные тесты бара/хоткеев/контент-приложения, typecheck и build проходят</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.5 -->
-  <div class="release" id="v1-5-5">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.5</span>
     </div>
@@ -741,7 +966,6 @@
           Откат бара из 1.5.4 к привычной раскладке 1.5.0. В 1.5.4 <code>Multi</code> стал значком <code>⧉</code>, а <code>Scan</code> уехал в меню <code>⋯</code> — на практике неудобно. Вернули: <code>Multi</code> — текстовой кнопкой, <code>Scan</code> — видимой кнопкой в ряду. Чипы-хоткеи остались.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Изменено</div>
         <ul class="changes-list">
@@ -751,19 +975,18 @@
           <li><strong>Чипы-хоткеи</strong> на кнопках (<code>E</code>/<code>F</code>/<code>G</code>/<code>D</code>/<code>S</code>) остались</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Удалён код и CSS значка-тумблера и меню <code>⋯</code>; <code>Scan</code> снова в <code>TOOLBAR_FEATURES</code> с «ready»-точкой, не задевающей чип; порядок <code>cycle-tone</code> выровнен с пилюлями (без <code>casual</code>)</li>
           <li>824 теста проходят (4 skipped), typecheck и build чистые; бар проверен на скриншоте по четырём состояниям</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.4 -->
-  <div class="release" id="v1-5-4">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.4</span>
     </div>
@@ -773,7 +996,6 @@
           Откат направления 1.5.2/1.5.3 по фидбэку: тон убран из кнопки <code>Reply</code> и снова видим — отдельным компактным рядом пилюль. <code>Multi</code> вернулся в ряд, но компактным значком <code>⧉</code>, а не текстовой кнопкой. <code>Scan</code> остался в меню <code>⋯</code>. Бар стал чуть компактнее.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -782,20 +1004,19 @@
           <li><strong>Бар компактнее.</strong> Кнопки действий чуть ниже и у́же, ряд плотнее</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Тон-пилюли идут через прежний путь <code>onToneSelect → startTonedReply</code>, <code>⌘⇧O</code> листает тот же набор и отражается активной пилюлей. <code>Multi</code> — <code>aria-pressed</code> + класс <code>.chatgoose-toolbar-toggle-icon</code>, смысл значка несут <code>aria-label</code>/тултип; меню <code>⋯</code> теперь держит только <code>Scan</code></li>
           <li>Удалён мёртвый CSS и код сплит-каретки, тон-меню и пунктов <code>Multi</code>-в-меню; проводка в <code>index.ts</code> (тон, режим ответа, хоткеи) не тронута — изменение только в баре</li>
           <li>827 тестов проходят (4 skipped), typecheck и build чистые; тесты бара переписаны под пилюли, значок-тумблер <code>Multi</code> и меню <code>⋯</code> только со <code>Scan</code></li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.3 -->
-  <div class="release" id="v1-5-3">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.3</span>
     </div>
@@ -805,7 +1026,6 @@
           Продолжение чистки бара из 1.5.2 — по фидбэку операторов. Редкие действия <code>Scan</code> и <code>Multi</code> уехали в выпадающее меню <code>⋯</code> у правого края (рядом с именем модели), а смена тона больше не стоит лишнего клика: меню тонов раскрывается по наведению на <code>▾</code>.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -813,20 +1033,19 @@
           <li><strong>Тон по наведению.</strong> Меню тонов у <code>Reply</code> раскрывается, когда наводишь на <code>▾</code> — без отдельного клика «открыть». Навёл → один клик по тону = генерация. Раньше смена тона стоила двух кликов</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Меню <code>⋯</code> зеркалит тон-меню (всплывает вверх, выровнено по правому краю — раскрывается влево, за край не вылезает); одновременно открыт только один поповер. <code>S</code>-хоткей <code>Scan</code> работает как прежде</li>
           <li>Hover-open у каретки: задержка-намерение 110 мс (быстрый проезд к <code>Polish</code>/<code>Hi</code> не мигает меню) и grace 160 мс на закрытие (успеть зайти в поповер через зазор); клик по-прежнему переключает</li>
           <li>829 тестов проходят (4 skipped), typecheck и build чистые; добавлено покрытие меню <code>⋯</code> и hover-логики</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.2 -->
-  <div class="release" id="v1-5-2">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.2</span>
     </div>
@@ -836,7 +1055,6 @@
           Точечное улучшение к 1.5.1: бар действий стал компактнее и чище. Тоны ответа (<code>Flirty</code>/<code>Upsell</code>/<code>Horny</code>) переехали из отдельного ряда в выпадающее меню у кнопки <code>Reply</code> — как в десктопной версии, а чипы хоткеев на macOS ужались до буквы. Бар больше не упирается в край узкого диалога.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -844,20 +1062,19 @@
           <li><strong>Компактные чипы хоткеев на macOS.</strong> На маке чип теперь показывает только букву (<code>E</code>/<code>F</code>/…), как на Windows/Linux — полное <code>⌘⇧E</code> осталось в подсказке при наведении и шпаргалке <code>?</code>. Раньше пять полных комбо распирали ряд</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li><code>Reply</code> — сплит-контрол (тело + каретка <code>▾</code>), меню тона всплывает над баром; у тулбара убран скролл-обрез — ряд переносится, а не клипается</li>
           <li>Клик по тону армирует тон и сразу запускает fast-reply (как в десктопе); <code>⌘⇧O</code> по-прежнему листает тон. Меню закрывается по клику вне и <code>Esc</code>, каретка отключается во время операции</li>
           <li>824 теста (820 проходят, 4 skipped), typecheck и build чистые; тесты бара переписаны под меню</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.1 -->
-  <div class="release" id="v1-5-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.1</span>
     </div>
@@ -867,7 +1084,6 @@
           Точечное улучшение к 1.5.0: горячие клавиши теперь видно прямо в интерфейсе, а не только в шпаргалке по <code>?</code>. На кнопках действий и в футере доски «Спендеры» появились чипы-клавиши с сочетанием, плюс подсказка при наведении.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -875,20 +1091,19 @@
           <li><strong>Подсказки в доске «Спендеры».</strong> В футере доски — настоящие клавиши-чипы <code>J</code>/<code>K</code>/<code>Enter</code>/<code>Esc</code> вместо простого текста</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Переиспользуемый кейкап <code>.chatgoose-kbd</code> + хелпер <code>makeKbd()</code> — единый визуал клавиши для бара кнопок, футера доски и шпаргалки <code>?</code> (один источник, чтобы стиль не расходился)</li>
           <li>Чипы внутри кнопок декоративные (<code>aria-hidden</code>), сочетание уходит ассистивным технологиям через <code>aria-keyshortcuts</code> — доступное имя кнопки остаётся чистым</li>
           <li>824 теста (820 проходят, 4 skipped), typecheck и build чистые; дифф проверен адверсариально (a11y, вёрстка чипов, порядок спиннера)</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.5.0 -->
-  <div class="release" id="v1-5-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.5.0</span>
     </div>
@@ -898,7 +1113,6 @@
           Первый релиз с новыми фичами после технической серии 1.4.x. Перенесли два удобных решения из десктопной версии ChatGoose: полноценные горячие клавиши для всех AI-действий прямо в диалоге и доску «Спендеры» — рейтинг фанов по сумме трат.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -907,21 +1121,20 @@
           <li><strong>«Спендеры» — доска топ-плательщиков.</strong> Рейтинг фанов по сумме всех трат, с разбивкой по тирам (🐳 Кит / ⭐ Топ / ✅ Прайм / Базовый / Низкий / Микро). Открытие кнопкой <code>$</code> или хоткеем; навигация <code>J</code>/<code>K</code>, открытие чата по <code>Enter</code>/клику, фильтр по тирам, «Обновить»</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Чистый движок сопоставления клавиш (<code>shared/keymap.ts</code>) + единая таблица биндингов (<code>shared/hotkeys.ts</code>) с платформо-зависимым модификатором; один центральный <code>keydown</code>-listener вместо разрозненных обработчиков</li>
           <li>Доска собирается в фоне: <code>messaging/groups</code> + <code>earnings/stats/accounts</code> по каждому фану, затем ранжирование; скан ограничен (top-N недавних), низкая конкуренция и кэш 10 минут, чтобы не нагружать Fansly; тиры считаются на клиенте по порогам</li>
           <li>Новый runtime-запрос <code>getSpendersList</code>; пороги тиров, сборка списка и движок клавиш — чистые функции с тестами</li>
           <li>822 теста (818 проходят, 4 skipped), typecheck и build чистые; дифф проверен адверсариально (корректность ранжирования и интеграция хоткеев)</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.4.1 -->
-  <div class="release" id="v1-4-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.4.1</span>
     </div>
@@ -931,7 +1144,6 @@
           Технический релиз вслед за 1.4.0 на пути к 2.0: код разнесён по модулям с явными границами, на входящих сообщениях добавлена валидация, подключён CI, а кэш Fan Summary стал аккуратнее. Новых фич и изменений в работе кнопок нет.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -942,8 +1154,8 @@
           <li>В README явно описано, какие данные уходят наружу: Agency Hub — строго opt-in, а usage-метрики не содержат текст переписки, промптов, ключей и Fansly-сессии</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Новый <code>shared/protocol.ts</code> с type-guard'ами; <code>runtime-api.ts</code> и <code>port-client.ts</code> валидируют сообщения на границе доверия вместо <code>as</code></li>
           <li>Жизненный цикл операций вынесен в <code>OperationRegistry</code>, <code>OperationTimeoutController</code>, <code>operation-cleanup</code>, <code>conversation-context-loader</code></li>
@@ -952,13 +1164,12 @@
           <li>Добавлен CI (<code>.github/workflows/ci.yml</code>) и скрипт <code>npm run check</code> (typecheck + test + build)</li>
           <li>Юнит-тесты на новые модули; 783 теста всего (779 проходят, 4 skipped), typecheck и build чистые</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.4.0 -->
-  <div class="release" id="v1-4-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.4.0</span>
     </div>
@@ -968,7 +1179,6 @@
           Большой проход по code review всей кодовой базы, подготовка к 2.0 релизу: устранены утечки, гонки и слабые места в надёжности в background, content и UI. Новых фич нет — только стабильность и корректность.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -984,8 +1194,8 @@
           <li>Активная подписка с прошедшей датой окончания не показывается как «заканчивается через N дней»</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Устранены неограниченные утечки <code>Set</code> отменённых operation id (feature и compare)</li>
           <li>LLM-стримы освобождают reader и HTTP-тело на всех путях выхода, включая throw из середины цикла</li>
@@ -997,13 +1207,12 @@
           <li>Миграция storage гардит <code>personalities</code> / <code>accountMappings</code>; hi-greeting восстановил prompt caching</li>
           <li>Добавлено 22 regression-теста (745 всего); typecheck и build чистые</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.14 -->
-  <div class="release" id="v1-3-14">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.14</span>
     </div>
@@ -1013,7 +1222,6 @@
           Reasoning block теперь не смешивается с prompt debug: <code>LLM Input</code> снова показывает только данные, отправленные в модель.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1022,20 +1230,19 @@
           <li>Это убирает путаницу между prompt input и reasoning/debug output</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Убрано поле <code>reasoning</code> из <code>PromptDebugSnapshot</code></li>
           <li><code>operation:debugPrompt</code> снова содержит только system/transcript/data/user prompt</li>
           <li>Regression tests обновлены под единственный источник reasoning block в profiling summary</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.13 -->
-  <div class="release" id="v1-3-13">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.13</span>
     </div>
@@ -1045,7 +1252,6 @@
           Reasoning block теперь виден прямо в карточке <code>Pipeline Profiling</code>, а не только в нижнем <code>LLM Input</code> inspector.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1054,20 +1260,19 @@
           <li>Если provider не прислал текст reasoning, UI остаётся как раньше и показывает только observed-сигнал</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li><code>OperationProfilingSnapshot</code> теперь хранит <code>reasoningBlock</code></li>
           <li>Profiler обновляет reasoning block по мере stream delta в debug mode</li>
           <li>Добавлены regression tests для profiler snapshot и rendering внутри profiling summary</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.12 -->
-  <div class="release" id="v1-3-12">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.12</span>
     </div>
@@ -1077,7 +1282,6 @@
           Reasoning debug теперь показывает не только факт thinking-события, но и сам summarized reasoning block, если провайдер прислал его в stream.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1086,20 +1290,19 @@
           <li>Если provider прислал только redacted/omitted сигнал без текста, UI по-прежнему показывает только <code>Reasoning observed</code></li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Anthropic и OpenRouter stream parsers прокидывают отдельный <code>onReasoningDelta</code></li>
           <li>Operation debug snapshot накапливает reasoning-текст только в debug mode и добавляет его в <code>operation:debugPrompt</code></li>
           <li>Добавлены regression tests для Anthropic/OpenRouter reasoning deltas, operation snapshot и overlay rendering</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.11 -->
-  <div class="release" id="v1-3-11">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.11</span>
     </div>
@@ -1109,7 +1312,6 @@
           Follow-up hotfix после review 1.3.10: retry/backoff теперь сохраняет ожидаемое поведение в edge cases.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1118,21 +1320,20 @@
           <li>Retry-таймеры LLM корректно перевооружаются для новой попытки после pre-text provider activity</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li><code>enqueue()</code> не ставит debounce timer, пока target queue уже flushing; post-flush scheduling выбирает backoff</li>
           <li>Retry gating в operations снова опирается на первый text chunk, а provider activity остаётся отдельным сигналом для TTFB/idle timers</li>
           <li>Убран недостижимый <code>60s</code> Agency Hub retry delay при <code>MAX_ATTEMPTS = 3</code></li>
           <li>Добавлены regression tests для enqueue-during-flush и service_unavailable после provider progress до текста</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.10 -->
-  <div class="release" id="v1-3-10">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.10</span>
     </div>
@@ -1142,7 +1343,6 @@
           Hotfix для reasoning stream, provider-aware ключей и Agency Hub usage retry.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1152,8 +1352,8 @@
           <li>Из bundled Lora personality убран TODO-placeholder цен, чтобы он не попадал в prompt</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li><code>llm-ttfb</code> завершается на первый provider event/progress/reasoning signal, а первый text chunk по-прежнему только добавляет текст в UI</li>
           <li>Capability rules для Anthropic adaptive thinking и OpenRouter Gemini thinking вынесены в общий helper</li>
@@ -1161,13 +1361,12 @@
           <li>Agency Hub AI usage reporter requeue'ит failed/thrown batches с bounded retry/backoff и max attempts</li>
           <li>Добавлены regression tests для timeout, provider-aware key gating, OpenRouter reasoning, Options reasoning capabilities, bundled prompt text и usage reporter retries</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.9 -->
-  <div class="release" id="v1-3-9">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.9</span>
     </div>
@@ -1179,7 +1378,6 @@
           <code>Max</code>.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1188,20 +1386,19 @@
           <li>Claude-запросы с reasoning теперь используют <code>thinking.display = "summarized"</code>, чтобы <code>Reasoning observed</code> мог увидеть thinking-событие в stream</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Reply-текст по-прежнему берётся только из <code>text_delta</code>, поэтому summarized thinking не вставляется в чат</li>
           <li>Для OpenRouter Gemini значение <code>Max</code> безопасно мапится в <code>high</code></li>
           <li>Обновлены regression tests для Claude adaptive request body, OpenRouter Gemini mapping, storage и Options UI</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.8 -->
-  <div class="release" id="v1-3-8">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.8</span>
     </div>
@@ -1212,7 +1409,6 @@
           чтобы её было видно после генерации без live log.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1220,19 +1416,18 @@
           <li>Больше не нужно ловить live profiling log во время генерации: статус reasoning виден рядом с usage/cost/stages</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Completed overlay summary извлекает reasoning-события из profiling <code>logEntries</code> и рендерит их как обычные profiling rows</li>
           <li>Добавлен regression test на отображение reasoning rows в completed overlay</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.7 -->
-  <div class="release" id="v1-3-7">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.7</span>
     </div>
@@ -1243,7 +1438,6 @@
           stream, а не только выбран в настройках.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1252,20 +1446,19 @@
           <li>Теперь можно отличить “reasoning был включён в request body” от “adaptive thinking реально сработал в этом ответе”</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Anthropic и OpenRouter stream parsers прокидывают <code>onReasoningObserved</code></li>
           <li>Operation и Compare profiling логируют первый observed reasoning signal и явное <code>no</code>, если reasoning был запрошен, но stream не содержал reasoning-событий</li>
           <li>Добавлены regression tests на stream-level reasoning detection и profiling log</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.6 -->
-  <div class="release" id="v1-3-6">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.6</span>
     </div>
@@ -1277,7 +1470,6 @@
           thinking несовместим с temperature modifications.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1286,19 +1478,18 @@
           <li>Если reasoning выключен через <code>Off</code> или выбранная Claude-модель не поддерживает adaptive thinking, temperature продолжает использоваться как раньше</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Request body для Anthropic теперь собирается условно: <code>temperature</code> добавляется только когда <code>thinking</code> не отправляется</li>
           <li>Добавлены regression checks, что adaptive requests содержат <code>thinking/output_config</code>, но не содержат <code>temperature</code></li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.5 -->
-  <div class="release" id="v1-3-5">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.5</span>
     </div>
@@ -1309,7 +1500,6 @@
           отдельно управлять reasoning effort для каждой feature-модели.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1320,21 +1510,20 @@
           <li><code>Off</code> полностью убирает thinking/reasoning config из запроса для поддерживаемых моделей</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Добавлен <code>settings.featureReasoning</code> со storage schema <code>7</code>; старые настройки автоматически получают <code>medium</code></li>
           <li>Anthropic Direct и OpenRouter clients теперь принимают явный <code>reasoningEffort</code> вместо feature-hardcode</li>
           <li>Для неподдерживаемых моделей thinking config по-прежнему не отправляется, чтобы не ловить provider errors</li>
           <li>Добавлены regression tests для storage migration, Options UI, Anthropic adaptive thinking и OpenRouter Gemini thinking</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.4 -->
-  <div class="release" id="v1-3-4">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.4</span>
     </div>
@@ -1346,7 +1535,6 @@
           финальный текст.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1356,20 +1544,19 @@
           <li>Adaptive-mode caps подняты до больших потолков: <code>8000</code> для коротких replies, <code>16000</code> для Help/Review и <code>24000</code> для Summary</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Adaptive thinking включается только для <code>claude-sonnet-4-6</code> и <code>claude-opus-4-6</code></li>
           <li>Claude 4.5 и Haiku 4.5 остаются в обычном режиме, чтобы не отправлять неподдерживаемый adaptive config</li>
           <li>Добавлены regression tests на Claude adaptive request body, большие caps и fallback без thinking для неподдерживаемых Claude-моделей</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.3 -->
-  <div class="release" id="v1-3-3">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.3</span>
     </div>
@@ -1381,7 +1568,6 @@
           и незавершённые ответы.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1391,21 +1577,20 @@
           <li>Если модель вернула только meta-текст или поток закончился по <code>max_tokens</code>, ChatGoose показывает понятную ошибку и просит regenerate вместо вставки битого текста</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Добавлен общий <code>reply-output</code> normalizer для background и content UI</li>
           <li>OpenRouter и Anthropic stream clients теперь прокидывают <code>stop_reason</code> в операции</li>
           <li>Compare cards больше не показывают raw leaked output, если после sanitizer не осталось пригодных частей</li>
           <li>Добавлены regression tests на Gemini leak, short replies, variant splitting, <code>max_tokens</code> и unusable-output ошибки</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.2 -->
-  <div class="release" id="v1-3-2">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.2</span>
     </div>
@@ -1416,7 +1601,6 @@
           более устойчивый parsing OpenRouter stream и preflight warning для OpenRouter API key.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1427,21 +1611,20 @@
           <li>Если выбрана OpenRouter-модель и ключей вообще нет, preflight toast теперь просит OpenRouter API key, а не Claude key</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li><code>OpenRouterClient</code> выводит effective event из <code>payload.type</code> для Anthropic Messages stream</li>
           <li>OpenAI chat-completion chunks на <code>/api/v1/messages</code> по-прежнему reject'ятся как unsupported shape</li>
           <li><code>TabUiState</code> получил provider map по feature models для provider-aware content preflight</li>
           <li>Добавлены regression tests для Opus pricing, OpenRouter data-only SSE frames, OpenRouter stream errors и OpenRouter missing-key toast</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.1 -->
-  <div class="release" id="v1-3-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.1</span>
     </div>
@@ -1452,7 +1635,6 @@
           Расходы, debug-профилирование и ошибки API key теперь больше не используют Claude-лейблы там, где выбран OpenRouter.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1463,8 +1645,8 @@
           <li>Grok cache-read pricing помечен approximate, пока cache-read цена не подтверждена надёжным source</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title fixed"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Provider-neutral контракт переведён на <code>llmSpend</code>, <code>llmUsage</code>, <code>llmCost</code></li>
           <li>Удалены legacy <code>anthropic*</code> aliases из payload/profiling contract</li>
@@ -1472,13 +1654,12 @@
           <li>OpenRouter adapter поддерживает Anthropic-shaped и OpenAI-shaped usage payloads</li>
           <li>Unsupported OpenRouter SSE chunk shapes теперь дают ошибку вместо silent empty success</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.3.0 -->
-  <div class="release" id="v1-3-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.3.0</span>
     </div>
@@ -1490,7 +1671,6 @@
           сам отправляет запрос нужному провайдеру.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1513,8 +1693,8 @@
           <li>OpenRouter-модели не подменяются Claude автоматически: выбранная модель остаётся явной</li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title fixed"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title fixed"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li>Новые сохранённые model ids теперь provider-aware: <code>anthropic:...</code> и <code>openrouter:...</code></li>
           <li>Старые bare Claude ids вроде <code>claude-sonnet-4-6</code> остаются совместимыми и нормализуются автоматически</li>
@@ -1525,13 +1705,12 @@
           <li>Для Grok 4.3 оценка стоимости помечается approximate: OpenRouter может применять tiered pricing выше 200k total tokens</li>
           <li><code>x-ai/grok-4.20</code> — поддерживаемый slug. <code>x-ai/grok-4.2</code> не используется и не добавлен</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.2.17 -->
-  <div class="release" id="v1-2-17">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.2.17</span>
     </div>
@@ -1549,7 +1728,6 @@
           если доказательств не хватает, статус остаётся <code>unknown</code>.
         </p>
       </div>
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Главное</div>
         <ul class="changes-list">
@@ -1569,8 +1747,8 @@
           <li>Промпты <code>fast-reply</code>, <code>improve-draft</code>, <code>help-me</code> и <code>ping</code> теперь прямо говорят AI не цитировать PPV-цены/теги фану и не утверждать «купил» или «не купил» при <code>unknown</code></li>
         </ul>
       </div>
-      <details class="change-group tech-group">
-        <summary class="change-group-title improved"><span class="dot"></span> Технически</summary>
+      <div class="change-group">
+        <div class="change-group-title improved"><span class="dot"></span> Технически</div>
         <ul class="changes-list">
           <li><code>normalizeTranscript()</code> принимает <code>PurchaseEvidenceOverride</code>: inline <code>/message.accountMediaOrders[]</code> даёт только positive proof, а <code>checkedNotPurchased*</code> приходит только из exact verifier</li>
           <li>Inline single засчитывается только как <code>accountId === fanAccountId + type === 1 + accountMediaId</code>; inline bundle — только <code>type === 2 + accountMediaId</code>. Type-less <code>accountMediaId</code> из обычного inline payload не считается покупкой</li>
@@ -1580,18 +1758,16 @@
           <li>Любая неполная проверка — cap overflow, timeout, malformed response или API error — fail-open'ится в <code>unknown</code>, а не ломает операцию и не превращается в <code>not purchased</code></li>
           <li><code>session-capture</code> теперь знает route key для <code>/api/v1/media/orderhistory</code>, чтобы session/auth check брался из правильного Fansly route</li>
         </ul>
-      </details>
-      </details>
+      </div>
     </div>
   </div>
 
   <!-- 1.2.15 -->
-  <div class="release" id="v1-2-15">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.2.15</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
@@ -1600,17 +1776,15 @@
           <li>В транскрипте платные вложения помечаются статусом «куплено», «заблокировано» или «неизвестно»; при неизвестном статусе AI не делает уверенных утверждений о покупке</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.2.2 -->
-  <div class="release" id="v1-2-2">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.2.2</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Улучшено</div>
         <ul class="changes-list">
@@ -1618,34 +1792,30 @@
           <li>Настройки и документация для Deep-фич синхронизированы с реальным дефолтом 1500 и диапазоном 100–3000</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.2.1 -->
-  <div class="release" id="v1-2-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.2.1</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
           <li>Исправлен endpoint отправки AI usage batch в Agency Hub: теперь используется корректный путь <code>/api/v1/ai-usage/batch</code></li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.2.0 -->
-  <div class="release" id="v1-2-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.2.0</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -1667,17 +1837,15 @@
           <li>Ошибочные и прерванные операции больше не могут случайно попадать в usage-статистику</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.6 -->
-  <div class="release" id="v1-1-6">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.6</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Улучшено</div>
         <ul class="changes-list">
@@ -1685,17 +1853,15 @@
           <li>Лимит сообщений для Deep-фич увеличен до 1500 (макс. 2000)</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.5 -->
-  <div class="release" id="v1-1-5">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.5</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Улучшено</div>
         <ul class="changes-list">
@@ -1703,17 +1869,15 @@
           <li>Оптимизирован prompt caching для пингов — быстрее и дешевле</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.4 -->
-  <div class="release" id="v1-1-4">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.4</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -1721,51 +1885,45 @@
           <li>Ссылки на changelog со страниц установки и руководства</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.3 -->
-  <div class="release" id="v1-1-3">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.3</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title improved"><span class="dot"></span> Улучшено</div>
         <ul class="changes-list">
           <li>Бот теперь старается задавать вопрос в конце сообщения, чтобы поддерживать диалог с фаном</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.2 -->
-  <div class="release" id="v1-1-2">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.2</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title fixed"><span class="dot"></span> Исправлено</div>
         <ul class="changes-list">
           <li>Навигация в руководстве больше не прыгает при скролле</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.1 -->
-  <div class="release" id="v1-1-1">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.1</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -1778,17 +1936,15 @@
           <li>Навигационные ссылки больше не наезжают друг на друга на планшетах</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.1.0 -->
-  <div class="release" id="v1-1-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.1.0</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Новое</div>
         <ul class="changes-list">
@@ -1798,17 +1954,15 @@
           <li>Автоматический деплой Firefox-расширения</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
   <!-- 1.0.0 -->
-  <div class="release" id="v1-0-0">
+  <div class="release">
     <div class="release-header">
       <span class="release-version">1.0.0</span>
     </div>
     <div class="release-changes">
-      <details class="release-detail"><summary class="release-detail-toggle">Подробнее</summary>
       <div class="change-group">
         <div class="change-group-title new"><span class="dot"></span> Первый релиз</div>
         <ul class="changes-list">
@@ -1824,33 +1978,20 @@
           <li>Поддержка Firefox и Chrome</li>
         </ul>
       </div>
-      </details>
     </div>
   </div>
 
 </div>
+
+<!-- ─── Footer ────────────────────────────────────────────────────────── -->
 
 <footer class="footer">
   <div class="footer-brand">
     <img src="mascot.png" alt="ChatGoose">
     <span>ChatGoose</span>
   </div>
-  <p>v1.7.1 &middot; Gosling Agency &middot; Kernel-served AI</p>
+  <p>v1.9.11 &middot; Gosling Agency &middot; Kernel-served AI</p>
 </footer>
-
-<script>
-  // Progressive enhancement (spec §11): expand the latest three releases at load.
-  // Every card ships collapsed in the markup; this opens only the newest three.
-  // No-JS = all cards collapsed to their (readable) serif summaries — acceptable.
-  // A release adds one card at the top; the "first three" recompute automatically,
-  // so no per-card markup ever has to move — zero churn on release.
-  document.querySelectorAll('.release').forEach(function (release, i) {
-    if (i < 3) {
-      var d = release.querySelector('details.release-detail');
-      if (d) { d.open = true; }
-    }
-  });
-</script>
 
 </body>
 </html>

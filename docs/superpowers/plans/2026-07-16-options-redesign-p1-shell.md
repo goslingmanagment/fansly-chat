@@ -1,5 +1,9 @@
 # Options Redesign P1 — Shell & Vocabulary Implementation Plan
 
+> **Release status (2026-07-18): deferred to 2.0.** This work appeared in
+> 1.9.10 by mistake and was removed from production by 1.9.11. Continue from
+> `release/2.0-options`; it is not part of the 1.9.x release line (E44).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Rev 5** — second double-blind toolkit pass (7 unique findings, all fixed): `scrollRoot` dropped from `buildShell` (unused param = lint error); scrollspy activates the FIRST section at mount deterministically (real scrolls recompute); the fonts test uses `Uint8Array` + numeric wOF2 magic and extends the `node:fs` shim in `src/env.d.ts` (the real shim site — `Buffer` does not exist in this repo's types); the copy audit uses `rg` (BSD grep has no `-P`), sweeps `createSection(...)` description args and BOTH `UserFacingError` fields, and adds a rendered-DOM English-blocklist test; the personas empty state stops promising an impossible action (editing is frozen until core #151); the permission badge is computed ONCE before the early returns (7 exit paths — no stuck «…» placeholder) with a granted-but-no-credential test; the newest-wins fixture pins its order (newer FIRST) plus a direct unit test for `sessions.ts`.

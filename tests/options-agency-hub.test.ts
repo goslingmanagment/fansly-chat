@@ -1,11 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { createBundledPersonalities } from '../src/shared/personalities.js';
-import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
 
 let dom: InstanceType<typeof JSDOM>;
@@ -127,7 +125,7 @@ function getSectionByTitle(title: string): HTMLElement {
 
 function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
   const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) => candidate.textContent?.includes('Разрешить доступ'),
+    (candidate) => candidate.textContent?.includes('Grant Access'),
   );
   if (!button) {
     throw new Error('Missing Agency Hub access button');
@@ -137,18 +135,11 @@ function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
 
 function getTestConnectionButton(section: HTMLElement): HTMLButtonElement {
   const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) => candidate.textContent?.includes('Проверить соединение'),
+    (candidate) => candidate.textContent?.includes('Test Connection'),
   );
   if (!button) {
     throw new Error('Missing Agency Hub test connection button');
   }
-  return button;
-}
-
-function getSignOutButton(section: HTMLElement): HTMLButtonElement {
-  const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button'))
-    .find((candidate) => candidate.textContent === 'Выйти');
-  if (!button) throw new Error('Missing «Выйти» button');
   return button;
 }
 
@@ -198,7 +189,7 @@ async function loadOptionsPage(
             error: {
               key: 'hub_request_failed',
               code: 'CG-HUB-07',
-              message: 'Запрос к Agency Hub не удался.',
+              message: 'Agency Hub request failed.',
             },
           };
         }
@@ -242,7 +233,7 @@ describe('Options page - Agency Hub section', () => {
 
     expect(urlInput?.value).toBe('http://localhost:3000');
     expect(keyInput?.value).toBe('hub-key');
-    expect(section.textContent).toContain('Синк отключён: доступ к хосту не выдан.');
+    expect(section.textContent).toContain('Sync disabled: host access not granted.');
     expect(section.textContent).toContain('http://localhost/*');
     expect(permissionsContains).toHaveBeenCalled();
   });
@@ -316,7 +307,7 @@ describe('Options page - Agency Hub section', () => {
     storageDeferred.resolve();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Доступ к хосту выдан.');
+      expect(section.textContent).toContain('Host access granted.');
       // Readiness is claimed only by the live connection test, never by the
       // local permission check (they contradicted each other on screen).
       expect(section.textContent).not.toContain('Sync ready');
@@ -334,8 +325,8 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Синк отключён: доступ к хосту не выдан.');
-      expect(section.textContent).toContain('Firefox не выдал доступ к http://localhost/*.');
+      expect(section.textContent).toContain('Sync disabled: host access not granted.');
+      expect(section.textContent).toContain('Firefox did not grant access for http://localhost/*.');
     }, { timeout: 2000 });
   });
 
@@ -354,7 +345,7 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Синк отключён: не удалось запросить доступ к хосту.');
+      expect(section.textContent).toContain('Sync disabled: failed to request host access.');
       expect(section.textContent).toContain('May only request permissions from a user input handler');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
@@ -384,9 +375,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Соединение OK ✓');
+      expect(section.textContent).toContain('Connected ✓');
       expect(section.textContent).toContain(
-        'Живой тест соединения прошёл: http://localhost:3000.',
+        'Live connection test succeeded for http://localhost:3000.',
       );
     }, { timeout: 2000 });
 
@@ -421,9 +412,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Соединение не удалось: CG-HUB-07');
-      expect(section.textContent).toContain('Запрос к Agency Hub не удался.');
-      expect(section.textContent).toContain('Hub вернул ошибку или недоступен.');
+      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
+      expect(section.textContent).toContain('Agency Hub request failed.');
+      expect(section.textContent).toContain('The Hub returned an error or could not be reached.');
     }, { timeout: 2000 });
   });
 
@@ -454,9 +445,9 @@ describe('Options page - Agency Hub section', () => {
     const button = getTestConnectionButton(section);
 
     expect(button.disabled).toBe(true);
-    expect(section.textContent).toContain('Ещё не проверялось.');
+    expect(section.textContent).toContain('Not tested yet.');
     expect(section.textContent).toContain(
-      'Сохрани адрес Hub и ключ, чтобы запустить живой тест соединения.',
+      'Save a Hub URL and API key to run a live connection test.',
     );
     expect(runtimeSendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -484,9 +475,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Соединение не удалось: CG-HUB-07');
-      expect(section.textContent).toContain('Запрос к Agency Hub не удался.');
-      expect(section.textContent).toContain('Не удалось выполнить проверку соединения.');
+      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
+      expect(section.textContent).toContain('Agency Hub request failed.');
+      expect(section.textContent).toContain('The connection test could not be completed.');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
       'Agency Hub connection test failed',
@@ -508,8 +499,8 @@ describe('Options page - Agency Hub section', () => {
           error: {
             key: 'hub_invalid_api_key',
             code: 'CG-HUB-03',
-            message: 'Ключ Agency Hub недействителен.',
-            description: 'Проверь ключ в настройках Agency Hub и попробуй снова.',
+            message: 'Agency Hub API key is invalid.',
+            description: 'Check the key in Agency Hub settings and try again.',
             httpStatus: 401,
             serverDetail: '{"message":"Unauthorized"}',
           },
@@ -543,17 +534,13 @@ describe('Options page - Agency Hub section', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
       });
       expect(savedCustody).toEqual({ agencyHubApiKey: 'invalid-key' });
-      expect(section.textContent).toContain('Соединение не удалось: CG-HUB-03');
-      expect(section.textContent).toContain('Ключ Agency Hub недействителен.');
-      expect(section.textContent).toContain('Проверь ключ в настройках Agency Hub и попробуй снова.');
-      expect(section.textContent).toContain('Hub ответил 401: {"message":"Unauthorized"}');
+      expect(section.textContent).toContain('Connection failed: CG-HUB-03');
+      expect(section.textContent).toContain('Agency Hub API key is invalid.');
+      expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
+      expect(section.textContent).toContain('Hub responded 401: {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
-    // Not `toHaveBeenLastCalledWith`: a persisted hub change now re-hydrates the
-    // Статус rows (getAgencyHubHealth/getAgencyHubIdentity) AFTER the connection
-    // test, so the test call is no longer the final runtime message. The intent
-    // here is that the connection test carried the right settings.
-    expect(runtimeSendMessage).toHaveBeenCalledWith({
+    expect(runtimeSendMessage).toHaveBeenLastCalledWith({
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',
@@ -561,544 +548,5 @@ describe('Options page - Agency Hub section', () => {
         agencyHubDeviceToken: '',
       },
     });
-  });
-
-  it('renders the hub section as labeled rows with a permission badge', async () => {
-    await loadOptionsPage(makeState());
-
-    const section = getSectionByTitle('Agency Hub');
-    const labels = Array.from(section.querySelectorAll('.chatgoose-lrow-label'), (n) => n.textContent);
-    expect(labels).toEqual(['Адрес Hub', 'Вход устройства', 'Доступ Firefox']);
-    expect(section.querySelector('[data-hub-permission-badge]')).not.toBeNull();
-  });
-
-  it('legacy key lives inside a collapsed details block and permission status text survives', async () => {
-    await loadOptionsPage(makeState());
-
-    const section = getSectionByTitle('Agency Hub');
-    const details = section.querySelector('details.chatgoose-hub-legacy') as HTMLDetailsElement;
-    expect(details.open).toBe(false);
-    expect(details.querySelector('summary')?.textContent).toContain('Legacy chatter key');
-    expect(details.querySelector('input[type="password"]')).not.toBeNull();
-    // the status node all permission states write to is still rendered:
-    expect(section.textContent).toContain('Синк отключён'); // Task-9 Russian state text
-  });
-
-  it('a failed permission check shows «не удалось проверить», not «не выдан»', async () => {
-    await loadOptionsPage(makeState(), {
-      permissionsContainsImpl: async () => {
-        throw new Error('permissions.contains blew up');
-      },
-    });
-
-    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
-    expect(badge?.textContent).toBe('не удалось проверить');
-    expect(badge?.className).toContain('chatgoose-badge-neutral');
-  });
-
-  it('permission badge shows разрешён when host access is granted but no credential is set', async () => {
-    await loadOptionsPage(makeState({
-      agencyHubApiKey: '',
-      agencyHubDeviceToken: '',
-    }), {
-      permissionsContainsImpl: async () => true,
-    });
-
-    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
-    expect(badge?.textContent).toBe('разрешён');
-    expect(badge?.className).toContain('chatgoose-badge-green');
-  });
-
-  it('permission badge shows не выдан when the origin is valid but access is not granted', async () => {
-    await loadOptionsPage(makeState(), {
-      permissionsContainsImpl: async () => false,
-    });
-
-    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
-    expect(badge?.textContent).toBe('не выдан');
-    expect(badge?.className).toContain('chatgoose-badge-amber');
-  });
-
-  it('permission badge shows нет адреса when the Hub URL is empty', async () => {
-    await loadOptionsPage(makeState({ agencyHubBaseUrl: '' }));
-
-    const badge = getSectionByTitle('Agency Hub').querySelector('[data-hub-permission-badge]');
-    expect(badge?.textContent).toBe('нет адреса');
-    expect(badge?.className).toContain('chatgoose-badge-neutral');
-  });
-});
-
-describe('Options page - device-token sign-out (P3)', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    installDom();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it('mounts signed-OUT without a ReferenceError: renderHubSignInState runs at mount', async () => {
-    // Pins the TDZ fix: the first renderHubSignInState() reads hubSignInRow and
-    // hubSignedInBlock, so both must be constructed ABOVE that call. If they are
-    // not, the module throws at mount and this load never resolves the section.
-    await loadOptionsPage(makeState()); // default agencyHubDeviceToken: '' → signed out
-    const section = getSectionByTitle('Agency Hub');
-    const userInput = section.querySelector('input[autocomplete="username"]') as HTMLInputElement;
-    expect(userInput.closest('[hidden]')).toBeNull(); // sign-in row visible while signed out
-    expect(section.querySelector('[data-role="hub-signed-in"]')?.hasAttribute('hidden')).toBe(true);
-  });
-
-  it('signed-in state shows the active badge, a masked token line and «Выйти»; hides sign-in inputs', async () => {
-    await loadOptionsPage(makeState({ agencyHubDeviceToken: 'agency_hub_device_abcdef0123456789' }));
-    const section = getSectionByTitle('Agency Hub');
-    expect(section.querySelector('.chatgoose-badge-green')?.textContent).toBe('активен');
-    expect(section.querySelector('[data-role="hub-token-line"]')?.textContent)
-      .toContain('продлевается при работе');
-    expect(section.querySelector('[data-role="hub-token-line"]')?.textContent)
-      .not.toContain('agency_hub_device_abcdef0123456789'); // masked prefix, no full token
-    expect(section.querySelector('[data-role="hub-identity-line"]')).not.toBeNull(); // identity line present
-    const userInput = section.querySelector('input[autocomplete="username"]') as HTMLInputElement;
-    expect(userInput.closest('[hidden]')).not.toBeNull(); // sign-in row hidden while signed in
-    getSignOutButton(section); // present
-  });
-
-  it('both sign-in blocks share the toggle class AND styles.css hides it at author origin (Finding 1)', async () => {
-    await loadOptionsPage(makeState());
-    const section = getSectionByTitle('Agency Hub');
-    // The sign-in row (wrapping username/password/«Войти») and the signed-in
-    // block both carry the shared toggle class…
-    const signInRow = section
-      .querySelector('input[autocomplete="username"]')!
-      .closest('.chatgoose-hub-signin-toggle');
-    const signedInBlock = section.querySelector('[data-role="hub-signed-in"]');
-    expect(signInRow).not.toBeNull();
-    expect(signedInBlock?.classList.contains('chatgoose-hub-signin-toggle')).toBe(true);
-    // …and because each carries an inline display (flex/grid) that beats the UA
-    // [hidden] rule, the .hidden attribute alone would not hide them: assert the
-    // author-origin !important override that actually restores hiding exists.
-    const styles = readFileSync(new URL('../src/options/styles.css', import.meta.url), 'utf8');
-    expect(styles).toMatch(
-      /\.chatgoose-hub-signin-toggle\[hidden\]\s*\{[^}]*display:\s*none\s*!important/,
-    );
-  });
-
-  it('«Выйти»: successful revoke wipes both custody keys to EMPTY strings and reports it', async () => {
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc', agencyHubApiKey: 'legacy-key' }),
-      { runtimeSendMessageImpl: async (message) => {
-          if (message.type === 'signOutAgencyHub') {
-            // Stand-in for the background: the REAL handler wipes custody itself
-            // (Task 2); the page harness's mock must mirror that write so
-            // savedCustody observes it.
-            savedCustody.agencyHubDeviceToken = '';
-            savedCustody.agencyHubApiKey = '';
-            return { outcome: 'revoked' };
-          }
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        } },
-    );
-    const section = getSectionByTitle('Agency Hub');
-    getSignOutButton(section).click();
-    await vi.waitFor(() => {
-      expect(savedCustody.agencyHubDeviceToken).toBe(''); // EMPTY string, not undefined/absent
-      expect(savedCustody.agencyHubApiKey).toBe('');
-    });
-    expect(section.textContent).toContain('отозван на хабе');
-  });
-
-  it('«Выйти»: already-invalid says the token was invalid/absent (never fabricates a 401), and still wipes', async () => {
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
-      { runtimeSendMessageImpl: async (message) => {
-          if (message.type === 'signOutAgencyHub') {
-            savedCustody.agencyHubDeviceToken = '';
-            return { outcome: 'already-invalid' };
-          }
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        } },
-    );
-    const section = getSectionByTitle('Agency Hub');
-    getSignOutButton(section).click();
-    await vi.waitFor(() => expect(savedCustody.agencyHubDeviceToken).toBe(''));
-    // already-invalid also covers 403 and the no-token case, so «401» must NOT
-    // be hard-coded into the copy.
-    expect(section.textContent).toContain('Token уже недействителен или отсутствует — стёрт локально.');
-    expect(section.textContent).not.toContain('401');
-  });
-
-  it('«Выйти»: an unreachable hub wipes locally and says the token dies by sliding-expiry', async () => {
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
-      { runtimeSendMessageImpl: async (message) => {
-          if (message.type === 'signOutAgencyHub') {
-            savedCustody.agencyHubDeviceToken = '';
-            return { outcome: 'unreachable' };
-          }
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        } },
-    );
-    const section = getSectionByTitle('Agency Hub');
-    getSignOutButton(section).click();
-    await vi.waitFor(() => expect(savedCustody.agencyHubDeviceToken).toBe(''));
-    expect(section.textContent).toContain('sliding-expiry');
-  });
-
-  it('«Выйти»: a failed LOCAL wipe (background outcome) shows the red saved-flash and keeps the signed-in block', async () => {
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
-      { runtimeSendMessageImpl: async (message) => {
-          // The background reports its own storage failure — the token is still on
-          // disk, so the mock does NOT touch savedCustody.
-          if (message.type === 'signOutAgencyHub') return { outcome: 'wipe-failed' };
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        } },
-    );
-    const flash = document.querySelector('[data-saved-flash]') as HTMLElement;
-    const section = getSectionByTitle('Agency Hub');
-    getSignOutButton(section).click();
-    await vi.waitFor(() => {
-      expect(flash.className).toContain('chatgoose-saved-flash-bad');
-    });
-    // Credentials are still present → the signed-in block stays up.
-    expect(section.querySelector('[data-role="hub-signed-in"]')?.hasAttribute('hidden')).toBe(false);
-  });
-
-  it('signed-in block renders the identity line (username · role · pages) from P2 statusModel', async () => {
-    // The page harness answers P2's getAgencyHubIdentity (fired by
-    // hydrateHubStatusRows at mount); P3's line is a pure reader of the
-    // resulting statusModel.identity — pages is string[] per the P2 contract.
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
-      { runtimeSendMessageImpl: async (message) => {
-          if (message.type === 'getAgencyHubIdentity') {
-            return { ok: true, username: 'nova', role: 'chatter', pages: ['Mia', 'Lina', 'Ari'] };
-          }
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        } },
-    );
-    const section = getSectionByTitle('Agency Hub');
-    await vi.waitFor(() => {
-      expect(section.querySelector('[data-role="hub-identity-line"]')?.textContent)
-        .toBe('nova · chatter · страниц: 3');
-    });
-  });
-
-  it('identity line falls back to «identity недоступна» when getAgencyHubIdentity fails', async () => {
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc' }),
-      { runtimeSendMessageImpl: async (message) => {
-          if (message.type === 'getAgencyHubIdentity') {
-            return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-          }
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        } },
-    );
-    const section = getSectionByTitle('Agency Hub');
-    await vi.waitFor(() => {
-      expect(section.querySelector('[data-role="hub-identity-line"]')?.textContent)
-        .toBe('identity недоступна');
-    });
-  });
-
-  it('«Выйти» AWAITS the in-flight save chain: a pending key edit lands first, the wipe lands last', async () => {
-    const releaseStaleWrite = createDeferred<void>();
-    let sawStaleWrite = false;
-    let signOutServed = false;
-    await loadOptionsPage(
-      makeState({ agencyHubDeviceToken: 'agency_hub_device_abc', agencyHubApiKey: 'old-key' }),
-      {
-        runtimeSendMessageImpl: async (message) => {
-          if (message.type === 'signOutAgencyHub') {
-            // The handler must be reached only AFTER the page's own chain settled —
-            // i.e. after the held stale write was released and committed.
-            signOutServed = true;
-            expect(sawStaleWrite).toBe(true);
-            savedCustody.agencyHubDeviceToken = '';
-            savedCustody.agencyHubApiKey = '';
-            return { outcome: 'revoked' };
-          }
-          if (message.type === 'getAgencyHubIdentity') {
-            return { ok: true, username: 'u', role: 'chatter', pages: ['p'] };
-          }
-          if (message.type === 'getSessionsSnapshot') return [];
-          return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-        },
-        // Hold the in-flight edited-key write open across the «Выйти» click: the
-        // handler must WAIT for it (preserving the edit's place in the chain), not
-        // race it — the background wipe then lands strictly afterwards.
-        storageSetImpl: async (data) => {
-          if (!sawStaleWrite
-              && Object.prototype.hasOwnProperty.call(data, 'agencyHubApiKey')
-              && data.agencyHubApiKey === 'edited-key') {
-            sawStaleWrite = true;
-            await releaseStaleWrite.promise;
-          }
-        },
-      },
-    );
-    const section = getSectionByTitle('Agency Hub');
-    const keyInput = section.querySelector('input[aria-label="Legacy chatter key"]') as HTMLInputElement;
-    keyInput.value = 'edited-key';
-    keyInput.dispatchEvent(new Event('input'));
-    keyInput.dispatchEvent(new Event('change'));   // flush → the persist is now in flight (held)
-    getSignOutButton(section).click();             // must await the chain, not bypass it
-    expect(signOutServed).toBe(false);             // still waiting on the held write
-    releaseStaleWrite.resolve();
-    await vi.waitFor(() => {
-      expect(signOutServed).toBe(true);
-      // Final custody state: the wipe is the last word.
-      expect(savedCustody.agencyHubApiKey).toBe('');
-      expect(savedCustody.agencyHubDeviceToken).toBe('');
-    });
-    // pagehide after sign-out must not replay the key: dirty flags were cleared.
-    window.dispatchEvent(new Event('pagehide'));
-    expect(savedCustody.agencyHubApiKey).toBe('');
-  });
-
-  it('«Выйти» FLUSHES a not-yet-committed <350ms edit before wiping (Finding 2: no lost edit)', async () => {
-    const state = makeState({
-      agencyHubDeviceToken: 'agency_hub_device_abc',
-      agencyHubApiKey: 'legacy-key',
-    });
-    await loadOptionsPage(state, {
-      runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'signOutAgencyHub') {
-          savedCustody.agencyHubDeviceToken = '';
-          savedCustody.agencyHubApiKey = '';
-          return { outcome: 'revoked' };
-        }
-        if (message.type === 'getSessionsSnapshot') return [];
-        return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-      },
-    });
-    const section = getSectionByTitle('Agency Hub');
-    const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
-    // An edit with ONLY an input event — no change/blur — so the 350ms debounce
-    // has not fired when we sign out immediately. The old cancel() dropped this
-    // pending snapshot; flushSettingsSave() must run it first.
-    urlInput.value = 'http://localhost:9999';
-    urlInput.dispatchEvent(new Event('input'));
-    getSignOutButton(section).click();
-    await vi.waitFor(() => {
-      // The pending edit was flushed (persisted), not silently dropped…
-      expect(savedSettings).toMatchObject({ agencyHubBaseUrl: 'http://localhost:9999' });
-      // …and custody was still wiped.
-      expect(savedCustody.agencyHubDeviceToken).toBe('');
-      expect(savedCustody.agencyHubApiKey).toBe('');
-    });
-  });
-
-  it('a stale in-flight connection test cannot repaint «Соединение OK» after sign-out (Finding 5)', async () => {
-    const testConnection = createDeferred<{ ok: boolean }>();
-    let testDispatched = false;
-    const state = makeState({
-      agencyHubDeviceToken: 'agency_hub_device_abc',
-      agencyHubApiKey: '',
-    });
-    await loadOptionsPage(state, {
-      permissionsContainsImpl: async () => true,
-      runtimeSendMessageImpl: async (message) => {
-        if (message.type === 'testAgencyHubConnection') {
-          testDispatched = true;
-          return testConnection.promise; // held open across the sign-out
-        }
-        if (message.type === 'signOutAgencyHub') {
-          savedCustody.agencyHubDeviceToken = '';
-          savedCustody.agencyHubApiKey = '';
-          // Reflect the wipe in the storage the page re-reads, so the post-wipe
-          // connection test sees NO inputs and hits the version-bumping branch.
-          state.settings.agencyHubDeviceToken = '';
-          state.settings.agencyHubApiKey = '';
-          return { outcome: 'revoked' };
-        }
-        if (message.type === 'getSessionsSnapshot') return [];
-        return { ok: false, error: { key: 'hub_request_failed', code: 'X', message: 'x' } };
-      },
-    });
-    const section = getSectionByTitle('Agency Hub');
-    // Wait until the mount's auto connection test is in flight (and held).
-    await vi.waitFor(() => expect(testDispatched).toBe(true));
-    // Sign out while that pre-sign-out test is still pending.
-    getSignOutButton(section).click();
-    await vi.waitFor(() => expect(savedCustody.agencyHubDeviceToken).toBe(''));
-    // Now let the STALE test resolve OK — the version bump in the no-input branch
-    // must make it fail its guard and drop, never repainting a live-OK status.
-    testConnection.resolve({ ok: true });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(section.textContent).not.toContain('Соединение OK');
-  });
-});
-
-describe('Options page - persona catalog presentation (P3)', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    installDom();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it('persona row: built-in badge, mono version, mapping count', async () => {
-    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-    const source = personaCatalogSource(base.settings)!; // REAL source; a fake is hidden by migrateState
-    await loadOptionsPage({
-      ...base,
-      personaCatalog: [
-        { key: 'builtin:lora', displayName: 'Lora', version: 3, definitionId: 'definition-id-16chars', status: 'active' },
-      ],
-      accountMappings: { acc1: 'builtin:lora' },
-      personaCatalogSource: source,
-      personaCatalogFetchedAt: new Date().toISOString(),
-    });
-    const section = getSectionByTitle('Персоны');
-    const row = section.querySelector('[data-persona-key="builtin:lora"]') as HTMLElement;
-    expect(row.querySelector('.chatgoose-persona-name')?.textContent).toBe('Lora');
-    expect(Array.from(row.querySelectorAll('.chatgoose-badge'), (b) => b.textContent))
-      .toEqual(['built-in', 'v3']);
-    expect(row.querySelector('.chatgoose-persona-count')?.textContent).toBe('аккаунтов: 1');
-  });
-
-  it('archived persona is shown dimmed with a replacement hint ONLY while referenced', async () => {
-    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-    const source = personaCatalogSource(base.settings)!;
-    await loadOptionsPage({
-      ...base,
-      personaCatalog: [
-        { key: 'old', displayName: 'Old', version: 1, definitionId: 'definition-id-16chars', status: 'archived' },
-        { key: 'gone', displayName: 'Gone', version: 1, definitionId: 'definition-id-abcdef', status: 'archived' },
-      ],
-      accountMappings: { acc1: 'old' }, // 'gone' referenced by nobody
-      personaCatalogSource: source,
-      personaCatalogFetchedAt: new Date().toISOString(),
-    });
-    const section = getSectionByTitle('Персоны');
-    const shown = section.querySelector('[data-persona-key="old"]') as HTMLElement;
-    expect(shown.className).toContain('chatgoose-persona-row-archived');
-    expect(shown.textContent).toContain('выбери замену');
-    expect(section.querySelector('[data-persona-key="gone"]')).toBeNull();
-  });
-
-  it('empty section states are honest, never «персона удалена»', async () => {
-    // no credentials → source is null for both sides
-    await loadOptionsPage({ ...makeState({ agencyHubBaseUrl: '', agencyHubApiKey: '', agencyHubDeviceToken: '' }),
-      personaCatalog: [], personaCatalogSource: null, personaCatalogFetchedAt: null });
-    expect(getSectionByTitle('Персоны').textContent).toContain('подключись к Hub');
-
-    // creds set, catalog NOT yet synced to these creds (rotation/first-load):
-    // stored source null ≠ current source → awaiting-refresh, never «удалена».
-    // The harness caches the module, so re-mount cleanly for the second state.
-    vi.resetModules();
-    installDom();
-    await loadOptionsPage({ ...makeState({ agencyHubDeviceToken: 'agency_hub_device_x' }),
-      personaCatalog: [], personaCatalogSource: null, personaCatalogFetchedAt: null });
-    const rotated = getSectionByTitle('Персоны').textContent ?? '';
-    expect(rotated).toContain('для новых кредов ещё не загружен');
-    expect(rotated).not.toContain('удалена');
-  });
-
-  it('source synced but no fetch confirmed yet (fetchedAt null) → «ещё не загружен», NOT «пустой каталог»', async () => {
-    // clearForSource stamps the new source with fetchedAt null BEFORE any request,
-    // and a FAILED refresh leaves exactly that {source-match, null} triple. Calling
-    // it «пустой каталог» would be dishonest — nothing was fetched. The background
-    // now stamps fetchedAt on every confirmed response (even a byte-identical empty
-    // one), so a null fetchedAt reliably means not-yet-loaded, never server-empty.
-    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-    const source = personaCatalogSource(base.settings)!;
-    await loadOptionsPage({ ...base,
-      personaCatalog: [], personaCatalogSource: source, personaCatalogFetchedAt: null });
-    const notLoaded = getSectionByTitle('Персоны').textContent ?? '';
-    expect(notLoaded).toContain('ещё не загружен');
-    expect(notLoaded).not.toContain('пустой каталог');
-  });
-
-  it('server-confirmed empty (source synced AND a fetch landed, fetchedAt stamped) → «пустой каталог»', async () => {
-    // Only once a fetch has actually confirmed an empty catalog for THESE creds
-    // (source match AND fetchedAt !== null) is «пустой каталог» the honest verdict.
-    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-    const source = personaCatalogSource(base.settings)!;
-    await loadOptionsPage({ ...base,
-      personaCatalog: [], personaCatalogSource: source, personaCatalogFetchedAt: new Date().toISOString() });
-    const confirmed = getSectionByTitle('Персоны').textContent ?? '';
-    expect(confirmed).toContain('пустой каталог');
-    expect(confirmed).not.toContain('ещё не загружен');
-  });
-
-  it('footer reports last-CHANGED catalog time and the frozen-editing truth', async () => {
-    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-    const source = personaCatalogSource(base.settings)!;
-    await loadOptionsPage({ ...base,
-      personaCatalog: [{ key: 'p1', displayName: 'Closer', version: 1, definitionId: 'definition-id-16chars', status: 'active' }],
-      personaCatalogSource: source,
-      personaCatalogFetchedAt: new Date().toISOString() });
-    const section = getSectionByTitle('Персоны');
-    expect(section.querySelector('[data-role="persona-changed"]')?.textContent).toContain('каталог изменялся');
-    expect(section.textContent).toContain('редактирование голосов сейчас заморожено'.replace('р', 'Р'));
-  });
-
-  it('all personas archived AND unreferenced → «Все голоса каталога в архиве.», never «пустой каталог» (Finding 6)', async () => {
-    // Raw catalog is non-empty, but buildPersonaRowViews filters every
-    // archived+unreferenced persona out → zero rows. That is NOT a server-empty
-    // catalog, so «пустой каталог» would be dishonest.
-    const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-    const source = personaCatalogSource(base.settings)!;
-    await loadOptionsPage({ ...base,
-      personaCatalog: [
-        { key: 'a', displayName: 'A', version: 1, definitionId: 'definition-id-16chars', status: 'archived' },
-        { key: 'b', displayName: 'B', version: 1, definitionId: 'definition-id-abcdef', status: 'archived' },
-      ],
-      accountMappings: {}, // nobody references them → all filtered out
-      personaCatalogSource: source,
-      personaCatalogFetchedAt: new Date().toISOString() });
-    const text = getSectionByTitle('Персоны').textContent ?? '';
-    expect(text).toContain('Все голоса каталога в архиве.');
-    expect(text).not.toContain('пустой каталог');
-  });
-
-  it('catalog footer relative time refreshes on the shared minute ticker instead of freezing (Finding 7)', async () => {
-    const fakeNow = Date.parse('2026-07-17T12:00:00Z');
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(fakeNow);
-    const realSetInterval = window.setInterval.bind(window);
-    let ticker: (() => void) | null = null;
-    // Capture the 60s ticker's callback so it can be fired deterministically; the
-    // fix must REUSE this one interval, not add a second.
-    const setIntervalSpy = vi
-      .spyOn(window, 'setInterval')
-      .mockImplementation(((handler: TimerHandler, timeout?: number, ...rest: unknown[]) => {
-        if (timeout === 60_000 && typeof handler === 'function') {
-          ticker = handler as () => void;
-          return 0 as unknown as ReturnType<typeof setInterval>;
-        }
-        return realSetInterval(handler, timeout, ...rest);
-      }) as typeof window.setInterval);
-    try {
-      const base = makeState({ agencyHubDeviceToken: 'agency_hub_device_x' });
-      const source = personaCatalogSource(base.settings)!;
-      await loadOptionsPage({ ...base,
-        personaCatalog: [{ key: 'p1', displayName: 'Closer', version: 1, definitionId: 'definition-id-16chars', status: 'active' }],
-        personaCatalogSource: source,
-        personaCatalogFetchedAt: new Date(fakeNow).toISOString() });
-      const footer = getSectionByTitle('Персоны')
-        .querySelector('[data-role="persona-changed"]') as HTMLElement;
-      expect(footer.textContent).toContain('только что');
-      expect(typeof ticker).toBe('function');
-      // Advance the wall clock 5 minutes and fire the very interval the page set.
-      nowSpy.mockReturnValue(fakeNow + 5 * 60_000);
-      ticker!();
-      expect(footer.textContent).toContain('5 мин назад');
-    } finally {
-      setIntervalSpy.mockRestore();
-      nowSpy.mockRestore();
-    }
   });
 });

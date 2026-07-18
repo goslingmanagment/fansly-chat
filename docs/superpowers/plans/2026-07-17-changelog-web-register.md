@@ -1,5 +1,9 @@
 # Changelog Web-Register — Parallel-Track Implementation Plan
 
+> **Release status (2026-07-18): deferred to 2.0.** This work appeared in
+> 1.9.10 by mistake and was removed from production by 1.9.11. Continue from
+> `release/2.0-options`; it is not part of the 1.9.x release line (E44).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Rev 3** — single-source consolidation (Rev 2's two date/count mechanisms collapse into one committed manifest):
