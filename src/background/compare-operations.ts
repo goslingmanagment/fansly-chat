@@ -772,7 +772,11 @@ export async function executeCompare(
       fanAccountId,
       purchaseEvidence,
     );
+    // UI-facing label (may carry a chatter's private custom fan name via the
+    // DOM fallback). The KERNEL name is account-lookup only (custom-name rule,
+    // spec §4) so a custom name never reaches a prompt.
     let fanDisplayName = payload.domFanDisplayName ?? 'fan';
+    let kernelFanName = 'fan';
     if (fanAccountId) {
       startStage('account-name-lookup', 'Resolve fan display name');
       try {
@@ -787,6 +791,8 @@ export async function executeCompare(
           account?.displayName?.trim() ||
           payload.domFanDisplayName ||
           'fan';
+        kernelFanName =
+          account?.username?.trim() || account?.displayName?.trim() || 'fan';
         completeStage(
           'account-name-lookup',
           `Resolved fan display name: ${fanDisplayName}`,
@@ -988,7 +994,8 @@ export async function executeCompare(
       messageCount: keptMessageCount,
       fanSpendingData: spendingData,
       fanSubscriptionData: subscriptionData,
-      fanDisplayName,
+      // Custom-name rule (spec §4): kernel-facing name is account-lookup only.
+      fanDisplayName: kernelFanName,
       replyMode: payload.replyMode ?? 'default',
       replyTone: payload.replyTone ?? 'none',
     } satisfies {

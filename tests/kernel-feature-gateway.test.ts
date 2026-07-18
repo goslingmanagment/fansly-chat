@@ -149,7 +149,7 @@ describe('kernel feature gateway', () => {
       },
     }), { onText: () => {} }, new AbortController().signal);
 
-    const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, any>;
+    const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
     expect(body).toMatchObject({
       conversationRef: 'group-1',
       fanRef: 'fan-1',
