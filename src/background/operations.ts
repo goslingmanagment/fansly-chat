@@ -322,7 +322,7 @@ function usesDeepOperationTimeouts(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
 
-function buildFeatureResult(
+export function buildFeatureResult(
   feature: FeatureType,
   rawText: string,
   replyMode?: OperationStartPayload['replyMode'],
@@ -332,6 +332,11 @@ function buildFeatureResult(
       return { rawText, helpMe: parseHelpMeXml(rawText) };
     case 'chat-review':
       return { rawText, chatReview: parseChatReviewXml(rawText) };
+    // Coach streams free-form advice; the raw text is the result — no XML
+    // sections, no reply-part splitting. Draft cards (if any) arrive on the
+    // wire via result.parts, handled by the overlay, not synthesized here.
+    case 'coach-chat':
+      return { rawText };
     case 'single-reply':
       return {
         rawText,

@@ -13,7 +13,8 @@ export type FeatureResultKind =
   | 'single-reply'
   | 'help-me'
   | 'summary'
-  | 'chat-review';
+  | 'chat-review'
+  | 'coach-chat';
 
 export interface FeaturePolicy {
   messageCountBucket: FeatureMessageCountBucket;
@@ -114,6 +115,18 @@ export const FEATURE_POLICIES = {
     requiresDraft: false,
     usesPingSegment: false,
     includesEarnings: false,
+  },
+  'coach-chat': {
+    messageCountBucket: 'quick',
+    timeoutBucket: 'quick',
+    modelFeature: 'coach-chat',
+    surfaceKind: 'overlay',
+    promptMode: 'analysis',
+    resultKind: 'coach-chat',
+    supportsReplyMode: false,
+    supportsReplyTone: false,
+    requiresDraft: false,
+    usesPingSegment: false,
   },
 } as const satisfies Record<FeatureType, FeaturePolicy>;
 

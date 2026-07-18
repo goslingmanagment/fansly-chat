@@ -177,6 +177,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   'chat-review': 'Review',
   'ping': 'Ping',
   'hi-greeting': 'Hi',
+  'coach-chat': 'Coach',
 };
 
 // ─── Default Settings ───────────────────────────────────────────────────

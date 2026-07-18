@@ -108,9 +108,12 @@ function resultPartTexts(
       return feature === 'hi-greeting'
         ? normalizeVariantReplyParts(rawText)
         : normalizeReplyParts(rawText);
+    // coach-chat: synthesizes no reply parts from raw text; any draft cards
+    // arrive pre-split on result.parts (handled above), nothing to derive here.
     case 'help-me':
     case 'summary':
     case 'chat-review':
+    case 'coach-chat':
       return [];
   }
 }
