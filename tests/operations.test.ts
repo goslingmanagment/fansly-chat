@@ -4647,6 +4647,53 @@ describe('OperationCoordinator', () => {
     expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
   });
 
+  it('fails closed on a truncated analysis feature (help-me AND chat-review, max_tokens + length)', async () => {
+    // Round-12 P1-1: the exhaustion guard is now UNCONDITIONAL. help-me and
+    // chat-review parse XML (valid:false rather than throwing), so before this a
+    // truncated analysis result reached the chatter as a valid:false fallback —
+    // violating "a truncated stream is an error, never presented" with NO
+    // exceptions (CLAUDE.md). Every feature × both stop reasons must fail closed.
+    for (const feature of ['help-me', 'chat-review'] as const) {
+      for (const stopReason of ['max_tokens', 'length'] as const) {
+        const kernelGateway = {
+          isConfigured: vi.fn(() => true),
+          streamFeature: vi.fn(
+            async (
+              _settings: unknown,
+              _request: unknown,
+              callbacks: { onStopReason?: (reason: string | null) => void },
+              _signal: unknown,
+            ) => {
+              callbacks.onStopReason?.(stopReason);
+              // A parseable-but-truncated analysis body — the point is it fails
+              // closed even though parseXml would otherwise yield a valid:false result.
+              return '<coaching>Lead with warmth then bridge to the';
+            },
+          ),
+        };
+        const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+        await coordinator.startOperation(1, {
+          type: 'operation:start',
+          operationId: `${feature}-${stopReason}`,
+          feature,
+          groupId: 'group-1',
+          routeNonce: 1,
+          domFanDisplayName: 'alice',
+          forceRegenerate: false,
+        });
+
+        const messages = postedMessages(port);
+        const errorMessage = messages.find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+            message.type === 'operation:error',
+        );
+        expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+        expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+      }
+    }
+  });
+
   it('fails closed on a truncated fan-summary stream and caches nothing', async () => {
     // Round-4 extended the exhaustion guard to fan-summary; this pins it. A
     // truncated recap must fail closed — never presented AND, the whole point for

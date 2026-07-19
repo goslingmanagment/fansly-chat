@@ -2645,17 +2645,15 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
-      // Output-exhaustion fail-closed (spec §8): a provider hitting its token
-      // ceiling (normalized cross-provider by isOutputExhausted) makes a reply,
-      // a coach turn, and BOTH recap sizes non-committable — a truncated recap
-      // must never be cached, pushed as dossier, or presented. Analysis features
-      // that are neither coach nor recap keep tolerating a soft trim.
-      if (
-        isOutputExhausted(latestLlmStopReason) &&
-        (getFeaturePolicy(payload.feature).promptMode === 'reply' ||
-          payload.feature === 'coach-chat' ||
-          payload.feature === 'fan-summary')
-      ) {
+      // Output-exhaustion fail-closed (spec §8, CLAUDE.md family law): a provider
+      // hitting its token ceiling (normalized cross-provider by isOutputExhausted:
+      // kernel 'max_tokens' + OpenRouter 'length') makes the generation
+      // non-committable for EVERY feature — "a truncated stream is an error, never
+      // presented as a result", with NO exceptions. Applies before buildFeatureResult,
+      // so a truncated help-me/chat-review can't slip through as a valid: false
+      // XML fallback either. This is the universal guard; do not re-narrow it to a
+      // feature/promptMode list — the rule is unconditional.
+      if (isOutputExhausted(latestLlmStopReason)) {
         throw new ChatGooseError('ai_output_unusable');
       }
 

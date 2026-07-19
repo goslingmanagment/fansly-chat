@@ -384,12 +384,16 @@ export class AgencyHubClient {
 
   /** Coach recap-status read (spec §3/§5): the freshest usable full + short
    * fan-summary recap for one conversation — metadata only, NO generation and
-   * NO AI spend. Copies the `getConversationProfile` shape: a 404 (an old Hub
-   * without the endpoint, or an unknown conversation) is a domain "none", not an
-   * error, so it returns null slots; other failures throw the Hub error domain
-   * and the caller (runtime-api) coalesces them to null so opening Coach never
-   * breaks. Canonical identity (§5): `conversationRef = groupId`, `fanRef =
-   * fanAccountId`. */
+   * NO AI spend. Honest availability (E43/E45): ONLY a valid 200 confirms
+   * reality — then `state: 'ok'` with slots that may be null (genuinely no recap).
+   * A 404 proves only that the status could NOT be read (an old Hub without the
+   * route, or a page deleted mid-flight), and any other failure (timeout, 401/403,
+   * hub_request_failed) likewise means "could not check" — all of these report
+   * `state: 'unavailable'` (404 returned here; the rest throw and the caller
+   * coalesces to unavailable), which the consumer must NOT render as "no recap".
+   * Unlike `getConversationProfile`, a 404 is deliberately NOT treated as a
+   * confirmed domain "none". Canonical identity (§5): `conversationRef = groupId`,
+   * `fanRef = fanAccountId`. */
   async getRecapStatus(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     params: { pageLabel: string; conversationRef: string; fanRef?: string | null },

@@ -31,12 +31,19 @@ export class TabContextStore {
 
   setRoute(tabId: number, groupId: string | null, routeNonce: number): TabContext {
     const context = this.getOrCreate(tabId);
-    context.groupId = groupId;
-    context.routeNonce = routeNonce;
-    if (!groupId) {
+    // Clear the cached fan whenever the CONVERSATION changes — on ANY groupId
+    // change, not only a null route. Fan resolution is always per-operation, so a
+    // stale fan from group A must never ride a request for group B: an SPA
+    // transition A→B previously left A's fanAccountId under groupId B, so
+    // recap-status(B, null) resolved fanRef=A and the Hub could return A's recap
+    // metadata for B's conversation. Re-setting the SAME groupId (routeNonce bump)
+    // keeps the fan.
+    if (context.groupId !== groupId) {
       context.fanAccountId = null;
       context.fanDisplayName = null;
     }
+    context.groupId = groupId;
+    context.routeNonce = routeNonce;
     return context;
   }
 
