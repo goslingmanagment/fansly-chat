@@ -393,19 +393,32 @@ export function registerRuntimeApi({
 
       if (requestType === 'getRecapStatus') {
         // Metadata-only recap-status read for the coach empty state (spec §5).
-        // It must NEVER break opening Coach: any failure — not connected, no
-        // page match, an old Hub without the endpoint — resolves to null slots.
-        const nulls: RecapStatusResponse = { full: null, short: null };
+        // It must NEVER break opening Coach: any failure to REACH the Hub — not
+        // connected, no page match, Hub down/absent — resolves to state
+        // 'unavailable' (NOT null-slots-as-"no recap"; that dishonest collapse is
+        // exactly the E43 empty-state trap). Only a Hub that actually answered
+        // returns state 'ok' with real (possibly-null) slots.
+        const unavailable: RecapStatusResponse = { state: 'unavailable', full: null, short: null };
         const tabId = sender.tab?.id;
         const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
         if (!session || !session.connected) {
-          return nulls;
+          return unavailable;
         }
         // Shape already validated by getRuntimeRequestType.
         const record = message as unknown as {
           groupId: string;
           fanAccountId: string | null;
         };
+        // Legacy recaps were stored under conversationRef = fan id, so they are
+        // findable ONLY via fanRef. Content has no reliable fan id, so resolve it
+        // from the tab context's cached fan (populated by any prior op on this
+        // group) — the cheapest honest source, NO extra Fansly call. If nothing
+        // is cached, fanRef stays null and only canonical (groupId-keyed) recaps
+        // are found (accepted; the coach turn's own attach still searches both).
+        const cachedContext = tabId !== undefined ? tabContexts.get(tabId) : null;
+        const resolvedFanRef =
+          record.fanAccountId ??
+          (cachedContext?.groupId === record.groupId ? cachedContext.fanAccountId : null);
         const controller = new AbortController();
         const timeout = globalThis.setTimeout(
           () => controller.abort(),
@@ -419,7 +432,7 @@ export function registerRuntimeApi({
               ?.username?.trim() ||
             null;
           if (!pageUsername) {
-            return nulls;
+            return unavailable;
           }
           const { settings } = await storageCoordinator.getState();
           const pageLabel = await agencyHubClient.resolvePageLabelForUsername(
@@ -428,7 +441,7 @@ export function registerRuntimeApi({
             controller.signal,
           );
           if (!pageLabel) {
-            return nulls;
+            return unavailable;
           }
           const status = await agencyHubClient.getRecapStatus(
             settings,
@@ -436,13 +449,13 @@ export function registerRuntimeApi({
               pageLabel,
               // Canonical identity (§5): conversationRef = groupId, fanRef = fan.
               conversationRef: record.groupId,
-              fanRef: record.fanAccountId,
+              fanRef: resolvedFanRef,
             },
             controller.signal,
           );
-          return status ?? nulls;
+          return status;
         } catch {
-          return nulls;
+          return unavailable;
         } finally {
           globalThis.clearTimeout(timeout);
         }

@@ -1073,7 +1073,11 @@ invalidation. Client-side mitigation shipped here: the opportunistic Hub re-push
 regeneration's own sync path overwrites the Hub copy — so the self-heal story is
 "regenerate → auto re-push." RESIDUAL: a fan whose recap is never re-run
 (`coachAutoRecap: 'off'` and never manually triggered) keeps a stale Hub dossier
-indefinitely. The client cannot reach into the Hub to delete or quarantine it;
-the structural owner is core #136's dossier rework (Hub-side provenance /
-trusted-terminal + kernel-side filtering of un-provenanced dossiers). Tracked in
-`.agentic/backlog.md`.
+indefinitely. The client cannot reach into the Hub to delete or quarantine it, so
+this residual risk is accepted and OWNED here in the decision log: the structural
+fix belongs to core #136's dossier rework (Hub-side provenance / trusted-terminal
++ kernel-side filtering of un-provenanced dossiers), and until that lands the
+exposure is one possibly-truncated dossier per never-re-run fan feeding other
+prompts — bounded, low, and self-healing on the next recap. (A working note also
+sits in the repo's `.agentic/` scratch backlog, but THIS entry is the source of
+truth.)

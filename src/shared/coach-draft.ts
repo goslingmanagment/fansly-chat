@@ -114,7 +114,12 @@ export function parseCoachDrafts(answerRaw: string): ParsedCoachAnswer {
 
     const body = bodyLines.join('\n');
     const isEmpty = body.trim() === '';
-    const isOversized = body.length > COACH_DRAFT_MAX_CHARS;
+    // Measure the body in CODE POINTS, not UTF-16 code units, to match the
+    // template's "under 1500 characters" and coach-history.ts's code-point-safe
+    // projection. `.length` would count an emoji as 2, so an emoji-dense but
+    // template-valid draft (~800 emoji = 1600 code units) would be falsely
+    // oversized and lose its send button.
+    const isOversized = Array.from(body).length > COACH_DRAFT_MAX_CHARS;
     if (isEmpty) {
       // Ignored: drop the whole block, emit no draft.
     } else if (isOversized || drafts.length >= COACH_DRAFT_MAX_COUNT) {

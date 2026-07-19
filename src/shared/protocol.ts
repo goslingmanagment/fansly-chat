@@ -352,9 +352,23 @@ function isRecapSlot(value: unknown): boolean {
 }
 
 export function isRecapStatusResponse(value: unknown): value is RecapStatusResponse {
-  return isObjectRecord(value) &&
-    hasExactKeys(value, ['full', 'short']) &&
-    (value.full === null || isRecapSlot(value.full)) &&
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  // `full` + `short` are required; `state` is OPTIONAL (added round 10 after the
+  // shape shipped without it — an absent state means 'ok', see the type). Only
+  // these three keys are allowed; a present state must be a known value.
+  const keys = Object.keys(value);
+  if (!keys.every((key) => key === 'state' || key === 'full' || key === 'short')) {
+    return false;
+  }
+  if (!('full' in value) || !('short' in value)) {
+    return false;
+  }
+  if (value.state !== undefined && value.state !== 'ok' && value.state !== 'unavailable') {
+    return false;
+  }
+  return (value.full === null || isRecapSlot(value.full)) &&
     (value.short === null || isRecapSlot(value.short));
 }
 

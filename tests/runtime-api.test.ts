@@ -3,6 +3,7 @@ import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import type { SessionTemplate, SpendersBuildPayload } from '../src/shared/types.js';
+import type { TabContextStore as TabContextStoreClass } from '../src/background/tab-context.js';
 
 type MessageSenderLike = { tab?: { id?: number }; url?: string };
 let mockStorage: Record<string, unknown> = {};
@@ -56,6 +57,7 @@ async function installRuntimeApiHarness(fanslyClient: {
   };
   emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
   onAgencyHubReady?: () => void;
+  tabContexts?: TabContextStoreClass;
 }) {
   vi.resetModules();
   onMessageListener = undefined;
@@ -137,12 +139,13 @@ async function installRuntimeApiHarness(fanslyClient: {
     has: vi.fn(() => false),
     clear: vi.fn(),
   };
+  const tabContexts = options?.tabContexts ?? new TabContextStore();
   registerRuntimeApi({
     agencyHubClient: agencyHubClient as never,
     fanslyClient: fanslyClient as never,
     sessionStore,
     spendersService: spendersService as never,
-    tabContexts: new TabContextStore(),
+    tabContexts,
     storageCoordinator,
     debugPrompts: debugPrompts as never,
     emitToTab: options?.emitToTab,
@@ -155,6 +158,7 @@ async function installRuntimeApiHarness(fanslyClient: {
 
   return {
     sessionStore,
+    tabContexts,
     tabsQuery,
     tabsGet,
     tabsCreate,
@@ -673,6 +677,7 @@ describe('runtime-api getRecapStatus', () => {
   });
 
   const recap = {
+    state: 'ok' as const,
     full: {
       generatedAt: '2026-07-01T00:00:00.000Z',
       ageMs: 1_000,
@@ -714,7 +719,63 @@ describe('runtime-api getRecapStatus', () => {
     );
   });
 
-  it('returns null slots on any failure — never breaks coach opening', async () => {
+  it('P2: resolves fanRef from the cached tab context when content sends null', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore, tabContexts } = await installRuntimeApiHarness(fanslyClient, {
+      agencyHubClient,
+    });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+    // A prior op cached the conversation's fan for this group + tab.
+    tabContexts.setRoute(7, 'group-1', 1);
+    tabContexts.setFan(7, 'fan-legacy', 'Alice');
+
+    await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
+      { tab: { id: 7 } },
+    );
+
+    // Legacy recaps (keyed by fan id) become findable via the resolved fanRef.
+    expect(agencyHubClient.getRecapStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: 'fan-legacy' },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('P2: fanRef stays null when the cached tab context is for a different group', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore, tabContexts } = await installRuntimeApiHarness(fanslyClient, {
+      agencyHubClient,
+    });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+    tabContexts.setRoute(7, 'other-group', 1);
+    tabContexts.setFan(7, 'fan-other', 'Someone');
+
+    await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
+      { tab: { id: 7 } },
+    );
+
+    expect(agencyHubClient.getRecapStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('returns UNAVAILABLE state on any failure — never breaks coach opening, never fakes "no recap"', async () => {
     const fanslyClient = {
       getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
     };
@@ -732,10 +793,10 @@ describe('runtime-api getRecapStatus', () => {
       { tab: { id: 7 } },
     );
 
-    expect(response).toEqual({ full: null, short: null });
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
   });
 
-  it('returns null slots when the sender tab has no connected session', async () => {
+  it('returns unavailable when the sender tab has no connected session', async () => {
     const agencyHubClient = {
       resolvePageLabelForUsername: vi.fn(),
       getRecapStatus: vi.fn(),
@@ -750,11 +811,11 @@ describe('runtime-api getRecapStatus', () => {
       { tab: { id: 999 } },
     );
 
-    expect(response).toEqual({ full: null, short: null });
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
     expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
   });
 
-  it('returns null slots when no Hub page matches the creator', async () => {
+  it('returns unavailable when no Hub page matches the creator', async () => {
     const fanslyClient = {
       getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
     };
@@ -770,7 +831,7 @@ describe('runtime-api getRecapStatus', () => {
       { tab: { id: 7 } },
     );
 
-    expect(response).toEqual({ full: null, short: null });
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
     expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
   });
 });

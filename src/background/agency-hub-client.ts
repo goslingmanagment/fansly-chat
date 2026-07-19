@@ -393,26 +393,32 @@ export class AgencyHubClient {
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     params: { pageLabel: string; conversationRef: string; fanRef?: string | null },
     signal: AbortSignal,
-  ): Promise<RecapStatusResponse | null> {
+  ): Promise<RecapStatusResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
     if (!baseUrl || !bearer || !await this.hasHostPermission(baseUrl)) {
-      return null;
+      // Not configured / no host permission — the Hub was never reached, so the
+      // caller must NOT read this as "no recap" (E43 honest empty-states).
+      return { state: 'unavailable', full: null, short: null };
     }
     try {
-      return await this.sdkFor(baseUrl, bearer, signal).aiRecapStatus({
+      const response = await this.sdkFor(baseUrl, bearer, signal).aiRecapStatus({
         query: {
           pageLabel: params.pageLabel,
           conversationRef: params.conversationRef,
           ...(params.fanRef ? { fanRef: params.fanRef } : {}),
         },
       });
+      // Hub answered — null slots now genuinely mean "no recap".
+      return { state: 'ok', full: response.full, short: response.short };
     } catch (error) {
-      // 404 = the endpoint/conversation is unknown to this Hub → "none", not an
-      // error (mirrors getConversationProfile).
+      // 404 = the endpoint/conversation is unknown to this Hub → genuinely "none"
+      // (the Hub WAS reached), not an error (mirrors getConversationProfile).
       if (error instanceof KernelApiError && error.status === 404) {
-        return null;
+        return { state: 'ok', full: null, short: null };
       }
+      // Timeout / hub_request_failed / 401/403 → could not check; surface as a
+      // throw so the caller reports 'unavailable', not "no recap".
       throw this.toHubError(error, 'recap status fetch');
     }
   }

@@ -836,6 +836,13 @@ export interface RecapSlot {
 }
 
 export interface RecapStatusResponse {
+  /** Whether the Hub was actually reached. 'unavailable' (not connected / no page
+   * match / Hub down / not configured) MUST NOT be shown as "no recap" — those are
+   * distinct (E43 honest empty-states). 'ok' means the Hub answered; then null
+   * slots genuinely mean no recap. OPTIONAL: the producing handler/client always
+   * set it, but the field was added mid-stack (round 10) after consumers already
+   * read `full`/`short`, so an absent state reads as 'ok' for backward-compat. */
+  state?: 'ok' | 'unavailable';
   full: RecapSlot | null;
   short: RecapSlot | null;
 }

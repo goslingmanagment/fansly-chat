@@ -112,30 +112,38 @@ describe('protocol boundary guards', () => {
       requestedCount: 3000,
       keptCount: 12,
     };
-    expect(isRecapStatusResponse({ full: slot, short: null })).toBe(true);
-    expect(isRecapStatusResponse({ full: null, short: null })).toBe(true);
+    expect(isRecapStatusResponse({ state: 'ok', full: slot, short: null })).toBe(true);
+    expect(isRecapStatusResponse({ state: 'ok', full: null, short: null })).toBe(true);
+    // 'unavailable' is a distinct honest state (Hub not reached) — never "no recap".
+    expect(isRecapStatusResponse({ state: 'unavailable', full: null, short: null })).toBe(true);
     expect(
       isRecapStatusResponse({
+        state: 'ok',
         full: { ...slot, transcriptCoverage: null, requestedCount: null, keptCount: null },
         short: { ...slot, transcriptCoverage: 'window' },
       }),
     ).toBe(true);
 
+    // A stateless response is still valid — `state` is optional (added mid-stack)
+    // and an absent state reads as 'ok'.
+    expect(isRecapStatusResponse({ full: null, short: null })).toBe(true);
+    // Unknown state value.
+    expect(isRecapStatusResponse({ state: 'maybe', full: null, short: null })).toBe(false);
     // Missing a top-level slot key.
-    expect(isRecapStatusResponse({ full: null })).toBe(false);
+    expect(isRecapStatusResponse({ state: 'ok', full: null })).toBe(false);
     // Extra top-level key.
-    expect(isRecapStatusResponse({ full: null, short: null, extra: 1 })).toBe(false);
+    expect(isRecapStatusResponse({ state: 'ok', full: null, short: null, extra: 1 })).toBe(false);
     // Bad coverage enum value.
     expect(
-      isRecapStatusResponse({ full: { ...slot, transcriptCoverage: 'partial' }, short: null }),
+      isRecapStatusResponse({ state: 'ok', full: { ...slot, transcriptCoverage: 'partial' }, short: null }),
     ).toBe(false);
     // Extra key on the slot (kernel schema is strict).
     expect(
-      isRecapStatusResponse({ full: { ...slot, sneaky: true }, short: null }),
+      isRecapStatusResponse({ state: 'ok', full: { ...slot, sneaky: true }, short: null }),
     ).toBe(false);
     // Non-string generatedAt.
     expect(
-      isRecapStatusResponse({ full: { ...slot, generatedAt: 0 }, short: null }),
+      isRecapStatusResponse({ state: 'ok', full: { ...slot, generatedAt: 0 }, short: null }),
     ).toBe(false);
     expect(isRecapStatusResponse(null)).toBe(false);
   });

@@ -112,6 +112,22 @@ describe('parseCoachDrafts', () => {
     expect(result.drafts).toEqual([{ text: exact, index: 0 }]);
   });
 
+  it('measures the body in CODE POINTS, not UTF-16 units (emoji-dense drafts)', () => {
+    // Round-10 P2: sex-work chat drafts are emoji-dense. '😘' is one code point
+    // but two UTF-16 units, so `.length` counts an ~800-emoji message as ~1600
+    // and falsely rejects it. The template caps at 1500 CHARACTERS (code points).
+    const emoji = '😘';
+    // 1500 emoji = 1500 code points (3000 code units) — at the cap, VALID.
+    const atCap = emoji.repeat(1500);
+    const ok = parseCoachDrafts(['```draft', atCap, '```'].join('\n'));
+    expect(ok.drafts).toEqual([{ text: atCap, index: 0 }]);
+    // 1501 code points — genuinely oversized → violation, kept in prose.
+    const over = emoji.repeat(1501);
+    const overResult = parseCoachDrafts(['```draft', over, '```'].join('\n'));
+    expect(overResult.drafts).toEqual([]);
+    expect(overResult.prose).toContain(over);
+  });
+
   it('extracts the first two fences and leaves a third in prose escaped', () => {
     const answer = [
       '```draft', 'first', '```',
