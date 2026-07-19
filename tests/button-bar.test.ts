@@ -75,8 +75,13 @@ function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> 
     onCompareRestoreClick: noop,
     onReplyModeToggle: noop,
     onToneSelect: noop,
+    onVoiceClick: noop,
     ...overrides,
   });
+}
+
+function voiceButton(root: ParentNode): HTMLButtonElement | null {
+  return root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-voice');
 }
 
 describe('ButtonBar toolbar visibility', () => {
@@ -173,6 +178,48 @@ describe('ButtonBar toolbar visibility', () => {
     const recap = buttonByLabel(bar.root, 'Recap');
     expect(recap?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
     expect(recap?.title).toContain('Recap ready to open');
+  });
+
+  it('hides the 🎙 Voice button unless the page is voice-capable', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState({ voiceNotesCapable: false }), null, 'default', 'none', true, false, false);
+    expect(voiceButton(bar.root)?.classList.contains('chatgoose-hidden')).toBe(true);
+
+    bar.render(buildState({ voiceNotesCapable: true }), null, 'default', 'none', true, false, false);
+    const voice = voiceButton(bar.root);
+    expect(voice?.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(voice?.textContent).toBe('🎙');
+    expect(voice?.disabled).toBe(false);
+  });
+
+  it('disables the 🎙 Voice button when the Fansly session is not connected', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(
+      buildState({ voiceNotesCapable: true, connected: false }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+
+    expect(voiceButton(bar.root)?.disabled).toBe(true);
+  });
+
+  it('fires onVoiceClick when the 🎙 Voice button is clicked', () => {
+    const voiceSpy = vi.fn();
+    const bar = makeBar({ onVoiceClick: voiceSpy });
+    document.body.append(bar.root);
+
+    bar.render(buildState({ voiceNotesCapable: true }), null, 'default', 'none', true, false, false);
+    voiceButton(bar.root)!.click();
+
+    expect(voiceSpy).toHaveBeenCalledTimes(1);
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {

@@ -12,6 +12,9 @@ import {
 } from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
+import { VoiceAttemptController } from './voice/attempt-controller.js';
+import { VoiceAttachAdapter } from './voice/attach-adapter.js';
+import { VoicePanel } from './voice/voice-panel.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
 import { BoardLauncher } from './spenders/board-launcher.js';
 import { SpendersBoardController } from './spenders/spenders-board-controller.js';
@@ -184,6 +187,15 @@ export class ChatGooseContentApp {
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
   private deepOverlayModel: OverlayViewModel | null = null;
 
+  // ─── Voice (лента) ────────────────────────────────────────────────────────
+  // A dedicated, route-bound lane. Its controller owns the attempt and is
+  // deliberately EXEMPT from the generic port-disconnect teardown: a dropped
+  // background never cancels an in-flight paid synthesis. Created lazily on the
+  // first 🎙 open for a conversation, and torn down only on route change.
+  private voiceController: VoiceAttemptController | null = null;
+  private voicePanel: VoicePanel | null = null;
+  private voiceReconnectPending = false;
+
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
     if (nextHasDraftText === this.hasDraftText) {
@@ -210,6 +222,13 @@ export class ChatGooseContentApp {
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
       this.resetNextReplyTone();
+      // Voice is EXEMPT from this teardown (billing correctness must not depend
+      // on the background staying alive): keep the controller + its stored
+      // attempt, just stop its polling and mark it for a reconnect handshake.
+      if (this.voiceController) {
+        this.voiceReconnectPending = true;
+        void this.voiceController.handlePortDisconnected();
+      }
       this.renderAll();
     },
   });
@@ -223,6 +242,7 @@ export class ChatGooseContentApp {
     },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
     onToneSelect: (tone) => this.armReplyTone(tone),
+    onVoiceClick: () => this.openVoicePanel(),
   });
   private readonly mappingBanner = new MappingBanner({
     onOpenSettings: () => {
@@ -1064,6 +1084,105 @@ export class ChatGooseContentApp {
     this.nextReplyTone = 'none';
   }
 
+  // ─── Voice (лента) ──────────────────────────────────────────────────
+
+  private openVoicePanel(): void {
+    if (!this.tabState?.voiceNotesCapable || !this.currentGroupId) {
+      return;
+    }
+    // Reopen an existing attempt for this conversation without re-reading the
+    // draft (the flow may already be past the script step).
+    if (this.voiceController && this.voicePanel) {
+      this.voicePanel.setFanUsername(getActiveConversationDisplayName());
+      this.voicePanel.open();
+      return;
+    }
+
+    // requiresDraft: the voice source is the live composer draft.
+    const draft = getActiveConversationDraftText().trim();
+    if (!draft) {
+      this.toast.show('Напишите черновик в поле — из него сделаем войс.', {
+        tone: 'warning',
+      });
+      return;
+    }
+
+    this.createVoiceController();
+    this.voicePanel!.setFanUsername(getActiveConversationDisplayName());
+    this.voicePanel!.open();
+    void this.startVoiceFlow(draft);
+  }
+
+  private createVoiceController(): void {
+    const adapter = new VoiceAttachAdapter();
+    const controller = new VoiceAttemptController({
+      port: { send: (message) => this.port.send(message) },
+      route: {
+        accountId: this.tabState?.accountId ?? '',
+        groupId: this.currentGroupId ?? '',
+        routeNonce: this.routeNonce,
+      },
+      conversationRef: this.currentGroupId ?? '',
+      onChange: () => this.voicePanel?.render(),
+      onError: (message) => this.voicePanel?.handleError(message),
+      onAttachGrant: (message) => {
+        void this.voicePanel?.handleAttachGrant(message);
+      },
+    });
+    this.voiceController = controller;
+
+    const panel = new VoicePanel({
+      controller,
+      probeComposer: () => adapter.probeComposer(),
+      attach: async ({ voiceNoteId, audio, token }) => {
+        const probe = adapter.probeComposer();
+        if (!probe.ok) {
+          return 'uncertain';
+        }
+        const file = new File([audio], `voice-note-${voiceNoteId}.mp3`, {
+          type: 'audio/mpeg',
+        });
+        // The token is armed only at the moment of the final attach action.
+        adapter.arm(token);
+        return adapter.attach(probe.input, file);
+      },
+      getDraftText: () => getActiveConversationDraftText(),
+      setDraftText: async (text) => {
+        try {
+          await insertIntoFanslyTextarea(text);
+        } catch {
+          // The composer went away; the panel already keeps the original text.
+        }
+      },
+      onClose: () => this.closeVoicePanel(),
+    });
+    this.voicePanel = panel;
+    this.root.append(panel.root);
+  }
+
+  private async startVoiceFlow(draft: string): Promise<void> {
+    const controller = this.voiceController;
+    if (!controller) {
+      return;
+    }
+    const recovered = await controller.boot();
+    if (!recovered) {
+      await controller.startScript(draft, 'none');
+    }
+  }
+
+  private closeVoicePanel(): void {
+    this.voicePanel?.hide();
+  }
+
+  private teardownVoice(): void {
+    this.voiceController?.destroy();
+    this.voiceController = null;
+    this.voicePanel?.root.remove();
+    this.voicePanel = null;
+    this.voiceReconnectPending = false;
+  }
+
   // ─── Route ──────────────────────────────────────────────────────────
 
   private handleRouteChange(groupId: string | null): void {
@@ -1075,6 +1194,10 @@ export class ChatGooseContentApp {
       // The regen-tone memo is per-conversation — never bleed a tone from
       // one fan's chat into a Regenerate in another's.
       this.lastSentReplyTone = 'none';
+      // Voice is bound to the conversation route (its attach attestation checks
+      // the exact tuple): a new conversation gets a fresh controller. The old
+      // attempt survives in storage.session, recoverable if the chatter returns.
+      this.teardownVoice();
     }
     this.completedOverlayCache.setActiveGroup(groupId);
     this.completedCompareCache.setActiveGroup(groupId);
@@ -1170,6 +1293,12 @@ export class ChatGooseContentApp {
   }
 
   private handlePortMessage(message: BackgroundPortMessage): void {
+    // A message means the port is live again: re-arm any recoverable voice work
+    // (the same idempotent create/status calls) from the persisted snapshot.
+    if (this.voiceReconnectPending && this.voiceController) {
+      this.voiceReconnectPending = false;
+      void this.voiceController.handlePortReconnect();
+    }
     switch (message.type) {
       case 'tab:state':
       case 'settings:changed':
@@ -1242,6 +1371,16 @@ export class ChatGooseContentApp {
       case 'operation:error':
       case 'operation:discarded':
         this.handleOperationError(message);
+        break;
+      case 'voice:scriptDelta':
+      case 'voice:scriptComplete':
+      case 'voice:scriptError':
+      case 'voice:noteView':
+      case 'voice:noteError':
+      case 'voice:audioBytes':
+      case 'voice:attachGrant':
+      case 'voice:attachRefuse':
+        void this.voiceController?.handleMessage(message);
         break;
       default:
         break;
