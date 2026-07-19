@@ -15,6 +15,7 @@ import { PortClient } from './port-client.js';
 import { VoiceAttemptController } from './voice/attempt-controller.js';
 import { VoiceAttachAdapter } from './voice/attach-adapter.js';
 import { VoicePanel } from './voice/voice-panel.js';
+import { VoiceStudio } from './voice/voice-studio.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
 import { BoardLauncher } from './spenders/board-launcher.js';
 import { SpendersBoardController } from './spenders/spenders-board-controller.js';
@@ -194,6 +195,7 @@ export class ChatGooseContentApp {
   // first 🎙 open for a conversation, and torn down only on route change.
   private voiceController: VoiceAttemptController | null = null;
   private voicePanel: VoicePanel | null = null;
+  private voiceStudio: VoiceStudio | null = null;
   private voiceReconnectPending = false;
 
   private readonly handleDraftInput = (): void => {
@@ -1158,9 +1160,21 @@ export class ChatGooseContentApp {
         }
       },
       onClose: () => this.closeVoicePanel(),
+      onExpand: () => this.expandVoiceStudio(),
     });
     this.voicePanel = panel;
     this.root.append(panel.root);
+
+    // The студия is the same components in a two-column overlay, driven by the
+    // same controller. Built lazily here so «⤢ развернуть в студию» has a target.
+    this.voiceStudio = new VoiceStudio({
+      panel,
+      onCollapse: () => undefined,
+    });
+  }
+
+  private expandVoiceStudio(): void {
+    this.voiceStudio?.expand();
   }
 
   private async startVoiceFlow(draft: string): Promise<void> {
@@ -1175,6 +1189,12 @@ export class ChatGooseContentApp {
   }
 
   private closeVoicePanel(): void {
+    // If the студия is open, fold its borrowed nodes back into the лента first
+    // so the panel is whole before it hides (blob URLs are only suspended, not
+    // revoked, by the collapse itself).
+    if (this.voiceStudio?.isOpen()) {
+      this.voiceStudio.collapse();
+    }
     this.voicePanel?.hide();
     // Drop the take object URLs while the panel is hidden (the audio bytes stay
     // in memory); reopen re-mints them.
@@ -1184,6 +1204,8 @@ export class ChatGooseContentApp {
   private teardownVoice(): void {
     this.voiceController?.destroy();
     this.voiceController = null;
+    this.voiceStudio?.destroy();
+    this.voiceStudio = null;
     this.voicePanel?.root.remove();
     this.voicePanel = null;
     this.voiceReconnectPending = false;

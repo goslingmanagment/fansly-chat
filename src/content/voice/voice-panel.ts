@@ -58,6 +58,16 @@ const TONE_PRESETS: Array<{ tone: ReplyTone; label: string }> = [
 
 type AttachPhase = 'idle' | 'awaiting-modal' | 'confirmed' | 'uncertain';
 
+/**
+ * Deliberate open toggle (spec §"Two views": decided on the live panel, not in
+ * mockups — "both behaviors are one conditional render"). When true, the compact
+ * лента collapses the script editor to a one-line row once non-stale takes
+ * exist, reclaiming vertical space; when false the editor stays fully expanded.
+ * Implemented both ways; the студия (two-column) always keeps the full editor.
+ * Default false — the pilot ships the always-expanded behavior.
+ */
+const COLLAPSE_SCRIPT_AFTER_GENERATION = false;
+
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -123,6 +133,7 @@ export class VoicePanel {
   private readonly takesSlot = el('div', 'chatgoose-voice-slot');
   private readonly attachSlot = el('div', 'chatgoose-voice-slot');
   private readonly editorWrap: HTMLElement;
+  private readonly body: HTMLElement;
 
   private attachPhase: AttachPhase = 'idle';
   private fanUsername: string | null = null;
@@ -130,6 +141,9 @@ export class VoicePanel {
   private draftCleared = false;
   private pendingReconcile = false;
   private lastError: UserFacingError | null = null;
+  // True while the студия overlay has adopted this panel's section nodes. It
+  // keeps the лента-only script collapse from firing on the borrowed editor.
+  private studioActive = false;
 
   constructor(private readonly deps: VoicePanelDeps) {
     this.root = el('div', 'chatgoose-voice-panel chatgoose-hidden');
@@ -140,7 +154,8 @@ export class VoicePanel {
     if (this.deps.onExpand) {
       const expand = el('button', 'chatgoose-voice-action chatgoose-voice-expand', '⤢');
       expand.type = 'button';
-      expand.title = 'Открыть студию';
+      expand.title = 'Развернуть в студию';
+      expand.setAttribute('aria-label', 'Развернуть в студию');
       expand.addEventListener('click', () => this.deps.onExpand?.());
       actions.append(expand);
     }
@@ -159,8 +174,63 @@ export class VoicePanel {
     this.editorWrap = el('div', 'chatgoose-voice-editor-wrap');
     this.editorWrap.append(this.editorEl);
 
-    const body = el('div', 'chatgoose-voice-body');
-    body.append(
+    this.body = el('div', 'chatgoose-voice-body');
+    this.restoreLentaLayout();
+
+    this.root.append(header, this.body);
+  }
+
+  open(): void {
+    this.show();
+  }
+
+  /** Un-hide the лента and refresh it (used on entry and on студия collapse). */
+  show(): void {
+    this.root.classList.remove('chatgoose-hidden');
+    this.render();
+  }
+
+  hide(): void {
+    this.root.classList.add('chatgoose-hidden');
+  }
+
+  isOpen(): boolean {
+    return !this.root.classList.contains('chatgoose-hidden');
+  }
+
+  // ─── Shared components: studio borrows these LIVE section nodes ──────────
+  // The студия is not a second render of the components — it re-parents the very
+  // same slot nodes into a two-column layout, so state (script text, takes,
+  // selection, attach phase, error, blob players) is shared by construction and
+  // a view switch loses nothing. render() fills these slots by reference, so it
+  // keeps updating them wherever they currently live.
+
+  /** The full-width notice (error) node, shown at the top of the студия. */
+  noticeSectionNodes(): HTMLElement[] {
+    return [this.errorSlot];
+  }
+
+  /** The script-column nodes: source row, editor, meta, tones, generate/busy. */
+  scriptSectionNodes(): HTMLElement[] {
+    return [
+      this.sourceSlot,
+      this.editorWrap,
+      this.metaSlot,
+      this.tonesSlot,
+      this.generateSlot,
+      this.busySlot,
+      this.reconcileSlot,
+    ];
+  }
+
+  /** The takes-column nodes: takes list + attach/download actions. */
+  takesSectionNodes(): HTMLElement[] {
+    return [this.takesSlot, this.attachSlot];
+  }
+
+  /** Re-home every section back into the compact лента body, original order. */
+  restoreLentaLayout(): void {
+    this.body.append(
       this.errorSlot,
       this.sourceSlot,
       this.editorWrap,
@@ -172,21 +242,11 @@ export class VoicePanel {
       this.takesSlot,
       this.attachSlot,
     );
-
-    this.root.append(header, body);
   }
 
-  open(): void {
-    this.root.classList.remove('chatgoose-hidden');
-    this.render();
-  }
-
-  hide(): void {
-    this.root.classList.add('chatgoose-hidden');
-  }
-
-  isOpen(): boolean {
-    return !this.root.classList.contains('chatgoose-hidden');
+  /** The студия toggles this so the лента-only script collapse stays dormant. */
+  setStudioActive(active: boolean): void {
+    this.studioActive = active;
   }
 
   setFanUsername(name: string | null): void {
@@ -315,6 +375,14 @@ export class VoicePanel {
       this.editorEl.value = attempt.script;
     }
     this.editorEl.disabled = false;
+
+    // Лента-only compactness toggle (dormant while the студия owns the editor).
+    const collapseScript =
+      COLLAPSE_SCRIPT_AFTER_GENERATION &&
+      !this.studioActive &&
+      !attempt.stale &&
+      attempt.takes.length > 0;
+    this.editorWrap.classList.toggle('chatgoose-voice-editor-collapsed', collapseScript);
 
     this.renderSource(attempt);
     this.renderMeta(attempt);
