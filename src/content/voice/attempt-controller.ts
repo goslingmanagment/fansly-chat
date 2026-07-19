@@ -71,10 +71,17 @@ const POLLED_STATES = new Set<VoiceNoteStatusView['state']>([
   'queued',
   'dispatched',
 ]);
+const DEFINITE_CREATE_REJECTION_STATUSES = new Set([400, 403, 409, 429]);
 
-/** Server-identical client canonicalization. Do this only at a paid click. */
+/** Server-identical canonicalization; paid payload bytes are frozen only at click. */
 export function canonicalizeVoiceScript(script: string): string {
   return script.normalize('NFC').replace(/\r\n/g, '\n').trim();
+}
+
+function isCanonicalScriptStale(attempt: VoiceAttempt): boolean {
+  return attempt.takes.length > 0 &&
+    attempt.canonicalScript !== null &&
+    canonicalizeVoiceScript(attempt.script) !== attempt.canonicalScript;
 }
 
 function defaultCreateBlobUrl(bytes: ArrayBuffer): string {
@@ -244,9 +251,10 @@ export class VoiceAttemptController {
 
   async editScript(script: string): Promise<void> {
     const record = this.requireActiveRecord();
-    const stale = record.attempt.takes.length > 0 &&
-      record.attempt.canonicalScript !== null &&
-      script !== record.attempt.canonicalScript;
+    const stale = isCanonicalScriptStale({
+      ...record.attempt,
+      script,
+    });
     if (record.attempt.script === script && record.attempt.stale === stale) {
       return;
     }
@@ -521,6 +529,7 @@ export class VoiceAttemptController {
       conversationRef: record.conversationRef,
       sourceGenerationRef: generationRef,
       script: canonicalScript,
+      phase: 'in-flight',
     };
     record.attempt.phase = 'takes';
     await this.persist(record);
@@ -600,9 +609,7 @@ export class VoiceAttemptController {
     if (record.attempt.selectedTakeId === null) {
       record.attempt.selectedTakeId = view.voiceNoteId;
     }
-    record.attempt.stale = record.attempt.takes.length > 0 &&
-      record.attempt.canonicalScript !== null &&
-      record.attempt.script !== record.attempt.canonicalScript;
+    record.attempt.stale = isCanonicalScriptStale(record.attempt);
     await this.persist(record);
     this.syncPolling();
     this.notifyChange();
@@ -617,16 +624,32 @@ export class VoiceAttemptController {
     message: Extract<BackgroundPortMessage, { type: 'voice:noteError' }>,
   ): Promise<void> {
     let changed = false;
-    if (record.pendingCreate) {
-      if (message.code === 'voice_quota_denied') {
-        record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
+    if (message.source === 'status' || message.source === 'audio') {
+      if (message.voiceNoteId !== undefined) {
+        const take = record.attempt.takes.find(
+          ({ voiceNoteId }) => voiceNoteId === message.voiceNoteId,
+        );
+        if (take && take.view.errorCode !== message.code) {
+          take.view = { ...take.view, errorCode: message.code };
+          changed = true;
+        }
+        if (message.source === 'audio') {
+          this.audioFetchesInFlight.delete(audioFetchKey(
+            record.attempt.attemptId,
+            message.voiceNoteId,
+          ));
+        }
       }
-      record.pendingCreate = null;
-      changed = true;
-    }
-    for (const key of this.audioFetchesInFlight) {
-      if (key.startsWith(`${record.attempt.attemptId}:`)) {
-        this.audioFetchesInFlight.delete(key);
+    } else if (record.pendingCreate) {
+      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status)) {
+        if (message.code === 'voice_quota_denied') {
+          record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
+        }
+        record.pendingCreate = null;
+        changed = true;
+      } else if (record.pendingCreate.phase !== 'needs-reconcile') {
+        record.pendingCreate.phase = 'needs-reconcile';
+        changed = true;
       }
     }
     if (changed) {

@@ -1317,6 +1317,9 @@ export interface VoiceNoteViewPayload extends PortEnvelopeBase {
 export interface VoiceNoteErrorPayload extends PortEnvelopeBase {
   type: 'voice:noteError';
   attemptId: string;
+  source: 'create' | 'status' | 'audio';
+  /** Present for status/audio failures, whose take is already server-owned. */
+  voiceNoteId?: number;
   code: string;
   message: string;
   status: number;

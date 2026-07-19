@@ -122,6 +122,16 @@ function isVoiceNoteState(value: unknown): value is VoiceNoteState {
   return isString(value) && VOICE_NOTE_STATES.has(value as VoiceNoteState);
 }
 
+function hasVoiceNoteErrorSource(record: Record<string, unknown>): boolean {
+  if (record.source === 'create') {
+    return isOptionalNumber(record, 'voiceNoteId');
+  }
+  return (
+    record.source === 'status' ||
+    record.source === 'audio'
+  ) && isNumber(record.voiceNoteId);
+}
+
 function isOptionalReplyMode(record: Record<string, unknown>): boolean {
   return record.replyMode === undefined || isReplyMode(record.replyMode);
 }
@@ -458,6 +468,7 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return hasAttemptId(message) && isVoiceNoteStatusView(message.view);
     case 'voice:noteError':
       return hasAttemptId(message) &&
+        hasVoiceNoteErrorSource(message) &&
         isString(message.code) &&
         isString(message.message) &&
         isNumber(message.status);

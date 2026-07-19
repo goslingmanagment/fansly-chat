@@ -350,6 +350,36 @@ describe('VoiceService SDK transport', () => {
     }]);
   });
 
+  it('attributes a status read failure to its existing voice note', async () => {
+    const harness = createHarness({
+      getVoiceNoteStatus: vi.fn(async () => {
+        throw {
+          status: 503,
+          body: { code: 'hub_request_failed' },
+        };
+      }),
+    });
+    await createAttempt(harness);
+    harness.sent.length = 0;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }, harness.emit);
+
+    expect(harness.sent).toEqual([
+      expect.objectContaining({
+        type: 'voice:noteError',
+        attemptId: ATTEMPT_ID,
+        source: 'status',
+        voiceNoteId: 42,
+        code: 'hub_request_failed',
+        status: 503,
+      }),
+    ]);
+  });
+
   it('maps a 401 create failure to the actionable invalid-key error', async () => {
     const createVoiceNote = vi.fn(async () => {
       throw {
@@ -368,6 +398,7 @@ describe('VoiceService SDK transport', () => {
     expect(harness.sent).toEqual([{
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
+      source: 'create',
       code: 'hub_invalid_api_key',
       message: 'Agency Hub rejected the credential.',
       status: 401,
@@ -391,6 +422,7 @@ describe('VoiceService SDK transport', () => {
     expect(harness.sent).toEqual([{
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
+      source: 'create',
       code: 'voice_quota_denied',
       message: 'Лимит символов для войсов исчерпан.',
       status: 429,
@@ -422,6 +454,8 @@ describe('VoiceService SDK transport', () => {
     expect(harness.sent).toEqual([{
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
+      source: 'audio',
+      voiceNoteId: 42,
       code: 'hub_invalid_api_key',
       message: 'Agency Hub rejected the credential.',
       status: 403,
@@ -453,6 +487,8 @@ describe('VoiceService SDK transport', () => {
     expect(harness.sent).toEqual([{
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
+      source: 'audio',
+      voiceNoteId: 42,
       code: 'voice_artifact_corrupt',
       message: 'Аудиофайл войса повреждён.',
       status: 0,

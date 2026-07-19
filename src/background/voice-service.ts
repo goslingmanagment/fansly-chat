@@ -36,6 +36,9 @@ import type { TabContextStore } from './tab-context.js';
 type VoiceContentMessage = Extract<ContentPortMessage, { type: `voice:${string}` }>;
 type VoiceBackgroundMessage = Extract<BackgroundPortMessage, { type: `voice:${string}` }>;
 type VoiceEmitter = (message: VoiceBackgroundMessage) => void;
+type VoiceNoteErrorContext =
+  | { source: 'create' }
+  | { source: 'status' | 'audio'; voiceNoteId: number };
 type HubSettings = Pick<
   Settings,
   'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'
@@ -542,7 +545,12 @@ export class VoiceService {
   ): Promise<void> {
     const context = this.deps.tabContexts.get(tabId);
     if (!context) {
-      this.emitLocalNoteError(message.attemptId, 'voice_source_invalid', emit);
+      this.emitLocalNoteError(
+        message.attemptId,
+        { source: 'create' },
+        'voice_source_invalid',
+        emit,
+      );
       return;
     }
     const binding = bindingFromContext(context);
@@ -551,7 +559,12 @@ export class VoiceService {
       const state = await this.deps.storageCoordinator.getState();
       const page = await this.resolvePageForTab(tabId, controller.signal, state.settings);
       if (attachRefusal(binding, this.deps.tabContexts.get(tabId)) !== null) {
-        this.emitLocalNoteError(message.attemptId, 'voice_source_invalid', emit);
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'create' },
+          'voice_source_invalid',
+          emit,
+        );
         return;
       }
       const view = await this.deps.agencyHubClient.createVoiceNote(
@@ -579,7 +592,7 @@ export class VoiceService {
       }
       emit({ type: 'voice:noteView', attemptId: message.attemptId, view });
     } catch (error) {
-      this.emitNoteError(message.attemptId, error, emit);
+      this.emitNoteError(message.attemptId, { source: 'create' }, error, emit);
     }
   }
 
@@ -606,7 +619,12 @@ export class VoiceService {
       );
       emit({ type: 'voice:noteView', attemptId: message.attemptId, view });
     } catch (error) {
-      this.emitNoteError(message.attemptId, error, emit);
+      this.emitNoteError(
+        message.attemptId,
+        { source: 'status', voiceNoteId: message.voiceNoteId },
+        error,
+        emit,
+      );
     }
   }
 
@@ -620,7 +638,12 @@ export class VoiceService {
       message.expectedBytes < 0 ||
       message.expectedBytes > VOICE_AUDIO_MAX_BYTES
     ) {
-      this.emitLocalNoteError(message.attemptId, 'voice_artifact_corrupt', emit);
+      this.emitLocalNoteError(
+        message.attemptId,
+        { source: 'audio', voiceNoteId: message.voiceNoteId },
+        'voice_artifact_corrupt',
+        emit,
+      );
       return;
     }
 
@@ -642,10 +665,15 @@ export class VoiceService {
       );
       if (!response.ok) {
         const body = parseResponseErrorBody(await response.text());
-        this.emitNoteError(message.attemptId, {
-          status: response.status,
-          body,
-        }, emit);
+        this.emitNoteError(
+          message.attemptId,
+          { source: 'audio', voiceNoteId: message.voiceNoteId },
+          {
+            status: response.status,
+            body,
+          },
+          emit,
+        );
         return;
       }
 
@@ -654,7 +682,12 @@ export class VoiceService {
         ?.trim()
         .toLowerCase();
       if (contentType !== 'audio/mpeg') {
-        this.emitLocalNoteError(message.attemptId, 'voice_artifact_corrupt', emit);
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'audio', voiceNoteId: message.voiceNoteId },
+          'voice_artifact_corrupt',
+          emit,
+        );
         return;
       }
       const bytes = await response.arrayBuffer();
@@ -663,7 +696,12 @@ export class VoiceService {
         bytes.byteLength > VOICE_AUDIO_MAX_BYTES ||
         (await sha256Hex(bytes)) !== message.expectedSha256.trim().toLowerCase()
       ) {
-        this.emitLocalNoteError(message.attemptId, 'voice_artifact_corrupt', emit);
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'audio', voiceNoteId: message.voiceNoteId },
+          'voice_artifact_corrupt',
+          emit,
+        );
         return;
       }
       emit({
@@ -673,7 +711,12 @@ export class VoiceService {
         bytes,
       });
     } catch (error) {
-      this.emitNoteError(message.attemptId, error, emit);
+      this.emitNoteError(
+        message.attemptId,
+        { source: 'audio', voiceNoteId: message.voiceNoteId },
+        error,
+        emit,
+      );
     }
   }
 
@@ -838,18 +881,25 @@ export class VoiceService {
     return (await this.resolvePageForTab(tabId, signal, settings)).pageLabel;
   }
 
-  private emitNoteError(attemptId: string, error: unknown, emit: VoiceEmitter): void {
-    emit({ type: 'voice:noteError', attemptId, ...noteFailure(error) });
+  private emitNoteError(
+    attemptId: string,
+    context: VoiceNoteErrorContext,
+    error: unknown,
+    emit: VoiceEmitter,
+  ): void {
+    emit({ type: 'voice:noteError', attemptId, ...context, ...noteFailure(error) });
   }
 
   private emitLocalNoteError(
     attemptId: string,
+    context: VoiceNoteErrorContext,
     code: 'voice_source_invalid' | 'voice_artifact_corrupt',
     emit: VoiceEmitter,
   ): void {
     emit({
       type: 'voice:noteError',
       attemptId,
+      ...context,
       code,
       message: createUserError(code).message,
       status: 0,

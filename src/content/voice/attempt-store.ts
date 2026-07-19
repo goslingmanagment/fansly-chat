@@ -19,6 +19,7 @@ export interface VoiceTakeCreateSnapshot {
   conversationRef: string;
   sourceGenerationRef: string;
   script: string;
+  phase: 'in-flight' | 'needs-reconcile';
 }
 
 export interface StoredVoiceTake {
@@ -149,34 +150,60 @@ function isStoredAttempt(value: unknown): value is StoredVoiceAttempt {
     isRoute(value.boundRoute);
 }
 
-function isCreateSnapshot(value: unknown): value is VoiceTakeCreateSnapshot {
-  return isRecord(value) &&
-    typeof value.clientRequestId === 'string' &&
-    typeof value.conversationRef === 'string' &&
-    typeof value.sourceGenerationRef === 'string' &&
-    typeof value.script === 'string';
+function parseCreateSnapshot(value: unknown): VoiceTakeCreateSnapshot | null {
+  if (
+    !isRecord(value) ||
+    typeof value.clientRequestId !== 'string' ||
+    typeof value.conversationRef !== 'string' ||
+    typeof value.sourceGenerationRef !== 'string' ||
+    typeof value.script !== 'string' ||
+    !(
+      value.phase === undefined ||
+      value.phase === 'in-flight' ||
+      value.phase === 'needs-reconcile'
+    )
+  ) {
+    return null;
+  }
+  return {
+    clientRequestId: value.clientRequestId,
+    conversationRef: value.conversationRef,
+    sourceGenerationRef: value.sourceGenerationRef,
+    script: value.script,
+    // Development snapshots from before the discriminator landed are safe to
+    // recover as ordinary in-flight creates.
+    phase: value.phase ?? 'in-flight',
+  };
 }
 
 function parseEnvelope(value: unknown): StoredEnvelope | null {
+  const pendingCreate = isRecord(value) && value.pendingCreate !== null
+    ? parseCreateSnapshot(value.pendingCreate)
+    : null;
   if (
     !isRecord(value) ||
     value.version !== 1 ||
     !Number.isFinite(value.savedAt) ||
     !isStoredAttempt(value.attempt) ||
     typeof value.conversationRef !== 'string' ||
-    !(value.pendingCreate === null || isCreateSnapshot(value.pendingCreate)) ||
+    !(value.pendingCreate === null || pendingCreate) ||
     !Array.isArray(value.burnedClientRequestIds) ||
     !value.burnedClientRequestIds.every((id) => typeof id === 'string')
   ) {
     return null;
   }
-  return value as unknown as StoredEnvelope;
+  return {
+    ...(value as unknown as StoredEnvelope),
+    pendingCreate,
+  };
 }
 
-function sameRoute(left: StoredVoiceAttemptRoute, right: StoredVoiceAttemptRoute): boolean {
+function sameRecoveryRoute(
+  left: StoredVoiceAttemptRoute,
+  right: StoredVoiceAttemptRoute,
+): boolean {
   return left.accountId === right.accountId &&
-    left.groupId === right.groupId &&
-    left.routeNonce === right.routeNonce;
+    left.groupId === right.groupId;
 }
 
 function defaultSessionStorage(): VoiceAttemptStorageArea {
@@ -258,10 +285,15 @@ export class VoiceAttemptStore {
       if (
         !envelope ||
         key !== `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${envelope.attempt.attemptId}` ||
-        now - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS ||
-        !sameRoute(envelope.attempt.boundRoute, route)
+        now - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS
       ) {
         removeKeys.push(key);
+        continue;
+      }
+      if (!sameRecoveryRoute(envelope.attempt.boundRoute, route)) {
+        // storage.session is shared by every extension tab. A foreign route's
+        // live attempt belongs to that tab and remains until its owner or TTL
+        // removes it.
         continue;
       }
       entries.push({

@@ -323,9 +323,28 @@ describe('protocol boundary guards', () => {
       {
         type: 'voice:noteError',
         attemptId: 'attempt-1',
+        source: 'create',
         code: 'voice_quota_denied',
         message: 'Voice quota denied.',
         status: 429,
+      },
+      {
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source: 'status',
+        voiceNoteId: 42,
+        code: 'hub_request_failed',
+        message: 'Status read failed.',
+        status: 503,
+      },
+      {
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source: 'audio',
+        voiceNoteId: 42,
+        code: 'voice_artifact_corrupt',
+        message: 'Audio failed validation.',
+        status: 0,
       },
       {
         type: 'voice:audioBytes',
@@ -398,11 +417,12 @@ describe('protocol boundary guards', () => {
         message: {
           type: 'voice:noteError',
           attemptId: 'attempt-1',
+          source: 'create',
           code: 'voice_quota_denied',
           message: 'Voice quota denied.',
           status: 429,
         },
-        requiredKey: 'status',
+        requiredKey: 'source',
       },
       {
         message: {
@@ -462,6 +482,35 @@ describe('protocol boundary guards', () => {
       attemptId: 'attempt-1',
       voiceNoteId: 42,
       bytes: new Uint8Array(8),
+    })).toBe(false);
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteError',
+      attemptId: 'attempt-1',
+      source: 'create',
+      code: 'voice_quota_denied',
+      message: 'Voice quota denied.',
+    })).toBe(false);
+
+    for (const source of ['status', 'audio']) {
+      expect(isBackgroundPortMessage({
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source,
+        code: 'hub_request_failed',
+        message: 'Voice operation failed.',
+        status: 503,
+      }), `${source} error missing voiceNoteId`).toBe(false);
+    }
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteError',
+      attemptId: 'attempt-1',
+      source: 'not-a-source',
+      voiceNoteId: 42,
+      code: 'hub_request_failed',
+      message: 'Voice operation failed.',
+      status: 503,
     })).toBe(false);
 
     expect(isBackgroundPortMessage({

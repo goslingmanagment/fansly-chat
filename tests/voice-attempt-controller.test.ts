@@ -226,6 +226,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
+      source: 'create',
       code: 'voice_quota_denied',
       message: 'local safe copy',
       status: 429,
@@ -240,6 +241,95 @@ describe('VoiceAttemptController', () => {
       script: 'Café\nline',
     });
     expect(messagesOfType(port, 'voice:noteCreate').at(-1)?.clientRequestId).not.toBe(TAKE_ID_1);
+  });
+
+  it('keeps a paid create snapshot when a different take poll fails', async () => {
+    const { controller, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'queued'),
+    });
+    await controller.generateAnotherTake();
+
+    const before = (await store.load(ROUTE))[0]?.pendingCreate;
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'status',
+      voiceNoteId: 42,
+      code: 'hub_request_failed',
+      message: 'Status check failed.',
+      status: 503,
+    });
+
+    const after = (await store.load(ROUTE))[0];
+    expect(after?.pendingCreate).toEqual(before);
+    expect(after?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_2,
+      phase: 'in-flight',
+    });
+    expect(controller.getAttempt()?.takes[0]?.view.errorCode).toBe('hub_request_failed');
+  });
+
+  it('keeps an indeterminate create for same-id reconciliation on rearm', async () => {
+    const { controller, port, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    const originalCreate = messagesOfType(port, 'voice:noteCreate')[0];
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'hub_request_failed',
+      message: 'Create timed out.',
+      status: 0,
+    });
+
+    expect(messagesOfType(port, 'voice:noteCreate')).toEqual([originalCreate]);
+    expect((await store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      phase: 'needs-reconcile',
+    });
+
+    await controller.handlePortDisconnected();
+    port.connected = true;
+    await controller.handlePortReconnect();
+    expect(messagesOfType(port, 'voice:noteCreate')).toEqual([
+      originalCreate,
+      originalCreate,
+    ]);
+  });
+
+  it('clears a definitely rejected create snapshot', async () => {
+    const { controller, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'voice_script_invalid',
+      message: 'Create rejected.',
+      status: 400,
+    });
+
+    const stored = (await store.load(ROUTE))[0];
+    expect(stored?.pendingCreate).toBeNull();
+    expect(stored?.burnedClientRequestIds).toEqual([]);
   });
 
   it('recovers an in-flight create with the exact same idempotency snapshot', async () => {
@@ -409,7 +499,7 @@ describe('VoiceAttemptController', () => {
     expect(stored[0]?.attempt.phase).toBe('script');
   });
 
-  it('drops TTL-expired and route-mismatched snapshots during boot', async () => {
+  it('drops TTL-expired snapshots during boot', async () => {
     let now = 1_000;
     const expired = createController({
       uuids: [ATTEMPT_ID],
@@ -422,19 +512,51 @@ describe('VoiceAttemptController', () => {
     const expiredReader = createController({ uuids: [TAKE_ID_1], now: () => now });
     expect(await expiredReader.controller.boot()).toBeNull();
     expect(Object.keys(session.data)).toHaveLength(0);
+  });
 
-    now += 1;
-    const wrongRoute = createController({
+  it('resumes the same account and group after reload changes routeNonce', async () => {
+    const beforeReload = createController({
       route: { ...ROUTE, routeNonce: 9 },
-      uuids: [TAKE_ID_2],
-      now: () => now,
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
     });
-    await wrongRoute.controller.startScript('Wrong route', 'none');
-    wrongRoute.controller.destroy();
+    await beforeReload.controller.startScript('Draft', 'none');
+    await finishScript(beforeReload.controller, 'Voice script');
+    beforeReload.port.connected = false;
+    await beforeReload.controller.generateTake();
+    beforeReload.controller.destroy();
 
-    const currentRoute = createController({ uuids: [TAKE_ID_3], now: () => now });
-    expect(await currentRoute.controller.boot()).toBeNull();
-    expect(Object.keys(session.data)).toHaveLength(0);
+    const afterReload = createController({ uuids: [TAKE_ID_3] });
+    await afterReload.controller.boot();
+
+    expect(afterReload.controller.getAttempt()?.boundRoute.routeNonce).toBe(9);
+    expect(messagesOfType(afterReload.port, 'voice:noteCreate')).toEqual([{
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      conversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      script: 'Voice script',
+    }]);
+  });
+
+  it('skips a foreign route without deleting its live session entry', async () => {
+    const foreignRoute: VoiceAttemptRoute = {
+      accountId: ROUTE.accountId,
+      groupId: 'group-foreign',
+      routeNonce: 8,
+    };
+    const foreign = createController({
+      route: foreignRoute,
+      uuids: [ATTEMPT_ID],
+    });
+    await foreign.controller.startScript('Foreign draft', 'none');
+    foreign.controller.destroy();
+    const foreignKey = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
+
+    const current = createController({ uuids: [TAKE_ID_3] });
+    expect(await current.controller.boot()).toBeNull();
+    expect(session.data[foreignKey]).toBeDefined();
+    expect(await current.store.load(foreignRoute)).toHaveLength(1);
   });
 
   it('persists after each state transition and always before paid create dispatch', async () => {
@@ -496,11 +618,12 @@ describe('VoiceAttemptController', () => {
     expect(JSON.stringify(session.data[key])).not.toMatch(/blobUrl|"audio"/);
   });
 
-  it('marks takes stale on edits and clears staleness only on exact canonical restoration', async () => {
+  it('compares canonical script text when marking takes stale', async () => {
     const { controller } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await controller.startScript('Draft', 'none');
     await finishScript(controller, 'Café');
     await controller.generateTake();
+    await controller.editScript('Cafe\u0301');
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
@@ -515,13 +638,16 @@ describe('VoiceAttemptController', () => {
       voiceNoteId: 42,
       bytes: new Uint8Array([1, 2]).buffer,
     });
+    expect(controller.getAttempt()?.stale).toBe(false);
     expect(controller.canAttachSelectedTake()).toBe(true);
 
-    await controller.editScript('Cafe\u0301');
-    expect(controller.getAttempt()?.stale).toBe(true);
-    expect(controller.canAttachSelectedTake()).toBe(false);
+    await controller.editScript('Cafe\u0301\r\n');
+    expect(controller.getAttempt()?.stale).toBe(false);
+    expect(controller.canAttachSelectedTake()).toBe(true);
 
     await controller.editScript('Café ');
+    expect(controller.getAttempt()?.stale).toBe(false);
+    await controller.editScript('Changed');
     expect(controller.getAttempt()?.stale).toBe(true);
     await controller.editScript('Café');
     expect(controller.getAttempt()?.stale).toBe(false);
