@@ -117,6 +117,13 @@ export interface SummaryCacheEntry {
   modelId?: string;
   fanAccountId?: string | null;
   agencyHubSync?: AgencyHubSummarySyncMetadata;
+  /** Written ONLY on entries produced behind the exhaustion + empty fail-closed
+   * guards, so the cached recap is known to be a complete, trusted generation. A
+   * cache hit REQUIRES it (isValidSummaryCacheEntry), so a pre-guard entry — e.g.
+   * a max_tokens/length-truncated recap cached before fan-summary was
+   * exhaustion-guarded — is treated as a MISS and regenerated. Cheap (one recap
+   * per fan) and self-healing; legacy entries need no migration drop. */
+  trustedTerminal?: boolean;
 }
 
 export interface PersistedState {

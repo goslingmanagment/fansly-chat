@@ -23,6 +23,7 @@ describe('summary cache model matching', () => {
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
+      trustedTerminal: true,
     };
     expect(isValidSummaryCacheEntry(
       entry,
@@ -52,6 +53,7 @@ describe('summary cache model matching', () => {
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
+      trustedTerminal: true,
     };
 
     expect(isValidSummaryCacheEntry(
@@ -73,6 +75,31 @@ describe('summary cache model matching', () => {
       personaDefinitionId: undefined,
     })).toBeNull();
   });
+
+  it('requires the trustedTerminal marker — a pre-guard/legacy entry is not a valid hit', () => {
+    const base: SummaryCacheEntry = {
+      summary: 'Cached',
+      personalityId: 'personality-1',
+      personaDefinitionId: 'v1:persona-one-definition',
+      personalityUpdatedAt: 1000,
+      personaCatalogSource: 'source-a',
+      generatedAt: 456,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+    };
+    const args = ['personality-1', 'v1:persona-one-definition', 'source-a', 'kernel'] as const;
+    // Legacy/pre-guard entry (no marker) — possibly a truncated recap cached
+    // before fan-summary was exhaustion-guarded — must NOT serve a cache hit.
+    expect(isValidSummaryCacheEntry(base, ...args)).toBe(false);
+    // An entry written behind the exhaustion + empty fail-closed guards is valid.
+    expect(isValidSummaryCacheEntry({ ...base, trustedTerminal: true }, ...args)).toBe(true);
+    // The marker survives normalization/collect (a fresh entry stays valid); a
+    // legacy entry normalizes fine but simply carries no marker.
+    expect(normalizeSummaryCacheEntry({ ...base, trustedTerminal: true }))
+      .toMatchObject({ trustedTerminal: true });
+    expect(normalizeSummaryCacheEntry(base)).not.toHaveProperty('trustedTerminal');
+  });
 });
 
 describe('summary cache boundaries', () => {
@@ -86,6 +113,7 @@ describe('summary cache boundaries', () => {
     spendingDataVerified: true,
     subscriptionLookupVerified: true,
     modelId: 'anthropic:claude-opus-4-6',
+    trustedTerminal: true,
   };
 
   it('normalizes valid entries and drops corrupt summary cache values', () => {

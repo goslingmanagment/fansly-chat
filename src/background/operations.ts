@@ -2647,6 +2647,21 @@ export class OperationCoordinator {
         throw new ChatGooseError('ai_output_unusable');
       }
 
+      // Empty / whitespace-only output fails closed for coach + recap. Unlike a
+      // reply (guarded by assertInsertableFeatureResult) and unlike help-me /
+      // chat-review (which parse XML out of rawText and already fail that parse
+      // on empty), buildFeatureResult('coach-chat'/'fan-summary') returns the raw
+      // text verbatim — so a meta→done stream with no content, or a whitespace
+      // end_turn answer, would otherwise present as a result AND (for recap)
+      // enter the summary cache. This guard sits before the result build and the
+      // cache write, so nothing empty is ever presented or cached.
+      if (
+        !rawText.trim() &&
+        (payload.feature === 'coach-chat' || payload.feature === 'fan-summary')
+      ) {
+        throw new ChatGooseError('ai_output_unusable');
+      }
+
       const result = buildFeatureResult(
         payload.feature,
         rawText,
@@ -2704,6 +2719,11 @@ export class OperationCoordinator {
             modelId: resolvedModel,
             fanAccountId,
             agencyHubSync: initialSyncStatus,
+            // This write sits behind the exhaustion + empty-output guards, so the
+            // recap is a complete, trusted generation. The marker is what a later
+            // cache hit requires (isValidSummaryCacheEntry) — a pre-guard entry
+            // lacks it and regenerates instead of serving a truncated recap.
+            trustedTerminal: true,
             },
             (state) => this.isLatestSummaryCommit(
               validated.urlGroupId,

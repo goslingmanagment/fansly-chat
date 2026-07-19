@@ -444,6 +444,7 @@ describe('OperationCoordinator', () => {
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
         modelId: 'kernel',
+        trustedTerminal: true,
       },
     };
 
@@ -3499,6 +3500,9 @@ describe('OperationCoordinator', () => {
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
+      // A fresh generation sits behind the fail-closed guards, so it is marked
+      // trusted-terminal — that marker is what makes it a valid future cache hit.
+      trustedTerminal: true,
     });
     expect(JSON.stringify(mockStorage['summary:group-1'])).not.toContain('Stale Hub summary');
     expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
@@ -4139,6 +4143,7 @@ describe('OperationCoordinator', () => {
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
+      trustedTerminal: true,
     };
 
     const fetchMock = vi.fn(async (url: URL | string) => {
@@ -4343,6 +4348,7 @@ describe('OperationCoordinator', () => {
       subscriptionLookupVerified: true,
       modelId: 'kernel',
       fanAccountId: 'fan-1',
+      trustedTerminal: true,
       agencyHubSync: {
         baseUrl: 'http://hub-a.test',
         pageLabel: 'creator-fs',
@@ -4583,6 +4589,94 @@ describe('OperationCoordinator', () => {
       expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
       expect(mockStorage['summary:group-1']).toBeUndefined();
     }
+  });
+
+  it('fails closed on an empty or whitespace-only coach/recap stream (nothing cached)', async () => {
+    // Round-6 P1-1: buildFeatureResult returns any rawText for coach + recap
+    // (incl. '' or whitespace), and the exhaustion guard only fires on a stop
+    // reason. A meta→done stream with no content — or a whitespace end_turn
+    // answer — must fail closed, never present, and never enter the summary cache.
+    for (const feature of ['coach-chat', 'fan-summary'] as const) {
+      for (const emptyish of ['', '   \n\t  ']) {
+        delete mockStorage['summary:group-1'];
+        const kernelGateway = {
+          isConfigured: vi.fn(() => true),
+          streamFeature: vi.fn(async () => emptyish),
+        };
+        const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+        await coordinator.startOperation(1, {
+          type: 'operation:start',
+          operationId: `empty-${feature}-${emptyish.length}`,
+          feature,
+          groupId: 'group-1',
+          routeNonce: 1,
+          domFanDisplayName: 'alice',
+          forceRegenerate: false,
+        });
+
+        const messages = postedMessages(port);
+        const errorMessage = messages.find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+            message.type === 'operation:error',
+        );
+        expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+        expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+        expect(mockStorage['summary:group-1']).toBeUndefined();
+      }
+    }
+  });
+
+  it('does not serve a pre-guard (legacy, unmarked) cached recap — regenerates instead', async () => {
+    // Round-6 P1-2: a recap cached before fan-summary was exhaustion-guarded (a
+    // possibly-truncated recap) carries no trustedTerminal marker. isValidSummaryCacheEntry
+    // now requires the marker, so such an entry is a cache MISS: the truncated
+    // recap is never served or Hub-pushed again — it regenerates and self-heals.
+    mockStorage['summary:group-1'] = {
+      summary: 'Legacy possibly-truncated recap',
+      personalityId: 'personality-1',
+      personaDefinitionId: 'v1:personality-one-definition',
+      personalityUpdatedAt: 1000,
+      personaCatalogSource: null,
+      generatedAt: 2000,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+      // NOTE: no trustedTerminal — this is a pre-guard/legacy entry.
+    };
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async () => 'Fresh complete recap'),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-legacy',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    // The legacy entry did NOT serve as a cache hit: the stream ran
+    // (regeneration) and the completed recap is the fresh one, marked cached:false.
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.rawText).toBe('Fresh complete recap');
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: false });
+    // The legacy (possibly-truncated) recap was never presented to the chatter.
+    expect(
+      postedMessages(port).every(
+        (message) =>
+          message.type !== 'operation:complete' ||
+          message.result.rawText !== 'Legacy possibly-truncated recap',
+      ),
+    ).toBe(true);
   });
 
   it('passes the configured temperature for each operation type', async () => {
