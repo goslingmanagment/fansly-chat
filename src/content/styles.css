@@ -1584,7 +1584,8 @@ ol.chatgoose-md-list {
 
 /* ─── Scroll Lock ────────────────────────────────────────────── */
 
-body.chatgoose-scroll-lock {
+body.chatgoose-scroll-lock,
+body.chatgoose-voice-studio-lock {
   overflow: hidden !important;
 }
 

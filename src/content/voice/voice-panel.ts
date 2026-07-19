@@ -46,6 +46,13 @@ export interface VoicePanelDeps {
   onClose: () => void;
   /** Optional студия expand (Task 6); the control is hidden when absent. */
   onExpand?: () => void;
+  /**
+   * Fired the instant the attach handoff begins (attachPhase → 'awaiting-modal').
+   * index.ts collapses the студия here: Fansly's native Upload modal opens on the
+   * file handoff and would otherwise be stranded behind the studio scrim. Absent
+   * (or a no-op) when there is no студия to fold.
+   */
+  onAttachHandoff?: () => void;
 }
 
 // Тёплый/Игривый/Спокойный are product words; they map to the reply-tone the
@@ -317,6 +324,13 @@ export class VoicePanel {
     this.leftoverDraft = draft.trim() ? draft : null;
     this.draftCleared = false;
     this.lastError = null;
+    // The native Upload modal opens on the file handoff below. If the студия is
+    // still open, its fixed scrim (pointer-events auto) strands the modal — the
+    // chatter can't reach it, and the 10s observation budget burns hesitation
+    // into an 'uncertain'. Fold the студия back into the лента FIRST, through
+    // its own collapse path, so the shared nodes restore correctly and the
+    // reopened лента carries the modal hint. No-op when already in the лента.
+    this.deps.onAttachHandoff?.();
     // The native Upload modal opens now; the waveform only appears after the
     // human clicks Upload — so the guidance must be shown immediately, not on
     // confirmation.

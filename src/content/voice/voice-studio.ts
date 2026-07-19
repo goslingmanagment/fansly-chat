@@ -105,7 +105,10 @@ export class VoiceStudio {
     this.deps.panel.hide();
     this.deps.panel.render();
 
-    document.body.classList.add('chatgoose-scroll-lock');
+    // A dedicated lock class (same CSS as chatgoose-scroll-lock): the deep-
+    // feature OverlayController toggles chatgoose-scroll-lock on every render and
+    // would clear the студия's lock when an unrelated feature closes.
+    document.body.classList.add('chatgoose-voice-studio-lock');
     document.addEventListener('keydown', this.onKeydown);
   }
 
@@ -116,7 +119,7 @@ export class VoiceStudio {
     }
     this.opened = false;
     document.removeEventListener('keydown', this.onKeydown);
-    document.body.classList.remove('chatgoose-scroll-lock');
+    document.body.classList.remove('chatgoose-voice-studio-lock');
 
     // Hand the shared nodes back to the лента, in their original order, then
     // reveal + refresh it. The controller state is untouched — nothing lost.
@@ -138,7 +141,7 @@ export class VoiceStudio {
       // onCollapse callback — this is a teardown, not a user collapse.
       this.opened = false;
       document.removeEventListener('keydown', this.onKeydown);
-      document.body.classList.remove('chatgoose-scroll-lock');
+      document.body.classList.remove('chatgoose-voice-studio-lock');
       this.deps.panel.setStudioActive(false);
       this.deps.panel.restoreLentaLayout();
     }

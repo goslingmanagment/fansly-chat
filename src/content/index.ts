@@ -1161,6 +1161,10 @@ export class ChatGooseContentApp {
       },
       onClose: () => this.closeVoicePanel(),
       onExpand: () => this.expandVoiceStudio(),
+      // Collapse the студия the moment the attach handoff begins so Fansly's
+      // native Upload modal isn't stranded behind the studio scrim. No-op when
+      // the студия is already folded (the лента attach path).
+      onAttachHandoff: () => this.voiceStudio?.collapse(),
     });
     this.voicePanel = panel;
     this.root.append(panel.root);

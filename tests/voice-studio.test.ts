@@ -68,6 +68,8 @@ interface Harness {
   sent: ContentPortMessage[];
   revoked: string[];
   collapses: number;
+  /** studio.isOpen() captured at each attach dispatch (the file handoff). */
+  attachStudioOpenAt: boolean[];
   attemptId: () => string;
 }
 
@@ -76,6 +78,7 @@ let harness: Harness | null = null;
 function setup(): Harness {
   const sent: ContentPortMessage[] = [];
   const revoked: string[] = [];
+  const attachStudioOpenAt: boolean[] = [];
   let collapses = 0;
   const probe: VoiceComposerProbe = {
     ok: true,
@@ -109,11 +112,17 @@ function setup(): Harness {
   const panel = new VoicePanel({
     controller,
     probeComposer: () => probe,
-    attach: () => Promise.resolve(attachOutcome),
+    attach: () => {
+      // The file handoff to Fansly's native input; record whether the студия
+      // scrim is still up at this instant (the fix must have folded it first).
+      attachStudioOpenAt.push(ref.studio?.isOpen() ?? false);
+      return Promise.resolve(attachOutcome);
+    },
     getDraftText: () => '',
     setDraftText: async () => undefined,
     onClose: () => undefined,
     onExpand: () => ref.studio?.expand(),
+    onAttachHandoff: () => ref.studio?.collapse(),
   });
   ref.panel = panel;
 
@@ -134,6 +143,7 @@ function setup(): Harness {
     controller,
     sent,
     revoked,
+    attachStudioOpenAt,
     get collapses() {
       return collapses;
     },
@@ -407,5 +417,44 @@ describe('VoiceStudio — студия overlay on shared components', () => {
     expect(backdrop).not.toBeNull();
     backdrop!.dispatchEvent(new Event('click', { bubbles: true }));
     expect(harness!.studio.isOpen()).toBe(false);
+  });
+
+  it('folds the студия on attach handoff so the native Upload modal is reachable', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.panel.setFanUsername('alice');
+
+    harness!.studio.expand();
+    expect(harness!.studio.isOpen()).toBe(true);
+    // The scrim (fixed root, pointer-events auto) is up — it would strand the modal.
+    expect(harness!.studio.root.querySelector('.chatgoose-overlay-shell')).not.toBeNull();
+    const selectedBefore = harness!.controller.getAttempt()?.selectedTakeId;
+
+    // Attach initiated from within the студия. Do not await yet: assert the
+    // synchronous handoff state (attachPhase → 'awaiting-modal') before the
+    // attach promise resolves.
+    const grant = harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      token: 'tok-1',
+      fanUsername: 'alice',
+    });
+
+    // The студия root was folded away (its scrim gone) BEFORE the file handoff.
+    expect(harness!.studio.isOpen()).toBe(false);
+    expect(harness!.studio.root.querySelector('.chatgoose-overlay-shell')).toBeNull();
+    expect(harness!.studio.root.childElementCount).toBe(0);
+    expect(document.body.classList.contains('chatgoose-voice-studio-lock')).toBe(false);
+    // The dispatch saw the студия already collapsed — no strand.
+    expect(harness!.attachStudioOpenAt).toEqual([false]);
+
+    // The лента is back, visible, carrying the modal hint.
+    expect(harness!.panel.root.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(textOf(harness!.panel.root)).toContain('Выберите Free/PPV и подтвердите Upload');
+
+    // State is intact: the same take stayed selected through the fold.
+    expect(harness!.controller.getAttempt()?.selectedTakeId).toBe(selectedBefore);
+
+    await grant;
   });
 });
