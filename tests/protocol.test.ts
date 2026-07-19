@@ -113,6 +113,7 @@ describe('protocol boundary guards', () => {
         attemptId: 'attempt-1',
         clientRequestId: 'client-request-1',
         conversationRef: 'conversation-1',
+        pinnedConversationRef: 'fan-1',
         sourceGenerationRef: 'generation-1',
         script: '[warmly] Hello there',
       },
@@ -205,6 +206,15 @@ describe('protocol boundary guards', () => {
       attemptId: 'attempt-1',
       draftText: 'Write a warm voice note',
       replyTone: 'not-a-tone',
+    })).toBe(false);
+    expect(isContentPortMessage({
+      type: 'voice:noteCreate',
+      attemptId: 'attempt-1',
+      clientRequestId: 'client-request-1',
+      conversationRef: 'conversation-1',
+      pinnedConversationRef: 42,
+      sourceGenerationRef: 'generation-1',
+      script: 'hello',
     })).toBe(false);
   });
 
@@ -307,6 +317,12 @@ describe('protocol boundary guards', () => {
         message: 'Voice script is unavailable.',
       },
       {
+        type: 'voice:noteCreateAck',
+        attemptId: 'attempt-1',
+        clientRequestId: 'client-request-1',
+        conversationRef: 'fan-1',
+      },
+      {
         type: 'voice:noteView',
         attemptId: 'attempt-1',
         view: {
@@ -396,6 +412,15 @@ describe('protocol boundary guards', () => {
           message: 'Voice script is unavailable.',
         },
         requiredKey: 'code',
+      },
+      {
+        message: {
+          type: 'voice:noteCreateAck',
+          attemptId: 'attempt-1',
+          clientRequestId: 'client-request-1',
+          conversationRef: 'fan-1',
+        },
+        requiredKey: 'conversationRef',
       },
       {
         message: {

@@ -18,6 +18,7 @@ export type VoiceAttemptRoute = StoredVoiceAttemptRoute;
 export interface VoiceTake {
   voiceNoteId: number;
   clientRequestId: string;
+  pinnedConversationRef: string | null;
   view: VoiceNoteStatusView;
   audio: ArrayBuffer | null;
   blobUrl: string | null;
@@ -65,6 +66,10 @@ interface RuntimeAttemptRecord {
   conversationRef: string;
   pendingCreate: VoiceTakeCreateSnapshot | null;
   burnedClientRequestIds: Set<string>;
+  /** Classification of the currently dispatched create response. Persisted
+   * sentOnce says whether a prior dispatch existed; this runtime bit preserves
+   * first-send-vs-replay semantics after sentOnce is advanced pre-dispatch. */
+  currentCreateSendWasReplay: boolean;
 }
 
 const POLLED_STATES = new Set<VoiceNoteStatusView['state']>([
@@ -205,6 +210,7 @@ export class VoiceAttemptController {
       conversationRef: this.conversationRef,
       pendingCreate: null,
       burnedClientRequestIds: new Set<string>(),
+      currentCreateSendWasReplay: false,
     };
     this.records.set(attemptId, record);
     this.activeAttemptId = attemptId;
@@ -343,6 +349,13 @@ export class VoiceAttemptController {
     });
   }
 
+  hasPendingCreateNeedsReconcile(): boolean {
+    const record = this.activeAttemptId
+      ? this.records.get(this.activeAttemptId)
+      : undefined;
+    return record?.pendingCreate?.phase === 'needs-reconcile';
+  }
+
   async markAttached(): Promise<void> {
     const record = this.requireActiveRecord();
     if (record.attempt.phase === 'attached') {
@@ -392,6 +405,9 @@ export class VoiceAttemptController {
         await this.persist(record);
         this.notifyChange();
         this.onError?.(message);
+        return;
+      case 'voice:noteCreateAck':
+        await this.applyCreateAck(record, message.clientRequestId, message.conversationRef);
         return;
       case 'voice:noteView':
         await this.applyNoteView(record, message.view);
@@ -503,6 +519,7 @@ export class VoiceAttemptController {
         takes: entry.attempt.takes.map((take) => ({
           voiceNoteId: take.voiceNoteId,
           clientRequestId: take.clientRequestId,
+          pinnedConversationRef: take.pinnedConversationRef,
           view: { ...take.view },
           audio: null,
           blobUrl: null,
@@ -511,6 +528,7 @@ export class VoiceAttemptController {
       conversationRef: entry.conversationRef,
       pendingCreate,
       burnedClientRequestIds,
+      currentCreateSendWasReplay: false,
     };
   }
 
@@ -565,14 +583,16 @@ export class VoiceAttemptController {
     record.pendingCreate = {
       clientRequestId,
       conversationRef: record.conversationRef,
+      pinnedConversationRef: null,
       sourceGenerationRef: generationRef,
       script: canonicalScript,
       phase: 'in-flight',
+      sentOnce: false,
     };
     record.attempt.phase = 'takes';
     await this.persist(record);
     this.notifyChange();
-    this.sendPendingCreate(record);
+    await this.sendPendingCreate(record);
     return clientRequestId;
   }
 
@@ -596,19 +616,56 @@ export class VoiceAttemptController {
     throw new Error('unable to mint a unique voice clientRequestId');
   }
 
-  private sendPendingCreate(record: RuntimeAttemptRecord): boolean {
+  private async sendPendingCreate(record: RuntimeAttemptRecord): Promise<boolean> {
     const snapshot = record.pendingCreate;
     if (!snapshot || record.burnedClientRequestIds.has(snapshot.clientRequestId)) {
       return false;
     }
-    return this.post({
+    const wasSentOnce = snapshot.sentOnce;
+    if (!wasSentOnce) {
+      // Advance the durable ambiguity bit before the paid dispatch. A crash in
+      // the tiny persist→post gap is conservative (free reconcile), never a
+      // possibly-billed snapshot deletion.
+      snapshot.sentOnce = true;
+      await this.persist(record);
+    }
+    const sent = this.post({
       type: 'voice:noteCreate',
       attemptId: record.attempt.attemptId,
       clientRequestId: snapshot.clientRequestId,
       conversationRef: snapshot.conversationRef,
+      ...(snapshot.pinnedConversationRef !== null
+        ? { pinnedConversationRef: snapshot.pinnedConversationRef }
+        : {}),
       sourceGenerationRef: snapshot.sourceGenerationRef,
       script: snapshot.script,
     });
+    if (sent) {
+      record.currentCreateSendWasReplay = wasSentOnce;
+      return true;
+    }
+    if (!wasSentOnce && record.pendingCreate === snapshot) {
+      snapshot.sentOnce = false;
+      await this.persist(record);
+    }
+    return false;
+  }
+
+  private async applyCreateAck(
+    record: RuntimeAttemptRecord,
+    clientRequestId: string,
+    conversationRef: string,
+  ): Promise<void> {
+    const snapshot = record.pendingCreate;
+    if (
+      !snapshot ||
+      snapshot.clientRequestId !== clientRequestId ||
+      snapshot.pinnedConversationRef === conversationRef
+    ) {
+      return;
+    }
+    snapshot.pinnedConversationRef = conversationRef;
+    await this.persist(record);
   }
 
   private async applyNoteView(
@@ -626,6 +683,7 @@ export class VoiceAttemptController {
       take = {
         voiceNoteId: view.voiceNoteId,
         clientRequestId: record.pendingCreate.clientRequestId,
+        pinnedConversationRef: record.pendingCreate.pinnedConversationRef,
         view: { ...view },
         audio: null,
         blobUrl: null,
@@ -679,7 +737,9 @@ export class VoiceAttemptController {
         }
       }
     } else if (record.pendingCreate) {
-      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status)) {
+      const replayConflict = message.status === 409 &&
+        record.currentCreateSendWasReplay;
+      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) && !replayConflict) {
         if (message.code === 'voice_quota_denied') {
           record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
         }
@@ -764,7 +824,7 @@ export class VoiceAttemptController {
           return;
         }
       }
-      if (record.pendingCreate && !this.sendPendingCreate(record)) {
+      if (record.pendingCreate && !(await this.sendPendingCreate(record))) {
         return;
       }
     }
@@ -841,6 +901,7 @@ export class VoiceAttemptController {
         takes: record.attempt.takes.map((take) => ({
           voiceNoteId: take.voiceNoteId,
           clientRequestId: take.clientRequestId,
+          pinnedConversationRef: take.pinnedConversationRef,
           view: { ...take.view },
         })),
         selectedTakeId: record.attempt.selectedTakeId,

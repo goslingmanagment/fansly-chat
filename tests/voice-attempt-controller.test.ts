@@ -394,6 +394,124 @@ describe('VoiceAttemptController', () => {
     expect(second.controller.getAttempt()?.canonicalScript).toBe('voice\nscript');
   });
 
+  it('persists the background-derived conversation pin and includes it on every replay', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script', 'generation-original');
+    await first.controller.generateTake();
+    await first.controller.handleMessage({
+      type: 'voice:noteCreateAck',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      conversationRef: 'fan-derived-by-background',
+    });
+
+    expect((await first.store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      pinnedConversationRef: 'fan-derived-by-background',
+      sentOnce: true,
+    });
+    first.controller.destroy();
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await resumed.controller.boot();
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toEqual([{
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-derived-by-background',
+      sourceGenerationRef: 'generation-original',
+      script: 'Voice script',
+    }]);
+
+    await resumed.controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'queued'),
+    });
+    expect((await resumed.store.load(ROUTE))[0]?.attempt.takes[0]).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      pinnedConversationRef: 'fan-derived-by-background',
+    });
+  });
+
+  it('keeps a replay 409 as needs-reconcile because the create may have billed', async () => {
+    const { controller, port, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+
+    await controller.handlePortDisconnected();
+    port.connected = true;
+    await controller.handlePortReconnect();
+    expect(messagesOfType(port, 'voice:noteCreate')).toHaveLength(2);
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'idempotency_mismatch',
+      message: 'Create conflict.',
+      status: 409,
+    });
+
+    expect((await store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      phase: 'needs-reconcile',
+      sentOnce: true,
+    });
+    expect(controller.hasPendingCreateNeedsReconcile()).toBe(true);
+  });
+
+  it('keeps first-send 409 definite and clears the pending snapshot', async () => {
+    const { controller, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'idempotency_mismatch',
+      message: 'Create conflict.',
+      status: 409,
+    });
+
+    const stored = (await store.load(ROUTE))[0];
+    expect(stored?.pendingCreate).toBeNull();
+    expect(stored?.attempt.phase).toBe('script');
+    expect(controller.hasPendingCreateNeedsReconcile()).toBe(false);
+  });
+
+  it('treats a legacy V1 pending create without sentOnce as possibly dispatched', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script');
+    await first.controller.generateTake();
+    first.controller.destroy();
+
+    const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
+    const envelope = session.data[key] as {
+      pendingCreate: Record<string, unknown>;
+    };
+    delete envelope.pendingCreate.sentOnce;
+    delete envelope.pendingCreate.pinnedConversationRef;
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await resumed.controller.boot();
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toHaveLength(1);
+    expect((await resumed.store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
+      sentOnce: true,
+      pinnedConversationRef: null,
+    });
+  });
+
   it('re-arms every live matching attempt rather than only the active UI attempt', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('First draft', 'none');
@@ -632,8 +750,8 @@ describe('VoiceAttemptController', () => {
 
     events.length = 0;
     await controller.generateTake();
-    expect(events).toEqual(['persist', 'voice:noteCreate']);
-    expect(session.set).toHaveBeenCalledTimes(5);
+    expect(events).toEqual(['persist', 'persist', 'voice:noteCreate']);
+    expect(session.set).toHaveBeenCalledTimes(6);
 
     await controller.handleMessage({
       type: 'voice:noteView',
@@ -643,14 +761,14 @@ describe('VoiceAttemptController', () => {
         audioBytesLen: 2,
       }),
     });
-    expect(session.set).toHaveBeenCalledTimes(6);
+    expect(session.set).toHaveBeenCalledTimes(7);
     await controller.handleMessage({
       type: 'voice:audioBytes',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
       bytes: new Uint8Array([1, 2]).buffer,
     });
-    expect(session.set).toHaveBeenCalledTimes(7);
+    expect(session.set).toHaveBeenCalledTimes(8);
 
     const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
     expect(session.data[key]).toBeDefined();

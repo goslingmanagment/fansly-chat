@@ -1033,6 +1033,7 @@ export interface PortEnvelopeBase {
     | 'voice:scriptDelta'
     | 'voice:scriptComplete'
     | 'voice:scriptError'
+    | 'voice:noteCreateAck'
     | 'voice:noteView'
     | 'voice:noteError'
     | 'voice:audioBytes'
@@ -1105,6 +1106,9 @@ export interface VoiceNoteCreatePayload extends PortEnvelopeBase {
   attemptId: string;
   clientRequestId: string;
   conversationRef: string;
+  /** Background-derived route pin returned by voice:noteCreateAck. Once known,
+   * every recovery replay for this clientRequestId sends it verbatim. */
+  pinnedConversationRef?: string;
   sourceGenerationRef: string;
   script: string;
 }
@@ -1308,6 +1312,13 @@ export interface VoiceScriptErrorPayload extends PortEnvelopeBase {
   message: string;
 }
 
+export interface VoiceNoteCreateAckPayload extends PortEnvelopeBase {
+  type: 'voice:noteCreateAck';
+  attemptId: string;
+  clientRequestId: string;
+  conversationRef: string;
+}
+
 export interface VoiceNoteViewPayload extends PortEnvelopeBase {
   type: 'voice:noteView';
   attemptId: string;
@@ -1392,6 +1403,7 @@ export type BackgroundPortMessage =
   | VoiceScriptDeltaPayload
   | VoiceScriptCompletePayload
   | VoiceScriptErrorPayload
+  | VoiceNoteCreateAckPayload
   | VoiceNoteViewPayload
   | VoiceNoteErrorPayload
   | VoiceAudioBytesPayload

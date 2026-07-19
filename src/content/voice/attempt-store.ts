@@ -17,14 +17,19 @@ export interface StoredVoiceAttemptRoute {
 export interface VoiceTakeCreateSnapshot {
   clientRequestId: string;
   conversationRef: string;
+  pinnedConversationRef: string | null;
   sourceGenerationRef: string;
   script: string;
   phase: 'in-flight' | 'needs-reconcile';
+  /** Durable evidence that this idempotency key may already have reached the
+   * billable create endpoint. */
+  sentOnce: boolean;
 }
 
 export interface StoredVoiceTake {
   voiceNoteId: number;
   clientRequestId: string;
+  pinnedConversationRef: string | null;
   view: VoiceNoteStatusView;
 }
 
@@ -118,36 +123,68 @@ function isRoute(value: unknown): value is StoredVoiceAttemptRoute {
     Number.isFinite(value.routeNonce);
 }
 
-function isStoredTake(value: unknown): value is StoredVoiceTake {
-  return isRecord(value) &&
-    Number.isFinite(value.voiceNoteId) &&
-    typeof value.clientRequestId === 'string' &&
-    isVoiceNoteStatusView(value.view) &&
-    value.voiceNoteId === value.view.voiceNoteId;
+function parseStoredTake(value: unknown): StoredVoiceTake | null {
+  if (
+    !isRecord(value) ||
+    !Number.isFinite(value.voiceNoteId) ||
+    typeof value.clientRequestId !== 'string' ||
+    !(value.pinnedConversationRef === undefined || isNullableString(value.pinnedConversationRef)) ||
+    !isVoiceNoteStatusView(value.view) ||
+    value.voiceNoteId !== value.view.voiceNoteId
+  ) {
+    return null;
+  }
+  return {
+    voiceNoteId: value.voiceNoteId as number,
+    clientRequestId: value.clientRequestId,
+    // Older V1 envelopes predate the background-derived route pin.
+    pinnedConversationRef: value.pinnedConversationRef ?? null,
+    view: { ...value.view },
+  };
 }
 
-function isStoredAttempt(value: unknown): value is StoredVoiceAttempt {
+function parseStoredAttempt(value: unknown): StoredVoiceAttempt | null {
   if (!isRecord(value)) {
-    return false;
+    return null;
   }
-  return typeof value.attemptId === 'string' &&
-    (
+  const takes = Array.isArray(value.takes)
+    ? value.takes.map(parseStoredTake)
+    : [];
+  if (
+    typeof value.attemptId !== 'string' ||
+    !(
       value.phase === 'script' ||
       value.phase === 'generating' ||
       value.phase === 'takes' ||
       value.phase === 'attached'
-    ) &&
-    typeof value.draftText === 'string' &&
-    typeof value.script === 'string' &&
-    isNullableString(value.canonicalScript) &&
-    isNullableString(value.generationRef) &&
-    typeof value.tone === 'string' &&
-    REPLY_TONES.has(value.tone as ReplyTone) &&
-    Array.isArray(value.takes) &&
-    value.takes.every(isStoredTake) &&
-    (value.selectedTakeId === null || Number.isFinite(value.selectedTakeId)) &&
-    typeof value.stale === 'boolean' &&
-    isRoute(value.boundRoute);
+    ) ||
+    typeof value.draftText !== 'string' ||
+    typeof value.script !== 'string' ||
+    !isNullableString(value.canonicalScript) ||
+    !isNullableString(value.generationRef) ||
+    typeof value.tone !== 'string' ||
+    !REPLY_TONES.has(value.tone as ReplyTone) ||
+    !Array.isArray(value.takes) ||
+    takes.some((take) => take === null) ||
+    !(value.selectedTakeId === null || Number.isFinite(value.selectedTakeId)) ||
+    typeof value.stale !== 'boolean' ||
+    !isRoute(value.boundRoute)
+  ) {
+    return null;
+  }
+  return {
+    attemptId: value.attemptId,
+    phase: value.phase,
+    draftText: value.draftText,
+    script: value.script,
+    canonicalScript: value.canonicalScript,
+    generationRef: value.generationRef,
+    tone: value.tone as ReplyTone,
+    takes: takes as StoredVoiceTake[],
+    selectedTakeId: value.selectedTakeId as number | null,
+    stale: value.stale,
+    boundRoute: { ...value.boundRoute },
+  };
 }
 
 function parseCreateSnapshot(value: unknown): VoiceTakeCreateSnapshot | null {
@@ -155,8 +192,10 @@ function parseCreateSnapshot(value: unknown): VoiceTakeCreateSnapshot | null {
     !isRecord(value) ||
     typeof value.clientRequestId !== 'string' ||
     typeof value.conversationRef !== 'string' ||
+    !(value.pinnedConversationRef === undefined || isNullableString(value.pinnedConversationRef)) ||
     typeof value.sourceGenerationRef !== 'string' ||
     typeof value.script !== 'string' ||
+    !(value.sentOnce === undefined || typeof value.sentOnce === 'boolean') ||
     !(
       value.phase === undefined ||
       value.phase === 'in-flight' ||
@@ -168,15 +207,20 @@ function parseCreateSnapshot(value: unknown): VoiceTakeCreateSnapshot | null {
   return {
     clientRequestId: value.clientRequestId,
     conversationRef: value.conversationRef,
+    pinnedConversationRef: value.pinnedConversationRef ?? null,
     sourceGenerationRef: value.sourceGenerationRef,
     script: value.script,
     // Development snapshots from before the discriminator landed are safe to
     // recover as ordinary in-flight creates.
     phase: value.phase ?? 'in-flight',
+    // A legacy persisted pending create may already have reached the server.
+    // Treat missing evidence conservatively so a replay 409 cannot erase it.
+    sentOnce: value.sentOnce ?? true,
   };
 }
 
 function parseEnvelope(value: unknown): StoredEnvelope | null {
+  const attempt = isRecord(value) ? parseStoredAttempt(value.attempt) : null;
   const pendingCreate = isRecord(value) && value.pendingCreate !== null
     ? parseCreateSnapshot(value.pendingCreate)
     : null;
@@ -184,7 +228,7 @@ function parseEnvelope(value: unknown): StoredEnvelope | null {
     !isRecord(value) ||
     value.version !== 1 ||
     !Number.isFinite(value.savedAt) ||
-    !isStoredAttempt(value.attempt) ||
+    !attempt ||
     typeof value.conversationRef !== 'string' ||
     !(value.pendingCreate === null || pendingCreate) ||
     !Array.isArray(value.burnedClientRequestIds) ||
@@ -194,6 +238,7 @@ function parseEnvelope(value: unknown): StoredEnvelope | null {
   }
   return {
     ...(value as unknown as StoredEnvelope),
+    attempt,
     pendingCreate,
   };
 }
@@ -234,6 +279,7 @@ function serializeSnapshot(snapshot: VoiceAttemptStoreSnapshot, savedAt: number)
       takes: snapshot.attempt.takes.map((take) => ({
         voiceNoteId: take.voiceNoteId,
         clientRequestId: take.clientRequestId,
+        pinnedConversationRef: take.pinnedConversationRef,
         view: { ...take.view },
       })),
       selectedTakeId: snapshot.attempt.selectedTakeId,

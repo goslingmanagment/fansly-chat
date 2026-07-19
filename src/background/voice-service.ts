@@ -257,11 +257,12 @@ export class VoiceService {
   private readonly portsByTabId = new Map<number, browser.runtime.Port>();
   private readonly activeScriptsByTabId = new Map<number, ActiveScript>();
   private readonly attemptsById = new Map<string, VoiceAttemptRecord>();
-  /** Opaque, pre-issued attachment attestations. Granting consumes the row. */
-  private readonly attachTokens = new Map<string, string>();
-  /** An attempt stays spent after grant or route invalidation, including when
-   * noteCreate is idempotently replayed later. */
+  /** Route/fan invalidation is permanent for this worker-lifetime attempt.
+   * A successfully dispatched grant is not attempt-level invalidation: an
+   * explicit human re-request may receive a fresh, independently single-use
+   * token after an uncertain native handoff. */
   private readonly unavailableAttachAttemptIds = new Set<string>();
+  private readonly attachGrantsInFlight = new Set<string>();
   private readonly capabilityByPageLabel = new Map<string, CapabilityCacheEntry>();
   private readonly pageBindingByTabId = new Map<number, TabPageBinding>();
   private readonly randomUUID: () => string;
@@ -349,11 +350,11 @@ export class VoiceService {
     }
   }
 
-  /** Route changes revoke every unconsumed attachment token for the tab and
+  /** Route changes permanently invalidate attachment handoffs for the tab and
    * abort a script whose live clientContext belongs to the old conversation. */
   invalidateRoute(tabId: number): void {
     this.abortActiveScript(tabId);
-    this.deleteAttachTokensForTab(tabId);
+    this.invalidateAttachAttemptsForTab(tabId);
   }
 
   handlePortDisconnected(tabId: number): void {
@@ -366,6 +367,7 @@ export class VoiceService {
       if (attempt.binding.tabId === tabId) {
         this.attemptsById.delete(attemptId);
         this.unavailableAttachAttemptIds.delete(attemptId);
+        this.attachGrantsInFlight.delete(attemptId);
       }
     }
     this.pageBindingByTabId.delete(tabId);
@@ -544,14 +546,15 @@ export class VoiceService {
     emit: VoiceEmitter,
   ): Promise<void> {
     const context = this.deps.tabContexts.get(tabId);
-    // conversationRef is derived from the LIVE TabContext (fanAccountId ?? groupId),
-    // identical to the voice-script step's routing key. message.conversationRef is
-    // accepted on the wire but IGNORED for the create body — content snapshots its
-    // own copy for display/recovery only, and the create must not diverge from the
-    // script step's route (the server's canonical attempt hash covers conversationRef,
-    // so an idempotent recovery replay derives the same value deterministically).
-    const conversationRef = context ? context.fanAccountId ?? context.groupId : null;
-    if (!context || !conversationRef) {
+    // First send: derive exactly like voice-script. Recovery: use the pin that
+    // this service returned before the original create dispatch, even if a new
+    // MV3 worker has not resolved fanAccountId yet. The legacy conversationRef
+    // field remains display/recovery context and is never trusted as the pin.
+    const derivedConversationRef = context
+      ? context.fanAccountId ?? context.groupId
+      : null;
+    const conversationRef = message.pinnedConversationRef ?? derivedConversationRef;
+    if (!context || conversationRef === null) {
       this.emitLocalNoteError(
         message.attemptId,
         { source: 'create' },
@@ -574,6 +577,15 @@ export class VoiceService {
         );
         return;
       }
+      // Send the background-owned derivation back before the billable request.
+      // Content persists it against this exact clientRequestId and includes it
+      // on every recovery replay.
+      emit({
+        type: 'voice:noteCreateAck',
+        attemptId: message.attemptId,
+        clientRequestId: message.clientRequestId,
+        conversationRef,
+      });
       const view = await this.deps.agencyHubClient.createVoiceNote(
         state.settings,
         page.pageLabel,
@@ -591,12 +603,6 @@ export class VoiceService {
         voiceNoteId: view.voiceNoteId,
         binding,
       });
-      if (
-        !this.unavailableAttachAttemptIds.has(message.attemptId) &&
-        !this.findAttachToken(message.attemptId)
-      ) {
-        this.attachTokens.set(this.randomUUID(), message.attemptId);
-      }
       emit({ type: 'voice:noteView', attemptId: message.attemptId, view });
     } catch (error) {
       this.emitNoteError(message.attemptId, { source: 'create' }, error, emit);
@@ -733,66 +739,69 @@ export class VoiceService {
     emit: VoiceEmitter,
   ): Promise<void> {
     const attempt = this.attemptsById.get(message.attemptId);
-    if (!attempt || attempt.binding.tabId !== tabId || attempt.voiceNoteId !== message.voiceNoteId) {
+    if (
+      !attempt ||
+      attempt.binding.tabId !== tabId ||
+      attempt.voiceNoteId !== message.voiceNoteId ||
+      this.unavailableAttachAttemptIds.has(message.attemptId) ||
+      this.attachGrantsInFlight.has(message.attemptId)
+    ) {
       this.emitAttachRefusal(message.attemptId, 'unknown', emit);
       return;
     }
-    const context = this.deps.tabContexts.get(tabId);
-    const refusal = attachRefusal(attempt.binding, context);
-    if (refusal) {
-      this.deleteAttachTokensForAttempt(message.attemptId);
-      this.unavailableAttachAttemptIds.add(message.attemptId);
-      this.emitAttachRefusal(message.attemptId, refusal, emit);
-      return;
-    }
-    const token = this.findAttachToken(message.attemptId);
-    if (!token || !context) {
-      this.emitAttachRefusal(message.attemptId, 'unknown', emit);
-      return;
-    }
-
-    let fanUsername = context.fanDisplayName?.trim() ?? '';
-    if (!fanUsername && context.fanAccountId) {
-      try {
-        const session = this.deps.sessionStore.getSessionForTab(tabId);
-        if (session) {
-          const [fan] = await this.deps.fanslyClient.getAccountNames(
-            [context.fanAccountId],
-            session,
-            new AbortController().signal,
-          );
-          fanUsername = fan?.username?.trim() || fan?.displayName?.trim() || '';
-        }
-      } catch {
-        // The attestation remains valid, but without a fan label it cannot be
-        // safely handed to the DOM attach path.
+    this.attachGrantsInFlight.add(message.attemptId);
+    try {
+      const context = this.deps.tabContexts.get(tabId);
+      const refusal = attachRefusal(attempt.binding, context);
+      if (refusal) {
+        this.unavailableAttachAttemptIds.add(message.attemptId);
+        this.emitAttachRefusal(message.attemptId, refusal, emit);
+        return;
       }
-    }
-    const afterLookupRefusal = attachRefusal(
-      attempt.binding,
-      this.deps.tabContexts.get(tabId),
-    );
-    if (afterLookupRefusal) {
-      this.deleteAttachTokensForAttempt(message.attemptId);
-      this.unavailableAttachAttemptIds.add(message.attemptId);
-      this.emitAttachRefusal(message.attemptId, afterLookupRefusal, emit);
-      return;
-    }
-    if (!fanUsername || this.attachTokens.get(token) !== message.attemptId) {
-      this.emitAttachRefusal(message.attemptId, 'unknown', emit);
-      return;
-    }
 
-    // The request that receives the grant consumes the token. A second attach
-    // request for the same render therefore has no attestation to spend.
-    this.attachTokens.delete(token);
-    this.unavailableAttachAttemptIds.add(message.attemptId);
-    emit({
-      type: 'voice:attachGrant',
-      attemptId: message.attemptId,
-      token,
-      fanUsername,
-    });
+      let fanUsername = context?.fanDisplayName?.trim() ?? '';
+      if (!fanUsername && context?.fanAccountId) {
+        try {
+          const session = this.deps.sessionStore.getSessionForTab(tabId);
+          if (session) {
+            const [fan] = await this.deps.fanslyClient.getAccountNames(
+              [context.fanAccountId],
+              session,
+              new AbortController().signal,
+            );
+            fanUsername = fan?.username?.trim() || fan?.displayName?.trim() || '';
+          }
+        } catch {
+          // The attestation remains valid, but without a fan label it cannot be
+          // safely handed to the DOM attach path.
+        }
+      }
+      const afterLookupRefusal = attachRefusal(
+        attempt.binding,
+        this.deps.tabContexts.get(tabId),
+      );
+      if (afterLookupRefusal) {
+        this.unavailableAttachAttemptIds.add(message.attemptId);
+        this.emitAttachRefusal(message.attemptId, afterLookupRefusal, emit);
+        return;
+      }
+      if (!fanUsername) {
+        this.emitAttachRefusal(message.attemptId, 'unknown', emit);
+        return;
+      }
+
+      // Mint only for this explicit handoff. The adapter consumes this token
+      // before its one native change dispatch; a later human re-request gets a
+      // different token and can never revive the consumed one.
+      emit({
+        type: 'voice:attachGrant',
+        attemptId: message.attemptId,
+        token: this.randomUUID(),
+        fanUsername,
+      });
+    } finally {
+      this.attachGrantsInFlight.delete(message.attemptId);
+    }
   }
 
   private async resolvePageForTab(
@@ -940,27 +949,9 @@ export class VoiceService {
     active.controller.abort();
   }
 
-  private findAttachToken(attemptId: string): string | null {
-    for (const [token, boundAttemptId] of this.attachTokens) {
-      if (boundAttemptId === attemptId) {
-        return token;
-      }
-    }
-    return null;
-  }
-
-  private deleteAttachTokensForAttempt(attemptId: string): void {
-    for (const [token, boundAttemptId] of this.attachTokens) {
-      if (boundAttemptId === attemptId) {
-        this.attachTokens.delete(token);
-      }
-    }
-  }
-
-  private deleteAttachTokensForTab(tabId: number): void {
-    for (const [token, attemptId] of this.attachTokens) {
-      if (this.attemptsById.get(attemptId)?.binding.tabId === tabId) {
-        this.attachTokens.delete(token);
+  private invalidateAttachAttemptsForTab(tabId: number): void {
+    for (const [attemptId, attempt] of this.attemptsById) {
+      if (attempt.binding.tabId === tabId) {
         this.unavailableAttachAttemptIds.add(attemptId);
       }
     }

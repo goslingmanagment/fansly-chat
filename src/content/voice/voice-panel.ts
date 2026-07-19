@@ -96,6 +96,12 @@ const ATTACH_REFUSAL_KEY: Record<string, UserErrorKey> = {
   fan_mismatch: 'chat_changed',
 };
 
+const UNKNOWN_ATTACH_REFUSAL: UserFacingError = {
+  key: 'unknown_error',
+  code: 'CG-VOICE',
+  message: 'Не удалось выдать разрешение — попробуйте ещё раз',
+};
+
 /**
  * The default "лента" voice surface. It renders the shared components (script
  * editor + meta, tone chips, takes list, attach/download actions) from ONE
@@ -198,13 +204,17 @@ export class VoicePanel {
     }
     if (message.type === 'voice:attachRefuse') {
       this.attachPhase = 'idle';
-      this.lastError = getErrorMessage(ATTACH_REFUSAL_KEY[message.reason] ?? 'chat_changed');
+      const mappedKey = ATTACH_REFUSAL_KEY[message.reason];
+      this.lastError = mappedKey
+        ? getErrorMessage(mappedKey)
+        : UNKNOWN_ATTACH_REFUSAL;
       this.render();
       return;
     }
     // voice:noteError
     if (message.source === 'create') {
-      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status)) {
+      const needsReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
+      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) && !needsReconcile) {
         this.pendingReconcile = false;
         this.lastError = resolveVoiceError(message.code, message.message);
       } else {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
 import { VoiceAttemptController } from '../src/content/voice/attempt-controller.js';
+import { VoiceService } from '../src/background/voice-service.js';
 import {
   VoiceAttemptStore,
   type VoiceAttemptStorageArea,
@@ -13,6 +14,7 @@ import type {
   ReplyTone,
   VoiceNoteState,
 } from '../src/shared/types.js';
+import { createDefaultSettings } from '../src/shared/migrations.js';
 import { VoicePanel, type VoicePanelAttachParams } from '../src/content/voice/voice-panel.js';
 
 function installDom(): InstanceType<typeof JSDOM> {
@@ -65,6 +67,7 @@ interface Harness {
   sent: ContentPortMessage[];
   setProbe: (probe: VoiceComposerProbe) => void;
   setAttachOutcome: (outcome: VoiceAttachOutcome | Promise<VoiceAttachOutcome>) => void;
+  setSendHandler: (handler: ((message: ContentPortMessage) => void) | null) => void;
   attachCalls: VoicePanelAttachParams[];
   draft: { value: string };
   root: HTMLElement;
@@ -84,6 +87,7 @@ function setup(): Harness {
   const draft = { value: '' };
   let blobCounter = 0;
   let uuidCounter = 0;
+  let sendHandler: ((message: ContentPortMessage) => void) | null = null;
 
   // A holder so the controller callbacks can reference the panel that is built
   // just after it; the callbacks only fire once work is driven, after assignment.
@@ -92,6 +96,7 @@ function setup(): Harness {
     port: {
       send: (message) => {
         sent.push(message);
+        sendHandler?.(message);
         return true;
       },
     },
@@ -135,6 +140,9 @@ function setup(): Harness {
     },
     setAttachOutcome: (next) => {
       attachOutcome = next;
+    },
+    setSendHandler: (handler) => {
+      sendHandler = handler;
     },
     attachCalls,
     draft,
@@ -199,6 +207,91 @@ function textOf(root: HTMLElement): string {
  * panel's fire-and-forget handlers kick off. */
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Wires the panel/controller to the real background attach grant path. The
+ * create is seeded directly only to establish the service's attested tuple;
+ * every attach request and grant then crosses the production message handlers. */
+async function wireRealAttachService(attemptId: string) {
+  const context = {
+    tabId: 7,
+    accountId: 'account-1',
+    groupId: 'group-1',
+    fanAccountId: 'fan-1',
+    fanDisplayName: 'alice',
+    activeOperationId: null,
+    routeNonce: 1,
+  };
+  let tokenCounter = 0;
+  const completed = view({
+    voiceNoteId: 1,
+    state: 'completed',
+    audioSha256: 'a'.repeat(64),
+    audioBytesLen: 3,
+  });
+  const service = new VoiceService({
+    kernelGateway: { streamFeature: vi.fn() } as never,
+    agencyHubClient: {
+      resolvePageForUsername: vi.fn(async () => ({
+        pageLabel: 'creator-fs',
+        voiceNotesCapable: true,
+      })),
+      createVoiceNote: vi.fn(async () => completed),
+      getVoiceNoteStatus: vi.fn(async () => completed),
+      fetchVoiceNoteAudio: vi.fn(async () => new Response()),
+    },
+    fanslyClient: {
+      getAuthenticatedAccount: vi.fn(),
+      loadMessages: vi.fn(),
+      getGroup: vi.fn(),
+      getAccountNames: vi.fn(async () => [{
+        id: 'fan-1',
+        username: 'alice',
+        displayName: 'Alice',
+      }]),
+      verifyMediaPurchaseStates: vi.fn(),
+    } as never,
+    sessionStore: {
+      getSessionForTab: vi.fn(() => ({
+        connected: true,
+        resolvedUsername: 'creator',
+      })),
+    } as never,
+    tabContexts: {
+      get: vi.fn(() => context),
+      getOrCreate: vi.fn(() => context),
+      setFan: vi.fn(() => context),
+    },
+    storageCoordinator: {
+      getState: vi.fn(async () => ({
+        settings: {
+          ...createDefaultSettings(),
+          agencyHubBaseUrl: 'https://hub.test',
+          agencyHubDeviceToken: 'device-token',
+        },
+      })),
+    } as never,
+    randomUUID: () => `service-token-${(tokenCounter += 1)}`,
+  });
+
+  await service.handleMessage(7, {
+    type: 'voice:noteCreate',
+    attemptId,
+    clientRequestId: 'seed-client-request',
+    conversationRef: 'group-1',
+    sourceGenerationRef: 'gen-1',
+    script: SCRIPT,
+  }, () => undefined);
+
+  harness!.setSendHandler((message) => {
+    if (message.type !== 'voice:attachToken') {
+      return;
+    }
+    void service.handleMessage(7, message, (outbound) => {
+      void harness?.controller.handleMessage(outbound);
+    });
+  });
+  return { context, service };
 }
 
 function buttonByText(root: HTMLElement, needle: string): HTMLButtonElement | undefined {
@@ -400,19 +493,19 @@ describe('VoicePanel — лента', () => {
     expect(harness!.attachCalls).toHaveLength(1);
   });
 
-  it('re-arms an uncertain attach for a FRESH single-use token, one adapter.attach per grant', async () => {
+  it('re-arms an uncertain attach through a REAL second service grant with a fresh token', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);
     harness!.panel.setFanUsername('alice');
     harness!.setAttachOutcome('uncertain');
+    await wireRealAttachService(attemptId);
 
-    await harness!.panel.handleAttachGrant({
-      type: 'voice:attachGrant',
-      attemptId,
-      token: 'tok-1',
-      fanUsername: 'alice',
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach')!.click();
+    await vi.waitFor(() => {
+      expect(harness!.attachCalls).toEqual([
+        expect.objectContaining({ token: 'service-token-1' }),
+      ]);
     });
-    expect(harness!.attachCalls).toHaveLength(1);
 
     const { root, sent } = harness!;
     const rearm = buttonByText(root, 'Прикрепить ещё раз');
@@ -431,14 +524,32 @@ describe('VoicePanel — лента', () => {
       expect.objectContaining({ type: 'voice:attachToken', attemptId, voiceNoteId: 1 }),
     );
 
-    // Exactly one adapter.attach for the second grant.
-    await harness!.panel.handleAttachGrant({
-      type: 'voice:attachGrant',
-      attemptId,
-      token: 'tok-2',
-      fanUsername: 'alice',
+    // The second adapter dispatch comes from the service, not a test-faked
+    // handleAttachGrant call, and carries a different single-use token.
+    await vi.waitFor(() => {
+      expect(harness!.attachCalls).toEqual([
+        expect.objectContaining({ token: 'service-token-1' }),
+        expect.objectContaining({ token: 'service-token-2' }),
+      ]);
     });
-    expect(harness!.attachCalls).toHaveLength(2);
+  });
+
+  it('refuses the real service re-request when the attested tuple drifts', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.setAttachOutcome('uncertain');
+    const { context } = await wireRealAttachService(attemptId);
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach')!.click();
+    await vi.waitFor(() => expect(harness!.attachCalls).toHaveLength(1));
+    buttonByText(harness!.root, 'Прикрепить ещё раз')!.click();
+    context.routeNonce += 1;
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach')!.click();
+
+    await vi.waitFor(() => {
+      expect(textOf(harness!.root)).toContain('Conversation context changed.');
+    });
+    expect(harness!.attachCalls).toHaveLength(1);
   });
 
   it('offers the leftover-draft hint after a confirmed attach and clears the composer on request', async () => {
@@ -479,6 +590,20 @@ describe('VoicePanel — лента', () => {
     expect(textOf(harness!.root)).toContain('Лимит символов для войсов исчерпан.');
   });
 
+  it('maps an unknown attach refusal to an honest retryable permission error', async () => {
+    const attemptId = await toScriptPhase();
+    harness!.panel.handleError({
+      type: 'voice:attachRefuse',
+      attemptId,
+      reason: 'unknown',
+    });
+
+    expect(textOf(harness!.root)).toContain(
+      'Не удалось выдать разрешение — попробуйте ещё раз',
+    );
+    expect(textOf(harness!.root)).not.toContain('Conversation context changed.');
+  });
+
   it('surfaces an indeterminate take as free status check plus an explicit paid regenerate', async () => {
     const attemptId = await toScriptPhase();
     await harness!.controller.generateTake();
@@ -511,6 +636,25 @@ describe('VoicePanel — лента', () => {
     });
 
     expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+  });
+
+  it('surfaces a replay 409 as a free reconcile instead of a definite error', async () => {
+    const attemptId = await toScriptPhase();
+    await harness!.controller.generateTake();
+    await harness!.controller.handlePortDisconnected();
+    await harness!.controller.handlePortReconnect();
+
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'create',
+      code: 'idempotency_mismatch',
+      message: 'Create conflict.',
+      status: 409,
+    });
+
+    expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    expect(textOf(harness!.root)).not.toContain('Create conflict.');
   });
 
   it('a definite create rejection with no take returns to the script phase, not a fake spinner', async () => {

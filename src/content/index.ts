@@ -1381,6 +1381,7 @@ export class ChatGooseContentApp {
       case 'voice:scriptDelta':
       case 'voice:scriptComplete':
       case 'voice:scriptError':
+      case 'voice:noteCreateAck':
       case 'voice:noteView':
       case 'voice:noteError':
       case 'voice:audioBytes':
