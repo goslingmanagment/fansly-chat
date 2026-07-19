@@ -1000,3 +1000,37 @@ remains aligned to the currently deployed Core contract as release evidence;
 keeping generated contract bytes does not enable any E40–E43 call path. The
 E40–E43 technical decisions and their hand-curated plans/spec stay in history
 with explicit 2.0-deferred banners rather than being deleted.
+
+**E45 (2026-07-20).** Voice notes extension lane (phase 2 of the voice
+effort; kernel half = core #15 / Decision #174). The extension gains a
+dedicated `voice:*` port protocol — deliberately NOT `operation:*`, so the
+voice flow is exempt from the generic disconnect cleanup and the generic
+lane's transparent `service_unavailable` retry; `voice-script` joins
+FeatureType as a panel-only feature excluded from every insert/accept/
+compare surface (type-level via `isOperationFeatureType`). Billing safety
+is client-enforced end-to-end: the content attempt-controller owns
+`clientRequestId` per take, canonicalizes the script once (NFC, CRLF→LF,
+trim) into a durable `storage.session` snapshot persisted BEFORE the paid
+create is sent, replays the same id on boot/reconnect (kernel replays
+idempotently), burns quota-denied ids forever, classifies create errors by
+a `source` discriminator + definite-status set (409 on a replay is
+needs-reconcile, never a definite loss), and pins the background-derived
+`conversationRef` (fanAccountId ?? groupId, acked back and persisted) so
+recovery replays stay byte-identical across event-page restarts. Attach is
+at-most-once behind a background-attested single-use token bound to the
+tab/account/group/fan/routeNonce tuple; re-mint is allowed only for
+non-confirmed attempts on explicit human re-request, gated at the
+controller (`phase === 'attached'` + attachInFlight). The adapter uses the
+spike-proven native-input handoff (DataTransfer + bubbling change; page-
+context cloneInto fallback) with the Upload-modal reality encoded in UX:
+the Free/PPV hint shows at handoff, `uncertain` within the 10s waveform
+budget is a calm normal path. Two views, one controller: the студия
+overlay re-parents the лента's live slot nodes (state loss impossible by
+construction) and auto-collapses at attach handoff so the native modal is
+never stranded behind the scrim. Audio bytes are validated (type, length
+≤2 MiB, sha256) in the background before crossing the port, live only in
+memory + revocable blob URLs, and are never persisted or logged. No
+storage.local changes; `storage.session` attempt snapshots are versioned
+(`voiceAttemptV1:`) and TTL-bounded. The feature renders only when the
+kernel's `capabilities.voiceNotes` hint is true (fail-closed plumbing
+through TabUiState); the kernel remains authoritative at create.
