@@ -6,7 +6,7 @@ import type {
 
 export type FeatureMessageCountBucket = 'quick' | 'ping' | 'improve' | 'deep' | 'hi';
 export type FeatureTimeoutBucket = 'quick' | 'deep';
-export type FeatureSurfaceKind = 'inline-reply' | 'overlay';
+export type FeatureSurfaceKind = 'inline-reply' | 'overlay' | 'panel-only';
 export type FeaturePromptMode = 'reply' | 'analysis';
 export type FeatureResultKind =
   | 'reply'
@@ -112,6 +112,23 @@ export const FEATURE_POLICIES = {
     supportsReplyMode: false,
     supportsReplyTone: false,
     requiresDraft: false,
+    usesPingSegment: false,
+    includesEarnings: false,
+  },
+  'voice-script': {
+    messageCountBucket: 'quick',
+    timeoutBucket: 'quick',
+    modelFeature: 'voice-script',
+    // Voice owns a dedicated panel/controller and never enters the generic
+    // inline-reply or overlay operation surfaces.
+    surfaceKind: 'panel-only',
+    promptMode: 'analysis',
+    // The dedicated runner forwards raw script text; this inert value keeps
+    // the generic result builder non-insertable if the boundary ever regresses.
+    resultKind: 'summary',
+    supportsReplyMode: false,
+    supportsReplyTone: true,
+    requiresDraft: true,
     usesPingSegment: false,
     includesEarnings: false,
   },

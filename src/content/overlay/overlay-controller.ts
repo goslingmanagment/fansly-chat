@@ -116,6 +116,8 @@ function titleForFeature(feature: FeatureType): string {
       return 'Chat Review';
     case 'ping':
       return 'Ping';
+    case 'voice-script':
+      throw new Error('voice-script uses the dedicated voice panel');
   }
 }
 

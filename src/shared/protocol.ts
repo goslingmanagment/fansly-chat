@@ -9,6 +9,7 @@ import type {
   ReplyTone,
   RuntimeRequestMap,
   RuntimeResponseMap,
+  VoiceNoteState,
 } from './types.js';
 
 export type RuntimeRequestType = keyof RuntimeRequestMap;
@@ -49,6 +50,16 @@ const REPLY_TONES = new Set<ReplyTone>([
   'flirty',
   'upsell',
   'spicy',
+]);
+const VOICE_NOTE_STATES = new Set<VoiceNoteState>([
+  'queued',
+  'dispatched',
+  'completed',
+  'failed_definite',
+  'failed_after_dispatch',
+  'indeterminate',
+  'quota_denied',
+  'artifact_expired',
 ]);
 
 export function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +102,10 @@ function isFeatureType(value: unknown): value is FeatureType {
   return isString(value) && FEATURE_TYPES.has(value as FeatureType);
 }
 
+function isOperationFeatureType(value: unknown): value is Exclude<FeatureType, 'voice-script'> {
+  return isFeatureType(value) && value !== 'voice-script';
+}
+
 function isOperationPhase(value: unknown): value is OperationPhase {
   return isString(value) && OPERATION_PHASES.has(value as OperationPhase);
 }
@@ -103,6 +118,10 @@ function isReplyTone(value: unknown): value is ReplyTone {
   return isString(value) && REPLY_TONES.has(value as ReplyTone);
 }
 
+function isVoiceNoteState(value: unknown): value is VoiceNoteState {
+  return isString(value) && VOICE_NOTE_STATES.has(value as VoiceNoteState);
+}
+
 function isOptionalReplyMode(record: Record<string, unknown>): boolean {
   return record.replyMode === undefined || isReplyMode(record.replyMode);
 }
@@ -113,6 +132,10 @@ function isOptionalReplyTone(record: Record<string, unknown>): boolean {
 
 function hasOperationId(record: Record<string, unknown>): boolean {
   return isString(record.operationId);
+}
+
+function hasAttemptId(record: Record<string, unknown>): boolean {
+  return isString(record.attemptId);
 }
 
 function hasCardId(record: Record<string, unknown>): boolean {
@@ -170,13 +193,29 @@ function isTabRouteMessage(record: Record<string, unknown>): boolean {
 
 function isOperationStartMessage(record: Record<string, unknown>): boolean {
   return hasOperationId(record) &&
-    isFeatureType(record.feature) &&
+    isOperationFeatureType(record.feature) &&
     isTabRouteMessage(record) &&
     isNullableString(record.domFanDisplayName) &&
     isOptionalString(record, 'draftText') &&
     isOptionalBoolean(record, 'forceRegenerate') &&
     isOptionalReplyMode(record) &&
     isOptionalReplyTone(record);
+}
+
+function isVoiceNoteStatusView(value: unknown): boolean {
+  return isObjectRecord(value) &&
+    isNumber(value.voiceNoteId) &&
+    isVoiceNoteState(value.state) &&
+    isNumber(value.scriptChars) &&
+    (value.billed === null || isBoolean(value.billed)) &&
+    isNullableString(value.audioSha256) &&
+    isNullableNumber(value.audioBytesLen) &&
+    isString(value.createdAt) &&
+    isOptionalString(value, 'errorCode');
+}
+
+function isArrayBuffer(value: unknown): value is ArrayBuffer {
+  return typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer;
 }
 
 function isCompareStartMessage(record: Record<string, unknown>): boolean {
@@ -316,6 +355,26 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
     case 'operation:cancel':
     case 'compare:cancel':
       return hasOperationId(message);
+    case 'voice:scriptStart':
+      return hasAttemptId(message) &&
+        isString(message.draftText) &&
+        isReplyTone(message.replyTone);
+    case 'voice:scriptCancel':
+      return hasAttemptId(message);
+    case 'voice:noteCreate':
+      return hasAttemptId(message) &&
+        isString(message.clientRequestId) &&
+        isString(message.conversationRef) &&
+        isString(message.sourceGenerationRef) &&
+        isString(message.script);
+    case 'voice:noteStatus':
+    case 'voice:attachToken':
+      return hasAttemptId(message) && isNumber(message.voiceNoteId);
+    case 'voice:audioFetch':
+      return hasAttemptId(message) &&
+        isNumber(message.voiceNoteId) &&
+        isString(message.expectedSha256) &&
+        isNumber(message.expectedBytes);
     default:
       return false;
   }
@@ -333,14 +392,14 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return hasOperationId(message) && hasCardId(message) && isString(message.text);
     case 'operation:debugPrompt':
       return hasOperationId(message) &&
-        isFeatureType(message.feature) &&
+        isOperationFeatureType(message.feature) &&
         isObjectRecord(message.snapshot);
     case 'operation:debugPromptStatus':
       // Exact envelope too: an extra top-level key on THIS message would be a
       // prompt block riding beside the projection into the page's process.
       return hasExactKeys(message, ['type', 'operationId', 'feature', 'echo']) &&
         hasOperationId(message) &&
-        isFeatureType(message.feature) &&
+        isOperationFeatureType(message.feature) &&
         isDebugPromptEchoStatus(message.echo);
     case 'operation:complete':
       return hasOperationId(message) &&
@@ -381,10 +440,41 @@ export function isBackgroundPortMessage(message: unknown): message is Background
     case 'spenders:snapshot':
       return isOptionalString(message, 'buildId') && isSpendersListResult(message.result);
     case 'operation:progress':
-      return hasOperationProgressShape(message) && isFeatureType(message.feature);
+      return hasOperationProgressShape(message) && isOperationFeatureType(message.feature);
     case 'compare:progress':
       return hasOperationProgressShape(message) &&
         isOptionalString(message, 'fanDisplayName');
+    case 'voice:scriptDelta':
+      return hasAttemptId(message) && isString(message.text);
+    case 'voice:scriptComplete':
+      return hasAttemptId(message) &&
+        isString(message.script) &&
+        isString(message.generationRef);
+    case 'voice:scriptError':
+      return hasAttemptId(message) &&
+        isString(message.code) &&
+        isString(message.message);
+    case 'voice:noteView':
+      return hasAttemptId(message) && isVoiceNoteStatusView(message.view);
+    case 'voice:noteError':
+      return hasAttemptId(message) &&
+        isString(message.code) &&
+        isString(message.message) &&
+        isNumber(message.status);
+    case 'voice:audioBytes':
+      return hasAttemptId(message) &&
+        isNumber(message.voiceNoteId) &&
+        isArrayBuffer(message.bytes);
+    case 'voice:attachGrant':
+      return hasAttemptId(message) &&
+        isString(message.token) &&
+        isString(message.fanUsername);
+    case 'voice:attachRefuse':
+      return hasAttemptId(message) && (
+        message.reason === 'route_changed' ||
+        message.reason === 'fan_mismatch' ||
+        message.reason === 'unknown'
+      );
     default:
       return false;
   }
