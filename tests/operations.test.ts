@@ -4539,6 +4539,52 @@ describe('OperationCoordinator', () => {
     }
   });
 
+  it('fails closed on a truncated fan-summary stream and caches nothing', async () => {
+    // Round-4 extended the exhaustion guard to fan-summary; this pins it. A
+    // truncated recap must fail closed — never presented AND, the whole point for
+    // recaps, never written to the summary cache (a truncated recap there would
+    // poison later reads and any Hub dossier push). Cover the kernel 'max_tokens'
+    // and OpenRouter's provider 'length'.
+    for (const stopReason of ['max_tokens', 'length'] as const) {
+      delete mockStorage['summary:group-1'];
+      const kernelGateway = {
+        isConfigured: vi.fn(() => true),
+        streamFeature: vi.fn(
+          async (
+            _settings: unknown,
+            _request: unknown,
+            callbacks: { onStopReason?: (reason: string | null) => void },
+            _signal: unknown,
+          ) => {
+            callbacks.onStopReason?.(stopReason);
+            return 'Alice is a long-term whale who mostly buys customs and responds best to';
+          },
+        ),
+      };
+      const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+      await coordinator.startOperation(1, {
+        type: 'operation:start',
+        operationId: `summary-op-${stopReason}`,
+        feature: 'fan-summary',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        forceRegenerate: false,
+      });
+
+      const messages = postedMessages(port);
+      const errorMessage = messages.find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          message.type === 'operation:error',
+      );
+      expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+      // Nothing presented, and the truncated summary is NEVER cached.
+      expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+      expect(mockStorage['summary:group-1']).toBeUndefined();
+    }
+  });
+
   it('passes the configured temperature for each operation type', async () => {
     const { coordinator, kernelGateway } = await createCoordinatorHarness({
       anthropicRawText: 'Result',
