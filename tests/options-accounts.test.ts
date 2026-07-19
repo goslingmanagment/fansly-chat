@@ -1148,4 +1148,28 @@ describe('Options page coach settings', () => {
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
     expect(warning.textContent).toContain('Full Recap loads up to 1234 messages');
   });
+
+  it('clamps the cost warning to the deep-window bounds — never quotes an unreachable count', async () => {
+    // Round-11 P2: sanitizeSettings clamps the persisted value to [100, 3000], so
+    // the warning must clamp too — quoting 99999 is a dishonest cost (E43).
+    await loadOptionsPage({
+      state: makeState({
+        settings: { ...makeState().settings, deepMessageCount: 250, coachAutoRecap: 'full' },
+      }),
+      sessions: [],
+    });
+    const warning = getRecapWarning()!;
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+
+    // Above the max: shows the clamped 3000, never the typed 99999.
+    deepInput.value = '99999';
+    deepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(warning.textContent).toContain('Full Recap loads up to 3000 messages');
+    expect(warning.textContent).not.toContain('99999');
+
+    // Below the min: clamps up to 100.
+    deepInput.value = '5';
+    deepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(warning.textContent).toContain('Full Recap loads up to 100 messages');
+  });
 });

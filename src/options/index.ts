@@ -36,6 +36,8 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
+  DEEP_MAX_MESSAGE_COUNT,
+  DEEP_MIN_MESSAGE_COUNT,
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
   PERSONA_CATALOG_SOURCE_STORAGE_KEY,
   PERSONA_CATALOG_STORAGE_KEY,
@@ -325,10 +327,18 @@ async function render(): Promise<void> {
   // field holds a blank/non-numeric mid-edit value.
   const updateCoachRecapWarning = (): void => {
     const rawDeep = Number(deepInput.value);
-    const shownDeep =
+    const parsedDeep =
       Number.isFinite(rawDeep) && rawDeep > 0
         ? Math.round(rawDeep)
         : state.settings.deepMessageCount;
+    // Clamp to the same [min, max] sanitizeSettings persists, so the warning can
+    // never quote an unreachable count (typing 99999 must read 3000, not 99999 —
+    // an honest cost warning, E43). The debounced save reflects the clamp too, but
+    // only after a round-trip; this clamps live while the chatter is reading it.
+    const shownDeep = Math.min(
+      DEEP_MAX_MESSAGE_COUNT,
+      Math.max(DEEP_MIN_MESSAGE_COUNT, parsedDeep),
+    );
     coachRecapWarning.textContent =
       `Full Recap loads up to ${shownDeep} messages — slow and expensive.`;
     coachRecapWarning.hidden = coachRecapSelect.value !== 'full';

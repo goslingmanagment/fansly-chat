@@ -19,6 +19,7 @@ import {
   toUserError,
 } from '../shared/errors.js';
 import { logWarn } from '../shared/log.js';
+import { isRecapStatusResponse } from '../shared/protocol.js';
 import type {
   AgencyHubAiUsageBatchResponse,
   AgencyHubAiUsageEvent,
@@ -409,13 +410,23 @@ export class AgencyHubClient {
           ...(params.fanRef ? { fanRef: params.fanRef } : {}),
         },
       });
-      // Hub answered — null slots now genuinely mean "no recap".
+      // Defense-in-depth at this untrusted boundary (item 4): the SDK already
+      // safeParses the 200 against aiRecapStatusResponseSchema, but re-validate
+      // the shape here so a drifted/old Hub whose reply somehow slips through can
+      // never reach the consumer as a trusted 'ok' — fail closed to unavailable.
+      if (!isRecapStatusResponse(response)) {
+        return { state: 'unavailable', full: null, short: null };
+      }
+      // Only a VALID 200 confirms reality — then null slots genuinely mean "no recap".
       return { state: 'ok', full: response.full, short: response.short };
     } catch (error) {
-      // 404 = the endpoint/conversation is unknown to this Hub → genuinely "none"
-      // (the Hub WAS reached), not an error (mirrors getConversationProfile).
+      // A 404 only proves the endpoint/conversation could not be READ (an old Hub
+      // without the route, or a page deleted between the pageLabel resolve and
+      // this call) — it does NOT confirm "no recap". Only a valid 200 can. So a
+      // 404, like any other failure, reports 'unavailable', never confirmed-empty.
+      // (Core signals genuine absence as a 200 with null slots, never a 404.)
       if (error instanceof KernelApiError && error.status === 404) {
-        return { state: 'ok', full: null, short: null };
+        return { state: 'unavailable', full: null, short: null };
       }
       // Timeout / hub_request_failed / 401/403 → could not check; surface as a
       // throw so the caller reports 'unavailable', not "no recap".

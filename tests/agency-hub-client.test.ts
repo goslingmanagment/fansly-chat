@@ -1121,7 +1121,9 @@ describe('AgencyHubClient', () => {
     expect(result).toEqual({ state: 'ok', full: recapSlot, short: null });
   });
 
-  it('getRecapStatus: maps a 404 to state ok with empty slots (Hub reached, no recap)', async () => {
+  it('getRecapStatus: maps a 404 to UNAVAILABLE (endpoint unreadable, not confirmed-no-recap)', async () => {
+    // Round-11 P1: a 404 only proves the status could not be read (old Hub / page
+    // deleted mid-flight); only a valid 200 can confirm empty slots.
     vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
       if (String(url).startsWith('http://localhost:3000/api/v1/ai/recap-status')) {
         return jsonResponse({ error: 'not found' }, 404);
@@ -1139,7 +1141,7 @@ describe('AgencyHubClient', () => {
       new AbortController().signal,
     );
 
-    expect(result).toEqual({ state: 'ok', full: null, short: null });
+    expect(result).toEqual({ state: 'unavailable', full: null, short: null });
   });
 
   it('getRecapStatus: rethrows a non-404 Hub failure so the caller reports unavailable', async () => {

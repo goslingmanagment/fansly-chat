@@ -755,12 +755,11 @@ describe('OperationCoordinator', () => {
       expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
 
-    it('never re-pushes an UNTRUSTED (pre-guard/legacy) cached recap and reports no summary', async () => {
-      // Round-9 P1: a recap cached before fan-summary was exhaustion-guarded
-      // (possibly truncated) lacks trustedTerminal. It is a local cache MISS AND
-      // must never be opportunistically re-pushed to the Hub dossier the kernel
-      // injects into other prompts — the stale body would keep feeding them. It
-      // heals only via a fresh trusted regeneration whose own sync overwrites Hub.
+    it('reports no available summary for an untrusted recap and never re-pushes it via tab-state', async () => {
+      // Round-9 P1: an untrusted (pre-guard, possibly truncated) recap is a local
+      // cache MISS, so hasAvailableSummary is false and the opportunistic tab-state
+      // re-push never even fires. (The guard branch itself is pinned separately
+      // below — this only covers the tab-state GATE.)
       hubConfiguredSettings();
       delete (mockStorage['summary:group-1'] as Record<string, unknown>).trustedTerminal;
       const agencyHubClient = retryHubClient({
@@ -774,12 +773,43 @@ describe('OperationCoordinator', () => {
       await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      // No cache hit: an untrusted entry is not a usable summary.
       expect(postedMessages(port)).toContainEqual(expect.objectContaining({
         type: 'tab:state',
         state: expect.objectContaining({ hasAvailableSummary: false }),
       }));
-      // No direct Hub push of the untrusted/stale body.
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
+    it('the retrySummaryHubSync guard itself refuses an untrusted recap on a direct call (item 4)', async () => {
+      // Round-11 item 4: the tab-state assertion above stays green even if
+      // operations.ts's `trustedTerminal !== true` guard is deleted (retrySummaryHubSync
+      // is never reached when hasAvailableSummary is false). Exercise the guard
+      // DIRECTLY — the cache-swap race: the entry was trusted when tab state was
+      // computed, then replaced by a legacy one before the async re-read — so
+      // removing the guard makes this test go red.
+      hubConfiguredSettings();
+      // Untrusted + unsynced (base fixture has no agencyHubSync), otherwise fully
+      // push-eligible: baseUrl set, persona matches, not-yet-saved. So the ONLY
+      // thing that can stop the push is the trustedTerminal guard — deleting it
+      // (grep operations.ts) makes this test go red.
+      delete (mockStorage['summary:group-1'] as Record<string, unknown>).trustedTerminal;
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      // tab:init wires the tab route + session. hasAvailableSummary is false for the
+      // untrusted entry, so tab:init does NOT re-push (no retry-state pollution).
+      await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+
+      // Direct call reaches the guard branch itself (the cache-swap race). Refuses.
+      await (coordinator as any).retrySummaryHubSync(1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
 
@@ -4571,6 +4601,50 @@ describe('OperationCoordinator', () => {
       // Fail closed: the truncated coach answer is NEVER presented as a result.
       expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
     }
+  });
+
+  it('fails closed on a truncated shipped reply feature (fast-reply, provider length)', async () => {
+    // Round-11 P2: widening the exhaustion guard to isOutputExhausted ('length'
+    // too) changed live behaviour for the FOUR shipped reply features — a provider
+    // 'length' stop now hard-fails where a truncated-but-insertable reply used to
+    // reach the fan. Pin fast-reply, the highest-frequency path; a revert to the
+    // literal `max_tokens` check would go red here.
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(
+        async (
+          _settings: unknown,
+          _request: unknown,
+          callbacks: { onStopReason?: (reason: string | null) => void },
+          _signal: unknown,
+        ) => {
+          callbacks.onStopReason?.('length');
+          // Non-empty, normally-insertable text — the point is that 'length' fails
+          // it closed anyway (normalizeReplyParts would otherwise yield a part).
+          return 'Hey babe, I was just thinking about you and';
+        },
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-length',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const errorMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+    expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
   });
 
   it('fails closed on a truncated fan-summary stream and caches nothing', async () => {
