@@ -1,0 +1,677 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  VoiceAttemptController,
+  type VoiceAttemptControllerPort,
+  type VoiceAttemptRoute,
+} from '../src/content/voice/attempt-controller.js';
+import { VoiceAttemptStore } from '../src/content/voice/attempt-store.js';
+import {
+  VOICE_ATTEMPT_SESSION_KEY_PREFIX,
+  VOICE_ATTEMPT_TTL_MS,
+  VOICE_STATUS_POLL_MS,
+} from '../src/shared/constants.js';
+import type {
+  BackgroundPortMessage,
+  ContentPortMessage,
+  ReplyTone,
+  VoiceNoteStatusView,
+} from '../src/shared/types.js';
+
+const ROUTE: VoiceAttemptRoute = {
+  accountId: 'creator-1',
+  groupId: 'group-1',
+  routeNonce: 3,
+};
+
+const ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+const ATTEMPT_ID_2 = '55555555-5555-4555-8555-555555555555';
+const TAKE_ID_1 = '22222222-2222-4222-8222-222222222222';
+const TAKE_ID_2 = '33333333-3333-4333-8333-333333333333';
+const TAKE_ID_3 = '44444444-4444-4444-8444-444444444444';
+
+interface FakeSessionStorage {
+  readonly data: Record<string, unknown>;
+  readonly get: ReturnType<typeof vi.fn>;
+  readonly set: ReturnType<typeof vi.fn>;
+  readonly remove: ReturnType<typeof vi.fn>;
+}
+
+interface FakePort extends VoiceAttemptControllerPort {
+  connected: boolean;
+  readonly sent: ContentPortMessage[];
+}
+
+function clone<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function createSessionStorage(): FakeSessionStorage {
+  const data: Record<string, unknown> = {};
+  const get = vi.fn(async (keys?: string | string[] | null) => {
+    if (keys == null) {
+      return clone(data);
+    }
+    const requested = Array.isArray(keys) ? keys : [keys];
+    return Object.fromEntries(
+      requested
+        .filter((key) => Object.hasOwn(data, key))
+        .map((key) => [key, clone(data[key])]),
+    );
+  });
+  const set = vi.fn(async (items: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(items)) {
+      data[key] = clone(value);
+    }
+  });
+  const remove = vi.fn(async (keys: string | string[]) => {
+    for (const key of Array.isArray(keys) ? keys : [keys]) {
+      delete data[key];
+    }
+  });
+  return { data, get, set, remove };
+}
+
+function createPort(): FakePort {
+  const sent: ContentPortMessage[] = [];
+  return {
+    connected: true,
+    sent,
+    send(message) {
+      if (!this.connected) {
+        return false;
+      }
+      sent.push(clone(message));
+      return true;
+    },
+  };
+}
+
+function voiceView(
+  voiceNoteId: number,
+  state: VoiceNoteStatusView['state'],
+  overrides: Partial<VoiceNoteStatusView> = {},
+): VoiceNoteStatusView {
+  return {
+    voiceNoteId,
+    state,
+    scriptChars: 18,
+    billed: null,
+    audioSha256: null,
+    audioBytesLen: null,
+    createdAt: `2026-07-19T10:00:${String(voiceNoteId).padStart(2, '0')}.000Z`,
+    ...overrides,
+  };
+}
+
+function messagesOfType<T extends ContentPortMessage['type']>(
+  port: FakePort,
+  type: T,
+): Array<Extract<ContentPortMessage, { type: T }>> {
+  return port.sent.filter(
+    (message): message is Extract<ContentPortMessage, { type: T }> => message.type === type,
+  );
+}
+
+async function finishScript(
+  controller: VoiceAttemptController,
+  script = 'A ready script',
+  generationRef = 'generation-1',
+): Promise<void> {
+  const attemptId = controller.getAttempt()?.attemptId;
+  if (!attemptId) {
+    throw new Error('attempt missing');
+  }
+  await controller.handleMessage({
+    type: 'voice:scriptComplete',
+    attemptId,
+    script,
+    generationRef,
+  });
+}
+
+function createUuidFactory(values: string[]): () => string {
+  return vi.fn(() => {
+    const value = values.shift();
+    if (!value) {
+      throw new Error('unexpected randomUUID call');
+    }
+    return value;
+  });
+}
+
+describe('VoiceAttemptController', () => {
+  let session: FakeSessionStorage;
+  const controllers: VoiceAttemptController[] = [];
+
+  function createController(options: {
+    port?: FakePort;
+    route?: VoiceAttemptRoute;
+    uuids?: string[];
+    now?: () => number;
+    createBlobUrl?: (bytes: ArrayBuffer) => string;
+    revokeBlobUrl?: (url: string) => void;
+    onError?: (message: Extract<BackgroundPortMessage, {
+      type: 'voice:scriptError' | 'voice:noteError' | 'voice:attachRefuse';
+    }>) => void;
+  } = {}) {
+    const port = options.port ?? createPort();
+    const store = new VoiceAttemptStore({ now: options.now });
+    const controller = new VoiceAttemptController({
+      port,
+      store,
+      route: options.route ?? ROUTE,
+      conversationRef: 'fan-1',
+      randomUUID: createUuidFactory(options.uuids ?? [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2]),
+      createBlobUrl: options.createBlobUrl ?? (() => 'blob:voice-1'),
+      revokeBlobUrl: options.revokeBlobUrl ?? vi.fn(),
+      onError: options.onError,
+    });
+    controllers.push(controller);
+    return { controller, port, store };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-19T12:00:00.000Z'));
+    session = createSessionStorage();
+    (globalThis as Record<string, unknown>).browser = {
+      storage: {
+        session: {
+          get: session.get,
+          set: session.set,
+          remove: session.remove,
+        },
+      },
+    };
+  });
+
+  afterEach(() => {
+    for (const controller of controllers.splice(0)) {
+      controller.destroy();
+    }
+    delete (globalThis as Record<string, unknown>).browser;
+    vi.useRealTimers();
+  });
+
+  it('freezes one canonical payload per take and burns quota-denied request ids', async () => {
+    const { controller, port, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+
+    await controller.startScript('Original composer draft', 'casual');
+    await finishScript(controller, 'temporary');
+    await controller.editScript('  Cafe\u0301\r\nline  \r\n');
+    expect(await controller.generateTake()).toBe(TAKE_ID_1);
+
+    const firstCreate = messagesOfType(port, 'voice:noteCreate').at(-1);
+    expect(firstCreate).toEqual({
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      conversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      script: 'Café\nline',
+    });
+    expect(controller.getAttempt()).toMatchObject({
+      script: 'Café\nline',
+      canonicalScript: 'Café\nline',
+    });
+
+    await controller.editScript('Changed after the paid click');
+    controller.handlePortDisconnected();
+    port.connected = true;
+    await controller.handlePortReconnect();
+    expect(messagesOfType(port, 'voice:noteCreate').at(-1)).toEqual(firstCreate);
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      code: 'voice_quota_denied',
+      message: 'local safe copy',
+      status: 429,
+    });
+    const recovered = await store.load(ROUTE);
+    expect(recovered[0]?.burnedClientRequestIds).toEqual([TAKE_ID_1]);
+    expect(recovered[0]?.pendingCreate).toBeNull();
+
+    expect(await controller.generateAnotherTake()).toBe(TAKE_ID_2);
+    expect(messagesOfType(port, 'voice:noteCreate').at(-1)).toMatchObject({
+      clientRequestId: TAKE_ID_2,
+      script: 'Café\nline',
+    });
+    expect(messagesOfType(port, 'voice:noteCreate').at(-1)?.clientRequestId).not.toBe(TAKE_ID_1);
+  });
+
+  it('recovers an in-flight create with the exact same idempotency snapshot', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'flirty');
+    await finishScript(first.controller, '  voice\r\nscript  ', 'generation-original');
+    first.port.connected = false;
+    await first.controller.generateTake();
+    expect(messagesOfType(first.port, 'voice:noteCreate')).toHaveLength(0);
+    first.controller.destroy();
+
+    const second = createController({ uuids: [TAKE_ID_3] });
+    await second.controller.boot();
+
+    expect(messagesOfType(second.port, 'voice:noteCreate')).toEqual([{
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      conversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-original',
+      script: 'voice\nscript',
+    }]);
+    expect(second.controller.getAttempt()?.canonicalScript).toBe('voice\nscript');
+  });
+
+  it('re-arms every live matching attempt rather than only the active UI attempt', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('First draft', 'none');
+    await finishScript(first.controller, 'First script', 'generation-first');
+    first.port.connected = false;
+    await first.controller.generateTake();
+    first.controller.destroy();
+
+    // This simulates a second live controller writing another matching entry
+    // without first claiming the existing one (for example, another content
+    // lifecycle in the same session).
+    const second = createController({ uuids: [ATTEMPT_ID_2, TAKE_ID_2] });
+    await second.controller.startScript('Second draft', 'flirty');
+    await finishScript(second.controller, 'Second script', 'generation-second');
+    second.port.connected = false;
+    await second.controller.generateTake();
+    second.controller.destroy();
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await resumed.controller.boot();
+    expect(resumed.controller.getAttempts()).toHaveLength(2);
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toEqual([
+      {
+        type: 'voice:noteCreate',
+        attemptId: ATTEMPT_ID,
+        clientRequestId: TAKE_ID_1,
+        conversationRef: 'fan-1',
+        sourceGenerationRef: 'generation-first',
+        script: 'First script',
+      },
+      {
+        type: 'voice:noteCreate',
+        attemptId: ATTEMPT_ID_2,
+        clientRequestId: TAKE_ID_2,
+        conversationRef: 'fan-1',
+        sourceGenerationRef: 'generation-second',
+        script: 'Second script',
+      },
+    ]);
+  });
+
+  it('re-polls every recovered take, orders by createdAt, and refetches omitted audio bytes', async () => {
+    const createBlobUrl = vi.fn(() => 'blob:first-controller');
+    const first = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+      createBlobUrl,
+    });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script');
+    await first.controller.generateTake();
+    await first.controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(20, 'queued', { createdAt: '2026-07-19T10:02:00.000Z' }),
+    });
+    await first.controller.generateAnotherTake();
+    await first.controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(10, 'completed', {
+        createdAt: '2026-07-19T10:01:00.000Z',
+        billed: true,
+        audioSha256: 'abc123',
+        audioBytesLen: 3,
+      }),
+    });
+    await first.controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 10,
+      bytes: new Uint8Array([1, 2, 3]).buffer,
+    });
+
+    expect(first.controller.getAttempt()?.takes.map((take) => take.voiceNoteId)).toEqual([10, 20]);
+    expect(first.controller.getAttempt()?.takes[0]?.blobUrl).toBe('blob:first-controller');
+    const rawSnapshot = JSON.stringify(session.data);
+    expect(rawSnapshot).not.toContain('blobUrl');
+    expect(rawSnapshot).not.toContain('"audio"');
+    first.controller.destroy();
+
+    const resumedBlobUrl = vi.fn(() => 'blob:resumed');
+    const second = createController({ uuids: [TAKE_ID_3], createBlobUrl: resumedBlobUrl });
+    await second.controller.boot();
+
+    expect(second.controller.getAttempt()?.takes.map((take) => ({
+      voiceNoteId: take.voiceNoteId,
+      audio: take.audio,
+      blobUrl: take.blobUrl,
+    }))).toEqual([
+      { voiceNoteId: 10, audio: null, blobUrl: null },
+      { voiceNoteId: 20, audio: null, blobUrl: null },
+    ]);
+    expect(messagesOfType(second.port, 'voice:noteStatus').map((message) => message.voiceNoteId))
+      .toEqual([10, 20]);
+
+    await second.controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(10, 'completed', {
+        createdAt: '2026-07-19T10:01:00.000Z',
+        billed: true,
+        audioSha256: 'abc123',
+        audioBytesLen: 3,
+      }),
+    });
+    expect(messagesOfType(second.port, 'voice:audioFetch').at(-1)).toEqual({
+      type: 'voice:audioFetch',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 10,
+      expectedSha256: 'abc123',
+      expectedBytes: 3,
+    });
+  });
+
+  it('turns a dead voice-script SSE into editable script state with the last accumulated delta', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID] });
+    await first.controller.startScript('Original', 'spicy');
+    await first.controller.handleMessage({
+      type: 'voice:scriptDelta',
+      attemptId: ATTEMPT_ID,
+      text: '[warmly] ',
+    });
+    await first.controller.handleMessage({
+      type: 'voice:scriptDelta',
+      attemptId: ATTEMPT_ID,
+      text: 'Hello there',
+    });
+    first.controller.destroy();
+
+    const second = createController({ uuids: [TAKE_ID_3] });
+    await second.controller.boot();
+
+    expect(second.controller.getAttempt()).toMatchObject({
+      attemptId: ATTEMPT_ID,
+      phase: 'script',
+      draftText: 'Original',
+      script: '[warmly] Hello there',
+      generationRef: null,
+    });
+    expect(messagesOfType(second.port, 'voice:scriptStart')).toHaveLength(0);
+    const stored = await second.store.load(ROUTE);
+    expect(stored[0]?.attempt.phase).toBe('script');
+  });
+
+  it('drops TTL-expired and route-mismatched snapshots during boot', async () => {
+    let now = 1_000;
+    const expired = createController({
+      uuids: [ATTEMPT_ID],
+      now: () => now,
+    });
+    await expired.controller.startScript('Old draft', 'none');
+    expired.controller.destroy();
+    now += VOICE_ATTEMPT_TTL_MS;
+
+    const expiredReader = createController({ uuids: [TAKE_ID_1], now: () => now });
+    expect(await expiredReader.controller.boot()).toBeNull();
+    expect(Object.keys(session.data)).toHaveLength(0);
+
+    now += 1;
+    const wrongRoute = createController({
+      route: { ...ROUTE, routeNonce: 9 },
+      uuids: [TAKE_ID_2],
+      now: () => now,
+    });
+    await wrongRoute.controller.startScript('Wrong route', 'none');
+    wrongRoute.controller.destroy();
+
+    const currentRoute = createController({ uuids: [TAKE_ID_3], now: () => now });
+    expect(await currentRoute.controller.boot()).toBeNull();
+    expect(Object.keys(session.data)).toHaveLength(0);
+  });
+
+  it('persists after each state transition and always before paid create dispatch', async () => {
+    const events: string[] = [];
+    session.set.mockImplementation(async (items: Record<string, unknown>) => {
+      events.push('persist');
+      for (const [key, value] of Object.entries(items)) {
+        session.data[key] = clone(value);
+      }
+    });
+    const port = createPort();
+    const originalSend = port.send.bind(port);
+    port.send = (message) => {
+      events.push(message.type);
+      return originalSend(message);
+    };
+    const { controller } = createController({
+      port,
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+
+    await controller.startScript('Draft', 'casual');
+    expect(session.set).toHaveBeenCalledTimes(1);
+    await controller.handleMessage({
+      type: 'voice:scriptDelta',
+      attemptId: ATTEMPT_ID,
+      text: 'delta',
+    });
+    expect(session.set).toHaveBeenCalledTimes(2);
+    await finishScript(controller, 'Final');
+    expect(session.set).toHaveBeenCalledTimes(3);
+    await controller.editScript('Edited');
+    expect(session.set).toHaveBeenCalledTimes(4);
+
+    events.length = 0;
+    await controller.generateTake();
+    expect(events).toEqual(['persist', 'voice:noteCreate']);
+    expect(session.set).toHaveBeenCalledTimes(5);
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'completed', {
+        audioSha256: 'hash',
+        audioBytesLen: 2,
+      }),
+    });
+    expect(session.set).toHaveBeenCalledTimes(6);
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2]).buffer,
+    });
+    expect(session.set).toHaveBeenCalledTimes(7);
+
+    const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
+    expect(session.data[key]).toBeDefined();
+    expect(JSON.stringify(session.data[key])).not.toMatch(/blobUrl|"audio"/);
+  });
+
+  it('marks takes stale on edits and clears staleness only on exact canonical restoration', async () => {
+    const { controller } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Café');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'completed', {
+        audioSha256: 'hash',
+        audioBytesLen: 2,
+      }),
+    });
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2]).buffer,
+    });
+    expect(controller.canAttachSelectedTake()).toBe(true);
+
+    await controller.editScript('Cafe\u0301');
+    expect(controller.getAttempt()?.stale).toBe(true);
+    expect(controller.canAttachSelectedTake()).toBe(false);
+
+    await controller.editScript('Café ');
+    expect(controller.getAttempt()?.stale).toBe(true);
+    await controller.editScript('Café');
+    expect(controller.getAttempt()?.stale).toBe(false);
+    expect(controller.canAttachSelectedTake()).toBe(true);
+  });
+
+  it('polls queued/dispatched takes, stops on terminal states, and makes indeterminate rechecks manual', async () => {
+    const { controller, port } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'queued'),
+    });
+    port.sent.length = 0;
+
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
+    expect(messagesOfType(port, 'voice:noteStatus')).toEqual([{
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }]);
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'dispatched'),
+    });
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'indeterminate', { billed: null }),
+    });
+    const statusCount = messagesOfType(port, 'voice:noteStatus').length;
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS * 3);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(statusCount);
+    expect(messagesOfType(port, 'voice:noteCreate')).toHaveLength(0);
+
+    expect(controller.checkStatus(42)).toBe(true);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(statusCount + 1);
+    expect(messagesOfType(port, 'voice:noteCreate')).toHaveLength(0);
+
+    expect(await controller.generateAgain()).toBe(TAKE_ID_2);
+    expect(messagesOfType(port, 'voice:noteCreate').at(-1)?.clientRequestId).toBe(TAKE_ID_2);
+  });
+
+  it('preserves voice state on disconnect and re-arms pending creates and polling only on handshake', async () => {
+    const { controller, port } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(7, 'queued'),
+    });
+    port.sent.length = 0;
+
+    port.connected = false;
+    controller.handlePortDisconnected();
+    const before = controller.getAttempt();
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS * 2);
+    expect(port.sent).toHaveLength(0);
+    expect(controller.getAttempt()).toEqual(before);
+
+    await controller.generateAnotherTake();
+    expect(messagesOfType(port, 'voice:noteCreate')).toHaveLength(0);
+    port.connected = true;
+    await controller.handlePortReconnect();
+
+    expect(messagesOfType(port, 'voice:noteStatus')).toEqual([{
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 7,
+    }]);
+    expect(messagesOfType(port, 'voice:noteCreate')).toEqual([{
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_2,
+      conversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      script: 'Voice script',
+    }]);
+
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
+  });
+
+  it('returns a dead live SSE to script phase on disconnect without replaying it', async () => {
+    const { controller, port } = createController({ uuids: [ATTEMPT_ID] });
+    await controller.startScript('Draft', 'casual');
+    await controller.handleMessage({
+      type: 'voice:scriptDelta',
+      attemptId: ATTEMPT_ID,
+      text: 'Partial script',
+    });
+    port.sent.length = 0;
+
+    await controller.handlePortDisconnected();
+    expect(controller.getAttempt()).toMatchObject({
+      phase: 'script',
+      script: 'Partial script',
+      generationRef: null,
+    });
+    port.connected = true;
+    await controller.handlePortReconnect();
+    expect(messagesOfType(port, 'voice:scriptStart')).toHaveLength(0);
+  });
+
+  it('revokes in-memory blob URLs when a new script generation replaces the attempt', async () => {
+    const revokeBlobUrl = vi.fn();
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+      createBlobUrl: () => 'blob:old-take',
+      revokeBlobUrl,
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'completed', {
+        audioSha256: 'hash',
+        audioBytesLen: 2,
+      }),
+    });
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2]).buffer,
+    });
+
+    await controller.regenerateScript('flirty');
+    expect(revokeBlobUrl).toHaveBeenCalledWith('blob:old-take');
+    expect(controller.getAttempt()).toMatchObject({
+      phase: 'generating',
+      takes: [],
+      selectedTakeId: null,
+      canonicalScript: null,
+      tone: 'flirty' satisfies ReplyTone,
+    });
+  });
+});
