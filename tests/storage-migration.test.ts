@@ -442,6 +442,21 @@ describe('sanitizeSettings', () => {
     expect(storage.sanitizeSettings({ coachHistoryLimit: 7 }).coachHistoryLimit).toBe(7);
   });
 
+  it('normalizes a fractional coachHistoryLimit to a whole integer', () => {
+    // Turn count must persist as an integer — round to nearest, then clamp.
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 1.5 }).coachHistoryLimit).toBe(2);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 1.4 }).coachHistoryLimit).toBe(1);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 10.6 }).coachHistoryLimit).toBe(11);
+    // Rounding runs before the clamp: 20.4 rounds to 20 (in range), 20.6 rounds
+    // to 21 then clamps back to the 20 ceiling.
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 20.6 }).coachHistoryLimit).toBe(20);
+    for (const value of [1.5, 3.2, 9.9, 12.5, 19.999]) {
+      expect(
+        Number.isInteger(storage.sanitizeSettings({ coachHistoryLimit: value }).coachHistoryLimit),
+      ).toBe(true);
+    }
+  });
+
   it('falls back to the coachHistoryLimit default for a NaN-producing value', () => {
     const result = storage.sanitizeSettings({
       coachHistoryLimit: 'abc' as unknown as number,

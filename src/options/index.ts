@@ -295,6 +295,9 @@ async function render(): Promise<void> {
   coachHistoryInput.className = 'chatgoose-input';
   coachHistoryInput.min = String(COACH_HISTORY_LIMIT_MIN);
   coachHistoryInput.max = String(COACH_HISTORY_LIMIT_MAX);
+  // Turn count is an integer — step=1 keeps the browser's number spinner and
+  // validity check on whole turns (sanitizeSettings rounds regardless).
+  coachHistoryInput.step = '1';
   coachHistoryInput.value = String(state.settings.coachHistoryLimit);
 
   const coachRecapSelect = document.createElement('select');

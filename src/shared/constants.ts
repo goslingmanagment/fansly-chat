@@ -128,7 +128,14 @@ export const COACH_QUESTION_MAX_CHARS = 2_000;
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
 export const QUICK_OPERATION_TIMEOUT_MS = 60_000;
-export const DEEP_OPERATION_PREP_TIMEOUT_MS = 180_000;
+// Budget for the deep-feature PREP stage (live-read pagination of the Fansly DOM
+// before the LLM stream). Sized for the deep window ceiling: 3000 msgs = 120
+// pages × 300ms pagination delay ≈ 36s of pure pacing floor, before per-request
+// network latency stacks on top. The old 180s was sized for a 1500-msg window;
+// the v15 deep default doubled to 3000 (DEEP_DEFAULT_MESSAGE_COUNT), so the
+// prep budget doubles to 360s to keep a full-window coach/recap load from
+// timing out mid-pagination.
+export const DEEP_OPERATION_PREP_TIMEOUT_MS = 360_000;
 export const DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS = 45_000;
 export const DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS = 45_000;
 export const DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS = 300_000;

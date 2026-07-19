@@ -133,8 +133,13 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const ping = Number.isFinite(rawPing) ? rawPing : defaults.pingMessageCount;
   const improve = Number.isFinite(rawImprove) ? rawImprove : defaults.improveMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
+  // coachHistoryLimit is a turn COUNT — it must persist as a whole integer so a
+  // fractional input (a hand-edited settings blob, or a number input the browser
+  // let float through) can never round-trip as e.g. 1.5. Round to nearest first,
+  // THEN clamp below; a non-finite value (NaN/±Infinity) falls back to the
+  // default. Math.round: 1.5 -> 2, 1.4 -> 1.
   const coachHistory = Number.isFinite(rawCoachHistory)
-    ? rawCoachHistory
+    ? Math.round(rawCoachHistory)
     : defaults.coachHistoryLimit;
 
   return {
