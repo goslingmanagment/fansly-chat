@@ -10,6 +10,8 @@ import {
   createDefaultSettings,
   createSeedState,
   UnsupportedFutureStorageSchemaError,
+  bumpLegacyDeepMessageCountDefault,
+  DEEP_DEFAULT_BUMP_SCHEMA_VERSION,
 } from '../src/shared/migrations.js';
 import {
   BUNDLED_LORA_PERSONALITY_ID,
@@ -261,6 +263,39 @@ describe('migrateState', () => {
     // Round-trip stability: re-migrating the output must not drift the value.
     const remigrated = migrateState(result as unknown as Record<string, unknown>);
     expect(remigrated.settings.deepMessageCount).toBe(1500);
+  });
+
+  // The legacy deep-window bump must anchor to a FIXED version (15), not the
+  // moving STORAGE_SCHEMA_VERSION. Unit-test the transform helper directly with
+  // hardcoded incoming versions so the guard is proven independent of whatever
+  // the current schema happens to be. Without the fixed anchor, a future schema
+  // bump (say v16) would re-fire the transform on a v15 record whose 1500 is the
+  // chatter's DELIBERATE choice — E45 violation.
+  describe('bumpLegacyDeepMessageCountDefault anchors on a fixed version', () => {
+    it('pins the anchor at schema version 15', () => {
+      expect(DEEP_DEFAULT_BUMP_SCHEMA_VERSION).toBe(15);
+    });
+
+    it('refuses to bump a record already AT the anchor version (15)', () => {
+      const result = bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 15);
+      expect(result.deepMessageCount).toBe(1500);
+    });
+
+    it('refuses to bump a HYPOTHETICAL future-version record (16) — the E45 regression', () => {
+      // With the buggy `>= STORAGE_SCHEMA_VERSION` guard this would re-fire once
+      // the schema advances past 15; the fixed anchor keeps it inert.
+      const result = bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 16);
+      expect(result.deepMessageCount).toBe(1500);
+    });
+
+    it('bumps a genuinely pre-v15 record carrying the old default (1500 → 3000)', () => {
+      expect(bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 13).deepMessageCount).toBe(3000);
+      expect(bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 14).deepMessageCount).toBe(3000);
+    });
+
+    it('preserves a pre-v15 record with a non-default value (1499 stays 1499)', () => {
+      expect(bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1499 }, 14).deepMessageCount).toBe(1499);
+    });
   });
 
   it('v15: adds coach fields with defaults when absent from an older record', () => {

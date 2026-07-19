@@ -319,9 +319,18 @@ async function render(): Promise<void> {
   // so it's a deliberate choice, not a surprise on the bill.
   const coachRecapWarning = document.createElement('div');
   coachRecapWarning.className = 'chatgoose-section-desc';
-  coachRecapWarning.textContent =
-    'Full Recap loads up to 3000 messages — slow and expensive.';
+  // Text is built from the LIVE deep-window value, never a hardcoded 3000, so it
+  // stays truthful when the chatter changes "Deep feature message count" (or the
+  // stored value is clamped on save). Falls back to the loaded setting while the
+  // field holds a blank/non-numeric mid-edit value.
   const updateCoachRecapWarning = (): void => {
+    const rawDeep = Number(deepInput.value);
+    const shownDeep =
+      Number.isFinite(rawDeep) && rawDeep > 0
+        ? Math.round(rawDeep)
+        : state.settings.deepMessageCount;
+    coachRecapWarning.textContent =
+      `Full Recap loads up to ${shownDeep} messages — slow and expensive.`;
     coachRecapWarning.hidden = coachRecapSelect.value !== 'full';
   };
   updateCoachRecapWarning();
@@ -938,6 +947,8 @@ async function render(): Promise<void> {
       writeCount(pingInput, mergedSettings.pingMessageCount);
       writeCount(improveInput, mergedSettings.improveMessageCount);
       writeCount(deepInput, mergedSettings.deepMessageCount);
+      // The reflected/clamped deep count feeds the Full Recap cost warning.
+      updateCoachRecapWarning();
       writeCount(coachHistoryInput, mergedSettings.coachHistoryLimit);
       if (document.activeElement !== coachRecapSelect) {
         coachRecapSelect.value = mergedSettings.coachAutoRecap;
@@ -1011,8 +1022,10 @@ async function render(): Promise<void> {
     return queueSettingsSave(true);
   };
 
-  // Toggle the cost warning the moment the picker changes, ahead of any save.
+  // Toggle the cost warning the moment the picker changes, ahead of any save,
+  // and keep its message tracking the deep-window field as the chatter types.
   coachRecapSelect.addEventListener('change', updateCoachRecapWarning);
+  deepInput.addEventListener('input', updateCoachRecapWarning);
 
   [
     themeSelect,

@@ -1032,7 +1032,7 @@ describe('Options page coach settings', () => {
   const getRecapWarning = (): HTMLElement | null =>
     Array.from(
       getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-section-desc'),
-    ).find((node) => node.textContent?.includes('Full Recap loads up to 3000 messages')) ?? null;
+    ).find((node) => node.textContent?.includes('Full Recap loads up to')) ?? null;
 
   it('renders coach memory + auto-recap fields with stored defaults and a hidden warning', async () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
@@ -1122,5 +1122,30 @@ describe('Options page coach settings', () => {
     await vi.waitFor(() => {
       expect(currentState.settings.coachAutoRecap).toBe('short');
     }, { timeout: 2000 });
+  });
+
+  it('builds the cost warning from the live deep-window value, not a hardcoded 3000', async () => {
+    await loadOptionsPage({
+      state: makeState({
+        settings: {
+          ...makeState().settings,
+          deepMessageCount: 250,
+          coachAutoRecap: 'full',
+        },
+      }),
+      sessions: [],
+    });
+
+    const warning = getRecapWarning()!;
+    expect(warning).toBeTruthy();
+    // Reflects the stored deep window (250), never the old hardcoded 3000.
+    expect(warning.textContent).toContain('Full Recap loads up to 250 messages');
+    expect(warning.textContent).not.toContain('3000');
+
+    // Editing the deep-window field updates the warning message live.
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+    deepInput.value = '1234';
+    deepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(warning.textContent).toContain('Full Recap loads up to 1234 messages');
   });
 });

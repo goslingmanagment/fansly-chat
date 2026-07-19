@@ -120,17 +120,32 @@ type MigrationRecord = Record<string, unknown>;
 const PRE_V15_DEEP_MESSAGE_COUNT_DEFAULT = 1500;
 
 /**
- * v15 RAW transform: run on the incoming settings blob BEFORE field
- * normalization, and ONLY when the record predates v15. Records already at (or
- * ahead of) the current schema must never re-run this — otherwise a chatter who
- * deliberately set 1500 AFTER v15 would be silently bumped on the next load.
- * Keyed on the INCOMING record's schemaVersion, not the migration target.
+ * The schema version at which the deep-window default rose 1500 → 3000. The
+ * legacy bump is anchored HERE as a FIXED historical constant, NOT to
+ * STORAGE_SCHEMA_VERSION. It must fire only for records that genuinely PREDATE
+ * v15 (their stored 1500 is the old default they never chose). A record at v15
+ * or beyond that still reads exactly 1500 chose it deliberately, and a LATER
+ * schema bump must never silently re-adopt the new default on top of that choice
+ * (E45). Guarding against the moving STORAGE_SCHEMA_VERSION was the bug: at v16 a
+ * v15 record with a deliberate 1500 passed `15 < 16` and got clobbered.
  */
-function bumpLegacyDeepMessageCountDefault(
+export const DEEP_DEFAULT_BUMP_SCHEMA_VERSION = 15;
+
+/**
+ * v15 RAW transform: run on the incoming settings blob BEFORE field
+ * normalization, and ONLY when the record predates v15
+ * (DEEP_DEFAULT_BUMP_SCHEMA_VERSION). A record at v15 or beyond must never re-run
+ * this — otherwise a chatter who deliberately set 1500 AFTER v15 would be
+ * silently bumped on a later schema migration. Keyed on the INCOMING record's
+ * schemaVersion against a FIXED anchor, not the moving migration target.
+ * Exported so the anchor's refusal (incomingSchemaVersion ≥ 15) is unit-tested
+ * directly, independent of the current STORAGE_SCHEMA_VERSION.
+ */
+export function bumpLegacyDeepMessageCountDefault(
   rawSettings: Record<string, unknown>,
   incomingSchemaVersion: number,
 ): Record<string, unknown> {
-  if (incomingSchemaVersion >= STORAGE_SCHEMA_VERSION) {
+  if (incomingSchemaVersion >= DEEP_DEFAULT_BUMP_SCHEMA_VERSION) {
     return rawSettings;
   }
   if (rawSettings.deepMessageCount !== PRE_V15_DEEP_MESSAGE_COUNT_DEFAULT) {

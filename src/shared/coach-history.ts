@@ -4,10 +4,18 @@ import type { CoachHistoryEntry } from './types.js';
 // (apps/runtime/.../prompts/builder.ts: COACH_ANSWER_PROJECTION_*). A committed
 // coach answer may be up to the 64k transport ceiling, but before assembly core
 // projects each replayed answer to a small head+tail so prompt cost never
-// tracks the transport ceiling. Correctness never depends on the client: the
-// extension applies the SAME projection only as a bandwidth optimization (the
-// kernel re-projects regardless). The constants MUST match core's — kept here
-// under COACH_PROJECTION_* names, pinned by tests.
+// tracks the transport ceiling. The extension applies the SAME projection only
+// as a bandwidth optimization: correctness NEVER depends on the client, because
+// core re-projects each replayed answer authoritatively regardless of what the
+// client sent.
+//
+// DRIFT IS NOT AUTO-CAUGHT. These constants MUST match core's, but no test pins
+// them independently — the projection tests below derive their expectations from
+// these same COACH_PROJECTION_* values, so a divergence from core's numbers
+// would still pass green, and the template is not part of the vendored SDK. What
+// keeps a drift harmless is the authoritative re-projection above; what keeps it
+// from lasting is a MANUAL re-pin check against core's COACH_ANSWER_PROJECTION_*
+// at each SDK re-vendor (mirroring the coach-draft fixture's honest-scope note).
 export const COACH_PROJECTION_MAX_CHARS = 10_000;
 export const COACH_PROJECTION_HEAD_CHARS = 6_000;
 export const COACH_PROJECTION_TAIL_CHARS = 3_800;
