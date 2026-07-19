@@ -619,6 +619,45 @@ export declare const pageConversationMessagesParamsSchema: z.ZodObject<{
 export declare const pageConversationMessagesQuerySchema: z.ZodObject<{
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
 }, z.core.$strip>;
+export declare const voiceNoteParamsSchema: z.ZodObject<{
+    pageLabel: z.ZodString;
+    id: z.ZodCoercedNumber<unknown>;
+}, z.core.$strip>;
+export declare const voiceNoteCreateBodySchema: z.ZodObject<{
+    clientRequestId: z.ZodString;
+    conversationRef: z.ZodString;
+    sourceGenerationRef: z.ZodString;
+    script: z.ZodString;
+}, z.core.$strip>;
+export declare const voiceNoteStateSchema: z.ZodEnum<{
+    queued: "queued";
+    dispatched: "dispatched";
+    completed: "completed";
+    failed_definite: "failed_definite";
+    failed_after_dispatch: "failed_after_dispatch";
+    indeterminate: "indeterminate";
+    quota_denied: "quota_denied";
+    artifact_expired: "artifact_expired";
+}>;
+export declare const voiceNoteStatusSchema: z.ZodObject<{
+    voiceNoteId: z.ZodNumber;
+    state: z.ZodEnum<{
+        queued: "queued";
+        dispatched: "dispatched";
+        completed: "completed";
+        failed_definite: "failed_definite";
+        failed_after_dispatch: "failed_after_dispatch";
+        indeterminate: "indeterminate";
+        quota_denied: "quota_denied";
+        artifact_expired: "artifact_expired";
+    }>;
+    scriptChars: z.ZodNumber;
+    billed: z.ZodNullable<z.ZodBoolean>;
+    audioSha256: z.ZodNullable<z.ZodString>;
+    audioBytesLen: z.ZodNullable<z.ZodNumber>;
+    createdAt: z.ZodString;
+    errorCode: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
 export declare const assignedPageSchema: z.ZodObject<{
     id: z.ZodNumber;
     label: z.ZodString;
@@ -640,6 +679,9 @@ export declare const assignedPageSchema: z.ZodObject<{
     }, z.core.$strip>;
     lastLightSyncAt: z.ZodNullable<z.ZodString>;
     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+    capabilities: z.ZodOptional<z.ZodObject<{
+        voiceNotes: z.ZodBoolean;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export declare const modelListItemSchema: z.ZodObject<{
     id: z.ZodNumber;
@@ -1005,6 +1047,9 @@ export declare const pageRevenueResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export declare const transactionFanSchema: z.ZodNullable<z.ZodObject<{
@@ -1068,6 +1113,9 @@ export declare const transactionListResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         transactionId: z.ZodString;
@@ -1148,6 +1196,9 @@ export declare const subscriberListResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         platformSubscriptionId: z.ZodString;
@@ -1189,6 +1240,9 @@ export declare const subscriberDailyResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         businessDate: z.ZodString;
@@ -1255,6 +1309,9 @@ export declare const followerListResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         platformUserId: z.ZodString;
@@ -1314,6 +1371,9 @@ export declare const followerDailyResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         businessDate: z.ZodString;
@@ -1359,6 +1419,9 @@ export declare const fanListResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         platformUserId: z.ZodString;
@@ -1402,6 +1465,9 @@ export declare const pageDeletedFansResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     items: z.ZodArray<z.ZodObject<{
         platformUserId: z.ZodString;
@@ -1611,9 +1677,9 @@ export declare const spenderListResponseSchema: z.ZodObject<{
             lastMessagePreview: z.ZodNullable<z.ZodString>;
             storedMessageCount: z.ZodNumber;
             messageCoverageStatus: z.ZodEnum<{
+                complete: "complete";
                 pending_backfill: "pending_backfill";
                 partial_window: "partial_window";
-                complete: "complete";
             }>;
             messageBackfillComplete: z.ZodBoolean;
         }, z.core.$strip>;
@@ -2231,6 +2297,9 @@ export declare const pageConversationPreviewResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     fan: z.ZodNullable<z.ZodObject<{
         fanId: z.ZodNumber;
@@ -2247,9 +2316,9 @@ export declare const pageConversationPreviewResponseSchema: z.ZodObject<{
         platformConversationId: z.ZodString;
         storedMessageCount: z.ZodNumber;
         messageCoverageStatus: z.ZodEnum<{
+            complete: "complete";
             pending_backfill: "pending_backfill";
             partial_window: "partial_window";
-            complete: "complete";
         }>;
         messageBackfillComplete: z.ZodBoolean;
         messageSyncEligibility: z.ZodEnum<{
@@ -2408,9 +2477,9 @@ export declare const workboardV2ItemSchema: z.ZodObject<{
         lastModelMessageAt: z.ZodNullable<z.ZodString>;
         preview: z.ZodNullable<z.ZodString>;
         coverageStatus: z.ZodEnum<{
+            complete: "complete";
             pending_backfill: "pending_backfill";
             partial_window: "partial_window";
-            complete: "complete";
         }>;
         platformConversationId: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>;
@@ -2557,9 +2626,9 @@ export declare const workboardV2ResponseSchema: z.ZodObject<{
             lastModelMessageAt: z.ZodNullable<z.ZodString>;
             preview: z.ZodNullable<z.ZodString>;
             coverageStatus: z.ZodEnum<{
+                complete: "complete";
                 pending_backfill: "pending_backfill";
                 partial_window: "partial_window";
-                complete: "complete";
             }>;
             platformConversationId: z.ZodNullable<z.ZodString>;
         }, z.core.$strip>;
@@ -2709,9 +2778,9 @@ export declare const workboardV2ListsBandSchema: z.ZodObject<{
             lastModelMessageAt: z.ZodNullable<z.ZodString>;
             preview: z.ZodNullable<z.ZodString>;
             coverageStatus: z.ZodEnum<{
+                complete: "complete";
                 pending_backfill: "pending_backfill";
                 partial_window: "partial_window";
-                complete: "complete";
             }>;
             platformConversationId: z.ZodNullable<z.ZodString>;
         }, z.core.$strip>;
@@ -2825,9 +2894,9 @@ export declare const workboardV2ListsResponseSchema: z.ZodObject<{
                 lastModelMessageAt: z.ZodNullable<z.ZodString>;
                 preview: z.ZodNullable<z.ZodString>;
                 coverageStatus: z.ZodEnum<{
+                    complete: "complete";
                     pending_backfill: "pending_backfill";
                     partial_window: "partial_window";
-                    complete: "complete";
                 }>;
                 platformConversationId: z.ZodNullable<z.ZodString>;
             }, z.core.$strip>;
@@ -3073,15 +3142,18 @@ export declare const pageConversationMessagesResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     conversationId: z.ZodString;
     conversation: z.ZodObject<{
         platformConversationId: z.ZodString;
         storedMessageCount: z.ZodNumber;
         messageCoverageStatus: z.ZodEnum<{
+            complete: "complete";
             pending_backfill: "pending_backfill";
             partial_window: "partial_window";
-            complete: "complete";
         }>;
         messageBackfillComplete: z.ZodBoolean;
         messageSyncEligibility: z.ZodEnum<{
@@ -3664,6 +3736,8 @@ export declare const aiUsageEventInputSchema: z.ZodObject<{
         ping: "ping";
         "hi-greeting": "hi-greeting";
         "workboard-closing": "workboard-closing";
+        "coach-chat": "coach-chat";
+        "voice-script": "voice-script";
     }>;
     model: z.ZodString;
     inputTokens: z.ZodNumber;
@@ -3689,6 +3763,8 @@ export declare const aiUsageBatchBodySchema: z.ZodObject<{
             ping: "ping";
             "hi-greeting": "hi-greeting";
             "workboard-closing": "workboard-closing";
+            "coach-chat": "coach-chat";
+            "voice-script": "voice-script";
         }>;
         model: z.ZodString;
         inputTokens: z.ZodNumber;
@@ -3789,6 +3865,8 @@ export declare const aiGatewayStreamBodySchema: z.ZodObject<{
         ping: "ping";
         "hi-greeting": "hi-greeting";
         "workboard-closing": "workboard-closing";
+        "coach-chat": "coach-chat";
+        "voice-script": "voice-script";
     }>;
     pageLabel: z.ZodString;
     platform: z.ZodEnum<{
@@ -3854,6 +3932,8 @@ export declare const aiGatewayStreamFrameSchema: z.ZodDiscriminatedUnion<[z.ZodO
         ping: "ping";
         "hi-greeting": "hi-greeting";
         "workboard-closing": "workboard-closing";
+        "coach-chat": "coach-chat";
+        "voice-script": "voice-script";
     }>;
     pageLabel: z.ZodString;
     model: z.ZodString;
@@ -3909,6 +3989,8 @@ export declare const aiFeatureStreamFrameSchema: z.ZodUnion<readonly [z.ZodDiscr
         ping: "ping";
         "hi-greeting": "hi-greeting";
         "workboard-closing": "workboard-closing";
+        "coach-chat": "coach-chat";
+        "voice-script": "voice-script";
     }>;
     pageLabel: z.ZodString;
     model: z.ZodString;
@@ -4018,6 +4100,33 @@ export declare const aiPersonaCatalogResponseSchema: z.ZodObject<{
         }>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
+export declare const aiRecapStatusQuerySchema: z.ZodObject<{
+    pageLabel: z.ZodString;
+    conversationRef: z.ZodString;
+    fanRef: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export declare const aiRecapStatusResponseSchema: z.ZodObject<{
+    full: z.ZodNullable<z.ZodObject<{
+        generatedAt: z.ZodString;
+        ageMs: z.ZodNumber;
+        transcriptCoverage: z.ZodNullable<z.ZodEnum<{
+            window: "window";
+            "full-history": "full-history";
+        }>>;
+        requestedCount: z.ZodNullable<z.ZodNumber>;
+        keptCount: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strict>>;
+    short: z.ZodNullable<z.ZodObject<{
+        generatedAt: z.ZodString;
+        ageMs: z.ZodNumber;
+        transcriptCoverage: z.ZodNullable<z.ZodEnum<{
+            window: "window";
+            "full-history": "full-history";
+        }>>;
+        requestedCount: z.ZodNullable<z.ZodNumber>;
+        keptCount: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
 export declare const adminAiPersonaSchema: z.ZodObject<{
     key: z.ZodString;
     displayName: z.ZodString;
@@ -4061,6 +4170,8 @@ export declare const adminAiPersonaArchiveQuerySchema: z.ZodObject<{
 export declare const aiFeatureStreamParamsSchema: z.ZodObject<{
     feature: z.ZodString;
 }, z.core.$strip>;
+export declare const COACH_ANSWER_MAX_CHARS = 64000;
+export declare const AI_FEATURE_STREAM_BODY_LIMIT_BYTES: number;
 export declare const aiFeatureStreamBodySchema: z.ZodObject<{
     clientRequestId: z.ZodString;
     pageLabel: z.ZodString;
@@ -4094,6 +4205,12 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
     messageCount: z.ZodOptional<z.ZodNumber>;
     draftText: z.ZodOptional<z.ZodString>;
     isRegeneration: z.ZodOptional<z.ZodBoolean>;
+    chatterQuestion: z.ZodOptional<z.ZodString>;
+    coachHistory: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        question: z.ZodString;
+        answer: z.ZodString;
+    }, z.core.$strict>>>;
+    summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
     clientContext: z.ZodOptional<z.ZodObject<{
         transcript: z.ZodString;
         messageCount: z.ZodNumber;
@@ -4105,6 +4222,10 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
             active: "active";
             "segment-a": "segment-a";
             "segment-b": "segment-b";
+        }>>;
+        transcriptCoverage: z.ZodOptional<z.ZodEnum<{
+            window: "window";
+            "full-history": "full-history";
         }>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
@@ -4203,6 +4324,8 @@ export declare const aiUsageTopFeatureSchema: z.ZodObject<{
         ping: "ping";
         "hi-greeting": "hi-greeting";
         "workboard-closing": "workboard-closing";
+        "coach-chat": "coach-chat";
+        "voice-script": "voice-script";
     }>;
     requestCount: z.ZodNumber;
     sharePct: z.ZodNumber;
@@ -4218,6 +4341,8 @@ export declare const aiUsageFeatureBreakdownSchema: z.ZodObject<{
         ping: "ping";
         "hi-greeting": "hi-greeting";
         "workboard-closing": "workboard-closing";
+        "coach-chat": "coach-chat";
+        "voice-script": "voice-script";
     }>;
     requestCount: z.ZodNumber;
     sharePct: z.ZodNumber;
@@ -4294,6 +4419,8 @@ export declare const adminChatterUsageRowSchema: z.ZodObject<{
             ping: "ping";
             "hi-greeting": "hi-greeting";
             "workboard-closing": "workboard-closing";
+            "coach-chat": "coach-chat";
+            "voice-script": "voice-script";
         }>;
         requestCount: z.ZodNumber;
         sharePct: z.ZodNumber;
@@ -4309,6 +4436,8 @@ export declare const adminChatterUsageRowSchema: z.ZodObject<{
             ping: "ping";
             "hi-greeting": "hi-greeting";
             "workboard-closing": "workboard-closing";
+            "coach-chat": "coach-chat";
+            "voice-script": "voice-script";
         }>;
         requestCount: z.ZodNumber;
         sharePct: z.ZodNumber;
@@ -4374,6 +4503,8 @@ export declare const adminChatterUsageResponseSchema: z.ZodObject<{
                 ping: "ping";
                 "hi-greeting": "hi-greeting";
                 "workboard-closing": "workboard-closing";
+                "coach-chat": "coach-chat";
+                "voice-script": "voice-script";
             }>;
             requestCount: z.ZodNumber;
             sharePct: z.ZodNumber;
@@ -4389,6 +4520,8 @@ export declare const adminChatterUsageResponseSchema: z.ZodObject<{
                 ping: "ping";
                 "hi-greeting": "hi-greeting";
                 "workboard-closing": "workboard-closing";
+                "coach-chat": "coach-chat";
+                "voice-script": "voice-script";
             }>;
             requestCount: z.ZodNumber;
             sharePct: z.ZodNumber;
@@ -4606,10 +4739,10 @@ export declare const syncMonitorStreamItemSchema: z.ZodObject<{
     }>;
     status: z.ZodEnum<{
         pending: "pending";
+        blocked: "blocked";
         retrying: "retrying";
         idle: "idle";
         running: "running";
-        blocked: "blocked";
         paused: "paused";
     }>;
     stalled: z.ZodBoolean;
@@ -4761,10 +4894,10 @@ export declare const syncMonitorPageItemSchema: z.ZodObject<{
         }>;
         status: z.ZodEnum<{
             pending: "pending";
+            blocked: "blocked";
             retrying: "retrying";
             idle: "idle";
             running: "running";
-            blocked: "blocked";
             paused: "paused";
         }>;
         stalled: z.ZodBoolean;
@@ -5116,10 +5249,10 @@ export declare const syncStatusResponseSchema: z.ZodObject<{
             }>;
             status: z.ZodEnum<{
                 pending: "pending";
+                blocked: "blocked";
                 retrying: "retrying";
                 idle: "idle";
                 running: "running";
-                blocked: "blocked";
                 paused: "paused";
             }>;
             stalled: z.ZodBoolean;
@@ -7944,6 +8077,7 @@ export declare const notificationsIncidentItemSchema: z.ZodObject<{
         golden_signal_lag: "golden_signal_lag";
         scheduler_silent: "scheduler_silent";
         ops_sampler_silent: "ops_sampler_silent";
+        ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
     }>;
     pageLabel: z.ZodNullable<z.ZodString>;
     platform: z.ZodNullable<z.ZodEnum<{
@@ -7983,6 +8117,7 @@ export declare const notificationsIncidentsQuerySchema: z.ZodObject<{
         golden_signal_lag: "golden_signal_lag";
         scheduler_silent: "scheduler_silent";
         ops_sampler_silent: "ops_sampler_silent";
+        ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
     }>>;
     pageLabel: z.ZodOptional<z.ZodString>;
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
@@ -8008,6 +8143,7 @@ export declare const notificationsIncidentsResponseSchema: z.ZodObject<{
             golden_signal_lag: "golden_signal_lag";
             scheduler_silent: "scheduler_silent";
             ops_sampler_silent: "ops_sampler_silent";
+            ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
         }>;
         pageLabel: z.ZodNullable<z.ZodString>;
         platform: z.ZodNullable<z.ZodEnum<{
@@ -8194,6 +8330,9 @@ export declare const adminCreatePageResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
     verified: z.ZodBoolean;
     syncQueued: z.ZodBoolean;
@@ -8238,6 +8377,9 @@ export declare const adminUpdatePageResponseSchema: z.ZodObject<{
         }, z.core.$strip>;
         lastLightSyncAt: z.ZodNullable<z.ZodString>;
         lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            voiceNotes: z.ZodBoolean;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export declare const updateCredentialsResponseSchema: z.ZodObject<{
@@ -8932,12 +9074,12 @@ export declare const ofapiCaptureSeedResponseSchema: z.ZodObject<{
         }>;
         jobId: z.ZodNullable<z.ZodString>;
         state: z.ZodNullable<z.ZodEnum<{
-            complete: "complete";
-            blocked: "blocked";
             ready: "ready";
             leased: "leased";
             awaiting_parse: "awaiting_parse";
             retry_wait: "retry_wait";
+            blocked: "blocked";
+            complete: "complete";
             cancelled: "cancelled";
         }>>;
         reasonCode: z.ZodNullable<z.ZodString>;
@@ -8977,12 +9119,12 @@ export declare const ofapiExportQuoteCreateResponseSchema: z.ZodObject<{
     }>;
     targetHash: z.ZodString;
     state: z.ZodNullable<z.ZodEnum<{
-        complete: "complete";
-        blocked: "blocked";
         ready: "ready";
         leased: "leased";
         awaiting_parse: "awaiting_parse";
         retry_wait: "retry_wait";
+        blocked: "blocked";
+        complete: "complete";
         cancelled: "cancelled";
     }>>;
     reasonCode: z.ZodNullable<z.ZodString>;
@@ -9028,12 +9170,12 @@ export declare const ofapiExportArtifactCaptureResponseSchema: z.ZodObject<{
     nextRowVersion: z.ZodNumber;
     importJobId: z.ZodNullable<z.ZodString>;
     importJobState: z.ZodNullable<z.ZodEnum<{
-        complete: "complete";
-        blocked: "blocked";
         ready: "ready";
         leased: "leased";
         awaiting_parse: "awaiting_parse";
         retry_wait: "retry_wait";
+        blocked: "blocked";
+        complete: "complete";
         cancelled: "cancelled";
     }>>;
     classification: z.ZodLiteral<"item_presence">;
@@ -9056,12 +9198,12 @@ export declare const ofapiExportQuoteStatusResponseSchema: z.ZodObject<{
     }>;
     targetHash: z.ZodString;
     state: z.ZodEnum<{
-        complete: "complete";
-        blocked: "blocked";
         ready: "ready";
         leased: "leased";
         awaiting_parse: "awaiting_parse";
         retry_wait: "retry_wait";
+        blocked: "blocked";
+        complete: "complete";
         cancelled: "cancelled";
     }>;
     reasonCode: z.ZodNullable<z.ZodString>;
@@ -9097,12 +9239,12 @@ export declare const ofapiCaptureOperatorStatusResponseSchema: z.ZodObject<{
     }, z.core.$strip>>;
     jobGroups: z.ZodArray<z.ZodObject<{
         state: z.ZodEnum<{
-            complete: "complete";
-            blocked: "blocked";
             ready: "ready";
             leased: "leased";
             awaiting_parse: "awaiting_parse";
             retry_wait: "retry_wait";
+            blocked: "blocked";
+            complete: "complete";
             cancelled: "cancelled";
         }>;
         reasonCode: z.ZodNullable<z.ZodString>;
@@ -9120,12 +9262,12 @@ export declare const ofapiCaptureOperatorStatusResponseSchema: z.ZodObject<{
             export_import: "export_import";
         }>;
         state: z.ZodEnum<{
-            complete: "complete";
-            blocked: "blocked";
             ready: "ready";
             leased: "leased";
             awaiting_parse: "awaiting_parse";
             retry_wait: "retry_wait";
+            blocked: "blocked";
+            complete: "complete";
             cancelled: "cancelled";
         }>;
         reasonCode: z.ZodNullable<z.ZodString>;
@@ -9141,15 +9283,15 @@ export declare const ofapiCaptureOperatorStatusResponseSchema: z.ZodObject<{
             pageId: z.ZodNumber;
             operation: z.ZodString;
             state: z.ZodEnum<{
+                indeterminate: "indeterminate";
                 reserved: "reserved";
                 released_pre_dispatch: "released_pre_dispatch";
                 dispatching: "dispatching";
                 response_captured: "response_captured";
-                indeterminate: "indeterminate";
             }>;
             creditState: z.ZodEnum<{
-                reserved: "reserved";
                 indeterminate: "indeterminate";
+                reserved: "reserved";
                 settled: "settled";
                 released: "released";
             }>;
@@ -9159,6 +9301,10 @@ export declare const ofapiCaptureOperatorStatusResponseSchema: z.ZodObject<{
             dispatchStartedAt: z.ZodNullable<z.ZodString>;
             finishedAt: z.ZodNullable<z.ZodString>;
         }, z.core.$strip>>;
+    }, z.core.$strip>;
+    strandedInteractive: z.ZodObject<{
+        count: z.ZodNumber;
+        oldestAt: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>;
     storageHealth: z.ZodNullable<z.ZodObject<{
         healthy: z.ZodBoolean;
@@ -9216,15 +9362,15 @@ export declare const ofapiCaptureAttemptResolveResponseSchema: z.ZodObject<{
         pageId: z.ZodNumber;
         operation: z.ZodString;
         state: z.ZodEnum<{
+            indeterminate: "indeterminate";
             reserved: "reserved";
             released_pre_dispatch: "released_pre_dispatch";
             dispatching: "dispatching";
             response_captured: "response_captured";
-            indeterminate: "indeterminate";
         }>;
         creditState: z.ZodEnum<{
-            reserved: "reserved";
             indeterminate: "indeterminate";
+            reserved: "reserved";
             settled: "settled";
             released: "released";
         }>;
@@ -9240,8 +9386,8 @@ export declare const ofapiCaptureJobParamsSchema: z.ZodObject<{
 }, z.core.$strip>;
 export declare const ofapiCaptureJobReplayBodySchema: z.ZodObject<{
     expectedState: z.ZodEnum<{
-        blocked: "blocked";
         awaiting_parse: "awaiting_parse";
+        blocked: "blocked";
     }>;
     expectedReasonCode: z.ZodEnum<{
         parser_failed: "parser_failed";
@@ -9264,8 +9410,8 @@ export declare const ofapiCaptureJobReplayResponseSchema: z.ZodObject<{
     attemptId: z.ZodString;
     previous: z.ZodObject<{
         state: z.ZodEnum<{
-            blocked: "blocked";
             awaiting_parse: "awaiting_parse";
+            blocked: "blocked";
         }>;
         reasonCode: z.ZodNullable<z.ZodString>;
         rowVersion: z.ZodNumber;
@@ -9332,12 +9478,12 @@ export declare const ofapiExportCreateReconcileResponseSchema: z.ZodObject<{
     job: z.ZodObject<{
         jobId: z.ZodString;
         state: z.ZodEnum<{
-            complete: "complete";
-            blocked: "blocked";
             ready: "ready";
             leased: "leased";
             awaiting_parse: "awaiting_parse";
             retry_wait: "retry_wait";
+            blocked: "blocked";
+            complete: "complete";
             cancelled: "cancelled";
         }>;
         reasonCode: z.ZodNullable<z.ZodString>;
@@ -9349,15 +9495,15 @@ export declare const ofapiExportCreateReconcileResponseSchema: z.ZodObject<{
         pageId: z.ZodNumber;
         operation: z.ZodString;
         state: z.ZodEnum<{
+            indeterminate: "indeterminate";
             reserved: "reserved";
             released_pre_dispatch: "released_pre_dispatch";
             dispatching: "dispatching";
             response_captured: "response_captured";
-            indeterminate: "indeterminate";
         }>;
         creditState: z.ZodEnum<{
-            reserved: "reserved";
             indeterminate: "indeterminate";
+            reserved: "reserved";
             settled: "settled";
             released: "released";
         }>;
@@ -9504,8 +9650,8 @@ export declare const ofapiCreditsChatterSummaryResponseSchema: z.ZodObject<{
 }, z.core.$strip>;
 export declare const ofapiCommandStateSchema: z.ZodEnum<{
     cancelled: "cancelled";
-    indeterminate: "indeterminate";
     queued: "queued";
+    indeterminate: "indeterminate";
     in_flight: "in_flight";
     confirmed: "confirmed";
     failed_retryable: "failed_retryable";
@@ -9580,8 +9726,8 @@ export declare const ofapiCommandResponseSchema: z.ZodObject<{
     conversationId: z.ZodString;
     state: z.ZodEnum<{
         cancelled: "cancelled";
-        indeterminate: "indeterminate";
         queued: "queued";
+        indeterminate: "indeterminate";
         in_flight: "in_flight";
         confirmed: "confirmed";
         failed_retryable: "failed_retryable";
@@ -10418,6 +10564,8 @@ export declare const routeSchemas: {
                     ping: "ping";
                     "hi-greeting": "hi-greeting";
                     "workboard-closing": "workboard-closing";
+                    "coach-chat": "coach-chat";
+                    "voice-script": "voice-script";
                 }>;
                 model: z.ZodString;
                 inputTokens: z.ZodNumber;
@@ -10511,6 +10659,8 @@ export declare const routeSchemas: {
                 ping: "ping";
                 "hi-greeting": "hi-greeting";
                 "workboard-closing": "workboard-closing";
+                "coach-chat": "coach-chat";
+                "voice-script": "voice-script";
             }>;
             pageLabel: z.ZodString;
             platform: z.ZodEnum<{
@@ -11128,12 +11278,12 @@ export declare const routeSchemas: {
                     }>;
                     jobId: z.ZodNullable<z.ZodString>;
                     state: z.ZodNullable<z.ZodEnum<{
-                        complete: "complete";
-                        blocked: "blocked";
                         ready: "ready";
                         leased: "leased";
                         awaiting_parse: "awaiting_parse";
                         retry_wait: "retry_wait";
+                        blocked: "blocked";
+                        complete: "complete";
                         cancelled: "cancelled";
                     }>>;
                     reasonCode: z.ZodNullable<z.ZodString>;
@@ -11184,12 +11334,12 @@ export declare const routeSchemas: {
                 }, z.core.$strip>>;
                 jobGroups: z.ZodArray<z.ZodObject<{
                     state: z.ZodEnum<{
-                        complete: "complete";
-                        blocked: "blocked";
                         ready: "ready";
                         leased: "leased";
                         awaiting_parse: "awaiting_parse";
                         retry_wait: "retry_wait";
+                        blocked: "blocked";
+                        complete: "complete";
                         cancelled: "cancelled";
                     }>;
                     reasonCode: z.ZodNullable<z.ZodString>;
@@ -11207,12 +11357,12 @@ export declare const routeSchemas: {
                         export_import: "export_import";
                     }>;
                     state: z.ZodEnum<{
-                        complete: "complete";
-                        blocked: "blocked";
                         ready: "ready";
                         leased: "leased";
                         awaiting_parse: "awaiting_parse";
                         retry_wait: "retry_wait";
+                        blocked: "blocked";
+                        complete: "complete";
                         cancelled: "cancelled";
                     }>;
                     reasonCode: z.ZodNullable<z.ZodString>;
@@ -11228,15 +11378,15 @@ export declare const routeSchemas: {
                         pageId: z.ZodNumber;
                         operation: z.ZodString;
                         state: z.ZodEnum<{
+                            indeterminate: "indeterminate";
                             reserved: "reserved";
                             released_pre_dispatch: "released_pre_dispatch";
                             dispatching: "dispatching";
                             response_captured: "response_captured";
-                            indeterminate: "indeterminate";
                         }>;
                         creditState: z.ZodEnum<{
-                            reserved: "reserved";
                             indeterminate: "indeterminate";
+                            reserved: "reserved";
                             settled: "settled";
                             released: "released";
                         }>;
@@ -11246,6 +11396,10 @@ export declare const routeSchemas: {
                         dispatchStartedAt: z.ZodNullable<z.ZodString>;
                         finishedAt: z.ZodNullable<z.ZodString>;
                     }, z.core.$strip>>;
+                }, z.core.$strip>;
+                strandedInteractive: z.ZodObject<{
+                    count: z.ZodNumber;
+                    oldestAt: z.ZodNullable<z.ZodString>;
                 }, z.core.$strip>;
                 storageHealth: z.ZodNullable<z.ZodObject<{
                     healthy: z.ZodBoolean;
@@ -11352,15 +11506,15 @@ export declare const routeSchemas: {
                     pageId: z.ZodNumber;
                     operation: z.ZodString;
                     state: z.ZodEnum<{
+                        indeterminate: "indeterminate";
                         reserved: "reserved";
                         released_pre_dispatch: "released_pre_dispatch";
                         dispatching: "dispatching";
                         response_captured: "response_captured";
-                        indeterminate: "indeterminate";
                     }>;
                     creditState: z.ZodEnum<{
-                        reserved: "reserved";
                         indeterminate: "indeterminate";
+                        reserved: "reserved";
                         settled: "settled";
                         released: "released";
                     }>;
@@ -11410,8 +11564,8 @@ export declare const routeSchemas: {
         }, z.core.$strip>;
         readonly body: z.ZodObject<{
             expectedState: z.ZodEnum<{
-                blocked: "blocked";
                 awaiting_parse: "awaiting_parse";
+                blocked: "blocked";
             }>;
             expectedReasonCode: z.ZodEnum<{
                 parser_failed: "parser_failed";
@@ -11435,8 +11589,8 @@ export declare const routeSchemas: {
                 attemptId: z.ZodString;
                 previous: z.ZodObject<{
                     state: z.ZodEnum<{
-                        blocked: "blocked";
                         awaiting_parse: "awaiting_parse";
+                        blocked: "blocked";
                     }>;
                     reasonCode: z.ZodNullable<z.ZodString>;
                     rowVersion: z.ZodNumber;
@@ -11576,12 +11730,12 @@ export declare const routeSchemas: {
                 job: z.ZodObject<{
                     jobId: z.ZodString;
                     state: z.ZodEnum<{
-                        complete: "complete";
-                        blocked: "blocked";
                         ready: "ready";
                         leased: "leased";
                         awaiting_parse: "awaiting_parse";
                         retry_wait: "retry_wait";
+                        blocked: "blocked";
+                        complete: "complete";
                         cancelled: "cancelled";
                     }>;
                     reasonCode: z.ZodNullable<z.ZodString>;
@@ -11593,15 +11747,15 @@ export declare const routeSchemas: {
                     pageId: z.ZodNumber;
                     operation: z.ZodString;
                     state: z.ZodEnum<{
+                        indeterminate: "indeterminate";
                         reserved: "reserved";
                         released_pre_dispatch: "released_pre_dispatch";
                         dispatching: "dispatching";
                         response_captured: "response_captured";
-                        indeterminate: "indeterminate";
                     }>;
                     creditState: z.ZodEnum<{
-                        reserved: "reserved";
                         indeterminate: "indeterminate";
+                        reserved: "reserved";
                         settled: "settled";
                         released: "released";
                     }>;
@@ -11681,12 +11835,12 @@ export declare const routeSchemas: {
                 }>;
                 targetHash: z.ZodString;
                 state: z.ZodNullable<z.ZodEnum<{
-                    complete: "complete";
-                    blocked: "blocked";
                     ready: "ready";
                     leased: "leased";
                     awaiting_parse: "awaiting_parse";
                     retry_wait: "retry_wait";
+                    blocked: "blocked";
+                    complete: "complete";
                     cancelled: "cancelled";
                 }>>;
                 reasonCode: z.ZodNullable<z.ZodString>;
@@ -11737,12 +11891,12 @@ export declare const routeSchemas: {
                 }>;
                 targetHash: z.ZodString;
                 state: z.ZodEnum<{
-                    complete: "complete";
-                    blocked: "blocked";
                     ready: "ready";
                     leased: "leased";
                     awaiting_parse: "awaiting_parse";
                     retry_wait: "retry_wait";
+                    blocked: "blocked";
+                    complete: "complete";
                     cancelled: "cancelled";
                 }>;
                 reasonCode: z.ZodNullable<z.ZodString>;
@@ -11868,12 +12022,12 @@ export declare const routeSchemas: {
                 nextRowVersion: z.ZodNumber;
                 importJobId: z.ZodNullable<z.ZodString>;
                 importJobState: z.ZodNullable<z.ZodEnum<{
-                    complete: "complete";
-                    blocked: "blocked";
                     ready: "ready";
                     leased: "leased";
                     awaiting_parse: "awaiting_parse";
                     retry_wait: "retry_wait";
+                    blocked: "blocked";
+                    complete: "complete";
                     cancelled: "cancelled";
                 }>>;
                 classification: z.ZodLiteral<"item_presence">;
@@ -11938,12 +12092,12 @@ export declare const routeSchemas: {
                 }>;
                 targetHash: z.ZodString;
                 state: z.ZodEnum<{
-                    complete: "complete";
-                    blocked: "blocked";
                     ready: "ready";
                     leased: "leased";
                     awaiting_parse: "awaiting_parse";
                     retry_wait: "retry_wait";
+                    blocked: "blocked";
+                    complete: "complete";
                     cancelled: "cancelled";
                 }>;
                 reasonCode: z.ZodNullable<z.ZodString>;
@@ -12137,8 +12291,8 @@ export declare const routeSchemas: {
                 conversationId: z.ZodString;
                 state: z.ZodEnum<{
                     cancelled: "cancelled";
-                    indeterminate: "indeterminate";
                     queued: "queued";
+                    indeterminate: "indeterminate";
                     in_flight: "in_flight";
                     confirmed: "confirmed";
                     failed_retryable: "failed_retryable";
@@ -12171,8 +12325,8 @@ export declare const routeSchemas: {
                 conversationId: z.ZodString;
                 state: z.ZodEnum<{
                     cancelled: "cancelled";
-                    indeterminate: "indeterminate";
                     queued: "queued";
+                    indeterminate: "indeterminate";
                     in_flight: "in_flight";
                     confirmed: "confirmed";
                     failed_retryable: "failed_retryable";
@@ -12248,8 +12402,8 @@ export declare const routeSchemas: {
                 conversationId: z.ZodString;
                 state: z.ZodEnum<{
                     cancelled: "cancelled";
-                    indeterminate: "indeterminate";
                     queued: "queued";
+                    indeterminate: "indeterminate";
                     in_flight: "in_flight";
                     confirmed: "confirmed";
                     failed_retryable: "failed_retryable";
@@ -12315,8 +12469,8 @@ export declare const routeSchemas: {
                 conversationId: z.ZodString;
                 state: z.ZodEnum<{
                     cancelled: "cancelled";
-                    indeterminate: "indeterminate";
                     queued: "queued";
+                    indeterminate: "indeterminate";
                     in_flight: "in_flight";
                     confirmed: "confirmed";
                     failed_retryable: "failed_retryable";
@@ -12804,8 +12958,170 @@ export declare const routeSchemas: {
                 }, z.core.$strip>;
                 lastLightSyncAt: z.ZodNullable<z.ZodString>;
                 lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                capabilities: z.ZodOptional<z.ZodObject<{
+                    voiceNotes: z.ZodBoolean;
+                }, z.core.$strip>>;
             }, z.core.$strip>>;
             readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+        };
+    };
+    readonly voiceNoteCreate: {
+        readonly auth: {
+            readonly kind: "apiKey";
+            readonly scope: "page";
+        };
+        readonly tags: readonly ["voice"];
+        readonly summary: "Admit (or idempotently replay) a voice-note render";
+        readonly description: string;
+        readonly params: z.ZodObject<{
+            pageLabel: z.ZodString;
+        }, z.core.$strip>;
+        readonly body: z.ZodObject<{
+            clientRequestId: z.ZodString;
+            conversationRef: z.ZodString;
+            sourceGenerationRef: z.ZodString;
+            script: z.ZodString;
+        }, z.core.$strip>;
+        readonly response: {
+            readonly 202: z.ZodObject<{
+                voiceNoteId: z.ZodNumber;
+                state: z.ZodEnum<{
+                    queued: "queued";
+                    dispatched: "dispatched";
+                    completed: "completed";
+                    failed_definite: "failed_definite";
+                    failed_after_dispatch: "failed_after_dispatch";
+                    indeterminate: "indeterminate";
+                    quota_denied: "quota_denied";
+                    artifact_expired: "artifact_expired";
+                }>;
+                scriptChars: z.ZodNumber;
+                billed: z.ZodNullable<z.ZodBoolean>;
+                audioSha256: z.ZodNullable<z.ZodString>;
+                audioBytesLen: z.ZodNullable<z.ZodNumber>;
+                createdAt: z.ZodString;
+                errorCode: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 409: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 429: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 503: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+        };
+    };
+    readonly voiceNoteStatus: {
+        readonly auth: {
+            readonly kind: "apiKey";
+            readonly scope: "page";
+        };
+        readonly tags: readonly ["voice"];
+        readonly summary: "Read a voice-note render's status";
+        readonly description: string;
+        readonly params: z.ZodObject<{
+            pageLabel: z.ZodString;
+            id: z.ZodCoercedNumber<unknown>;
+        }, z.core.$strip>;
+        readonly response: {
+            readonly 200: z.ZodObject<{
+                voiceNoteId: z.ZodNumber;
+                state: z.ZodEnum<{
+                    queued: "queued";
+                    dispatched: "dispatched";
+                    completed: "completed";
+                    failed_definite: "failed_definite";
+                    failed_after_dispatch: "failed_after_dispatch";
+                    indeterminate: "indeterminate";
+                    quota_denied: "quota_denied";
+                    artifact_expired: "artifact_expired";
+                }>;
+                scriptChars: z.ZodNumber;
+                billed: z.ZodNullable<z.ZodBoolean>;
+                audioSha256: z.ZodNullable<z.ZodString>;
+                audioBytesLen: z.ZodNullable<z.ZodNumber>;
+                createdAt: z.ZodString;
+                errorCode: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+        };
+    };
+    readonly voiceNoteAudio: {
+        readonly auth: {
+            readonly kind: "apiKey";
+            readonly scope: "page";
+        };
+        readonly tags: readonly ["voice"];
+        readonly summary: "Download a completed voice-note's audio bytes";
+        readonly description: string;
+        readonly params: z.ZodObject<{
+            pageLabel: z.ZodString;
+            id: z.ZodCoercedNumber<unknown>;
+        }, z.core.$strip>;
+        readonly response: {
+            readonly 200: z.ZodString;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 410: z.ZodObject<{
                 error: z.ZodString;
                 message: z.ZodString;
                 statusCode: z.ZodNumber;
@@ -13203,6 +13519,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
@@ -13275,6 +13594,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     transactionId: z.ZodString;
@@ -13372,6 +13694,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     platformSubscriptionId: z.ZodString;
@@ -13455,6 +13780,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     businessDate: z.ZodString;
@@ -13524,6 +13852,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     platformUserId: z.ZodString;
@@ -13625,6 +13956,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     businessDate: z.ZodString;
@@ -13687,6 +14021,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     platformUserId: z.ZodString;
@@ -13818,6 +14155,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 items: z.ZodArray<z.ZodObject<{
                     platformUserId: z.ZodString;
@@ -14580,9 +14920,9 @@ export declare const routeSchemas: {
                         lastMessagePreview: z.ZodNullable<z.ZodString>;
                         storedMessageCount: z.ZodNumber;
                         messageCoverageStatus: z.ZodEnum<{
+                            complete: "complete";
                             pending_backfill: "pending_backfill";
                             partial_window: "partial_window";
-                            complete: "complete";
                         }>;
                         messageBackfillComplete: z.ZodBoolean;
                     }, z.core.$strip>;
@@ -15256,6 +15596,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 fan: z.ZodNullable<z.ZodObject<{
                     fanId: z.ZodNumber;
@@ -15272,9 +15615,9 @@ export declare const routeSchemas: {
                     platformConversationId: z.ZodString;
                     storedMessageCount: z.ZodNumber;
                     messageCoverageStatus: z.ZodEnum<{
+                        complete: "complete";
                         pending_backfill: "pending_backfill";
                         partial_window: "partial_window";
-                        complete: "complete";
                     }>;
                     messageBackfillComplete: z.ZodBoolean;
                     messageSyncEligibility: z.ZodEnum<{
@@ -15378,15 +15721,18 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 conversationId: z.ZodString;
                 conversation: z.ZodObject<{
                     platformConversationId: z.ZodString;
                     storedMessageCount: z.ZodNumber;
                     messageCoverageStatus: z.ZodEnum<{
+                        complete: "complete";
                         pending_backfill: "pending_backfill";
                         partial_window: "partial_window";
-                        complete: "complete";
                     }>;
                     messageBackfillComplete: z.ZodBoolean;
                     messageSyncEligibility: z.ZodEnum<{
@@ -15570,9 +15916,9 @@ export declare const routeSchemas: {
                         lastModelMessageAt: z.ZodNullable<z.ZodString>;
                         preview: z.ZodNullable<z.ZodString>;
                         coverageStatus: z.ZodEnum<{
+                            complete: "complete";
                             pending_backfill: "pending_backfill";
                             partial_window: "partial_window";
-                            complete: "complete";
                         }>;
                         platformConversationId: z.ZodNullable<z.ZodString>;
                     }, z.core.$strip>;
@@ -15756,9 +16102,9 @@ export declare const routeSchemas: {
                             lastModelMessageAt: z.ZodNullable<z.ZodString>;
                             preview: z.ZodNullable<z.ZodString>;
                             coverageStatus: z.ZodEnum<{
+                                complete: "complete";
                                 pending_backfill: "pending_backfill";
                                 partial_window: "partial_window";
-                                complete: "complete";
                             }>;
                             platformConversationId: z.ZodNullable<z.ZodString>;
                         }, z.core.$strip>;
@@ -16635,10 +16981,10 @@ export declare const routeSchemas: {
                         }>;
                         status: z.ZodEnum<{
                             pending: "pending";
+                            blocked: "blocked";
                             retrying: "retrying";
                             idle: "idle";
                             running: "running";
-                            blocked: "blocked";
                             paused: "paused";
                         }>;
                         stalled: z.ZodBoolean;
@@ -19037,6 +19383,62 @@ export declare const routeSchemas: {
             }, z.core.$strip>;
         };
     };
+    readonly aiRecapStatus: {
+        readonly auth: {
+            readonly kind: "apiKey";
+        };
+        readonly tags: readonly ["usage"];
+        readonly summary: "Freshest usable recap metadata (full + short slots) for one conversation";
+        readonly querystring: z.ZodObject<{
+            pageLabel: z.ZodString;
+            conversationRef: z.ZodString;
+            fanRef: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+        readonly response: {
+            readonly 200: z.ZodObject<{
+                full: z.ZodNullable<z.ZodObject<{
+                    generatedAt: z.ZodString;
+                    ageMs: z.ZodNumber;
+                    transcriptCoverage: z.ZodNullable<z.ZodEnum<{
+                        window: "window";
+                        "full-history": "full-history";
+                    }>>;
+                    requestedCount: z.ZodNullable<z.ZodNumber>;
+                    keptCount: z.ZodNullable<z.ZodNumber>;
+                }, z.core.$strict>>;
+                short: z.ZodNullable<z.ZodObject<{
+                    generatedAt: z.ZodString;
+                    ageMs: z.ZodNumber;
+                    transcriptCoverage: z.ZodNullable<z.ZodEnum<{
+                        window: "window";
+                        "full-history": "full-history";
+                    }>>;
+                    requestedCount: z.ZodNullable<z.ZodNumber>;
+                    keptCount: z.ZodNullable<z.ZodNumber>;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+        };
+    };
     readonly aiPersonaUpsert: {
         readonly auth: {
             readonly kind: "apiKey";
@@ -19329,6 +19731,12 @@ export declare const routeSchemas: {
             messageCount: z.ZodOptional<z.ZodNumber>;
             draftText: z.ZodOptional<z.ZodString>;
             isRegeneration: z.ZodOptional<z.ZodBoolean>;
+            chatterQuestion: z.ZodOptional<z.ZodString>;
+            coachHistory: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                question: z.ZodString;
+                answer: z.ZodString;
+            }, z.core.$strict>>>;
+            summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
             clientContext: z.ZodOptional<z.ZodObject<{
                 transcript: z.ZodString;
                 messageCount: z.ZodNumber;
@@ -19340,6 +19748,10 @@ export declare const routeSchemas: {
                     active: "active";
                     "segment-a": "segment-a";
                     "segment-b": "segment-b";
+                }>>;
+                transcriptCoverage: z.ZodOptional<z.ZodEnum<{
+                    window: "window";
+                    "full-history": "full-history";
                 }>>;
             }, z.core.$strict>>;
         }, z.core.$strict>;
@@ -19533,6 +19945,8 @@ export declare const routeSchemas: {
                             ping: "ping";
                             "hi-greeting": "hi-greeting";
                             "workboard-closing": "workboard-closing";
+                            "coach-chat": "coach-chat";
+                            "voice-script": "voice-script";
                         }>;
                         requestCount: z.ZodNumber;
                         sharePct: z.ZodNumber;
@@ -19548,6 +19962,8 @@ export declare const routeSchemas: {
                             ping: "ping";
                             "hi-greeting": "hi-greeting";
                             "workboard-closing": "workboard-closing";
+                            "coach-chat": "coach-chat";
+                            "voice-script": "voice-script";
                         }>;
                         requestCount: z.ZodNumber;
                         sharePct: z.ZodNumber;
@@ -21200,6 +21616,9 @@ export declare const routeSchemas: {
                 }, z.core.$strip>;
                 lastLightSyncAt: z.ZodNullable<z.ZodString>;
                 lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                capabilities: z.ZodOptional<z.ZodObject<{
+                    voiceNotes: z.ZodBoolean;
+                }, z.core.$strip>>;
             }, z.core.$strip>>;
             readonly 401: z.ZodObject<{
                 error: z.ZodString;
@@ -21263,6 +21682,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
                 verified: z.ZodBoolean;
                 syncQueued: z.ZodBoolean;
@@ -21343,6 +21765,9 @@ export declare const routeSchemas: {
                     }, z.core.$strip>;
                     lastLightSyncAt: z.ZodNullable<z.ZodString>;
                     lastFollowerSyncAt: z.ZodNullable<z.ZodString>;
+                    capabilities: z.ZodOptional<z.ZodObject<{
+                        voiceNotes: z.ZodBoolean;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
@@ -21912,6 +22337,7 @@ export declare const routeSchemas: {
                 golden_signal_lag: "golden_signal_lag";
                 scheduler_silent: "scheduler_silent";
                 ops_sampler_silent: "ops_sampler_silent";
+                ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
             }>>;
             pageLabel: z.ZodOptional<z.ZodString>;
             limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
@@ -21938,6 +22364,7 @@ export declare const routeSchemas: {
                         golden_signal_lag: "golden_signal_lag";
                         scheduler_silent: "scheduler_silent";
                         ops_sampler_silent: "ops_sampler_silent";
+                        ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
                     }>;
                     pageLabel: z.ZodNullable<z.ZodString>;
                     platform: z.ZodNullable<z.ZodEnum<{
