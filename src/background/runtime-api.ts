@@ -18,6 +18,7 @@ import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
+  RecapStatusResponse,
   SpendersBuildPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
@@ -385,6 +386,63 @@ export function registerRuntimeApi({
             ok: false,
             error: timedOut ? createUserError('timed_out') : toUserError(error),
           };
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
+      }
+
+      if (requestType === 'getRecapStatus') {
+        // Metadata-only recap-status read for the coach empty state (spec §5).
+        // It must NEVER break opening Coach: any failure — not connected, no
+        // page match, an old Hub without the endpoint — resolves to null slots.
+        const nulls: RecapStatusResponse = { full: null, short: null };
+        const tabId = sender.tab?.id;
+        const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
+        if (!session || !session.connected) {
+          return nulls;
+        }
+        // Shape already validated by getRuntimeRequestType.
+        const record = message as unknown as {
+          groupId: string;
+          fanAccountId: string | null;
+        };
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+        );
+        try {
+          // Resolve the page label the same way a generation does.
+          const pageUsername =
+            session.resolvedUsername?.trim() ||
+            (await fanslyClient.getAuthenticatedAccount(session, controller.signal))
+              ?.username?.trim() ||
+            null;
+          if (!pageUsername) {
+            return nulls;
+          }
+          const { settings } = await storageCoordinator.getState();
+          const pageLabel = await agencyHubClient.resolvePageLabelForUsername(
+            settings,
+            pageUsername,
+            controller.signal,
+          );
+          if (!pageLabel) {
+            return nulls;
+          }
+          const status = await agencyHubClient.getRecapStatus(
+            settings,
+            {
+              pageLabel,
+              // Canonical identity (§5): conversationRef = groupId, fanRef = fan.
+              conversationRef: record.groupId,
+              fanRef: record.fanAccountId,
+            },
+            controller.signal,
+          );
+          return status ?? nulls;
+        } catch {
+          return nulls;
         } finally {
           globalThis.clearTimeout(timeout);
         }

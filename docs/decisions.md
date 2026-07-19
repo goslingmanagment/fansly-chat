@@ -61,6 +61,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
 | E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
 | E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
+| E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` cache-hit marker invalidates every pre-guard recap (one forced regen per fan, self-healing) with a documented Hub-residual gap owned by core #136 |
 
 ## Entries
 
@@ -1033,3 +1034,46 @@ matching latency cost was absorbed by doubling `DEEP_OPERATION_PREP_TIMEOUT_MS`
 180 s → 360 s so a full-window load no longer times out mid-pagination. If the
 non-coach blast radius is later judged too wide, the fix is to split a dedicated
 coach/recap window constant off the shared deep default rather than to lower it.
+
+**Output-exhaustion fail-closed extended + empty guard (review rounds 4–6).** The
+family "a truncated stream is an error, never presented" rule previously fired
+only for reply features (a literal `max_tokens` check). It now keys on the SDK's
+`isOutputExhausted` (normalizes kernel `max_tokens` + provider `length`) and
+extends to coach-chat AND fan-summary (and, on the compare lane, to each compare
+card). Separately, an EMPTY/whitespace-only coach or recap output also fails
+closed (`ai_output_unusable`) before the result is built or cached — a meta→done
+stream with no content, or a whitespace `end_turn` answer, is not a usable result.
+Scope note: reply features stay covered by `assertInsertableFeatureResult`, and
+help-me/chat-review parse XML out of the body so an empty body already fails that
+parse. Net: a truncated OR empty recap is never presented and never cached.
+
+**`trustedTerminal` cache invalidation — one-time fleet cost (accepted).** A
+cached recap is a valid cache HIT only if it carries a `trustedTerminal` marker,
+which is written ONLY on entries produced behind the exhaustion+empty guards
+(`isValidSummaryCacheEntry` requires it; `normalizeSummaryCacheEntry` preserves it
+through migration; it is not a required field, so legacy entries survive
+normalization but fail the hit). Consequence, deliberately accepted because a
+legacy entry cannot be proven un-truncated: EVERY recap cached by a shipped 1.9.x
+lacks the marker, so (1) the FIRST Recap per fan after upgrade is a forced
+regeneration — real AI spend plus a full deep-window live read at the new 3000-msg
+/ ~120-page default; (2) `hasAvailableFanSummary` flips to false for every fan
+until each is re-run, so the popup/status `hasAvailableSummary` flag reports "no
+summary" in the interim; (3) the dead entries occupy the summary-cache budget
+until LRU eviction. Cheap and self-healing (one recap per fan). The forced
+regeneration MUST be called out in CHANGELOG.md when this stack ships (the coach
+feature is unreleased today, so there is no release entry to carry it yet) so the
+one-time fleet spend is not a surprise on the bill.
+
+**Hub-residual gap (round 9) — client cannot fully heal the dossier.**
+`trustedTerminal` guards only the LOCAL cache. A pre-guard truncated recap already
+pushed to the Hub `fan_profiles` dossier — which the kernel injects into OTHER
+features' prompts (core #136) — stays the Hub's latest version regardless of local
+invalidation. Client-side mitigation shipped here: the opportunistic Hub re-push
+(`retrySummaryHubSync`) refuses an untrusted entry, and a fresh trusted
+regeneration's own sync path overwrites the Hub copy — so the self-heal story is
+"regenerate → auto re-push." RESIDUAL: a fan whose recap is never re-run
+(`coachAutoRecap: 'off'` and never manually triggered) keeps a stale Hub dossier
+indefinitely. The client cannot reach into the Hub to delete or quarantine it;
+the structural owner is core #136's dossier rework (Hub-side provenance /
+trusted-terminal + kernel-side filtering of un-provenanced dossiers). Tracked in
+`.agentic/backlog.md`.

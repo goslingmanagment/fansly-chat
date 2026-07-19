@@ -41,7 +41,9 @@ async function installRuntimeApiHarness(fanslyClient: {
   getAuthenticatedAccount: (session: SessionTemplate, signal: AbortSignal) => Promise<unknown>;
 }, options?: {
   agencyHubClient?: {
-    testConnection: ReturnType<typeof vi.fn>;
+    testConnection?: ReturnType<typeof vi.fn>;
+    resolvePageLabelForUsername?: ReturnType<typeof vi.fn>;
+    getRecapStatus?: ReturnType<typeof vi.fn>;
   };
   spendersService?: {
     getList: ReturnType<typeof vi.fn>;
@@ -661,6 +663,115 @@ describe('runtime-api resolveFanChat', () => {
 
     expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
     expect(fanslyClient.findGroupIdForFan).not.toHaveBeenCalled();
+  });
+});
+
+describe('runtime-api getRecapStatus', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  const recap = {
+    full: {
+      generatedAt: '2026-07-01T00:00:00.000Z',
+      ageMs: 1_000,
+      transcriptCoverage: 'full-history' as const,
+      requestedCount: 3000,
+      keptCount: 2900,
+    },
+    short: {
+      generatedAt: '2026-07-18T00:00:00.000Z',
+      ageMs: 10,
+      transcriptCoverage: 'window' as const,
+      requestedCount: 300,
+      keptCount: 300,
+    },
+  };
+
+  it('resolves the page label and returns both recap slots for the sender tab', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual(recap);
+    // Canonical identity: conversationRef = groupId, fanRef = fanAccountId.
+    expect(agencyHubClient.getRecapStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: 'fan-1' },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('returns null slots on any failure — never breaks coach opening', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => {
+        throw new Error('hub down');
+      }),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ full: null, short: null });
+  });
+
+  it('returns null slots when the sender tab has no connected session', async () => {
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(),
+      getRecapStatus: vi.fn(),
+    };
+    await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => undefined) },
+      { agencyHubClient },
+    );
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      { tab: { id: 999 } },
+    );
+
+    expect(response).toEqual({ full: null, short: null });
+    expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns null slots when no Hub page matches the creator', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => null),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ full: null, short: null });
+    expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
   });
 });
 

@@ -755,6 +755,34 @@ describe('OperationCoordinator', () => {
       expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
 
+    it('never re-pushes an UNTRUSTED (pre-guard/legacy) cached recap and reports no summary', async () => {
+      // Round-9 P1: a recap cached before fan-summary was exhaustion-guarded
+      // (possibly truncated) lacks trustedTerminal. It is a local cache MISS AND
+      // must never be opportunistically re-pushed to the Hub dossier the kernel
+      // injects into other prompts — the stale body would keep feeding them. It
+      // heals only via a fresh trusted regeneration whose own sync overwrites Hub.
+      hubConfiguredSettings();
+      delete (mockStorage['summary:group-1'] as Record<string, unknown>).trustedTerminal;
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator, port } = await createCoordinatorHarness({ agencyHubClient });
+
+      await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // No cache hit: an untrusted entry is not a usable summary.
+      expect(postedMessages(port)).toContainEqual(expect.objectContaining({
+        type: 'tab:state',
+        state: expect.objectContaining({ hasAvailableSummary: false }),
+      }));
+      // No direct Hub push of the untrusted/stale body.
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
     it('waits out the cooldown after a failed push instead of hammering the hub', async () => {
       hubConfiguredSettings();
       const agencyHubClient = retryHubClient({

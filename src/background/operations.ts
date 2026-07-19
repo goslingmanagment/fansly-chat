@@ -763,6 +763,18 @@ export class OperationCoordinator {
     if (!cached) {
       return;
     }
+    // Round-9 P1: never re-push an UNTRUSTED cached recap to the Hub. A recap
+    // cached before fan-summary was exhaustion-guarded (possibly truncated) lacks
+    // `trustedTerminal`; trustedTerminal already makes it a local cache MISS, but
+    // this opportunistic re-push must ALSO refuse it so a stale/truncated body is
+    // never (re)written to the fan_profiles dossier the kernel injects into other
+    // prompts. It self-heals only via a fresh trusted regeneration, whose own
+    // sync path overwrites the Hub copy. (The caller already gates on
+    // hasAvailableSummary, which is false for untrusted entries — this is the
+    // explicit local invariant.)
+    if (cached.trustedTerminal !== true) {
+      return;
+    }
     const baseUrl = normalizeAgencyHubBaseUrl(storage.settings.agencyHubBaseUrl);
     if (!baseUrl) {
       return;

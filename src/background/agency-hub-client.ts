@@ -24,6 +24,7 @@ import type {
   AgencyHubAiUsageEvent,
   AgencyHubConnectionTestResponse,
   AgencyHubSummarySyncMetadata,
+  RecapStatusResponse,
   Settings,
   SpendersStreamState,
   UserFacingError,
@@ -378,6 +379,42 @@ export class AgencyHubClient {
       });
     }
     return this.resolvePageLabel(pages, pageUsername);
+  }
+
+  /** Coach recap-status read (spec §3/§5): the freshest usable full + short
+   * fan-summary recap for one conversation — metadata only, NO generation and
+   * NO AI spend. Copies the `getConversationProfile` shape: a 404 (an old Hub
+   * without the endpoint, or an unknown conversation) is a domain "none", not an
+   * error, so it returns null slots; other failures throw the Hub error domain
+   * and the caller (runtime-api) coalesces them to null so opening Coach never
+   * breaks. Canonical identity (§5): `conversationRef = groupId`, `fanRef =
+   * fanAccountId`. */
+  async getRecapStatus(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    params: { pageLabel: string; conversationRef: string; fanRef?: string | null },
+    signal: AbortSignal,
+  ): Promise<RecapStatusResponse | null> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl || !bearer || !await this.hasHostPermission(baseUrl)) {
+      return null;
+    }
+    try {
+      return await this.sdkFor(baseUrl, bearer, signal).aiRecapStatus({
+        query: {
+          pageLabel: params.pageLabel,
+          conversationRef: params.conversationRef,
+          ...(params.fanRef ? { fanRef: params.fanRef } : {}),
+        },
+      });
+    } catch (error) {
+      // 404 = the endpoint/conversation is unknown to this Hub → "none", not an
+      // error (mirrors getConversationProfile).
+      if (error instanceof KernelApiError && error.status === 404) {
+        return null;
+      }
+      throw this.toHubError(error, 'recap status fetch');
+    }
   }
 
   /** Stage 32 Task 4: one kernel query replaces the board's Fansly earnings
