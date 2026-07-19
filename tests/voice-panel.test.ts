@@ -400,6 +400,47 @@ describe('VoicePanel — лента', () => {
     expect(harness!.attachCalls).toHaveLength(1);
   });
 
+  it('re-arms an uncertain attach for a FRESH single-use token, one adapter.attach per grant', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.panel.setFanUsername('alice');
+    harness!.setAttachOutcome('uncertain');
+
+    await harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      token: 'tok-1',
+      fanUsername: 'alice',
+    });
+    expect(harness!.attachCalls).toHaveLength(1);
+
+    const { root, sent } = harness!;
+    const rearm = buttonByText(root, 'Прикрепить ещё раз');
+    expect(rearm).toBeDefined();
+
+    sent.length = 0;
+    rearm!.click();
+    // Re-arming alone requests nothing — never an auto-repeat.
+    expect(sent.some((message) => message.type === 'voice:attachToken')).toBe(false);
+
+    // The idle attach affordance is back; clicking it mints a fresh token.
+    const attach = root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach');
+    expect(attach).not.toBeNull();
+    attach!.click();
+    expect(sent).toContainEqual(
+      expect.objectContaining({ type: 'voice:attachToken', attemptId, voiceNoteId: 1 }),
+    );
+
+    // Exactly one adapter.attach for the second grant.
+    await harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      token: 'tok-2',
+      fanUsername: 'alice',
+    });
+    expect(harness!.attachCalls).toHaveLength(2);
+  });
+
   it('offers the leftover-draft hint after a confirmed attach and clears the composer on request', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);
@@ -414,6 +455,9 @@ describe('VoicePanel — лента', () => {
       fanUsername: 'alice',
     });
 
+    // After confirmation the modal instruction is swapped for a short success line.
+    expect(textOf(harness!.root)).toContain('Войс прикреплён.');
+    expect(textOf(harness!.root)).not.toContain('Выберите Free/PPV');
     expect(textOf(harness!.root)).toContain(
       'Текст остался в поле — фан получит и текст, и войс. Убрать?',
     );
@@ -467,5 +511,34 @@ describe('VoicePanel — лента', () => {
     });
 
     expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+  });
+
+  it('a definite create rejection with no take returns to the script phase, not a fake spinner', async () => {
+    const attemptId = await toScriptPhase();
+    await harness!.controller.generateTake();
+    // While the first create is in flight the busy spinner is shown.
+    expect(textOf(harness!.root)).toContain('Вариант 1 генерируется');
+
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'create',
+      code: 'voice_quota_denied',
+      message: 'raw',
+      status: 429,
+    });
+
+    const { root } = harness!;
+    // The spinner is gone and the money-honest generate button is back.
+    expect(textOf(root)).not.toContain('Вариант 1 генерируется');
+    const generate = root.querySelector<HTMLButtonElement>('.chatgoose-voice-generate');
+    expect(generate).not.toBeNull();
+    expect(generate!.disabled).toBe(false);
+    // The chatter's script edits are preserved and the quota error is surfaced.
+    expect(
+      root.querySelector<HTMLTextAreaElement>('textarea.chatgoose-voice-script')!.value,
+    ).toBe(SCRIPT);
+    expect(textOf(root)).toContain('Лимит символов для войсов исчерпан.');
+    expect(harness!.controller.getAttempt()?.phase).toBe('script');
   });
 });

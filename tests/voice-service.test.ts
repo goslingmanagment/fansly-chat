@@ -350,6 +350,33 @@ describe('VoiceService SDK transport', () => {
     }]);
   });
 
+  it('derives the create conversationRef from TabContext, ignoring the wire value, and replays it identically', async () => {
+    const harness = createHarness();
+    // Content snapshots groupId on the wire (display/recovery only); the create
+    // body must instead carry the fanAccountId-derived route, matching the
+    // voice-script step so the server's canonical attempt hash stays stable.
+    const wireCreate = {
+      type: 'voice:noteCreate' as const,
+      attemptId: ATTEMPT_ID,
+      clientRequestId: CLIENT_REQUEST_ID,
+      conversationRef: 'group-1',
+      sourceGenerationRef: 'generation-1',
+      script: '[warmly] Hello Alice',
+    };
+
+    await harness.service.handleMessage(TAB_ID, wireCreate, harness.emit);
+    // A reconnect replays the same idempotent create.
+    await harness.service.handleMessage(TAB_ID, wireCreate, harness.emit);
+
+    expect(harness.hub.createVoiceNote).toHaveBeenCalledTimes(2);
+    const bodies = harness.hub.createVoiceNote.mock.calls.map((call) => call[2]);
+    expect(bodies[0]?.conversationRef).toBe('fan-1');
+    expect(bodies[1]?.conversationRef).toBe('fan-1');
+    // The divergent content-supplied groupId never reaches the create body.
+    expect(bodies[0]?.conversationRef).not.toBe('group-1');
+    expect(bodies[0]).toEqual(bodies[1]);
+  });
+
   it('attributes a status read failure to its existing voice note', async () => {
     const harness = createHarness({
       getVoiceNoteStatus: vi.fn(async () => {

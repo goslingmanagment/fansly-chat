@@ -2576,6 +2576,18 @@ body.chatgoose-scroll-lock {
   font-weight: 500;
 }
 
+/* Attach confirmed: a calm neutral note (green stays reserved for money). */
+.chatgoose-voice-modal-hint-confirmed {
+  border-color: var(--chatgoose-line);
+  background: transparent;
+  color: var(--chatgoose-ink-mid);
+  font-weight: 500;
+}
+
+.chatgoose-voice-attach-rearm {
+  justify-self: start;
+}
+
 .chatgoose-voice-leftover {
   display: flex;
   align-items: center;

@@ -544,7 +544,14 @@ export class VoiceService {
     emit: VoiceEmitter,
   ): Promise<void> {
     const context = this.deps.tabContexts.get(tabId);
-    if (!context) {
+    // conversationRef is derived from the LIVE TabContext (fanAccountId ?? groupId),
+    // identical to the voice-script step's routing key. message.conversationRef is
+    // accepted on the wire but IGNORED for the create body — content snapshots its
+    // own copy for display/recovery only, and the create must not diverge from the
+    // script step's route (the server's canonical attempt hash covers conversationRef,
+    // so an idempotent recovery replay derives the same value deterministically).
+    const conversationRef = context ? context.fanAccountId ?? context.groupId : null;
+    if (!context || !conversationRef) {
       this.emitLocalNoteError(
         message.attemptId,
         { source: 'create' },
@@ -572,7 +579,7 @@ export class VoiceService {
         page.pageLabel,
         {
           clientRequestId: message.clientRequestId,
-          conversationRef: message.conversationRef,
+          conversationRef,
           sourceGenerationRef: message.sourceGenerationRef,
           script: message.script,
         },

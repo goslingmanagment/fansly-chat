@@ -332,6 +332,45 @@ describe('VoiceAttemptController', () => {
     expect(stored?.burnedClientRequestIds).toEqual([]);
   });
 
+  it('returns to the script phase after a definite create rejection with no take, surviving reload', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script');
+    await first.controller.generateTake();
+    expect(first.controller.getAttempt()?.phase).toBe('takes');
+
+    await first.controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'voice_quota_denied',
+      message: 'raw',
+      status: 429,
+    });
+
+    // Phase falls back to the editor with the script intact; quota bookkeeping stands.
+    expect(first.controller.getAttempt()).toMatchObject({
+      phase: 'script',
+      script: 'Voice script',
+      generationRef: 'generation-1',
+      takes: [],
+    });
+    const stored = (await first.store.load(ROUTE))[0];
+    expect(stored?.attempt.phase).toBe('script');
+    expect(stored?.pendingCreate).toBeNull();
+    expect(stored?.burnedClientRequestIds).toEqual([TAKE_ID_1]);
+    first.controller.destroy();
+
+    // The script phase survives a reload — no resurrected fake spinner.
+    const second = createController({ uuids: [TAKE_ID_2] });
+    await second.controller.boot();
+    expect(second.controller.getAttempt()).toMatchObject({
+      phase: 'script',
+      script: 'Voice script',
+    });
+    expect(messagesOfType(second.port, 'voice:noteCreate')).toHaveLength(0);
+  });
+
   it('recovers an in-flight create with the exact same idempotency snapshot', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('Draft', 'flirty');
@@ -799,5 +838,48 @@ describe('VoiceAttemptController', () => {
       canonicalScript: null,
       tone: 'flirty' satisfies ReplyTone,
     });
+  });
+
+  it('revokes take blob URLs on panel close and re-mints them from retained bytes on reopen', async () => {
+    const revokeBlobUrl = vi.fn();
+    const blobUrls = ['blob:take-open', 'blob:take-reopen'];
+    let issued = 0;
+    const createBlobUrl = vi.fn(() => blobUrls[issued++] ?? 'blob:take-extra');
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+      createBlobUrl,
+      revokeBlobUrl,
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'completed', { audioSha256: 'hash', audioBytesLen: 2 }),
+    });
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2]).buffer,
+    });
+    expect(controller.getAttempt()?.takes[0]?.blobUrl).toBe('blob:take-open');
+    expect(controller.canAttachSelectedTake()).toBe(true);
+
+    // Close: revoke the object URL but keep the decoded audio bytes.
+    controller.suspendBlobUrls();
+    expect(revokeBlobUrl).toHaveBeenCalledWith('blob:take-open');
+    const suspended = controller.getAttempt()?.takes[0];
+    expect(suspended?.blobUrl).toBeNull();
+    expect(suspended?.audio).not.toBeNull();
+
+    // Reopen: re-mint the URL from the retained bytes — the take is playable again.
+    controller.resumeBlobUrls();
+    expect(controller.getAttempt()?.takes[0]?.blobUrl).toBe('blob:take-reopen');
+    expect(controller.canAttachSelectedTake()).toBe(true);
+    // A second reopen without a close is a no-op (no duplicate URL minting).
+    controller.resumeBlobUrls();
+    expect(createBlobUrl).toHaveBeenCalledTimes(2);
   });
 });

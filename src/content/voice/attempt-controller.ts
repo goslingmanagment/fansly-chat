@@ -71,7 +71,12 @@ const POLLED_STATES = new Set<VoiceNoteStatusView['state']>([
   'queued',
   'dispatched',
 ]);
-const DEFINITE_CREATE_REJECTION_STATUSES = new Set([400, 403, 409, 429]);
+/**
+ * Create HTTP statuses that clear the pending create server-side (billing-safe):
+ * ordinary errors, not the indeterminate needs-reconcile surface. Exported so the
+ * panel classifies create errors from a single source of truth.
+ */
+export const DEFINITE_CREATE_REJECTION_STATUSES = new Set([400, 403, 409, 429]);
 
 /** Server-identical canonicalization; paid payload bytes are frozen only at click. */
 export function canonicalizeVoiceScript(script: string): string {
@@ -452,6 +457,39 @@ export class VoiceAttemptController {
     this.audioFetchesInFlight.clear();
   }
 
+  /**
+   * Panel-close housekeeping: revoke every take's object URL while retaining
+   * the decoded audio bytes in memory. A hidden panel holds no live blob: URLs.
+   */
+  suspendBlobUrls(): void {
+    this.assertUsable();
+    for (const record of this.records.values()) {
+      for (const take of record.attempt.takes) {
+        this.revokeTakeBlobUrl(take);
+      }
+    }
+  }
+
+  /**
+   * Panel-reopen: re-mint an object URL for every take whose audio bytes
+   * survived the close, so the retained takes are immediately playable again.
+   */
+  resumeBlobUrls(): void {
+    this.assertUsable();
+    let changed = false;
+    for (const record of this.records.values()) {
+      for (const take of record.attempt.takes) {
+        if (take.audio && !take.blobUrl) {
+          take.blobUrl = this.createBlobUrl(take.audio);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      this.notifyChange();
+    }
+  }
+
   private hydrate(entry: VoiceAttemptStoreEntry): RuntimeAttemptRecord {
     const burnedClientRequestIds = new Set(entry.burnedClientRequestIds);
     const pendingCreate = entry.pendingCreate &&
@@ -646,6 +684,14 @@ export class VoiceAttemptController {
           record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
         }
         record.pendingCreate = null;
+        // A definite rejection of the FIRST create (no take yet) would otherwise
+        // strand the attempt at phase 'takes' with zero takes and no pending
+        // create — the panel reads that as a perpetual "generating" spinner and
+        // hides the generate button. Return to the editor so the surfaced error
+        // carries a re-generate path; the chatter's script edits stay intact.
+        if (record.attempt.takes.length === 0) {
+          record.attempt.phase = 'script';
+        }
         changed = true;
       } else if (record.pendingCreate.phase !== 'needs-reconcile') {
         record.pendingCreate.phase = 'needs-reconcile';

@@ -1091,8 +1091,11 @@ export class ChatGooseContentApp {
       return;
     }
     // Reopen an existing attempt for this conversation without re-reading the
-    // draft (the flow may already be past the script step).
+    // draft (the flow may already be past the script step). Close revoked the
+    // take blob: URLs but kept the audio bytes — re-mint them so retained takes
+    // are playable again.
     if (this.voiceController && this.voicePanel) {
+      this.voiceController.resumeBlobUrls();
       this.voicePanel.setFanUsername(getActiveConversationDisplayName());
       this.voicePanel.open();
       return;
@@ -1173,6 +1176,9 @@ export class ChatGooseContentApp {
 
   private closeVoicePanel(): void {
     this.voicePanel?.hide();
+    // Drop the take object URLs while the panel is hidden (the audio bytes stay
+    // in memory); reopen re-mints them.
+    this.voiceController?.suspendBlobUrls();
   }
 
   private teardownVoice(): void {

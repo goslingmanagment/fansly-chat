@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types.js';
 import {
   canonicalizeVoiceScript,
+  DEFINITE_CREATE_REJECTION_STATUSES,
   type VoiceAttachGrant,
   type VoiceAttempt,
   type VoiceAttemptController,
@@ -46,11 +47,6 @@ export interface VoicePanelDeps {
   /** Optional студия expand (Task 6); the control is hidden when absent. */
   onExpand?: () => void;
 }
-
-// Mirrors the controller's definite-create rejection set: these clear the
-// pending create server-side (billing-safe), so they are ordinary errors, not
-// the indeterminate needs-reconcile surface.
-const DEFINITE_CREATE_REJECTION_STATUSES = new Set([400, 403, 409, 429]);
 
 // Тёплый/Игривый/Спокойный are product words; they map to the reply-tone the
 // voice-script step already understands. Presets never spend EL characters.
@@ -664,6 +660,28 @@ export class VoicePanel {
           'div',
           'chatgoose-voice-modal-hint chatgoose-voice-modal-hint-uncertain',
           'Проверьте composer — вложение должно появиться после Upload',
+        ),
+      );
+      // Adapter tokens are single-use: an uncertain attach consumed the grant.
+      // Offer an explicit, calm re-arm — never an auto-repeat — that returns to
+      // the idle attach affordance so the next click mints a FRESH token.
+      const rearm = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-attach-rearm',
+        'Прикрепить ещё раз',
+      );
+      rearm.type = 'button';
+      rearm.addEventListener('click', () => {
+        this.attachPhase = 'idle';
+        this.render();
+      });
+      region.append(rearm);
+    } else if (this.attachPhase === 'confirmed') {
+      region.append(
+        el(
+          'div',
+          'chatgoose-voice-modal-hint chatgoose-voice-modal-hint-confirmed',
+          'Войс прикреплён.',
         ),
       );
     } else {
