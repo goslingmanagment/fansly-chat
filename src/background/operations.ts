@@ -323,6 +323,12 @@ function usesDeepOperationTimeouts(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
 
+/** A deep-timeout feature whose PREP stage is capped at the quick budget (coach:
+ * a small quick window ⇒ no 360s prep budget, while its STREAM stays deep). */
+function usesQuickPrepBudget(feature: FeatureType): boolean {
+  return getFeaturePolicy(feature).prepTimeoutBucket === 'quick';
+}
+
 export function buildFeatureResult(
   feature: FeatureType,
   rawText: string,
@@ -1484,7 +1490,13 @@ export class OperationCoordinator {
         operationTimeoutController.clear('llm-max-stream');
       };
       if (usesDeepOperationTimeouts(payload.feature)) {
-        operationTimeoutController.arm('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
+        // The PREP budget is split from the STREAM budget (P2-6): coach paginates a
+        // small quick window, so it gets the quick prep ceiling even though its
+        // stream timeouts below stay deep. deep-prep is cleared on stream start.
+        const prepBudget = usesQuickPrepBudget(payload.feature)
+          ? QUICK_OPERATION_TIMEOUT_MS
+          : DEEP_OPERATION_TIMEOUTS.prep;
+        operationTimeoutController.arm('deep-prep', prepBudget);
       } else {
         operationTimeoutController.arm('quick-total', QUICK_OPERATION_TIMEOUT_MS);
       }
@@ -2052,6 +2064,12 @@ export class OperationCoordinator {
             `resolved ${fanDisplayName}`,
           );
         } catch (error) {
+          // Belt-and-braces (conversation-context-loader pattern): if the lookup
+          // was aborted by a route-change cancel, re-throw so this op unwinds
+          // instead of falling through to write a now-stale fan.
+          if (signal.aborted) {
+            throw error;
+          }
           const failureCode = errorCode(error);
           failStage(
             'account-name-lookup',
@@ -2071,7 +2089,9 @@ export class OperationCoordinator {
         );
       }
 
-      this.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
+      // Pass THIS op's groupId; the store no-ops if the context has moved on (the
+      // structural stale-fan guard).
+      this.tabContexts.setFan(tabId, validated.urlGroupId, fanAccountId, fanDisplayName);
       sendOperationProgress({
         phase: 'generating',
         message: 'Generating…',
@@ -2657,18 +2677,16 @@ export class OperationCoordinator {
         throw new ChatGooseError('ai_output_unusable');
       }
 
-      // Empty / whitespace-only output fails closed for coach + recap. Unlike a
-      // reply (guarded by assertInsertableFeatureResult) and unlike help-me /
-      // chat-review (which parse XML out of rawText and already fail that parse
-      // on empty), buildFeatureResult('coach-chat'/'fan-summary') returns the raw
-      // text verbatim — so a meta→done stream with no content, or a whitespace
-      // end_turn answer, would otherwise present as a result AND (for recap)
-      // enter the summary cache. This guard sits before the result build and the
-      // cache write, so nothing empty is ever presented or cached.
-      if (
-        !rawText.trim() &&
-        (payload.feature === 'coach-chat' || payload.feature === 'fan-summary')
-      ) {
+      // Empty / whitespace-only output fails closed for EVERY feature, symmetric
+      // to the exhaustion guard above — a meta→done stream with no content, or a
+      // whitespace end_turn answer, is not a usable result. This is unconditional:
+      // help-me/chat-review's parseHelpMeXml('')/parseChatReviewXml('') return
+      // valid:false (they do NOT throw), and assertInsertableFeatureResult only
+      // guards reply kinds, so an empty analysis result would otherwise reach
+      // operation:complete and render an empty card as success. Sits before the
+      // result build and the summary-cache write, so nothing empty is ever
+      // presented or cached. Do not re-narrow to a feature list.
+      if (!rawText.trim()) {
         throw new ChatGooseError('ai_output_unusable');
       }
 

@@ -1035,17 +1035,21 @@ matching latency cost was absorbed by doubling `DEEP_OPERATION_PREP_TIMEOUT_MS`
 non-coach blast radius is later judged too wide, the fix is to split a dedicated
 coach/recap window constant off the shared deep default rather than to lower it.
 
-**Output-exhaustion fail-closed extended + empty guard (review rounds 4–6).** The
-family "a truncated stream is an error, never presented" rule previously fired
-only for reply features (a literal `max_tokens` check). It now keys on the SDK's
-`isOutputExhausted` (normalizes kernel `max_tokens` + provider `length`) and
-extends to coach-chat AND fan-summary (and, on the compare lane, to each compare
-card). Separately, an EMPTY/whitespace-only coach or recap output also fails
-closed (`ai_output_unusable`) before the result is built or cached — a meta→done
-stream with no content, or a whitespace `end_turn` answer, is not a usable result.
-Scope note: reply features stay covered by `assertInsertableFeatureResult`, and
-help-me/chat-review parse XML out of the body so an empty body already fails that
-parse. Net: a truncated OR empty recap is never presented and never cached.
+**Output-exhaustion + empty-output fail-closed — UNCONDITIONAL (review rounds 4–13).**
+The family "a truncated stream is an error, never presented" rule keys on the SDK's
+`isOutputExhausted` (normalizes kernel `max_tokens` + provider `length`). It began
+narrowed to reply/coach/fan-summary, but since round 12 it fires for EVERY
+FeatureType before the result is built — help-me/chat-review are NOT exempt (their
+XML parsers return `valid:false` rather than throwing, so a truncated analysis body
+would otherwise present as a `valid:false` card). Symmetrically, since round 13 an
+EMPTY/whitespace-only output ALSO fails closed for every feature: `parseHelpMeXml('')`
+/`parseChatReviewXml('')` return `valid:false` (they do NOT throw) and
+`assertInsertableFeatureResult` guards only reply kinds, so an empty analysis result
+would otherwise reach operation:complete and render an empty card as success (the
+earlier "empty body already fails that parse" scope note was factually wrong and is
+retracted here). Both guards sit before the result build and the summary-cache
+write, so nothing truncated or empty is ever presented or cached — no feature
+exceptions (do not re-narrow either guard to a feature list).
 
 **`trustedTerminal` cache invalidation — one-time fleet cost (accepted).** A
 cached recap is a valid cache HIT only if it carries a `trustedTerminal` marker,

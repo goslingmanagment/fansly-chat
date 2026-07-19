@@ -18,6 +18,9 @@ describe('coach-chat feature registration', () => {
       // quick 60s TOTAL budget would abort a long stream mid-answer (fail-closed
       // ⇒ whole answer + spend lost). See PR#18 round-3 P1.
       timeoutBucket: 'deep',
+      // PREP budget is 'quick' (coach reads ~4 pages) even though the STREAM
+      // budget is 'deep' — round-13 P2-6 split, so a hung prep aborts at 60s not 360s.
+      prepTimeoutBucket: 'quick',
       modelFeature: 'coach-chat',
       surfaceKind: 'overlay',
       promptMode: 'analysis',

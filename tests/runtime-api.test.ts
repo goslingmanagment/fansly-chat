@@ -733,7 +733,7 @@ describe('runtime-api getRecapStatus', () => {
     sessionStore.registerCapture(7, makeCapture('creator-1'));
     // A prior op cached the conversation's fan for this group + tab.
     tabContexts.setRoute(7, 'group-1', 1);
-    tabContexts.setFan(7, 'fan-legacy', 'Alice');
+    tabContexts.setFan(7, 'group-1', 'fan-legacy', 'Alice');
 
     await onMessageListener?.(
       { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
@@ -748,7 +748,11 @@ describe('runtime-api getRecapStatus', () => {
     );
   });
 
-  it('P2: fanRef stays null when the cached tab context is for a different group', async () => {
+  it('P1-2: a cross-group cached fan does not leak, and an unresolved fanRef reports unavailable', async () => {
+    // Round-13 P1-2: the cached fan is for a DIFFERENT group, so it must not be
+    // used (no cross-group leak). With no fanRef, a groupId-only query can never
+    // find a fan-id-keyed recap, so we do NOT query and confirm empty — we report
+    // 'unavailable' (honest "couldn't check").
     const fanslyClient = {
       getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
     };
@@ -761,18 +765,38 @@ describe('runtime-api getRecapStatus', () => {
     });
     sessionStore.registerCapture(7, makeCapture('creator-1'));
     tabContexts.setRoute(7, 'other-group', 1);
-    tabContexts.setFan(7, 'fan-other', 'Someone');
+    tabContexts.setFan(7, 'other-group', 'fan-other', 'Someone');
 
-    await onMessageListener?.(
+    const response = await onMessageListener?.(
       { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
       { tab: { id: 7 } },
     );
 
-    expect(agencyHubClient.getRecapStatus).toHaveBeenCalledWith(
-      expect.anything(),
-      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
-      expect.any(AbortSignal),
+    // Never queried the Hub with a null fanRef, never leaked the cross-group fan.
+    expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
+  });
+
+  it('P1-2: a COLD recap-status (no cached fan) reports unavailable, not confirmed-empty', async () => {
+    // Service-worker restart: the tab context has no fan yet, so fanRef is null.
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+    // No setRoute/setFan — cold TabContext.
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
+      { tab: { id: 7 } },
     );
+
+    expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
   });
 
   it('returns UNAVAILABLE state on any failure — never breaks coach opening, never fakes "no recap"', async () => {

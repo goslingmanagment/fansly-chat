@@ -409,16 +409,25 @@ export function registerRuntimeApi({
           groupId: string;
           fanAccountId: string | null;
         };
-        // Legacy recaps were stored under conversationRef = fan id, so they are
-        // findable ONLY via fanRef. Content has no reliable fan id, so resolve it
-        // from the tab context's cached fan (populated by any prior op on this
-        // group) — the cheapest honest source, NO extra Fansly call. If nothing
-        // is cached, fanRef stays null and only canonical (groupId-keyed) recaps
-        // are found (accepted; the coach turn's own attach still searches both).
+        // Recaps are stored under conversationRef = fan id (fan-summary's write),
+        // so they are findable ONLY via fanRef. Content has no reliable fan id, so
+        // resolve it from the tab context's cached fan — populated by a prior op on
+        // this SAME group (matching groupId; the store's stale-fan guard keeps a
+        // cross-group fan out) — the cheapest honest source, no extra Fansly call.
         const cachedContext = tabId !== undefined ? tabContexts.get(tabId) : null;
         const resolvedFanRef =
           record.fanAccountId ??
           (cachedContext?.groupId === record.groupId ? cachedContext.fanAccountId : null);
+        // COLD recap-status (P1-2): after a service-worker restart the tab context
+        // has no cached fan yet, so resolvedFanRef is null. A groupId-only query
+        // then can NEVER find a fan-id-keyed recap — a valid 200 with null slots
+        // would FALSELY read as "confirmed no recap" and disable "open last recap"
+        // (and could trigger a needless auto-recap with AI spend). Report honest
+        // 'unavailable' instead; the next op caches the fan and a later read checks
+        // for real. We never confirm empty without a fanRef to search with.
+        if (resolvedFanRef === null) {
+          return unavailable;
+        }
         const controller = new AbortController();
         const timeout = globalThis.setTimeout(
           () => controller.abort(),

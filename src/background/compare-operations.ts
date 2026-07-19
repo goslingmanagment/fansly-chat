@@ -786,6 +786,11 @@ export async function executeCompare(
           { fanDisplayName },
         );
       } catch (error) {
+        // Belt-and-braces (conversation-context-loader pattern): a route-change
+        // abort must unwind this op, not fall through to write a stale fan.
+        if (signal.aborted) {
+          throw error;
+        }
         const failureCode = errorCode(error);
         failStage(
           'account-name-lookup',
@@ -805,7 +810,8 @@ export async function executeCompare(
       );
     }
 
-    context.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
+    // Pass THIS op's groupId; the store no-ops if the context has moved on.
+    context.tabContexts.setFan(tabId, validated.urlGroupId, fanAccountId, fanDisplayName);
     sendCompareOperationProgress({
       phase: 'loading-earnings',
       message: 'Loading fan context…',

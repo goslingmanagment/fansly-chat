@@ -3017,12 +3017,11 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toBeUndefined();
   });
 
-  it('routes coach-chat through the DEEP timeout path, not the 60s quick-total (round-3 P1)', async () => {
-    // coach-chat has messageCountBucket 'quick' but timeoutBucket 'deep': a coach
-    // answer is capped at 64 000 chars, so it must NOT run under the 60s
-    // quick-total total budget. Observed at the prep stage — a hanging message
-    // load survives past QUICK_OPERATION_TIMEOUT_MS (which would already have
-    // aborted a quick-bucketed feature) and only aborts at the deep-prep budget.
+  it('coach-chat PREP uses the QUICK budget, not the 360s deep-prep (round-13 P2-6)', async () => {
+    // coach reads only the quick window (~4 pages), so its PREP aborts at
+    // QUICK_OPERATION_TIMEOUT_MS (60s), NOT the 360s deep-prep budget — a hung
+    // Fansly read during Coach must not freeze the chatter for 6 minutes. (Its
+    // STREAM timeouts stay deep — pinned by the next test.)
     vi.useFakeTimers();
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -3061,17 +3060,14 @@ describe('OperationCoordinator', () => {
 
     await loadStarted;
 
-    // Past the quick-total ceiling: a quick-bucketed feature would already have
-    // aborted with timed_out — coach must still be running.
-    await vi.advanceTimersByTimeAsync(QUICK_OPERATION_TIMEOUT_MS);
+    // Just before the quick prep ceiling: still running.
+    await vi.advanceTimersByTimeAsync(QUICK_OPERATION_TIMEOUT_MS - 1_000);
     expect(
       postedMessages(port).some((message) => message.type === 'operation:error'),
     ).toBe(false);
 
-    // Only the deep-prep budget aborts it.
-    await vi.advanceTimersByTimeAsync(
-      DEEP_OPERATION_PREP_TIMEOUT_MS - QUICK_OPERATION_TIMEOUT_MS,
-    );
+    // At the quick prep ceiling: prep times out — NOT waiting for the 360s deep-prep.
+    await vi.advanceTimersByTimeAsync(1_000);
     await startPromise;
 
     const errorMessage = postedMessages(port).find(
@@ -3082,9 +3078,74 @@ describe('OperationCoordinator', () => {
       key: 'timed_out',
       code: 'CG-NET-02',
     });
+    // Aborted at prep (load-messages), never reached the stream (llm-ttfb).
     expect(
       errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb'),
     ).toBeUndefined();
+  });
+
+  it('coach-chat STREAM uses the DEEP TTFB budget, not the 60s quick-total (round-13 P2-6)', async () => {
+    // The other half of the split: once the (quick) prep completes and the stream
+    // starts, coach's stream timeouts are DEEP — a hung TTFB aborts at the deep
+    // TTFB budget, proving the stream is NOT under a 60s quick-total ceiling.
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(
+        (
+          _settings: unknown,
+          _request: unknown,
+          _callbacks: unknown,
+          signal: AbortSignal,
+        ) => new Promise<string>((_resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'coach-stream',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await streamStarted;
+    // Just before the deep TTFB budget: coach stream still running.
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS - 1_000);
+    expect(
+      postedMessages(port).some((message) => message.type === 'operation:error'),
+    ).toBe(false);
+
+    // At the deep TTFB budget the stream aborts via the llm-ttfb STAGE — a stage a
+    // quick-total feature never arms (it would run to the 60s total instead). So
+    // the presence of a failed llm-ttfb stage proves the stream is on the deep path.
+    await vi.advanceTimersByTimeAsync(1_000);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, { key: 'timed_out', code: 'CG-NET-02' });
+    expect(
+      errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb'),
+    ).toMatchObject({ status: 'failed' });
   });
 
   it('times out deep operations when LLM TTFB exceeds the stage budget', async () => {
@@ -4130,6 +4191,92 @@ describe('OperationCoordinator', () => {
     });
   });
 
+  it('trustedTerminal survives the hub-sync update, so the synced recap stays a cache hit (round-13 P2-7)', async () => {
+    // trustedTerminal is the ONLY key to a cache hit and it survives the async
+    // sync-status update SOLELY via persistSummarySyncStatus's object spread. Pin
+    // it: a refactor that rebuilds the entry explicitly would silently drop the
+    // marker after the first successful push → EVERY recap a permanent cache-miss
+    // (AI spend + full deep pagination every time).
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    delete mockStorage['summary:group-1'];
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([hubPageRow()]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
+        return jsonResponse(hubProfileRecord(1));
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    (agencyHubClient as any).resolvePageLabelForUsername = vi.fn(async () => 'creator-fs');
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, any>,
+        callbacks: { onText: (text: string) => void; onMeta?: (meta: Record<string, unknown>) => void },
+      ) => {
+        callbacks.onMeta?.({ requestId: 'gen-1', clientRequestId: 'summary-op-1', model: 'claude-sonnet-4-5' });
+        callbacks.onText('Fresh summary');
+        return 'Fresh summary';
+      }),
+    };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, port } = await createCoordinatorHarness({
+      kernelGateway,
+      agencyHubClient,
+      fanslyClient,
+    });
+
+    // First run: generate + Hub-sync.
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-1',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    await vi.waitFor(() => {
+      const cacheEntry = mockStorage['summary:group-1'] as SummaryCacheEntry | undefined;
+      expect(cacheEntry?.agencyHubSync).toMatchObject({ state: 'saved' });
+      // The marker MUST survive the sync-status update.
+      expect(cacheEntry?.trustedTerminal).toBe(true);
+    });
+
+    // Second run WITHOUT forceRegenerate: the marked, synced entry is a cache HIT.
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-2',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const secondComplete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete' && message.operationId === 'summary-op-2',
+    );
+    expect(secondComplete?.result.summaryMeta).toMatchObject({ cached: true });
+    // Cache hit ⇒ no regeneration: streamFeature ran exactly once (the first op).
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+  });
+
   it('W9.4/A18: caches a fresh fan summary even when the meta frame names a real vendor model', async () => {
     // Pre-fix, the write was gated on `actualModel === resolvedModel` — but
     // resolvedModel is the 'kernel' cache sentinel while the kernel's meta
@@ -4772,6 +4919,41 @@ describe('OperationCoordinator', () => {
         expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
         expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
         expect(mockStorage['summary:group-1']).toBeUndefined();
+      }
+    }
+  });
+
+  it('fails closed on an empty help-me or chat-review stream (round-13 P1-4)', async () => {
+    // The empty-output guard is now UNCONDITIONAL. parseHelpMeXml('') /
+    // parseChatReviewXml('') return valid:false (they do NOT throw), and
+    // assertInsertableFeatureResult guards only reply kinds — so before this an
+    // empty analysis result reached operation:complete and rendered an empty card
+    // as success. Every feature must fail closed on empty output.
+    for (const feature of ['help-me', 'chat-review'] as const) {
+      for (const emptyish of ['', '   \n\t  ']) {
+        const kernelGateway = {
+          isConfigured: vi.fn(() => true),
+          streamFeature: vi.fn(async () => emptyish),
+        };
+        const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+        await coordinator.startOperation(1, {
+          type: 'operation:start',
+          operationId: `empty-${feature}-${emptyish.length}`,
+          feature,
+          groupId: 'group-1',
+          routeNonce: 1,
+          domFanDisplayName: 'alice',
+          forceRegenerate: false,
+        });
+
+        const messages = postedMessages(port);
+        const errorMessage = messages.find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+            message.type === 'operation:error',
+        );
+        expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+        expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
       }
     }
   });
