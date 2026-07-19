@@ -84,11 +84,12 @@ export interface KernelFeatureCallbacks {
 
 /** Kernel product-gate structured codes (#120) → the extension's CG error
  * keys — matched on the error body's machine code, no message parsing. */
-const KERNEL_GATE_KEYS: Record<string, 'not_enough_history' | 'hi_too_many_messages' | 'ping_blocked' | 'unknown_error'> = {
+const KERNEL_GATE_KEYS: Record<string, 'not_enough_history' | 'hi_too_many_messages' | 'ping_blocked' | 'gate_voice_disabled' | 'unknown_error'> = {
   gate_min_messages: 'not_enough_history',
   gate_hi_greeting_limit: 'hi_too_many_messages',
   gate_ping_active: 'ping_blocked',
   gate_draft_required: 'unknown_error',
+  gate_voice_disabled: 'gate_voice_disabled',
 };
 
 /** Kernel product-gate denials → the extension's CG error keys. Mapped

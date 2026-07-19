@@ -61,6 +61,18 @@ function topSpendersPayload() {
   };
 }
 
+function voiceNotePayload() {
+  return {
+    voiceNoteId: 42,
+    state: 'queued',
+    scriptChars: 12,
+    billed: null,
+    audioSha256: null,
+    audioBytesLen: null,
+    createdAt: '2026-07-19T10:00:00.000Z',
+  };
+}
+
 function makeUsageEvent(index = 1) {
   return {
     clientEventId: `event-${index}`,
@@ -82,6 +94,76 @@ describe('AgencyHubClient', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('uses the typed voice create/status operations', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return jsonResponse(
+        voiceNotePayload(),
+        init?.method === 'POST' ? 202 : 200,
+      );
+    });
+    vi.stubGlobal('browser', {
+      permissions: { contains: vi.fn(async () => true) },
+    });
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(client.createVoiceNote(
+      makeSettings(),
+      'creator-fs',
+      {
+        clientRequestId: '11111111-1111-4111-8111-111111111111',
+        conversationRef: 'fan-1',
+        sourceGenerationRef: 'generation-1',
+        script: '[warmly] Hello',
+      },
+      new AbortController().signal,
+    )).resolves.toEqual(voiceNotePayload());
+    await expect(client.getVoiceNoteStatus(
+      makeSettings(),
+      'creator-fs',
+      42,
+      new AbortController().signal,
+    )).resolves.toEqual(voiceNotePayload());
+
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/api/v1/pages/creator-fs/voice-notes',
+      '/api/v1/pages/creator-fs/voice-notes/42',
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      clientRequestId: '11111111-1111-4111-8111-111111111111',
+      conversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      script: '[warmly] Hello',
+    });
+  });
+
+  it('wires audio-helper auth failures through onAuthError', async () => {
+    const onAuthError = vi.fn();
+    const fetchMock = vi.fn(async () => jsonResponse({
+      error: 'Unauthorized',
+      message: 'Unauthorized',
+      statusCode: 401,
+    }, 401));
+    vi.stubGlobal('browser', {
+      permissions: { contains: vi.fn(async () => true) },
+    });
+    const client = new AgencyHubClient(fetchMock as typeof fetch, onAuthError);
+
+    const response = await client.fetchVoiceNoteAudio(
+      makeSettings(),
+      'creator-fs',
+      42,
+      new AbortController().signal,
+    );
+
+    expect(response.status).toBe(401);
+    expect(onAuthError).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 401 }),
+      null,
+    );
   });
 
   it('fetches the read-only persona metadata catalog without exposing prompt text', async () => {
@@ -309,6 +391,25 @@ describe('AgencyHubClient', () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ key: 'hub_request_failed' });
+  });
+
+  it('reads the optional voice-notes capability from the matched assigned page', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([
+      hubPage({ capabilities: { voiceNotes: true } }),
+    ]));
+    vi.stubGlobal('browser', {
+      permissions: { contains: vi.fn(async () => true) },
+    });
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    await expect(client.resolvePageForUsername(
+      makeSettings(),
+      'creator',
+      new AbortController().signal,
+    )).resolves.toEqual({
+      pageLabel: 'creator-fs',
+      voiceNotesCapable: true,
+    });
   });
 
   it('matches the Fansly page by username and pushes the raw profile body', async () => {

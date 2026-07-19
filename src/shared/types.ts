@@ -754,6 +754,8 @@ export interface TabUiState {
   hasAvailableSummary: boolean;
   connected: boolean;
   hasApiKey: boolean;
+  /** Fail-closed hint from the assigned Agency Hub page. */
+  voiceNotesCapable: boolean;
   modelProviderByFeature?: Partial<Record<ModelSelectableFeatureType, 'anthropic' | 'openrouter'>>;
   apiKeyReadyByFeature?: Partial<Record<ModelSelectableFeatureType, boolean>>;
   hasPersonalities: boolean;

@@ -20,7 +20,7 @@ export async function loadMediaPurchaseEvidence({
   signal,
   debugEnabled,
 }: {
-  fanslyClient: FanslyClient;
+  fanslyClient: Pick<FanslyClient, 'verifyMediaPurchaseStates'>;
   pages: FanslyMessagePageResponse[];
   fanAccountId: string | null;
   session: SessionTemplate;

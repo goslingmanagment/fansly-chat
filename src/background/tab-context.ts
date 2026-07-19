@@ -31,9 +31,10 @@ export class TabContextStore {
 
   setRoute(tabId: number, groupId: string | null, routeNonce: number): TabContext {
     const context = this.getOrCreate(tabId);
+    const groupChanged = context.groupId !== groupId;
     context.groupId = groupId;
     context.routeNonce = routeNonce;
-    if (!groupId) {
+    if (groupChanged || !groupId) {
       context.fanAccountId = null;
       context.fanDisplayName = null;
     }

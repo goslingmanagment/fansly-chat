@@ -29,6 +29,7 @@ import type { SessionStore } from './session-store.js';
 import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
+import type { VoiceService } from './voice-service.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 
@@ -44,6 +45,8 @@ export interface RuntimeApiDeps {
   emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
   /** A successful live test is a reliable signal to refresh the persona catalog. */
   onAgencyHubReady?: () => void | Promise<void>;
+  /** Fail-closed page capability resolver shared with tab:init state. */
+  voiceService?: Pick<VoiceService, 'resolveCapability'>;
 }
 
 /** E28. The prompt echo is readable by ONE caller: our own viewer page. The
@@ -77,6 +80,7 @@ export function registerRuntimeApi({
   debugPrompts,
   emitToTab,
   onAgencyHubReady,
+  voiceService,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: unknown, sender: browser.runtime.MessageSender) => {
@@ -113,6 +117,7 @@ export function registerRuntimeApi({
             hasAvailableSummary: false,
             connected: false,
             hasApiKey: false,
+            voiceNotesCapable: false,
             hasPersonalities: false,
             mappedPersonalityId: null,
             mappedPersonalityName: null,
@@ -156,6 +161,7 @@ export function registerRuntimeApi({
           : null;
         const connected = Boolean(session?.connected);
         const compareDraftCount = getCompareDraftCount();
+        const voiceNotesCapable = await voiceService?.resolveCapability(tabId) ?? false;
 
         return {
           tabId,
@@ -172,6 +178,7 @@ export function registerRuntimeApi({
             normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) &&
             (state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim()),
           ),
+          voiceNotesCapable,
           hasPersonalities: getActivePersonaCatalog(state.personaCatalog).length > 0,
           mappedPersonalityId,
           mappedPersonalityName,

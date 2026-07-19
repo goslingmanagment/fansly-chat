@@ -30,6 +30,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
     hasAvailableSummary: false,
     connected: true,
     hasApiKey: true,
+    voiceNotesCapable: false,
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',

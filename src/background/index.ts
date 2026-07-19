@@ -17,6 +17,7 @@ import {
 } from './storage-change-policy.js';
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
+import { VoiceService } from './voice-service.js';
 import { readStorageState } from '../shared/storage.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
@@ -55,6 +56,14 @@ const kernelGateway = createKernelFeatureGateway(
   undefined,
   () => personaCatalog.refresh(),
 );
+const voiceService = new VoiceService({
+  kernelGateway,
+  agencyHubClient,
+  fanslyClient,
+  sessionStore,
+  tabContexts,
+  storageCoordinator,
+});
 // A persistent content port can keep this MV3 worker alive for a whole shift.
 // Refresh while alive so an owner archive/revision does not stay stale until
 // the browser restarts; suspension/restart is covered by the startup refresh.
@@ -71,9 +80,11 @@ const coordinator = new OperationCoordinator(
   agencyHubClient,
   acceptanceReporter,
 );
+coordinator.setVoiceCapabilityResolver((tabId) => voiceService.resolveCapability(tabId));
 
 browser.runtime.onConnect.addListener((port) => {
   coordinator.registerPort(port);
+  voiceService.registerPort(port);
 });
 
 initializeSessionCapture(sessionStore, async (tabId, accountId, material) => {
@@ -102,9 +113,11 @@ registerRuntimeApi({
   onAgencyHubReady: async () => {
     await personaCatalog.refresh();
   },
+  voiceService,
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {
+  voiceService.handleTabRemoved(tabId);
   void coordinator.handleTabRemoved(tabId);
 });
 
