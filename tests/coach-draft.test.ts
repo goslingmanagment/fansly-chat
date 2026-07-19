@@ -72,6 +72,31 @@ describe('parseCoachDrafts', () => {
     expect(result.prose).toContain('\\```draft');
   });
 
+  it('splits a nested opener (missing first closer) into prose + a clean second draft', () => {
+    // Exact PR#18 round-3 reproduction: the model emits two drafts but omits the
+    // first closer, so the second `\`\`\`draft` line opens before any close. The
+    // first (closer-less) block must fall to prose escaped; the second must parse
+    // as a valid draft — NOT merge both fan messages into one corrupt card.
+    const answer = [
+      '```draft',
+      'hey babe wanna see?',
+      '```draft',
+      'or maybe this one 😘',
+      '```',
+    ].join('\n');
+    const result = parseCoachDrafts(answer);
+    // Only the second, well-formed block becomes a draft.
+    expect(result.drafts).toEqual([{ text: 'or maybe this one 😘', index: 0 }]);
+    // The first block's text survives in prose, but its opener is neutralised so
+    // it can neither re-parse as a draft nor render as a code fence.
+    expect(result.prose).toContain('hey babe wanna see?');
+    expect(result.prose).toContain('\\```draft');
+    expect(result.prose).not.toMatch(/^```draft[ \t]*$/m);
+    // The two fan messages must never be fused into one draft body.
+    expect(result.drafts[0]!.text).not.toContain('hey babe wanna see?');
+    expect(result.drafts[0]!.text).not.toContain('```draft');
+  });
+
   it('treats an oversized fence (>1500 chars) as a violation left in prose', () => {
     const big = 'x'.repeat(1501);
     const answer = ['```draft', big, '```'].join('\n');

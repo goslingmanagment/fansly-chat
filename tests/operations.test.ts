@@ -2898,6 +2898,76 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toBeUndefined();
   });
 
+  it('routes coach-chat through the DEEP timeout path, not the 60s quick-total (round-3 P1)', async () => {
+    // coach-chat has messageCountBucket 'quick' but timeoutBucket 'deep': a coach
+    // answer is capped at 64 000 chars, so it must NOT run under the 60s
+    // quick-total total budget. Observed at the prep stage — a hanging message
+    // load survives past QUICK_OPERATION_TIMEOUT_MS (which would already have
+    // aborted a quick-bucketed feature) and only aborts at the deep-prep budget.
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    let resolveLoadStarted: (() => void) | null = null;
+    const loadStarted = new Promise<void>((resolve) => {
+      resolveLoadStarted = resolve;
+    });
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockImplementation(
+      async (
+        _groupId: string,
+        _messageCount: number,
+        _session: unknown,
+        signal?: AbortSignal,
+      ) => new Promise((_, reject) => {
+        resolveLoadStarted?.();
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      }),
+    );
+    const { coordinator, port } = await createCoordinatorHarness({ fanslyClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'coach-op',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await loadStarted;
+
+    // Past the quick-total ceiling: a quick-bucketed feature would already have
+    // aborted with timed_out — coach must still be running.
+    await vi.advanceTimersByTimeAsync(QUICK_OPERATION_TIMEOUT_MS);
+    expect(
+      postedMessages(port).some((message) => message.type === 'operation:error'),
+    ).toBe(false);
+
+    // Only the deep-prep budget aborts it.
+    await vi.advanceTimersByTimeAsync(
+      DEEP_OPERATION_PREP_TIMEOUT_MS - QUICK_OPERATION_TIMEOUT_MS,
+    );
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CG-NET-02',
+    });
+    expect(
+      errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb'),
+    ).toBeUndefined();
+  });
+
   it('times out deep operations when LLM TTFB exceeds the stage budget', async () => {
     vi.useFakeTimers();
     mockStorage.settings = {

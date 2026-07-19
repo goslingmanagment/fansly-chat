@@ -55,9 +55,9 @@ function neutraliseFenceMarkers(proseLines: string[]): string {
  * `\`\`\`draft` opener, its body lines, and a line-anchored `\`\`\`` closer.
  * The first {@link COACH_DRAFT_MAX_COUNT} well-formed, non-empty bodies of
  * ≤{@link COACH_DRAFT_MAX_CHARS} chars become drafts (removed from prose).
- * Empty bodies are dropped silently. Every violation — unclosed opener,
- * oversized body, or a well-formed block beyond the limit — stays in the prose
- * with its fence markers neutralised.
+ * Empty bodies are dropped silently. Every violation — unclosed opener, a nested
+ * opener before its closer, oversized body, or a well-formed block beyond the
+ * limit — stays in the prose with its fence markers neutralised.
  */
 export function parseCoachDrafts(answerRaw: string): ParsedCoachAnswer {
   const lines = answerRaw.split(/\r?\n/);
@@ -77,12 +77,31 @@ export function parseCoachDrafts(answerRaw: string): ParsedCoachAnswer {
     const openIdx = i;
     const bodyLines: string[] = [];
     let closeIdx = -1;
+    let nestedOpenIdx = -1;
     for (let j = openIdx + 1; j < lines.length; j += 1) {
+      // A second opener before any closer is a violation: the model omitted this
+      // block's closer. Without this branch the nested `\`\`\`draft` line is
+      // swallowed as body text, merging two fan messages into one corrupt draft.
+      if (DRAFT_OPEN_RE.test(lines[j]!)) {
+        nestedOpenIdx = j;
+        break;
+      }
       if (DRAFT_CLOSE_RE.test(lines[j]!)) {
         closeIdx = j;
         break;
       }
       bodyLines.push(lines[j]!);
+    }
+
+    if (nestedOpenIdx !== -1) {
+      // Abandon the current (closer-less) block to prose — the opener and its
+      // body-so-far, markers neutralised later — and resume parsing AT the nested
+      // opener so the second draft still gets its chance.
+      for (let k = openIdx; k < nestedOpenIdx; k += 1) {
+        proseLines.push(lines[k]!);
+      }
+      i = nestedOpenIdx;
+      continue;
     }
 
     if (closeIdx === -1) {

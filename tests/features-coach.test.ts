@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, FEATURE_LABELS } from '../src/shared/constants.js';
 import {
   FEATURE_POLICIES,
   getFeaturePolicy,
+  isDeepFeature,
   resolveFeatureMessageCount,
   resolveFeatureModelFeature,
 } from '../src/shared/features.js';
@@ -12,7 +13,11 @@ describe('coach-chat feature registration', () => {
   it('registers the exact coach-chat policy row', () => {
     expect(FEATURE_POLICIES['coach-chat']).toEqual({
       messageCountBucket: 'quick',
-      timeoutBucket: 'quick',
+      // TIMEOUT bucket is 'deep' even though the MESSAGE-count bucket is 'quick':
+      // a coach answer is capped at COACH_ANSWER_MAX_CHARS (64 000 chars), so the
+      // quick 60s TOTAL budget would abort a long stream mid-answer (fail-closed
+      // ⇒ whole answer + spend lost). See PR#18 round-3 P1.
+      timeoutBucket: 'deep',
       modelFeature: 'coach-chat',
       surfaceKind: 'overlay',
       promptMode: 'analysis',
@@ -22,6 +27,22 @@ describe('coach-chat feature registration', () => {
       requiresDraft: false,
       usesPingSegment: false,
     });
+  });
+
+  it('splits the buckets: deep TIMEOUT path, quick message-count, no deep semantics', () => {
+    const policy = FEATURE_POLICIES['coach-chat'];
+    // Deep timeout path — this is what usesDeepOperationTimeouts() keys off, so
+    // coach gets TTFB/idle/max-stream budgets and is NEVER armed under the 60s
+    // quick-total ceiling (the round-3 P1: a 64k-char answer needs a long-stream
+    // budget, not a 60s total).
+    expect(policy.timeoutBucket).toBe('deep');
+    // But it must NOT inherit deep MESSAGE-count semantics: no deepMessageCount,
+    // no MIN_MESSAGES_FOR_DEEP gate. isDeepFeature() keys off messageCountBucket.
+    expect(policy.messageCountBucket).toBe('quick');
+    expect(isDeepFeature('coach-chat')).toBe(false);
+    expect(resolveFeatureMessageCount('coach-chat', DEFAULT_SETTINGS)).toBe(
+      DEFAULT_SETTINGS.quickMessageCount,
+    );
   });
 
   it('exposes the policy through getFeaturePolicy', () => {

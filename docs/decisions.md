@@ -1017,3 +1017,19 @@ v14 shipped with the 1500 default, this deliberately upgrades in-the-wild v14
 installs on the old default too (14 < 15). E19 credential custody,
 `serializePersistedState`, and the E37 future-schema barrier are untouched: the
 single jump-to-current normalizer auto-targets v15 via the `MIGRATIONS` entry.
+**Fansly-egress + cost blast radius (assessed).** The 3000 default is a SHARED
+deep-window value: `resolveFeatureMessageCount` feeds it to the whole `deep`
+message-count bucket, so raising it doubles the live-read pagination (~60 → ~120
+Fansly pages) not only for coach's recap but for `fan-summary` AND `chat-review`
+on every old-default install the bump touches. This is accepted, not overlooked:
+the larger window is owner-chosen for the recap path; `chat-review` inherits it
+deliberately — it is hidden from the action bar since E24 and is a low-usage
+analysis feature, so its share of the extra egress is small. Crucially the
+pagination PACING is unchanged — `FANSLY_PAGINATION_DELAY_MS` stays 300 ms, so
+the request RATE against Fansly (the actual model-ban risk surface per CLAUDE.md)
+is identical; only the page COUNT per deep operation rises, and only for the two
+overlay analysis features, never the high-frequency inline reply path. The
+matching latency cost was absorbed by doubling `DEEP_OPERATION_PREP_TIMEOUT_MS`
+180 s → 360 s so a full-window load no longer times out mid-pagination. If the
+non-coach blast radius is later judged too wide, the fix is to split a dedicated
+coach/recap window constant off the shared deep default rather than to lower it.

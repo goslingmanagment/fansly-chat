@@ -117,8 +117,16 @@ export const FEATURE_POLICIES = {
     includesEarnings: false,
   },
   'coach-chat': {
+    // The two buckets are deliberately SPLIT. Message count stays 'quick' (coach
+    // reads a small live window, no deep pagination or MIN_MESSAGES_FOR_DEEP
+    // gate), but the TIMEOUT bucket is 'deep': a coach answer is free-form advice
+    // capped at COACH_ANSWER_MAX_CHARS (64 000 chars), so the quick 60s TOTAL
+    // budget (QUICK_OPERATION_TIMEOUT_MS) would abort a long stream mid-answer
+    // and — per the fail-closed rule — cost the chatter the whole generation plus
+    // the spend. 'deep' timeouts give it TTFB + idle + max-stream budgets sized
+    // for a long SSE stream instead of one 60s total ceiling.
     messageCountBucket: 'quick',
-    timeoutBucket: 'quick',
+    timeoutBucket: 'deep',
     modelFeature: 'coach-chat',
     surfaceKind: 'overlay',
     promptMode: 'analysis',
