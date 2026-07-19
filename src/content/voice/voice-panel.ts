@@ -234,8 +234,19 @@ export class VoicePanel {
   async handleAttachGrant(grant: VoiceAttachGrant): Promise<void> {
     const attempt = this.deps.controller.getAttempt();
     const take = attempt?.takes.find((candidate) => candidate.voiceNoteId === attempt.selectedTakeId);
-    if (!attempt || !take || !take.audio || !this.deps.controller.canAttachSelectedTake()) {
+    // Drift check on the concrete selected take: canAttachSelectedTake() is now
+    // gated by the in-flight flag (true here, since this grant answers our own
+    // request), so it cannot serve as the guard — assert the take fields directly.
+    if (
+      !attempt ||
+      attempt.stale ||
+      !take ||
+      take.view.state !== 'completed' ||
+      !take.audio ||
+      !take.blobUrl
+    ) {
       // The selected take drifted (edited/stale) between click and grant.
+      this.deps.controller.reportAttachOutcome('uncertain');
       this.attachPhase = 'uncertain';
       this.render();
       return;
@@ -263,6 +274,9 @@ export class VoicePanel {
       outcome = 'uncertain';
     }
 
+    // Release the controller-level attach gate on the terminal outcome, then
+    // reflect it in the view-local phase.
+    this.deps.controller.reportAttachOutcome(outcome);
     if (outcome === 'confirmed') {
       await this.deps.controller.markAttached();
       this.attachPhase = 'confirmed';

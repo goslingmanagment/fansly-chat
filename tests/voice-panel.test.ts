@@ -685,4 +685,83 @@ describe('VoicePanel — лента', () => {
     expect(textOf(root)).toContain('Лимит символов для войсов исчерпан.');
     expect(harness!.controller.getAttempt()?.phase).toBe('script');
   });
+
+  it('does not re-dispatch a confirmed attach after an edit-then-undo re-exposes the button', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.panel.setFanUsername('alice');
+    harness!.setAttachOutcome('confirmed');
+
+    await harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      token: 'tok-1',
+      fanUsername: 'alice',
+    });
+    expect(harness!.controller.getAttempt()?.phase).toBe('attached');
+
+    // Edit the script, then undo back to the exact canonical text.
+    const editor = harness!.root.querySelector<HTMLTextAreaElement>('textarea.chatgoose-voice-script')!;
+    editor.value = `${SCRIPT} changed`;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    editor.value = SCRIPT;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+
+    expect(harness!.controller.getAttempt()?.stale).toBe(false);
+    // The attach affordance re-appears (attachPhase reset to idle) but stays
+    // disabled, and a direct request is refused — the take is already attached.
+    const attach = harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach');
+    expect(attach?.disabled).toBe(true);
+    expect(harness!.controller.requestAttach()).toBe(false);
+  });
+
+  it('does not permit a second attach when an editor reset fires during the observation window', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.panel.setFanUsername('alice');
+
+    // Hold the adapter in its observation window.
+    let resolveAttach!: (outcome: VoiceAttachOutcome) => void;
+    harness!.setAttachOutcome(new Promise<VoiceAttachOutcome>((resolve) => {
+      resolveAttach = resolve;
+    }));
+    // Answer our own attachToken request with a grant (the real request path).
+    harness!.setSendHandler((message) => {
+      if (message.type === 'voice:attachToken') {
+        void harness!.panel.handleAttachGrant({
+          type: 'voice:attachGrant',
+          attemptId,
+          token: 'tok-1',
+          fanUsername: 'alice',
+        });
+      }
+    });
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach')!.click();
+    await flush();
+    expect(textOf(harness!.root)).toContain('Выберите Free/PPV и подтвердите Upload');
+    expect(harness!.attachCalls).toHaveLength(1);
+
+    // A stray editor input flips the view-local attachPhase back to idle; a
+    // render then re-exposes the attach button — which must stay disabled.
+    const editor = harness!.root.querySelector<HTMLTextAreaElement>('textarea.chatgoose-voice-script')!;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    harness!.panel.render();
+
+    harness!.sent.length = 0;
+    const attach = harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach');
+    expect(attach).not.toBeNull();
+    expect(attach!.disabled).toBe(true);
+    expect(harness!.controller.canAttachSelectedTake()).toBe(false);
+    expect(harness!.controller.requestAttach()).toBe(false);
+    expect(harness!.sent.some((message) => message.type === 'voice:attachToken')).toBe(false);
+    expect(harness!.attachCalls).toHaveLength(1);
+
+    // The terminal outcome finally releases the gate and re-arms the flow.
+    resolveAttach('uncertain');
+    await flush();
+    expect(harness!.controller.canAttachSelectedTake()).toBe(true);
+  });
 });

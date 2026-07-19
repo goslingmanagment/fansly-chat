@@ -1000,4 +1000,82 @@ describe('VoiceAttemptController', () => {
     controller.resumeBlobUrls();
     expect(createBlobUrl).toHaveBeenCalledTimes(2);
   });
+
+  async function toAttachableTake(controller: VoiceAttemptController): Promise<void> {
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'completed', { audioSha256: 'hash', audioBytesLen: 2 }),
+    });
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2]).buffer,
+    });
+  }
+
+  it('never re-grants an already-attached take after an edit-then-undo re-enables the button', async () => {
+    const { controller, port } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await toAttachableTake(controller);
+    expect(controller.canAttachSelectedTake()).toBe(true);
+
+    // Attach → grant round-trip → confirmed.
+    expect(controller.requestAttach()).toBe(true);
+    controller.reportAttachOutcome('confirmed');
+    await controller.markAttached();
+    expect(controller.getAttempt()?.phase).toBe('attached');
+    const tokenCount = messagesOfType(port, 'voice:attachToken').length;
+
+    // Edit then undo back to the exact canonical script: not stale, but the
+    // attached take must stay un-attachable — no second dispatch.
+    await controller.editScript('Voice script — draft');
+    await controller.editScript('Voice script');
+    expect(controller.getAttempt()?.stale).toBe(false);
+    expect(controller.canAttachSelectedTake()).toBe(false);
+    expect(controller.requestAttach()).toBe(false);
+    expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(tokenCount);
+  });
+
+  it('holds the attach gate across the in-flight window and re-arms only on an explicit outcome', async () => {
+    const { controller, port } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await toAttachableTake(controller);
+
+    // First attach in flight: no adapter outcome reported yet.
+    expect(controller.requestAttach()).toBe(true);
+    expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(1);
+    expect(controller.canAttachSelectedTake()).toBe(false);
+
+    // A view-local reset during the observation window (no script change) must
+    // not re-open the gate — a concurrent second dispatch is refused.
+    await controller.editScript('Voice script');
+    expect(controller.getAttempt()?.stale).toBe(false);
+    expect(controller.canAttachSelectedTake()).toBe(false);
+    expect(controller.requestAttach()).toBe(false);
+    expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(1);
+
+    // An uncertain outcome releases the gate so the explicit re-arm works.
+    controller.reportAttachOutcome('uncertain');
+    expect(controller.canAttachSelectedTake()).toBe(true);
+    expect(controller.requestAttach()).toBe(true);
+    expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(2);
+  });
+
+  it('releases the attach gate when the service refuses the token', async () => {
+    const { controller } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await toAttachableTake(controller);
+
+    expect(controller.requestAttach()).toBe(true);
+    expect(controller.canAttachSelectedTake()).toBe(false);
+
+    await controller.handleMessage({
+      type: 'voice:attachRefuse',
+      attemptId: ATTEMPT_ID,
+      reason: 'unknown',
+    });
+    expect(controller.canAttachSelectedTake()).toBe(true);
+  });
 });

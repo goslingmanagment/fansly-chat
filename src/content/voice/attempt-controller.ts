@@ -133,6 +133,7 @@ export class VoiceAttemptController {
   private readonly issuedClientRequestIds = new Set<string>();
   private readonly audioFetchesInFlight = new Set<string>();
   private activeAttemptId: string | null = null;
+  private attachInFlight = false;
   private pollTimer: number | null = null;
   private connected = true;
   private destroyed = false;
@@ -325,7 +326,16 @@ export class VoiceAttemptController {
 
   canAttachSelectedTake(): boolean {
     const attempt = this.getAttempt();
-    if (!attempt || attempt.stale || attempt.selectedTakeId === null) {
+    if (
+      !attempt ||
+      attempt.stale ||
+      attempt.selectedTakeId === null ||
+      // An already-attached take must never be re-dispatched (a view-local
+      // attachPhase reset after 'confirmed' would otherwise re-enable it), and
+      // an in-flight attach holds the gate across the whole grant round-trip.
+      attempt.phase === 'attached' ||
+      this.attachInFlight
+    ) {
       return false;
     }
     const take = attempt.takes.find(({ voiceNoteId }) => voiceNoteId === attempt.selectedTakeId);
@@ -342,11 +352,30 @@ export class VoiceAttemptController {
     if (!this.canAttachSelectedTake() || record.attempt.selectedTakeId === null) {
       return false;
     }
-    return this.post({
+    // Claim the gate BEFORE dispatch so a synchronous re-entrant request (or a
+    // view-local attachPhase reset re-showing the button) cannot start a second
+    // attach; roll back if the port refused the message.
+    this.attachInFlight = true;
+    const sent = this.post({
       type: 'voice:attachToken',
       attemptId: record.attempt.attemptId,
       voiceNoteId: record.attempt.selectedTakeId,
     });
+    if (!sent) {
+      this.attachInFlight = false;
+    }
+    return sent;
+  }
+
+  /**
+   * The panel reports the terminal adapter outcome so the controller-level attach
+   * gate is released exactly once, by an explicit outcome only. A 'confirmed'
+   * outcome additionally advances the phase via markAttached (which keeps the
+   * take un-attachable); an 'uncertain' outcome leaves the take attachable so the
+   * explicit re-arm path can mint a fresh token.
+   */
+  reportAttachOutcome(_outcome: 'confirmed' | 'uncertain'): void {
+    this.attachInFlight = false;
   }
 
   hasPendingCreateNeedsReconcile(): boolean {
@@ -422,6 +451,7 @@ export class VoiceAttemptController {
         this.onAttachGrant?.(message);
         return;
       case 'voice:attachRefuse':
+        this.attachInFlight = false;
         this.onError?.(message);
         return;
       default:
