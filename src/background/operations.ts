@@ -18,6 +18,7 @@ import {
   STREAM_CHUNK_FLUSH_MS,
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../shared/constants.js';
+import { isOutputExhausted } from '@kernel/sdk';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
   aggregateMonthlyEarnings,
@@ -2632,9 +2633,16 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
+      // Output-exhaustion fail-closed (spec §8): a provider hitting its token
+      // ceiling (normalized cross-provider by isOutputExhausted) makes a reply,
+      // a coach turn, and BOTH recap sizes non-committable — a truncated recap
+      // must never be cached, pushed as dossier, or presented. Analysis features
+      // that are neither coach nor recap keep tolerating a soft trim.
       if (
-        latestLlmStopReason === 'max_tokens' &&
-        getFeaturePolicy(payload.feature).promptMode === 'reply'
+        isOutputExhausted(latestLlmStopReason) &&
+        (getFeaturePolicy(payload.feature).promptMode === 'reply' ||
+          payload.feature === 'coach-chat' ||
+          payload.feature === 'fan-summary')
       ) {
         throw new ChatGooseError('ai_output_unusable');
       }

@@ -175,6 +175,65 @@ describe('saveSettings custody contract', () => {
   });
 });
 
+describe('saveSettings durably stamps schemaVersion (E45)', () => {
+  function preV15Store(deep: number): Record<string, unknown> {
+    // A v14 record whose v15 migration was never written back to disk — the
+    // StorageCoordinator's deferred-repair window (listener probe not yet passed).
+    return {
+      schemaVersion: 14,
+      settings: { ...createDefaultSettings(), deepMessageCount: deep },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+  }
+
+  it('preserves a deliberate post-v15 deep window even when disk was still pre-v15', async () => {
+    // Disk holds v14 + the new default; the chatter deliberately picks 1500.
+    mockStorage = preV15Store(3000);
+
+    // Options loads via the NON-mutating readStorageState (in-memory v15, disk
+    // stays v14), then saves the deliberate 1500 with its observed version.
+    const view = await storage.readStorageState();
+    expect(view.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    await storage.saveSettings(
+      { deepMessageCount: 1500 },
+      view.settings,
+      { observedSchemaVersion: view.schemaVersion },
+    );
+
+    // The write stamps the durable v15 marker alongside the settings...
+    expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    // ...so the next load does NOT re-run the one-shot deep-window bump: the
+    // deliberate 1500 survives (without the marker it would migrate to 3000).
+    const reloaded = await storage.loadStorageState();
+    expect(reloaded.settings.deepMessageCount).toBe(1500);
+  });
+
+  it('never downgrades schemaVersion below a higher on-disk version (future-schema barrier)', async () => {
+    const future = STORAGE_SCHEMA_VERSION + 1;
+    mockStorage = {
+      schemaVersion: future,
+      settings: { ...createDefaultSettings() },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+    // A newer worker owns disk at a higher schema. saveSettings must REFUSE
+    // rather than stamp our (lower) version over it.
+    await expect(
+      storage.saveSettings(
+        { deepMessageCount: 1500 },
+        createDefaultSettings(),
+        { observedSchemaVersion: future },
+      ),
+    ).rejects.toThrow();
+    expect(mockStorage.schemaVersion).toBe(future);
+  });
+});
+
 describe('serialization helpers', () => {
   it('stripSecretSettings removes exactly the two credential fields', () => {
     const settings = {

@@ -205,6 +205,17 @@ export async function saveSettings(
   const nextSettings = sanitizeSettings({ ...currentSettings, ...settingsPatch });
   const items: Record<string, unknown> = {
     settings: stripSecretSettings(nextSettings),
+    // Stamp the current schema durably alongside the settings write. Options
+    // loads via the NON-mutating readStorageState (E45 deferred-repair window:
+    // disk may still hold a pre-v15 record whose migration was never written
+    // back). Persisting only `settings` would leave schemaVersion stale, so the
+    // NEXT load would re-run the one-shot deep-window bump and clobber a
+    // deliberate post-v15 value — exactly the 1500-stays-1500 promise E45 makes.
+    // Barrier: the future-schema guard above THROWS before this write whenever
+    // the observed on-disk version is higher than ours (and the read/modify/write
+    // path's loadStorageState throws on a future disk too), so STORAGE_SCHEMA_VERSION
+    // here is never a downgrade — the base state is always at the current schema.
+    schemaVersion: STORAGE_SCHEMA_VERSION,
   };
   if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubDeviceToken')) {
     items[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = nextSettings.agencyHubDeviceToken;

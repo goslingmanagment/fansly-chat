@@ -2,6 +2,7 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
+import { isOutputExhausted } from '@kernel/sdk';
 import {
   resolveCompareModelCards,
   resolveMappedPersonalityId,
@@ -1209,7 +1210,11 @@ export async function executeCompare(
       }
 
       const parts = normalizeReplyParts(rawText);
-      if (latestStopReason === 'max_tokens' || parts.length === 0) {
+      // Fail closed on a truncated card (spec §8): isOutputExhausted normalizes
+      // BOTH the kernel 'max_tokens' and OpenRouter's provider 'length' stop
+      // reasons — the literal 'max_tokens' check missed 'length'. A compare card
+      // is a reply, so any output exhaustion makes it non-insertable.
+      if (isOutputExhausted(latestStopReason) || parts.length === 0) {
         const profiling = buildCompareCardProfilingSnapshot(profiler, cardUsage);
         sendCompareCardError(
           context,

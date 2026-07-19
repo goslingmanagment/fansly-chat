@@ -1895,6 +1895,66 @@ describe('OperationCoordinator', () => {
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
+  it('fails a compare card closed on a truncated stream (provider length)', async () => {
+    // Round-4 P2: compare cards are replies; the literal 'max_tokens' check
+    // missed OpenRouter's provider 'length'. isOutputExhausted normalizes both,
+    // so a truncated card is non-insertable instead of presented.
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: unknown,
+        callbacks: { onStopReason?: (reason: string | null) => void },
+      ) => {
+        callbacks.onStopReason?.('length');
+        return 'Hey babe, I was just thinking about the custom you asked for and';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const currentError = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
+        message.type === 'compare:cardError' && message.cardId === 'current:personality-1',
+    );
+    expectUserErrorIdentity(currentError?.error, {
+      key: 'ai_output_unusable',
+      code: 'CG-API-06',
+    });
+    // Fail closed: the truncated card is never presented as a completed card.
+    expect(
+      messages.some(
+        (message) =>
+          message.type === 'compare:cardComplete' &&
+          message.cardId === 'current:personality-1',
+      ),
+    ).toBe(false);
+  });
+
   it('treats unexpected compare card aborts as connection errors and still completes', async () => {
     await mockCompareCards([
       {
@@ -4434,6 +4494,49 @@ describe('OperationCoordinator', () => {
       key: 'ai_output_unusable',
       code: 'CG-API-06',
     });
+  });
+
+  it('fails closed on a truncated coach stream (max_tokens AND provider length)', async () => {
+    // Round-4 P1: coach-chat is promptMode 'analysis', so the reply-only guard
+    // let a truncated coach answer through and present as a result — a hard-rule
+    // violation. isOutputExhausted normalizes BOTH the kernel 'max_tokens' and
+    // OpenRouter's provider 'length'; the guard now covers coach-chat.
+    for (const stopReason of ['max_tokens', 'length'] as const) {
+      const kernelGateway = {
+        isConfigured: vi.fn(() => true),
+        streamFeature: vi.fn(
+          async (
+            _settings: unknown,
+            _request: unknown,
+            callbacks: { onStopReason?: (reason: string | null) => void },
+            _signal: unknown,
+          ) => {
+            callbacks.onStopReason?.(stopReason);
+            return 'Try leading with a question about her weekend, then bridge to the';
+          },
+        ),
+      };
+      const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+      await coordinator.startOperation(1, {
+        type: 'operation:start',
+        operationId: `coach-op-${stopReason}`,
+        feature: 'coach-chat',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        forceRegenerate: false,
+      });
+
+      const messages = postedMessages(port);
+      const errorMessage = messages.find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          message.type === 'operation:error',
+      );
+      expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+      // Fail closed: the truncated coach answer is NEVER presented as a result.
+      expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+    }
   });
 
   it('passes the configured temperature for each operation type', async () => {
