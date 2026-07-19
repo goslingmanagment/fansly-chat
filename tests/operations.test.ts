@@ -6118,6 +6118,56 @@ describe('OperationCoordinator', () => {
     expect(complete?.fanDisplayName).toBe('SECRET-PET-NAME');
   });
 
+  it('custom-name rule (compare): a lookup failure sends "fan" to every card, never the DOM custom name', async () => {
+    // Analogous compare-lane guard to the fast-reply case above: the chatter's
+    // private custom fan name rides the DOM label, the account lookup fails, so
+    // the kernel-facing name on EVERY compare card must degrade to "fan".
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, any>,
+        callbacks: { onText: (text: string) => void },
+      ) => {
+        callbacks.onText('Reply');
+        return 'Reply';
+      }),
+    };
+    const { coordinator, fanslyClient } = await createCoordinatorHarness({ kernelGateway });
+    fanslyClient.getAccountNames.mockRejectedValue(new Error('lookup failed'));
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'SECRET-PET-NAME',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalled();
+    for (let index = 0; index < kernelGateway.streamFeature.mock.calls.length; index += 1) {
+      const request = kernelRequestFromStreamCall(kernelGateway, index);
+      expect(request.clientContext.fanDisplayName).toBe('fan');
+      expect(request.clientContext.fanDisplayName).not.toContain('SECRET');
+    }
+  });
+
   it('short recap: 300-message clamp, short cache key, no full overwrite, no hub sync', async () => {
     const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
       anthropicRawText: 'Short recap body',
