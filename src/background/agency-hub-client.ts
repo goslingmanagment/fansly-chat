@@ -186,7 +186,6 @@ export class AgencyHubClient {
 
   constructor(
     fetchImpl: FetchLike = (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
-    private readonly onAuthError?: NonNullable<KernelClientOptions['onAuthError']>,
   ) {
     this.fetchImpl = (input, init) => fetchImpl.call(globalThis, input, init);
   }
@@ -228,7 +227,6 @@ export class AgencyHubClient {
       auth: { mode: 'bearer', token: () => bearer },
       headers: clientVersionHeaders(),
       fetch: (input, init) => this.fetchImpl(input, { ...init, signal }),
-      ...(this.onAuthError ? { onAuthError: this.onAuthError } : {}),
     };
   }
 
@@ -438,8 +436,9 @@ export class AgencyHubClient {
     return { baseUrl, bearer };
   }
 
-  /** Voice-note methods intentionally preserve KernelApiError bodies for the
-   * dedicated service, which maps structured voice codes onto its port lane. */
+  /** Voice-note methods intentionally preserve KernelApiError bodies and raw
+   * error responses for the dedicated service, which maps structured voice
+   * codes and auth statuses onto its port lane. */
   async createVoiceNote(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
     pageLabel: string,

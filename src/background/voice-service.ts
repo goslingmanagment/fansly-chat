@@ -175,13 +175,15 @@ function safeMessageForCode(code: string, fallback: Parameters<typeof createUser
 }
 
 function noteFailure(error: unknown): { code: string; message: string; status: number } {
-  const code = structuredErrorCode(error, 'hub_request_failed');
   const body = errorBody(error);
   const status = isRecord(error)
     ? numericStatus(error.status) ||
       numericStatus(body?.statusCode) ||
       (isRecord(error.details) ? numericStatus(error.details.status) : 0)
     : 0;
+  const code = status === 401 || status === 403
+    ? 'hub_invalid_api_key'
+    : structuredErrorCode(error, 'hub_request_failed');
   return {
     code,
     message: safeMessageForCode(code, 'hub_request_failed'),

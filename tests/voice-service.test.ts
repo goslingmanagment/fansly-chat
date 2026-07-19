@@ -350,6 +350,30 @@ describe('VoiceService SDK transport', () => {
     }]);
   });
 
+  it('maps a 401 create failure to the actionable invalid-key error', async () => {
+    const createVoiceNote = vi.fn(async () => {
+      throw {
+        status: 401,
+        body: {
+          error: 'Unauthorized',
+          message: 'Unauthorized',
+          statusCode: 401,
+        },
+      };
+    });
+    const harness = createHarness({ createVoiceNote });
+
+    await createAttempt(harness);
+
+    expect(harness.sent).toEqual([{
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      code: 'hub_invalid_api_key',
+      message: 'Agency Hub rejected the credential.',
+      status: 401,
+    }]);
+  });
+
   it('maps a 429 body code to voice:noteError without leaking the script', async () => {
     const createVoiceNote = vi.fn(async () => {
       throw {
@@ -372,6 +396,36 @@ describe('VoiceService SDK transport', () => {
       status: 429,
     }]);
     expect(JSON.stringify(harness.sent)).not.toContain('SECRET SCRIPT TEXT');
+  });
+
+  it('maps a 403 audio response to the actionable invalid-key error', async () => {
+    const fetchVoiceNoteAudio = vi.fn(async () => new Response(JSON.stringify({
+      error: 'Forbidden',
+      message: 'Forbidden',
+      statusCode: 403,
+    }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const harness = createHarness({ fetchVoiceNoteAudio });
+    await createAttempt(harness);
+    harness.sent.length = 0;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:audioFetch',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      expectedSha256: '0'.repeat(64),
+      expectedBytes: 1,
+    }, harness.emit);
+
+    expect(harness.sent).toEqual([{
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      code: 'hub_invalid_api_key',
+      message: 'Agency Hub rejected the credential.',
+      status: 403,
+    }]);
   });
 
   it.each([

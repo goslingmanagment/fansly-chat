@@ -140,8 +140,7 @@ describe('AgencyHubClient', () => {
     });
   });
 
-  it('wires audio-helper auth failures through onAuthError', async () => {
-    const onAuthError = vi.fn();
+  it('returns audio-helper auth failures for VoiceService to classify', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({
       error: 'Unauthorized',
       message: 'Unauthorized',
@@ -150,7 +149,7 @@ describe('AgencyHubClient', () => {
     vi.stubGlobal('browser', {
       permissions: { contains: vi.fn(async () => true) },
     });
-    const client = new AgencyHubClient(fetchMock as typeof fetch, onAuthError);
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
 
     const response = await client.fetchVoiceNoteAudio(
       makeSettings(),
@@ -160,10 +159,10 @@ describe('AgencyHubClient', () => {
     );
 
     expect(response.status).toBe(401);
-    expect(onAuthError).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 401 }),
-      null,
-    );
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Unauthorized',
+      statusCode: 401,
+    });
   });
 
   it('fetches the read-only persona metadata catalog without exposing prompt text', async () => {
