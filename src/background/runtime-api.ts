@@ -18,6 +18,7 @@ import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   PopupStatus,
+  RecapStatusResponse,
   SpendersBuildPayload,
 } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
@@ -385,6 +386,98 @@ export function registerRuntimeApi({
             ok: false,
             error: timedOut ? createUserError('timed_out') : toUserError(error),
           };
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
+      }
+
+      if (requestType === 'getRecapStatus') {
+        // Metadata-only recap-status read for the coach empty state (spec §5).
+        // It must NEVER break opening Coach: any failure to REACH the Hub — not
+        // connected, no page match, Hub down/absent — resolves to state
+        // 'unavailable' (NOT null-slots-as-"no recap"; that dishonest collapse is
+        // exactly the E43 empty-state trap). Only a Hub that actually answered
+        // returns state 'ok' with real (possibly-null) slots.
+        const unavailable: RecapStatusResponse = { state: 'unavailable', full: null, short: null };
+        const tabId = sender.tab?.id;
+        const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
+        if (!session || !session.connected) {
+          return unavailable;
+        }
+        // Shape already validated by getRuntimeRequestType (groupId non-empty).
+        const record = message as unknown as {
+          groupId: string;
+          fanAccountId: string | null;
+        };
+        // Coerce an empty/whitespace fanAccountId to null so '' takes the same
+        // honest cold path as a missing fan — otherwise '' is a falsy fanRef the
+        // client silently drops, leaving a groupId-only query that FALSELY confirms
+        // "no recap" (P1-2, the '' half).
+        const requestedFan = record.fanAccountId?.trim() || null;
+        // The tab context (background's authoritative view, kept group-aligned by
+        // the setRoute/setFan stale-fan guards) is the ONLY trusted fan source.
+        const cachedContext = tabId !== undefined ? tabContexts.get(tabId) : null;
+        const contextFanForGroup =
+          cachedContext?.groupId === record.groupId ? cachedContext.fanAccountId : null;
+        let resolvedFanRef: string | null;
+        if (requestedFan !== null) {
+          // An explicit fanAccountId from content is trusted ONLY when the context
+          // confirms it for THIS group. Content's DOM fan id can lag an SPA
+          // route-change (the A→B race rounds 12–13 hardened), so a fan the context
+          // does not confirm for this group is a possible cross-group leak — fail
+          // closed to 'unavailable' rather than query the Hub with (group B, fan A).
+          if (requestedFan !== contextFanForGroup) {
+            return unavailable;
+          }
+          resolvedFanRef = requestedFan;
+        } else {
+          resolvedFanRef = contextFanForGroup;
+        }
+        // COLD recap-status (P1-2): with no fanRef to search with (SW restart:
+        // context has no cached fan), a groupId-only query can never find a
+        // fan-id-keyed recap — a null-slots 200 would FALSELY read as "confirmed
+        // no recap" and disable "open last recap". Report honest 'unavailable'
+        // instead; the next op caches the fan and a later read checks for real.
+        if (resolvedFanRef === null) {
+          return unavailable;
+        }
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+        );
+        try {
+          // Resolve the page label the same way a generation does.
+          const pageUsername =
+            session.resolvedUsername?.trim() ||
+            (await fanslyClient.getAuthenticatedAccount(session, controller.signal))
+              ?.username?.trim() ||
+            null;
+          if (!pageUsername) {
+            return unavailable;
+          }
+          const { settings } = await storageCoordinator.getState();
+          const pageLabel = await agencyHubClient.resolvePageLabelForUsername(
+            settings,
+            pageUsername,
+            controller.signal,
+          );
+          if (!pageLabel) {
+            return unavailable;
+          }
+          const status = await agencyHubClient.getRecapStatus(
+            settings,
+            {
+              pageLabel,
+              // Canonical identity (§5): conversationRef = groupId, fanRef = fan.
+              conversationRef: record.groupId,
+              fanRef: resolvedFanRef,
+            },
+            controller.signal,
+          );
+          return status;
+        } catch {
+          return unavailable;
         } finally {
           globalThis.clearTimeout(timeout);
         }

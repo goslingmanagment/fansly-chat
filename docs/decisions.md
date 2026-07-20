@@ -61,6 +61,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
 | E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
 | E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
+| E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` cache-hit marker invalidates every pre-guard recap (one forced regen per fan, self-healing) with a documented Hub-residual gap owned by core #136 |
 
 ## Entries
 
@@ -1000,3 +1001,87 @@ remains aligned to the currently deployed Core contract as release evidence;
 keeping generated contract bytes does not enable any E40–E43 call path. The
 E40–E43 technical decisions and their hand-curated plans/spec stay in history
 with explicit 2.0-deferred banners rather than being deleted.
+
+**E45 (2026-07-18).** The Coach feature's settings-shape change ships as storage
+schema **v15**, not v14. v14 already shipped and lives on `main` (E37 persona
+catalog; kept live through the 1.9.11 corrective, E44) — so per the forward-only
+migration law a NEW shape change takes the next number rather than reusing a
+released one. v15 adds two Settings fields (`coachHistoryLimit` default 10,
+clamped [1,20]; `coachAutoRecap` `off|short|full`, junk → `off`) and raises the
+deep-window default `DEEP_DEFAULT_MESSAGE_COUNT` 1500 → 3000. The default bump is
+a RAW pre-normalization transform (`bumpLegacyDeepMessageCountDefault`) keyed on
+the INCOMING record's `schemaVersion`: a pre-v15 record whose `deepMessageCount`
+is exactly the old default 1500 silently adopts 3000, any other stored value
+(including a deliberate 1499) is preserved, and a record already at the current
+schema never re-runs it — so a chatter who sets 1500 AFTER v15 keeps it. Because
+v14 shipped with the 1500 default, this deliberately upgrades in-the-wild v14
+installs on the old default too (14 < 15). E19 credential custody,
+`serializePersistedState`, and the E37 future-schema barrier are untouched: the
+single jump-to-current normalizer auto-targets v15 via the `MIGRATIONS` entry.
+**Fansly-egress + cost blast radius (assessed).** The 3000 default is a SHARED
+deep-window value: `resolveFeatureMessageCount` feeds it to the whole `deep`
+message-count bucket, so raising it doubles the live-read pagination (~60 → ~120
+Fansly pages) not only for coach's recap but for `fan-summary` AND `chat-review`
+on every old-default install the bump touches. This is accepted, not overlooked:
+the larger window is owner-chosen for the recap path; `chat-review` inherits it
+deliberately — it is hidden from the action bar since E24 and is a low-usage
+analysis feature, so its share of the extra egress is small. Crucially the
+pagination PACING is unchanged — `FANSLY_PAGINATION_DELAY_MS` stays 300 ms, so
+the request RATE against Fansly (the actual model-ban risk surface per CLAUDE.md)
+is identical; only the page COUNT per deep operation rises, and only for the two
+overlay analysis features, never the high-frequency inline reply path. The
+matching latency cost was absorbed by doubling `DEEP_OPERATION_PREP_TIMEOUT_MS`
+180 s → 360 s so a full-window load no longer times out mid-pagination. If the
+non-coach blast radius is later judged too wide, the fix is to split a dedicated
+coach/recap window constant off the shared deep default rather than to lower it.
+
+**Output-exhaustion + empty-output fail-closed — UNCONDITIONAL (review rounds 4–13).**
+The family "a truncated stream is an error, never presented" rule keys on the SDK's
+`isOutputExhausted` (normalizes kernel `max_tokens` + provider `length`). It began
+narrowed to reply/coach/fan-summary, but since round 12 it fires for EVERY
+FeatureType before the result is built — help-me/chat-review are NOT exempt (their
+XML parsers return `valid:false` rather than throwing, so a truncated analysis body
+would otherwise present as a `valid:false` card). Symmetrically, since round 13 an
+EMPTY/whitespace-only output ALSO fails closed for every feature: `parseHelpMeXml('')`
+/`parseChatReviewXml('')` return `valid:false` (they do NOT throw) and
+`assertInsertableFeatureResult` guards only reply kinds, so an empty analysis result
+would otherwise reach operation:complete and render an empty card as success (the
+earlier "empty body already fails that parse" scope note was factually wrong and is
+retracted here). Both guards sit before the result build and the summary-cache
+write, so nothing truncated or empty is ever presented or cached — no feature
+exceptions (do not re-narrow either guard to a feature list).
+
+**`trustedTerminal` cache invalidation — one-time fleet cost (accepted).** A
+cached recap is a valid cache HIT only if it carries a `trustedTerminal` marker,
+which is written ONLY on entries produced behind the exhaustion+empty guards
+(`isValidSummaryCacheEntry` requires it; `normalizeSummaryCacheEntry` preserves it
+through migration; it is not a required field, so legacy entries survive
+normalization but fail the hit). Consequence, deliberately accepted because a
+legacy entry cannot be proven un-truncated: EVERY recap cached by a shipped 1.9.x
+lacks the marker, so (1) the FIRST Recap per fan after upgrade is a forced
+regeneration — real AI spend plus a full deep-window live read at the new 3000-msg
+/ ~120-page default; (2) `hasAvailableFanSummary` flips to false for every fan
+until each is re-run, so the popup/status `hasAvailableSummary` flag reports "no
+summary" in the interim; (3) the dead entries occupy the summary-cache budget
+until LRU eviction. Cheap and self-healing (one recap per fan). The forced
+regeneration MUST be called out in CHANGELOG.md when this stack ships (the coach
+feature is unreleased today, so there is no release entry to carry it yet) so the
+one-time fleet spend is not a surprise on the bill.
+
+**Hub-residual gap (round 9) — client cannot fully heal the dossier.**
+`trustedTerminal` guards only the LOCAL cache. A pre-guard truncated recap already
+pushed to the Hub `fan_profiles` dossier — which the kernel injects into OTHER
+features' prompts (core #136) — stays the Hub's latest version regardless of local
+invalidation. Client-side mitigation shipped here: the opportunistic Hub re-push
+(`retrySummaryHubSync`) refuses an untrusted entry, and a fresh trusted
+regeneration's own sync path overwrites the Hub copy — so the self-heal story is
+"regenerate → auto re-push." RESIDUAL: a fan whose recap is never re-run
+(`coachAutoRecap: 'off'` and never manually triggered) keeps a stale Hub dossier
+indefinitely. The client cannot reach into the Hub to delete or quarantine it, so
+this residual risk is accepted and OWNED here in the decision log: the structural
+fix belongs to core #136's dossier rework (Hub-side provenance / trusted-terminal
++ kernel-side filtering of un-provenanced dossiers), and until that lands the
+exposure is one possibly-truncated dossier per never-re-run fan feeding other
+prompts — bounded, low, and self-healing on the next recap. (A working note also
+sits in the repo's `.agentic/` scratch backlog, but THIS entry is the source of
+truth.)

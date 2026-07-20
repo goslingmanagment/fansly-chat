@@ -1657,4 +1657,24 @@ describe('ChatGooseContentApp', () => {
     expect(app.suppressedTerminalOpIds.size).toBe(0);
     expect(app.deepOverlayModel).toBeNull();
   });
+
+  it('builds a read-only completed overlay model for a coach completion, not an error', async () => {
+    // Round-9 P2: buildCompletedOverlayModel must have a coach-chat case. Without
+    // it, coach falls through to the reply path (resultPartTexts→[]) and renders a
+    // bogus ai_output_unusable error, discarding the advice. On the full stack a
+    // coach completion is intercepted earlier; this keeps slice 1 correct anyway.
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    const advice = 'Open with a question about her weekend, then bridge to the PPV.';
+    const model = app.buildCompletedOverlayModel('coach-chat', 'coach-op', 'alice', {
+      rawText: advice,
+    });
+
+    expect(model.kind).toBe('readOnly');
+    expect(model.feature).toBe('coach-chat');
+    expect(model.rawText).toBe(advice);
+    // The advice is surfaced, NOT swallowed into an unusable-output error.
+    expect(model.error).toBeUndefined();
+  });
 });

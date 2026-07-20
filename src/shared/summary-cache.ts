@@ -91,6 +91,12 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
   if (typeof record.fanAccountId === 'string' || record.fanAccountId === null) {
     entry.fanAccountId = record.fanAccountId;
   }
+  // Preserve the trusted-terminal marker so entries written behind the
+  // fail-closed guards keep it through collect/migration; a legacy entry simply
+  // lacks it (structurally still valid — it fails the HIT gate lazily below).
+  if (record.trustedTerminal === true) {
+    entry.trustedTerminal = true;
+  }
 
   const agencyHubSync = normalizeSummarySyncMetadata(record.agencyHubSync);
   if (agencyHubSync) {
@@ -280,7 +286,12 @@ export function isValidSummaryCacheEntry(
     entry.personaCatalogSource === personaCatalogSource &&
     (entry.modelId ?? null) === (modelId ?? null) &&
     entry.spendingDataVerified === true &&
-    entry.subscriptionLookupVerified === true
+    entry.subscriptionLookupVerified === true &&
+    // A cache hit requires proof the recap was a complete, trusted generation.
+    // Entries cached before the exhaustion+empty fail-closed guards (including a
+    // pre-v15 truncated recap) lack this marker and are treated as a MISS, so a
+    // truncated recap can never be served or Hub-pushed again — it regenerates.
+    entry.trustedTerminal === true
   );
 }
 

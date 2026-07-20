@@ -18,6 +18,7 @@ import {
   STREAM_CHUNK_FLUSH_MS,
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../shared/constants.js';
+import { isOutputExhausted } from '@kernel/sdk';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
   aggregateMonthlyEarnings,
@@ -322,7 +323,13 @@ function usesDeepOperationTimeouts(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
 
-function buildFeatureResult(
+/** A deep-timeout feature whose PREP stage is capped at the quick budget (coach:
+ * a small quick window ⇒ no 360s prep budget, while its STREAM stays deep). */
+function usesQuickPrepBudget(feature: FeatureType): boolean {
+  return getFeaturePolicy(feature).prepTimeoutBucket === 'quick';
+}
+
+export function buildFeatureResult(
   feature: FeatureType,
   rawText: string,
   replyMode?: OperationStartPayload['replyMode'],
@@ -332,6 +339,11 @@ function buildFeatureResult(
       return { rawText, helpMe: parseHelpMeXml(rawText) };
     case 'chat-review':
       return { rawText, chatReview: parseChatReviewXml(rawText) };
+    // Coach streams free-form advice; the raw text is the result — no XML
+    // sections, no reply-part splitting. Draft cards (if any) arrive on the
+    // wire via result.parts, handled by the overlay, not synthesized here.
+    case 'coach-chat':
+      return { rawText };
     case 'single-reply':
       return {
         rawText,
@@ -755,6 +767,18 @@ export class OperationCoordinator {
     }
     const cached = await this.storageCoordinator.getSummaryCache(groupId);
     if (!cached) {
+      return;
+    }
+    // Round-9 P1: never re-push an UNTRUSTED cached recap to the Hub. A recap
+    // cached before fan-summary was exhaustion-guarded (possibly truncated) lacks
+    // `trustedTerminal`; trustedTerminal already makes it a local cache MISS, but
+    // this opportunistic re-push must ALSO refuse it so a stale/truncated body is
+    // never (re)written to the fan_profiles dossier the kernel injects into other
+    // prompts. It self-heals only via a fresh trusted regeneration, whose own
+    // sync path overwrites the Hub copy. (The caller already gates on
+    // hasAvailableSummary, which is false for untrusted entries — this is the
+    // explicit local invariant.)
+    if (cached.trustedTerminal !== true) {
       return;
     }
     const baseUrl = normalizeAgencyHubBaseUrl(storage.settings.agencyHubBaseUrl);
@@ -1427,11 +1451,23 @@ export class OperationCoordinator {
         reservedSummaryCommitToken,
       );
     }
+    // P1-1: capture the tab's route identity BEFORE validateStart's awaits. A
+    // route-change to another chat during those awaits advances the context but
+    // only cancels an ACTIVE op — this reserved-but-not-yet-active start survives,
+    // and its setRoute below would roll the context back onto the abandoned chat
+    // (then its setFan would pass the same-group guard). validateStart's own URL
+    // check misses this because the tab.url can still lag the routeChanged message.
+    const startRouteNonce = this.tabContexts.getOrCreate(tabId).routeNonce;
     let timeoutController: OperationTimeoutController<OperationTimeoutKey> | null = null;
     let controller: AbortController | null = null;
     let debugEnabled = false;
     try {
       const validated = await this.validateStart(tabId, payload);
+      // Stale start: the route advanced while we validated. Die with chat_changed
+      // and never re-touch the tab context (no setRoute/activate/setFan).
+      if (this.tabContexts.getOrCreate(tabId).routeNonce !== startRouteNonce) {
+        throw new ChatGooseError('chat_changed');
+      }
       debugEnabled = validated.storage.settings.debugMode;
       const profiler = createOperationProfiler(debugEnabled);
       const operationTimeoutController = new OperationTimeoutController<OperationTimeoutKey>();
@@ -1466,7 +1502,13 @@ export class OperationCoordinator {
         operationTimeoutController.clear('llm-max-stream');
       };
       if (usesDeepOperationTimeouts(payload.feature)) {
-        operationTimeoutController.arm('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
+        // The PREP budget is split from the STREAM budget (P2-6): coach paginates a
+        // small quick window, so it gets the quick prep ceiling even though its
+        // stream timeouts below stay deep. deep-prep is cleared on stream start.
+        const prepBudget = usesQuickPrepBudget(payload.feature)
+          ? QUICK_OPERATION_TIMEOUT_MS
+          : DEEP_OPERATION_TIMEOUTS.prep;
+        operationTimeoutController.arm('deep-prep', prepBudget);
       } else {
         operationTimeoutController.arm('quick-total', QUICK_OPERATION_TIMEOUT_MS);
       }
@@ -2034,6 +2076,12 @@ export class OperationCoordinator {
             `resolved ${fanDisplayName}`,
           );
         } catch (error) {
+          // Belt-and-braces (conversation-context-loader pattern): if the lookup
+          // was aborted by a route-change cancel, re-throw so this op unwinds
+          // instead of falling through to write a now-stale fan.
+          if (signal.aborted) {
+            throw error;
+          }
           const failureCode = errorCode(error);
           failStage(
             'account-name-lookup',
@@ -2053,7 +2101,9 @@ export class OperationCoordinator {
         );
       }
 
-      this.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
+      // Pass THIS op's groupId; the store no-ops if the context has moved on (the
+      // structural stale-fan guard).
+      this.tabContexts.setFan(tabId, validated.urlGroupId, fanAccountId, fanDisplayName);
       sendOperationProgress({
         phase: 'generating',
         message: 'Generating…',
@@ -2627,10 +2677,28 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
-      if (
-        latestLlmStopReason === 'max_tokens' &&
-        getFeaturePolicy(payload.feature).promptMode === 'reply'
-      ) {
+      // Output-exhaustion fail-closed (spec §8, CLAUDE.md family law): a provider
+      // hitting its token ceiling (normalized cross-provider by isOutputExhausted:
+      // kernel 'max_tokens' + OpenRouter 'length') makes the generation
+      // non-committable for EVERY feature — "a truncated stream is an error, never
+      // presented as a result", with NO exceptions. Applies before buildFeatureResult,
+      // so a truncated help-me/chat-review can't slip through as a valid: false
+      // XML fallback either. This is the universal guard; do not re-narrow it to a
+      // feature/promptMode list — the rule is unconditional.
+      if (isOutputExhausted(latestLlmStopReason)) {
+        throw new ChatGooseError('ai_output_unusable');
+      }
+
+      // Empty / whitespace-only output fails closed for EVERY feature, symmetric
+      // to the exhaustion guard above — a meta→done stream with no content, or a
+      // whitespace end_turn answer, is not a usable result. This is unconditional:
+      // help-me/chat-review's parseHelpMeXml('')/parseChatReviewXml('') return
+      // valid:false (they do NOT throw), and assertInsertableFeatureResult only
+      // guards reply kinds, so an empty analysis result would otherwise reach
+      // operation:complete and render an empty card as success. Sits before the
+      // result build and the summary-cache write, so nothing empty is ever
+      // presented or cached. Do not re-narrow to a feature list.
+      if (!rawText.trim()) {
         throw new ChatGooseError('ai_output_unusable');
       }
 
@@ -2691,6 +2759,11 @@ export class OperationCoordinator {
             modelId: resolvedModel,
             fanAccountId,
             agencyHubSync: initialSyncStatus,
+            // This write sits behind the exhaustion + empty-output guards, so the
+            // recap is a complete, trusted generation. The marker is what a later
+            // cache hit requires (isValidSummaryCacheEntry) — a pre-guard entry
+            // lacks it and regenerates instead of serving a truncated recap.
+            trustedTerminal: true,
             },
             (state) => this.isLatestSummaryCommit(
               validated.urlGroupId,

@@ -18,6 +18,8 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
     },
     personalities: [],
     personaCatalog: [],

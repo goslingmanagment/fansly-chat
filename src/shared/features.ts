@@ -13,11 +13,18 @@ export type FeatureResultKind =
   | 'single-reply'
   | 'help-me'
   | 'summary'
-  | 'chat-review';
+  | 'chat-review'
+  | 'coach-chat';
 
 export interface FeaturePolicy {
   messageCountBucket: FeatureMessageCountBucket;
   timeoutBucket: FeatureTimeoutBucket;
+  /** PREP-stage (live-read pagination) budget, split from `timeoutBucket` which
+   * sizes the STREAM. Only meaningful for deep-timeout features. 'quick' caps prep
+   * at QUICK_OPERATION_TIMEOUT_MS (coach reads a small quick window — ~4 pages —
+   * so it needs no 360s prep budget); absent/'deep' keeps the deep prep budget
+   * (fan-summary/chat-review paginate the full deep window). */
+  prepTimeoutBucket?: FeatureTimeoutBucket;
   modelFeature: ModelSelectableFeatureType;
   surfaceKind: FeatureSurfaceKind;
   promptMode: FeaturePromptMode;
@@ -114,6 +121,31 @@ export const FEATURE_POLICIES = {
     requiresDraft: false,
     usesPingSegment: false,
     includesEarnings: false,
+  },
+  'coach-chat': {
+    // The two buckets are deliberately SPLIT. Message count stays 'quick' (coach
+    // reads a small live window, no deep pagination or MIN_MESSAGES_FOR_DEEP
+    // gate), but the TIMEOUT bucket is 'deep': a coach answer is free-form advice
+    // capped at COACH_ANSWER_MAX_CHARS (64 000 chars), so the quick 60s TOTAL
+    // budget (QUICK_OPERATION_TIMEOUT_MS) would abort a long stream mid-answer
+    // and — per the fail-closed rule — cost the chatter the whole generation plus
+    // the spend. 'deep' timeouts give it TTFB + idle + max-stream budgets sized
+    // for a long SSE stream instead of one 60s total ceiling.
+    messageCountBucket: 'quick',
+    timeoutBucket: 'deep',
+    // Coach reads only the quick window (~4 pages), so its PREP budget is 'quick'
+    // (60s) even though its STREAM budget is 'deep' (a 64k-char answer). Without
+    // this it inherited the 360s deep-prep budget — a hung Fansly read during Coach
+    // would freeze the chatter for 6 minutes vs 60s for any other quick-window feature.
+    prepTimeoutBucket: 'quick',
+    modelFeature: 'coach-chat',
+    surfaceKind: 'overlay',
+    promptMode: 'analysis',
+    resultKind: 'coach-chat',
+    supportsReplyMode: false,
+    supportsReplyTone: false,
+    requiresDraft: false,
+    usesPingSegment: false,
   },
 } as const satisfies Record<FeatureType, FeaturePolicy>;
 

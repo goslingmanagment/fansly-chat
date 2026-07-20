@@ -2,6 +2,7 @@ import {
   QUICK_OPERATION_TIMEOUT_MS,
   STREAM_CHUNK_FLUSH_MS,
 } from '../shared/constants.js';
+import { isOutputExhausted } from '@kernel/sdk';
 import {
   resolveCompareModelCards,
   resolveMappedPersonalityId,
@@ -440,11 +441,19 @@ export async function executeCompare(
     });
     return;
   }
+  // P1-1 (same shape as startOperation): a route-change during validate's awaits
+  // advances the context but doesn't cancel this reserved-but-not-active start;
+  // its setRoute below would roll the context back onto the abandoned chat.
+  const startRouteNonce = context.tabContexts.getOrCreate(tabId).routeNonce;
   let timeoutController: OperationTimeoutController<'quick-total'> | null = null;
   let controller: AbortController | null = null;
   let debugEnabled = false;
   try {
     const validated = await validateCompareStart(context, tabId, payload);
+    // Stale start: die with chat_changed, never re-touch the tab context.
+    if (context.tabContexts.getOrCreate(tabId).routeNonce !== startRouteNonce) {
+      throw new ChatGooseError('chat_changed');
+    }
     debugEnabled = validated.storage.settings.debugMode;
     const profiler = createOperationProfiler(debugEnabled);
     const compareTimeoutController = new OperationTimeoutController<'quick-total'>();
@@ -785,6 +794,11 @@ export async function executeCompare(
           { fanDisplayName },
         );
       } catch (error) {
+        // Belt-and-braces (conversation-context-loader pattern): a route-change
+        // abort must unwind this op, not fall through to write a stale fan.
+        if (signal.aborted) {
+          throw error;
+        }
         const failureCode = errorCode(error);
         failStage(
           'account-name-lookup',
@@ -804,7 +818,8 @@ export async function executeCompare(
       );
     }
 
-    context.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
+    // Pass THIS op's groupId; the store no-ops if the context has moved on.
+    context.tabContexts.setFan(tabId, validated.urlGroupId, fanAccountId, fanDisplayName);
     sendCompareOperationProgress({
       phase: 'loading-earnings',
       message: 'Loading fan context…',
@@ -1209,7 +1224,11 @@ export async function executeCompare(
       }
 
       const parts = normalizeReplyParts(rawText);
-      if (latestStopReason === 'max_tokens' || parts.length === 0) {
+      // Fail closed on a truncated card (spec §8): isOutputExhausted normalizes
+      // BOTH the kernel 'max_tokens' and OpenRouter's provider 'length' stop
+      // reasons — the literal 'max_tokens' check missed 'length'. A compare card
+      // is a reply, so any output exhaustion makes it non-insertable.
+      if (isOutputExhausted(latestStopReason) || parts.length === 0) {
         const profiling = buildCompareCardProfilingSnapshot(profiler, cardUsage);
         sendCompareCardError(
           context,
