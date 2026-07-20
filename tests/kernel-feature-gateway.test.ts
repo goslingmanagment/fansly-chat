@@ -128,11 +128,20 @@ describe('kernel feature gateway', () => {
 
   it('threads the coach body fields: fanRef, chatterQuestion, coachHistory, transcriptCoverage', async () => {
     const calls: Array<{ init: RequestInit | undefined }> = [];
+    const attachedRecaps = {
+      full: { generatedAt: '2026-07-19T12:00:00.000Z', ageMs: 60_000 },
+      short: null,
+    };
     const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
       calls.push({ init });
-      return sseResponse([META, { type: 'content_delta', text: 'ok' }, { type: 'done', stopReason: 'end_turn' }]);
+      return sseResponse([
+        { ...META, feature: 'coach-chat', attachedRecaps },
+        { type: 'content_delta', text: 'ok' },
+        { type: 'done', stopReason: 'end_turn' },
+      ]);
     });
     const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    const metas: unknown[] = [];
     await gateway.streamFeature(settings(), request({
       feature: 'coach-chat',
       conversationRef: 'group-1',
@@ -147,7 +156,10 @@ describe('kernel feature gateway', () => {
         fanSubscriptionData: '',
         transcriptCoverage: 'full-history',
       },
-    }), { onText: () => {} }, new AbortController().signal);
+    }), {
+      onText: () => {},
+      onMeta: (meta) => metas.push(meta),
+    }, new AbortController().signal);
 
     const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
     expect(body).toMatchObject({
@@ -159,6 +171,7 @@ describe('kernel feature gateway', () => {
     });
     // summaryMode is coach-irrelevant and must not leak onto a coach body.
     expect(body).not.toHaveProperty('summaryMode');
+    expect(metas).toEqual([expect.objectContaining({ attachedRecaps })]);
   });
 
   it('sends summaryMode only for a short recap; a full recap omits it', async () => {
@@ -182,7 +195,7 @@ describe('kernel feature gateway', () => {
     expect(await bodyFor(undefined)).not.toHaveProperty('summaryMode');
   });
 
-  it('maps a structured unknown_ai_feature 404 to coach_requires_newer_hub, not a bare 404', async () => {
+  it('maps real pre-Coach validation and structured unknown-feature errors to newer Hub', async () => {
     const failWith = async (payload: object, status: number): Promise<ChatGooseError> => {
       const fetchMock = vi.fn(async () =>
         new Response(JSON.stringify(payload), {
@@ -202,9 +215,24 @@ describe('kernel feature gateway', () => {
     const gated = await failWith({ error: 'unknown_ai_feature', message: 'feature not found', statusCode: 404 }, 404);
     expect(gated.key).toBe('coach_requires_newer_hub');
     expect(gated.code).toBe('CG-HUB-11');
+    // A real pre-Coach Core rejects the new strict body before feature dispatch,
+    // so its response is Fastify's generic validation 400, not the later 404.
+    const legacyValidation = await failWith({
+      error: 'Bad Request',
+      message: 'body/clientContext Unrecognized key: "transcriptCoverage", body/ Unrecognized keys: "chatterQuestion", "coachHistory"',
+      statusCode: 400,
+    }, 400);
+    expect(legacyValidation.key).toBe('coach_requires_newer_hub');
     // A generic 404 (missing/unauthorized page) must NOT be relabelled.
     const generic = await failWith({ error: 'not_found', message: 'no such page', statusCode: 404 }, 404);
     expect(generic.key).toBe('hub_request_failed');
+    // Nor may an unrelated current-Hub Coach validation error be relabelled.
+    const currentValidation = await failWith({
+      error: 'Bad Request',
+      message: 'body/clientContext/messageCount Invalid input: expected int',
+      statusCode: 400,
+    }, 400);
+    expect(currentValidation.key).toBe('hub_request_failed');
   });
 
   it('maps kernel product-gate wordings onto the extension error keys', async () => {
@@ -314,6 +342,30 @@ describe('kernel feature gateway', () => {
     expect(error.details?.responseSnippet).toBe(
       'provider_stream_failed: AI gateway provider stream failed',
     );
+  });
+
+  it('maps provider_output_empty to ai_output_unusable, not an infrastructure failure', async () => {
+    const gateway = createKernelFeatureGateway(vi.fn(async () => sseResponse([
+      META,
+      {
+        type: 'error',
+        code: 'provider_output_empty',
+        message: 'AI provider returned no usable output',
+        retryAfterMs: null,
+      },
+    ])) as unknown as typeof fetch);
+
+    await expect(gateway.streamFeature(
+      settings(),
+      request(),
+      { onText: () => {} },
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      key: 'ai_output_unusable',
+      details: {
+        responseSnippet: 'provider_output_empty: AI provider returned no usable output',
+      },
+    });
   });
 
   it('maps an unknown error frame code to hub_request_failed, still carrying the detail', async () => {

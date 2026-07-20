@@ -360,10 +360,11 @@ future kernel hybrid — not worth its cost now).
 - Model/reasoning policy for `coach-chat` set in core's feature policy tables
   (kernel-owned model selection; the extension gets NO model configuration — Options
   has none today and this feature adds none).
-- Compat: only a **structured `unknown_ai_feature` error** maps to «Coach requires a
-  newer Agency Hub» (a generic 404 may mean an unauthorized/missing page and must not
-  be mislabeled). Compatibility tests: new-client/old-core, old-client/new-core, and
-  rollback-after-extension-release.
+- Compat: a **structured `unknown_ai_feature` error**, or the exact strict-body 400
+  shape returned by a pre-Coach Hub for the new Coach fields, maps to «Coach requires
+  a newer Agency Hub». Generic 400/404 responses may mean a current validation error
+  or an unauthorized/missing page and must not be mislabeled. Compatibility tests:
+  new-client/old-core, old-client/new-core, and rollback-after-extension-release.
 
 ## 8. Errors and fail-closed rules
 

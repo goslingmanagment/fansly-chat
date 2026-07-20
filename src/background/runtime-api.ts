@@ -416,7 +416,9 @@ export function registerRuntimeApi({
         const record = message as unknown as {
           groupId: string;
           fanAccountId: string | null;
+          personaDefinitionId: string;
         };
+        const personaDefinitionId = record.personaDefinitionId.trim();
         // Coerce an empty/whitespace fanAccountId to null so '' takes the same
         // honest cold path as a missing fan — otherwise '' is a falsy fanRef the
         // client silently drops, leaving a groupId-only query that FALSELY confirms
@@ -480,6 +482,7 @@ export function registerRuntimeApi({
               // Canonical identity (§5): conversationRef = groupId, fanRef = fan.
               conversationRef: record.groupId,
               fanRef: resolvedFanRef,
+              personaDefinitionId,
             },
             controller.signal,
           );

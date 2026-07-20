@@ -430,40 +430,47 @@ export function collectUnverifiedPpvAttachmentRequests(
   const requests: PpvAttachmentRequest[] = [];
   const seen = new Set<string>();
 
-  for (const page of pages) {
-    for (const message of page.messages ?? []) {
-      for (const attachment of message.attachments ?? []) {
-        const contentId = attachment.contentId;
-        if (!contentId) {
+  // Page order is intentionally not trusted here. Normal loads are newest-page
+  // first, while the Coach cache is oldest-page first so fresh page maps can win
+  // during normalization. Rank candidate messages explicitly so the fixed
+  // verification budget always goes to the newest PPV attachments without
+  // reversing `pages` (which would break that map precedence).
+  const messagesNewestFirst = pages
+    .flatMap((page) => page.messages ?? [])
+    .sort((left, right) => compareMessageIds(right.id, left.id));
+
+  for (const message of messagesNewestFirst) {
+    for (const attachment of message.attachments ?? []) {
+      const contentId = attachment.contentId;
+      if (!contentId) {
+        continue;
+      }
+
+      if (attachment.contentType === ATTACHMENT_CONTENT_TYPE_MEDIA) {
+        const media = mediaMap.get(contentId);
+        if (media && findPpvPermission(media)) {
+          pushUniquePpvRequest(requests, seen, evidence, 'single', contentId);
+        }
+        continue;
+      }
+
+      if (attachment.contentType === ATTACHMENT_CONTENT_TYPE_BUNDLE) {
+        const bundle = bundleMap.get(contentId);
+        if (bundle && findPpvPermission(bundle)) {
+          pushUniquePpvRequest(requests, seen, evidence, 'bundle', contentId);
+        }
+        continue;
+      }
+
+      if (attachment.contentType === undefined) {
+        const bundle = bundleMap.get(contentId);
+        if (bundle && findPpvPermission(bundle)) {
+          pushUniquePpvRequest(requests, seen, evidence, 'bundle', contentId);
           continue;
         }
-
-        if (attachment.contentType === ATTACHMENT_CONTENT_TYPE_MEDIA) {
-          const media = mediaMap.get(contentId);
-          if (media && findPpvPermission(media)) {
-            pushUniquePpvRequest(requests, seen, evidence, 'single', contentId);
-          }
-          continue;
-        }
-
-        if (attachment.contentType === ATTACHMENT_CONTENT_TYPE_BUNDLE) {
-          const bundle = bundleMap.get(contentId);
-          if (bundle && findPpvPermission(bundle)) {
-            pushUniquePpvRequest(requests, seen, evidence, 'bundle', contentId);
-          }
-          continue;
-        }
-
-        if (attachment.contentType === undefined) {
-          const bundle = bundleMap.get(contentId);
-          if (bundle && findPpvPermission(bundle)) {
-            pushUniquePpvRequest(requests, seen, evidence, 'bundle', contentId);
-            continue;
-          }
-          const media = mediaMap.get(contentId);
-          if (media && findPpvPermission(media)) {
-            pushUniquePpvRequest(requests, seen, evidence, 'single', contentId);
-          }
+        const media = mediaMap.get(contentId);
+        if (media && findPpvPermission(media)) {
+          pushUniquePpvRequest(requests, seen, evidence, 'single', contentId);
         }
       }
     }

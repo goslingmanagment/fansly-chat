@@ -152,6 +152,29 @@ describe('CoachTranscriptCache — refresh overlap-and-replace', () => {
     expect(loadPage).toHaveBeenCalledTimes(1);
   });
 
+  it('bounds the stored rolling window and drops full-history coverage after eviction', async () => {
+    const cache = new CoachTranscriptCache();
+    const parts = key({ quickMessageCount: 3 });
+    await cache.getOrSeed(
+      parts,
+      fullWindow([makePage([3, 2, 1])], true),
+    );
+
+    const result = await cache.refresh(
+      parts,
+      async (): Promise<CoachTranscriptPageResult> => ({
+        page: makePage([5, 4, 3]),
+        reachedEnd: false,
+      }),
+    );
+
+    expect(result.status).toBe('refreshed');
+    if (result.status !== 'refreshed') return;
+    expect(normalizedIds(result.window)).toEqual(['3', '4', '5']);
+    expect(result.window.reachedEnd).toBe(false);
+    expect(normalizedIds(cache.peek(parts)!)).toEqual(['3', '4', '5']);
+  });
+
   it('keeps confirmed full-history coverage when the fresh region re-covers the whole cache', async () => {
     const cache = new CoachTranscriptCache();
     await cache.getOrSeed(

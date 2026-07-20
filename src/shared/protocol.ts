@@ -377,11 +377,15 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         : null;
     case 'getRecapStatus':
       // groupId must be a non-empty conversation id; an empty groupId is a
-      // meaningless recap-status query. fanAccountId stays nullable — the handler
-      // trims it and treats an empty string as null (the honest cold path).
+      // meaningless recap-status query. The exact current persona definition is
+      // required so Core cannot report another persona's recap as usable.
+      // fanAccountId stays nullable — the handler trims it and treats an empty
+      // string as null (the honest cold path).
       return isString(message.groupId) &&
         message.groupId.trim().length > 0 &&
-        isNullableString(message.fanAccountId)
+        isNullableString(message.fanAccountId) &&
+        isString(message.personaDefinitionId) &&
+        message.personaDefinitionId.trim().length > 0
         ? 'getRecapStatus'
         : null;
     default:

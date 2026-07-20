@@ -261,43 +261,22 @@ function freshestSlotAgeMs(status: RecapStatusResponse | null): number | null {
   return ages.length > 0 ? Math.min(...ages) : null;
 }
 
-/** Auto-recap failure taxonomy (spec §5). A recap step that fails STOPS the
- * chain (question preserved in the composer) for the ENUMERATED categories —
- * user cancel / route change (both handled structurally), auth/credential/setup
- * failure, global quota exhaustion, and transcript-acquisition failure. Every
- * OTHER recap failure is a "recap-specific model failure or feature ceiling" and
- * PROCEEDS to the coach turn with the older/no recap (the default). The
- * extension cannot distinguish a per-feature ceiling from global quota (both are
- * `hub_quota_exceeded`), so quota is treated as the safe STOP branch. */
-const RECAP_CHAIN_STOP_KEYS: ReadonlySet<UserErrorKey> = new Set<UserErrorKey>([
-  // Auth / credential / setup — the coach turn cannot generate either.
-  'not_connected',
-  'session_expired',
-  'missing_api_key',
-  'invalid_api_key',
-  'hub_missing_api_key',
-  'hub_invalid_api_key',
-  'hub_missing_permission',
-  'hub_invalid_url',
-  'no_mapping',
-  'no_personalities',
-  'hub_page_match_failed',
-  'coach_fan_unresolved',
-  'coach_requires_newer_hub',
-  // Global quota exhaustion.
-  'hub_quota_exceeded',
-  // Transcript-acquisition failure (Fansly-side / network during pagination).
-  'fansly_server_error',
-  'network_error',
-  'timed_out',
-  // Context / route boundary.
-  'chat_changed',
-  'another_operation',
-  'extension_reloaded',
+/** Auto-recap failure taxonomy (spec §5). Only known recap-specific output or
+ * history ceilings may continue to Coach. Everything else — including new or
+ * infrastructure errors — stops and preserves the question. */
+const RECAP_CHAIN_PROCEED_KEYS: ReadonlySet<UserErrorKey> = new Set<UserErrorKey>([
+  'ai_output_unusable',
+  'not_enough_history',
 ]);
 
 function classifyRecapChainFailure(errorKey: string): 'stop' | 'proceed' {
-  return RECAP_CHAIN_STOP_KEYS.has(errorKey as UserErrorKey) ? 'stop' : 'proceed';
+  return RECAP_CHAIN_PROCEED_KEYS.has(errorKey as UserErrorKey) ? 'proceed' : 'stop';
+}
+
+function restoreCoachComposerText(session: CoachSession, question: string): void {
+  if (session.composerText === '') {
+    session.composerText = question;
+  }
 }
 
 /** The topbar auto-recap override cycle order (spec §5 per-session control). */
@@ -392,6 +371,11 @@ export class ChatGooseContentApp {
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
   // await (the auto-recap decision needs live settings before arming anything).
   private coachSubmitInFlight = false;
+  // Opening Coach and successful recap steps start metadata reads without
+  // blocking normal Coach turns. Only a still-unconsumed first auto-recap
+  // decision awaits the latest read, so stale status cannot trigger duplicate
+  // generation while fresher metadata is in flight.
+  private coachRecapStatusRead: { session: CoachSession; promise: Promise<void> } | null = null;
   // The summaryMode of the ACTIVE fan-summary op (standalone recap /
   // «Открыть последний»), or null for a plain full run. A 'short' result must
   // never enter the full summary availability/overlay caches (P2-short-cache).
@@ -566,9 +550,18 @@ export class ChatGooseContentApp {
         this.renderAll();
         return;
       }
+      // Draft Insert closes the Coach overlay even when another turn is
+      // streaming. Cancel/suppress that live turn before collapsing so its paid
+      // terminal cannot be orphaned and leave the session permanently pending.
+      if (this.activeFeature === 'coach-chat') {
+        this.cancelCoachTurn();
+        this.closeCoach();
+        this.renderAll();
+        return;
+      }
       // Idle coach close (Esc/backdrop while not streaming): retain the session
       // in the store for reopen (spec §3), just drop the overlay.
-      if (this.coachOverlayModel && this.activeFeature !== 'coach-chat') {
+      if (this.coachOverlayModel) {
         this.closeCoach();
         this.renderAll();
         return;
@@ -806,10 +799,23 @@ export class ChatGooseContentApp {
     if (!groupId || !picker) {
       return;
     }
+    const personaDefinitionId = this.tabState?.mappedPersonaDefinitionId?.trim();
+    if (!personaDefinitionId) {
+      // No mapped definition means there is no safe persona scope for the Hub
+      // read. Do not issue an unscoped query that could confirm another
+      // persona's recap; keep the picker in its honest unavailable state.
+      this.recapPickerModel = {
+        ...picker,
+        recapStatus: { state: 'unavailable', full: null, short: null },
+      };
+      this.renderSurfaces();
+      return;
+    }
     try {
       const status = await sendRuntimeRequest('getRecapStatus', {
         groupId,
         fanAccountId: null,
+        personaDefinitionId,
       });
       if (!isRecapStatusResponse(status) || this.recapPickerModel !== picker) {
         return;
@@ -863,7 +869,7 @@ export class ChatGooseContentApp {
     this.closeRecapPicker();
     let mode: 'short' | 'full';
     let fallback: 'short' | 'full' | null;
-    if (status) {
+    if (status && status.state !== 'unavailable') {
       const picked = pickFreshestSlotMode(status);
       if (picked === null) {
         // Status is loaded and empty — no round-trip needed, just toast.
@@ -875,9 +881,8 @@ export class ChatGooseContentApp {
       fallback =
         picked === 'full' ? (status.short ? 'short' : null) : (status.full ? 'full' : null);
     } else {
-      // Status unknown (read pending/failed): let the background be the source of
-      // truth — try the durable full recap first, then the short (a real miss on
-      // both 404s to a toast).
+      // Status unknown/unavailable: let the local cache be the source of truth —
+      // try the durable full recap first, then short (two real misses toast).
       mode = 'full';
       fallback = 'short';
     }
@@ -1850,7 +1855,8 @@ export class ChatGooseContentApp {
     this.renderAll();
     // Recap-status read (spec §5): async, best-effort — it must never block or
     // break opening; null slots are fine.
-    void this.refreshCoachRecapStatus(session);
+    const promise = this.refreshCoachRecapStatus(session);
+    this.coachRecapStatusRead = { session, promise };
   }
 
   /** Drop the coach overlay while RETAINING the store session for reopen (spec
@@ -1900,13 +1906,25 @@ export class ChatGooseContentApp {
     let settings;
     try {
       ({ settings } = await loadStorageState());
+      const effectiveMode = resolveEffectiveAutoRecap(
+        session.autoRecapOverride,
+        settings.coachAutoRecap,
+      );
+      const statusRead = this.coachRecapStatusRead;
+      if (
+        !session.autoRecapAttempted &&
+        effectiveMode !== 'off' &&
+        statusRead?.session === session
+      ) {
+        await statusRead.promise;
+      }
     } catch {
       // The settings read failed AFTER the renderer already cleared the composer
       // (it emits onCoachComposerInput('') before onCoachSubmit). Nothing was
       // armed yet — settings are read first — so restore the question into the
       // composer so it is not silently lost, and tell the user to retry.
+      restoreCoachComposerText(session, trimmed);
       if (this.activeCoachSession === session) {
-        session.composerText = trimmed;
         this.rebuildCoachModel();
         this.renderAll();
       }
@@ -1917,11 +1935,15 @@ export class ChatGooseContentApp {
     }
     // A route/persona change during the await tore the session/route down.
     if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
+      restoreCoachComposerText(session, trimmed);
       return;
     }
     // Defensive re-check: the in-flight guard blocked re-entrant submits, but a
     // terminal elsewhere could conceivably have armed an op during the await.
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
+      restoreCoachComposerText(session, trimmed);
+      this.rebuildCoachModel();
+      this.renderAll();
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
@@ -1961,8 +1983,6 @@ export class ChatGooseContentApp {
     this.lastFeature = 'coach-chat';
     this.coachStore.beginPending(session, trimmed, operationId);
     this.coachPendingAnswerText = '';
-    // Carry-forward 7: submit clears the composer (the renderer also emits '').
-    session.composerText = '';
     this.rebuildCoachModel();
     this.renderAll();
 
@@ -1988,6 +2008,7 @@ export class ChatGooseContentApp {
       // terminal will arrive. The turn never started — clearPending (not a
       // failed-attempt) and ask the user to retry.
       this.coachStore.clearPending(session);
+      restoreCoachComposerText(session, trimmed);
       this.clearCoachOperationState();
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.rebuildCoachModel();
@@ -2130,12 +2151,17 @@ export class ChatGooseContentApp {
       return;
     }
     chain.step.status = 'done';
+    // A successful explicit refresh satisfies this session's one automatic
+    // recap opportunity even if the following metadata GET is unavailable.
+    // Otherwise an immediate first question can pay for the same recap twice.
+    chain.session.autoRecapAttempted = true;
     this.coachRecapChain = null;
     this.clearCoachOperationState();
     if (chain.session === this.activeCoachSession) {
       // The freshly generated recap changes the status slots — refresh them so a
       // later decision (and the status line) reflect it.
-      void this.refreshCoachRecapStatus(chain.session);
+      const promise = this.refreshCoachRecapStatus(chain.session);
+      this.coachRecapStatusRead = { session: chain.session, promise };
     }
     this.rebuildCoachModel();
     this.renderAll();
@@ -2418,6 +2444,7 @@ export class ChatGooseContentApp {
         composerText: session.composerText,
         composerEnabled: !busy,
         autoRecapOverride: session.autoRecapOverride,
+        groupId: this.currentGroupId ?? '',
         // (creator account, group) identity — a change swaps the whole feed.
         // Coach is context-bound and closes on route/persona change, so the
         // current tab identity always matches the open session's key.
@@ -2434,12 +2461,22 @@ export class ChatGooseContentApp {
     if (!groupId) {
       return;
     }
+    const personaDefinitionId = this.tabState?.mappedPersonaDefinitionId?.trim();
+    if (!personaDefinitionId) {
+      if (this.activeCoachSession === session) {
+        session.recapStatus = { state: 'unavailable', full: null, short: null };
+        this.rebuildCoachModel();
+        this.renderSurfaces();
+      }
+      return;
+    }
     try {
       const status = await sendRuntimeRequest('getRecapStatus', {
         groupId,
         // The background resolves the fan for the canonical fanRef (§5); content
         // has no reliable fan account id, so it sends null.
         fanAccountId: null,
+        personaDefinitionId,
       });
       if (!isRecapStatusResponse(status) || this.activeCoachSession !== session) {
         return;

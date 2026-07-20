@@ -146,6 +146,32 @@ function mergeOverlap(
   return [...retainedPages, ...toOldestFirst(freshPagesNewestFirst)];
 }
 
+/** Keep the raw cache itself bounded, not only the transcript sent to Core.
+ * Pages stay oldest-first and messages keep their provider order, so the
+ * existing fresh-wins page-map behavior is unchanged. Once an oldest row is
+ * evicted the cached window no longer proves full-history coverage. */
+function trimWindow(
+  window: CoachTranscriptWindow,
+  maxMessages: number,
+): CoachTranscriptWindow {
+  const limit = Math.max(0, Math.floor(maxMessages));
+  const rankedMessages = window.pages
+    .flatMap((page) => page.messages ?? [])
+    .sort((left, right) => compareMessageIds(right.id, left.id));
+  if (rankedMessages.length <= limit) {
+    return window;
+  }
+
+  const retained = new Set(rankedMessages.slice(0, limit));
+  const pages = window.pages
+    .map((page) => ({
+      ...page,
+      messages: (page.messages ?? []).filter((message) => retained.has(message)),
+    }))
+    .filter((page) => page.messages.length > 0);
+  return { pages, reachedEnd: false };
+}
+
 export class CoachTranscriptCache {
   /** Insertion-ordered map == LRU order (oldest key first, MRU last). */
   private readonly entries = new Map<string, CacheEntry>();
@@ -179,8 +205,8 @@ export class CoachTranscriptCache {
       pages: toOldestFirst(pages),
       reachedEnd,
     };
-    this.store(key, parts, window);
-    return this.cloneWindow(window);
+    const stored = this.store(key, parts, window);
+    return this.cloneWindow(stored);
   }
 
   /**
@@ -224,8 +250,8 @@ export class CoachTranscriptCache {
           pages: toOldestFirst(freshPages),
           reachedEnd: true,
         };
-        this.store(key, parts, window);
-        return { status: 'refreshed', window: this.cloneWindow(window) };
+        const stored = this.store(key, parts, window);
+        return { status: 'refreshed', window: this.cloneWindow(stored) };
       }
 
       const overlaps =
@@ -244,8 +270,8 @@ export class CoachTranscriptCache {
           // confirm an end here.
           reachedEnd: entry.window.reachedEnd,
         };
-        this.store(key, parts, window);
-        return { status: 'refreshed', window: this.cloneWindow(window) };
+        const stored = this.store(key, parts, window);
+        return { status: 'refreshed', window: this.cloneWindow(stored) };
       }
 
       // Full page, still no overlap → page further back.
@@ -290,9 +316,10 @@ export class CoachTranscriptCache {
     key: string,
     parts: CoachTranscriptCacheKeyParts,
     window: CoachTranscriptWindow,
-  ): void {
+  ): CoachTranscriptWindow {
+    const boundedWindow = trimWindow(window, parts.quickMessageCount);
     this.entries.delete(key);
-    this.entries.set(key, { parts, window });
+    this.entries.set(key, { parts, window: boundedWindow });
     while (this.entries.size > this.maxSessions) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) {
@@ -300,6 +327,7 @@ export class CoachTranscriptCache {
       }
       this.entries.delete(oldest);
     }
+    return boundedWindow;
   }
 
   private touch(key: string, entry: CacheEntry): void {

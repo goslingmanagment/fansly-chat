@@ -498,7 +498,12 @@ export class AgencyHubClient {
    * `fanRef = fanAccountId`. */
   async getRecapStatus(
     settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
-    params: { pageLabel: string; conversationRef: string; fanRef?: string | null },
+    params: {
+      pageLabel: string;
+      conversationRef: string;
+      fanRef?: string | null;
+      personaDefinitionId: string;
+    },
     signal: AbortSignal,
   ): Promise<RecapStatusResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
@@ -514,6 +519,7 @@ export class AgencyHubClient {
           pageLabel: params.pageLabel,
           conversationRef: params.conversationRef,
           ...(params.fanRef ? { fanRef: params.fanRef } : {}),
+          personaDefinitionId: params.personaDefinitionId,
         },
       });
       // Defense-in-depth at this untrusted boundary (item 4): the SDK already

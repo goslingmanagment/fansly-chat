@@ -3918,6 +3918,16 @@ export declare const aiGatewayQuotaSchema: z.ZodObject<{
     remainingRequestsToday: z.ZodNullable<z.ZodNumber>;
     remainingMicroUsdToday: z.ZodNullable<z.ZodNumber>;
 }, z.core.$strip>;
+export declare const aiFeatureAttachedRecapsSchema: z.ZodObject<{
+    full: z.ZodNullable<z.ZodObject<{
+        generatedAt: z.ZodString;
+        ageMs: z.ZodNumber;
+    }, z.core.$strict>>;
+    short: z.ZodNullable<z.ZodObject<{
+        generatedAt: z.ZodString;
+        ageMs: z.ZodNumber;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
 export declare const aiGatewayStreamFrameSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"meta">;
     requestId: z.ZodString;
@@ -3943,6 +3953,16 @@ export declare const aiGatewayStreamFrameSchema: z.ZodDiscriminatedUnion<[z.ZodO
     }>;
     providerResponseId: z.ZodNullable<z.ZodString>;
     personaDefinitionId: z.ZodOptional<z.ZodString>;
+    attachedRecaps: z.ZodOptional<z.ZodObject<{
+        full: z.ZodNullable<z.ZodObject<{
+            generatedAt: z.ZodString;
+            ageMs: z.ZodNumber;
+        }, z.core.$strict>>;
+        short: z.ZodNullable<z.ZodObject<{
+            generatedAt: z.ZodString;
+            ageMs: z.ZodNumber;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
     quota: z.ZodObject<{
         accepted: z.ZodBoolean;
         remainingRequestsToday: z.ZodNullable<z.ZodNumber>;
@@ -4000,6 +4020,16 @@ export declare const aiFeatureStreamFrameSchema: z.ZodUnion<readonly [z.ZodDiscr
     }>;
     providerResponseId: z.ZodNullable<z.ZodString>;
     personaDefinitionId: z.ZodOptional<z.ZodString>;
+    attachedRecaps: z.ZodOptional<z.ZodObject<{
+        full: z.ZodNullable<z.ZodObject<{
+            generatedAt: z.ZodString;
+            ageMs: z.ZodNumber;
+        }, z.core.$strict>>;
+        short: z.ZodNullable<z.ZodObject<{
+            generatedAt: z.ZodString;
+            ageMs: z.ZodNumber;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
     quota: z.ZodObject<{
         accepted: z.ZodBoolean;
         remainingRequestsToday: z.ZodNullable<z.ZodNumber>;
@@ -4104,6 +4134,7 @@ export declare const aiRecapStatusQuerySchema: z.ZodObject<{
     pageLabel: z.ZodString;
     conversationRef: z.ZodString;
     fanRef: z.ZodOptional<z.ZodString>;
+    personaDefinitionId: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const aiRecapStatusResponseSchema: z.ZodObject<{
     full: z.ZodNullable<z.ZodObject<{
@@ -19393,6 +19424,7 @@ export declare const routeSchemas: {
             pageLabel: z.ZodString;
             conversationRef: z.ZodString;
             fanRef: z.ZodOptional<z.ZodString>;
+            personaDefinitionId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{
@@ -22770,6 +22802,7 @@ export type AiFeatureDebugInputFrame = z.infer<typeof aiFeatureDebugInputFrameSc
 export type AiGatewayStreamBody = z.infer<typeof aiGatewayStreamBodySchema>;
 export type AiGatewayUsage = z.infer<typeof aiGatewayUsageSchema>;
 export type AiGatewayQuota = z.infer<typeof aiGatewayQuotaSchema>;
+export type AiFeatureAttachedRecaps = z.infer<typeof aiFeatureAttachedRecapsSchema>;
 export type AiGatewayStreamFrame = z.infer<typeof aiGatewayStreamFrameSchema>;
 export type AiFeatureStreamFrame = z.infer<typeof aiFeatureStreamFrameSchema>;
 export type AiPersonaCatalogItem = z.infer<typeof aiPersonaCatalogItemSchema>;

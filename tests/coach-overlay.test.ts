@@ -55,6 +55,7 @@ function createCoachModel(
       composerText: '',
       composerEnabled: true,
       autoRecapOverride: 'inherit',
+      groupId: 'example',
       sessionKey: 'acct|group',
       ...sessionView,
     },
@@ -556,6 +557,30 @@ describe('OverlayController — coach chat mode', () => {
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
 
+  it('refuses draft Insert when the live URL has moved to another fan', async () => {
+    const { controller, callbacks } = makeController();
+    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
+    controller.render(
+      createCoachModel({
+        groupId: 'example',
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Fan A draft', index: 0 }])],
+      }),
+    );
+    window.history.pushState({}, '', '/messages/other-fan');
+
+    const insert = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+    ).find((button) => /insert/i.test(button.textContent ?? ''));
+    insert!.click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chatgoose-inline-error')?.classList.contains('chatgoose-hidden')).toBe(false);
+    });
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
   it('keeps the overlay open and surfaces an inline error when a draft insert fails', async () => {
     const { controller, callbacks } = makeController();
     vi.mocked(getActiveConversationDraftText).mockReturnValue('');
@@ -815,6 +840,18 @@ describe('OverlayController — recap start dialog (spec §5)', () => {
   it('keeps «Открыть последний» live while the status is still unknown', () => {
     const { controller } = makeController();
     controller.render(createRecapPickerModel(null));
+
+    const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
+    expect(openLast.disabled).toBe(false);
+  });
+
+  it('keeps «Открыть последний» live when recap status is unavailable', () => {
+    const { controller } = makeController();
+    controller.render(createRecapPickerModel({
+      state: 'unavailable',
+      full: null,
+      short: null,
+    }));
 
     const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
     expect(openLast.disabled).toBe(false);

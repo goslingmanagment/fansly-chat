@@ -1117,7 +1117,9 @@ then optionally chains the coach turn, governed by a STOP/PROCEED taxonomy
 setup failure, global quota, and transcript-acquisition failure STOP the chain
 (question preserved in the composer); a recap-specific model failure or a feature
 ceiling PROCEEDS to the coach turn with the older/no recap and honest fallback
-copy. **Documented deviation from spec §5's letter:** `timed_out` and
+copy. The implementation is a closed PROCEED allowlist (`ai_output_unusable`,
+including Core's empty-output terminal, and `not_enough_history`); every new or
+ambiguous error defaults to STOP. **Documented deviation from spec §5's letter:** `timed_out` and
 `network_error` are classified STOP even though a *kernel recap-stream* stall would
 by the letter PROCEED — those two codes cover BOTH Fansly-pagination failure and a
 kernel-stream stall and the client cannot tell them apart, so the deliberate safe

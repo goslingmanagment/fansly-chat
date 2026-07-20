@@ -346,12 +346,10 @@ function usesQuickPrepBudget(feature: FeatureType): boolean {
 /**
  * Canonical vs legacy conversation identity (spec §5). Coach + fan-summary send
  * `conversationRef = groupId` + `fanRef = fanAccountId` once the fan is
- * resolved; otherwise the LEGACY shape (`conversationRef = fanAccountId ?? groupId`,
- * NO fanRef). Deriving both in the SAME branch makes a "canonical groupId
- * without fanRef" request unbuildable — the groupId conversationRef only ever
- * ships alongside a fanRef. Coach never reaches the legacy branch: it fails
- * before the kernel call when the fan is unresolved. Every other feature keeps
- * the legacy shape unchanged this phase.
+ * resolved. Both generation paths fail before this builder when the fan is
+ * unresolved, so they never ship a canonical groupId without a fanRef. Every
+ * other feature keeps the legacy shape (`conversationRef = fanAccountId ??
+ * groupId`, no fanRef) unchanged this phase.
  */
 function buildConversationRefs(
   feature: FeatureType,
@@ -453,9 +451,10 @@ export class OperationCoordinator {
   /** Voice transport stays outside this coordinator. This callback exists
    * only because TabUiState is assembled here. */
   private voiceCapabilityResolver: ((tabId: number) => Promise<boolean>) | null = null;
-  /** Latest user-started Scan for each conversation. Kept after completion so
-   * its async Hub append cannot be overtaken by an older cross-tab operation. */
-  private readonly latestSummaryCommitByGroupId = new Map<
+  /** Latest user-started Scan for each conversation AND recap size. Kept after
+   * completion so an async full Hub append cannot be overtaken by an older
+   * cross-tab full operation, while an independent short recap cannot fence it. */
+  private readonly latestSummaryCommitByKey = new Map<
     string,
     { operationId: string; token: number }
   >();
@@ -913,7 +912,7 @@ export class OperationCoordinator {
       },
       requireCachedEntry: true,
       summaryCommitToken:
-        this.latestSummaryCommitByGroupId.get(groupId)?.token ?? 0,
+        this.latestSummaryCommitByKey.get(this.summaryCommitKey(groupId, 'full'))?.token ?? 0,
     };
 
     const key = [groupId, cached.generatedAt, baseUrl].join('|');
@@ -1256,17 +1255,23 @@ export class OperationCoordinator {
     return this.summaryCommitSequence;
   }
 
+  private summaryCommitKey(groupId: string, mode: SummaryCacheMode): string {
+    return `${groupId}|${mode}`;
+  }
+
   private registerSummaryCommit(
     groupId: string,
+    mode: SummaryCacheMode,
     operationId: string,
     token: number,
   ): void {
-    const current = this.latestSummaryCommitByGroupId.get(groupId);
+    const key = this.summaryCommitKey(groupId, mode);
+    const current = this.latestSummaryCommitByKey.get(key);
     if (current && current.token > token) {
       return;
     }
-    this.latestSummaryCommitByGroupId.delete(groupId);
-    this.latestSummaryCommitByGroupId.set(groupId, { operationId, token });
+    this.latestSummaryCommitByKey.delete(key);
+    this.latestSummaryCommitByKey.set(key, { operationId, token });
     // This map is a correctness fence, not a result cache: a Scan may still be
     // finishing its durable write or Hub append long after another group was
     // opened. An arbitrary LRU cap cannot know which token is still pending and
@@ -1276,13 +1281,14 @@ export class OperationCoordinator {
 
   private isLatestSummaryCommit(
     groupId: string,
+    mode: SummaryCacheMode,
     operationId: string | undefined,
     token: number | undefined,
   ): boolean {
     if (token === undefined) {
       return true;
     }
-    const latest = this.latestSummaryCommitByGroupId.get(groupId);
+    const latest = this.latestSummaryCommitByKey.get(this.summaryCommitKey(groupId, mode));
     const latestToken = latest?.token ?? 0;
     return latestToken === token &&
       (operationId === undefined || latest?.operationId === operationId);
@@ -1290,10 +1296,11 @@ export class OperationCoordinator {
 
   private assertLatestSummaryCommit(
     groupId: string,
+    mode: SummaryCacheMode,
     operationId: string,
     token: number,
   ): void {
-    if (!this.isLatestSummaryCommit(groupId, operationId, token)) {
+    if (!this.isLatestSummaryCommit(groupId, mode, operationId, token)) {
       throw new ChatGooseError('chat_changed');
     }
   }
@@ -1303,6 +1310,7 @@ export class OperationCoordinator {
   ): Promise<boolean> {
     if (!this.isLatestSummaryCommit(
       task.groupId,
+      'full',
       task.operationId,
       task.summaryCommitToken,
     )) {
@@ -1520,12 +1528,24 @@ export class OperationCoordinator {
     // await. Register immediately so a newer click also fences old async Hub
     // work while its own validation is pending; an older slow validation can
     // never obtain a newer token and supersede that click.
-    const reservedSummaryCommitToken = payload.feature === 'fan-summary'
+    // A cached-only view never writes a recap, so it must not take commit
+    // ownership from a paid generation running in another tab. Generating and
+    // cache-serving recap operations retain the existing newest-writer fence.
+    const reservedSummaryCommitMode: SummaryCacheMode | null =
+      payload.feature === 'fan-summary' && payload.viewCachedOnly !== true
+      ? (payload.summaryMode === 'short' ? 'short' : 'full')
+      : null;
+    const reservedSummaryCommitToken = reservedSummaryCommitMode !== null
       ? this.reserveSummaryCommitToken()
       : null;
-    if (reservedSummaryCommitToken !== null && payload.groupId) {
+    if (
+      reservedSummaryCommitToken !== null &&
+      reservedSummaryCommitMode !== null &&
+      payload.groupId
+    ) {
       this.registerSummaryCommit(
         payload.groupId,
+        reservedSummaryCommitMode,
         payload.operationId,
         reservedSummaryCommitToken,
       );
@@ -1878,14 +1898,17 @@ export class OperationCoordinator {
       }
 
       if (payload.feature === 'fan-summary' && cachedSummary && hasValidCachedSummary) {
-        if (summaryCommitToken === null) {
-          throw new ChatGooseError('unknown_error');
+        if (!payload.viewCachedOnly) {
+          if (summaryCommitToken === null) {
+            throw new ChatGooseError('unknown_error');
+          }
+          this.assertLatestSummaryCommit(
+            validated.urlGroupId,
+            summaryCacheMode,
+            payload.operationId,
+            summaryCommitToken,
+          );
         }
-        this.assertLatestSummaryCommit(
-          validated.urlGroupId,
-          payload.operationId,
-          summaryCommitToken,
-        );
         await this.assertPersonaIdentityCurrent(personaIdentity);
 
         if (isShortRecap) {
@@ -1897,6 +1920,8 @@ export class OperationCoordinator {
               generatedAt: cachedSummary.generatedAt,
               stale: false,
               cached: true,
+              transcriptCoverage: cachedSummary.transcriptCoverage,
+              keptCount: cachedSummary.keptCount,
             },
           };
           this.assertActive(tabId, payload.operationId);
@@ -1964,6 +1989,8 @@ export class OperationCoordinator {
             stale: false,
             cached: true,
             syncStatus,
+            transcriptCoverage: cachedSummary.transcriptCoverage,
+            keptCount: cachedSummary.keptCount,
           },
         };
         this.assertActive(tabId, payload.operationId);
@@ -1988,8 +2015,12 @@ export class OperationCoordinator {
           debugEnabled,
           personaIdentity,
           requireCachedEntry: true,
-          operationId: payload.operationId,
-          summaryCommitToken,
+          // Cached-only reads do not participate in writer ordering. The cache
+          // identity + persona checks in isSummarySyncTaskCurrent still prevent
+          // a stale async Hub push if a real writer replaces this entry.
+          ...(summaryCommitToken !== null
+            ? { operationId: payload.operationId, summaryCommitToken }
+            : {}),
         };
         if (!await this.isSummarySyncTaskCurrent(summarySyncTask)) {
           throw new ChatGooseError('chat_changed');
@@ -2177,10 +2208,14 @@ export class OperationCoordinator {
           (user) => user.userId !== resolvedAccountId,
         )?.userId ?? null;
 
-      if (payload.feature === 'coach-chat' && !fanAccountId) {
-        // Coach uses canonical refs ONLY with a resolved fan (fanRef is REQUIRED
-        // kernel-side); it cannot start otherwise. Fail BEFORE the kernel call
-        // so acquiring context never burns a generation (spec §4/§5).
+      if (
+        (payload.feature === 'coach-chat' || payload.feature === 'fan-summary') &&
+        !fanAccountId
+      ) {
+        // New Coach and Recap requests use canonical groupId + fanRef identity.
+        // A cached recap was already returned above without needing this lookup;
+        // only a would-be generation reaches here. Fail BEFORE the kernel call
+        // rather than persist a group-keyed row that fan erasure cannot reach.
         throw new ChatGooseError('coach_fan_unresolved');
       }
 
@@ -2204,13 +2239,10 @@ export class OperationCoordinator {
         purchaseEvidence,
       );
 
-      // Cap to the window (spec §5 / §6.5 "Sort, cap to the window"), before
-      // formatting. Two overshoot sources: a coach session's MERGED window grows
-      // unbounded over a long dialog with an active fan (each refresh appends
-      // fresh rows, nothing else caps it), and a short recap's page-granular
-      // load can overshoot 300. `effectiveMessageCount` is the target window for
-      // both (coach = quickMessageCount, short = 300). When the cap bites it is
-      // window-trimming, forcing transcriptCoverage='window'.
+      // Defense-in-depth cap before formatting (spec §5 / §6.5 "Sort, cap to
+      // the window"). The Coach cache is bounded at write time; short recap
+      // pagination can still overshoot 300 at a page boundary. When this cap
+      // bites it is window-trimming, forcing transcriptCoverage='window'.
       let windowTrimmed = false;
       if (
         (payload.feature === 'coach-chat' || isShortRecap) &&
@@ -2843,6 +2875,7 @@ export class OperationCoordinator {
           if (summaryCommitToken !== null) {
             this.assertLatestSummaryCommit(
               validated.urlGroupId,
+              summaryCacheMode,
               payload.operationId,
               summaryCommitToken,
             );
@@ -2970,6 +3003,7 @@ export class OperationCoordinator {
         }
         this.assertLatestSummaryCommit(
           validated.urlGroupId,
+          summaryCacheMode,
           payload.operationId,
           summaryCommitToken,
         );
@@ -2984,6 +3018,7 @@ export class OperationCoordinator {
         const isCommitCurrent = (state: PersistedState): boolean =>
           this.isLatestSummaryCommit(
             validated.urlGroupId,
+            summaryCacheMode,
             payload.operationId,
             summaryCommitToken,
           ) && isPersonaOperationIdentityCurrent(state, personaIdentity);
@@ -3010,6 +3045,8 @@ export class OperationCoordinator {
                 personalityUpdatedAt: personality.version,
                 personaCatalogSource: personaIdentity.personaCatalogSource,
                 generatedAt,
+                transcriptCoverage: computedTranscriptCoverage,
+                keptCount: keptMessageCount,
                 spendingDataVerified: true,
                 subscriptionLookupVerified: true,
                 modelId: resolvedModel,
@@ -3055,6 +3092,8 @@ export class OperationCoordinator {
                 personalityUpdatedAt: personality.version,
                 personaCatalogSource: personaIdentity.personaCatalogSource,
                 generatedAt,
+                transcriptCoverage: computedTranscriptCoverage,
+                keptCount: keptMessageCount,
                 spendingDataVerified: true,
                 subscriptionLookupVerified: true,
                 modelId: resolvedModel,

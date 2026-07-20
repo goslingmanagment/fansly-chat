@@ -716,6 +716,7 @@ describe('runtime-api getRecapStatus', () => {
       keptCount: 300,
     },
   };
+  const personaDefinitionId = 'v1:persona-one-definition';
 
   it('resolves the page label and returns both recap slots for a context-confirmed fan', async () => {
     const fanslyClient = {
@@ -733,7 +734,12 @@ describe('runtime-api getRecapStatus', () => {
     tabContexts.setFan(7, 'group-1', 'fan-1', 'Alice');
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      {
+        type: 'getRecapStatus',
+        groupId: 'group-1',
+        fanAccountId: 'fan-1',
+        personaDefinitionId,
+      },
       { tab: { id: 7 } },
     );
 
@@ -741,7 +747,12 @@ describe('runtime-api getRecapStatus', () => {
     // Canonical identity: conversationRef = groupId, fanRef = fanAccountId.
     expect(agencyHubClient.getRecapStatus).toHaveBeenCalledWith(
       expect.anything(),
-      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: 'fan-1' },
+      {
+        pageLabel: 'creator-fs',
+        conversationRef: 'group-1',
+        fanRef: 'fan-1',
+        personaDefinitionId,
+      },
       expect.any(AbortSignal),
     );
   });
@@ -763,14 +774,19 @@ describe('runtime-api getRecapStatus', () => {
     tabContexts.setFan(7, 'group-1', 'fan-legacy', 'Alice');
 
     await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null, personaDefinitionId },
       { tab: { id: 7 } },
     );
 
     // Legacy recaps (keyed by fan id) become findable via the resolved fanRef.
     expect(agencyHubClient.getRecapStatus).toHaveBeenCalledWith(
       expect.anything(),
-      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: 'fan-legacy' },
+      {
+        pageLabel: 'creator-fs',
+        conversationRef: 'group-1',
+        fanRef: 'fan-legacy',
+        personaDefinitionId,
+      },
       expect.any(AbortSignal),
     );
   });
@@ -795,7 +811,7 @@ describe('runtime-api getRecapStatus', () => {
     tabContexts.setFan(7, 'other-group', 'fan-other', 'Someone');
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null, personaDefinitionId },
       { tab: { id: 7 } },
     );
 
@@ -818,7 +834,7 @@ describe('runtime-api getRecapStatus', () => {
     // No setRoute/setFan — cold TabContext.
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null },
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: null, personaDefinitionId },
       { tab: { id: 7 } },
     );
 
@@ -840,7 +856,7 @@ describe('runtime-api getRecapStatus', () => {
     sessionStore.registerCapture(7, makeCapture('creator-1'));
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: '   ' },
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: '   ', personaDefinitionId },
       { tab: { id: 7 } },
     );
 
@@ -865,7 +881,7 @@ describe('runtime-api getRecapStatus', () => {
     tabContexts.setFan(7, 'group-1', 'fan-B', 'Bea');
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-A' },
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-A', personaDefinitionId },
       { tab: { id: 7 } },
     );
 
@@ -888,7 +904,12 @@ describe('runtime-api getRecapStatus', () => {
     sessionStore.registerCapture(7, makeCapture('creator-1'));
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      {
+        type: 'getRecapStatus',
+        groupId: 'group-1',
+        fanAccountId: 'fan-1',
+        personaDefinitionId,
+      },
       { tab: { id: 7 } },
     );
 
@@ -906,7 +927,12 @@ describe('runtime-api getRecapStatus', () => {
     );
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      {
+        type: 'getRecapStatus',
+        groupId: 'group-1',
+        fanAccountId: 'fan-1',
+        personaDefinitionId,
+      },
       { tab: { id: 999 } },
     );
 
@@ -926,7 +952,12 @@ describe('runtime-api getRecapStatus', () => {
     sessionStore.registerCapture(7, makeCapture('creator-1'));
 
     const response = await onMessageListener?.(
-      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
+      {
+        type: 'getRecapStatus',
+        groupId: 'group-1',
+        fanAccountId: 'fan-1',
+        personaDefinitionId,
+      },
       { tab: { id: 7 } },
     );
 

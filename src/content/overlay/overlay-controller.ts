@@ -1,5 +1,5 @@
 import { COACH_QUESTION_MAX_CHARS } from '../../shared/constants.js';
-import { toUserError } from '../../shared/errors.js';
+import { ChatGooseError, toUserError } from '../../shared/errors.js';
 import type {
   CoachAutoRecapOverride,
   CoachOverlayDraft,
@@ -18,6 +18,7 @@ import type {
   UserFacingError,
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
+import { parseGroupIdFromPath } from '../route-watcher.js';
 import { renderSummaryMarkdown } from './summary-markdown.js';
 import {
   formatLlmCostSummary,
@@ -1713,6 +1714,12 @@ export class OverlayController {
   ): Promise<void> {
     try {
       if (action === 'inserted') {
+        const expectedGroupId = this.model.kind === 'coach'
+          ? this.model.sessionView.groupId
+          : null;
+        if (parseGroupIdFromPath(window.location.pathname) !== expectedGroupId) {
+          throw new ChatGooseError('chat_changed');
+        }
         await insertIntoFanslyTextarea(draft.text);
       } else {
         await copyToClipboard(draft.text);
@@ -1975,9 +1982,10 @@ export class OverlayController {
       () => this.callbacks.onRecapOpenLast?.(),
     );
     openLast.classList.add('chatgoose-recap-picker-last');
-    // A loaded-and-empty status greys the button out (nothing to open); an
-    // unloaded status leaves it live (the background is the source of truth).
-    if (model.recapStatus && !hasStored) {
+    // Only an answered status with empty slots confirms there is nothing to
+    // open. `unavailable` means the Hub could not be checked; local cache lookup
+    // is still useful and does not require a generation.
+    if (model.recapStatus && model.recapStatus.state !== 'unavailable' && !hasStored) {
       openLast.disabled = true;
     }
     actions.append(full, short, openLast);
@@ -2039,8 +2047,8 @@ export class OverlayController {
       section.append(meta);
 
       // Recap coverage header (spec §5): «вся переписка (N сообщений)» when the
-      // whole history was kept, else «последние N — история длиннее». Present
-      // only on freshly generated recaps (a cache hit carries no coverage).
+      // whole history was kept, else «последние N — история длиннее». Current
+      // cache entries preserve this metadata; legacy entries simply omit it.
       const { transcriptCoverage, keptCount } = model.summaryMeta;
       if (transcriptCoverage && typeof keptCount === 'number') {
         const coverage = document.createElement('div');
