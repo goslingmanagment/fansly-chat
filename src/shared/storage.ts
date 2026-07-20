@@ -1,6 +1,8 @@
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  COACH_HISTORY_LIMIT_MAX,
+  COACH_HISTORY_LIMIT_MIN,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   IMPROVE_MAX_MESSAGE_COUNT,
@@ -126,10 +128,19 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
   const rawPing = Number(input.pingMessageCount ?? defaults.pingMessageCount);
   const rawImprove = Number(input.improveMessageCount ?? defaults.improveMessageCount);
   const rawDeep = Number(input.deepMessageCount ?? defaults.deepMessageCount);
+  const rawCoachHistory = Number(input.coachHistoryLimit ?? defaults.coachHistoryLimit);
   const quick = Number.isFinite(rawQuick) ? rawQuick : defaults.quickMessageCount;
   const ping = Number.isFinite(rawPing) ? rawPing : defaults.pingMessageCount;
   const improve = Number.isFinite(rawImprove) ? rawImprove : defaults.improveMessageCount;
   const deep = Number.isFinite(rawDeep) ? rawDeep : defaults.deepMessageCount;
+  // coachHistoryLimit is a turn COUNT — it must persist as a whole integer so a
+  // fractional input (a hand-edited settings blob, or a number input the browser
+  // let float through) can never round-trip as e.g. 1.5. Round to nearest first,
+  // THEN clamp below; a non-finite value (NaN/±Infinity) falls back to the
+  // default. Math.round: 1.5 -> 2, 1.4 -> 1.
+  const coachHistory = Number.isFinite(rawCoachHistory)
+    ? Math.round(rawCoachHistory)
+    : defaults.coachHistoryLimit;
 
   return {
     agencyHubBaseUrl: normalizeAgencyHubBaseUrl(
@@ -152,6 +163,16 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
       input.uiTheme === 'light' || input.uiTheme === 'dark' || input.uiTheme === 'system'
         ? input.uiTheme
         : defaults.uiTheme,
+    coachHistoryLimit: Math.min(
+      COACH_HISTORY_LIMIT_MAX,
+      Math.max(COACH_HISTORY_LIMIT_MIN, coachHistory),
+    ),
+    coachAutoRecap:
+      input.coachAutoRecap === 'short' ||
+      input.coachAutoRecap === 'full' ||
+      input.coachAutoRecap === 'off'
+        ? input.coachAutoRecap
+        : defaults.coachAutoRecap,
   };
 }
 
@@ -174,6 +195,34 @@ export async function saveSettings(
   ) {
     throw new UnsupportedFutureStorageSchemaError(observedSchemaVersion);
   }
+  // P2 downgrade barrier for the READ/MODIFY/WRITE path (baseSettings absent —
+  // e.g. the device-token issuance in runtime-api). We stamp schemaVersion below,
+  // so make failing-closed on a future on-disk layout EXPLICIT at the write site:
+  // read the real disk schemaVersion and refuse to stamp our (lower) version over
+  // a higher one, which would otherwise let a newer worker re-run v15 → v16 over
+  // already-migrated data (the old/new-context ping-pong migrations.ts guards).
+  // This is deliberately belt-and-suspenders — migrateState() inside the
+  // loadStorageState() below ALSO throws UnsupportedFutureStorageSchemaError on a
+  // future record — but it keeps the guard co-located with the stamp so a future
+  // refactor that hands this path a baseSettings snapshot cannot silently bypass it.
+  //
+  // The Options snapshot path (baseSettings provided) deliberately does NOT read
+  // here: it must dispatch storage.set synchronously (pagehide fires before the
+  // document is discarded; the blur/queue chain also asserts a synchronous set),
+  // so it cannot await a disk read first. Its downgrade barrier is the
+  // storage.onChanged observer feeding observedSchemaVersion above. NOTE: that
+  // observer is async, so a disk raised AFTER Options loaded but BEFORE the observer
+  // fires is a residual race no synchronous guard can close; see .agentic/backlog.md.
+  if (baseSettings === undefined) {
+    const diskSchemaVersion = (await browser.storage.local.get('schemaVersion')).schemaVersion;
+    if (
+      typeof diskSchemaVersion === 'number' &&
+      Number.isSafeInteger(diskSchemaVersion) &&
+      diskSchemaVersion > STORAGE_SCHEMA_VERSION
+    ) {
+      throw new UnsupportedFutureStorageSchemaError(diskSchemaVersion);
+    }
+  }
   // Options already owns a normalized snapshot and passes it so pagehide can
   // dispatch storage.set before the document is discarded. Other callers keep
   // the coordinator-safe read/modify/write path. Options installs its schema
@@ -184,6 +233,17 @@ export async function saveSettings(
   const nextSettings = sanitizeSettings({ ...currentSettings, ...settingsPatch });
   const items: Record<string, unknown> = {
     settings: stripSecretSettings(nextSettings),
+    // Stamp the current schema durably alongside the settings write. Options
+    // loads via the NON-mutating readStorageState (E45 deferred-repair window:
+    // disk may still hold a pre-v15 record whose migration was never written
+    // back). Persisting only `settings` would leave schemaVersion stale, so the
+    // NEXT load would re-run the one-shot deep-window bump and clobber a
+    // deliberate post-v15 value — exactly the 1500-stays-1500 promise E45 makes.
+    // Barrier: the future-schema guard above THROWS before this write whenever
+    // the observed on-disk version is higher than ours (and the read/modify/write
+    // path's loadStorageState throws on a future disk too), so STORAGE_SCHEMA_VERSION
+    // here is never a downgrade — the base state is always at the current schema.
+    schemaVersion: STORAGE_SCHEMA_VERSION,
   };
   if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubDeviceToken')) {
     items[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = nextSettings.agencyHubDeviceToken;

@@ -65,6 +65,8 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     personaCatalog: [{
@@ -1009,5 +1011,165 @@ describe('Options page settings and read-only personas', () => {
       expect(currentState.accountMappings['acc-1']).toBe('p1');
     });
     expect(currentState.personalities).toEqual(legacyBefore);
+  });
+});
+
+describe('Options page coach settings', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const getCoachMemoryInput = (): HTMLInputElement =>
+    document.querySelector<HTMLInputElement>('input[type="number"][max="20"]')!;
+
+  const getRecapSelect = (): HTMLSelectElement =>
+    Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((select) =>
+      Array.from(select.options).some((option) => option.value === 'full'),
+    )!;
+
+  const getRecapWarning = (): HTMLElement | null =>
+    Array.from(
+      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-section-desc'),
+    ).find((node) => node.textContent?.includes('Full Recap loads up to')) ?? null;
+
+  it('renders coach memory + auto-recap fields with stored defaults and a hidden warning', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const memoryInput = getCoachMemoryInput();
+    expect(memoryInput).toBeTruthy();
+    expect(memoryInput.min).toBe('1');
+    expect(memoryInput.max).toBe('20');
+    expect(memoryInput.value).toBe('10');
+
+    const recapSelect = getRecapSelect();
+    expect(recapSelect).toBeTruthy();
+    expect(Array.from(recapSelect.options).map((option) => option.value)).toEqual([
+      'off',
+      'short',
+      'full',
+    ]);
+    expect(recapSelect.value).toBe('off');
+
+    const warning = getRecapWarning();
+    expect(warning).toBeTruthy();
+    expect(warning!.hidden).toBe(true);
+  });
+
+  it('reflects stored non-default coach settings on load (memory value + visible warning)', async () => {
+    await loadOptionsPage({
+      state: makeState({
+        settings: {
+          ...makeState().settings,
+          coachHistoryLimit: 5,
+          coachAutoRecap: 'full',
+        },
+      }),
+      sessions: [],
+    });
+
+    expect(getCoachMemoryInput().value).toBe('5');
+    const recapSelect = getRecapSelect();
+    expect(recapSelect.value).toBe('full');
+    expect(getRecapWarning()!.hidden).toBe(false);
+  });
+
+  it('persists an edited coach memory value through the settings patch', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const memoryInput = getCoachMemoryInput();
+    memoryInput.value = '15';
+    memoryInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachHistoryLimit).toBe(15);
+    }, { timeout: 2000 });
+  });
+
+  it('clamps and reflects an out-of-range coach memory value into the unfocused field', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const memoryInput = getCoachMemoryInput();
+    memoryInput.value = '99';
+    memoryInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachHistoryLimit).toBe(20);
+    }, { timeout: 2000 });
+    await vi.waitFor(() => expect(memoryInput.value).toBe('20'));
+  });
+
+  it('persists the auto-recap choice and toggles the cost warning on change', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const recapSelect = getRecapSelect();
+    const warning = getRecapWarning()!;
+    expect(warning.hidden).toBe(true);
+
+    recapSelect.value = 'full';
+    recapSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(warning.hidden).toBe(false);
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachAutoRecap).toBe('full');
+    }, { timeout: 2000 });
+
+    recapSelect.value = 'short';
+    recapSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(warning.hidden).toBe(true);
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachAutoRecap).toBe('short');
+    }, { timeout: 2000 });
+  });
+
+  it('builds the cost warning from the live deep-window value, not a hardcoded 3000', async () => {
+    await loadOptionsPage({
+      state: makeState({
+        settings: {
+          ...makeState().settings,
+          deepMessageCount: 250,
+          coachAutoRecap: 'full',
+        },
+      }),
+      sessions: [],
+    });
+
+    const warning = getRecapWarning()!;
+    expect(warning).toBeTruthy();
+    // Reflects the stored deep window (250), never the old hardcoded 3000.
+    expect(warning.textContent).toContain('Full Recap loads up to 250 messages');
+    expect(warning.textContent).not.toContain('3000');
+
+    // Editing the deep-window field updates the warning message live.
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+    deepInput.value = '1234';
+    deepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(warning.textContent).toContain('Full Recap loads up to 1234 messages');
+  });
+
+  it('clamps the cost warning to the deep-window bounds — never quotes an unreachable count', async () => {
+    // Round-11 P2: sanitizeSettings clamps the persisted value to [100, 3000], so
+    // the warning must clamp too — quoting 99999 is a dishonest cost (E43).
+    await loadOptionsPage({
+      state: makeState({
+        settings: { ...makeState().settings, deepMessageCount: 250, coachAutoRecap: 'full' },
+      }),
+      sessions: [],
+    });
+    const warning = getRecapWarning()!;
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+
+    // Above the max: shows the clamped 3000, never the typed 99999.
+    deepInput.value = '99999';
+    deepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(warning.textContent).toContain('Full Recap loads up to 3000 messages');
+    expect(warning.textContent).not.toContain('99999');
+
+    // Below the min: clamps up to 100.
+    deepInput.value = '5';
+    deepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(warning.textContent).toContain('Full Recap loads up to 100 messages');
   });
 });

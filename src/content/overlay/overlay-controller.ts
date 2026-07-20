@@ -116,6 +116,8 @@ function titleForFeature(feature: FeatureType): string {
       return 'Chat Review';
     case 'ping':
       return 'Ping';
+    case 'coach-chat':
+      return 'Coach';
   }
 }
 

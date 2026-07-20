@@ -108,9 +108,12 @@ function resultPartTexts(
       return feature === 'hi-greeting'
         ? normalizeVariantReplyParts(rawText)
         : normalizeReplyParts(rawText);
+    // coach-chat: synthesizes no reply parts from raw text; any draft cards
+    // arrive pre-split on result.parts (handled above), nothing to derive here.
     case 'help-me':
     case 'summary':
     case 'chat-review':
+    case 'coach-chat':
       return [];
   }
 }
@@ -1784,7 +1787,28 @@ export class ChatGooseContentApp {
   ): CompletedOverlayViewModel {
     const rawText = result.rawText;
 
-    switch (getFeaturePolicy(feature).resultKind) {
+    const resultKind = getFeaturePolicy(feature).resultKind;
+    switch (resultKind) {
+      case 'coach-chat':
+        // Coach normally renders via its OWN overlay path (createCoachView off
+        // the CoachSession store); on the full stack handleComplete intercepts a
+        // coach completion before this function, so this arm is dead code there.
+        // But part 1 has no such interceptor yet, so keep slice 1 standalone-
+        // correct: surface the coach advice READ-ONLY instead of falling through
+        // to the reply path — where resultPartTexts('coach-chat') → [] would
+        // discard the answer and show a bogus ai_output_unusable error.
+        return {
+          kind: 'readOnly',
+          feature: 'coach-chat',
+          fanDisplayName,
+          operationId,
+          rawText,
+          debugPrompt: this.activeDebugPrompt ?? undefined,
+          debugEcho: this.activeDebugEcho ?? undefined,
+          llmSpend,
+          profiling,
+          rerunActionLabel: 'Regenerate',
+        };
       case 'help-me': {
         const parsed = result.helpMe;
         return {
@@ -1839,6 +1863,13 @@ export class ChatGooseContentApp {
           rerunActionLabel: 'Refresh',
         };
     }
+
+    // Exhaustiveness gate: only the reply-shaped kinds reach here. Assigning the
+    // now-narrowed discriminant to the reply-kind union makes tsc fail if a future
+    // resultKind is added without a case above — closing the silent-fallthrough
+    // that let coach-chat render as an empty error (round-9 P2).
+    const replyKind: 'reply' | 'single-reply' = resultKind;
+    void replyKind;
 
     const partTexts = resultPartTexts(feature, result, rawText);
     return {

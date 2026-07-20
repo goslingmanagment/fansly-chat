@@ -1,6 +1,6 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
-export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting';
+export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers' | 'media';
@@ -28,6 +28,10 @@ export interface Settings {
   debugMode: boolean;
   promptCachingEnabled: boolean;
   uiTheme: UiThemeSetting;
+  /** Coach: how many prior coach turns are retained/replayed (clamped [1,20]). */
+  coachHistoryLimit: number;
+  /** Coach: whether an automatic recap runs, and at what depth. */
+  coachAutoRecap: 'off' | 'short' | 'full';
 }
 
 export interface Personality {
@@ -113,6 +117,13 @@ export interface SummaryCacheEntry {
   modelId?: string;
   fanAccountId?: string | null;
   agencyHubSync?: AgencyHubSummarySyncMetadata;
+  /** Written ONLY on entries produced behind the exhaustion + empty fail-closed
+   * guards, so the cached recap is known to be a complete, trusted generation. A
+   * cache hit REQUIRES it (isValidSummaryCacheEntry), so a pre-guard entry — e.g.
+   * a max_tokens/length-truncated recap cached before fan-summary was
+   * exhaustion-guarded — is treated as a MISS and regenerated. Cheap (one recap
+   * per fan) and self-healing; legacy entries need no migration drop. */
+  trustedTerminal?: boolean;
 }
 
 export interface PersistedState {
@@ -788,6 +799,7 @@ export interface RuntimeRequestMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
+  getRecapStatus: RecapStatusRequest;
   openDebugPrompt: DebugPromptTokenRequest;
   getDebugPromptSnapshot: DebugPromptTokenRequest;
 }
@@ -799,8 +811,40 @@ export interface RuntimeResponseMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
+  getRecapStatus: RecapStatusResponse;
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
+}
+
+/** Coach recap-status metadata read (spec §3/§5): the freshest usable full +
+ * short fan-summary recap for one conversation — metadata only, NO generation
+ * and NO AI spend. The background maps this to the kernel `aiRecapStatus`
+ * query; the content script renders the "recap status line" from it. */
+export interface RecapStatusRequest {
+  groupId: string;
+  fanAccountId: string | null;
+}
+
+/** Freshest-usable recap metadata for one slot (full or short). Mirrors the
+ * SDK's `aiRecapSlotSchema`: metadata only — never the recap text itself. */
+export interface RecapSlot {
+  generatedAt: string;
+  ageMs: number;
+  transcriptCoverage: 'full-history' | 'window' | null;
+  requestedCount: number | null;
+  keptCount: number | null;
+}
+
+export interface RecapStatusResponse {
+  /** Whether the Hub was actually reached. 'unavailable' (not connected / no page
+   * match / Hub down / not configured) MUST NOT be shown as "no recap" — those are
+   * distinct (E43 honest empty-states). 'ok' means the Hub answered; then null
+   * slots genuinely mean no recap. OPTIONAL: the producing handler/client always
+   * set it, but the field was added mid-stack (round 10) after consumers already
+   * read `full`/`short`, so an absent state reads as 'ok' for backward-compat. */
+  state?: 'ok' | 'unavailable';
+  full: RecapSlot | null;
+  short: RecapSlot | null;
 }
 
 /** E28 viewer handshake. The token is the whole authority — it is minted per
@@ -999,6 +1043,16 @@ export interface RouteChangedPayload extends PortEnvelopeBase {
   routeNonce: number;
 }
 
+/** One replayed coach turn — the shape carried both on the content→background
+ * wire (`OperationStartPayload.coachHistory`) and in the kernel request body.
+ * Bounds are enforced by the protocol guard (`isCoachHistoryEntry`): question
+ * 1..COACH_QUESTION_MAX_CHARS, answer 1..COACH_ANSWER_MAX_CHARS, ≤20 entries.
+ * Answers are already PROJECTED (head+tail) before they land here. */
+export interface CoachHistoryEntry {
+  question: string;
+  answer: string;
+}
+
 export interface OperationStartPayload extends PortEnvelopeBase {
   type: 'operation:start';
   operationId: string;
@@ -1010,6 +1064,14 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;
+  /** coach-chat: the chatter's live question for this turn. */
+  chatterQuestion?: string;
+  /** coach-chat: prior turns replayed as dialog memory (answers projected). */
+  coachHistory?: CoachHistoryEntry[];
+  /** coach-chat: 'short' | 'full' on THIS (content→background) wire. The
+   * background maps 'full' → omit on the kernel wire (the kernel body accepts
+   * only the literal 'short'); 'short' passes through. */
+  summaryMode?: 'short' | 'full';
 }
 
 export interface CompareStartPayload extends PortEnvelopeBase {
@@ -1098,6 +1160,10 @@ export interface CompletePayload extends PortEnvelopeBase {
   fanDisplayName: string;
   llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
+  /** coach-chat: the gateway meta-frame requestId, stored on the exchange so a
+   * later acceptance can correlate the sent draft back to its generation.
+   * Optional — only coach operations fill it. */
+  generationRef?: string;
 }
 
 export interface ErrorPayload extends PortEnvelopeBase {

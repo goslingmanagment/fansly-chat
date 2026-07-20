@@ -10,6 +10,8 @@ import {
   createDefaultSettings,
   createSeedState,
   UnsupportedFutureStorageSchemaError,
+  bumpLegacyDeepMessageCountDefault,
+  DEEP_DEFAULT_BUMP_SCHEMA_VERSION,
 } from '../src/shared/migrations.js';
 import {
   BUNDLED_LORA_PERSONALITY_ID,
@@ -206,6 +208,127 @@ describe('migrateState', () => {
     expect(result.settings.pingMessageCount).toBe(73);
   });
 
+  // ─── v15: coach fields + deep-window default 1500 → 3000 ────────────────
+  // NOTE ON VERSION NUMBER: the brief specced this as the "v14" migration,
+  // but schema v14 already shipped to production (1.9.9–1.9.11, the persona
+  // catalog move) and lives on `main`. Per the repo's forward-only migration
+  // law this shape change (coach fields + deep default) gets its OWN number,
+  // v15. The brief's semantics are preserved exactly, just keyed on the true
+  // current version: a record already at the current schema never re-runs the
+  // deep-window bump, and a shipped-v14 record with the OLD default upgrades.
+
+  it('v15: bumps a pre-v15 default deep window (1500) to the new default (3000)', () => {
+    const fromV13 = migrateState({
+      schemaVersion: 13,
+      settings: { deepMessageCount: 1500 },
+    });
+    expect(fromV13.settings.deepMessageCount).toBe(3000);
+
+    // The shipped-v14 default (also 1500) must upgrade too — v14 < current.
+    const fromV14 = migrateState({
+      schemaVersion: 14,
+      settings: { deepMessageCount: 1500 },
+    });
+    expect(fromV14.settings.deepMessageCount).toBe(3000);
+  });
+
+  it('v15: preserves a user-modified deep window (1499 stays 1499)', () => {
+    const result = migrateState({
+      schemaVersion: 13,
+      settings: { deepMessageCount: 1499 },
+    });
+    expect(result.settings.deepMessageCount).toBe(1499);
+  });
+
+  it('v15: a missing deep window adopts the new default (3000)', () => {
+    const result = migrateState({
+      schemaVersion: 13,
+      settings: { debugMode: true },
+    });
+    expect(result.settings.deepMessageCount).toBe(3000);
+  });
+
+  it('v15: never re-transforms a record already at the current schema (1500 stays 1500)', () => {
+    const atCurrent = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: { ...createDefaultSettings(), deepMessageCount: 1500 },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+    const result = migrateState(atCurrent);
+    expect(result.settings.deepMessageCount).toBe(1500);
+
+    // Round-trip stability: re-migrating the output must not drift the value.
+    const remigrated = migrateState(result as unknown as Record<string, unknown>);
+    expect(remigrated.settings.deepMessageCount).toBe(1500);
+  });
+
+  // The legacy deep-window bump must anchor to a FIXED version (15), not the
+  // moving STORAGE_SCHEMA_VERSION. Unit-test the transform helper directly with
+  // hardcoded incoming versions so the guard is proven independent of whatever
+  // the current schema happens to be. Without the fixed anchor, a future schema
+  // bump (say v16) would re-fire the transform on a v15 record whose 1500 is the
+  // chatter's DELIBERATE choice — E45 violation.
+  describe('bumpLegacyDeepMessageCountDefault anchors on a fixed version', () => {
+    it('pins the anchor at schema version 15', () => {
+      expect(DEEP_DEFAULT_BUMP_SCHEMA_VERSION).toBe(15);
+    });
+
+    it('refuses to bump a record already AT the anchor version (15)', () => {
+      const result = bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 15);
+      expect(result.deepMessageCount).toBe(1500);
+    });
+
+    it('refuses to bump a HYPOTHETICAL future-version record (16) — the E45 regression', () => {
+      // With the buggy `>= STORAGE_SCHEMA_VERSION` guard this would re-fire once
+      // the schema advances past 15; the fixed anchor keeps it inert.
+      const result = bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 16);
+      expect(result.deepMessageCount).toBe(1500);
+    });
+
+    it('bumps a genuinely pre-v15 record carrying the old default (1500 → 3000)', () => {
+      expect(bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 13).deepMessageCount).toBe(3000);
+      expect(bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1500 }, 14).deepMessageCount).toBe(3000);
+    });
+
+    it('preserves a pre-v15 record with a non-default value (1499 stays 1499)', () => {
+      expect(bumpLegacyDeepMessageCountDefault({ deepMessageCount: 1499 }, 14).deepMessageCount).toBe(1499);
+    });
+  });
+
+  it('v15: adds coach fields with defaults when absent from an older record', () => {
+    const result = migrateState({
+      schemaVersion: 13,
+      settings: { debugMode: true },
+    });
+    expect(result.settings.coachHistoryLimit).toBe(createDefaultSettings().coachHistoryLimit);
+    expect(result.settings.coachAutoRecap).toBe('off');
+  });
+
+  it('v15: preserves stored coach fields and coerces junk coachAutoRecap on migration', () => {
+    const kept = migrateState({
+      schemaVersion: 14,
+      settings: { coachHistoryLimit: 5, coachAutoRecap: 'full' },
+    });
+    expect(kept.settings.coachHistoryLimit).toBe(5);
+    expect(kept.settings.coachAutoRecap).toBe('full');
+
+    const junk = migrateState({
+      schemaVersion: 14,
+      settings: { coachAutoRecap: 'weekly' },
+    });
+    expect(junk.settings.coachAutoRecap).toBe('off');
+  });
+
+  it('v15: default settings carry the coach fields and the 3000 deep window', () => {
+    const defaults = createDefaultSettings();
+    expect(defaults.deepMessageCount).toBe(3000);
+    expect(defaults.coachHistoryLimit).toBe(10);
+    expect(defaults.coachAutoRecap).toBe('off');
+  });
+
 
 
 
@@ -346,6 +469,52 @@ describe('sanitizeSettings', () => {
     expect(
       storage.sanitizeSettings({ uiTheme: 'neon' as unknown as 'dark' }).uiTheme,
     ).toBe('system');
+  });
+
+  it('clamps coachHistoryLimit within [1, 20]', () => {
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 0 }).coachHistoryLimit).toBe(1);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 21 }).coachHistoryLimit).toBe(20);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 7 }).coachHistoryLimit).toBe(7);
+  });
+
+  it('normalizes a fractional coachHistoryLimit to a whole integer', () => {
+    // Turn count must persist as an integer — round to nearest, then clamp.
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 1.5 }).coachHistoryLimit).toBe(2);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 1.4 }).coachHistoryLimit).toBe(1);
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 10.6 }).coachHistoryLimit).toBe(11);
+    // Rounding runs before the clamp: 20.4 rounds to 20 (in range), 20.6 rounds
+    // to 21 then clamps back to the 20 ceiling.
+    expect(storage.sanitizeSettings({ coachHistoryLimit: 20.6 }).coachHistoryLimit).toBe(20);
+    for (const value of [1.5, 3.2, 9.9, 12.5, 19.999]) {
+      expect(
+        Number.isInteger(storage.sanitizeSettings({ coachHistoryLimit: value }).coachHistoryLimit),
+      ).toBe(true);
+    }
+  });
+
+  it('falls back to the coachHistoryLimit default for a NaN-producing value', () => {
+    const result = storage.sanitizeSettings({
+      coachHistoryLimit: 'abc' as unknown as number,
+    });
+    expect(result.coachHistoryLimit).toBe(createDefaultSettings().coachHistoryLimit);
+    expect(Number.isFinite(result.coachHistoryLimit)).toBe(true);
+  });
+
+  it('keeps valid coachAutoRecap values and falls back to off for junk', () => {
+    expect(storage.sanitizeSettings({ coachAutoRecap: 'off' }).coachAutoRecap).toBe('off');
+    expect(storage.sanitizeSettings({ coachAutoRecap: 'short' }).coachAutoRecap).toBe('short');
+    expect(storage.sanitizeSettings({ coachAutoRecap: 'full' }).coachAutoRecap).toBe('full');
+    expect(
+      storage.sanitizeSettings({
+        coachAutoRecap: 'weekly' as unknown as 'off',
+      }).coachAutoRecap,
+    ).toBe('off');
+  });
+
+  it('fills coach field defaults when missing', () => {
+    const result = storage.sanitizeSettings({});
+    expect(result.coachHistoryLimit).toBe(createDefaultSettings().coachHistoryLimit);
+    expect(result.coachAutoRecap).toBe('off');
   });
 
   it('trims API key', () => {
