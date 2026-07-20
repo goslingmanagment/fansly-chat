@@ -49,6 +49,9 @@ interface ButtonBarCallbacks {
   /** A tone segment was clicked — ARM the tone for the next Reply (or disarm
    *  the already-armed one). Never generates by itself (E24 options model). */
   onToneSelect: (tone: ReplyTone) => void;
+  /** The 🎙 Voice action — opens the лента voice panel on the current draft.
+   *  Rendered only when the tab's page reports `voiceNotesCapable`. */
+  onVoiceClick: () => void;
   /** Coach button clicked — open/focus the coach chat overlay (spec §3). Coach
    *  is an app action (not a HOTKEY_FEATURE entry); opening creates no
    *  generation, so it is a distinct callback, not `onFeatureClick`. */
@@ -75,6 +78,9 @@ export class ButtonBar {
   private readonly toneTrack: HTMLElement;
   private readonly toneSegments = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
+  // Capability-gated 🎙 entry point; hidden until the page reports voice
+  // support. Pinned at the row's far right so it never disturbs the E24 order.
+  private readonly voiceButton: HTMLButtonElement;
   // Coach opens the chat overlay (spec §3). It is NOT a TOOLBAR_FEATURES entry —
   // clicking it starts no generation — so it lives outside the feature map.
   private readonly coachButton: HTMLButtonElement;
@@ -143,6 +149,15 @@ export class ButtonBar {
     this.personalityLabel = document.createElement('div');
     this.personalityLabel.className = 'chatgoose-pill chatgoose-personality chatgoose-toolbar-pill chatgoose-toolbar-personality-end';
 
+    this.voiceButton = document.createElement('button');
+    this.voiceButton.type = 'button';
+    this.voiceButton.className =
+      'chatgoose-button chatgoose-toolbar-button chatgoose-toolbar-voice chatgoose-hidden';
+    this.voiceButton.textContent = '🎙';
+    this.voiceButton.title = 'Войс — голосовая заметка на текущем черновике';
+    this.voiceButton.setAttribute('aria-label', 'Voice note');
+    this.voiceButton.addEventListener('click', () => this.callbacks.onVoiceClick());
+
     // Tone groove — a sunken radio track pressed against Reply.
     this.toneTrack = document.createElement('div');
     this.toneTrack.className = 'chatgoose-tone-track';
@@ -180,6 +195,7 @@ export class ButtonBar {
       // Coach sits in the "about the fan" cluster, right after Recap (spec §10).
       this.coachButton,
       this.personalityLabel,
+      this.voiceButton,
     );
   }
 
@@ -318,5 +334,11 @@ export class ButtonBar {
       nextReplyTone,
       Boolean(activeAction) || disableForPrereqs,
     );
+
+    // ─── Voice (capability-gated) ─────────────────────────────────────────────
+    // The flag is a UI hint only (the create endpoint stays authoritative);
+    // voice does not require a mapped persona, only a live Fansly session.
+    this.voiceButton.classList.toggle('chatgoose-hidden', !state.voiceNotesCapable);
+    this.voiceButton.disabled = !state.connected;
   }
 }

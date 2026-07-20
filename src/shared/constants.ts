@@ -176,6 +176,16 @@ export const HI_GREETING_MAX_TRANSCRIPT = 10;
 export const PING_ACTIVE_DAYS = 5;
 export const PING_MIN_FAN_MESSAGES = 3;
 
+// ─── Voice Notes ────────────────────────────────────────────────────────
+
+/** Advisory mirror of the kernel cap; the server remains authoritative. */
+export const VOICE_SCRIPT_MAX_CHARS_ADVISORY = 600;
+export const VOICE_CHARS_PER_SECOND = 14;
+export const VOICE_AUDIO_MAX_BYTES = 2_097_152;
+export const VOICE_ATTEMPT_SESSION_KEY_PREFIX = 'voiceAttemptV1:';
+export const VOICE_ATTEMPT_TTL_MS = 6 * 3600_000;
+export const VOICE_STATUS_POLL_MS = 1500;
+
 // ─── Earnings ────────────────────────────────────────────────────────────
 
 export const EARNINGS_FALLBACK_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
@@ -213,7 +223,10 @@ export const DEEP_FEATURES: FeatureType[] = (
 export const QUICK_FEATURES: FeatureType[] = (
   Object.entries(FEATURE_POLICIES) as Array<[FeatureType, FeaturePolicy]>
 )
-  .filter(([, policy]) => policy.messageCountBucket === 'quick')
+  // voice-script has a quick transcript policy but a dedicated runner; it
+  // must not become a generic quick operation.
+  .filter(([feature, policy]) =>
+    feature !== 'voice-script' && policy.messageCountBucket === 'quick')
   .map(([feature]) => feature);
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
@@ -226,6 +239,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   'chat-review': 'Review',
   'ping': 'Ping',
   'hi-greeting': 'Hi',
+  'voice-script': 'Voice',
   'coach-chat': 'Coach',
 };
 

@@ -1,0 +1,917 @@
+import {
+  VOICE_CHARS_PER_SECOND,
+  VOICE_SCRIPT_MAX_CHARS_ADVISORY,
+} from '../../shared/constants.js';
+import { getErrorMessage, isUserErrorKey } from '../../shared/errors.js';
+import type {
+  BackgroundPortMessage,
+  ReplyTone,
+  UserErrorKey,
+  UserFacingError,
+} from '../../shared/types.js';
+import {
+  canonicalizeVoiceScript,
+  type VoiceAttachGrant,
+  type VoiceAttempt,
+  type VoiceAttemptController,
+  type VoiceTake,
+} from './attempt-controller.js';
+import type { VoiceComposerProbe, VoiceAttachOutcome } from './attach-adapter.js';
+
+/** The controller callbacks the panel consumes (script/note/attach failures). */
+export type VoicePanelErrorMessage = Extract<
+  BackgroundPortMessage,
+  { type: 'voice:scriptError' | 'voice:noteError' | 'voice:attachRefuse' }
+>;
+
+/** What the panel hands off to the attach seam once background attests the fan. */
+export interface VoicePanelAttachParams {
+  voiceNoteId: number;
+  audio: ArrayBuffer;
+  token: string;
+}
+
+export interface VoicePanelDeps {
+  /** THE state owner. The panel reads it and drives its public API only. */
+  controller: VoiceAttemptController;
+  /** Self-checked BEFORE rendering the attach button (ok:false → Download-only). */
+  probeComposer: () => VoiceComposerProbe;
+  /** Arms + hands the file to Fansly's native input; index.ts owns the seam. */
+  attach: (params: VoicePanelAttachParams) => Promise<VoiceAttachOutcome>;
+  /** The live Fansly composer draft — the source text and the leftover caption. */
+  getDraftText: () => string;
+  /** Writes the composer draft (clear = ''; recover = the captured original). */
+  setDraftText: (text: string) => Promise<void>;
+  onClose: () => void;
+  /** Optional студия expand (Task 6); the control is hidden when absent. */
+  onExpand?: () => void;
+  /**
+   * Fired the instant the attach handoff begins (attachPhase → 'awaiting-modal').
+   * index.ts collapses the студия here: Fansly's native Upload modal opens on the
+   * file handoff and would otherwise be stranded behind the studio scrim. Absent
+   * (or a no-op) when there is no студия to fold.
+   */
+  onAttachHandoff?: () => void;
+}
+
+// Тёплый/Игривый/Спокойный are product words; they map to the reply-tone the
+// voice-script step already understands. Presets never spend EL characters.
+const TONE_PRESETS: Array<{ tone: ReplyTone; label: string }> = [
+  { tone: 'casual', label: 'Тёплый' },
+  { tone: 'flirty', label: 'Игривый' },
+  { tone: 'none', label: 'Спокойный' },
+];
+
+type AttachPhase = 'idle' | 'awaiting-modal' | 'confirmed' | 'uncertain' | 'aborted';
+
+/**
+ * Deliberate open toggle (spec §"Two views": decided on the live panel, not in
+ * mockups — "both behaviors are one conditional render"). When true, the compact
+ * лента collapses the script editor to a one-line row once non-stale takes
+ * exist, reclaiming vertical space; when false the editor stays fully expanded.
+ * Implemented both ways; the студия (two-column) always keeps the full editor.
+ * Default false — the pilot ships the always-expanded behavior.
+ */
+const COLLAPSE_SCRIPT_AFTER_GENERATION = false;
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== undefined) {
+    node.textContent = text;
+  }
+  return node;
+}
+
+function formatDuration(scriptChars: number): string {
+  const total = Math.max(0, Math.round(scriptChars / VOICE_CHARS_PER_SECOND));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function resolveVoiceError(code: string, fallbackMessage: string): UserFacingError {
+  if (isUserErrorKey(code)) {
+    return getErrorMessage(code);
+  }
+  return {
+    key: 'unknown_error',
+    code: 'CG-VOICE',
+    message: fallbackMessage || getErrorMessage('unknown_error').message,
+  };
+}
+
+const ATTACH_REFUSAL_KEY: Record<string, UserErrorKey> = {
+  route_changed: 'chat_changed',
+  fan_mismatch: 'chat_changed',
+};
+
+const UNKNOWN_ATTACH_REFUSAL: UserFacingError = {
+  key: 'unknown_error',
+  code: 'CG-VOICE',
+  message: 'Не удалось выдать разрешение — попробуйте ещё раз',
+};
+
+/**
+ * The default "лента" voice surface. It renders the shared components (script
+ * editor + meta, tone chips, takes list, attach/download actions) from ONE
+ * content-side attempt controller. State lives in the controller; the panel
+ * keeps only view-local flags (the attach handoff phase, the captured leftover
+ * caption, the last error notice). Preview `blob:` URLs are the controller's —
+ * it revokes them on regeneration, navigation, and destroy.
+ */
+export class VoicePanel {
+  readonly root: HTMLElement;
+  private readonly editorEl: HTMLTextAreaElement;
+  private readonly errorSlot = el('div', 'chatgoose-voice-slot');
+  private readonly sourceSlot = el('div', 'chatgoose-voice-slot');
+  private readonly metaSlot = el('div', 'chatgoose-voice-slot');
+  private readonly tonesSlot = el('div', 'chatgoose-voice-slot');
+  private readonly generateSlot = el('div', 'chatgoose-voice-slot');
+  private readonly busySlot = el('div', 'chatgoose-voice-slot');
+  private readonly reconcileSlot = el('div', 'chatgoose-voice-slot');
+  private readonly takesSlot = el('div', 'chatgoose-voice-slot');
+  private readonly attachSlot = el('div', 'chatgoose-voice-slot');
+  private readonly editorWrap: HTMLElement;
+  private readonly body: HTMLElement;
+
+  private attachPhase: AttachPhase = 'idle';
+  private fanUsername: string | null = null;
+  private leftoverDraft: string | null = null;
+  private draftCleared = false;
+  private pendingReconcile = false;
+  private lastError: UserFacingError | null = null;
+  // True while the студия overlay has adopted this panel's section nodes. It
+  // keeps the лента-only script collapse from firing on the borrowed editor.
+  private studioActive = false;
+
+  constructor(private readonly deps: VoicePanelDeps) {
+    this.root = el('div', 'chatgoose-voice-panel chatgoose-hidden');
+
+    const header = el('div', 'chatgoose-voice-header');
+    header.append(el('div', 'chatgoose-voice-title', 'Войс'));
+    const actions = el('div', 'chatgoose-voice-header-actions');
+    if (this.deps.onExpand) {
+      const expand = el('button', 'chatgoose-voice-action chatgoose-voice-expand', '⤢');
+      expand.type = 'button';
+      expand.title = 'Развернуть в студию';
+      expand.setAttribute('aria-label', 'Развернуть в студию');
+      expand.addEventListener('click', () => this.deps.onExpand?.());
+      actions.append(expand);
+    }
+    const close = el('button', 'chatgoose-voice-action chatgoose-voice-close', '×');
+    close.type = 'button';
+    close.title = 'Закрыть';
+    close.addEventListener('click', () => this.deps.onClose());
+    actions.append(close);
+    header.append(actions);
+
+    this.editorEl = el('textarea', 'chatgoose-voice-script');
+    this.editorEl.rows = 4;
+    this.editorEl.spellcheck = false;
+    this.editorEl.placeholder = 'Адаптированный скрипт для войса';
+    this.editorEl.addEventListener('input', () => this.onEditorInput());
+    this.editorWrap = el('div', 'chatgoose-voice-editor-wrap');
+    this.editorWrap.append(this.editorEl);
+
+    this.body = el('div', 'chatgoose-voice-body');
+    this.restoreLentaLayout();
+
+    this.root.append(header, this.body);
+  }
+
+  open(): void {
+    this.show();
+  }
+
+  /** Un-hide the лента and refresh it (used on entry and on студия collapse). */
+  show(): void {
+    this.root.classList.remove('chatgoose-hidden');
+    this.render();
+  }
+
+  hide(): void {
+    this.root.classList.add('chatgoose-hidden');
+  }
+
+  isOpen(): boolean {
+    return !this.root.classList.contains('chatgoose-hidden');
+  }
+
+  // ─── Shared components: studio borrows these LIVE section nodes ──────────
+  // The студия is not a second render of the components — it re-parents the very
+  // same slot nodes into a two-column layout, so state (script text, takes,
+  // selection, attach phase, error, blob players) is shared by construction and
+  // a view switch loses nothing. render() fills these slots by reference, so it
+  // keeps updating them wherever they currently live.
+
+  /** The full-width notice (error) node, shown at the top of the студия. */
+  noticeSectionNodes(): HTMLElement[] {
+    return [this.errorSlot];
+  }
+
+  /** The script-column nodes: source row, editor, meta, tones, generate/busy. */
+  scriptSectionNodes(): HTMLElement[] {
+    return [
+      this.sourceSlot,
+      this.editorWrap,
+      this.metaSlot,
+      this.tonesSlot,
+      this.generateSlot,
+      this.busySlot,
+      this.reconcileSlot,
+    ];
+  }
+
+  /** The takes-column nodes: takes list + attach/download actions. */
+  takesSectionNodes(): HTMLElement[] {
+    return [this.takesSlot, this.attachSlot];
+  }
+
+  /** Re-home every section back into the compact лента body, original order. */
+  restoreLentaLayout(): void {
+    this.body.append(
+      this.errorSlot,
+      this.sourceSlot,
+      this.editorWrap,
+      this.metaSlot,
+      this.tonesSlot,
+      this.generateSlot,
+      this.busySlot,
+      this.reconcileSlot,
+      this.takesSlot,
+      this.attachSlot,
+    );
+  }
+
+  /** The студия toggles this so the лента-only script collapse stays dormant. */
+  setStudioActive(active: boolean): void {
+    this.studioActive = active;
+  }
+
+  setFanUsername(name: string | null): void {
+    this.fanUsername = name?.trim() || null;
+    this.render();
+  }
+
+  // ─── Controller callbacks ───────────────────────────────────────────────
+
+  handleError(message: VoicePanelErrorMessage): void {
+    if (message.type === 'voice:scriptError') {
+      this.lastError = resolveVoiceError(message.code, message.message);
+      this.render();
+      return;
+    }
+    if (message.type === 'voice:attachRefuse') {
+      this.attachPhase = 'idle';
+      const mappedKey = ATTACH_REFUSAL_KEY[message.reason];
+      this.lastError = mappedKey
+        ? getErrorMessage(mappedKey)
+        : UNKNOWN_ATTACH_REFUSAL;
+      this.render();
+      return;
+    }
+    // voice:noteError
+    if (message.source === 'create') {
+      const needsReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
+      if (needsReconcile) {
+        // Indeterminate create: the controller keeps the pending create for a
+        // same-request recovery. Billing is unknown, so avoid a false verdict.
+        this.pendingReconcile = true;
+        this.lastError = null;
+      } else {
+        this.pendingReconcile = false;
+        this.lastError = resolveVoiceError(message.code, message.message);
+      }
+    } else {
+      // status/audio: the failing take is already server-owned; surface the
+      // money-honest string (e.g. corrupt audio will not be attached).
+      this.lastError = resolveVoiceError(message.code, message.message);
+    }
+    this.render();
+  }
+
+  async handleAttachGrant(grant: VoiceAttachGrant): Promise<void> {
+    const attempt = this.deps.controller.getAttempt();
+    const take = attempt?.takes.find((candidate) => candidate.voiceNoteId === grant.voiceNoteId);
+    // Drift check on the concrete requested take: canAttachSelectedTake() is now
+    // gated by the in-flight flag (true here, since this grant answers our own
+    // request), so it cannot serve as the guard — assert the take fields directly.
+    if (
+      !attempt ||
+      attempt.stale ||
+      !take ||
+      take.view.state !== 'completed' ||
+      !take.audio ||
+      !take.blobUrl
+    ) {
+      // The selected take drifted (edited/stale) between click and grant.
+      this.deps.controller.reportAttachOutcome('uncertain');
+      this.attachPhase = 'aborted';
+      this.render();
+      return;
+    }
+
+    this.fanUsername = grant.fanUsername?.trim() || this.fanUsername;
+    const draft = this.deps.getDraftText();
+    this.leftoverDraft = draft.trim() ? draft : null;
+    this.draftCleared = false;
+    this.lastError = null;
+    // The native Upload modal opens on the file handoff below. If the студия is
+    // still open, its fixed scrim (pointer-events auto) strands the modal — the
+    // chatter can't reach it, and the 10s observation budget burns hesitation
+    // into an 'uncertain'. Fold the студия back into the лента FIRST, through
+    // its own collapse path, so the shared nodes restore correctly and the
+    // reopened лента carries the modal hint. No-op when already in the лента.
+    this.deps.onAttachHandoff?.();
+    // The native Upload modal opens now; the waveform only appears after the
+    // human clicks Upload — so the guidance must be shown immediately, not on
+    // confirmation.
+    this.attachPhase = 'awaiting-modal';
+    this.render();
+
+    let outcome: VoiceAttachOutcome;
+    try {
+      outcome = await this.deps.attach({
+        voiceNoteId: take.voiceNoteId,
+        audio: take.audio,
+        token: grant.token,
+      });
+    } catch {
+      outcome = 'uncertain';
+    }
+
+    // Release the controller-level attach gate on the terminal outcome, then
+    // reflect it in the view-local phase.
+    this.deps.controller.reportAttachOutcome(outcome);
+    if (outcome === 'confirmed') {
+      await this.deps.controller.markAttached(grant.voiceNoteId);
+      this.attachPhase = 'confirmed';
+    } else if (outcome === 'aborted') {
+      this.attachPhase = 'aborted';
+    } else {
+      this.attachPhase = 'uncertain';
+    }
+    this.render();
+  }
+
+  // ─── Rendering ──────────────────────────────────────────────────────────
+
+  render(): void {
+    const attempt = this.deps.controller.getAttempt();
+    this.pendingReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
+
+    this.editorWrap.classList.toggle('chatgoose-hidden', !attempt);
+    this.renderError();
+
+    if (!attempt) {
+      this.sourceSlot.replaceChildren();
+      this.metaSlot.replaceChildren();
+      this.tonesSlot.replaceChildren();
+      this.generateSlot.replaceChildren();
+      this.busySlot.replaceChildren();
+      this.reconcileSlot.replaceChildren();
+      this.takesSlot.replaceChildren();
+      this.attachSlot.replaceChildren();
+      return;
+    }
+
+    if (document.activeElement !== this.editorEl) {
+      this.editorEl.value = attempt.script;
+    }
+    // Script deltas own the editor until the free LLM step completes. Take
+    // synthesis remains non-blocking and leaves the finished script editable.
+    this.editorEl.disabled = attempt.phase === 'generating';
+
+    // Лента-only compactness toggle (dormant while the студия owns the editor).
+    const collapseScript =
+      COLLAPSE_SCRIPT_AFTER_GENERATION &&
+      !this.studioActive &&
+      !attempt.stale &&
+      attempt.takes.length > 0;
+    this.editorWrap.classList.toggle('chatgoose-voice-editor-collapsed', collapseScript);
+
+    this.renderSource(attempt);
+    this.renderMeta(attempt);
+    this.renderTones(attempt);
+    this.renderGenerate(attempt);
+    this.renderBusy(attempt);
+    this.renderReconcile();
+    this.renderTakes(attempt);
+    this.renderAttach(attempt);
+  }
+
+  private renderError(): void {
+    if (!this.lastError) {
+      this.errorSlot.replaceChildren();
+      return;
+    }
+    const notice = el('div', 'chatgoose-voice-error');
+    notice.append(el('div', 'chatgoose-voice-error-title', this.lastError.message));
+    if (this.lastError.description) {
+      notice.append(el('div', 'chatgoose-voice-error-detail', this.lastError.description));
+    }
+    this.errorSlot.replaceChildren(notice);
+  }
+
+  private renderSource(attempt: VoiceAttempt): void {
+    const row = el('div', 'chatgoose-voice-source');
+    row.append(el('span', 'chatgoose-voice-source-label', 'Исходник'));
+    row.append(el('span', 'chatgoose-voice-source-text', attempt.draftText));
+    const restore = el('button', 'chatgoose-voice-source-restore', '↺');
+    restore.type = 'button';
+    restore.title = 'Вернуть исходник в скрипт';
+    restore.addEventListener('click', () => {
+      this.lastError = null;
+      void this.deps.controller.restoreDraft();
+    });
+    row.append(restore);
+    this.sourceSlot.replaceChildren(row);
+  }
+
+  private renderMeta(attempt: VoiceAttempt): void {
+    const length = attempt.script.length;
+    const seconds = Math.round(length / VOICE_CHARS_PER_SECOND);
+    const meta = el(
+      'div',
+      'chatgoose-voice-meta',
+      `${length} / ${VOICE_SCRIPT_MAX_CHARS_ADVISORY} · ≈${seconds} сек`,
+    );
+    this.metaSlot.replaceChildren(meta);
+  }
+
+  private renderTones(attempt: VoiceAttempt): void {
+    const wrap = el('div', 'chatgoose-voice-tones');
+    const chips = el('div', 'chatgoose-voice-tones-chips');
+    const pendingCreate = this.deps.controller.hasPendingCreate();
+    for (const preset of TONE_PRESETS) {
+      const chip = el('button', 'chatgoose-voice-tone', preset.label);
+      chip.type = 'button';
+      chip.dataset.tone = preset.tone;
+      const active = attempt.tone === preset.tone;
+      chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+      chip.classList.toggle('chatgoose-voice-tone-active', active);
+      chip.disabled = attempt.phase === 'generating' || pendingCreate;
+      chip.addEventListener('click', () => {
+        if (this.deps.controller.hasPendingCreate()) {
+          return;
+        }
+        this.lastError = null;
+        this.attachPhase = 'idle';
+        void this.deps.controller.regenerateScript(preset.tone);
+      });
+      chips.append(chip);
+    }
+    wrap.append(chips);
+    wrap.append(el('span', 'chatgoose-voice-tones-hint', 'пресеты бесплатны'));
+    this.tonesSlot.replaceChildren(wrap);
+  }
+
+  private costChars(attempt: VoiceAttempt): number {
+    return canonicalizeVoiceScript(attempt.script).length;
+  }
+
+  private renderGenerate(attempt: VoiceAttempt): void {
+    const hasTakes = attempt.takes.length > 0;
+    const pendingCreate = this.deps.controller.hasPendingCreate();
+    if (
+      attempt.phase === 'generating' ||
+      pendingCreate ||
+      hasTakes ||
+      this.pendingReconcile
+    ) {
+      this.generateSlot.replaceChildren();
+      return;
+    }
+    const cost = this.costChars(attempt);
+    const button = el(
+      'button',
+      'chatgoose-button chatgoose-voice-generate',
+      `Сгенерировать войс — потратит ~${cost} символов`,
+    );
+    button.type = 'button';
+    button.disabled = !attempt.generationRef || cost === 0;
+    button.addEventListener('click', () => {
+      this.beginPaidCreate(() => this.deps.controller.generateTake());
+    });
+    this.generateSlot.replaceChildren(button);
+  }
+
+  private renderBusy(attempt: VoiceAttempt): void {
+    if (attempt.phase === 'generating') {
+      this.busySlot.replaceChildren(
+        this.busyRow('Скрипт генерируется…'),
+      );
+      return;
+    }
+    if (this.deps.controller.hasPendingCreate() && !this.pendingReconcile) {
+      const ordinal = attempt.takes.length + 1;
+      this.busySlot.replaceChildren(
+        this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`),
+      );
+      return;
+    }
+    this.busySlot.replaceChildren();
+  }
+
+  private busyRow(text: string): HTMLElement {
+    const row = el('div', 'chatgoose-voice-busy');
+    row.append(el('span', 'chatgoose-spinner'));
+    row.append(el('span', 'chatgoose-voice-busy-text', text));
+    return row;
+  }
+
+  private renderReconcile(): void {
+    if (!this.pendingReconcile) {
+      this.reconcileSlot.replaceChildren();
+      return;
+    }
+    const block = el('div', 'chatgoose-voice-reconcile');
+    block.append(
+      el(
+        'div',
+        'chatgoose-voice-reconcile-text',
+        'Запрос не подтверждён — символы могли списаться.',
+      ),
+    );
+    const check = el(
+      'button',
+      'chatgoose-button chatgoose-button-secondary chatgoose-voice-check-status',
+      'Восстановить этот запрос',
+    );
+    check.type = 'button';
+    check.addEventListener('click', () => {
+      // Re-issue the same idempotent create that the chatter already approved;
+      // this never mints another take or silently changes the frozen payload.
+      void this.deps.controller.handlePortReconnect();
+    });
+    block.append(check);
+    this.reconcileSlot.replaceChildren(block);
+  }
+
+  private renderTakes(attempt: VoiceAttempt): void {
+    if (attempt.takes.length === 0) {
+      this.takesSlot.replaceChildren();
+      return;
+    }
+    const section = el('div', 'chatgoose-voice-takes');
+
+    const header = el('div', 'chatgoose-voice-takes-header');
+    const cost = this.costChars(attempt);
+    const pendingCreate = this.deps.controller.hasPendingCreate();
+    if (attempt.stale) {
+      const badge = el('span', 'chatgoose-voice-stale', 'устарело — текст изменён');
+      header.append(badge);
+      const regen = el(
+        'button',
+        'chatgoose-voice-another',
+        `Сгенерировать войс — потратит ~${cost} символов`,
+      );
+      regen.type = 'button';
+      regen.disabled = !attempt.generationRef || cost === 0 || pendingCreate;
+      regen.addEventListener('click', () => {
+        this.beginPaidCreate(() => this.deps.controller.generateAgain());
+      });
+      header.append(regen);
+    } else {
+      const another = el('button', 'chatgoose-voice-another', `+ Ещё вариант · ~${cost} симв.`);
+      another.type = 'button';
+      another.disabled = !attempt.canonicalScript || pendingCreate;
+      another.addEventListener('click', () => {
+        this.beginPaidCreate(() => this.deps.controller.generateAnotherTake());
+      });
+      header.append(another);
+    }
+    section.append(header);
+
+    attempt.takes.forEach((take, index) => {
+      section.append(this.renderTakeRow(attempt, take, index + 1));
+    });
+
+    this.takesSlot.replaceChildren(section);
+  }
+
+  private renderTakeRow(attempt: VoiceAttempt, take: VoiceTake, ordinal: number): HTMLElement {
+    const row = el('div', 'chatgoose-voice-take');
+    row.dataset.voiceNoteId = String(take.voiceNoteId);
+    const state = take.view.state;
+
+    const headline = el('div', 'chatgoose-voice-take-head');
+
+    if (state === 'completed' && take.blobUrl) {
+      const radio = el('input', 'chatgoose-voice-take-select');
+      radio.type = 'radio';
+      radio.name = `chatgoose-voice-take-${attempt.attemptId}`;
+      radio.checked = attempt.selectedTakeId === take.voiceNoteId;
+      radio.addEventListener('change', () => {
+        void this.deps.controller.selectTake(take.voiceNoteId);
+      });
+      headline.append(radio);
+    }
+
+    headline.append(
+      el('span', 'chatgoose-voice-take-title', this.takeTitle(state, ordinal, take.view.scriptChars)),
+    );
+
+    if (state === 'completed' && take.blobUrl) {
+      const download = el('button', 'chatgoose-voice-take-download', '⬇');
+      download.type = 'button';
+      download.title = 'Скачать MP3';
+      download.addEventListener('click', () => this.downloadTake(take));
+      headline.append(download);
+    }
+    row.append(headline);
+
+    if (state === 'completed' && take.blobUrl) {
+      const audio = el('audio', 'chatgoose-voice-audio');
+      audio.controls = true;
+      audio.preload = 'none';
+      audio.src = take.blobUrl;
+      row.append(audio);
+    } else if (state === 'queued' || state === 'dispatched') {
+      row.append(this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`));
+    }
+
+    const recovery = this.renderTakeRecovery(take);
+    if (recovery) {
+      row.append(recovery);
+    }
+    return row;
+  }
+
+  private takeTitle(state: VoiceTake['view']['state'], ordinal: number, scriptChars: number): string {
+    switch (state) {
+      case 'completed':
+        return `Вариант ${ordinal} · ${formatDuration(scriptChars)}`;
+      case 'queued':
+      case 'dispatched':
+        return `Вариант ${ordinal} генерируется… можно продолжать работать`;
+      case 'indeterminate':
+        return `Вариант ${ordinal} · статус неизвестен`;
+      case 'failed_after_dispatch':
+        return `Вариант ${ordinal} · ошибка после списания`;
+      case 'failed_definite':
+        return `Вариант ${ordinal} · не удалось · символы не потрачены`;
+      case 'quota_denied':
+        return `Вариант ${ordinal} · лимит исчерпан · символы не потрачены`;
+      case 'artifact_expired':
+        return `Вариант ${ordinal} · аудио истекло`;
+      default:
+        return `Вариант ${ordinal}`;
+    }
+  }
+
+  private renderTakeRecovery(take: VoiceTake): HTMLElement | null {
+    const state = take.view.state;
+    const needsFreeCheck = state === 'indeterminate' || (
+      (state === 'queued' || state === 'dispatched') && Boolean(take.view.errorCode)
+    );
+    const needsPaidRegen =
+      state === 'indeterminate' ||
+      state === 'failed_after_dispatch' ||
+      state === 'artifact_expired';
+    if (!needsFreeCheck && !needsPaidRegen) {
+      return null;
+    }
+    const actions = el('div', 'chatgoose-voice-take-recovery');
+    if (needsFreeCheck) {
+      const check = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-check-status',
+        'Проверить статус — бесплатно',
+      );
+      check.type = 'button';
+      check.addEventListener('click', () => {
+        this.deps.controller.checkStatus(take.voiceNoteId);
+      });
+      actions.append(check);
+    }
+    if (needsPaidRegen) {
+      const regen = el(
+        'button',
+        'chatgoose-button chatgoose-voice-regenerate',
+        'Сгенерировать заново — потратит символы',
+      );
+      regen.type = 'button';
+      regen.disabled = this.deps.controller.hasPendingCreate();
+      regen.addEventListener('click', () => {
+        this.beginPaidCreate(() => this.deps.controller.generateAgain());
+      });
+      actions.append(regen);
+    }
+    return actions;
+  }
+
+  private renderAttach(attempt: VoiceAttempt): void {
+    const completed = attempt.takes.filter(
+      (take) => take.view.state === 'completed' && take.blobUrl,
+    );
+    if (completed.length === 0 && this.attachPhase === 'idle') {
+      this.attachSlot.replaceChildren();
+      return;
+    }
+
+    if (this.attachPhase !== 'idle') {
+      this.attachSlot.replaceChildren(this.renderAttachFlow());
+      return;
+    }
+
+    const region = el('div', 'chatgoose-voice-attach-region');
+    const probe = this.deps.probeComposer();
+    if (!probe.ok) {
+      // Degradation: never a dead attach click — offer the honest download.
+      const download = el('button', 'chatgoose-button chatgoose-voice-download-mp3', 'Скачать MP3');
+      download.type = 'button';
+      const target = completed.find((take) => take.voiceNoteId === attempt.selectedTakeId) ??
+        completed[0];
+      download.disabled = !target;
+      download.addEventListener('click', () => {
+        if (target) {
+          this.downloadTake(target);
+        }
+      });
+      region.append(download);
+      region.append(
+        el('div', 'chatgoose-voice-degraded', 'Не нашли окно вложений Fansly'),
+      );
+      this.attachSlot.replaceChildren(region);
+      return;
+    }
+
+    const label = this.fanUsername
+      ? `Прикрепить для @${this.fanUsername}`
+      : 'Прикрепить войс';
+    const attach = el('button', 'chatgoose-button chatgoose-voice-attach', label);
+    attach.type = 'button';
+    attach.disabled = !this.deps.controller.canAttachSelectedTake();
+    attach.addEventListener('click', () => {
+      this.lastError = null;
+      // Re-probe synchronously at the human click. Production's probe also
+      // verifies the real pathname, closing the route-watcher polling gap.
+      if (!this.deps.probeComposer().ok) {
+        this.render();
+        return;
+      }
+      this.deps.controller.requestAttach();
+    });
+    region.append(attach);
+    this.attachSlot.replaceChildren(region);
+  }
+
+  private renderAttachFlow(): HTMLElement {
+    const region = el('div', 'chatgoose-voice-attach-region');
+    if (this.attachPhase === 'aborted') {
+      region.append(
+        el(
+          'div',
+          'chatgoose-voice-modal-hint',
+          'Вариант изменился — прикрепление отменено.',
+        ),
+      );
+      const back = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-attach-rearm',
+        'Вернуться к вариантам',
+      );
+      back.type = 'button';
+      back.addEventListener('click', () => {
+        this.attachPhase = 'idle';
+        this.render();
+      });
+      region.append(back);
+    } else if (this.attachPhase === 'uncertain') {
+      region.append(
+        el(
+          'div',
+          'chatgoose-voice-modal-hint chatgoose-voice-modal-hint-uncertain',
+          'Проверьте composer — вложение должно появиться после Upload',
+        ),
+      );
+      // Adapter tokens are single-use: an uncertain attach consumed the grant.
+      // Offer an explicit, calm re-arm — never an auto-repeat — that returns to
+      // the idle attach affordance so the next click mints a FRESH token.
+      const rearm = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-attach-rearm',
+        'Прикрепить ещё раз',
+      );
+      rearm.type = 'button';
+      rearm.addEventListener('click', () => {
+        this.attachPhase = 'idle';
+        this.render();
+      });
+      region.append(rearm);
+    } else if (this.attachPhase === 'confirmed') {
+      region.append(
+        el(
+          'div',
+          'chatgoose-voice-modal-hint chatgoose-voice-modal-hint-confirmed',
+          'Войс прикреплён.',
+        ),
+      );
+    } else {
+      region.append(
+        el(
+          'div',
+          'chatgoose-voice-modal-hint',
+          'Выберите Free/PPV и подтвердите Upload',
+        ),
+      );
+    }
+    const leftover = this.renderLeftoverHint();
+    if (leftover) {
+      region.append(leftover);
+    }
+    return region;
+  }
+
+  private renderLeftoverHint(): HTMLElement | null {
+    if (this.attachPhase !== 'confirmed' && this.attachPhase !== 'uncertain') {
+      return null;
+    }
+    if (!this.leftoverDraft) {
+      return null;
+    }
+    const hint = el('div', 'chatgoose-voice-leftover');
+    if (this.draftCleared) {
+      hint.classList.add('chatgoose-voice-leftover-cleared');
+      hint.append(el('span', 'chatgoose-voice-leftover-text', 'Текст убран.'));
+      const recover = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-leftover-recover',
+        'Вернуть текст',
+      );
+      recover.type = 'button';
+      recover.addEventListener('click', () => {
+        const original = this.leftoverDraft;
+        if (original === null) {
+          return;
+        }
+        void this.deps.setDraftText(original).then(() => {
+          this.draftCleared = false;
+          this.render();
+        });
+      });
+      hint.append(recover);
+      return hint;
+    }
+    // Soften the prompt when the outcome was uncertain (no confirmed waveform).
+    const prompt = this.attachPhase === 'uncertain'
+      ? 'Если войс прикрепился, текст в поле уйдёт вместе с ним. Убрать?'
+      : 'Текст остался в поле — фан получит и текст, и войс. Убрать?';
+    hint.append(el('span', 'chatgoose-voice-leftover-text', prompt));
+    const clear = el(
+      'button',
+      'chatgoose-button chatgoose-button-secondary chatgoose-voice-leftover-clear',
+      'Убрать',
+    );
+    clear.type = 'button';
+    clear.addEventListener('click', () => {
+      void this.deps.setDraftText('').then(() => {
+        this.draftCleared = true;
+        this.render();
+      });
+    });
+    hint.append(clear);
+    return hint;
+  }
+
+  private downloadTake(take: VoiceTake): void {
+    if (!take.blobUrl) {
+      return;
+    }
+    const anchor = el('a', 'chatgoose-hidden');
+    anchor.href = take.blobUrl;
+    anchor.download = `voice-note-${take.voiceNoteId}.mp3`;
+    this.root.append(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  private beginPaidCreate(start: () => Promise<string>): void {
+    if (this.deps.controller.hasPendingCreate()) {
+      return;
+    }
+    this.lastError = null;
+    const pending = start();
+    // beginCreate claims pendingCreate synchronously, before its first await.
+    // Render now so a second physical click cannot race the durable write.
+    this.render();
+    void pending.catch(() => {
+      this.lastError = getErrorMessage('unknown_error');
+      this.render();
+    });
+  }
+
+  private onEditorInput(): void {
+    this.lastError = null;
+    this.attachPhase = 'idle';
+    void this.deps.controller.editScript(this.editorEl.value);
+  }
+}

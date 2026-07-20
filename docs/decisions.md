@@ -63,6 +63,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
 | E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` cache-hit marker invalidates every pre-guard recap (one forced regen per fan, self-healing) with a documented Hub-residual gap owned by core #136 |
 | E46 | 2026-07-19 | Coach feature (client-side): per-fan in-memory sessions, canonical conversationRef=groupId + required fanRef, transcript overlap-and-replace cache, recap two sizes + picker (`summary-short:` key, short never syncs to Hub), auto-recap STOP/PROCEED taxonomy (timed_out/network_error STOP by design), serialization on lifecycle.reserve, empty-pageLabel acceptance fallback, custom-name rule both lanes |
+| E47 | 2026-07-20 | Voice notes: fan-pinned paid recovery, exact-take/live-route attach custody, bounded MP3 handoff, and explicit storage.session/MV3 limits |
 
 ## Entries
 
@@ -1140,3 +1141,49 @@ lanes (named guard tests in `tests/operations.test.ts`). Recorded in the same PR
 that implements the feature (family law). Spec:
 docs/superpowers/specs/2026-07-17-coach-chat-design.md; plan:
 docs/superpowers/plans/2026-07-18-coach-chat-extension.md.
+
+**E47 (2026-07-20).** Voice notes extension lane (phase 2 of the voice
+effort; kernel half = core #15 / Decisions #174–#175). The extension gains a
+dedicated `voice:*` port protocol — deliberately NOT `operation:*`, so paid
+voice recovery is exempt from generic disconnect cleanup and transparent
+`service_unavailable` retry. `voice-script` is panel-only and remains excluded
+from insert/accept/compare surfaces via `isOperationFeatureType`.
+
+The content attempt controller owns one `clientRequestId` per take. The free
+script step must first resolve the Fansly fan account id; `scriptComplete`
+returns that canonical id, and content freezes it as both `conversationRef`
+and `pinnedConversationRef` in the versioned `storage.session` snapshot BEFORE
+the paid create is posted. Group-id and unresolved-fan fallbacks are forbidden.
+Boot/reconnect replays only the same frozen id and payload. Once a dispatch may
+have occurred, a later replay rejection remains `needs-reconcile`; only the
+kernel's durable `voice_quota_denied` record proves the id unbilled and burns
+it. The recovery UI therefore says it restores the same approved request, not
+that it performs a free status-only read.
+
+Attach custody is bound to the exact clicked `voiceNoteId`. Background grants
+only after comparing the current tab/account/group/fan/routeNonce tuple; token
+single-use is enforced by the content adapter, not claimed as a background
+consume protocol. The adapter also checks the real live pathname both at the
+human click and immediately before the native file-input mutation, closing the
+polling route-watcher gap. An uncertain handoff never auto-repeats; PPV and Send
+remain manual in Fansly. The adapter uses the spike-proven DataTransfer/change
+handoff with the Firefox page-context fallback. The студия and лента retain one
+controller and the overlay collapses before Fansly's Upload modal opens.
+
+The background streams audio under the 2 MiB cap and validates `audio/mpeg`,
+MP3 structure, declared/actual length, and sha256 before bytes cross the port.
+Audio remains memory-only behind revocable blob URLs. Attempt snapshots contain
+the frozen script and refs but never audio; keys use `voiceAttemptV1:` and a
+6-hour TTL. Expired-key deletion is lazy on the next store load, not an eager
+timer. Firefox exposes `storage.session` to content with the area-wide
+`TRUSTED_AND_UNTRUSTED_CONTEXTS` access level: this also makes the existing
+spenders and quota session keys available to extension content contexts. Fansly
+page JavaScript remains in a separate world without direct WebExtension API
+access. This area-wide widening and lazy TTL are accepted for the pilot; no
+`storage.local` schema migration is implied.
+
+After an MV3 worker restart, persisted create/status recovery still works, but
+the background's in-memory attach attestation is gone, so already-created takes
+degrade to Download MP3 rather than weakening recipient checks. The Voice UI is
+hidden unless the kernel capability hint is true, while the default-off kernel
+kill switch and fail-closed allowlist remain authoritative for every paid call.

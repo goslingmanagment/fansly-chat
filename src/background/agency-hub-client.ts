@@ -1,4 +1,9 @@
-import { KernelApiError, createClient } from '@kernel/sdk';
+import {
+  KernelApiError,
+  createClient,
+  fetchVoiceNoteAudio as fetchVoiceNoteAudioResponse,
+  type KernelClientOptions,
+} from '@kernel/sdk';
 import { clientVersionHeaders } from '../shared/client-version.js';
 import {
   AGENCY_HUB_PROFILE_MAX_BYTES,
@@ -29,12 +34,21 @@ import type {
   Settings,
   SpendersStreamState,
   UserFacingError,
+  VoiceNoteStatusView,
 } from '../shared/types.js';
 
 interface AgencyHubPageSummary {
   label: string;
   platform: 'fansly' | 'onlyfans';
   username: string | null;
+  capabilities?: {
+    voiceNotes: boolean;
+  };
+}
+
+export interface AgencyHubResolvedPage {
+  pageLabel: string;
+  voiceNotesCapable: boolean;
 }
 
 interface AgencyHubProfileRecord {
@@ -172,7 +186,9 @@ function isLegacyTopSpendersLimitError(error: unknown, requestedLimit: number): 
 export class AgencyHubClient {
   private readonly fetchImpl: FetchLike;
 
-  constructor(fetchImpl: FetchLike = (...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) {
+  constructor(
+    fetchImpl: FetchLike = (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+  ) {
     this.fetchImpl = (input, init) => fetchImpl.call(globalThis, input, init);
   }
 
@@ -203,13 +219,21 @@ export class AgencyHubClient {
   /** SDK client bound to one call: bearer + abort signal ride the fetch seam
    * (the vendored SDK has no per-operation signal parameter). Responses are
    * contract-validated by the SDK — the old `as` casts are gone. */
-  private sdkFor(baseUrl: string, bearer: string, signal: AbortSignal) {
-    return createClient({
+  private sdkOptions(
+    baseUrl: string,
+    bearer: string,
+    signal: AbortSignal,
+  ): KernelClientOptions {
+    return {
       baseUrl: baseUrl.replace(/\/+$/, ''),
       auth: { mode: 'bearer', token: () => bearer },
       headers: clientVersionHeaders(),
       fetch: (input, init) => this.fetchImpl(input, { ...init, signal }),
-    });
+    };
+  }
+
+  private sdkFor(baseUrl: string, bearer: string, signal: AbortSignal) {
+    return createClient(this.sdkOptions(baseUrl, bearer, signal));
   }
 
   /** Map SDK failures back onto the public contract the callers already
@@ -266,10 +290,10 @@ export class AgencyHubClient {
     }
   }
 
-  private resolvePageLabel(
+  private resolvePage(
     pages: AgencyHubPageSummary[],
     pageUsername: string | null,
-  ): string | null {
+  ): AgencyHubPageSummary | null {
     const normalizedPageUsername = normalizeAgencyHubUsername(pageUsername);
     if (!normalizedPageUsername) {
       return null;
@@ -284,8 +308,9 @@ export class AgencyHubClient {
       return null;
     }
 
-    const pageLabel = matches[0]?.label?.trim() ?? '';
-    return pageLabel || null;
+    const match = matches[0];
+    const pageLabel = match?.label?.trim() ?? '';
+    return match && pageLabel ? match : null;
   }
 
   private async getConversationProfile(
@@ -354,6 +379,17 @@ export class AgencyHubClient {
     pageUsername: string | null,
     signal: AbortSignal,
   ): Promise<string | null> {
+    return (await this.resolvePageForUsername(settings, pageUsername, signal))?.pageLabel ?? null;
+  }
+
+  /** Resolve the current creator to its assigned page and retain the optional
+   * voice-notes capability hint. Missing capability data is deliberately
+   * false; POST /voice-notes remains the authoritative admission check. */
+  async resolvePageForUsername(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    pageUsername: string | null,
+    signal: AbortSignal,
+  ): Promise<AgencyHubResolvedPage | null> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
     if (!baseUrl) throw new ChatGooseError('hub_invalid_url');
@@ -379,7 +415,73 @@ export class AgencyHubClient {
         },
       });
     }
-    return this.resolvePageLabel(pages, pageUsername);
+    const page = this.resolvePage(pages, pageUsername);
+    if (!page) {
+      return null;
+    }
+    return {
+      pageLabel: page.label.trim(),
+      voiceNotesCapable: page.capabilities?.voiceNotes === true,
+    };
+  }
+
+  private async resolveVoiceCallContext(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+  ): Promise<{ baseUrl: string; bearer: string }> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl) throw new ChatGooseError('hub_invalid_url');
+    if (!bearer) throw new ChatGooseError('hub_missing_api_key');
+    if (!await this.hasHostPermission(baseUrl)) {
+      throw new ChatGooseError('hub_missing_permission');
+    }
+    return { baseUrl, bearer };
+  }
+
+  /** Voice-note methods intentionally preserve KernelApiError bodies and raw
+   * error responses for the dedicated service, which maps structured voice
+   * codes and auth statuses onto its port lane. */
+  async createVoiceNote(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    pageLabel: string,
+    body: {
+      clientRequestId: string;
+      conversationRef: string;
+      sourceGenerationRef: string;
+      script: string;
+    },
+    signal: AbortSignal,
+  ): Promise<VoiceNoteStatusView> {
+    const { baseUrl, bearer } = await this.resolveVoiceCallContext(settings);
+    return await this.sdkFor(baseUrl, bearer, signal).voiceNoteCreate({
+      params: { pageLabel },
+      body,
+    });
+  }
+
+  async getVoiceNoteStatus(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    pageLabel: string,
+    id: number,
+    signal: AbortSignal,
+  ): Promise<VoiceNoteStatusView> {
+    const { baseUrl, bearer } = await this.resolveVoiceCallContext(settings);
+    return await this.sdkFor(baseUrl, bearer, signal).voiceNoteStatus({
+      params: { pageLabel, id },
+    });
+  }
+
+  async fetchVoiceNoteAudio(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    pageLabel: string,
+    id: number,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    const { baseUrl, bearer } = await this.resolveVoiceCallContext(settings);
+    return await fetchVoiceNoteAudioResponse(
+      this.sdkOptions(baseUrl, bearer, signal),
+      { pageLabel, id },
+    );
   }
 
   /** Coach recap-status read (spec §3/§5): the freshest usable full + short
@@ -748,7 +850,7 @@ export class AgencyHubClient {
 
     try {
       const pages = await this.listVisiblePages(baseUrl, apiKey, signal);
-      const pageLabel = this.resolvePageLabel(pages, normalizedPageUsername);
+      const pageLabel = this.resolvePage(pages, normalizedPageUsername)?.label.trim() ?? null;
       if (!pageLabel) {
         return {
           status: 'failed',
@@ -873,7 +975,7 @@ export class AgencyHubClient {
 
     try {
       const pages = await this.listVisiblePages(baseUrl, apiKey, signal);
-      const pageLabel = this.resolvePageLabel(pages, normalizedPageUsername);
+      const pageLabel = this.resolvePage(pages, normalizedPageUsername)?.label.trim() ?? null;
       if (!pageLabel) {
         return {
           status: 'failed',

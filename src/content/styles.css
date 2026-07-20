@@ -1828,7 +1828,8 @@ ol.chatgoose-md-list {
 
 /* ─── Scroll Lock ────────────────────────────────────────────── */
 
-body.chatgoose-scroll-lock {
+body.chatgoose-scroll-lock,
+body.chatgoose-voice-studio-lock {
   overflow: hidden !important;
 }
 
@@ -2429,4 +2430,534 @@ body.chatgoose-scroll-lock {
   opacity: 1;
   transform: translateY(-1px);
   border-color: var(--chatgoose-green-line);
+}
+
+/* ─── Voice (лента) ──────────────────────────────────────────────
+   Family theme: terracotta accent, a serif script editor, mono numbers.
+   Colours come from the tokens, so the dark twin is a pure variable swap. */
+
+.chatgoose-toolbar-voice {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.chatgoose-voice-panel {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow);
+  overflow: hidden;
+}
+
+.chatgoose-voice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-voice-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-voice-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.chatgoose-voice-action {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-voice-action:hover {
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-voice-body {
+  display: grid;
+  gap: 9px;
+  padding: 10px 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+/* Empty slots must not open gaps: the rendered contents join the body grid. */
+.chatgoose-voice-slot {
+  display: contents;
+}
+
+.chatgoose-voice-error {
+  border: 1px solid var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 7px 10px;
+  display: grid;
+  gap: 2px;
+}
+
+.chatgoose-voice-error-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-voice-error-detail {
+  font-size: 11px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-voice-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-voice-source-label {
+  font-weight: 600;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-voice-source-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
+.chatgoose-voice-source-restore {
+  flex-shrink: 0;
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  border-radius: var(--chatgoose-radius-chip);
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.chatgoose-voice-source-restore:hover {
+  color: var(--chatgoose-clay-ink);
+  border-color: var(--chatgoose-clay-line);
+}
+
+.chatgoose-voice-editor-wrap {
+  display: block;
+}
+
+.chatgoose-voice-script {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 84px;
+  padding: 9px 11px;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font-serif);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.chatgoose-voice-script:focus {
+  outline: none;
+  border-color: var(--chatgoose-clay);
+}
+
+.chatgoose-voice-meta {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-voice-tones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-voice-tones-chips {
+  display: flex;
+  gap: 5px;
+}
+
+.chatgoose-voice-tone {
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-voice-tone:hover:not(:disabled) {
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-voice-tone-active {
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-voice-tone:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.chatgoose-voice-tones-hint {
+  font-size: 10px;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-voice-generate {
+  justify-self: start;
+  background: var(--chatgoose-clay);
+  border-color: var(--chatgoose-clay-deep);
+  color: #fff;
+}
+
+.chatgoose-voice-generate:hover:not(:disabled) {
+  background: var(--chatgoose-clay-deep);
+  border-color: var(--chatgoose-clay-deep);
+  color: #fff;
+}
+
+.chatgoose-voice-busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-voice-busy-text {
+  font-style: italic;
+}
+
+.chatgoose-voice-reconcile,
+.chatgoose-voice-take-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatgoose-voice-reconcile {
+  border: 1px solid var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 8px 10px;
+}
+
+.chatgoose-voice-reconcile-text {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--chatgoose-amber);
+}
+
+.chatgoose-voice-takes {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--chatgoose-line);
+  padding-top: 9px;
+}
+
+.chatgoose-voice-takes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-voice-another {
+  border: none;
+  background: none;
+  color: var(--chatgoose-clay-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chatgoose-voice-another:disabled {
+  color: var(--chatgoose-ink-low);
+  cursor: not-allowed;
+}
+
+.chatgoose-voice-stale {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--chatgoose-warn);
+}
+
+.chatgoose-voice-take {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 8px 10px;
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-voice-take-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatgoose-voice-take-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chatgoose-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.chatgoose-voice-take-download {
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-ink-mid);
+  border-radius: var(--chatgoose-radius-chip);
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.chatgoose-voice-take-download:hover {
+  color: var(--chatgoose-clay-ink);
+  border-color: var(--chatgoose-clay-line);
+}
+
+.chatgoose-voice-audio {
+  width: 100%;
+  height: 32px;
+}
+
+.chatgoose-voice-attach-region {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--chatgoose-line);
+  padding-top: 9px;
+}
+
+.chatgoose-voice-attach {
+  justify-self: start;
+  background: var(--chatgoose-clay);
+  border-color: var(--chatgoose-clay-deep);
+  color: #fff;
+}
+
+.chatgoose-voice-attach:hover:not(:disabled) {
+  background: var(--chatgoose-clay-deep);
+  color: #fff;
+}
+
+.chatgoose-voice-download-mp3 {
+  justify-self: start;
+}
+
+.chatgoose-voice-degraded {
+  border: 1px solid var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 7px 10px;
+  font-size: 11px;
+}
+
+.chatgoose-voice-modal-hint {
+  border: 1px solid var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chatgoose-voice-modal-hint-uncertain {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+  font-weight: 500;
+}
+
+/* Attach confirmed: a calm neutral note (green stays reserved for money). */
+.chatgoose-voice-modal-hint-confirmed {
+  border-color: var(--chatgoose-line);
+  background: transparent;
+  color: var(--chatgoose-ink-mid);
+  font-weight: 500;
+}
+
+.chatgoose-voice-attach-rearm {
+  justify-self: start;
+}
+
+.chatgoose-voice-leftover {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px dashed var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 7px 10px;
+}
+
+.chatgoose-voice-leftover-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--chatgoose-ink-mid);
+}
+
+/* Лента-only script collapse (COLLAPSE_SCRIPT_AFTER_GENERATION) — one-line row
+   once non-stale takes exist. Dormant by default; the студия never sets it. */
+.chatgoose-voice-editor-collapsed .chatgoose-voice-script {
+  min-height: 0;
+  height: 30px;
+  resize: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chatgoose-voice-editor-collapsed .chatgoose-voice-script:focus {
+  height: auto;
+  min-height: 84px;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+/* ─── Voice (студия overlay) ─────────────────────────────────────
+   The second view: the SAME components (from voice-panel.ts) re-parented into a
+   two-column overlay on the family's overlay surface. Its own fixed root sits
+   above the лента; the shell/backdrop/panel reuse .chatgoose-overlay-* theming. */
+
+#chatgoose-voice-studio-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.chatgoose-voice-studio.chatgoose-overlay-panel {
+  width: min(880px, 100%);
+  gap: 12px;
+}
+
+.chatgoose-voice-studio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-voice-studio-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-voice-studio-collapse {
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-voice-studio-collapse:hover {
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
+}
+
+/* Empty when there is no notice; the errorSlot's own content joins this grid. */
+.chatgoose-voice-studio-notice {
+  display: grid;
+  gap: 9px;
+}
+
+.chatgoose-voice-studio-notice:empty {
+  display: none;
+}
+
+.chatgoose-voice-studio-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.chatgoose-voice-studio-col {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  min-width: 0;
+}
+
+.chatgoose-voice-studio-takes {
+  border-left: 1px solid var(--chatgoose-line);
+  padding-left: 18px;
+}
+
+@media (max-width: 720px) {
+  .chatgoose-voice-studio-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .chatgoose-voice-studio-takes {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--chatgoose-line);
+    padding-top: 12px;
+  }
 }

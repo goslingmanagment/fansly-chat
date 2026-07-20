@@ -57,6 +57,9 @@ async function installRuntimeApiHarness(fanslyClient: {
   };
   emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
   onAgencyHubReady?: () => void;
+  voiceService?: {
+    resolveCapability: (tabId: number) => Promise<boolean>;
+  };
   tabContexts?: TabContextStoreClass;
 }) {
   vi.resetModules();
@@ -150,6 +153,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     debugPrompts: debugPrompts as never,
     emitToTab: options?.emitToTab,
     onAgencyHubReady: options?.onAgencyHubReady,
+    voiceService: options?.voiceService,
   });
 
   if (!onMessageListener) {
@@ -371,6 +375,25 @@ describe('runtime-api getPopupStatus', () => {
 
     const cleared = await onMessageListener?.({ type: 'getPopupStatus' });
     expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false }));
+  });
+
+  it('surfaces the fail-closed voice-notes capability for the selected tab', async () => {
+    mockStorage = createStorage();
+    const voiceService = {
+      resolveCapability: vi.fn(async () => true),
+    };
+    const { sessionStore, tabsQuery } = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    }, { voiceService });
+    sessionStore.registerCapture(1, makeCapture('active'));
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
+
+    const result = await onMessageListener?.({ type: 'getPopupStatus' });
+
+    expect(result).toEqual(expect.objectContaining({ voiceNotesCapable: true }));
+    expect(voiceService.resolveCapability).toHaveBeenCalledWith(1);
   });
 });
 

@@ -30,6 +30,7 @@ function buildState(overrides: Partial<TabUiState> = {}): TabUiState {
     hasAvailableSummary: false,
     connected: true,
     hasApiKey: true,
+    voiceNotesCapable: false,
     hasPersonalities: true,
     mappedPersonalityId: 'personality-1',
     mappedPersonalityName: 'Closer',
@@ -74,9 +75,14 @@ function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> 
     onCompareRestoreClick: noop,
     onReplyModeToggle: noop,
     onToneSelect: noop,
+    onVoiceClick: noop,
     onCoachClick: noop,
     ...overrides,
   });
+}
+
+function voiceButton(root: ParentNode): HTMLButtonElement | null {
+  return root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-voice');
 }
 
 describe('ButtonBar toolbar visibility', () => {
@@ -204,6 +210,48 @@ describe('ButtonBar toolbar visibility', () => {
     const recap = buttonByLabel(bar.root, 'Recap');
     expect(recap?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
     expect(recap?.title).toContain('Recap ready to open');
+  });
+
+  it('hides the 🎙 Voice button unless the page is voice-capable', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState({ voiceNotesCapable: false }), null, 'default', 'none', true, false, false);
+    expect(voiceButton(bar.root)?.classList.contains('chatgoose-hidden')).toBe(true);
+
+    bar.render(buildState({ voiceNotesCapable: true }), null, 'default', 'none', true, false, false);
+    const voice = voiceButton(bar.root);
+    expect(voice?.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(voice?.textContent).toBe('🎙');
+    expect(voice?.disabled).toBe(false);
+  });
+
+  it('disables the 🎙 Voice button when the Fansly session is not connected', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(
+      buildState({ voiceNotesCapable: true, connected: false }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+
+    expect(voiceButton(bar.root)?.disabled).toBe(true);
+  });
+
+  it('fires onVoiceClick when the 🎙 Voice button is clicked', () => {
+    const voiceSpy = vi.fn();
+    const bar = makeBar({ onVoiceClick: voiceSpy });
+    document.body.append(bar.root);
+
+    bar.render(buildState({ voiceNotesCapable: true }), null, 'default', 'none', true, false, false);
+    voiceButton(bar.root)!.click();
+
+    expect(voiceSpy).toHaveBeenCalledTimes(1);
   });
 
   it('keeps Help, Review, and Compare out of the toolbar', () => {
@@ -401,7 +449,7 @@ describe('ButtonBar improve draft state', () => {
     expect(buttonByLabel(bar.root, 'Fix')?.disabled).toBe(true);
   });
 
-  it('orders Reply, tone groove, Split, Fix, Hi, Ping, Recap, then the personality pill', () => {
+  it('orders Reply through Recap, Coach, personality, then Voice', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -425,6 +473,9 @@ describe('ButtonBar improve draft state', () => {
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
     );
+    const voiceIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-voice'),
+    );
 
     // Reply cluster (trigger + options) → draft tool → openers → fan side.
     expect(replyIndex).toBe(0);
@@ -437,6 +488,7 @@ describe('ButtonBar improve draft state', () => {
     // Coach joins the fan-side cluster right after Recap (spec §10).
     expect(coachIndex).toBe(recapIndex + 1);
     expect(personalityIndex).toBe(coachIndex + 1);
+    expect(voiceIndex).toBe(personalityIndex + 1);
 
     // Meaning-groups are seamed with hairlines, and Recap opens the
     // right-pinned cluster.
