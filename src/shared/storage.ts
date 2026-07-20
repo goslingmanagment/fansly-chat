@@ -195,6 +195,34 @@ export async function saveSettings(
   ) {
     throw new UnsupportedFutureStorageSchemaError(observedSchemaVersion);
   }
+  // P2 downgrade barrier for the READ/MODIFY/WRITE path (baseSettings absent —
+  // e.g. the device-token issuance in runtime-api). We stamp schemaVersion below,
+  // so make failing-closed on a future on-disk layout EXPLICIT at the write site:
+  // read the real disk schemaVersion and refuse to stamp our (lower) version over
+  // a higher one, which would otherwise let a newer worker re-run v15 → v16 over
+  // already-migrated data (the old/new-context ping-pong migrations.ts guards).
+  // This is deliberately belt-and-suspenders — migrateState() inside the
+  // loadStorageState() below ALSO throws UnsupportedFutureStorageSchemaError on a
+  // future record — but it keeps the guard co-located with the stamp so a future
+  // refactor that hands this path a baseSettings snapshot cannot silently bypass it.
+  //
+  // The Options snapshot path (baseSettings provided) deliberately does NOT read
+  // here: it must dispatch storage.set synchronously (pagehide fires before the
+  // document is discarded; the blur/queue chain also asserts a synchronous set),
+  // so it cannot await a disk read first. Its downgrade barrier is the
+  // storage.onChanged observer feeding observedSchemaVersion above. NOTE: that
+  // observer is async, so a disk raised AFTER Options loaded but BEFORE the observer
+  // fires is a residual race no synchronous guard can close; see .agentic/backlog.md.
+  if (baseSettings === undefined) {
+    const diskSchemaVersion = (await browser.storage.local.get('schemaVersion')).schemaVersion;
+    if (
+      typeof diskSchemaVersion === 'number' &&
+      Number.isSafeInteger(diskSchemaVersion) &&
+      diskSchemaVersion > STORAGE_SCHEMA_VERSION
+    ) {
+      throw new UnsupportedFutureStorageSchemaError(diskSchemaVersion);
+    }
+  }
   // Options already owns a normalized snapshot and passes it so pagehide can
   // dispatch storage.set before the document is discarded. Other callers keep
   // the coordinator-safe read/modify/write path. Options installs its schema

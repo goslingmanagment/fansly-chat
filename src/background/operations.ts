@@ -1451,11 +1451,23 @@ export class OperationCoordinator {
         reservedSummaryCommitToken,
       );
     }
+    // P1-1: capture the tab's route identity BEFORE validateStart's awaits. A
+    // route-change to another chat during those awaits advances the context but
+    // only cancels an ACTIVE op — this reserved-but-not-yet-active start survives,
+    // and its setRoute below would roll the context back onto the abandoned chat
+    // (then its setFan would pass the same-group guard). validateStart's own URL
+    // check misses this because the tab.url can still lag the routeChanged message.
+    const startRouteNonce = this.tabContexts.getOrCreate(tabId).routeNonce;
     let timeoutController: OperationTimeoutController<OperationTimeoutKey> | null = null;
     let controller: AbortController | null = null;
     let debugEnabled = false;
     try {
       const validated = await this.validateStart(tabId, payload);
+      // Stale start: the route advanced while we validated. Die with chat_changed
+      // and never re-touch the tab context (no setRoute/activate/setFan).
+      if (this.tabContexts.getOrCreate(tabId).routeNonce !== startRouteNonce) {
+        throw new ChatGooseError('chat_changed');
+      }
       debugEnabled = validated.storage.settings.debugMode;
       const profiler = createOperationProfiler(debugEnabled);
       const operationTimeoutController = new OperationTimeoutController<OperationTimeoutKey>();

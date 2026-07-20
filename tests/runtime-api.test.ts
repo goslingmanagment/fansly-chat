@@ -694,7 +694,7 @@ describe('runtime-api getRecapStatus', () => {
     },
   };
 
-  it('resolves the page label and returns both recap slots for the sender tab', async () => {
+  it('resolves the page label and returns both recap slots for a context-confirmed fan', async () => {
     const fanslyClient = {
       getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
     };
@@ -702,8 +702,12 @@ describe('runtime-api getRecapStatus', () => {
       resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
       getRecapStatus: vi.fn(async () => recap),
     };
-    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    const { sessionStore, tabContexts } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
     sessionStore.registerCapture(7, makeCapture('creator-1'));
+    // P1-2: an explicit fanAccountId is trusted only when the tab context confirms
+    // it for THIS group. A prior op cached fan-1 for group-1.
+    tabContexts.setRoute(7, 'group-1', 1);
+    tabContexts.setFan(7, 'group-1', 'fan-1', 'Alice');
 
     const response = await onMessageListener?.(
       { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-1' },
@@ -795,6 +799,54 @@ describe('runtime-api getRecapStatus', () => {
       { tab: { id: 7 } },
     );
 
+    expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
+  });
+
+  it('P1-2: an empty-string fanAccountId takes the null path (unavailable, no query)', async () => {
+    // Round-14: '' is a falsy fanRef the client would drop, leaving a groupId-only
+    // query that FALSELY confirms empty. The handler coerces ''/whitespace → null.
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: '   ' },
+      { tab: { id: 7 } },
+    );
+
+    expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
+    expect(response).toEqual({ state: 'unavailable', full: null, short: null });
+  });
+
+  it('P1-2: an explicit fanAccountId the context does not confirm for this group → unavailable', async () => {
+    // Round-14: content's DOM fan id can lag an SPA A→B route-change, so a fan the
+    // tab context does not confirm for THIS group is a possible cross-group leak.
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    };
+    const agencyHubClient = {
+      resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
+      getRecapStatus: vi.fn(async () => recap),
+    };
+    const { sessionStore, tabContexts } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+    // Context confirms fan-B for group-1; content sends the stale fan-A.
+    tabContexts.setRoute(7, 'group-1', 2);
+    tabContexts.setFan(7, 'group-1', 'fan-B', 'Bea');
+
+    const response = await onMessageListener?.(
+      { type: 'getRecapStatus', groupId: 'group-1', fanAccountId: 'fan-A' },
+      { tab: { id: 7 } },
+    );
+
+    // Never queried the Hub with the unconfirmed (possibly cross-group) fan.
     expect(agencyHubClient.getRecapStatus).not.toHaveBeenCalled();
     expect(response).toEqual({ state: 'unavailable', full: null, short: null });
   });

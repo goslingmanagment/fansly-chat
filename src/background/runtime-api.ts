@@ -404,27 +404,40 @@ export function registerRuntimeApi({
         if (!session || !session.connected) {
           return unavailable;
         }
-        // Shape already validated by getRuntimeRequestType.
+        // Shape already validated by getRuntimeRequestType (groupId non-empty).
         const record = message as unknown as {
           groupId: string;
           fanAccountId: string | null;
         };
-        // Recaps are stored under conversationRef = fan id (fan-summary's write),
-        // so they are findable ONLY via fanRef. Content has no reliable fan id, so
-        // resolve it from the tab context's cached fan — populated by a prior op on
-        // this SAME group (matching groupId; the store's stale-fan guard keeps a
-        // cross-group fan out) — the cheapest honest source, no extra Fansly call.
+        // Coerce an empty/whitespace fanAccountId to null so '' takes the same
+        // honest cold path as a missing fan — otherwise '' is a falsy fanRef the
+        // client silently drops, leaving a groupId-only query that FALSELY confirms
+        // "no recap" (P1-2, the '' half).
+        const requestedFan = record.fanAccountId?.trim() || null;
+        // The tab context (background's authoritative view, kept group-aligned by
+        // the setRoute/setFan stale-fan guards) is the ONLY trusted fan source.
         const cachedContext = tabId !== undefined ? tabContexts.get(tabId) : null;
-        const resolvedFanRef =
-          record.fanAccountId ??
-          (cachedContext?.groupId === record.groupId ? cachedContext.fanAccountId : null);
-        // COLD recap-status (P1-2): after a service-worker restart the tab context
-        // has no cached fan yet, so resolvedFanRef is null. A groupId-only query
-        // then can NEVER find a fan-id-keyed recap — a valid 200 with null slots
-        // would FALSELY read as "confirmed no recap" and disable "open last recap"
-        // (and could trigger a needless auto-recap with AI spend). Report honest
-        // 'unavailable' instead; the next op caches the fan and a later read checks
-        // for real. We never confirm empty without a fanRef to search with.
+        const contextFanForGroup =
+          cachedContext?.groupId === record.groupId ? cachedContext.fanAccountId : null;
+        let resolvedFanRef: string | null;
+        if (requestedFan !== null) {
+          // An explicit fanAccountId from content is trusted ONLY when the context
+          // confirms it for THIS group. Content's DOM fan id can lag an SPA
+          // route-change (the A→B race rounds 12–13 hardened), so a fan the context
+          // does not confirm for this group is a possible cross-group leak — fail
+          // closed to 'unavailable' rather than query the Hub with (group B, fan A).
+          if (requestedFan !== contextFanForGroup) {
+            return unavailable;
+          }
+          resolvedFanRef = requestedFan;
+        } else {
+          resolvedFanRef = contextFanForGroup;
+        }
+        // COLD recap-status (P1-2): with no fanRef to search with (SW restart:
+        // context has no cached fan), a groupId-only query can never find a
+        // fan-id-keyed recap — a null-slots 200 would FALSELY read as "confirmed
+        // no recap" and disable "open last recap". Report honest 'unavailable'
+        // instead; the next op caches the fan and a later read checks for real.
         if (resolvedFanRef === null) {
           return unavailable;
         }

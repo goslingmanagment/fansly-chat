@@ -441,11 +441,19 @@ export async function executeCompare(
     });
     return;
   }
+  // P1-1 (same shape as startOperation): a route-change during validate's awaits
+  // advances the context but doesn't cancel this reserved-but-not-active start;
+  // its setRoute below would roll the context back onto the abandoned chat.
+  const startRouteNonce = context.tabContexts.getOrCreate(tabId).routeNonce;
   let timeoutController: OperationTimeoutController<'quick-total'> | null = null;
   let controller: AbortController | null = null;
   let debugEnabled = false;
   try {
     const validated = await validateCompareStart(context, tabId, payload);
+    // Stale start: die with chat_changed, never re-touch the tab context.
+    if (context.tabContexts.getOrCreate(tabId).routeNonce !== startRouteNonce) {
+      throw new ChatGooseError('chat_changed');
+    }
     debugEnabled = validated.storage.settings.debugMode;
     const profiler = createOperationProfiler(debugEnabled);
     const compareTimeoutController = new OperationTimeoutController<'quick-total'>();

@@ -325,7 +325,12 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         ? 'resolveFanChat'
         : null;
     case 'getRecapStatus':
-      return isString(message.groupId) && isNullableString(message.fanAccountId)
+      // groupId must be a non-empty conversation id; an empty groupId is a
+      // meaningless recap-status query. fanAccountId stays nullable — the handler
+      // trims it and treats an empty string as null (the honest cold path).
+      return isString(message.groupId) &&
+        message.groupId.trim().length > 0 &&
+        isNullableString(message.fanAccountId)
         ? 'getRecapStatus'
         : null;
     default:

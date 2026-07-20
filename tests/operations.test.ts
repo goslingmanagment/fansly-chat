@@ -2373,6 +2373,60 @@ describe('OperationCoordinator', () => {
     )).toBe(false);
   });
 
+  it('P1-1: a route-change during validateStart kills the stale start and leaves the new chat intact', async () => {
+    // A reserved-but-not-yet-active op on group-1 must NOT re-poison the tab
+    // context when the chatter switches to group-2 mid-validation: it dies with
+    // chat_changed and never re-touches the context (no setRoute rollback that
+    // would let its setFan write a cross-group fan).
+    const fanslyClient = buildFanslyClientMock();
+    const { coordinator, port } = await createCoordinatorHarness({ fanslyClient });
+    await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
+
+    // Hang validateStart's browser.tabs.get until we've switched routes.
+    let resolveTab: ((value: { url: string }) => void) | null = null;
+    let markValidationStarted: (() => void) | null = null;
+    const validationStarted = new Promise<void>((resolve) => {
+      markValidationStarted = resolve;
+    });
+    (globalThis as any).browser.tabs.get = vi.fn(() => {
+      markValidationStarted?.();
+      return new Promise((resolve) => {
+        resolveTab = resolve;
+      });
+    });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'stale-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+    await validationStarted;
+
+    // The chatter switches to group-2 while the op validates.
+    await coordinator.handlePortMessage(1, { type: 'tab:routeChanged', groupId: 'group-2', routeNonce: 2 });
+
+    // validateStart's tab.url still shows the OLD chat (URLs lag routeChanged) — so
+    // its own URL check passes; only the routeNonce re-check catches the stale start.
+    resolveTab!({ url: 'https://fansly.com/messages/group-1' });
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage?.error).toMatchObject({ key: 'chat_changed' });
+    // The context stays on the NEW chat — never rolled back to group-1.
+    expect((coordinator as any).tabContexts.get(1)).toMatchObject({
+      groupId: 'group-2',
+      fanAccountId: null,
+    });
+  });
+
   it('revalidates an uncached Scan task after fan-id resolution and before Hub push', async () => {
     delete mockStorage['summary:group-1'];
     mockStorage.settings = {

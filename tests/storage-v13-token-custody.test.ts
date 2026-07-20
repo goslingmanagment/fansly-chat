@@ -18,6 +18,7 @@ import {
   migrateState,
   serializePersistedState,
   stripSecretSettings,
+  UnsupportedFutureStorageSchemaError,
 } from '../src/shared/migrations.js';
 
 // ─── Mock browser.storage.local (same pattern as storage-migration tests) ──
@@ -230,6 +231,28 @@ describe('saveSettings durably stamps schemaVersion (E45)', () => {
         { observedSchemaVersion: future },
       ),
     ).rejects.toThrow();
+    expect(mockStorage.schemaVersion).toBe(future);
+  });
+
+  it('reads the REAL disk version on the read/modify/write path and refuses to stamp over a higher one (round-14 P2)', async () => {
+    // The read/modify/write path (no baseSettings — e.g. runtime-api's device-token
+    // save) does not get an observedSchemaVersion, so the write-site disk read is
+    // its explicit downgrade barrier: a newer worker raised disk to a future
+    // version, and our stamp must NOT downgrade the marker (16 → 15) into a
+    // re-migration ping-pong. The guard fires BEFORE loadStorageState (which would
+    // also throw), so this asserts the co-located guard specifically.
+    const future = STORAGE_SCHEMA_VERSION + 1;
+    mockStorage = {
+      schemaVersion: future,
+      settings: { ...createDefaultSettings() },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+    await expect(
+      storage.saveSettings({ deepMessageCount: 1500 }), // no baseSettings ⇒ read/modify/write path
+    ).rejects.toThrow(UnsupportedFutureStorageSchemaError);
     expect(mockStorage.schemaVersion).toBe(future);
   });
 });
