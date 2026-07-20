@@ -666,6 +666,8 @@ export type UserErrorKey =
   | 'hub_provider_failed'
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
+  | 'coach_requires_newer_hub'
+  | 'coach_fan_unresolved'
   | 'insertion_failed'
   | 'unknown_error';
 
@@ -1072,6 +1074,12 @@ export interface OperationStartPayload extends PortEnvelopeBase {
    * background maps 'full' → omit on the kernel wire (the kernel body accepts
    * only the literal 'short'); 'short' passes through. */
   summaryMode?: 'short' | 'full';
+  /** coach-chat: the content-side coach session id (random per page-load,
+   * reset on «Новый диалог»/persona change). Keys the background transcript
+   * session cache (spec §3/§6) so a reload or new dialog forces a reseed, while
+   * a rolling dialog refreshes only the newest tail. Absent ⇒ no session
+   * isolation (a stable empty key), so the cache degrades to a per-tab window. */
+  coachSessionId?: string;
 }
 
 export interface CompareStartPayload extends PortEnvelopeBase {

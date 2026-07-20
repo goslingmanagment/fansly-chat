@@ -20,6 +20,7 @@ import {
 import {
   getSummaryCacheEntry,
   SummaryCacheStore,
+  type SummaryCacheMode,
 } from '../shared/summary-cache.js';
 import type { PersistedState, SummaryCacheEntry } from '../shared/types.js';
 
@@ -441,14 +442,21 @@ export class StorageCoordinator {
     });
   }
 
-  async getSummaryCache(groupId: string): Promise<SummaryCacheEntry | null> {
+  async getSummaryCache(
+    groupId: string,
+    mode: SummaryCacheMode = 'full',
+  ): Promise<SummaryCacheEntry | null> {
     const state = await this.getState();
-    return getSummaryCacheEntry(state, groupId);
+    return getSummaryCacheEntry(state, groupId, mode);
   }
 
-  async saveSummaryCache(groupId: string, entry: SummaryCacheEntry): Promise<void> {
+  async saveSummaryCache(
+    groupId: string,
+    entry: SummaryCacheEntry,
+    mode: SummaryCacheMode = 'full',
+  ): Promise<void> {
     await this.enqueueWrite(async () => {
-      await this.summaryCache.save(groupId, entry);
+      await this.summaryCache.save(groupId, entry, mode);
     });
   }
 
@@ -464,6 +472,7 @@ export class StorageCoordinator {
     groupId: string,
     entry: SummaryCacheEntry,
     isCurrent: (state: PersistedState) => boolean,
+    mode: SummaryCacheMode = 'full',
   ): Promise<boolean> {
     return this.enqueueWrite(async () => {
       const before = await readStorageState();
@@ -471,7 +480,7 @@ export class StorageCoordinator {
         return false;
       }
 
-      const existing = getSummaryCacheEntry(before, groupId);
+      const existing = getSummaryCacheEntry(before, groupId, mode);
       if (
         existing &&
         existing.personalityId === entry.personalityId &&
@@ -486,10 +495,10 @@ export class StorageCoordinator {
         return false;
       }
 
-      await this.summaryCache.save(groupId, entry);
+      await this.summaryCache.save(groupId, entry, mode);
 
       const after = await readStorageState();
-      const committed = getSummaryCacheEntry(after, groupId);
+      const committed = getSummaryCacheEntry(after, groupId, mode);
       return isCurrent(after) &&
         committed?.generatedAt === entry.generatedAt &&
         committed.summary === entry.summary &&

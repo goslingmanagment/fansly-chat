@@ -11,6 +11,7 @@ import {
   isObjectRecord,
 } from '../shared/protocol.js';
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
+import { logWarn } from '../shared/log.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
@@ -476,7 +477,10 @@ export function registerRuntimeApi({
             controller.signal,
           );
           return status;
-        } catch {
+        } catch (error) {
+          logWarn('Recap status read failed; Coach opens recap-less', {
+            reason: error instanceof Error ? error.message : String(error),
+          });
           return unavailable;
         } finally {
           globalThis.clearTimeout(timeout);

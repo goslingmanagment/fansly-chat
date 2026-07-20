@@ -8,7 +8,13 @@ import type { FeaturePolicy } from './features.js';
 // ─── Storage ─────────────────────────────────────────────────────────────
 
 export const STORAGE_SCHEMA_VERSION = 15;
+/** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
+/** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
+ * run must never overwrite the durable full dossier, so it gets its own key and
+ * is NEVER pushed to `fan_profiles`. Disjoint from `summary:` (the ':' vs '-'
+ * at index 7 means neither prefix matches the other's keys). */
+export const SUMMARY_SHORT_CACHE_PREFIX = 'summary-short:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const LEGACY_PERSONA_SNAPSHOT_KEY = 'legacyPersonaSnapshotV1';
 export const PERSONA_CATALOG_STORAGE_KEY = 'personaCatalog';
@@ -104,6 +110,12 @@ export const DEEP_MIN_MESSAGE_COUNT = 100;
 export const DEEP_MAX_MESSAGE_COUNT = 3000;
 
 // ─── Coach ───────────────────────────────────────────────────────────────
+
+/** Fixed message window for a SHORT recap (spec §5) — a constant, never a
+ * user setting (full recap uses `deepMessageCount`). Also the hard ceiling the
+ * client clamps the loaded window to before sending, so a short recap's
+ * `clientContext.messageCount` is always ≤ this. */
+export const SHORT_SUMMARY_MESSAGE_COUNT = 300;
 
 /** How many prior coach turns are retained/replayed by default. */
 export const COACH_HISTORY_LIMIT_DEFAULT = 10;
