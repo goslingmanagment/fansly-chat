@@ -6,6 +6,15 @@ import {
   isRecapStatusResponse,
 } from '../src/shared/protocol.js';
 
+function withoutKey(
+  record: Record<string, unknown>,
+  keyToRemove: string,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => key !== keyToRemove),
+  );
+}
+
 describe('protocol boundary guards', () => {
   it('recognizes known runtime requests and rejects malformed envelopes', () => {
     expect(getRuntimeRequestType({ type: 'getPopupStatus' })).toBe('getPopupStatus');
@@ -297,6 +306,137 @@ describe('protocol boundary guards', () => {
     })).toBe(true);
   });
 
+  it('accepts every valid content-to-background voice message', () => {
+    const messages: Record<string, unknown>[] = [
+      {
+        type: 'voice:scriptStart',
+        attemptId: 'attempt-1',
+        draftText: 'Write a warm voice note',
+        replyTone: 'casual',
+        isRegeneration: true,
+      },
+      {
+        type: 'voice:scriptCancel',
+        attemptId: 'attempt-1',
+      },
+      {
+        type: 'voice:noteCreate',
+        attemptId: 'attempt-1',
+        clientRequestId: 'client-request-1',
+        conversationRef: 'conversation-1',
+        pinnedConversationRef: 'fan-1',
+        sourceGenerationRef: 'generation-1',
+        script: '[warmly] Hello there',
+      },
+      {
+        type: 'voice:noteStatus',
+        attemptId: 'attempt-1',
+        voiceNoteId: 42,
+      },
+      {
+        type: 'voice:audioFetch',
+        attemptId: 'attempt-1',
+        voiceNoteId: 42,
+        expectedSha256: 'abc123',
+        expectedBytes: 1024,
+      },
+      {
+        type: 'voice:attachToken',
+        attemptId: 'attempt-1',
+        voiceNoteId: 42,
+      },
+    ];
+
+    for (const message of messages) {
+      expect(isContentPortMessage(message), String(message.type)).toBe(true);
+    }
+  });
+
+  it('rejects malformed or undiscriminated content-to-background voice messages', () => {
+    const cases: Array<{
+      message: Record<string, unknown>;
+      requiredKey: string;
+    }> = [
+      {
+        message: {
+          type: 'voice:scriptStart',
+          attemptId: 'attempt-1',
+          draftText: 'Write a warm voice note',
+          replyTone: 'casual',
+        },
+        requiredKey: 'draftText',
+      },
+      {
+        message: { type: 'voice:scriptCancel', attemptId: 'attempt-1' },
+        requiredKey: 'attemptId',
+      },
+      {
+        message: {
+          type: 'voice:noteCreate',
+          attemptId: 'attempt-1',
+          clientRequestId: 'client-request-1',
+          conversationRef: 'conversation-1',
+          pinnedConversationRef: 'fan-1',
+          sourceGenerationRef: 'generation-1',
+          script: '[warmly] Hello there',
+        },
+        requiredKey: 'sourceGenerationRef',
+      },
+      {
+        message: { type: 'voice:noteStatus', attemptId: 'attempt-1', voiceNoteId: 42 },
+        requiredKey: 'voiceNoteId',
+      },
+      {
+        message: {
+          type: 'voice:audioFetch',
+          attemptId: 'attempt-1',
+          voiceNoteId: 42,
+          expectedSha256: 'abc123',
+          expectedBytes: 1024,
+        },
+        requiredKey: 'expectedBytes',
+      },
+      {
+        message: { type: 'voice:attachToken', attemptId: 'attempt-1', voiceNoteId: 42 },
+        requiredKey: 'voiceNoteId',
+      },
+    ];
+
+    for (const { message, requiredKey } of cases) {
+      expect(
+        isContentPortMessage(withoutKey(message, requiredKey)),
+        `${String(message.type)} missing ${requiredKey}`,
+      ).toBe(false);
+      expect(
+        isContentPortMessage(withoutKey(message, 'type')),
+        `${String(message.type)} missing type`,
+      ).toBe(false);
+    }
+
+    expect(isContentPortMessage({
+      type: 'voice:scriptStart',
+      attemptId: 'attempt-1',
+      draftText: 'Write a warm voice note',
+      replyTone: 'not-a-tone',
+    })).toBe(false);
+    expect(isContentPortMessage({
+      type: 'voice:scriptStart',
+      attemptId: 'attempt-1',
+      draftText: 'Write a warm voice note',
+      replyTone: 'casual',
+      isRegeneration: 'yes',
+    })).toBe(false);
+    expect(isContentPortMessage({
+      type: 'voice:noteCreate',
+      attemptId: 'attempt-1',
+      clientRequestId: 'client-request-1',
+      conversationRef: 'conversation-1',
+      pinnedConversationRef: 42,
+      sourceGenerationRef: 'generation-1',
+      script: 'hello',
+    })).toBe(false);
+  });
+
   it('rejects malformed content port messages before coordinator dispatch', () => {
     expect(isContentPortMessage({
       type: 'operation:start',
@@ -305,6 +445,17 @@ describe('protocol boundary guards', () => {
       groupId: 'group-1',
       routeNonce: 1,
       domFanDisplayName: 'Alice',
+    })).toBe(false);
+
+    expect(isContentPortMessage({
+      type: 'operation:start',
+      operationId: 'op-1',
+      feature: 'voice-script',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'Alice',
+      draftText: 'Voice draft',
+      replyTone: 'casual',
     })).toBe(false);
 
     expect(isContentPortMessage({
@@ -363,6 +514,275 @@ describe('protocol boundary guards', () => {
         message: 'Unknown error.',
       },
     })).toBe(true);
+  });
+
+  it('accepts every valid background-to-content voice message', () => {
+    const messages: Record<string, unknown>[] = [
+      {
+        type: 'voice:scriptDelta',
+        attemptId: 'attempt-1',
+        text: '[warmly] ',
+      },
+      {
+        type: 'voice:scriptComplete',
+        attemptId: 'attempt-1',
+        script: '[warmly] Hello there',
+        generationRef: 'generation-1',
+        conversationRef: 'fan-1',
+      },
+      {
+        type: 'voice:scriptError',
+        attemptId: 'attempt-1',
+        code: 'gate_voice_disabled',
+        message: 'Voice script is unavailable.',
+      },
+      {
+        type: 'voice:noteView',
+        attemptId: 'attempt-1',
+        clientRequestId: 'client-request-1',
+        view: {
+          voiceNoteId: 42,
+          state: 'completed',
+          scriptChars: 21,
+          billed: true,
+          audioSha256: 'abc123',
+          audioBytesLen: 1024,
+          createdAt: '2026-07-19T10:00:00.000Z',
+          errorCode: 'voice_failed_after_dispatch',
+        },
+      },
+      {
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source: 'create',
+        code: 'voice_quota_denied',
+        message: 'Voice quota denied.',
+        status: 429,
+      },
+      {
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source: 'status',
+        voiceNoteId: 42,
+        code: 'hub_request_failed',
+        message: 'Status read failed.',
+        status: 503,
+      },
+      {
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source: 'audio',
+        voiceNoteId: 42,
+        code: 'voice_artifact_corrupt',
+        message: 'Audio failed validation.',
+        status: 0,
+      },
+      {
+        type: 'voice:audioBytes',
+        attemptId: 'attempt-1',
+        voiceNoteId: 42,
+        bytes: new ArrayBuffer(8),
+      },
+      {
+        type: 'voice:attachGrant',
+        attemptId: 'attempt-1',
+        voiceNoteId: 42,
+        token: 'single-use-token',
+        fanUsername: 'alice',
+      },
+      {
+        type: 'voice:attachRefuse',
+        attemptId: 'attempt-1',
+        reason: 'route_changed',
+      },
+    ];
+
+    for (const message of messages) {
+      expect(isBackgroundPortMessage(message), String(message.type)).toBe(true);
+    }
+
+    // Additive wire evolution: status-origin/older envelopes omit the create
+    // correlation id and must remain protocol-valid.
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteView',
+      attemptId: 'attempt-1',
+      view: {
+        voiceNoteId: 42,
+        state: 'queued',
+        scriptChars: 21,
+        billed: null,
+        audioSha256: null,
+        audioBytesLen: null,
+        createdAt: '2026-07-19T10:00:00.000Z',
+      },
+    })).toBe(true);
+  });
+
+  it('rejects malformed or undiscriminated background-to-content voice messages', () => {
+    const cases: Array<{
+      message: Record<string, unknown>;
+      requiredKey: string;
+    }> = [
+      {
+        message: { type: 'voice:scriptDelta', attemptId: 'attempt-1', text: 'hello' },
+        requiredKey: 'text',
+      },
+      {
+        message: {
+          type: 'voice:scriptComplete',
+          attemptId: 'attempt-1',
+          script: 'hello',
+          generationRef: 'generation-1',
+          conversationRef: 'fan-1',
+        },
+        requiredKey: 'generationRef',
+      },
+      {
+        message: {
+          type: 'voice:scriptError',
+          attemptId: 'attempt-1',
+          code: 'gate_voice_disabled',
+          message: 'Voice script is unavailable.',
+        },
+        requiredKey: 'code',
+      },
+      {
+        message: {
+          type: 'voice:noteView',
+          attemptId: 'attempt-1',
+          view: {
+            voiceNoteId: 42,
+            state: 'queued',
+            scriptChars: 21,
+            billed: null,
+            audioSha256: null,
+            audioBytesLen: null,
+            createdAt: '2026-07-19T10:00:00.000Z',
+          },
+        },
+        requiredKey: 'view',
+      },
+      {
+        message: {
+          type: 'voice:noteError',
+          attemptId: 'attempt-1',
+          source: 'create',
+          code: 'voice_quota_denied',
+          message: 'Voice quota denied.',
+          status: 429,
+        },
+        requiredKey: 'source',
+      },
+      {
+        message: {
+          type: 'voice:audioBytes',
+          attemptId: 'attempt-1',
+          voiceNoteId: 42,
+          bytes: new ArrayBuffer(8),
+        },
+        requiredKey: 'bytes',
+      },
+      {
+        message: {
+          type: 'voice:attachGrant',
+          attemptId: 'attempt-1',
+          voiceNoteId: 42,
+          token: 'single-use-token',
+          fanUsername: 'alice',
+        },
+        requiredKey: 'fanUsername',
+      },
+      {
+        message: {
+          type: 'voice:attachRefuse',
+          attemptId: 'attempt-1',
+          reason: 'fan_mismatch',
+        },
+        requiredKey: 'reason',
+      },
+    ];
+
+    for (const { message, requiredKey } of cases) {
+      expect(
+        isBackgroundPortMessage(withoutKey(message, requiredKey)),
+        `${String(message.type)} missing ${requiredKey}`,
+      ).toBe(false);
+      expect(
+        isBackgroundPortMessage(withoutKey(message, 'type')),
+        `${String(message.type)} missing type`,
+      ).toBe(false);
+    }
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteView',
+      attemptId: 'attempt-1',
+      clientRequestId: 42,
+      view: {
+        voiceNoteId: 42,
+        state: 'queued',
+        scriptChars: 21,
+        billed: null,
+        audioSha256: null,
+        audioBytesLen: null,
+        createdAt: '2026-07-19T10:00:00.000Z',
+      },
+    })).toBe(false);
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteView',
+      attemptId: 'attempt-1',
+      view: {
+        voiceNoteId: 42,
+        state: 'not-a-state',
+        scriptChars: 21,
+        billed: null,
+        audioSha256: null,
+        audioBytesLen: null,
+        createdAt: '2026-07-19T10:00:00.000Z',
+      },
+    })).toBe(false);
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:audioBytes',
+      attemptId: 'attempt-1',
+      voiceNoteId: 42,
+      bytes: new Uint8Array(8),
+    })).toBe(false);
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteError',
+      attemptId: 'attempt-1',
+      source: 'create',
+      code: 'voice_quota_denied',
+      message: 'Voice quota denied.',
+    })).toBe(false);
+
+    for (const source of ['status', 'audio']) {
+      expect(isBackgroundPortMessage({
+        type: 'voice:noteError',
+        attemptId: 'attempt-1',
+        source,
+        code: 'hub_request_failed',
+        message: 'Voice operation failed.',
+        status: 503,
+      }), `${source} error missing voiceNoteId`).toBe(false);
+    }
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteError',
+      attemptId: 'attempt-1',
+      source: 'not-a-source',
+      voiceNoteId: 42,
+      code: 'hub_request_failed',
+      message: 'Voice operation failed.',
+      status: 503,
+    })).toBe(false);
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:attachRefuse',
+      attemptId: 'attempt-1',
+      reason: 'not-a-reason',
+    })).toBe(false);
   });
 
   it('rejects malformed background port messages before content dispatch', () => {

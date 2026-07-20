@@ -77,6 +77,7 @@ function readyState(overrides: Partial<TabUiState> = {}): TabUiState {
     accountId: 'account-1',
     groupId: 'group-1',
     hasAvailableSummary: false,
+    voiceNotesCapable: false,
     connected: true,
     hasApiKey: true,
     hasPersonalities: true,

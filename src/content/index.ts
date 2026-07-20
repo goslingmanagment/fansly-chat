@@ -17,6 +17,10 @@ import {
 } from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
+import { VoiceAttemptController } from './voice/attempt-controller.js';
+import { VoiceAttachAdapter } from './voice/attach-adapter.js';
+import { VoicePanel } from './voice/voice-panel.js';
+import { VoiceStudio } from './voice/voice-studio.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
 import { BoardLauncher } from './spenders/board-launcher.js';
 import { SpendersBoardController } from './spenders/spenders-board-controller.js';
@@ -341,6 +345,16 @@ export class ChatGooseContentApp {
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
   private deepOverlayModel: OverlayViewModel | null = null;
 
+  // ─── Voice (лента) ────────────────────────────────────────────────────────
+  // A dedicated, route-bound lane. Its controller owns the attempt and is
+  // deliberately EXEMPT from the generic port-disconnect teardown: a dropped
+  // background never cancels an in-flight paid synthesis. Created lazily on the
+  // first 🎙 open for a conversation, and torn down only on route change.
+  private voiceController: VoiceAttemptController | null = null;
+  private voicePanel: VoicePanel | null = null;
+  private voiceStudio: VoiceStudio | null = null;
+  private voiceReconnectPending = false;
+
   // ─── Coach (spec §3) ──────────────────────────────────────────────────────
   // The content script owns the coach dialog/feed/composer state; the store
   // holds an LRU of 5 per-fan sessions keyed by (creator account, group).
@@ -399,6 +413,12 @@ export class ChatGooseContentApp {
   private readonly toast = new ToastController();
   private readonly port = new PortClient({
     onMessage: (message) => this.handlePortMessage(message),
+    onConnected: () => {
+      if (this.voiceController) {
+        this.voiceReconnectPending = false;
+        void this.voiceController.handlePortReconnect();
+      }
+    },
     onDisconnected: () => {
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.completedOverlayCache.clearAll();
@@ -418,6 +438,13 @@ export class ChatGooseContentApp {
       this.clearOperationState(true);
       this.resetNextFastReplyMode();
       this.resetNextReplyTone();
+      // Voice is EXEMPT from this teardown (billing correctness must not depend
+      // on the background staying alive): keep the controller + its stored
+      // attempt, just stop its polling and mark it for a reconnect handshake.
+      if (this.voiceController) {
+        this.voiceReconnectPending = true;
+        void this.voiceController.handlePortDisconnected();
+      }
       this.renderAll();
     },
   });
@@ -439,6 +466,7 @@ export class ChatGooseContentApp {
     },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
     onToneSelect: (tone) => this.armReplyTone(tone),
+    onVoiceClick: () => this.openVoicePanel(),
     onCoachClick: () => this.openCoach(),
   });
   private readonly mappingBanner = new MappingBanner({
@@ -1546,6 +1574,155 @@ export class ChatGooseContentApp {
     this.nextReplyTone = 'none';
   }
 
+  // ─── Voice (лента) ──────────────────────────────────────────────────
+
+  private openVoicePanel(): void {
+    if (!this.tabState?.voiceNotesCapable || !this.currentGroupId) {
+      return;
+    }
+    // Reopen an existing attempt for this conversation without re-reading the
+    // draft (the flow may already be past the script step). Close revoked the
+    // take blob: URLs but kept the audio bytes — re-mint them so retained takes
+    // are playable again.
+    if (this.voiceController && this.voicePanel) {
+      this.voiceController.resumeBlobUrls();
+      this.voicePanel.setFanUsername(getActiveConversationDisplayName());
+      this.voicePanel.open();
+      return;
+    }
+
+    // Boot first: an already-paid/recoverable attempt belongs to this route
+    // even when the composer is now empty. The draft gate applies only when no
+    // session attempt exists and we would start a brand-new script.
+    const draft = getActiveConversationDraftText().trim();
+    this.createVoiceController();
+    void this.startVoiceFlow(draft);
+  }
+
+  private createVoiceController(): void {
+    const groupId = this.currentGroupId;
+    if (!groupId) {
+      return;
+    }
+    const adapter = new VoiceAttachAdapter(document, groupId);
+    const controller = new VoiceAttemptController({
+      port: { send: (message) => this.port.send(message) },
+      route: {
+        accountId: this.tabState?.accountId ?? '',
+        groupId,
+        routeNonce: this.routeNonce,
+      },
+      onChange: () => this.voicePanel?.render(),
+      onError: (message) => this.voicePanel?.handleError(message),
+      onAttachGrant: (message) => {
+        void this.voicePanel?.handleAttachGrant(message);
+      },
+    });
+    this.voiceController = controller;
+
+    const panel = new VoicePanel({
+      controller,
+      probeComposer: () => adapter.probeComposer(),
+      attach: async ({ voiceNoteId, audio, token }) => {
+        const probe = adapter.probeComposer();
+        if (!probe.ok) {
+          return 'uncertain';
+        }
+        const file = new File([audio], `voice-note-${voiceNoteId}.mp3`, {
+          type: 'audio/mpeg',
+        });
+        // The token is armed only at the moment of the final attach action.
+        adapter.arm(token);
+        return adapter.attach(probe.input, file);
+      },
+      getDraftText: () => getActiveConversationDraftText(),
+      setDraftText: async (text) => {
+        try {
+          await insertIntoFanslyTextarea(text);
+        } catch {
+          // The composer went away; the panel already keeps the original text.
+        }
+      },
+      onClose: () => this.closeVoicePanel(),
+      onExpand: () => this.expandVoiceStudio(),
+      // Collapse the студия the moment the attach handoff begins so Fansly's
+      // native Upload modal isn't stranded behind the studio scrim. No-op when
+      // the студия is already folded (the лента attach path).
+      onAttachHandoff: () => this.voiceStudio?.collapse(),
+    });
+    this.voicePanel = panel;
+    this.root.append(panel.root);
+
+    // The студия is the same components in a two-column overlay, driven by the
+    // same controller. Built lazily here so «⤢ развернуть в студию» has a target.
+    this.voiceStudio = new VoiceStudio({
+      panel,
+      onCollapse: () => undefined,
+    });
+  }
+
+  private expandVoiceStudio(): void {
+    this.voiceStudio?.expand();
+  }
+
+  private async startVoiceFlow(draft: string): Promise<void> {
+    const controller = this.voiceController;
+    if (!controller) {
+      return;
+    }
+    try {
+      const recovered = await controller.boot();
+      if (this.voiceController !== controller) {
+        return;
+      }
+      if (!recovered) {
+        if (!draft) {
+          this.toast.show('Напишите черновик в поле — из него сделаем войс.', {
+            tone: 'warning',
+          });
+          this.teardownVoice();
+          return;
+        }
+        await controller.startScript(draft, 'none');
+      }
+      if (this.voiceController !== controller || !this.voicePanel) {
+        return;
+      }
+      this.voicePanel.setFanUsername(getActiveConversationDisplayName());
+      this.voicePanel.open();
+    } catch {
+      if (this.voiceController === controller) {
+        this.teardownVoice();
+        this.toast.show('Не удалось открыть сохранённый войс — попробуйте ещё раз.', {
+          tone: 'warning',
+        });
+      }
+    }
+  }
+
+  private closeVoicePanel(): void {
+    // If the студия is open, fold its borrowed nodes back into the лента first
+    // so the panel is whole before it hides (blob URLs are only suspended, not
+    // revoked, by the collapse itself).
+    if (this.voiceStudio?.isOpen()) {
+      this.voiceStudio.collapse();
+    }
+    this.voicePanel?.hide();
+    // Drop the take object URLs while the panel is hidden (the audio bytes stay
+    // in memory); reopen re-mints them.
+    this.voiceController?.suspendBlobUrls();
+  }
+
+  private teardownVoice(): void {
+    this.voiceController?.destroy();
+    this.voiceController = null;
+    this.voiceStudio?.destroy();
+    this.voiceStudio = null;
+    this.voicePanel?.root.remove();
+    this.voicePanel = null;
+    this.voiceReconnectPending = false;
+  }
+
   // ─── Route ──────────────────────────────────────────────────────────
 
   private handleRouteChange(groupId: string | null): void {
@@ -1557,6 +1734,10 @@ export class ChatGooseContentApp {
       // The regen-tone memo is per-conversation — never bleed a tone from
       // one fan's chat into a Regenerate in another's.
       this.lastSentReplyTone = 'none';
+      // Voice is bound to the conversation route (its attach attestation checks
+      // the exact tuple): a new conversation gets a fresh controller. The old
+      // attempt survives in storage.session, recoverable if the chatter returns.
+      this.teardownVoice();
     }
     this.completedOverlayCache.setActiveGroup(groupId);
     this.completedCompareCache.setActiveGroup(groupId);
@@ -2309,6 +2490,12 @@ export class ChatGooseContentApp {
   }
 
   private handlePortMessage(message: BackgroundPortMessage): void {
+    // A message means the port is live again: re-arm any recoverable voice work
+    // (the same idempotent create/status calls) from the persisted snapshot.
+    if (this.voiceReconnectPending && this.voiceController) {
+      this.voiceReconnectPending = false;
+      void this.voiceController.handlePortReconnect();
+    }
     switch (message.type) {
       case 'tab:state':
       case 'settings:changed':
@@ -2328,6 +2515,12 @@ export class ChatGooseContentApp {
           this.clearPersonaBoundFeatureState();
         }
         if (personaChanged || accountChanged) {
+          // Voice custody is bound to the creator account as well as the group.
+          // Preserve the old attempt in session storage, but never keep its
+          // live controller across an account switch.
+          if (accountChanged) {
+            this.teardownVoice();
+          }
           // Coach sessions must not bleed across persona/account (spec §3):
           // wipe the whole store and close any open coach overlay. A persona
           // change already tore any active coach op down via
@@ -2413,6 +2606,16 @@ export class ChatGooseContentApp {
       case 'operation:error':
       case 'operation:discarded':
         this.handleOperationError(message);
+        break;
+      case 'voice:scriptDelta':
+      case 'voice:scriptComplete':
+      case 'voice:scriptError':
+      case 'voice:noteView':
+      case 'voice:noteError':
+      case 'voice:audioBytes':
+      case 'voice:attachGrant':
+      case 'voice:attachRefuse':
+        void this.voiceController?.handleMessage(message);
         break;
       default:
         break;

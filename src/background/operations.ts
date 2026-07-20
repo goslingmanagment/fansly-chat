@@ -450,6 +450,9 @@ export class OperationCoordinator {
   >();
   private readonly captureIdentityRetryAfterByLegacyAccountId = new Map<string, number>();
   private summaryCommitSequence = 0;
+  /** Voice transport stays outside this coordinator. This callback exists
+   * only because TabUiState is assembled here. */
+  private voiceCapabilityResolver: ((tabId: number) => Promise<boolean>) | null = null;
   /** Latest user-started Scan for each conversation. Kept after completion so
    * its async Hub append cannot be overtaken by an older cross-tab operation. */
   private readonly latestSummaryCommitByGroupId = new Map<
@@ -473,6 +476,10 @@ export class OperationCoordinator {
      * viewer page. In-memory by construction — see debug-prompt-store.ts. */
     readonly debugPrompts: DebugPromptStore = createDebugPromptStore(),
   ) {}
+
+  setVoiceCapabilityResolver(resolver: (tabId: number) => Promise<boolean>): void {
+    this.voiceCapabilityResolver = resolver;
+  }
 
   /** Correlation for post-settle copy/insert signals (bounded, newest-wins). */
   private readonly acceptanceContexts = new Map<string, Omit<AcceptanceEventInput, 'action' | 'at'>>();
@@ -793,6 +800,7 @@ export class OperationCoordinator {
       ? storage.personaCatalogSource
       : null;
     const compareDraftCount = getCompareDraftCount();
+    const voiceNotesCapable = await this.voiceCapabilityResolver?.(tabId) ?? false;
 
     return {
       tabId,
@@ -806,6 +814,7 @@ export class OperationCoordinator {
       connected: Boolean(session?.connected),
       // Stage 32: readiness = kernel lane configured (hub transport up).
       hasApiKey: this.kernelGateway.isConfigured(storage.settings),
+      voiceNotesCapable,
       hasPersonalities: getActivePersonaCatalog(storage.personaCatalog).length > 0,
       mappedPersonalityId,
       mappedPersonalityName,

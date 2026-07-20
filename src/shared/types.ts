@@ -1,6 +1,6 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
-export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat';
+export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat' | 'voice-script';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers' | 'media';
@@ -673,6 +673,18 @@ export type UserErrorKey =
   | 'hub_sync_failed'
   | 'hub_quota_exceeded'
   | 'hub_provider_failed'
+  | 'voice_disabled'
+  | 'voice_not_allowlisted'
+  | 'voice_no_profile'
+  | 'voice_script_invalid'
+  | 'voice_source_invalid'
+  | 'voice_quota_denied'
+  | 'idempotency_mismatch'
+  | 'artifact_expired'
+  | 'voice_retrieval_disabled'
+  | 'voice_provider_unavailable'
+  | 'voice_artifact_corrupt'
+  | 'gate_voice_disabled'
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
   | 'coach_requires_newer_hub'
@@ -766,6 +778,8 @@ export interface TabUiState {
   hasAvailableSummary: boolean;
   connected: boolean;
   hasApiKey: boolean;
+  /** Fail-closed hint from the assigned Agency Hub page. */
+  voiceNotesCapable: boolean;
   modelProviderByFeature?: Partial<Record<ModelSelectableFeatureType, 'anthropic' | 'openrouter'>>;
   apiKeyReadyByFeature?: Partial<Record<ModelSelectableFeatureType, boolean>>;
   hasPersonalities: boolean;
@@ -1012,6 +1026,33 @@ export interface AgencyHubAiUsageBatchResponse {
 
 // ─── Port Messages (Discriminated Unions) ────────────────────────────────
 
+export type VoiceNoteState =
+  | 'queued'
+  | 'dispatched'
+  | 'completed'
+  | 'failed_definite'
+  | 'failed_after_dispatch'
+  | 'indeterminate'
+  | 'quota_denied'
+  | 'artifact_expired';
+
+/** Mirrors the vendored SDK's voiceNoteStatus response field-for-field. */
+export interface VoiceNoteStatusView {
+  voiceNoteId: number;
+  state: VoiceNoteState;
+  scriptChars: number;
+  billed: boolean | null;
+  audioSha256: string | null;
+  audioBytesLen: number | null;
+  createdAt: string;
+  errorCode?: string;
+}
+
+export type VoiceAttachRefusalReason =
+  | 'route_changed'
+  | 'fan_mismatch'
+  | 'unknown';
+
 export interface PortEnvelopeBase {
   type:
     | 'tab:init'
@@ -1039,7 +1080,21 @@ export interface PortEnvelopeBase {
     | 'compare:discarded'
     | 'settings:changed'
     | 'mapping:changed'
-    | 'summary:syncStatus';
+    | 'summary:syncStatus'
+    | 'voice:scriptStart'
+    | 'voice:scriptCancel'
+    | 'voice:noteCreate'
+    | 'voice:noteStatus'
+    | 'voice:audioFetch'
+    | 'voice:attachToken'
+    | 'voice:scriptDelta'
+    | 'voice:scriptComplete'
+    | 'voice:scriptError'
+    | 'voice:noteView'
+    | 'voice:noteError'
+    | 'voice:audioBytes'
+    | 'voice:attachGrant'
+    | 'voice:attachRefuse';
 }
 
 // Content → Background
@@ -1119,6 +1174,51 @@ export interface CompareCancelPayload extends PortEnvelopeBase {
   operationId: string;
 }
 
+export interface VoiceScriptStartPayload extends PortEnvelopeBase {
+  type: 'voice:scriptStart';
+  attemptId: string;
+  draftText: string;
+  replyTone: ReplyTone;
+  /** Explicit on manual re-runs so an MV3 worker restart cannot lose it. */
+  isRegeneration?: boolean;
+}
+
+export interface VoiceScriptCancelPayload extends PortEnvelopeBase {
+  type: 'voice:scriptCancel';
+  attemptId: string;
+}
+
+export interface VoiceNoteCreatePayload extends PortEnvelopeBase {
+  type: 'voice:noteCreate';
+  attemptId: string;
+  clientRequestId: string;
+  conversationRef: string;
+  /** Fan id resolved by the script step and durably frozen before paid create. */
+  pinnedConversationRef: string;
+  sourceGenerationRef: string;
+  script: string;
+}
+
+export interface VoiceNoteStatusPayload extends PortEnvelopeBase {
+  type: 'voice:noteStatus';
+  attemptId: string;
+  voiceNoteId: number;
+}
+
+export interface VoiceAudioFetchPayload extends PortEnvelopeBase {
+  type: 'voice:audioFetch';
+  attemptId: string;
+  voiceNoteId: number;
+  expectedSha256: string;
+  expectedBytes: number;
+}
+
+export interface VoiceAttachTokenPayload extends PortEnvelopeBase {
+  type: 'voice:attachToken';
+  attemptId: string;
+  voiceNoteId: number;
+}
+
 export type ContentPortMessage =
   | TabInitPayload
   | RouteChangedPayload
@@ -1126,7 +1226,13 @@ export type ContentPortMessage =
   | OperationCancelPayload
   | OperationAcceptancePayload
   | CompareStartPayload
-  | CompareCancelPayload;
+  | CompareCancelPayload
+  | VoiceScriptStartPayload
+  | VoiceScriptCancelPayload
+  | VoiceNoteCreatePayload
+  | VoiceNoteStatusPayload
+  | VoiceAudioFetchPayload
+  | VoiceAttachTokenPayload;
 
 /** Stage 32 Task 5: chatter took a suggestion (copy/insert) — rides the
  * capture lane correlated by operationId + the gateway generation ref. */
@@ -1280,6 +1386,68 @@ export interface CompareProgressEnvelope extends PortEnvelopeBase, CompareProgre
   type: 'compare:progress';
 }
 
+export interface VoiceScriptDeltaPayload extends PortEnvelopeBase {
+  type: 'voice:scriptDelta';
+  attemptId: string;
+  text: string;
+}
+
+export interface VoiceScriptCompletePayload extends PortEnvelopeBase {
+  type: 'voice:scriptComplete';
+  attemptId: string;
+  script: string;
+  generationRef: string;
+  /** Canonical fan id used by the source generation. */
+  conversationRef: string;
+}
+
+export interface VoiceScriptErrorPayload extends PortEnvelopeBase {
+  type: 'voice:scriptError';
+  attemptId: string;
+  code: string;
+  message: string;
+}
+
+export interface VoiceNoteViewPayload extends PortEnvelopeBase {
+  type: 'voice:noteView';
+  attemptId: string;
+  /** Present only on the direct create response. Status snapshots omit it. */
+  clientRequestId?: string;
+  view: VoiceNoteStatusView;
+}
+
+export interface VoiceNoteErrorPayload extends PortEnvelopeBase {
+  type: 'voice:noteError';
+  attemptId: string;
+  source: 'create' | 'status' | 'audio';
+  /** Present for status/audio failures, whose take is already server-owned. */
+  voiceNoteId?: number;
+  code: string;
+  message: string;
+  status: number;
+}
+
+export interface VoiceAudioBytesPayload extends PortEnvelopeBase {
+  type: 'voice:audioBytes';
+  attemptId: string;
+  voiceNoteId: number;
+  bytes: ArrayBuffer;
+}
+
+export interface VoiceAttachGrantPayload extends PortEnvelopeBase {
+  type: 'voice:attachGrant';
+  attemptId: string;
+  voiceNoteId: number;
+  token: string;
+  fanUsername: string;
+}
+
+export interface VoiceAttachRefusePayload extends PortEnvelopeBase {
+  type: 'voice:attachRefuse';
+  attemptId: string;
+  reason: VoiceAttachRefusalReason;
+}
+
 /** Cold-build progress for the Spenders board: the kernel snapshot is fast,
  * the name sweep is the part a chatter waits on — so it reports counts. */
 export interface SpendersProgressPayload {
@@ -1323,7 +1491,15 @@ export type BackgroundPortMessage =
   | TabStatePayload
   | SummarySyncStatusPayload
   | ProgressEnvelope
-  | CompareProgressEnvelope;
+  | CompareProgressEnvelope
+  | VoiceScriptDeltaPayload
+  | VoiceScriptCompletePayload
+  | VoiceScriptErrorPayload
+  | VoiceNoteViewPayload
+  | VoiceNoteErrorPayload
+  | VoiceAudioBytesPayload
+  | VoiceAttachGrantPayload
+  | VoiceAttachRefusePayload;
 
 // ─── Overlay View Model ──────────────────────────────────────────────────
 

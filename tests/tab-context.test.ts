@@ -10,7 +10,11 @@ describe('TabContextStore.setRoute fan hygiene', () => {
 
     store.setRoute(1, 'group-A', 1);
     store.setFan(1, 'group-A', 'fan-A', 'Alice');
-    expect(store.get(1)).toMatchObject({ groupId: 'group-A', fanAccountId: 'fan-A', fanDisplayName: 'Alice' });
+    expect(store.get(1)).toMatchObject({
+      groupId: 'group-A',
+      fanAccountId: 'fan-A',
+      fanDisplayName: 'Alice',
+    });
 
     // A→B (both non-null): the fan is dropped.
     store.setRoute(1, 'group-B', 2);
@@ -29,7 +33,11 @@ describe('TabContextStore.setRoute fan hygiene', () => {
 
     // Same groupId, new nonce — same conversation, so the resolved fan survives.
     store.setRoute(1, 'group-A', 2);
-    expect(store.get(1)).toMatchObject({ groupId: 'group-A', fanAccountId: 'fan-A', routeNonce: 2 });
+    expect(store.get(1)).toMatchObject({
+      groupId: 'group-A',
+      fanAccountId: 'fan-A',
+      routeNonce: 2,
+    });
   });
 
   it('still clears the fan on a null route', () => {
@@ -37,7 +45,11 @@ describe('TabContextStore.setRoute fan hygiene', () => {
     store.setRoute(1, 'group-A', 1);
     store.setFan(1, 'group-A', 'fan-A', 'Alice');
     store.setRoute(1, null, 2);
-    expect(store.get(1)).toMatchObject({ groupId: null, fanAccountId: null, fanDisplayName: null });
+    expect(store.get(1)).toMatchObject({
+      groupId: null,
+      fanAccountId: null,
+      fanDisplayName: null,
+    });
   });
 });
 
@@ -47,9 +59,8 @@ describe('TabContextStore.setFan structural stale-fan guard', () => {
     // B advanced the context. setFan(A) must NOT stamp A's fan onto a context at B —
     // the invariant lives in the store, not caller discipline.
     const store = new TabContextStore();
-    store.setRoute(1, 'group-B', 2); // context has already moved to B
+    store.setRoute(1, 'group-B', 2);
 
-    // A late writer for group A tries to record its fan.
     store.setFan(1, 'group-A', 'fan-A', 'Alice');
 
     expect(store.get(1)).toMatchObject({
@@ -63,6 +74,10 @@ describe('TabContextStore.setFan structural stale-fan guard', () => {
     const store = new TabContextStore();
     store.setRoute(1, 'group-A', 1);
     store.setFan(1, 'group-A', 'fan-A', 'Alice');
-    expect(store.get(1)).toMatchObject({ groupId: 'group-A', fanAccountId: 'fan-A', fanDisplayName: 'Alice' });
+    expect(store.get(1)).toMatchObject({
+      groupId: 'group-A',
+      fanAccountId: 'fan-A',
+      fanDisplayName: 'Alice',
+    });
   });
 });

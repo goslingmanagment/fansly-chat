@@ -19,12 +19,15 @@ describe('PortClient boundary guard', () => {
       },
     };
     const onMessage = vi.fn();
+    const onConnected = vi.fn();
     const client = new PortClient({
       onMessage,
       onDisconnected: vi.fn(),
+      onConnected,
     });
 
     client.connect();
+    expect(onConnected).toHaveBeenCalledTimes(1);
     port.emitMessage({
       type: 'operation:chunk',
       operationId: 'op-1',
