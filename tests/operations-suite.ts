@@ -3,6 +3,7 @@
    operations surface is rewritten onto kernel feature services in Stage 32
    Task 3. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { routeSchemas } from '@kernel/sdk';
 import {
   DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
   DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
@@ -5413,6 +5414,52 @@ describe(`OperationCoordinator (${part})`, () => {
       fanslyClient.loadMessages.mock.calls[0] as unknown as [string, number, ...unknown[]];
     expect(groupId).toBe('group-1');
     expect(messageCount).toBe(17);
+  });
+
+  it('ships same-clock ping silence context accepted by the vendored contract', async () => {
+    const nowSeconds = Math.floor(currentNow / 1000);
+    const daySeconds = 24 * 60 * 60;
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: pagesFromTranscript([
+        { id: 'fan-1', createdAt: nowSeconds - 14 * daySeconds, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: 'hey', labels: [] },
+        { id: 'fan-2', createdAt: nowSeconds - 13 * daySeconds, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: 'you there?', labels: [] },
+        { id: 'fan-3', createdAt: nowSeconds - 12 * daySeconds, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: 'ok', labels: [] },
+        { id: 'model-1', createdAt: nowSeconds - 11 * daySeconds, senderId: 'account-1', senderLabel: 'Model', type: 1, text: 'heyy', labels: [] },
+      ]),
+      pagesLoaded: 1,
+      targetPages: 1,
+      reachedEnd: false,
+    });
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'miss you',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'ping-op-quiet',
+      feature: 'ping',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.clientContext).toMatchObject({
+      pingSegment: 'segment-a',
+      fanSilenceDays: 12,
+    });
+    const parsed = routeSchemas.aiFeatureStream.body.safeParse({
+      clientRequestId: '00000000-0000-4000-8000-000000000000',
+      pageLabel: request.pageLabel,
+      platform: 'fansly',
+      conversationRef: request.conversationRef,
+      clientContext: request.clientContext,
+    });
+    expect(parsed.success, parsed.error?.message).toBe(true);
   });
 
   it('keeps using quickMessageCount for fast-reply history', async () => {

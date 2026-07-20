@@ -174,6 +174,40 @@ describe('kernel feature gateway', () => {
     expect(metas).toEqual([expect.objectContaining({ attachedRecaps })]);
   });
 
+  it('threads bounded ping silence context onto the SDK request body', async () => {
+    const calls: Array<{ init: RequestInit | undefined }> = [];
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      calls.push({ init });
+      return sseResponse([
+        { ...META, feature: 'ping' },
+        { type: 'content_delta', text: 'miss you' },
+        { type: 'done', stopReason: 'end_turn' },
+      ]);
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+
+    await gateway.streamFeature(settings(), request({
+      feature: 'ping',
+      clientContext: {
+        transcript: '[10:00] Fan: hey',
+        messageCount: 4,
+        fanDisplayName: 'Charles',
+        fanSpendingData: '',
+        fanSubscriptionData: '',
+        pingSegment: 'segment-a',
+        fanSilenceDays: 12,
+      },
+    }), { onText: () => {} }, new AbortController().signal);
+
+    const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      clientContext: {
+        pingSegment: 'segment-a',
+        fanSilenceDays: 12,
+      },
+    });
+  });
+
   it('sends summaryMode only for a short recap; a full recap omits it', async () => {
     const bodyFor = async (summaryMode: 'short' | undefined): Promise<Record<string, unknown>> => {
       const calls: Array<{ init: RequestInit | undefined }> = [];

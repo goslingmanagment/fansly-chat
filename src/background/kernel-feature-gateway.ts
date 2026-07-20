@@ -24,6 +24,9 @@ export interface KernelFeatureClientContext {
   fanSubscriptionData: string;
   fanBio?: string;
   pingSegment?: PingSegment;
+  /** Whole days since the fan's latest text, derived with the same clock as
+   * `pingSegment`; ping only, bounded to Core's 0..20_000 contract (#127). */
+  fanSilenceDays?: number;
   /** Coach + short-recap only (spec §5/§6): whether the shipped transcript is
    * the fan's whole history or a bounded window. Kernel-bound only — it never
    * rides the content→background protocol. */
@@ -403,6 +406,9 @@ export function createKernelFeatureGateway(
                 : {}),
               ...(request.clientContext.pingSegment !== undefined
                 ? { pingSegment: request.clientContext.pingSegment }
+                : {}),
+              ...(request.clientContext.fanSilenceDays !== undefined
+                ? { fanSilenceDays: request.clientContext.fanSilenceDays }
                 : {}),
               ...(request.clientContext.transcriptCoverage !== undefined
                 ? { transcriptCoverage: request.clientContext.transcriptCoverage }
