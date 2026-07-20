@@ -34,6 +34,10 @@ export interface FeaturePolicy {
   requiresDraft: boolean;
   usesPingSegment: boolean;
   includesEarnings?: boolean;
+  /** Whether the kernel request carries the fan's bio (account `about`). Mirrors
+   * core's `includesFanBio` policy (spec §7): hi-greeting (existing), help-me
+   * (its absence was a bug), and coach-chat. Absent ⇒ no bio. */
+  includesFanBio?: boolean;
 }
 
 export const FEATURE_POLICIES = {
@@ -72,6 +76,7 @@ export const FEATURE_POLICIES = {
     supportsReplyTone: false,
     requiresDraft: false,
     usesPingSegment: false,
+    includesFanBio: true,
   },
   'fan-summary': {
     messageCountBucket: 'deep',
@@ -121,6 +126,7 @@ export const FEATURE_POLICIES = {
     requiresDraft: false,
     usesPingSegment: false,
     includesEarnings: false,
+    includesFanBio: true,
   },
   'coach-chat': {
     // The two buckets are deliberately SPLIT. Message count stays 'quick' (coach
@@ -146,6 +152,7 @@ export const FEATURE_POLICIES = {
     supportsReplyTone: false,
     requiresDraft: false,
     usesPingSegment: false,
+    includesFanBio: true,
   },
 } as const satisfies Record<FeatureType, FeaturePolicy>;
 
@@ -179,6 +186,11 @@ export function featureRequiresDraft(feature: FeatureType): boolean {
 
 export function featureUsesPingSegment(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).usesPingSegment;
+}
+
+/** Whether the kernel request for this feature carries the fan's bio (spec §7). */
+export function featureIncludesFanBio(feature: FeatureType): boolean {
+  return getFeaturePolicy(feature).includesFanBio === true;
 }
 
 export function resolveFeatureMessageCount(

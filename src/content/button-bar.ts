@@ -49,6 +49,10 @@ interface ButtonBarCallbacks {
   /** A tone segment was clicked — ARM the tone for the next Reply (or disarm
    *  the already-armed one). Never generates by itself (E24 options model). */
   onToneSelect: (tone: ReplyTone) => void;
+  /** Coach button clicked — open/focus the coach chat overlay (spec §3). Coach
+   *  is an app action (not a HOTKEY_FEATURE entry); opening creates no
+   *  generation, so it is a distinct callback, not `onFeatureClick`. */
+  onCoachClick: () => void;
 }
 
 function makeSeparator(): HTMLElement {
@@ -71,6 +75,9 @@ export class ButtonBar {
   private readonly toneTrack: HTMLElement;
   private readonly toneSegments = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
+  // Coach opens the chat overlay (spec §3). It is NOT a TOOLBAR_FEATURES entry —
+  // clicking it starts no generation — so it lives outside the feature map.
+  private readonly coachButton: HTMLButtonElement;
 
   constructor(private readonly callbacks: ButtonBarCallbacks) {
     this.root = document.createElement('div');
@@ -123,6 +130,16 @@ export class ButtonBar {
       'Ответ серией из 2–3 сообщений — переключатель, действует пока включён';
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
+    this.coachButton = document.createElement('button');
+    this.coachButton.type = 'button';
+    this.coachButton.className = 'chatgoose-button chatgoose-toolbar-button';
+    const coachLabel = document.createElement('span');
+    coachLabel.className = 'chatgoose-toolbar-label';
+    coachLabel.textContent = 'Coach';
+    this.coachButton.append(coachLabel);
+    this.coachButton.title = `Coach — ask the AI about this fan (${comboLabel('C', this.platform)})`;
+    this.coachButton.addEventListener('click', () => this.callbacks.onCoachClick());
+
     this.personalityLabel = document.createElement('div');
     this.personalityLabel.className = 'chatgoose-pill chatgoose-personality chatgoose-toolbar-pill chatgoose-toolbar-personality-end';
 
@@ -160,6 +177,8 @@ export class ButtonBar {
       hiButton,
       pingButton,
       summaryButton,
+      // Coach sits in the "about the fan" cluster, right after Recap (spec §10).
+      this.coachButton,
       this.personalityLabel,
     );
   }
@@ -269,6 +288,18 @@ export class ButtonBar {
       Boolean(activeAction && !compareActive) || disableCompareForPrereqs;
     this.compareRestoreButton.classList.add('chatgoose-hidden');
     this.compareRestoreButton.disabled = true;
+
+    // Coach: enabled once its prereqs are met (it needs a mapped persona + key +
+    // connection to generate). A streaming coach turn reports as
+    // `activeAction === 'coach-chat'`, so it keeps the button live while blocking
+    // every other button; any OTHER active operation disables Coach in turn.
+    const coachActive = activeAction === 'coach-chat';
+    this.coachButton.disabled =
+      Boolean(activeAction && !coachActive) || disableForPrereqs;
+    this.coachButton.classList.toggle(
+      'chatgoose-toolbar-button-loading',
+      coachActive && activeLoading,
+    );
 
     // ─── Split (reply-mode flag) ──────────────────────────────────────────────
     const splitArmed = nextReplyMode === 'preferSplit';

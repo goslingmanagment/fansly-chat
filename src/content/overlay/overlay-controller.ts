@@ -1,5 +1,10 @@
+import { COACH_QUESTION_MAX_CHARS } from '../../shared/constants.js';
 import { toUserError } from '../../shared/errors.js';
 import type {
+  CoachAutoRecapOverride,
+  CoachOverlayDraft,
+  CoachOverlayFeedItem,
+  CoachOverlaySessionView,
   DebugPromptEchoStatus,
   LlmSpendSummary,
   LlmUsageMetrics,
@@ -23,7 +28,12 @@ import {
   formatSpendSecondary,
   formatUsd,
 } from '../spend-format.js';
-import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
+import {
+  insertIntoFanslyTextarea,
+  copyToClipboard,
+  focusActiveConversationTextarea,
+  getActiveConversationDraftText,
+} from '../textarea.js';
 import {
   createUserErrorBlock,
   formatLoadingStatus,
@@ -36,7 +46,10 @@ import {
   isInteractiveElement,
 } from '../ui/view-helpers.js';
 
-type OverlayDismissMode = 'close' | 'cancel-and-close' | 'collapse-to-inline';
+// 'coach' is the coach-specific dismiss discipline (spec §3): Esc/backdrop while
+// a turn STREAMS cancels the turn but keeps the overlay open (unlike
+// 'cancel-and-close'); while idle it closes (the store retains the session).
+type OverlayDismissMode = 'close' | 'cancel-and-close' | 'collapse-to-inline' | 'coach';
 
 interface OverlayRenderOptions {
   preserveInlineError?: boolean;
@@ -48,12 +61,37 @@ interface OverlayCallbacks {
   onCancel: (operationId: string) => void;
   onRerun: (feature: FeatureType) => void;
   onCollapse: () => void;
-  /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry). */
-  onAcceptance?: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
+  /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry).
+   * `generationRef` (coach only) is the correlation fallback for acceptance
+   * after the background's op→ref map is gone (P2). */
+  onAcceptance?: (
+    operationId: string,
+    action: 'copied' | 'inserted',
+    partIndex: number,
+    generationRef?: string,
+  ) => void;
   /** E28: open the kernel's real prompt on the extension's own page. The token
    * stays with the caller — this surface never learns it, so it cannot leak it
    * into the Fansly DOM it renders into. */
   onOpenDebugPrompt?: () => void;
+  /** Coach chat (spec §3). Optional so non-coach constructions stay valid. */
+  onCoachSubmit?: (question: string) => void;
+  /** «New dialog» — clears the session (the orchestrator confirms if non-empty). */
+  onCoachNewDialog?: () => void;
+  /** Explicit recap refresh from within coach (short/full, spec §5). */
+  onCoachRecap?: (mode: 'short' | 'full') => void;
+  /** Cycle the per-session auto-recap override (spec §5 topbar control). */
+  onCoachAutoRecapCycle?: () => void;
+  /** Retry a failed/cancelled turn — replays its question (spec §8). */
+  onCoachRetry?: (question: string) => void;
+  /** Live composer edits, so the orchestrator can persist `composerText`
+   * across close/switch (spec §3 "unsent question survives close/switch").
+   * Optional: the renderer never depends on it for its own correctness. */
+  onCoachComposerInput?: (text: string) => void;
+  /** Standalone Recap start dialog (spec §5): pick a mode to generate. */
+  onRecapPick?: (mode: 'short' | 'full') => void;
+  /** Standalone Recap start dialog (spec §5): «Открыть последний». */
+  onRecapOpenLast?: () => void;
 }
 
 interface PartCardOptions {
@@ -64,7 +102,9 @@ interface PartCardOptions {
 }
 
 type VisibleOverlayModel = Exclude<OverlayViewModel, { kind: 'hidden' }>;
-type StaticOverlayKind = Exclude<VisibleOverlayModel['kind'], 'loading'>;
+// Coach has its own CoachViewState (not a StaticViewState), so it must be
+// excluded here — otherwise `kind: 'coach'` cannot discriminate the two.
+type StaticOverlayKind = Exclude<VisibleOverlayModel['kind'], 'loading' | 'coach'>;
 
 interface StaticViewState {
   kind: StaticOverlayKind;
@@ -92,7 +132,41 @@ interface LoadingViewState {
   liveElapsedStartedAt: number | null;
 }
 
-type OverlayViewState = StaticViewState | LoadingViewState;
+/** Persistent DOM handles for the coach chat mode. The feed is rendered with a
+ * KEYED incremental diff: `itemNodes` maps a per-item key (exchange operationId,
+ * or feed index for failed/recap items) to its stable DOM node, so a re-render
+ * never rebuilds a committed exchange and streaming mutates ONLY the pending
+ * answer's text node (the `updateLoadingView` text-node pattern). */
+interface CoachViewState {
+  kind: 'coach';
+  /** The live/top-level streaming op (null == idle); mirrors the model. */
+  operationId: string | null;
+  root: HTMLElement;
+  /** Scroll container (role="log"); scrolls separately from the sticky composer. */
+  feedEl: HTMLDivElement;
+  /** Holds ONLY the keyed committed feed items, so their ordering is managed
+   * independently of the pending / empty-state nodes appended after it. */
+  itemsEl: HTMLDivElement;
+  recapStatusEl: HTMLDivElement;
+  recapStatusText: Text;
+  /** The per-session auto-recap override cycle button (spec §5). */
+  autoRecapButton: HTMLButtonElement;
+  composerTextarea: HTMLTextAreaElement;
+  sendButton: HTMLButtonElement;
+  cancelButton: HTMLButtonElement;
+  itemNodes: Map<string, HTMLElement>;
+  /** The last-rendered item per key, so a reused index-key whose content
+   * changed (feed reset) rebuilds instead of showing a stale node. */
+  renderedItems: Map<string, CoachOverlayFeedItem>;
+  /** The in-flight turn's node (question bubble + streaming answer); null idle. */
+  pendingNode: HTMLElement | null;
+  /** The ONLY node mutated as stream chunks arrive. */
+  pendingAnswerTextNode: Text | null;
+  pendingQuestion: string | null;
+  emptyStateNode: HTMLElement | null;
+}
+
+type OverlayViewState = StaticViewState | LoadingViewState | CoachViewState;
 
 interface OverlayRenderTraceState {
   renderCount: number;
@@ -176,6 +250,57 @@ function operationIdForModel(model: OverlayViewModel): string | null {
   return 'operationId' in model ? model.operationId ?? null : null;
 }
 
+/** Empty-state starter prompts (spec §3): clicking one prefills the composer. */
+const COACH_STARTER_HINTS: readonly string[] = [
+  'How do I sell this to him?',
+  'What is he actually into?',
+  'How do I re-open a cold chat?',
+];
+
+/** Structural equality for a feed item at a reused key — drives the rebuild vs
+ * reuse decision (exchanges are content-stable by op id; failed/recap items are
+ * compared field-by-field). */
+function sameCoachFeedItem(
+  previous: CoachOverlayFeedItem | undefined,
+  next: CoachOverlayFeedItem,
+): boolean {
+  if (!previous || previous.kind !== next.kind) {
+    return false;
+  }
+  if (previous.kind === 'exchange' && next.kind === 'exchange') {
+    return previous.operationId === next.operationId;
+  }
+  if (previous.kind === 'failed-attempt' && next.kind === 'failed-attempt') {
+    return (
+      previous.question === next.question &&
+      previous.errorCode === next.errorCode &&
+      previous.retryable === next.retryable
+    );
+  }
+  if (previous.kind === 'recap-step' && next.kind === 'recap-step') {
+    return (
+      previous.mode === next.mode &&
+      previous.origin === next.origin &&
+      previous.status === next.status &&
+      previous.note === next.note
+    );
+  }
+  return false;
+}
+
+/** The per-session auto-recap override cycle button label (spec §5). */
+function autoRecapLabel(override: CoachAutoRecapOverride): string {
+  const value =
+    override === 'inherit'
+      ? 'default'
+      : override === 'off'
+        ? 'off'
+        : override === 'short'
+          ? 'short'
+          : 'full';
+  return `Auto-recap: ${value}`;
+}
+
 export class OverlayController {
   private readonly root = ensureOverlayRoot();
   private model: OverlayViewModel = { kind: 'hidden' };
@@ -204,7 +329,9 @@ export class OverlayController {
 
   constructor(private readonly callbacks: OverlayCallbacks) {
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && this.model.kind !== 'hidden') {
+      // Escape during an IME composition cancels the composition, not the
+      // overlay — never dismiss mid-compose (matters for the coach composer).
+      if (event.key === 'Escape' && this.model.kind !== 'hidden' && !event.isComposing) {
         this.handleDismiss();
       }
     });
@@ -237,12 +364,23 @@ export class OverlayController {
     const mode = this.dismissMode;
     if (mode === 'collapse-to-inline') {
       this.callbacks.onCollapse();
-    } else {
-      if (mode === 'cancel-and-close' && this.model.kind === 'loading' && 'operationId' in this.model && this.model.operationId) {
+      return;
+    }
+    if (mode === 'coach') {
+      // Spec §3: Esc/backdrop while a turn streams cancels it but STAYS OPEN —
+      // the orchestrator re-renders the idle session (with a failed-attempt).
+      // Idle coach closes (the store retains the session for reopen).
+      if (this.model.kind === 'coach' && this.model.operationId) {
         this.callbacks.onCancel(this.model.operationId);
+        return;
       }
       this.callbacks.onClose();
+      return;
     }
+    if (mode === 'cancel-and-close' && this.model.kind === 'loading' && 'operationId' in this.model && this.model.operationId) {
+      this.callbacks.onCancel(this.model.operationId);
+    }
+    this.callbacks.onClose();
   }
 
   render(model: OverlayViewModel, options?: OverlayRenderOptions | boolean): void {
@@ -251,7 +389,7 @@ export class OverlayController {
     const renderStart = performance.now();
     const operationId = operationIdForModel(model);
     let shellAction: 'mounted' | 'reused' | 'hidden' = 'reused';
-    let bodyAction: 'none' | 'rebuild-body' | 'update-loading' = 'none';
+    let bodyAction: 'none' | 'rebuild-body' | 'update-loading' | 'rebuild-coach' | 'update-coach' = 'none';
 
     this.model = model;
     if (model.kind === 'error') {
@@ -259,12 +397,19 @@ export class OverlayController {
     } else if (!opts.preserveInlineError) {
       this.inlineError = null;
     }
-    if (model.kind === 'hidden' || model.kind === 'loading' || model.kind === 'error') {
+    if (
+      model.kind === 'hidden' ||
+      model.kind === 'loading' ||
+      model.kind === 'error' ||
+      model.kind === 'coach'
+    ) {
       this.passThrough = false;
     }
     // Set dismiss mode: explicit option > default based on kind
     if (opts.dismissMode) {
       this.dismissMode = opts.dismissMode;
+    } else if (model.kind === 'coach') {
+      this.dismissMode = 'coach';
     } else if (model.kind === 'loading') {
       this.dismissMode = 'cancel-and-close';
     } else {
@@ -301,6 +446,9 @@ export class OverlayController {
       shellAction = 'mounted';
     }
     this.syncBackdropPassThrough();
+    // Coach swaps the panel from a scrolling grid into a fixed-height flex
+    // column whose FEED scrolls (not the panel) beneath a sticky composer.
+    this.panelEl?.classList.toggle('chatgoose-overlay-coach', model.kind === 'coach');
     this.updateHeader(model);
     this.updateInlineError(model);
     bodyAction = this.renderBody(model);
@@ -463,11 +611,23 @@ export class OverlayController {
     const feature =
       model.kind === 'loading' || model.kind === 'reply' || model.kind === 'helpMe' || model.kind === 'readOnly'
         ? titleForFeature(model.feature)
-        : 'ChatGoose';
+        : model.kind === 'coach'
+          ? 'Coach'
+          : model.kind === 'recap-picker'
+            ? 'Recap'
+            : 'ChatGoose';
     const titleText =
-      model.kind === 'error' ? 'ChatGoose' : `${feature} — @${model.fanDisplayName || 'fan'}`;
+      model.kind === 'error'
+        ? 'ChatGoose'
+        : `${feature} — @${model.fanDisplayName || 'fan'}`;
     const subtitleText =
-      model.kind === 'error' ? 'Something went wrong' : 'Preview only. You send messages manually.';
+      model.kind === 'error'
+        ? 'Something went wrong'
+        : model.kind === 'coach'
+          ? 'Ask about this fan. You send messages manually.'
+          : model.kind === 'recap-picker'
+            ? 'Choose a recap. Nothing is generated until you pick.'
+            : 'Preview only. You send messages manually.';
 
     if (this.headerEyebrowEl.textContent !== feature) {
       this.headerEyebrowEl.textContent = feature;
@@ -498,7 +658,9 @@ export class OverlayController {
     this.inlineErrorEl.classList.add('chatgoose-hidden');
   }
 
-  private renderBody(model: VisibleOverlayModel): 'rebuild-body' | 'update-loading' {
+  private renderBody(
+    model: VisibleOverlayModel,
+  ): 'rebuild-body' | 'update-loading' | 'rebuild-coach' | 'update-coach' {
     if (!this.bodyEl) {
       return 'rebuild-body';
     }
@@ -506,6 +668,24 @@ export class OverlayController {
     if (model.kind === 'loading' && this.currentView?.kind === 'loading' && this.currentView.operationId === model.operationId) {
       this.updateLoadingView(this.currentView, model);
       return 'update-loading';
+    }
+
+    // Coach: keyed incremental renderer with its own view state. An existing
+    // coach view is reconciled in place (committed nodes reused, only changed
+    // bits touched — during streaming that is JUST the pending text node).
+    if (model.kind === 'coach') {
+      if (this.currentView?.kind === 'coach') {
+        this.updateCoachView(this.currentView, model);
+        return 'update-coach';
+      }
+      const view = this.createCoachView(model);
+      this.bodyEl.replaceChildren(view.root);
+      this.currentView = view;
+      // A rebuild is a (re)open: the feed is only measurable once attached
+      // (createCoachView runs updateCoachView while detached → scrollHeight 0),
+      // so pin it to the newest turn HERE, after attach.
+      this.scrollCoachFeedToBottom(view);
+      return 'rebuild-coach';
     }
 
     const nextView =
@@ -521,7 +701,9 @@ export class OverlayController {
                   ? this.renderHelpMe(model)
                   : model.kind === 'readOnly'
                     ? this.renderReadOnly(model)
-                    : this.renderError(model),
+                    : model.kind === 'recap-picker'
+                      ? this.renderRecapPicker(model)
+                      : this.renderError(model),
           };
 
     this.bodyEl.replaceChildren(nextView.root);
@@ -932,7 +1114,7 @@ export class OverlayController {
     model: OverlayViewModel,
     operationId: string | null,
     shellAction: 'mounted' | 'reused' | 'hidden',
-    bodyAction: 'none' | 'rebuild-body' | 'update-loading',
+    bodyAction: 'none' | 'rebuild-body' | 'update-loading' | 'rebuild-coach' | 'update-coach',
   ): void {
     const durationMs = performance.now() - renderStart;
     const count = this.renderTraceState.renderCount + 1;
@@ -956,6 +1138,610 @@ export class OverlayController {
     this.renderTraceState.renderCount = count;
     this.renderTraceState.lastKind = model.kind;
     this.renderTraceState.lastOperationId = operationId;
+  }
+
+  // ─── Coach Chat ─────────────────────────────────────────────────────
+
+  private createCoachView(model: Extract<OverlayViewModel, { kind: 'coach' }>): CoachViewState {
+    const root = document.createElement('div');
+    root.className = 'chatgoose-coach';
+
+    // Topbar: recap freshness line + explicit refresh controls + New dialog.
+    const topbar = document.createElement('div');
+    topbar.className = 'chatgoose-coach-topbar';
+
+    const recap = document.createElement('div');
+    recap.className = 'chatgoose-coach-recap';
+    const recapText = document.createTextNode('');
+    recap.append(recapText);
+
+    const topbarActions = document.createElement('div');
+    topbarActions.className = 'chatgoose-coach-topbar-actions';
+    const shortRecap = this.createCoachButton('Short recap', 'chatgoose-button-secondary', () =>
+      this.callbacks.onCoachRecap?.('short'),
+    );
+    const fullRecap = this.createCoachButton('Full recap', 'chatgoose-button-secondary', () =>
+      this.callbacks.onCoachRecap?.('full'),
+    );
+    // Per-session auto-recap override cycle (spec §5): inherit → off → short →
+    // full. Its label is refreshed in updateCoachView.
+    const autoRecap = this.createCoachButton(
+      autoRecapLabel(model.sessionView.autoRecapOverride),
+      'chatgoose-button-secondary chatgoose-coach-autorecap',
+      () => this.callbacks.onCoachAutoRecapCycle?.(),
+    );
+    // «Новый диалог» — a two-step inline confirm (spec §3), mirroring the
+    // Replace-draft button below: NO window.confirm (it blocks the extension).
+    // A NON-EMPTY dialog arms a "Confirm new dialog" state on the first click;
+    // the second click resets. An EMPTY dialog resets immediately. Blur /
+    // outside-click / «Keep» abandons the confirm so a stale armed state never
+    // lingers. Emptiness is read live from the current model at click time.
+    const newDialog = document.createElement('button');
+    newDialog.type = 'button';
+    newDialog.className = 'chatgoose-button chatgoose-button-secondary';
+    newDialog.textContent = 'New dialog';
+    const newDialogKeep = document.createElement('button');
+    newDialogKeep.type = 'button';
+    newDialogKeep.className = 'chatgoose-button chatgoose-button-secondary chatgoose-hidden';
+    newDialogKeep.textContent = 'Keep';
+    let newDialogArmed = false;
+    const disarmNewDialog = (): void => {
+      newDialogArmed = false;
+      newDialog.classList.remove('chatgoose-coach-newdialog-armed');
+      newDialogKeep.classList.add('chatgoose-hidden');
+      newDialog.textContent = 'New dialog';
+    };
+    newDialogKeep.addEventListener('click', () => disarmNewDialog());
+    newDialog.addEventListener('blur', () => {
+      if (newDialogArmed) {
+        disarmNewDialog();
+      }
+    });
+    newDialog.addEventListener('click', () => {
+      // Unsent composer text is also content worth confirming before it is wiped
+      // (resetSession clears composerText too) — not just committed feed items.
+      const hasContent =
+        this.model.kind === 'coach' &&
+        (this.model.sessionView.feedItems.length > 0 ||
+          this.model.sessionView.composerText.trim().length > 0);
+      if (hasContent && !newDialogArmed) {
+        newDialogArmed = true;
+        newDialog.textContent = 'Confirm new dialog';
+        newDialog.classList.add('chatgoose-coach-newdialog-armed');
+        newDialogKeep.classList.remove('chatgoose-hidden');
+        return;
+      }
+      disarmNewDialog();
+      this.callbacks.onCoachNewDialog?.();
+    });
+    topbarActions.append(autoRecap, shortRecap, fullRecap, newDialog, newDialogKeep);
+    topbar.append(recap, topbarActions);
+
+    // Feed — a separately-scrolling log. Committed items live in itemsEl so
+    // their order is managed independently of the pending / empty-state nodes.
+    const feed = document.createElement('div');
+    feed.className = 'chatgoose-coach-feed';
+    feed.setAttribute('role', 'log');
+    feed.setAttribute('aria-live', 'polite');
+    feed.setAttribute('aria-relevant', 'additions');
+    const items = document.createElement('div');
+    items.className = 'chatgoose-coach-items';
+    feed.append(items);
+
+    // Sticky composer.
+    const composer = document.createElement('div');
+    composer.className = 'chatgoose-coach-composer';
+    const textarea = document.createElement('textarea');
+    textarea.className = 'chatgoose-coach-input';
+    textarea.rows = 2;
+    textarea.placeholder = 'Ask about this fan…';
+    // Cap the question at the kernel bound (spec §7) at the DOM level so an
+    // over-long question is prevented up front, not failed late + generic.
+    textarea.maxLength = COACH_QUESTION_MAX_CHARS;
+    textarea.value = model.sessionView.composerText;
+    textarea.addEventListener('input', () => {
+      this.autosizeCoachComposer(textarea);
+      this.callbacks.onCoachComposerInput?.(textarea.value);
+    });
+    textarea.addEventListener('keydown', (event) => {
+      // Enter submits; Shift+Enter is a newline; an IME composition never submits.
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        this.submitCoachQuestion(textarea);
+      }
+    });
+
+    const composerActions = document.createElement('div');
+    composerActions.className = 'chatgoose-coach-composer-actions';
+    const send = this.createCoachButton('Send', '', () => this.submitCoachQuestion(textarea));
+    send.classList.add('chatgoose-coach-send');
+    const cancel = this.createCoachButton('Cancel', 'chatgoose-button-danger', () => {
+      if (this.model.kind === 'coach' && this.model.operationId) {
+        this.callbacks.onCancel(this.model.operationId);
+      }
+    });
+    cancel.classList.add('chatgoose-coach-cancel', 'chatgoose-hidden');
+    composerActions.append(send, cancel);
+    composer.append(textarea, composerActions);
+
+    root.append(topbar, feed, composer);
+
+    const view: CoachViewState = {
+      kind: 'coach',
+      operationId: model.operationId,
+      root,
+      feedEl: feed,
+      itemsEl: items,
+      recapStatusEl: recap,
+      recapStatusText: recapText,
+      autoRecapButton: autoRecap,
+      composerTextarea: textarea,
+      sendButton: send,
+      cancelButton: cancel,
+      itemNodes: new Map(),
+      renderedItems: new Map(),
+      pendingNode: null,
+      pendingAnswerTextNode: null,
+      pendingQuestion: null,
+      emptyStateNode: null,
+    };
+    this.updateCoachView(view, model);
+    return view;
+  }
+
+  private updateCoachView(
+    view: CoachViewState,
+    model: Extract<OverlayViewModel, { kind: 'coach' }>,
+  ): void {
+    const sv = model.sessionView;
+    view.operationId = model.operationId;
+    const streaming = model.operationId !== null;
+
+    // Recap status line (guarded — an unchanged line is not rewritten).
+    if (view.recapStatusText.data !== sv.recapStatusLine) {
+      view.recapStatusText.data = sv.recapStatusLine;
+    }
+    view.recapStatusEl.classList.toggle('chatgoose-hidden', sv.recapStatusLine === '');
+
+    // Composer lock + Send/Cancel affordance (all guarded).
+    const disabled = !sv.composerEnabled;
+
+    // Auto-recap override label (guarded); the control is disabled while the
+    // coach is busy (a streaming turn or a running recap step) — the mode must
+    // not change mid-turn.
+    const autoRecapText = autoRecapLabel(sv.autoRecapOverride);
+    if (view.autoRecapButton.textContent !== autoRecapText) {
+      view.autoRecapButton.textContent = autoRecapText;
+    }
+    if (view.autoRecapButton.disabled !== disabled) {
+      view.autoRecapButton.disabled = disabled;
+    }
+
+    if (view.composerTextarea.disabled !== disabled) {
+      view.composerTextarea.disabled = disabled;
+    }
+    if (view.sendButton.disabled !== disabled) {
+      view.sendButton.disabled = disabled;
+    }
+    view.sendButton.classList.toggle('chatgoose-hidden', streaming);
+    view.cancelButton.classList.toggle('chatgoose-hidden', !streaming);
+    // Restore the composer text ONLY when unfocused — never clobber a live caret.
+    if (
+      document.activeElement !== view.composerTextarea &&
+      view.composerTextarea.value !== sv.composerText
+    ) {
+      view.composerTextarea.value = sv.composerText;
+    }
+
+    // Snapshot the scroll pin BEFORE any feed mutation so streaming (or a new
+    // committed item) only auto-scrolls when the chatter was already at bottom.
+    const wasNearBottom = this.isScrolledToBottom(view.feedEl);
+
+    this.reconcileCoachFeed(view, sv);
+    this.reconcileCoachPending(view, model);
+    this.reconcileCoachEmptyState(view, model);
+
+    if (wasNearBottom) {
+      this.scrollCoachFeedToBottom(view);
+    }
+  }
+
+  /** Pin the feed to its newest turn. Called unconditionally on a (re)open
+   * rebuild (after attach) and on an incremental update only when the chatter
+   * was already at the bottom. */
+  private scrollCoachFeedToBottom(view: CoachViewState): void {
+    view.feedEl.scrollTop = Math.max(0, view.feedEl.scrollHeight - view.feedEl.clientHeight);
+  }
+
+  private reconcileCoachFeed(view: CoachViewState, sv: CoachOverlaySessionView): void {
+    const desiredKeys: string[] = [];
+    const nodesByKey = new Map<string, HTMLElement>();
+
+    sv.feedItems.forEach((item, index) => {
+      const key = this.coachFeedKey(item, index);
+      desiredKeys.push(key);
+      const existing = view.itemNodes.get(key);
+      if (!existing) {
+        const node = this.createCoachFeedNode(item, key);
+        view.itemNodes.set(key, node);
+        nodesByKey.set(key, node);
+      } else if (item.kind === 'recap-step') {
+        // A recap step transitions running → done/failed on the SAME node.
+        this.updateCoachRecapStepNode(existing, item);
+        nodesByKey.set(key, existing);
+      } else if (!sameCoachFeedItem(view.renderedItems.get(key), item)) {
+        // A reused index-key whose content changed (e.g. a feed reset that
+        // skipped an empty render) — rebuild rather than reuse a stale node.
+        const node = this.createCoachFeedNode(item, key);
+        existing.replaceWith(node);
+        view.itemNodes.set(key, node);
+        nodesByKey.set(key, node);
+      } else {
+        nodesByKey.set(key, existing);
+      }
+      view.renderedItems.set(key, item);
+    });
+
+    // Drop nodes whose keys are gone (a «New dialog» reset clears everything).
+    for (const [key, node] of view.itemNodes) {
+      if (!nodesByKey.has(key)) {
+        node.remove();
+        view.itemNodes.delete(key);
+        view.renderedItems.delete(key);
+      }
+    }
+
+    // Order itemsEl to match desiredKeys — append-only in practice, so an
+    // unchanged feed performs no DOM moves at all.
+    desiredKeys.forEach((key, index) => {
+      const node = nodesByKey.get(key)!;
+      if (view.itemsEl.children[index] !== node) {
+        view.itemsEl.insertBefore(node, view.itemsEl.children[index] ?? null);
+      }
+    });
+  }
+
+  private reconcileCoachPending(
+    view: CoachViewState,
+    model: Extract<OverlayViewModel, { kind: 'coach' }>,
+  ): void {
+    const sv = model.sessionView;
+    const streaming = model.operationId !== null && sv.pendingQuestion !== undefined;
+    if (!streaming) {
+      if (view.pendingNode) {
+        view.pendingNode.remove();
+        view.pendingNode = null;
+        view.pendingAnswerTextNode = null;
+        view.pendingQuestion = null;
+      }
+      return;
+    }
+
+    const question = sv.pendingQuestion ?? '';
+    if (!view.pendingNode || view.pendingQuestion !== question) {
+      // New turn — (re)build the pending node once; from here only its answer
+      // text node is mutated as chunks arrive.
+      const built = this.createCoachPendingNode(question);
+      if (view.pendingNode) {
+        view.pendingNode.replaceWith(built.wrapper);
+      } else {
+        view.feedEl.append(built.wrapper);
+      }
+      view.pendingNode = built.wrapper;
+      view.pendingAnswerTextNode = built.answerText;
+      view.pendingQuestion = question;
+    }
+    const answer = sv.pendingAnswerText && sv.pendingAnswerText.length > 0 ? sv.pendingAnswerText : '…';
+    if (view.pendingAnswerTextNode && view.pendingAnswerTextNode.data !== answer) {
+      view.pendingAnswerTextNode.data = answer;
+    }
+  }
+
+  private reconcileCoachEmptyState(
+    view: CoachViewState,
+    model: Extract<OverlayViewModel, { kind: 'coach' }>,
+  ): void {
+    const showEmpty = model.sessionView.feedItems.length === 0 && model.operationId === null;
+    if (showEmpty) {
+      if (!view.emptyStateNode) {
+        view.emptyStateNode = this.createCoachEmptyState(view);
+        view.feedEl.append(view.emptyStateNode);
+      }
+    } else if (view.emptyStateNode) {
+      view.emptyStateNode.remove();
+      view.emptyStateNode = null;
+    }
+  }
+
+  private submitCoachQuestion(textarea: HTMLTextAreaElement): void {
+    if (this.model.kind !== 'coach' || !this.model.sessionView.composerEnabled) {
+      return;
+    }
+    const question = textarea.value.trim();
+    if (!question) {
+      return;
+    }
+    // Defensive guard (maxLength already caps typing/paste): never submit — and
+    // never clear — an over-long question; keep it so the chatter can trim it.
+    if (question.length > COACH_QUESTION_MAX_CHARS) {
+      textarea.classList.add('chatgoose-coach-input-overlimit');
+      return;
+    }
+    textarea.classList.remove('chatgoose-coach-input-overlimit');
+    textarea.value = '';
+    this.autosizeCoachComposer(textarea);
+    // Keep the orchestrator's persisted composerText in sync with the clear.
+    this.callbacks.onCoachComposerInput?.('');
+    this.callbacks.onCoachSubmit?.(question);
+  }
+
+  private autosizeCoachComposer(textarea: HTMLTextAreaElement): void {
+    textarea.style.height = 'auto';
+    if (textarea.scrollHeight > 0) {
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    }
+  }
+
+  private coachFeedKey(item: CoachOverlayFeedItem, index: number): string {
+    // Exchanges are keyed by their own op id (stable identity); failed / recap
+    // items by feed index (append-only, so an index is stable for its lifetime).
+    return item.kind === 'exchange' ? `x:${item.operationId}` : `${item.kind[0]}:${index}`;
+  }
+
+  private createCoachFeedNode(item: CoachOverlayFeedItem, key: string): HTMLElement {
+    const node =
+      item.kind === 'exchange'
+        ? this.createCoachExchangeNode(item)
+        : item.kind === 'failed-attempt'
+          ? this.createCoachFailedNode(item)
+          : this.createCoachRecapStepNode(item);
+    node.dataset.coachKey = key;
+    return node;
+  }
+
+  private createCoachExchangeNode(
+    item: Extract<CoachOverlayFeedItem, { kind: 'exchange' }>,
+  ): HTMLDivElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chatgoose-coach-exchange';
+    wrapper.append(this.createCoachQuestionBubble(item.question));
+
+    if (item.answerProse) {
+      const answer = document.createElement('div');
+      answer.className = 'chatgoose-coach-answer';
+      // textContent ONLY — the T5 parser neutralises column-0 fences but not
+      // every CommonMark form; textContent moots the whole injection class.
+      answer.textContent = item.answerProse;
+      wrapper.append(answer);
+    }
+
+    if (item.drafts.length > 0) {
+      const drafts = document.createElement('div');
+      drafts.className = 'chatgoose-parts chatgoose-coach-drafts';
+      for (const draft of item.drafts) {
+        drafts.append(this.createCoachDraftCard(item.operationId, item.generationRef, draft));
+      }
+      wrapper.append(drafts);
+    }
+    return wrapper;
+  }
+
+  private createCoachFailedNode(
+    item: Extract<CoachOverlayFeedItem, { kind: 'failed-attempt' }>,
+  ): HTMLDivElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chatgoose-coach-exchange chatgoose-coach-failed';
+    wrapper.append(this.createCoachQuestionBubble(item.question));
+
+    const error = document.createElement('div');
+    error.className = 'chatgoose-coach-error';
+    error.textContent = `Couldn't finish this turn (${item.errorCode}).`;
+    wrapper.append(error);
+
+    if (item.retryable) {
+      const actions = document.createElement('div');
+      actions.className = 'chatgoose-coach-failed-actions';
+      actions.append(
+        this.createCoachButton('Retry', 'chatgoose-button-secondary', () =>
+          this.callbacks.onCoachRetry?.(item.question),
+        ),
+      );
+      wrapper.append(actions);
+    }
+    return wrapper;
+  }
+
+  private createCoachRecapStepNode(
+    item: Extract<CoachOverlayFeedItem, { kind: 'recap-step' }>,
+  ): HTMLDivElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chatgoose-coach-recap-step';
+    this.updateCoachRecapStepNode(wrapper, item);
+    return wrapper;
+  }
+
+  private updateCoachRecapStepNode(
+    node: HTMLElement,
+    item: Extract<CoachOverlayFeedItem, { kind: 'recap-step' }>,
+  ): void {
+    node.dataset.status = item.status;
+    const text = this.coachRecapStepLabel(item);
+    if (node.textContent !== text) {
+      node.textContent = text;
+    }
+  }
+
+  private coachRecapStepLabel(
+    item: Extract<CoachOverlayFeedItem, { kind: 'recap-step' }>,
+  ): string {
+    const mode = item.mode === 'full' ? 'Full recap' : 'Short recap';
+    const origin = item.origin === 'auto' ? 'auto' : 'manual';
+    const status =
+      item.status === 'running' ? 'refreshing…' : item.status === 'done' ? 'updated' : 'failed';
+    const base = `${mode} (${origin}) · ${status}`;
+    // A failed-but-proceeded auto-recap carries the fallback copy (spec §5).
+    return item.note ? `${base} · ${item.note}` : base;
+  }
+
+  private createCoachQuestionBubble(question: string): HTMLDivElement {
+    const bubble = document.createElement('div');
+    bubble.className = 'chatgoose-coach-question';
+    bubble.textContent = question;
+    return bubble;
+  }
+
+  private createCoachPendingNode(question: string): { wrapper: HTMLDivElement; answerText: Text } {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chatgoose-coach-exchange chatgoose-coach-pending';
+    wrapper.setAttribute('aria-busy', 'true');
+    wrapper.append(this.createCoachQuestionBubble(question));
+
+    const answer = document.createElement('div');
+    answer.className = 'chatgoose-coach-answer chatgoose-coach-answer-streaming';
+    const answerText = document.createTextNode('…');
+    answer.append(answerText);
+    wrapper.append(answer);
+    return { wrapper, answerText };
+  }
+
+  private createCoachEmptyState(view: CoachViewState): HTMLDivElement {
+    const empty = document.createElement('div');
+    empty.className = 'chatgoose-coach-empty';
+
+    const heading = document.createElement('div');
+    heading.className = 'chatgoose-coach-empty-heading';
+    heading.textContent = 'Ask the coach about this fan';
+    empty.append(heading);
+
+    const hintList = document.createElement('div');
+    hintList.className = 'chatgoose-coach-empty-hints';
+    for (const hint of COACH_STARTER_HINTS) {
+      const chip = this.createCoachButton(hint, 'chatgoose-coach-hint', () => {
+        view.composerTextarea.value = hint;
+        this.autosizeCoachComposer(view.composerTextarea);
+        this.callbacks.onCoachComposerInput?.(hint);
+        view.composerTextarea.focus();
+      });
+      hintList.append(chip);
+    }
+    empty.append(hintList);
+    return empty;
+  }
+
+  private createCoachDraftCard(
+    exchangeOperationId: string,
+    generationRef: string | undefined,
+    draft: CoachOverlayDraft,
+  ): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'chatgoose-card chatgoose-coach-draft';
+
+    const title = document.createElement('div');
+    title.className = 'chatgoose-card-title';
+    title.textContent = draft.index === 0 ? 'Draft' : `Draft ${draft.index + 1}`;
+
+    const text = document.createElement('div');
+    text.className = 'chatgoose-card-text';
+    text.textContent = draft.text; // textContent — draft bodies are never HTML.
+
+    const actions = document.createElement('div');
+    actions.className = 'chatgoose-card-actions';
+
+    const insert = document.createElement('button');
+    insert.type = 'button';
+    insert.className = 'chatgoose-button';
+
+    const keep = document.createElement('button');
+    keep.type = 'button';
+    keep.className = 'chatgoose-button chatgoose-button-secondary chatgoose-hidden';
+    keep.textContent = 'Keep draft';
+
+    // Two-step inline confirm — NO browser dialog (window.confirm blocks the
+    // extension). Insert into an empty composer is one click; replacing an
+    // unsent draft arms a "Confirm replace" state first.
+    let armed = false;
+    const disarm = (): void => {
+      armed = false;
+      insert.classList.remove('chatgoose-coach-draft-armed');
+      keep.classList.add('chatgoose-hidden');
+      insert.textContent = getActiveConversationDraftText().trim() ? 'Replace draft…' : 'Insert';
+    };
+    keep.addEventListener('click', () => disarm());
+    // Moving focus away from an armed Replace abandons the confirm (outside
+    // click / blur), so a stale "Confirm replace" never lingers.
+    insert.addEventListener('blur', () => {
+      if (armed) {
+        disarm();
+      }
+    });
+    insert.addEventListener('click', () => {
+      const hasDraft = getActiveConversationDraftText().trim() !== '';
+      if (hasDraft && !armed) {
+        armed = true;
+        insert.textContent = 'Confirm replace';
+        insert.classList.add('chatgoose-coach-draft-armed');
+        keep.classList.remove('chatgoose-hidden');
+        return;
+      }
+      disarm();
+      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'inserted');
+    });
+    insert.textContent = getActiveConversationDraftText().trim() ? 'Replace draft…' : 'Insert';
+
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'chatgoose-button chatgoose-button-secondary';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', () => {
+      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'copied');
+    });
+
+    actions.append(insert, keep, copy);
+    card.append(title, text, actions);
+    return card;
+  }
+
+  /** Insert/Copy a draft, attributing acceptance to the CARD's exchange
+   * operationId (spec §3) — NOT the session's live/top-level op. */
+  private async acceptCoachDraft(
+    exchangeOperationId: string,
+    generationRef: string | undefined,
+    draft: CoachOverlayDraft,
+    action: 'inserted' | 'copied',
+  ): Promise<void> {
+    try {
+      if (action === 'inserted') {
+        await insertIntoFanslyTextarea(draft.text);
+      } else {
+        await copyToClipboard(draft.text);
+      }
+      this.inlineError = null;
+      this.callbacks.onAcceptance?.(exchangeOperationId, action, draft.index, generationRef);
+      if (action === 'inserted') {
+        // Spec §3: after insert the overlay collapses and the Fansly composer
+        // is focused. Closing does NOT touch the store — the session is retained
+        // and reopens intact. Copy leaves the overlay open.
+        this.queueComposerFocus();
+        this.callbacks.onClose();
+      }
+    } catch (error) {
+      // A failed insert must NOT close — surface the error inline and stay open.
+      this.inlineError = toUserError(error);
+      this.render(this.model, true);
+    }
+  }
+
+  private createCoachButton(
+    label: string,
+    extraClass: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = extraClass ? `chatgoose-button ${extraClass}` : 'chatgoose-button';
+    button.textContent = label;
+    button.addEventListener('click', onClick);
+    return button;
   }
 
   // ─── Part Card ──────────────────────────────────────────────────────
@@ -1154,6 +1940,63 @@ export class OverlayController {
     return section;
   }
 
+  // ─── Recap start dialog (spec §5) ──────────────────────────────────
+
+  /** The standalone Recap picker (spec §5): Полный (focused; Enter keeps the old
+   * ⌘⇧S+Enter muscle memory) / Короткий / «Открыть последний» (view the stored
+   * recap, no generation). Nothing generates until a mode is picked; Esc cancels
+   * via the overlay's global dismiss. */
+  private renderRecapPicker(
+    model: Extract<OverlayViewModel, { kind: 'recap-picker' }>,
+  ): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'chatgoose-grid chatgoose-recap-picker';
+
+    const prompt = document.createElement('div');
+    prompt.className = 'chatgoose-recap-picker-prompt';
+    prompt.textContent = 'Какой рекап нужен?';
+    section.append(prompt);
+
+    const actions = document.createElement('div');
+    actions.className = 'chatgoose-recap-picker-actions';
+
+    // Полный is the default (focused) — ⌘⇧S+Enter still fires a full recap.
+    const full = this.createCoachButton('Полный', '', () => this.callbacks.onRecapPick?.('full'));
+    full.classList.add('chatgoose-recap-picker-full');
+    const short = this.createCoachButton('Короткий', 'chatgoose-button-secondary', () =>
+      this.callbacks.onRecapPick?.('short'),
+    );
+    const hasStored = Boolean(model.recapStatus && (model.recapStatus.full || model.recapStatus.short));
+    const openLast = this.createCoachButton(
+      'Открыть последний',
+      'chatgoose-button-secondary',
+      () => this.callbacks.onRecapOpenLast?.(),
+    );
+    openLast.classList.add('chatgoose-recap-picker-last');
+    // A loaded-and-empty status greys the button out (nothing to open); an
+    // unloaded status leaves it live (the background is the source of truth).
+    if (model.recapStatus && !hasStored) {
+      openLast.disabled = true;
+    }
+    actions.append(full, short, openLast);
+    section.append(actions);
+
+    // Enter (unmodified) picks Полный — the ⌘⇧S+Enter muscle memory (spec §5).
+    section.addEventListener('keydown', (event) => {
+      if (
+        event.key === 'Enter' &&
+        !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey &&
+        !event.isComposing
+      ) {
+        event.preventDefault();
+        this.callbacks.onRecapPick?.('full');
+      }
+    });
+
+    queueMicrotask(() => full.focus());
+    return section;
+  }
+
   // ─── Read Only (Summary, Review) ───────────────────────────────────
 
   private renderReadOnly(model: Extract<OverlayViewModel, { kind: 'readOnly' }>): HTMLElement {
@@ -1192,6 +2035,20 @@ export class OverlayController {
         ? `Cached ${relativeTime(model.summaryMeta.generatedAt)}`
         : `Generated ${relativeTime(model.summaryMeta.generatedAt)}`;
       section.append(meta);
+
+      // Recap coverage header (spec §5): «вся переписка (N сообщений)» when the
+      // whole history was kept, else «последние N — история длиннее». Present
+      // only on freshly generated recaps (a cache hit carries no coverage).
+      const { transcriptCoverage, keptCount } = model.summaryMeta;
+      if (transcriptCoverage && typeof keptCount === 'number') {
+        const coverage = document.createElement('div');
+        coverage.className = 'chatgoose-recap-coverage';
+        coverage.textContent =
+          transcriptCoverage === 'full-history'
+            ? `вся переписка (${keptCount} сообщений)`
+            : `последние ${keptCount} — история длиннее`;
+        section.append(coverage);
+      }
     }
 
     if (model.reviewMeta && !model.reviewMeta.parseFallback) {

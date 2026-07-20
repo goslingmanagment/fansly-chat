@@ -355,6 +355,7 @@ async function createCoordinatorHarness(options?: {
     kernelGateway as never,
     storageCoordinator,
     agencyHubClient as never,
+    options?.unusedReporter as never,
   ) as any;
   const port = createMockRuntimePort(1);
   coordinator.registerPort(port as never);
@@ -3535,6 +3536,53 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'ping-analysis')?.detail).toBe('active');
   });
 
+  it('viewCachedOnly serves the stored recap without generating (spec §5 «Открыть последний»)', async () => {
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'view-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
+    // No message pagination for a pure cache view.
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
+  it('viewCachedOnly fails with no_saved_recap when nothing is stored (no generation)', async () => {
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+    delete mockStorage['summary:group-1'];
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'view-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, { key: 'no_saved_recap', code: 'CG-APP-03' });
+    // Fail-closed: no pagination, no kernel call.
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
   it('returns summary-cache profiling for fan summary cache hits in debug mode', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -4209,7 +4257,7 @@ describe('OperationCoordinator', () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
     fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
-    const { coordinator, port } = await createCoordinatorHarness({
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({
       anthropicRawText: 'Fresh summary',
       agencyHubClient,
       fanslyClient,
@@ -4230,9 +4278,17 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
 
+    // P2-messageCount: the REQUESTED window (deepMessageCount = 500 in the
+    // harness) rides the kernel request top-level so core records requestedCount
+    // correctly — distinct from clientContext.messageCount (the kept count).
+    expect(kernelRequestFromStreamCall(kernelGateway).messageCount).toBe(500);
+
     expect(completeMessage?.result.summaryMeta).toMatchObject({
       cached: false,
       syncStatus: { state: 'saving' },
+      // Coverage header data (spec §5) rides on every freshly generated recap.
+      keptCount: expect.any(Number),
+      transcriptCoverage: expect.stringMatching(/^(full-history|window)$/),
     });
     expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
 
@@ -5768,6 +5824,45 @@ describe('OperationCoordinator', () => {
     expect(unusedReporter.enqueue).not.toHaveBeenCalled();
   });
 
+  it('P2: acceptance falls back to the client generationRef when the op→ref context is gone', async () => {
+    const reporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({ unusedReporter: reporter });
+    // Reconnect populated the tab route (as tab:init would); no op ran this SW
+    // lifetime, so the in-memory op→ref context is empty (post-restart accept).
+    coordinator.tabContexts.setRoute(1, 'group-1', 1);
+
+    await coordinator.handlePortMessage(1, {
+      type: 'operation:acceptance',
+      operationId: 'evicted-op',
+      action: 'inserted',
+      partIndex: 0,
+      generationRef: 'gen-survivor',
+    });
+
+    expect(reporter.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'gen-survivor',
+        feature: 'coach-chat',
+        conversationRef: 'group-1',
+        action: 'inserted',
+      }),
+    );
+  });
+
+  it('P2: acceptance with neither context nor generationRef enqueues nothing', async () => {
+    const reporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({ unusedReporter: reporter });
+
+    await coordinator.handlePortMessage(1, {
+      type: 'operation:acceptance',
+      operationId: 'evicted-op',
+      action: 'copied',
+      partIndex: 0,
+    });
+
+    expect(reporter.enqueue).not.toHaveBeenCalled();
+  });
+
   it('does not report discarded operations', async () => {
     const unusedReporter = { enqueue: vi.fn() };
     let streamStarted: (() => void) | null = null;
@@ -5863,6 +5958,35 @@ describe('OperationCoordinator', () => {
     // First coach turn seeds via the full-window loader; no single-page refresh.
     expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
     expect(fanslyClient.getMessagePage).not.toHaveBeenCalled();
+  });
+
+  it('P2-bio: a coach request carries the fan bio when account.about is present', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAccountNames.mockResolvedValue([
+      { id: 'fan-1', username: 'alice', displayName: 'Alice', about: 'Loves gym & travel.' },
+    ] as never);
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    // includesFanBio policy is true for coach-chat (not just hi-greeting).
+    expect(kernelRequestFromStreamCall(kernelGateway).clientContext.fanBio).toBe(
+      'Loves gym & travel.',
+    );
+  });
+
+  it('P2-messageCount: a coach request carries the requested quick window', async () => {
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    // quickMessageCount is 100 in the harness settings.
+    expect(kernelRequestFromStreamCall(kernelGateway).messageCount).toBe(100);
   });
 
   it('coach follow-up turn refreshes via a single page, not a full reload', async () => {
@@ -5992,6 +6116,56 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
     expect(complete?.fanDisplayName).toBe('SECRET-PET-NAME');
+  });
+
+  it('custom-name rule (compare): a lookup failure sends "fan" to every card, never the DOM custom name', async () => {
+    // Analogous compare-lane guard to the fast-reply case above: the chatter's
+    // private custom fan name rides the DOM label, the account lookup fails, so
+    // the kernel-facing name on EVERY compare card must degrade to "fan".
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, any>,
+        callbacks: { onText: (text: string) => void },
+      ) => {
+        callbacks.onText('Reply');
+        return 'Reply';
+      }),
+    };
+    const { coordinator, fanslyClient } = await createCoordinatorHarness({ kernelGateway });
+    fanslyClient.getAccountNames.mockRejectedValue(new Error('lookup failed'));
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'SECRET-PET-NAME',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalled();
+    for (let index = 0; index < kernelGateway.streamFeature.mock.calls.length; index += 1) {
+      const request = kernelRequestFromStreamCall(kernelGateway, index);
+      expect(request.clientContext.fanDisplayName).toBe('fan');
+      expect(request.clientContext.fanDisplayName).not.toContain('SECRET');
+    }
   });
 
   it('short recap: 300-message clamp, short cache key, no full overwrite, no hub sync', async () => {

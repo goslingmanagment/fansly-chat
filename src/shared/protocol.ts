@@ -220,7 +220,8 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalString(record, 'chatterQuestion') &&
     isOptionalCoachHistory(record) &&
     isOptionalSummaryMode(record) &&
-    isOptionalString(record, 'coachSessionId');
+    isOptionalString(record, 'coachSessionId') &&
+    isOptionalBoolean(record, 'viewCachedOnly');
 }
 
 function isCompareStartMessage(record: Record<string, unknown>): boolean {
@@ -403,7 +404,8 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
       return (
         typeof message.operationId === 'string' &&
         (message.action === 'copied' || message.action === 'inserted') &&
-        typeof message.partIndex === 'number'
+        typeof message.partIndex === 'number' &&
+        isOptionalString(message, 'generationRef')
       );
     case 'operation:cancel':
     case 'compare:cancel':

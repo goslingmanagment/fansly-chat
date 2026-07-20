@@ -252,6 +252,23 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Couldn\'t identify the fan in this conversation.',
     description: 'Reopen the chat and try again.',
   },
+  no_saved_recap: {
+    key: 'no_saved_recap',
+    code: 'CG-APP-03',
+    // «Открыть последний» (spec §5): a view-cached-only recap read found no
+    // stored recap for this fan/persona. Not a failure — just nothing to show
+    // yet; the copy points at generating one.
+    message: 'No saved recap for this fan yet.',
+    description: 'Run Полный or Короткий to generate one.',
+  },
+  settings_load_failed: {
+    key: 'settings_load_failed',
+    code: 'CG-APP-04',
+    // A coach submit could not read local settings (browser.storage failure).
+    // The question is preserved in the composer; a retry usually succeeds.
+    message: 'Couldn\'t read your settings.',
+    description: 'Your question is kept — try sending it again.',
+  },
 };
 
 const ERROR_KEYS = new Set<UserErrorKey>(Object.keys(ERROR_REGISTRY) as UserErrorKey[]);

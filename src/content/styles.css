@@ -997,6 +997,250 @@
   border-radius: 3px;
 }
 
+/* ─── Coach chat mode ────────────────────────────────────────── */
+
+/* Coach turns the panel into a fixed-height flex column: the FEED scrolls, not
+ * the panel, so the composer stays pinned (mirrors the board panel, map §7). */
+.chatgoose-overlay-panel.chatgoose-overlay-coach {
+  display: flex;
+  flex-direction: column;
+  height: min(84vh, 860px);
+  overflow: hidden;
+}
+
+.chatgoose-overlay-panel.chatgoose-overlay-coach .chatgoose-overlay-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.chatgoose-coach {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  gap: 12px;
+}
+
+.chatgoose-coach-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.chatgoose-coach-recap {
+  font-size: 12px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-coach-topbar-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* The separately-scrolling log. */
+.chatgoose-coach-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+.chatgoose-coach-feed::-webkit-scrollbar {
+  width: 5px;
+}
+
+.chatgoose-coach-feed::-webkit-scrollbar-thumb {
+  background: var(--chatgoose-line-strong);
+  border-radius: 3px;
+}
+
+.chatgoose-coach-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chatgoose-coach-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chatgoose-coach-question {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-clay-soft, var(--chatgoose-bg2));
+  color: var(--chatgoose-ink);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-coach-answer {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-coach-answer-streaming::after {
+  content: '▍';
+  margin-left: 1px;
+  animation: chatgoose-caret-blink 1s step-end infinite;
+}
+
+.chatgoose-coach-drafts {
+  margin-top: 2px;
+}
+
+.chatgoose-coach-draft-armed,
+.chatgoose-coach-newdialog-armed {
+  background: var(--chatgoose-warn, var(--chatgoose-amber, var(--chatgoose-clay)));
+  color: #fff;
+}
+
+.chatgoose-coach-failed .chatgoose-coach-error {
+  font-size: 12px;
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-coach-failed-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.chatgoose-coach-recap-step {
+  align-self: center;
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+  padding: 3px 10px;
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-bg0);
+  border: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-coach-recap-step[data-status='failed'] {
+  color: var(--chatgoose-bad);
+}
+
+/* Per-session auto-recap override cycle button (spec §5). */
+.chatgoose-coach-autorecap {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Recap coverage header on a generated recap result (spec §5). */
+.chatgoose-recap-coverage {
+  font-size: 12px;
+  color: var(--chatgoose-ink-low);
+  margin-top: -4px;
+}
+
+/* Standalone Recap start dialog (spec §5). */
+.chatgoose-recap-picker {
+  gap: 14px;
+}
+
+.chatgoose-recap-picker-prompt {
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-recap-picker-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-recap-picker-full {
+  font-weight: 600;
+}
+
+.chatgoose-coach-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 2px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-coach-empty-heading {
+  font-size: 14px;
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-coach-empty-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.chatgoose-coach-hint {
+  font-size: 12px;
+  text-align: left;
+}
+
+/* Sticky composer — never scrolls with the feed. */
+.chatgoose-coach-composer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-coach-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  min-height: 44px;
+  max-height: 160px;
+  padding: 9px 11px;
+  border-radius: var(--chatgoose-radius-flat);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.chatgoose-coach-input:disabled {
+  opacity: 0.6;
+}
+
+.chatgoose-coach-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+@keyframes chatgoose-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* ─── Overlay Header ─────────────────────────────────────────── */
 
 .chatgoose-overlay-header {
