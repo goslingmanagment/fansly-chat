@@ -89,6 +89,67 @@ export function getReplyPartTitle(
     : `Message ${number}`;
 }
 
+export interface SplitContractNote {
+  text: string;
+  tone: 'guidance' | 'violation';
+}
+
+/**
+ * Shared Split-contract note for every surface that renders generated reply
+ * parts (E49). A one-part result is a missed prompt contract, while 2+ parts
+ * get the normal manual-send guidance. Errors and empty results own separate
+ * UI states and therefore do not get a Split note.
+ */
+export function getSplitContractNote(
+  splitModeRequested: boolean | undefined,
+  hasError: boolean,
+  partCount: number,
+): SplitContractNote | null {
+  if (!splitModeRequested || hasError || partCount === 0) {
+    return null;
+  }
+
+  return partCount > 1
+    ? {
+        text: 'Split mode was on. Start with message 1, send it manually in Fansly, then use the follow-up if it still feels right.',
+        tone: 'guidance',
+      }
+    : {
+        text: 'Split mode expected at least 2 messages, but this result contains one. Try Regenerate to retry the split.',
+        tone: 'violation',
+      };
+}
+
+export function createSplitContractNote(note: SplitContractNote): HTMLDivElement {
+  const element = document.createElement('div');
+  element.className =
+    note.tone === 'violation'
+      ? 'chatgoose-inline-note chatgoose-inline-note-warn'
+      : 'chatgoose-inline-note';
+  element.textContent = note.text;
+  return element;
+}
+
+export interface SplitPartCardOptions {
+  hint?: string;
+  emphasis?: 'recommended' | 'followup';
+}
+
+/** Keep Split part-card hints and emphasis identical across all surfaces. */
+export function getSplitPartCardOptions(
+  part: OverlayInsertPart,
+  splitModeRequested: boolean | undefined,
+  partCount: number,
+): SplitPartCardOptions {
+  if (!splitModeRequested || partCount <= 1) {
+    return {};
+  }
+
+  return part.sequenceIndex === 0
+    ? { hint: 'Suggested first send.', emphasis: 'recommended' }
+    : { hint: 'Suggested follow-up after message 1.', emphasis: 'followup' };
+}
+
 export function isInsertFeedbackActive(
   part: OverlayInsertPart,
   now = Date.now(),

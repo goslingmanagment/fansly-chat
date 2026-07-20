@@ -17,11 +17,14 @@ import {
 } from '../spend-format.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
 import {
+  createSplitContractNote,
   createUserErrorBlock,
   formatLoadingStatus,
   getInsertButtonLabel,
   getNextInsertablePart,
   getReplyPartTitle,
+  getSplitContractNote,
+  getSplitPartCardOptions,
   insertedFeedbackDelayMs,
   isEditableElement,
   isInsertFeedbackActive,
@@ -447,24 +450,27 @@ export class InlinePanelController {
       section.append(createUserErrorBlock(this.inlineError));
     }
 
+    const splitNote = getSplitContractNote(
+      model.splitModeRequested,
+      Boolean(model.error),
+      model.parts.length,
+    );
+    if (splitNote) {
+      section.append(createSplitContractNote(splitNote));
+    }
+
     if (model.error) {
       section.append(createUserErrorBlock(model.error));
     } else if (model.parts.length > 0) {
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {
-        const isSplit = model.splitModeRequested && model.parts.length > 1;
         parts.append(
           this.createPartCard(
             getReplyPartTitle(part, model.splitModeRequested),
             part,
             {
-              hint: isSplit
-                ? (part.sequenceIndex === 0 ? 'Suggested first send.' : 'Suggested follow-up after message 1.')
-                : undefined,
-              emphasis: isSplit
-                ? (part.sequenceIndex === 0 ? 'recommended' : 'followup')
-                : undefined,
+              ...getSplitPartCardOptions(part, model.splitModeRequested, model.parts.length),
               status: part.insertedOnce ? 'Inserted earlier.' : undefined,
             },
           ),
@@ -618,22 +624,21 @@ export class InlinePanelController {
       section.append(this.createSpendStrip(spend));
     }
 
+    const splitNote = getSplitContractNote(tab.splitModeRequested, false, tab.parts.length);
+    if (splitNote) {
+      section.append(createSplitContractNote(splitNote));
+    }
+
     if (tab.parts.length > 0) {
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       tab.parts.forEach((part) => {
-        const isSplit = tab.splitModeRequested && tab.parts.length > 1;
         parts.append(
           this.createPartCard(
             getReplyPartTitle(part, tab.splitModeRequested),
             part,
             {
-              hint: isSplit
-                ? (part.sequenceIndex === 0 ? 'Suggested first send.' : 'Suggested follow-up after message 1.')
-                : undefined,
-              emphasis: isSplit
-                ? (part.sequenceIndex === 0 ? 'recommended' : 'followup')
-                : undefined,
+              ...getSplitPartCardOptions(part, tab.splitModeRequested, tab.parts.length),
               status: part.insertedOnce ? 'Inserted earlier.' : undefined,
             },
           ),

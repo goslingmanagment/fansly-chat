@@ -1589,12 +1589,18 @@ ol.chatgoose-md-list {
 }
 
 .chatgoose-inline-note {
-  border: 1px solid var(--chatgoose-green-line);
-  background: var(--chatgoose-green-bg);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
   border-radius: var(--chatgoose-radius-chip);
   padding: 10px 12px;
   font-size: 13px;
-  color: var(--chatgoose-green);
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-inline-note-warn {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
 }
 
 /* ─── Layout Helpers ─────────────────────────────────────────── */
