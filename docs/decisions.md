@@ -64,6 +64,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` cache-hit marker invalidates every pre-guard recap (one forced regen per fan, self-healing) with a documented Hub-residual gap owned by core #136 |
 | E46 | 2026-07-19 | Coach feature (client-side): per-fan in-memory sessions, canonical conversationRef=groupId + required fanRef, transcript overlap-and-replace cache, recap two sizes + picker (`summary-short:` key, short never syncs to Hub), auto-recap STOP/PROCEED taxonomy (timed_out/network_error STOP by design), serialization on lifecycle.reserve, empty-pageLabel acceptance fallback, custom-name rule both lanes |
 | E47 | 2026-07-20 | Voice notes: fan-pinned paid recovery, exact-take/live-route attach custody, bounded MP3 handoff, and explicit storage.session/MV3 limits |
+| E48 | 2026-07-20 | Docs cleanup: `docs/project-kernel/` retired (tombstone); superseded Pass-1 maps deleted and their living regeneration prompt moved under `docs/generated/` |
 
 ## Entries
 
@@ -1189,3 +1190,13 @@ the background's in-memory attach attestation is gone, so already-created takes
 degrade to Download MP3 rather than weakening recipient checks. The Voice UI is
 hidden unless the kernel capability hint is true, while the default-off kernel
 kill switch and fail-closed allowlist remain authoritative for every paid call.
+
+**E48 (2026-07-20).** The obsolete `docs/project-kernel/` archive is retired now
+that the Project-Kernel migration is complete. Tombstone (family anti-deletion
+law): the 17 superseded Pass-1 pre-migration maps (`00-overview` through
+`15-tests-overview`, plus `boundaries.md`) and `pass3-migration.md` are deleted;
+each is recoverable from Git and fully replaced by the point-in-time maps under
+`docs/generated/`. The one living file, `prompt-1-map.md`, moves to
+`docs/generated/REGENERATION-PROMPT.md` with its title and output paths updated.
+Generated-map banners still cite the historical path and will self-correct on
+the next regeneration; generated documentation is exempt from hand editing.

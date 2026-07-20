@@ -24,8 +24,7 @@ and may be deleted only after device-token adoption is demonstrated (E9d).**
 | Doc | What it answers |
 |---|---|
 | `docs/decisions.md` | This repo's append-only decision log (E1–latest) + the family law; cross-repo rulings live in core's `docs/decisions.md`, referenced by number |
-| `docs/generated/` | Point-in-time code maps. Read each banner's snapshot SHA before relying on a claim or line number; they are supplemental, not current truth until regenerated |
-| `docs/project-kernel/` | The Pass 1 (pre-migration) maps — superseded history, banners say so |
+| `docs/generated/` | Point-in-time code maps. Read each banner's snapshot SHA before relying on a claim or line number; they are supplemental, not current truth until regenerated. `REGENERATION-PROMPT.md` there is the re-runnable generator |
 | `SPEC_FINAL.md` | The original product spec — HISTORICAL (v1.3, pre-kernel): normative for product behavior/UX intent, wrong about architecture (it predates the kernel cutover — trust `docs/decisions.md` E2/E3 over it) |
 | `CHANGELOG.md` | Release history. The ignored local `TODO.md` is not a portable or authoritative worklist |
 | `~/code/core/docs/ai-gateway-contract.md` | Historical V1 raw-gateway contract. For the current feature-lane request shape, verify `src/background/kernel-feature-gateway.ts`, the vendored SDK, and core contracts; do not rely on the old prose contract |
