@@ -18,9 +18,17 @@ import {
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 import { VoiceService } from './voice-service.js';
+import { enableVoiceSessionStorageForContent } from './voice-session-access.js';
 import { readStorageState } from '../shared/storage.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
+
+// Firefox's storage.session defaults to trusted extension contexts only.
+// Invoke the access-level change immediately at worker startup so the content
+// attempt controller can persist idempotency custody before any paid create.
+void enableVoiceSessionStorageForContent(browser.storage.session).catch((error) => {
+  console.error('[voice] failed to expose storage.session to content', error);
+});
 
 const sessionStore = new SessionStore();
 const tabContexts = new TabContextStore();

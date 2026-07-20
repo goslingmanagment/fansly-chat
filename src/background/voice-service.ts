@@ -156,19 +156,32 @@ function errorBody(error: unknown): Record<string, unknown> | null {
   return error.body;
 }
 
+function structuredBodyErrorCode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const code = value.trim();
+  // Only the shared registry is a stable wire-code allowlist. Reject HTTP
+  // reason phrases such as "Internal Server Error" (and unknown ad-hoc
+  // strings) so they cannot masquerade as machine-readable protocol codes.
+  return isUserErrorKey(code) ? code : null;
+}
+
 function structuredErrorCode(error: unknown, fallback: string): string {
   if (error instanceof ChatGooseError) {
     return error.key;
   }
   const body = errorBody(error);
-  if (typeof body?.code === 'string' && body.code.trim()) {
-    return body.code.trim();
+  const bodyCode = structuredBodyErrorCode(body?.code) ??
+    structuredBodyErrorCode(body?.error);
+  if (bodyCode) {
+    return bodyCode;
   }
-  if (typeof body?.error === 'string' && body.error.trim()) {
-    return body.error.trim();
-  }
-  if (isRecord(error) && typeof error.code === 'string' && error.code.trim()) {
-    return error.code.trim();
+  if (isRecord(error) && typeof error.code === 'string') {
+    const errorCode = error.code.trim();
+    if (isUserErrorKey(errorCode)) {
+      return errorCode;
+    }
   }
   return fallback;
 }
@@ -243,6 +256,10 @@ function isAbortError(error: unknown): boolean {
   return isRecord(error) && error.name === 'AbortError';
 }
 
+function voiceTakeKey(attemptId: string, voiceNoteId: number): string {
+  return `${attemptId}:${voiceNoteId}`;
+}
+
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(
@@ -256,12 +273,13 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 export class VoiceService {
   private readonly portsByTabId = new Map<number, browser.runtime.Port>();
   private readonly activeScriptsByTabId = new Map<number, ActiveScript>();
-  private readonly attemptsById = new Map<string, VoiceAttemptRecord>();
-  /** Route/fan invalidation is permanent for this worker-lifetime attempt.
-   * A successfully dispatched grant is not attempt-level invalidation: an
+  private readonly scriptAttemptIds = new Set<string>();
+  private readonly attemptsByTakeKey = new Map<string, VoiceAttemptRecord>();
+  /** Route/fan invalidation is permanent for this worker-lifetime take.
+   * A successfully dispatched grant is not take-level invalidation: an
    * explicit human re-request may receive a fresh, independently single-use
    * token after an uncertain native handoff. */
-  private readonly unavailableAttachAttemptIds = new Set<string>();
+  private readonly unavailableAttachTakeKeys = new Set<string>();
   private readonly attachGrantsInFlight = new Set<string>();
   private readonly capabilityByPageLabel = new Map<string, CapabilityCacheEntry>();
   private readonly pageBindingByTabId = new Map<number, TabPageBinding>();
@@ -285,8 +303,16 @@ export class VoiceService {
       if (this.portsByTabId.get(tabId) !== port || !isContentPortMessage(message)) {
         return;
       }
-      if (message.type === 'tab:init' || message.type === 'tab:routeChanged') {
+      if (message.type === 'tab:routeChanged') {
         this.invalidateRoute(tabId);
+        return;
+      }
+      if (message.type === 'tab:init') {
+        // Port reconnects replay tab:init for the same route. They must not burn
+        // a paid take's still-valid in-memory attach attestation. A full content
+        // reload may reset routeNonce, so rebind only when the account/group/fan
+        // identity still matches; a different conversation is invalidated.
+        this.rebindAttachAttemptsForTab(tabId);
         return;
       }
       if (isVoiceContentMessage(message)) {
@@ -358,16 +384,19 @@ export class VoiceService {
   }
 
   handlePortDisconnected(tabId: number): void {
-    this.invalidateRoute(tabId);
+    // A transient MV3 port loss is not a route change. Abort only the
+    // non-replayable script stream; preserve paid-take attestation for the
+    // reconnecting content controller.
+    this.abortActiveScript(tabId);
   }
 
   handleTabRemoved(tabId: number): void {
     this.invalidateRoute(tabId);
-    for (const [attemptId, attempt] of this.attemptsById) {
+    for (const [key, attempt] of this.attemptsByTakeKey) {
       if (attempt.binding.tabId === tabId) {
-        this.attemptsById.delete(attemptId);
-        this.unavailableAttachAttemptIds.delete(attemptId);
-        this.attachGrantsInFlight.delete(attemptId);
+        this.attemptsByTakeKey.delete(key);
+        this.unavailableAttachTakeKeys.delete(key);
+        this.attachGrantsInFlight.delete(key);
       }
     }
     this.pageBindingByTabId.delete(tabId);
@@ -380,6 +409,10 @@ export class VoiceService {
     emit: VoiceEmitter,
   ): Promise<void> {
     this.abortActiveScript(tabId);
+    const isRegeneration = message.isRegeneration === true ||
+      this.scriptAttemptIds.has(message.attemptId);
+    this.scriptAttemptIds.add(message.attemptId);
+    const clientRequestId = this.randomUUID();
     const controller = new AbortController();
     const active: ActiveScript = { attemptId: message.attemptId, controller };
     this.activeScriptsByTabId.set(tabId, active);
@@ -477,12 +510,12 @@ export class VoiceService {
         state.settings,
         {
           feature: 'voice-script',
-          clientRequestId: message.attemptId,
+          clientRequestId,
           pageLabel: page.pageLabel,
           conversationRef: fanAccountId ?? context.groupId,
           replyTone: message.replyTone,
           draftText: message.draftText,
-          isRegeneration: false,
+          isRegeneration,
           clientContext: {
             transcript: clientTranscript.transcript,
             messageCount: clientTranscript.messageCount,
@@ -564,6 +597,16 @@ export class VoiceService {
       return;
     }
     const binding = bindingFromContext(context);
+    // Pin the background-owned derivation before any await (including page
+    // resolution). Content persists it against this exact clientRequestId, so
+    // a dropped port cannot leave an accepted create unreplayable after a
+    // worker restart.
+    emit({
+      type: 'voice:noteCreateAck',
+      attemptId: message.attemptId,
+      clientRequestId: message.clientRequestId,
+      conversationRef,
+    });
     const controller = new AbortController();
     try {
       const state = await this.deps.storageCoordinator.getState();
@@ -577,15 +620,6 @@ export class VoiceService {
         );
         return;
       }
-      // Send the background-owned derivation back before the billable request.
-      // Content persists it against this exact clientRequestId and includes it
-      // on every recovery replay.
-      emit({
-        type: 'voice:noteCreateAck',
-        attemptId: message.attemptId,
-        clientRequestId: message.clientRequestId,
-        conversationRef,
-      });
       const view = await this.deps.agencyHubClient.createVoiceNote(
         state.settings,
         page.pageLabel,
@@ -597,13 +631,18 @@ export class VoiceService {
         },
         controller.signal,
       );
-      this.attemptsById.set(message.attemptId, {
+      this.attemptsByTakeKey.set(voiceTakeKey(message.attemptId, view.voiceNoteId), {
         attemptId: message.attemptId,
         pageLabel: page.pageLabel,
         voiceNoteId: view.voiceNoteId,
         binding,
       });
-      emit({ type: 'voice:noteView', attemptId: message.attemptId, view });
+      emit({
+        type: 'voice:noteView',
+        attemptId: message.attemptId,
+        clientRequestId: message.clientRequestId,
+        view,
+      });
     } catch (error) {
       this.emitNoteError(message.attemptId, { source: 'create' }, error, emit);
     }
@@ -738,23 +777,23 @@ export class VoiceService {
     message: Extract<VoiceContentMessage, { type: 'voice:attachToken' }>,
     emit: VoiceEmitter,
   ): Promise<void> {
-    const attempt = this.attemptsById.get(message.attemptId);
+    const key = voiceTakeKey(message.attemptId, message.voiceNoteId);
+    const attempt = this.attemptsByTakeKey.get(key);
     if (
       !attempt ||
       attempt.binding.tabId !== tabId ||
-      attempt.voiceNoteId !== message.voiceNoteId ||
-      this.unavailableAttachAttemptIds.has(message.attemptId) ||
-      this.attachGrantsInFlight.has(message.attemptId)
+      this.unavailableAttachTakeKeys.has(key) ||
+      this.attachGrantsInFlight.has(key)
     ) {
       this.emitAttachRefusal(message.attemptId, 'unknown', emit);
       return;
     }
-    this.attachGrantsInFlight.add(message.attemptId);
+    this.attachGrantsInFlight.add(key);
     try {
       const context = this.deps.tabContexts.get(tabId);
       const refusal = attachRefusal(attempt.binding, context);
       if (refusal) {
-        this.unavailableAttachAttemptIds.add(message.attemptId);
+        this.unavailableAttachTakeKeys.add(key);
         this.emitAttachRefusal(message.attemptId, refusal, emit);
         return;
       }
@@ -781,7 +820,7 @@ export class VoiceService {
         this.deps.tabContexts.get(tabId),
       );
       if (afterLookupRefusal) {
-        this.unavailableAttachAttemptIds.add(message.attemptId);
+        this.unavailableAttachTakeKeys.add(key);
         this.emitAttachRefusal(message.attemptId, afterLookupRefusal, emit);
         return;
       }
@@ -800,7 +839,7 @@ export class VoiceService {
         fanUsername,
       });
     } finally {
-      this.attachGrantsInFlight.delete(message.attemptId);
+      this.attachGrantsInFlight.delete(key);
     }
   }
 
@@ -884,9 +923,9 @@ export class VoiceService {
     settings: Settings,
     signal: AbortSignal,
   ): Promise<string> {
-    const attempt = this.attemptsById.get(attemptId);
+    const attempt = this.attemptsByTakeKey.get(voiceTakeKey(attemptId, voiceNoteId));
     if (attempt) {
-      if (attempt.binding.tabId !== tabId || attempt.voiceNoteId !== voiceNoteId) {
+      if (attempt.binding.tabId !== tabId) {
         throw new ChatGooseError('voice_source_invalid');
       }
       return attempt.pageLabel;
@@ -950,9 +989,30 @@ export class VoiceService {
   }
 
   private invalidateAttachAttemptsForTab(tabId: number): void {
-    for (const [attemptId, attempt] of this.attemptsById) {
+    for (const [key, attempt] of this.attemptsByTakeKey) {
       if (attempt.binding.tabId === tabId) {
-        this.unavailableAttachAttemptIds.add(attemptId);
+        this.unavailableAttachTakeKeys.add(key);
+      }
+    }
+  }
+
+  private rebindAttachAttemptsForTab(tabId: number): void {
+    const context = this.deps.tabContexts.get(tabId);
+    if (!context) {
+      return;
+    }
+    for (const [key, attempt] of this.attemptsByTakeKey) {
+      if (attempt.binding.tabId !== tabId || this.unavailableAttachTakeKeys.has(key)) {
+        continue;
+      }
+      if (
+        attempt.binding.accountId === context.accountId &&
+        attempt.binding.groupId === context.groupId &&
+        attempt.binding.fanAccountId === context.fanAccountId
+      ) {
+        attempt.binding = bindingFromContext(context);
+      } else {
+        this.unavailableAttachTakeKeys.add(key);
       }
     }
   }

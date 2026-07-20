@@ -11,7 +11,6 @@ import type {
 } from '../../shared/types.js';
 import {
   canonicalizeVoiceScript,
-  DEFINITE_CREATE_REJECTION_STATUSES,
   type VoiceAttachGrant,
   type VoiceAttempt,
   type VoiceAttemptController,
@@ -63,7 +62,7 @@ const TONE_PRESETS: Array<{ tone: ReplyTone; label: string }> = [
   { tone: 'none', label: 'Спокойный' },
 ];
 
-type AttachPhase = 'idle' | 'awaiting-modal' | 'confirmed' | 'uncertain';
+type AttachPhase = 'idle' | 'awaiting-modal' | 'confirmed' | 'uncertain' | 'aborted';
 
 /**
  * Deliberate open toggle (spec §"Two views": decided on the live panel, not in
@@ -281,14 +280,14 @@ export class VoicePanel {
     // voice:noteError
     if (message.source === 'create') {
       const needsReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
-      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) && !needsReconcile) {
-        this.pendingReconcile = false;
-        this.lastError = resolveVoiceError(message.code, message.message);
-      } else {
+      if (needsReconcile) {
         // Indeterminate create: the controller keeps the pending create for a
         // free re-poll. Nothing is known to have billed — no scary notice.
         this.pendingReconcile = true;
         this.lastError = null;
+      } else {
+        this.pendingReconcile = false;
+        this.lastError = resolveVoiceError(message.code, message.message);
       }
     } else {
       // status/audio: the failing take is already server-owned; surface the
@@ -314,7 +313,7 @@ export class VoicePanel {
     ) {
       // The selected take drifted (edited/stale) between click and grant.
       this.deps.controller.reportAttachOutcome('uncertain');
-      this.attachPhase = 'uncertain';
+      this.attachPhase = 'aborted';
       this.render();
       return;
     }
@@ -364,11 +363,7 @@ export class VoicePanel {
 
   render(): void {
     const attempt = this.deps.controller.getAttempt();
-    if (attempt && attempt.takes.length > 0) {
-      // A take exists ⇒ the pending create resolved; drop the create-level
-      // reconcile affordance.
-      this.pendingReconcile = false;
-    }
+    this.pendingReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
 
     this.editorWrap.classList.toggle('chatgoose-hidden', !attempt);
     this.renderError();
@@ -403,7 +398,7 @@ export class VoicePanel {
     this.renderTones(attempt);
     this.renderGenerate(attempt);
     this.renderBusy(attempt);
-    this.renderReconcile(attempt);
+    this.renderReconcile();
     this.renderTakes(attempt);
     this.renderAttach(attempt);
   }
@@ -450,6 +445,7 @@ export class VoicePanel {
   private renderTones(attempt: VoiceAttempt): void {
     const wrap = el('div', 'chatgoose-voice-tones');
     const chips = el('div', 'chatgoose-voice-tones-chips');
+    const pendingCreate = this.deps.controller.hasPendingCreate();
     for (const preset of TONE_PRESETS) {
       const chip = el('button', 'chatgoose-voice-tone', preset.label);
       chip.type = 'button';
@@ -457,10 +453,12 @@ export class VoicePanel {
       const active = attempt.tone === preset.tone;
       chip.setAttribute('aria-pressed', active ? 'true' : 'false');
       chip.classList.toggle('chatgoose-voice-tone-active', active);
-      chip.disabled = attempt.phase === 'generating';
+      chip.disabled = attempt.phase === 'generating' || pendingCreate;
       chip.addEventListener('click', () => {
+        if (this.deps.controller.hasPendingCreate()) {
+          return;
+        }
         this.lastError = null;
-        this.pendingReconcile = false;
         this.attachPhase = 'idle';
         void this.deps.controller.regenerateScript(preset.tone);
       });
@@ -477,10 +475,10 @@ export class VoicePanel {
 
   private renderGenerate(attempt: VoiceAttempt): void {
     const hasTakes = attempt.takes.length > 0;
-    const creatingFirst = attempt.phase === 'takes' && !hasTakes && !this.pendingReconcile;
+    const pendingCreate = this.deps.controller.hasPendingCreate();
     if (
       attempt.phase === 'generating' ||
-      creatingFirst ||
+      pendingCreate ||
       hasTakes ||
       this.pendingReconcile
     ) {
@@ -496,8 +494,7 @@ export class VoicePanel {
     button.type = 'button';
     button.disabled = !attempt.generationRef || cost === 0;
     button.addEventListener('click', () => {
-      this.lastError = null;
-      void this.deps.controller.generateTake();
+      this.beginPaidCreate(() => this.deps.controller.generateTake());
     });
     this.generateSlot.replaceChildren(button);
   }
@@ -509,11 +506,10 @@ export class VoicePanel {
       );
       return;
     }
-    const creatingFirst =
-      attempt.phase === 'takes' && attempt.takes.length === 0 && !this.pendingReconcile;
-    if (creatingFirst) {
+    if (this.deps.controller.hasPendingCreate() && !this.pendingReconcile) {
+      const ordinal = attempt.takes.length + 1;
       this.busySlot.replaceChildren(
-        this.busyRow('Вариант 1 генерируется… можно продолжать работать'),
+        this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`),
       );
       return;
     }
@@ -527,8 +523,8 @@ export class VoicePanel {
     return row;
   }
 
-  private renderReconcile(attempt: VoiceAttempt): void {
-    if (!this.pendingReconcile || attempt.takes.length > 0) {
+  private renderReconcile(): void {
+    if (!this.pendingReconcile) {
       this.reconcileSlot.replaceChildren();
       return;
     }
@@ -563,6 +559,7 @@ export class VoicePanel {
 
     const header = el('div', 'chatgoose-voice-takes-header');
     const cost = this.costChars(attempt);
+    const pendingCreate = this.deps.controller.hasPendingCreate();
     if (attempt.stale) {
       const badge = el('span', 'chatgoose-voice-stale', 'устарело — текст изменён');
       header.append(badge);
@@ -572,19 +569,17 @@ export class VoicePanel {
         `Сгенерировать войс — потратит ~${cost} символов`,
       );
       regen.type = 'button';
-      regen.disabled = !attempt.generationRef || cost === 0;
+      regen.disabled = !attempt.generationRef || cost === 0 || pendingCreate;
       regen.addEventListener('click', () => {
-        this.lastError = null;
-        void this.deps.controller.generateAgain();
+        this.beginPaidCreate(() => this.deps.controller.generateAgain());
       });
       header.append(regen);
     } else {
       const another = el('button', 'chatgoose-voice-another', `+ Ещё вариант · ~${cost} симв.`);
       another.type = 'button';
-      another.disabled = !attempt.canonicalScript;
+      another.disabled = !attempt.canonicalScript || pendingCreate;
       another.addEventListener('click', () => {
-        this.lastError = null;
-        void this.deps.controller.generateAnotherTake();
+        this.beginPaidCreate(() => this.deps.controller.generateAnotherTake());
       });
       header.append(another);
     }
@@ -699,9 +694,9 @@ export class VoicePanel {
         'Сгенерировать заново — потратит символы',
       );
       regen.type = 'button';
+      regen.disabled = this.deps.controller.hasPendingCreate();
       regen.addEventListener('click', () => {
-        this.lastError = null;
-        void this.deps.controller.generateAgain();
+        this.beginPaidCreate(() => this.deps.controller.generateAgain());
       });
       actions.append(regen);
     }
@@ -760,7 +755,26 @@ export class VoicePanel {
 
   private renderAttachFlow(): HTMLElement {
     const region = el('div', 'chatgoose-voice-attach-region');
-    if (this.attachPhase === 'uncertain') {
+    if (this.attachPhase === 'aborted') {
+      region.append(
+        el(
+          'div',
+          'chatgoose-voice-modal-hint',
+          'Вариант изменился — прикрепление отменено.',
+        ),
+      );
+      const back = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-attach-rearm',
+        'Вернуться к вариантам',
+      );
+      back.type = 'button';
+      back.addEventListener('click', () => {
+        this.attachPhase = 'idle';
+        this.render();
+      });
+      region.append(back);
+    } else if (this.attachPhase === 'uncertain') {
       region.append(
         el(
           'div',
@@ -867,6 +881,21 @@ export class VoicePanel {
     this.root.append(anchor);
     anchor.click();
     anchor.remove();
+  }
+
+  private beginPaidCreate(start: () => Promise<string>): void {
+    if (this.deps.controller.hasPendingCreate()) {
+      return;
+    }
+    this.lastError = null;
+    const pending = start();
+    // beginCreate claims pendingCreate synchronously, before its first await.
+    // Render now so a second physical click cannot race the durable write.
+    this.render();
+    void pending.catch(() => {
+      this.lastError = getErrorMessage('unknown_error');
+      this.render();
+    });
   }
 
   private onEditorInput(): void {

@@ -190,7 +190,12 @@ async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
 /** Drive one completed, playable take (voiceNoteId 1) that can be attached. */
 async function toCompletedTake(attemptId: string): Promise<void> {
   await harness!.controller.generateTake();
-  await feed({ type: 'voice:noteView', attemptId, view: view({ state: 'queued' }) });
+  await feed({
+    type: 'voice:noteView',
+    attemptId,
+    clientRequestId: 'id-2',
+    view: view({ state: 'queued' }),
+  });
   await feed({
     type: 'voice:noteView',
     attemptId,
@@ -372,7 +377,12 @@ describe('VoicePanel — лента', () => {
   it('generating a take stays non-blocking: the editor remains usable and a busy row appears', async () => {
     const attemptId = await toScriptPhase();
     await harness!.controller.generateTake();
-    await feed({ type: 'voice:noteView', attemptId, view: view({ state: 'queued' }) });
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-2',
+      view: view({ state: 'queued' }),
+    });
     const { root } = harness!;
 
     expect(textOf(root)).toContain('Вариант 1 генерируется');
@@ -420,6 +430,48 @@ describe('VoicePanel — лента', () => {
     await flush();
 
     expect(sent.some((message) => message.type === 'voice:noteCreate')).toBe(true);
+  });
+
+  it('blocks duplicate paid clicks and shows progress for a later take', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.sent.length = 0;
+
+    const another = buttonByText(harness!.root, '+ Ещё вариант')!;
+    another.click();
+    // Even a second dispatch on the old detached node is ignored by the
+    // controller-backed pending gate.
+    another.click();
+    await flush();
+
+    expect(harness!.sent.filter((message) => message.type === 'voice:noteCreate')).toHaveLength(1);
+    expect(textOf(harness!.root)).toContain('Вариант 2 генерируется');
+    expect(buttonByText(harness!.root, '+ Ещё вариант')?.disabled).toBe(true);
+    expect(
+      Array.from(harness!.root.querySelectorAll<HTMLButtonElement>('.chatgoose-voice-tone'))
+        .every((button) => button.disabled),
+    ).toBe(true);
+  });
+
+  it('keeps a later indeterminate create on the free reconcile path beside older takes', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    buttonByText(harness!.root, '+ Ещё вариант')!.click();
+    await flush();
+
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'create',
+      code: 'hub_request_failed',
+      message: 'Create timed out.',
+      status: 503,
+    });
+
+    expect(textOf(harness!.root)).toContain('Вариант 1');
+    expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    expect(textOf(harness!.root)).not.toContain('Вариант 2 генерируется');
+    expect(buttonByText(harness!.root, '+ Ещё вариант')?.disabled).toBe(true);
   });
 
   it('editing the script marks takes stale and disables attach', async () => {
@@ -474,6 +526,25 @@ describe('VoicePanel — лента', () => {
 
     resolveAttach('confirmed');
     await grant;
+  });
+
+  it('reports a drifted grant as cancelled without claiming an attachment exists', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.draft.value = 'leftover caption';
+    await harness!.controller.editScript(`${SCRIPT} changed`);
+
+    await harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      token: 'stale-token',
+      fanUsername: 'alice',
+    });
+
+    expect(textOf(harness!.root)).toContain('Вариант изменился — прикрепление отменено.');
+    expect(textOf(harness!.root)).not.toContain('вложение должно появиться');
+    expect(textOf(harness!.root)).not.toContain('Если войс прикрепился');
+    expect(harness!.attachCalls).toHaveLength(0);
   });
 
   it('an uncertain outcome stays calm and never auto-repeats', async () => {
@@ -607,7 +678,12 @@ describe('VoicePanel — лента', () => {
   it('surfaces an indeterminate take as free status check plus an explicit paid regenerate', async () => {
     const attemptId = await toScriptPhase();
     await harness!.controller.generateTake();
-    await feed({ type: 'voice:noteView', attemptId, view: view({ state: 'queued' }) });
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-2',
+      view: view({ state: 'queued' }),
+    });
     await feed({ type: 'voice:noteView', attemptId, view: view({ state: 'indeterminate' }) });
     const { root, sent } = harness!;
 
@@ -626,7 +702,7 @@ describe('VoicePanel — лента', () => {
     await harness!.controller.generateTake();
     // A 5xx create outcome is indeterminate — the controller keeps the pending
     // create, and the panel must not imply characters were burned.
-    harness!.panel.handleError({
+    await feed({
       type: 'voice:noteError',
       attemptId,
       source: 'create',

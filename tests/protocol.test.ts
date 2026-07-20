@@ -103,6 +103,7 @@ describe('protocol boundary guards', () => {
         attemptId: 'attempt-1',
         draftText: 'Write a warm voice note',
         replyTone: 'casual',
+        isRegeneration: true,
       },
       {
         type: 'voice:scriptCancel',
@@ -206,6 +207,13 @@ describe('protocol boundary guards', () => {
       attemptId: 'attempt-1',
       draftText: 'Write a warm voice note',
       replyTone: 'not-a-tone',
+    })).toBe(false);
+    expect(isContentPortMessage({
+      type: 'voice:scriptStart',
+      attemptId: 'attempt-1',
+      draftText: 'Write a warm voice note',
+      replyTone: 'casual',
+      isRegeneration: 'yes',
     })).toBe(false);
     expect(isContentPortMessage({
       type: 'voice:noteCreate',
@@ -325,6 +333,7 @@ describe('protocol boundary guards', () => {
       {
         type: 'voice:noteView',
         attemptId: 'attempt-1',
+        clientRequestId: 'client-request-1',
         view: {
           voiceNoteId: 42,
           state: 'completed',
@@ -384,6 +393,22 @@ describe('protocol boundary guards', () => {
     for (const message of messages) {
       expect(isBackgroundPortMessage(message), String(message.type)).toBe(true);
     }
+
+    // Additive wire evolution: status-origin/older envelopes omit the create
+    // correlation id and must remain protocol-valid.
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteView',
+      attemptId: 'attempt-1',
+      view: {
+        voiceNoteId: 42,
+        state: 'queued',
+        scriptChars: 21,
+        billed: null,
+        audioSha256: null,
+        audioBytesLen: null,
+        createdAt: '2026-07-19T10:00:00.000Z',
+      },
+    })).toBe(true);
   });
 
   it('rejects malformed or undiscriminated background-to-content voice messages', () => {
@@ -487,6 +512,21 @@ describe('protocol boundary guards', () => {
         `${String(message.type)} missing type`,
       ).toBe(false);
     }
+
+    expect(isBackgroundPortMessage({
+      type: 'voice:noteView',
+      attemptId: 'attempt-1',
+      clientRequestId: 42,
+      view: {
+        voiceNoteId: 42,
+        state: 'queued',
+        scriptChars: 21,
+        billed: null,
+        audioSha256: null,
+        audioBytesLen: null,
+        createdAt: '2026-07-19T10:00:00.000Z',
+      },
+    })).toBe(false);
 
     expect(isBackgroundPortMessage({
       type: 'voice:noteView',

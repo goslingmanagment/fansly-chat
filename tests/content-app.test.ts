@@ -255,6 +255,31 @@ describe('ChatGooseContentApp', () => {
     vi.restoreAllMocks();
   });
 
+  it('boots a recoverable voice attempt before applying the empty-draft gate', async () => {
+    mountConversationComposer('');
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const boot = vi.fn(async () => ({ attemptId: 'recovered-attempt' }));
+    const open = vi.fn();
+    const setFanUsername = vi.fn();
+
+    app.tabState = readyState({ voiceNotesCapable: true });
+    app.currentGroupId = 'group-1';
+    app.createVoiceController = vi.fn(() => {
+      app.voiceController = { boot };
+      app.voicePanel = { open, setFanUsername };
+    });
+
+    app.openVoicePanel();
+
+    await vi.waitFor(() => expect(boot).toHaveBeenCalledTimes(1));
+    expect(app.createVoiceController).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(setFanUsername).toHaveBeenCalledWith('alice');
+    expect(document.querySelector('.chatgoose-toast')?.textContent ?? '')
+      .not.toContain('Напишите черновик');
+  });
+
   it('reopens the cached completed reply in the inline panel and preserves insert state', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

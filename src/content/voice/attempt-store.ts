@@ -29,7 +29,7 @@ export interface VoiceTakeCreateSnapshot {
 export interface StoredVoiceTake {
   voiceNoteId: number;
   clientRequestId: string;
-  pinnedConversationRef: string | null;
+  attached: boolean;
   view: VoiceNoteStatusView;
 }
 
@@ -128,7 +128,7 @@ function parseStoredTake(value: unknown): StoredVoiceTake | null {
     !isRecord(value) ||
     !Number.isFinite(value.voiceNoteId) ||
     typeof value.clientRequestId !== 'string' ||
-    !(value.pinnedConversationRef === undefined || isNullableString(value.pinnedConversationRef)) ||
+    !(value.attached === undefined || typeof value.attached === 'boolean') ||
     !isVoiceNoteStatusView(value.view) ||
     value.voiceNoteId !== value.view.voiceNoteId
   ) {
@@ -137,8 +137,9 @@ function parseStoredTake(value: unknown): StoredVoiceTake | null {
   return {
     voiceNoteId: value.voiceNoteId as number,
     clientRequestId: value.clientRequestId,
-    // Older V1 envelopes predate the background-derived route pin.
-    pinnedConversationRef: value.pinnedConversationRef ?? null,
+    // Older V1 envelopes predate per-take attachment custody. Hydration also
+    // upgrades the selected take of a legacy phase='attached' attempt.
+    attached: value.attached ?? false,
     view: { ...value.view },
   };
 }
@@ -279,7 +280,7 @@ function serializeSnapshot(snapshot: VoiceAttemptStoreSnapshot, savedAt: number)
       takes: snapshot.attempt.takes.map((take) => ({
         voiceNoteId: take.voiceNoteId,
         clientRequestId: take.clientRequestId,
-        pinnedConversationRef: take.pinnedConversationRef,
+        attached: take.attached,
         view: { ...take.view },
       })),
       selectedTakeId: snapshot.attempt.selectedTakeId,

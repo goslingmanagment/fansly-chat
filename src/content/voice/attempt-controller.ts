@@ -18,7 +18,7 @@ export type VoiceAttemptRoute = StoredVoiceAttemptRoute;
 export interface VoiceTake {
   voiceNoteId: number;
   clientRequestId: string;
-  pinnedConversationRef: string | null;
+  attached: boolean;
   view: VoiceNoteStatusView;
   audio: ArrayBuffer | null;
   blobUrl: string | null;
@@ -81,7 +81,18 @@ const POLLED_STATES = new Set<VoiceNoteStatusView['state']>([
  * ordinary errors, not the indeterminate needs-reconcile surface. Exported so the
  * panel classifies create errors from a single source of truth.
  */
-export const DEFINITE_CREATE_REJECTION_STATUSES = new Set([400, 403, 409, 429]);
+export const DEFINITE_CREATE_REJECTION_STATUSES = new Set([
+  400,
+  401,
+  403,
+  404,
+  409,
+  429,
+]);
+const DEFINITE_CREATE_REJECTION_CODES = new Set([
+  'voice_source_invalid',
+  'voice_provider_unavailable',
+]);
 
 /** Server-identical canonicalization; paid payload bytes are frozen only at click. */
 export function canonicalizeVoiceScript(script: string): string {
@@ -234,6 +245,12 @@ export class VoiceAttemptController {
 
   async regenerateScript(tone: ReplyTone): Promise<void> {
     const record = this.requireActiveRecord();
+    // A paid create may already have reached the Hub. Keep its immutable
+    // snapshot and the existing takes visible until create/reconcile resolves;
+    // tone presets never erase billable work in flight.
+    if (record.pendingCreate) {
+      return;
+    }
     this.revokeRecordBlobUrls(record);
     record.attempt.phase = 'generating';
     record.attempt.script = '';
@@ -253,6 +270,7 @@ export class VoiceAttemptController {
       attemptId: record.attempt.attemptId,
       draftText: record.attempt.draftText,
       replyTone: tone,
+      isRegeneration: true,
     });
     if (!sent) {
       record.attempt.phase = 'script';
@@ -341,6 +359,7 @@ export class VoiceAttemptController {
     const take = attempt.takes.find(({ voiceNoteId }) => voiceNoteId === attempt.selectedTakeId);
     return Boolean(
       take &&
+      !take.attached &&
       take.view.state === 'completed' &&
       take.audio &&
       take.blobUrl,
@@ -385,11 +404,22 @@ export class VoiceAttemptController {
     return record?.pendingCreate?.phase === 'needs-reconcile';
   }
 
+  hasPendingCreate(): boolean {
+    const record = this.activeAttemptId
+      ? this.records.get(this.activeAttemptId)
+      : undefined;
+    return Boolean(record?.pendingCreate);
+  }
+
   async markAttached(): Promise<void> {
     const record = this.requireActiveRecord();
-    if (record.attempt.phase === 'attached') {
+    const selected = record.attempt.takes.find(
+      ({ voiceNoteId }) => voiceNoteId === record.attempt.selectedTakeId,
+    );
+    if (!selected || selected.attached) {
       return;
     }
+    selected.attached = true;
     record.attempt.phase = 'attached';
     await this.persist(record);
     this.notifyChange();
@@ -439,7 +469,7 @@ export class VoiceAttemptController {
         await this.applyCreateAck(record, message.clientRequestId, message.conversationRef);
         return;
       case 'voice:noteView':
-        await this.applyNoteView(record, message.view);
+        await this.applyNoteView(record, message.view, message.clientRequestId);
         return;
       case 'voice:noteError':
         await this.applyNoteError(record, message);
@@ -465,6 +495,9 @@ export class VoiceAttemptController {
     }
     this.connected = false;
     this.stopPolling();
+    // Requests on the dead port cannot answer. A reconnect must be allowed to
+    // re-fetch completed audio instead of treating the lost request as live.
+    this.audioFetchesInFlight.clear();
     for (const record of this.records.values()) {
       if (record.attempt.phase !== 'generating') {
         continue;
@@ -549,7 +582,10 @@ export class VoiceAttemptController {
         takes: entry.attempt.takes.map((take) => ({
           voiceNoteId: take.voiceNoteId,
           clientRequestId: take.clientRequestId,
-          pinnedConversationRef: take.pinnedConversationRef,
+          attached: take.attached || (
+            entry.attempt.phase === 'attached' &&
+            entry.attempt.selectedTakeId === take.voiceNoteId
+          ),
           view: { ...take.view },
           audio: null,
           blobUrl: null,
@@ -701,6 +737,7 @@ export class VoiceAttemptController {
   private async applyNoteView(
     record: RuntimeAttemptRecord,
     view: VoiceNoteStatusView,
+    clientRequestId?: string,
   ): Promise<void> {
     let take = record.attempt.takes.find(({ voiceNoteId }) => voiceNoteId === view.voiceNoteId);
     if (take) {
@@ -709,11 +746,14 @@ export class VoiceAttemptController {
         this.revokeTakeBlobUrl(take);
         take.audio = null;
       }
-    } else if (record.pendingCreate) {
+    } else if (
+      record.pendingCreate &&
+      clientRequestId === record.pendingCreate.clientRequestId
+    ) {
       take = {
         voiceNoteId: view.voiceNoteId,
         clientRequestId: record.pendingCreate.clientRequestId,
-        pinnedConversationRef: record.pendingCreate.pinnedConversationRef,
+        attached: false,
         view: { ...view },
         audio: null,
         blobUrl: null,
@@ -769,7 +809,9 @@ export class VoiceAttemptController {
     } else if (record.pendingCreate) {
       const replayConflict = message.status === 409 &&
         record.currentCreateSendWasReplay;
-      if (DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) && !replayConflict) {
+      const definitelyRejected = DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) ||
+        DEFINITE_CREATE_REJECTION_CODES.has(message.code);
+      if (definitelyRejected && !replayConflict) {
         if (message.code === 'voice_quota_denied') {
           record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
         }
@@ -931,7 +973,7 @@ export class VoiceAttemptController {
         takes: record.attempt.takes.map((take) => ({
           voiceNoteId: take.voiceNoteId,
           clientRequestId: take.clientRequestId,
-          pinnedConversationRef: take.pinnedConversationRef,
+          attached: take.attached,
           view: { ...take.view },
         })),
         selectedTakeId: record.attempt.selectedTakeId,

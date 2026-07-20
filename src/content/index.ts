@@ -1103,18 +1103,11 @@ export class ChatGooseContentApp {
       return;
     }
 
-    // requiresDraft: the voice source is the live composer draft.
+    // Boot first: an already-paid/recoverable attempt belongs to this route
+    // even when the composer is now empty. The draft gate applies only when no
+    // session attempt exists and we would start a brand-new script.
     const draft = getActiveConversationDraftText().trim();
-    if (!draft) {
-      this.toast.show('Напишите черновик в поле — из него сделаем войс.', {
-        tone: 'warning',
-      });
-      return;
-    }
-
     this.createVoiceController();
-    this.voicePanel!.setFanUsername(getActiveConversationDisplayName());
-    this.voicePanel!.open();
     void this.startVoiceFlow(draft);
   }
 
@@ -1186,9 +1179,33 @@ export class ChatGooseContentApp {
     if (!controller) {
       return;
     }
-    const recovered = await controller.boot();
-    if (!recovered) {
-      await controller.startScript(draft, 'none');
+    try {
+      const recovered = await controller.boot();
+      if (this.voiceController !== controller) {
+        return;
+      }
+      if (!recovered) {
+        if (!draft) {
+          this.toast.show('Напишите черновик в поле — из него сделаем войс.', {
+            tone: 'warning',
+          });
+          this.teardownVoice();
+          return;
+        }
+        await controller.startScript(draft, 'none');
+      }
+      if (this.voiceController !== controller || !this.voicePanel) {
+        return;
+      }
+      this.voicePanel.setFanUsername(getActiveConversationDisplayName());
+      this.voicePanel.open();
+    } catch {
+      if (this.voiceController === controller) {
+        this.teardownVoice();
+        this.toast.show('Не удалось открыть сохранённый войс — попробуйте ещё раз.', {
+          tone: 'warning',
+        });
+      }
     }
   }
 

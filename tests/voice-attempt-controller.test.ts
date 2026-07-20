@@ -253,6 +253,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'queued'),
     });
     await controller.generateAnotherTake();
@@ -330,6 +331,52 @@ describe('VoiceAttemptController', () => {
     const stored = (await store.load(ROUTE))[0];
     expect(stored?.pendingCreate).toBeNull();
     expect(stored?.burnedClientRequestIds).toEqual([]);
+  });
+
+  it.each([
+    { status: 401, code: 'hub_invalid_api_key' },
+    { status: 404, code: 'hub_request_failed' },
+    { status: 503, code: 'voice_provider_unavailable' },
+  ])('clears a definite $status/$code create rejection', async ({ status, code }) => {
+    const { controller, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code,
+      message: 'Create rejected before synthesis.',
+      status,
+    });
+
+    expect((await store.load(ROUTE))[0]?.pendingCreate).toBeNull();
+    expect(controller.getAttempt()?.phase).toBe('script');
+  });
+
+  it('clears a local pre-dispatch create refusal and allows a fresh paid click', async () => {
+    const { controller, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'voice_source_invalid',
+      message: 'Local route refusal.',
+      status: 0,
+    });
+
+    expect((await store.load(ROUTE))[0]?.pendingCreate).toBeNull();
+    await expect(controller.generateTake()).resolves.toBe(TAKE_ID_2);
   });
 
   it('returns to the script phase after a definite create rejection with no take, surviving reload', async () => {
@@ -428,12 +475,76 @@ describe('VoiceAttemptController', () => {
     await resumed.controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'queued'),
     });
-    expect((await resumed.store.load(ROUTE))[0]?.attempt.takes[0]).toMatchObject({
+    expect((await resumed.store.load(ROUTE))[0]?.attempt.takes[0]).toEqual(expect.objectContaining({
       clientRequestId: TAKE_ID_1,
-      pinnedConversationRef: 'fan-derived-by-background',
+      attached: false,
+    }));
+    expect(JSON.stringify((await resumed.store.load(ROUTE))[0]?.attempt.takes[0]))
+      .not.toContain('pinnedConversationRef');
+  });
+
+  it('adopts an unknown create view only when its clientRequestId matches', async () => {
+    const { controller, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
     });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: 'stale-client-request',
+      view: voiceView(7, 'queued'),
+    });
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(8, 'queued'),
+    });
+
+    expect(controller.getAttempt()?.takes).toEqual([]);
+    expect((await store.load(ROUTE))[0]?.pendingCreate?.clientRequestId).toBe(TAKE_ID_1);
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: voiceView(9, 'queued'),
+    });
+    expect(controller.getAttempt()?.takes.map((take) => take.voiceNoteId)).toEqual([9]);
+    expect((await store.load(ROUTE))[0]?.pendingCreate).toBeNull();
+  });
+
+  it('keeps an in-flight paid create intact when a tone regeneration is requested', async () => {
+    const { controller, port, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: voiceView(42, 'completed', {
+        audioSha256: 'hash',
+        audioBytesLen: 2,
+      }),
+    });
+    await controller.generateAnotherTake();
+    const before = (await store.load(ROUTE))[0];
+    const scriptStarts = messagesOfType(port, 'voice:scriptStart').length;
+
+    await controller.regenerateScript('flirty');
+
+    const after = (await store.load(ROUTE))[0];
+    expect(after?.pendingCreate).toEqual(before?.pendingCreate);
+    expect(after?.attempt.takes).toEqual(before?.attempt.takes);
+    expect(messagesOfType(port, 'voice:scriptStart')).toHaveLength(scriptStarts);
   });
 
   it('keeps a replay 409 as needs-reconcile because the create may have billed', async () => {
@@ -512,6 +623,32 @@ describe('VoiceAttemptController', () => {
     });
   });
 
+  it('loads legacy stored takes while upgrading phase-attached custody per take', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await toAttachableTake(first.controller);
+    expect(first.controller.requestAttach()).toBe(true);
+    first.controller.reportAttachOutcome('confirmed');
+    await first.controller.markAttached();
+    first.controller.destroy();
+
+    const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
+    const envelope = session.data[key] as {
+      attempt: { takes: Array<Record<string, unknown>> };
+    };
+    delete envelope.attempt.takes[0]!.attached;
+    // Old snapshots may carry this now-unused field; additive parsing must not
+    // invalidate the recoverable paid take.
+    envelope.attempt.takes[0]!.pinnedConversationRef = 'legacy-fan-pin';
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await resumed.controller.boot();
+
+    expect(resumed.controller.getAttempt()?.takes[0]).toMatchObject({
+      voiceNoteId: 42,
+      attached: true,
+    });
+  });
+
   it('re-arms every live matching attempt rather than only the active UI attempt', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('First draft', 'none');
@@ -565,12 +702,14 @@ describe('VoiceAttemptController', () => {
     await first.controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(20, 'queued', { createdAt: '2026-07-19T10:02:00.000Z' }),
     });
     await first.controller.generateAnotherTake();
     await first.controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_2,
       view: voiceView(10, 'completed', {
         createdAt: '2026-07-19T10:01:00.000Z',
         billed: true,
@@ -756,6 +895,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'completed', {
         audioSha256: 'hash',
         audioBytesLen: 2,
@@ -784,6 +924,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'completed', {
         audioSha256: 'hash',
         audioBytesLen: 2,
@@ -821,6 +962,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'queued'),
     });
     port.sent.length = 0;
@@ -867,6 +1009,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(7, 'queued'),
     });
     port.sent.length = 0;
@@ -901,6 +1044,37 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
   });
 
+  it('retries an audio fetch whose response was lost with the disconnected port', async () => {
+    const { controller, port } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    const completed = voiceView(42, 'completed', {
+      audioSha256: 'hash',
+      audioBytesLen: 2,
+    });
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: completed,
+    });
+    expect(messagesOfType(port, 'voice:audioFetch')).toHaveLength(1);
+
+    await controller.handlePortDisconnected();
+    port.connected = true;
+    await controller.handlePortReconnect();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: completed,
+    });
+
+    expect(messagesOfType(port, 'voice:audioFetch')).toHaveLength(2);
+  });
+
   it('returns a dead live SSE to script phase on disconnect without replaying it', async () => {
     const { controller, port } = createController({ uuids: [ATTEMPT_ID] });
     await controller.startScript('Draft', 'casual');
@@ -924,7 +1098,7 @@ describe('VoiceAttemptController', () => {
 
   it('revokes in-memory blob URLs when a new script generation replaces the attempt', async () => {
     const revokeBlobUrl = vi.fn();
-    const { controller } = createController({
+    const { controller, port } = createController({
       uuids: [ATTEMPT_ID, TAKE_ID_1],
       createBlobUrl: () => 'blob:old-take',
       revokeBlobUrl,
@@ -935,6 +1109,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'completed', {
         audioSha256: 'hash',
         audioBytesLen: 2,
@@ -949,6 +1124,10 @@ describe('VoiceAttemptController', () => {
 
     await controller.regenerateScript('flirty');
     expect(revokeBlobUrl).toHaveBeenCalledWith('blob:old-take');
+    expect(messagesOfType(port, 'voice:scriptStart').at(-1)).toMatchObject({
+      attemptId: ATTEMPT_ID,
+      isRegeneration: true,
+    });
     expect(controller.getAttempt()).toMatchObject({
       phase: 'generating',
       takes: [],
@@ -974,6 +1153,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'completed', { audioSha256: 'hash', audioBytesLen: 2 }),
     });
     await controller.handleMessage({
@@ -1008,6 +1188,7 @@ describe('VoiceAttemptController', () => {
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
       view: voiceView(42, 'completed', { audioSha256: 'hash', audioBytesLen: 2 }),
     });
     await controller.handleMessage({
@@ -1038,6 +1219,39 @@ describe('VoiceAttemptController', () => {
     expect(controller.canAttachSelectedTake()).toBe(false);
     expect(controller.requestAttach()).toBe(false);
     expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(tokenCount);
+  });
+
+  it('keeps an attached take blocked after creating another take in the same attempt', async () => {
+    const { controller, port } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await toAttachableTake(controller);
+    expect(controller.requestAttach()).toBe(true);
+    controller.reportAttachOutcome('confirmed');
+    await controller.markAttached();
+
+    await controller.generateAnotherTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_2,
+      view: voiceView(84, 'completed', { audioSha256: 'hash-2', audioBytesLen: 2 }),
+    });
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 84,
+      bytes: new Uint8Array([3, 4]).buffer,
+    });
+
+    await controller.selectTake(42);
+    const tokenCount = messagesOfType(port, 'voice:attachToken').length;
+    expect(controller.canAttachSelectedTake()).toBe(false);
+    expect(controller.requestAttach()).toBe(false);
+    expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(tokenCount);
+
+    await controller.selectTake(84);
+    expect(controller.canAttachSelectedTake()).toBe(true);
   });
 
   it('holds the attach gate across the in-flight window and re-arms only on an explicit outcome', async () => {

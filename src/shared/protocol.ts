@@ -368,7 +368,8 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
     case 'voice:scriptStart':
       return hasAttemptId(message) &&
         isString(message.draftText) &&
-        isReplyTone(message.replyTone);
+        isReplyTone(message.replyTone) &&
+        isOptionalBoolean(message, 'isRegeneration');
     case 'voice:scriptCancel':
       return hasAttemptId(message);
     case 'voice:noteCreate':
@@ -470,7 +471,9 @@ export function isBackgroundPortMessage(message: unknown): message is Background
         isString(message.clientRequestId) &&
         isString(message.conversationRef);
     case 'voice:noteView':
-      return hasAttemptId(message) && isVoiceNoteStatusView(message.view);
+      return hasAttemptId(message) &&
+        isOptionalString(message, 'clientRequestId') &&
+        isVoiceNoteStatusView(message.view);
     case 'voice:noteError':
       return hasAttemptId(message) &&
         hasVoiceNoteErrorSource(message) &&

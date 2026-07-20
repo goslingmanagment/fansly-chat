@@ -1094,6 +1094,8 @@ export interface VoiceScriptStartPayload extends PortEnvelopeBase {
   attemptId: string;
   draftText: string;
   replyTone: ReplyTone;
+  /** Explicit on manual re-runs so an MV3 worker restart cannot lose it. */
+  isRegeneration?: boolean;
 }
 
 export interface VoiceScriptCancelPayload extends PortEnvelopeBase {
@@ -1322,6 +1324,8 @@ export interface VoiceNoteCreateAckPayload extends PortEnvelopeBase {
 export interface VoiceNoteViewPayload extends PortEnvelopeBase {
   type: 'voice:noteView';
   attemptId: string;
+  /** Present only on the direct create response. Status snapshots omit it. */
+  clientRequestId?: string;
   view: VoiceNoteStatusView;
 }
 
