@@ -210,6 +210,12 @@ export class ChatGooseContentApp {
   private readonly toast = new ToastController();
   private readonly port = new PortClient({
     onMessage: (message) => this.handlePortMessage(message),
+    onConnected: () => {
+      if (this.voiceController) {
+        this.voiceReconnectPending = false;
+        void this.voiceController.handlePortReconnect();
+      }
+    },
     onDisconnected: () => {
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.completedOverlayCache.clearAll();
@@ -1112,15 +1118,18 @@ export class ChatGooseContentApp {
   }
 
   private createVoiceController(): void {
-    const adapter = new VoiceAttachAdapter();
+    const groupId = this.currentGroupId;
+    if (!groupId) {
+      return;
+    }
+    const adapter = new VoiceAttachAdapter(document, groupId);
     const controller = new VoiceAttemptController({
       port: { send: (message) => this.port.send(message) },
       route: {
         accountId: this.tabState?.accountId ?? '',
-        groupId: this.currentGroupId ?? '',
+        groupId,
         routeNonce: this.routeNonce,
       },
-      conversationRef: this.currentGroupId ?? '',
       onChange: () => this.voicePanel?.render(),
       onError: (message) => this.voicePanel?.handleError(message),
       onAttachGrant: (message) => {
@@ -1424,7 +1433,6 @@ export class ChatGooseContentApp {
       case 'voice:scriptDelta':
       case 'voice:scriptComplete':
       case 'voice:scriptError':
-      case 'voice:noteCreateAck':
       case 'voice:noteView':
       case 'voice:noteError':
       case 'voice:audioBytes':

@@ -97,7 +97,6 @@ function setup(): Harness {
       },
     },
     route: { accountId: 'account-1', groupId: 'group-1', routeNonce: 1 },
-    conversationRef: 'group-1',
     store: new VoiceAttemptStore({ storage: memoryStorage(), now: () => 1_000 }),
     randomUUID: () => `id-${(uuidCounter += 1)}`,
     createBlobUrl: () => `blob:voice-${(blobCounter += 1)}`,
@@ -179,7 +178,13 @@ const SCRIPT = 'Adapted script text';
 async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
   await harness!.controller.startScript('hey babe', tone);
   const attemptId = harness!.controller.getAttempt()!.attemptId;
-  await feed({ type: 'voice:scriptComplete', attemptId, script: SCRIPT, generationRef: 'gen-1' });
+  await feed({
+    type: 'voice:scriptComplete',
+    attemptId,
+    script: SCRIPT,
+    generationRef: 'gen-1',
+    conversationRef: 'fan-1',
+  });
   return attemptId;
 }
 
@@ -190,7 +195,12 @@ async function toCompletedTake(attemptId: string, voiceNoteId = 1, createdAt?: s
   } else {
     await harness!.controller.generateAnotherTake();
   }
-  await feed({ type: 'voice:noteView', attemptId, view: view({ voiceNoteId, state: 'queued', createdAt }) });
+  await feed({
+    type: 'voice:noteView',
+    attemptId,
+    clientRequestId: `id-${voiceNoteId + 1}`,
+    view: view({ voiceNoteId, state: 'queued', createdAt }),
+  });
   await feed({
     type: 'voice:noteView',
     attemptId,
@@ -352,6 +362,7 @@ describe('VoiceStudio — студия overlay on shared components', () => {
     await harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'tok-1',
       fanUsername: 'alice',
     });
@@ -436,6 +447,7 @@ describe('VoiceStudio — студия overlay on shared components', () => {
     const grant = harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'tok-1',
       fanUsername: 'alice',
     });

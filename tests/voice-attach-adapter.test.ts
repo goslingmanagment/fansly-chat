@@ -106,7 +106,7 @@ describe('VoiceAttachAdapter', () => {
 
   it('hands off one File and dispatches one bubbling change after consuming the token', async () => {
     const { composer, input, assignedFiles } = appendComposer();
-    const adapter = new VoiceAttachAdapter();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
     const file = new File(['verified mp3 bytes'], 'voice-note.mp3', { type: 'audio/mpeg' });
     let changeCount = 0;
     let replay: Promise<unknown> | null = null;
@@ -129,7 +129,7 @@ describe('VoiceAttachAdapter', () => {
 
   it('treats uncertain observation as terminal and never re-fires that token', async () => {
     const { input } = appendComposer();
-    const adapter = new VoiceAttachAdapter();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
     const file = new File(['verified mp3 bytes'], 'voice-note.mp3', { type: 'audio/mpeg' });
     const onChange = vi.fn();
     input.addEventListener('change', onChange);
@@ -154,9 +154,25 @@ describe('VoiceAttachAdapter', () => {
     expect(onChange).toHaveBeenCalledTimes(2);
   });
 
+  it('consumes but never dispatches a grant after the real pathname changes', async () => {
+    const { input } = appendComposer();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
+    const file = new File(['verified mp3 bytes'], 'voice-note.mp3', { type: 'audio/mpeg' });
+    const onChange = vi.fn();
+    input.addEventListener('change', onChange);
+    adapter.arm('old-route-token');
+
+    dom.reconfigure({ url: 'https://fansly.com/messages/group-2' });
+
+    expect(adapter.probeComposer()).toEqual({ ok: false });
+    await expect(adapter.attach(input, file)).resolves.toBe('aborted');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(() => adapter.arm('old-route-token')).toThrow('attach token already consumed');
+  });
+
   it('confirms when the native waveform preview appears during polling', async () => {
     const { composer } = appendComposer();
-    const adapter = new VoiceAttachAdapter();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
     const file = new File(['verified mp3 bytes'], 'voice-note.mp3', { type: 'audio/mpeg' });
     adapter.arm('attach-token-3');
     const outcome = adapter.attach(
@@ -172,7 +188,7 @@ describe('VoiceAttachAdapter', () => {
 
   it('asserts that File construction belongs to the caller', async () => {
     const { input } = appendComposer();
-    const adapter = new VoiceAttachAdapter();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
     const onChange = vi.fn();
     input.addEventListener('change', onChange);
     adapter.arm('attach-token-invalid-file');
@@ -212,14 +228,16 @@ describe('VoiceAttachAdapter', () => {
     });
     pageFixture.input.addEventListener('change', pageChange);
 
-    const adapter = new VoiceAttachAdapter();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
     const file = new File(['verified mp3 bytes'], 'voice-note.mp3', { type: 'audio/mpeg' });
     adapter.arm('attach-token-page-leg');
 
     await expect(adapter.attach(contentFixture.input, file)).resolves.toBe('confirmed');
-    expect(cloneInto).toHaveBeenCalledTimes(1);
+    expect(cloneInto).toHaveBeenCalledTimes(2);
     expect(cloneInto.mock.calls[0]?.[0]).toBe(file);
     expect(cloneInto.mock.calls[0]?.[1]).toBe(pageDom.window);
+    expect(cloneInto.mock.calls[1]?.[0]).toEqual({ bubbles: true });
+    expect(cloneInto.mock.calls[1]?.[1]).toBe(pageDom.window);
     expect(Array.from(pageFixture.assignedFiles())).toEqual([file]);
     expect(pageChange).toHaveBeenCalledTimes(1);
     pageDom.window.close();

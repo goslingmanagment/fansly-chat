@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { VoiceService } from '../src/background/voice-service.js';
+import { enableVoiceSessionStorageForContent } from '../src/background/voice-session-access.js';
 import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
 import { createMockRuntimePort, postedMessages } from './helpers/port.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
+import { VOICE_AUDIO_MAX_BYTES } from '../src/shared/constants.js';
 import type {
   BackgroundPortMessage,
   FanslyMessagePageResponse,
@@ -18,6 +20,8 @@ import type {
 const TAB_ID = 7;
 const ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 const CLIENT_REQUEST_ID = '22222222-2222-4222-8222-222222222222';
+const CLIENT_REQUEST_ID_2 = '33333333-3333-4333-8333-333333333333';
+const VALID_MP3_BYTES = new Uint8Array([0xff, 0xfb, 0x90, 0x64]);
 
 function session(): SessionTemplate {
   return {
@@ -91,6 +95,8 @@ function createHarness(options: {
   getVoiceNoteStatus?: AgencyHubClient['getVoiceNoteStatus'];
   fetchVoiceNoteAudio?: AgencyHubClient['fetchVoiceNoteAudio'];
   resolvePageForUsername?: AgencyHubClient['resolvePageForUsername'];
+  getGroup?: FanslyClient['getGroup'];
+  getAccountNames?: FanslyClient['getAccountNames'];
   getState?: () => Promise<PersistedState>;
   now?: () => number;
   randomUUID?: () => string;
@@ -137,7 +143,7 @@ function createHarness(options: {
     ),
     fetchVoiceNoteAudio: vi.fn<AgencyHubClient['fetchVoiceNoteAudio']>(
       options.fetchVoiceNoteAudio ?? (async () =>
-      new Response(new Uint8Array([1, 2, 3]), {
+      new Response(VALID_MP3_BYTES, {
         status: 200,
         headers: { 'content-type': 'audio/mpeg' },
       })),
@@ -161,15 +167,15 @@ function createHarness(options: {
       pagesLoaded: 1,
       targetPages: 1,
     })),
-    getGroup: vi.fn<FanslyClient['getGroup']>(async () => ({
+    getGroup: vi.fn<FanslyClient['getGroup']>(options.getGroup ?? (async () => ({
       id: 'group-1',
       users: [{ userId: 'creator-1' }, { userId: 'fan-1' }],
-    })),
-    getAccountNames: vi.fn<FanslyClient['getAccountNames']>(async () => [{
+    }))),
+    getAccountNames: vi.fn<FanslyClient['getAccountNames']>(options.getAccountNames ?? (async () => [{
       id: 'fan-1',
       username: 'alice',
       displayName: 'Alice',
-    }]),
+    }])),
     verifyMediaPurchaseStates: vi.fn<FanslyClient['verifyMediaPurchaseStates']>(async () => ({
       purchasedSingleIds: new Set<string>(),
       purchasedBundleIds: new Set<string>(),
@@ -201,6 +207,7 @@ function createHarness(options: {
   return {
     service,
     hub,
+    fanslyClient,
     streamFeature,
     currentContext,
     sent,
@@ -214,6 +221,7 @@ async function createAttempt(harness: ReturnType<typeof createHarness>): Promise
     attemptId: ATTEMPT_ID,
     clientRequestId: CLIENT_REQUEST_ID,
     conversationRef: 'fan-1',
+    pinnedConversationRef: 'fan-1',
     sourceGenerationRef: 'generation-1',
     script: '[warmly] Hello Alice',
   }, harness.emit);
@@ -235,6 +243,7 @@ describe('VoiceService script runner', () => {
       attemptId: ATTEMPT_ID,
       clientRequestId: CLIENT_REQUEST_ID,
       conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
       script: '[warmly] Hello Alice',
     });
@@ -242,14 +251,9 @@ describe('VoiceService script runner', () => {
     await vi.waitFor(() => {
       expect(postedMessages(port)).toEqual([
         {
-          type: 'voice:noteCreateAck',
-          attemptId: ATTEMPT_ID,
-          clientRequestId: CLIENT_REQUEST_ID,
-          conversationRef: 'fan-1',
-        },
-        {
           type: 'voice:noteView',
           attemptId: ATTEMPT_ID,
+          clientRequestId: CLIENT_REQUEST_ID,
           view: voiceView(),
         },
       ]);
@@ -274,16 +278,19 @@ describe('VoiceService script runner', () => {
         attemptId: ATTEMPT_ID,
         script: '[warmly] Hello Alice',
         generationRef: 'generation-1',
+        conversationRef: 'fan-1',
       },
     ]);
     expect(harness.streamFeature).toHaveBeenCalledTimes(1);
     expect(harness.streamFeature.mock.calls[0]?.[1]).toMatchObject({
       feature: 'voice-script',
-      clientRequestId: ATTEMPT_ID,
+      clientRequestId: 'attach-token-1',
       pageLabel: 'creator-fs',
       conversationRef: 'fan-1',
+      fanRef: 'fan-1',
       draftText: 'Tell Alice about tonight',
       replyTone: 'flirty',
+      isRegeneration: false,
       clientContext: {
         messageCount: 1,
         fanDisplayName: 'alice',
@@ -291,6 +298,67 @@ describe('VoiceService script runner', () => {
         fanSubscriptionData: '',
       },
     });
+  });
+
+  it('mints a fresh kernel request id and marks later runs of one attempt as regeneration', async () => {
+    const ids = ['script-run-1', 'script-run-2'];
+    const harness = createHarness({ randomUUID: () => ids.shift()! });
+    const request = {
+      type: 'voice:scriptStart' as const,
+      attemptId: ATTEMPT_ID,
+      draftText: 'Tell Alice about tonight',
+      replyTone: 'flirty' as const,
+    };
+
+    await harness.service.handleMessage(TAB_ID, request, harness.emit);
+    await harness.service.handleMessage(TAB_ID, request, harness.emit);
+
+    expect(harness.streamFeature.mock.calls.map((call) => ({
+      clientRequestId: call[1].clientRequestId,
+      isRegeneration: call[1].isRegeneration,
+    }))).toEqual([
+      { clientRequestId: 'script-run-1', isRegeneration: false },
+      { clientRequestId: 'script-run-2', isRegeneration: true },
+    ]);
+  });
+
+  it('honours an explicit regeneration marker after background worker restart', async () => {
+    const harness = createHarness({ randomUUID: () => 'fresh-worker-script-run' });
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:scriptStart',
+      attemptId: ATTEMPT_ID,
+      draftText: 'Tell Alice about tonight',
+      replyTone: 'flirty',
+      isRegeneration: true,
+    }, harness.emit);
+
+    expect(harness.streamFeature.mock.calls[0]?.[1]).toMatchObject({
+      clientRequestId: 'fresh-worker-script-run',
+      isRegeneration: true,
+    });
+  });
+
+  it('refuses voice-script when the live group cannot resolve a fan account id', async () => {
+    const harness = createHarness({
+      getGroup: vi.fn(async () => ({
+        id: 'group-1',
+        users: [{ userId: 'creator-1' }],
+      })),
+    });
+    harness.currentContext.fanAccountId = null;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:scriptStart',
+      attemptId: ATTEMPT_ID,
+      draftText: 'Tell Alice about tonight',
+      replyTone: 'none',
+    }, harness.emit);
+
+    expect(harness.streamFeature).not.toHaveBeenCalled();
+    expect(harness.sent).toEqual([
+      expect.objectContaining({ type: 'voice:scriptError', code: 'voice_source_invalid' }),
+    ]);
   });
 
   it('does not transparently retry service_unavailable and does not echo the draft', async () => {
@@ -360,45 +428,99 @@ describe('VoiceService SDK transport', () => {
     }]);
   });
 
-  it('pins the derived conversationRef across a fresh worker whose fan is unresolved', async () => {
-    const firstWorker = createHarness();
-    // Content snapshots groupId on the wire (display/recovery only); the create
-    // body must instead carry the fanAccountId-derived route, matching the
-    // voice-script step so the server's canonical attempt hash stays stable.
-    const wireCreate = {
-      type: 'voice:noteCreate' as const,
+  it('refuses create unless the persisted fan pin matches a resolved live fan', async () => {
+    const harness = createHarness({
+      getGroup: vi.fn(async () => ({
+        id: 'group-1',
+        users: [{ userId: 'creator-1' }],
+      })),
+    });
+    const request = {
+      type: 'voice:noteCreate',
       attemptId: ATTEMPT_ID,
       clientRequestId: CLIENT_REQUEST_ID,
-      conversationRef: 'group-1',
+      conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-other',
       sourceGenerationRef: 'generation-1',
       script: '[warmly] Hello Alice',
-    };
+    } as const;
 
-    await firstWorker.service.handleMessage(TAB_ID, wireCreate, firstWorker.emit);
-    const pin = firstWorker.sent.find(
-      (message): message is Extract<BackgroundPortMessage, { type: 'voice:noteCreateAck' }> =>
-        message.type === 'voice:noteCreateAck',
-    )?.conversationRef;
-    expect(pin).toBe('fan-1');
+    await harness.service.handleMessage(TAB_ID, request, harness.emit);
+    harness.currentContext.fanAccountId = null;
+    await harness.service.handleMessage(TAB_ID, {
+      ...request,
+      pinnedConversationRef: 'fan-1',
+    }, harness.emit);
 
-    // Simulate an MV3 event-page restart: all service memory and the resolved
-    // fan are gone, but content replays the background-issued pin.
-    const restartedWorker = createHarness();
-    restartedWorker.currentContext.fanAccountId = null;
-    await restartedWorker.service.handleMessage(TAB_ID, {
-      ...wireCreate,
-      pinnedConversationRef: pin!,
-    }, restartedWorker.emit);
+    expect(harness.hub.createVoiceNote).not.toHaveBeenCalled();
+    expect(harness.sent).toEqual([
+      expect.objectContaining({ type: 'voice:noteError', code: 'voice_source_invalid' }),
+      expect.objectContaining({ type: 'voice:noteError', code: 'voice_source_invalid' }),
+    ]);
+  });
 
-    const bodies = [
-      firstWorker.hub.createVoiceNote.mock.calls[0]?.[2],
-      restartedWorker.hub.createVoiceNote.mock.calls[0]?.[2],
-    ];
-    expect(bodies[0]?.conversationRef).toBe('fan-1');
-    expect(bodies[1]?.conversationRef).toBe('fan-1');
-    // The divergent content-supplied groupId never reaches the create body.
-    expect(bodies[0]?.conversationRef).not.toBe('group-1');
-    expect(bodies[0]).toEqual(bodies[1]);
+  it('re-resolves the frozen fan pin after an MV3 worker restart before replaying create', async () => {
+    const harness = createHarness();
+    harness.currentContext.fanAccountId = null;
+
+    await createAttempt(harness);
+
+    expect(harness.fanslyClient.getGroup).toHaveBeenCalledTimes(1);
+    expect(harness.hub.createVoiceNote).toHaveBeenCalledWith(
+      expect.anything(),
+      'creator-fs',
+      expect.objectContaining({ conversationRef: 'fan-1' }),
+      expect.any(AbortSignal),
+    );
+    expect(harness.sent).toEqual([
+      expect.objectContaining({
+        type: 'voice:noteView',
+        clientRequestId: CLIENT_REQUEST_ID,
+      }),
+    ]);
+  });
+
+  it('keeps status and attach ownership for every take in one attempt', async () => {
+    const views = [voiceView({ voiceNoteId: 42 }), voiceView({ voiceNoteId: 84 })];
+    const harness = createHarness({
+      createVoiceNote: vi.fn(async () => views.shift()!),
+    });
+    await createAttempt(harness);
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: CLIENT_REQUEST_ID_2,
+      conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      script: '[warmly] Hello Alice',
+    }, harness.emit);
+    harness.sent.length = 0;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }, harness.emit);
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:attachToken',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }, harness.emit);
+
+    expect(harness.hub.getVoiceNoteStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      'creator-fs',
+      42,
+      expect.any(AbortSignal),
+    );
+    expect(harness.sent).toContainEqual({
+      type: 'voice:attachGrant',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      token: 'attach-token-1',
+      fanUsername: 'alice',
+    });
   });
 
   it('attributes a status read failure to its existing voice note', async () => {
@@ -446,22 +568,60 @@ describe('VoiceService SDK transport', () => {
 
     await createAttempt(harness);
 
-    expect(harness.sent).toEqual([
-      {
-        type: 'voice:noteCreateAck',
-        attemptId: ATTEMPT_ID,
-        clientRequestId: CLIENT_REQUEST_ID,
-        conversationRef: 'fan-1',
-      },
-      {
+    expect(harness.sent).toEqual([{
         type: 'voice:noteError',
         attemptId: ATTEMPT_ID,
         source: 'create',
         code: 'hub_invalid_api_key',
         message: 'Agency Hub rejected the credential.',
         status: 401,
-      },
-    ]);
+    }]);
+  });
+
+  it('preserves a structured 403 voice code before generic credential mapping', async () => {
+    const harness = createHarness({
+      createVoiceNote: vi.fn(async () => {
+        throw {
+          status: 403,
+          body: { code: 'voice_disabled', statusCode: 403 },
+        };
+      }),
+    });
+
+    await createAttempt(harness);
+
+    expect(harness.sent).toEqual([expect.objectContaining({
+      type: 'voice:noteError',
+      source: 'create',
+      code: 'voice_disabled',
+      status: 403,
+    })]);
+  });
+
+  it('rejects an HTTP reason phrase as a structured machine code', async () => {
+    const createVoiceNote = vi.fn(async () => {
+      throw {
+        status: 503,
+        body: {
+          error: 'Internal Server Error',
+          message: 'SECRET UPSTREAM DETAIL',
+          statusCode: 503,
+        },
+      };
+    });
+    const harness = createHarness({ createVoiceNote });
+
+    await createAttempt(harness);
+
+    expect(harness.sent.at(-1)).toEqual({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'hub_request_failed',
+      message: 'Agency Hub request failed.',
+      status: 503,
+    });
+    expect(JSON.stringify(harness.sent)).not.toContain('SECRET UPSTREAM DETAIL');
   });
 
   it('maps a 429 body code to voice:noteError without leaking the script', async () => {
@@ -478,22 +638,14 @@ describe('VoiceService SDK transport', () => {
 
     await createAttempt(harness);
 
-    expect(harness.sent).toEqual([
-      {
-        type: 'voice:noteCreateAck',
-        attemptId: ATTEMPT_ID,
-        clientRequestId: CLIENT_REQUEST_ID,
-        conversationRef: 'fan-1',
-      },
-      {
+    expect(harness.sent).toEqual([{
         type: 'voice:noteError',
         attemptId: ATTEMPT_ID,
         source: 'create',
         code: 'voice_quota_denied',
         message: 'Лимит символов для войсов исчерпан.',
         status: 429,
-      },
-    ]);
+    }]);
     expect(JSON.stringify(harness.sent)).not.toContain('SECRET SCRIPT TEXT');
   });
 
@@ -530,11 +682,11 @@ describe('VoiceService SDK transport', () => {
   });
 
   it.each([
-    { label: 'content type', contentType: 'application/octet-stream', expectedBytes: 3, badSha: false },
-    { label: 'byte length', contentType: 'audio/mpeg', expectedBytes: 4, badSha: false },
-    { label: 'sha256', contentType: 'audio/mpeg', expectedBytes: 3, badSha: true },
+    { label: 'content type', contentType: 'application/octet-stream', expectedBytes: 4, badSha: false },
+    { label: 'byte length', contentType: 'audio/mpeg', expectedBytes: 5, badSha: false },
+    { label: 'sha256', contentType: 'audio/mpeg', expectedBytes: 4, badSha: true },
   ])('rejects corrupt audio by $label', async ({ contentType, expectedBytes, badSha }) => {
-    const bytes = new Uint8Array([1, 2, 3]);
+    const bytes = VALID_MP3_BYTES;
     const fetchVoiceNoteAudio = vi.fn(async () => new Response(bytes, {
       status: 200,
       headers: { 'content-type': contentType },
@@ -562,8 +714,65 @@ describe('VoiceService SDK transport', () => {
     }]);
   });
 
+  it('rejects a 200 JSON body even when MIME, length, and hash all match', async () => {
+    const bytes = new TextEncoder().encode('{"error":"upstream proxy page"}');
+    const harness = createHarness({
+      fetchVoiceNoteAudio: vi.fn(async () => new Response(bytes, {
+        status: 200,
+        headers: { 'content-type': 'audio/mpeg' },
+      })),
+    });
+    await createAttempt(harness);
+    harness.sent.length = 0;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:audioFetch',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      expectedSha256: await sha256Hex(bytes),
+      expectedBytes: bytes.byteLength,
+    }, harness.emit);
+
+    expect(harness.sent).toEqual([
+      expect.objectContaining({ type: 'voice:noteError', code: 'voice_artifact_corrupt' }),
+    ]);
+  });
+
+  it('stops a chunked 200 response as soon as it crosses the 2 MiB cap', async () => {
+    const cancel = vi.fn();
+    const chunk = new Uint8Array(Math.floor(VOICE_AUDIO_MAX_BYTES / 2) + 1);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+      cancel,
+    });
+    const response = new Response(stream, {
+      status: 200,
+      headers: { 'content-type': 'audio/mpeg' },
+    });
+    const arrayBuffer = vi.spyOn(response, 'arrayBuffer');
+    const harness = createHarness({ fetchVoiceNoteAudio: vi.fn(async () => response) });
+    await createAttempt(harness);
+    harness.sent.length = 0;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:audioFetch',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      expectedSha256: '0'.repeat(64),
+      expectedBytes: VOICE_AUDIO_MAX_BYTES,
+    }, harness.emit);
+
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(harness.sent).toEqual([
+      expect.objectContaining({ type: 'voice:noteError', code: 'voice_artifact_corrupt' }),
+    ]);
+  });
+
   it('ships a validated ArrayBuffer to content', async () => {
-    const bytes = new Uint8Array([4, 5, 6]);
+    const bytes = VALID_MP3_BYTES;
     const harness = createHarness({
       fetchVoiceNoteAudio: vi.fn(async () => new Response(bytes, {
         status: 200,
@@ -588,7 +797,7 @@ describe('VoiceService SDK transport', () => {
       voiceNoteId: 42,
     });
     const payload = harness.sent[0] as Extract<BackgroundPortMessage, { type: 'voice:audioBytes' }>;
-    expect(Array.from(new Uint8Array(payload.bytes))).toEqual([4, 5, 6]);
+    expect(Array.from(new Uint8Array(payload.bytes))).toEqual(Array.from(VALID_MP3_BYTES));
   });
 });
 
@@ -610,12 +819,14 @@ describe('VoiceService attach attestation', () => {
       {
         type: 'voice:attachGrant',
         attemptId: ATTEMPT_ID,
+        voiceNoteId: 42,
         token: 'attach-token-1',
         fanUsername: 'alice',
       },
       {
         type: 'voice:attachGrant',
         attemptId: ATTEMPT_ID,
+        voiceNoteId: 42,
         token: 'attach-token-2',
         fanUsername: 'alice',
       },
@@ -642,7 +853,33 @@ describe('VoiceService attach attestation', () => {
     expect(harness.sent).toEqual([{
       type: 'voice:attachGrant',
       attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
       token: 'attach-token-2',
+      fanUsername: 'alice',
+    }]);
+  });
+
+  it('preserves a paid take attestation across a transient disconnect and replayed tab:init', async () => {
+    const harness = createHarness();
+    await createAttempt(harness);
+    harness.service.handlePortDisconnected(TAB_ID);
+    const port = createMockRuntimePort(TAB_ID);
+    harness.service.registerPort(port as never);
+    harness.currentContext.routeNonce = 0;
+    port.emitMessage({ type: 'tab:init', groupId: 'group-1', routeNonce: 0 });
+    harness.sent.length = 0;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:attachToken',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }, harness.emit);
+
+    expect(harness.sent).toEqual([{
+      type: 'voice:attachGrant',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      token: 'attach-token-1',
       fanUsername: 'alice',
     }]);
   });
@@ -694,6 +931,48 @@ describe('VoiceService attach attestation', () => {
       reason: 'fan_mismatch',
     }]);
   });
+
+  it('refuses attach when the live fan identity becomes unresolved', async () => {
+    const harness = createHarness();
+    await createAttempt(harness);
+    harness.sent.length = 0;
+    harness.currentContext.fanAccountId = null;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:attachToken',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }, harness.emit);
+
+    expect(harness.sent).toEqual([{
+      type: 'voice:attachRefuse',
+      attemptId: ATTEMPT_ID,
+      reason: 'fan_mismatch',
+    }]);
+  });
+
+  it('uses the Fansly client single-attempt bound for attach name enrichment', async () => {
+    const harness = createHarness();
+    await createAttempt(harness);
+    harness.sent.length = 0;
+    harness.currentContext.fanDisplayName = null;
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:attachToken',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+    }, harness.emit);
+
+    expect(harness.fanslyClient.getAccountNames).toHaveBeenLastCalledWith(
+      ['fan-1'],
+      expect.anything(),
+      expect.any(AbortSignal),
+      'none',
+    );
+    expect(harness.sent).toEqual([
+      expect.objectContaining({ type: 'voice:attachGrant', voiceNoteId: 42 }),
+    ]);
+  });
 });
 
 describe('VoiceService capability', () => {
@@ -737,5 +1016,17 @@ describe('VoiceService capability', () => {
     await expect(harness.service.resolveCapability(TAB_ID)).resolves.toBe(true);
 
     expect(harness.hub.resolvePageForUsername).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('voice attempt session access', () => {
+  it('exposes storage.session to the content attempt controller at worker startup', async () => {
+    const setAccessLevel = vi.fn(async () => undefined);
+
+    await enableVoiceSessionStorageForContent({ setAccessLevel });
+
+    expect(setAccessLevel).toHaveBeenCalledWith({
+      accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
+    });
   });
 });

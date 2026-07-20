@@ -166,6 +166,7 @@ describe('protocol boundary guards', () => {
           attemptId: 'attempt-1',
           clientRequestId: 'client-request-1',
           conversationRef: 'conversation-1',
+          pinnedConversationRef: 'fan-1',
           sourceGenerationRef: 'generation-1',
           script: '[warmly] Hello there',
         },
@@ -317,18 +318,13 @@ describe('protocol boundary guards', () => {
         attemptId: 'attempt-1',
         script: '[warmly] Hello there',
         generationRef: 'generation-1',
+        conversationRef: 'fan-1',
       },
       {
         type: 'voice:scriptError',
         attemptId: 'attempt-1',
         code: 'gate_voice_disabled',
         message: 'Voice script is unavailable.',
-      },
-      {
-        type: 'voice:noteCreateAck',
-        attemptId: 'attempt-1',
-        clientRequestId: 'client-request-1',
-        conversationRef: 'fan-1',
       },
       {
         type: 'voice:noteView',
@@ -380,6 +376,7 @@ describe('protocol boundary guards', () => {
       {
         type: 'voice:attachGrant',
         attemptId: 'attempt-1',
+        voiceNoteId: 42,
         token: 'single-use-token',
         fanUsername: 'alice',
       },
@@ -426,6 +423,7 @@ describe('protocol boundary guards', () => {
           attemptId: 'attempt-1',
           script: 'hello',
           generationRef: 'generation-1',
+          conversationRef: 'fan-1',
         },
         requiredKey: 'generationRef',
       },
@@ -437,15 +435,6 @@ describe('protocol boundary guards', () => {
           message: 'Voice script is unavailable.',
         },
         requiredKey: 'code',
-      },
-      {
-        message: {
-          type: 'voice:noteCreateAck',
-          attemptId: 'attempt-1',
-          clientRequestId: 'client-request-1',
-          conversationRef: 'fan-1',
-        },
-        requiredKey: 'conversationRef',
       },
       {
         message: {
@@ -487,6 +476,7 @@ describe('protocol boundary guards', () => {
         message: {
           type: 'voice:attachGrant',
           attemptId: 'attempt-1',
+          voiceNoteId: 42,
           token: 'single-use-token',
           fanUsername: 'alice',
         },

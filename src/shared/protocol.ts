@@ -376,7 +376,7 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
       return hasAttemptId(message) &&
         isString(message.clientRequestId) &&
         isString(message.conversationRef) &&
-        isOptionalString(message, 'pinnedConversationRef') &&
+        isString(message.pinnedConversationRef) &&
         isString(message.sourceGenerationRef) &&
         isString(message.script);
     case 'voice:noteStatus':
@@ -461,15 +461,12 @@ export function isBackgroundPortMessage(message: unknown): message is Background
     case 'voice:scriptComplete':
       return hasAttemptId(message) &&
         isString(message.script) &&
-        isString(message.generationRef);
+        isString(message.generationRef) &&
+        isString(message.conversationRef);
     case 'voice:scriptError':
       return hasAttemptId(message) &&
         isString(message.code) &&
         isString(message.message);
-    case 'voice:noteCreateAck':
-      return hasAttemptId(message) &&
-        isString(message.clientRequestId) &&
-        isString(message.conversationRef);
     case 'voice:noteView':
       return hasAttemptId(message) &&
         isOptionalString(message, 'clientRequestId') &&
@@ -486,6 +483,7 @@ export function isBackgroundPortMessage(message: unknown): message is Background
         isArrayBuffer(message.bytes);
     case 'voice:attachGrant':
       return hasAttemptId(message) &&
+        isNumber(message.voiceNoteId) &&
         isString(message.token) &&
         isString(message.fanUsername);
     case 'voice:attachRefuse':

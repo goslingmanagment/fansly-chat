@@ -51,7 +51,6 @@ export type VoiceAttachGrant = Extract<BackgroundPortMessage, { type: 'voice:att
 interface VoiceAttemptControllerOptions {
   port: VoiceAttemptControllerPort;
   route: VoiceAttemptRoute;
-  conversationRef: string;
   store?: VoiceAttemptStore;
   randomUUID?: () => string;
   createBlobUrl?: (bytes: ArrayBuffer) => string;
@@ -133,7 +132,6 @@ export class VoiceAttemptController {
   private readonly port: VoiceAttemptControllerPort;
   private readonly store: VoiceAttemptStore;
   private readonly route: VoiceAttemptRoute;
-  private readonly conversationRef: string;
   private readonly randomUUID: () => string;
   private readonly createBlobUrl: (bytes: ArrayBuffer) => string;
   private readonly revokeBlobUrl: (url: string) => void;
@@ -145,6 +143,7 @@ export class VoiceAttemptController {
   private readonly audioFetchesInFlight = new Set<string>();
   private activeAttemptId: string | null = null;
   private attachInFlight = false;
+  private attachVoiceNoteIdInFlight: number | null = null;
   private pollTimer: number | null = null;
   private connected = true;
   private destroyed = false;
@@ -153,7 +152,6 @@ export class VoiceAttemptController {
     this.port = options.port;
     this.store = options.store ?? new VoiceAttemptStore();
     this.route = { ...options.route };
-    this.conversationRef = options.conversationRef;
     this.randomUUID = options.randomUUID ?? (() => crypto.randomUUID());
     this.createBlobUrl = options.createBlobUrl ?? defaultCreateBlobUrl;
     this.revokeBlobUrl = options.revokeBlobUrl ?? ((url) => URL.revokeObjectURL(url));
@@ -219,7 +217,9 @@ export class VoiceAttemptController {
         stale: false,
         boundRoute: { ...this.route },
       },
-      conversationRef: this.conversationRef,
+      // The source step resolves and returns the canonical fan id. A group id
+      // is never accepted as a paid-create fallback.
+      conversationRef: '',
       pendingCreate: null,
       burnedClientRequestIds: new Set<string>(),
       currentCreateSendWasReplay: false,
@@ -256,6 +256,7 @@ export class VoiceAttemptController {
     record.attempt.script = '';
     record.attempt.canonicalScript = null;
     record.attempt.generationRef = null;
+    record.conversationRef = '';
     record.attempt.tone = tone;
     record.attempt.takes = [];
     record.attempt.selectedTakeId = null;
@@ -375,6 +376,7 @@ export class VoiceAttemptController {
     // view-local attachPhase reset re-showing the button) cannot start a second
     // attach; roll back if the port refused the message.
     this.attachInFlight = true;
+    this.attachVoiceNoteIdInFlight = record.attempt.selectedTakeId;
     const sent = this.post({
       type: 'voice:attachToken',
       attemptId: record.attempt.attemptId,
@@ -382,6 +384,7 @@ export class VoiceAttemptController {
     });
     if (!sent) {
       this.attachInFlight = false;
+      this.attachVoiceNoteIdInFlight = null;
     }
     return sent;
   }
@@ -393,8 +396,9 @@ export class VoiceAttemptController {
    * take un-attachable); an 'uncertain' outcome leaves the take attachable so the
    * explicit re-arm path can mint a fresh token.
    */
-  reportAttachOutcome(_outcome: 'confirmed' | 'uncertain'): void {
+  reportAttachOutcome(_outcome: 'confirmed' | 'uncertain' | 'aborted'): void {
     this.attachInFlight = false;
+    this.attachVoiceNoteIdInFlight = null;
   }
 
   hasPendingCreateNeedsReconcile(): boolean {
@@ -411,15 +415,14 @@ export class VoiceAttemptController {
     return Boolean(record?.pendingCreate);
   }
 
-  async markAttached(): Promise<void> {
+  async markAttached(voiceNoteId: number): Promise<void> {
     const record = this.requireActiveRecord();
-    const selected = record.attempt.takes.find(
-      ({ voiceNoteId }) => voiceNoteId === record.attempt.selectedTakeId,
-    );
-    if (!selected || selected.attached) {
+    const take = record.attempt.takes.find((candidate) => candidate.voiceNoteId === voiceNoteId);
+    if (!take || take.attached) {
       return;
     }
-    selected.attached = true;
+    take.attached = true;
+    record.attempt.selectedTakeId = voiceNoteId;
     record.attempt.phase = 'attached';
     await this.persist(record);
     this.notifyChange();
@@ -447,9 +450,18 @@ export class VoiceAttemptController {
         if (record.attempt.phase !== 'generating') {
           return;
         }
+        if (!message.conversationRef.trim()) {
+          record.attempt.phase = 'script';
+          record.attempt.generationRef = null;
+          record.conversationRef = '';
+          await this.persist(record);
+          this.notifyChange();
+          return;
+        }
         record.attempt.phase = 'script';
         record.attempt.script = message.script;
         record.attempt.generationRef = message.generationRef;
+        record.conversationRef = message.conversationRef.trim();
         record.attempt.canonicalScript = null;
         record.attempt.stale = false;
         await this.persist(record);
@@ -461,12 +473,10 @@ export class VoiceAttemptController {
         }
         record.attempt.phase = 'script';
         record.attempt.generationRef = null;
+        record.conversationRef = '';
         await this.persist(record);
         this.notifyChange();
         this.onError?.(message);
-        return;
-      case 'voice:noteCreateAck':
-        await this.applyCreateAck(record, message.clientRequestId, message.conversationRef);
         return;
       case 'voice:noteView':
         await this.applyNoteView(record, message.view, message.clientRequestId);
@@ -478,10 +488,20 @@ export class VoiceAttemptController {
         await this.applyAudioBytes(record, message.voiceNoteId, message.bytes);
         return;
       case 'voice:attachGrant':
+        if (
+          !this.attachInFlight ||
+          this.attachVoiceNoteIdInFlight !== message.voiceNoteId
+        ) {
+          this.attachInFlight = false;
+          this.attachVoiceNoteIdInFlight = null;
+          this.notifyChange();
+          return;
+        }
         this.onAttachGrant?.(message);
         return;
       case 'voice:attachRefuse':
         this.attachInFlight = false;
+        this.attachVoiceNoteIdInFlight = null;
         this.onError?.(message);
         return;
       default:
@@ -495,6 +515,8 @@ export class VoiceAttemptController {
     }
     this.connected = false;
     this.stopPolling();
+    this.attachInFlight = false;
+    this.attachVoiceNoteIdInFlight = null;
     // Requests on the dead port cannot answer. A reconnect must be allowed to
     // re-fetch completed audio instead of treating the lost request as live.
     this.audioFetchesInFlight.clear();
@@ -504,6 +526,7 @@ export class VoiceAttemptController {
       }
       record.attempt.phase = 'script';
       record.attempt.generationRef = null;
+      record.conversationRef = '';
       await this.persist(record);
     }
     this.notifyChange();
@@ -649,12 +672,13 @@ export class VoiceAttemptController {
     record.pendingCreate = {
       clientRequestId,
       conversationRef: record.conversationRef,
-      pinnedConversationRef: null,
+      pinnedConversationRef: record.conversationRef,
       sourceGenerationRef: generationRef,
       script: canonicalScript,
       phase: 'in-flight',
       sentOnce: false,
     };
+    record.currentCreateSendWasReplay = false;
     record.attempt.phase = 'takes';
     await this.persist(record);
     this.notifyChange();
@@ -668,6 +692,9 @@ export class VoiceAttemptController {
     }
     if (record.pendingCreate) {
       throw new Error('voice take creation is already in flight');
+    }
+    if (!record.conversationRef) {
+      throw new Error('voice fan identity is unavailable');
     }
   }
 
@@ -687,10 +714,17 @@ export class VoiceAttemptController {
     if (!snapshot || record.burnedClientRequestIds.has(snapshot.clientRequestId)) {
       return false;
     }
+    if (!snapshot.pinnedConversationRef) {
+      if (snapshot.phase !== 'needs-reconcile') {
+        snapshot.phase = 'needs-reconcile';
+        await this.persist(record);
+      }
+      return false;
+    }
     const wasSentOnce = snapshot.sentOnce;
     if (!wasSentOnce) {
       // Advance the durable ambiguity bit before the paid dispatch. A crash in
-      // the tiny persist→post gap is conservative (free reconcile), never a
+      // the tiny persist→post gap is conservative (same-request recovery), never a
       // possibly-billed snapshot deletion.
       snapshot.sentOnce = true;
       await this.persist(record);
@@ -700,9 +734,7 @@ export class VoiceAttemptController {
       attemptId: record.attempt.attemptId,
       clientRequestId: snapshot.clientRequestId,
       conversationRef: snapshot.conversationRef,
-      ...(snapshot.pinnedConversationRef !== null
-        ? { pinnedConversationRef: snapshot.pinnedConversationRef }
-        : {}),
+      pinnedConversationRef: snapshot.pinnedConversationRef,
       sourceGenerationRef: snapshot.sourceGenerationRef,
       script: snapshot.script,
     });
@@ -715,23 +747,6 @@ export class VoiceAttemptController {
       await this.persist(record);
     }
     return false;
-  }
-
-  private async applyCreateAck(
-    record: RuntimeAttemptRecord,
-    clientRequestId: string,
-    conversationRef: string,
-  ): Promise<void> {
-    const snapshot = record.pendingCreate;
-    if (
-      !snapshot ||
-      snapshot.clientRequestId !== clientRequestId ||
-      snapshot.pinnedConversationRef === conversationRef
-    ) {
-      return;
-    }
-    snapshot.pinnedConversationRef = conversationRef;
-    await this.persist(record);
   }
 
   private async applyNoteView(
@@ -760,7 +775,12 @@ export class VoiceAttemptController {
       };
       record.attempt.takes.push(take);
       record.pendingCreate = null;
-      record.attempt.selectedTakeId = view.voiceNoteId;
+      // Keep the human's clicked take stable for the whole attach round-trip.
+      // The grant itself is id-bound too, but avoiding a mid-flight selection
+      // jump keeps the visible custody state aligned with that request.
+      if (!this.attachInFlight) {
+        record.attempt.selectedTakeId = view.voiceNoteId;
+      }
     } else {
       return;
     }
@@ -807,11 +827,17 @@ export class VoiceAttemptController {
         }
       }
     } else if (record.pendingCreate) {
-      const replayConflict = message.status === 409 &&
-        record.currentCreateSendWasReplay;
       const definitelyRejected = DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) ||
         DEFINITE_CREATE_REJECTION_CODES.has(message.code);
-      if (definitelyRejected && !replayConflict) {
+      const durablyUnbilled = message.code === 'voice_quota_denied';
+      // Once an earlier dispatch may have reached the paid endpoint, a later
+      // HTTP rejection describes only the replay. It cannot prove that the
+      // original attempt was unbilled. The kernel's durable quota-denied code
+      // is the sole exception: that id is permanently recorded as unbilled.
+      if (
+        definitelyRejected &&
+        (!record.currentCreateSendWasReplay || durablyUnbilled)
+      ) {
         if (message.code === 'voice_quota_denied') {
           record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
         }
@@ -905,7 +931,9 @@ export class VoiceAttemptController {
 
   private syncPolling(): void {
     const shouldPoll = this.connected && Array.from(this.records.values()).some(
-      (record) => record.attempt.takes.some((take) => POLLED_STATES.has(take.view.state)),
+      (record) => record.attempt.takes.some(
+        (take) => POLLED_STATES.has(take.view.state) && !take.view.errorCode,
+      ),
     );
     if (!shouldPoll) {
       this.stopPolling();
@@ -922,7 +950,10 @@ export class VoiceAttemptController {
   private pollActiveTakes(): void {
     for (const record of this.records.values()) {
       for (const take of record.attempt.takes) {
-        if (!POLLED_STATES.has(take.view.state)) {
+        // Any failed status read pauses automatic polling for this take. This
+        // keeps a retrieval kill switch or bad credential from producing a
+        // request every 1.5 seconds; the panel exposes an explicit free check.
+        if (!POLLED_STATES.has(take.view.state) || take.view.errorCode) {
           continue;
         }
         if (!this.post({

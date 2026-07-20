@@ -1,10 +1,12 @@
+import { parseGroupIdFromPath } from '../route-watcher.js';
+
 const COMPOSER_SELECTOR = 'app-group-message-input';
 const FILE_INPUT_SELECTOR = `${COMPOSER_SELECTOR} input[type="file"]`;
 const ATTACHMENT_PREVIEW_SELECTOR = 'waveform, .waveform';
 const ATTACHMENT_POLL_MS = 300;
 const ATTACHMENT_OBSERVATION_BUDGET_MS = 10_000;
 
-export type VoiceAttachOutcome = 'confirmed' | 'uncertain';
+export type VoiceAttachOutcome = 'confirmed' | 'uncertain' | 'aborted';
 export type VoiceComposerProbe =
   | { ok: true; input: HTMLInputElement }
   | { ok: false };
@@ -24,7 +26,7 @@ type PageWindow = Window & {
   wrappedJSObject?: PageContextWindow;
 };
 
-type FirefoxCloneInto = (value: File, targetScope: object) => File;
+type FirefoxCloneInto = <T>(value: T, targetScope: object) => T;
 
 function resolveComposer(root: ParentNode): ComposerTarget | null {
   const inputs = root.querySelectorAll(FILE_INPUT_SELECTOR);
@@ -85,7 +87,10 @@ function handoffInPageContext(file: File): boolean {
   const transfer = new pageWindow.DataTransfer();
   transfer.items.add(cloneInto(file, pageWindow));
   pageInput.files = transfer.files;
-  pageInput.dispatchEvent(new pageWindow.Event('change', { bubbles: true }));
+  pageInput.dispatchEvent(new pageWindow.Event(
+    'change',
+    cloneInto({ bubbles: true }, pageWindow),
+  ));
   return true;
 }
 
@@ -128,14 +133,19 @@ function observeAttachmentPreview(
  */
 export class VoiceAttachAdapter {
   private readonly root: ParentNode;
+  private readonly expectedGroupId: string | null;
   private readonly consumedTokens = new Set<string>();
   private armedToken: string | null = null;
 
-  constructor(root: ParentNode = document) {
+  constructor(root: ParentNode = document, expectedGroupId: string | null = null) {
     this.root = root;
+    this.expectedGroupId = expectedGroupId;
   }
 
   probeComposer(): VoiceComposerProbe {
+    if (!this.routeMatches()) {
+      return { ok: false };
+    }
     return probeComposer(this.root);
   }
 
@@ -167,6 +177,13 @@ export class VoiceAttachAdapter {
     this.armedToken = null;
     this.consumedTokens.add(token);
 
+    // The route watcher is intentionally poll-based, so its cached group can
+    // lag an SPA transition. Read the real URL synchronously at the final DOM
+    // write boundary; a grant for the previous chat is consumed but never used.
+    if (!this.routeMatches()) {
+      return 'aborted';
+    }
+
     const composer = input.closest(COMPOSER_SELECTOR);
     if (!(composer instanceof HTMLElement) || !input.isConnected) {
       return 'uncertain';
@@ -197,5 +214,10 @@ export class VoiceAttachAdapter {
     }
 
     return observeAttachmentPreview(composer, previewsBefore);
+  }
+
+  private routeMatches(): boolean {
+    return this.expectedGroupId !== null &&
+      parseGroupIdFromPath(window.location.pathname) === this.expectedGroupId;
   }
 }

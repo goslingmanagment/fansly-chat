@@ -101,7 +101,6 @@ function setup(): Harness {
       },
     },
     route: { accountId: 'account-1', groupId: 'group-1', routeNonce: 1 },
-    conversationRef: 'group-1',
     store: new VoiceAttemptStore({ storage: memoryStorage(), now: () => 1_000 }),
     randomUUID: () => `id-${(uuidCounter += 1)}`,
     createBlobUrl: () => `blob:voice-${(blobCounter += 1)}`,
@@ -183,7 +182,13 @@ const SCRIPT = 'Adapted script text';
 async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
   await harness!.controller.startScript('hey babe', tone);
   const attemptId = harness!.controller.getAttempt()!.attemptId;
-  await feed({ type: 'voice:scriptComplete', attemptId, script: SCRIPT, generationRef: 'gen-1' });
+  await feed({
+    type: 'voice:scriptComplete',
+    attemptId,
+    script: SCRIPT,
+    generationRef: 'gen-1',
+    conversationRef: 'fan-1',
+  });
   return attemptId;
 }
 
@@ -283,7 +288,8 @@ async function wireRealAttachService(attemptId: string) {
     type: 'voice:noteCreate',
     attemptId,
     clientRequestId: 'seed-client-request',
-    conversationRef: 'group-1',
+    conversationRef: 'fan-1',
+    pinnedConversationRef: 'fan-1',
     sourceGenerationRef: 'gen-1',
     script: SCRIPT,
   }, () => undefined);
@@ -344,6 +350,23 @@ describe('VoicePanel — лента', () => {
 
     const generate = root.querySelector<HTMLButtonElement>('.chatgoose-voice-generate');
     expect(generate?.textContent).toContain('Сгенерировать войс — потратит ~19 символов');
+  });
+
+  it('keeps the editor read-only while streamed script deltas own it', async () => {
+    await harness!.controller.startScript('hey babe', 'none');
+    const editor = harness!.root.querySelector<HTMLTextAreaElement>(
+      'textarea.chatgoose-voice-script',
+    );
+    expect(editor?.disabled).toBe(true);
+
+    await feed({
+      type: 'voice:scriptComplete',
+      attemptId: harness!.attemptId(),
+      script: SCRIPT,
+      generationRef: 'gen-1',
+      conversationRef: 'fan-1',
+    });
+    expect(editor?.disabled).toBe(false);
   });
 
   it('restore swaps the raw draft back into the editor', async () => {
@@ -453,7 +476,7 @@ describe('VoicePanel — лента', () => {
     ).toBe(true);
   });
 
-  it('keeps a later indeterminate create on the free reconcile path beside older takes', async () => {
+  it('keeps a later indeterminate create on same-request recovery beside older takes', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);
     buttonByText(harness!.root, '+ Ещё вариант')!.click();
@@ -469,7 +492,7 @@ describe('VoicePanel — лента', () => {
     });
 
     expect(textOf(harness!.root)).toContain('Вариант 1');
-    expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    expect(textOf(harness!.root)).toContain('Восстановить этот запрос');
     expect(textOf(harness!.root)).not.toContain('Вариант 2 генерируется');
     expect(buttonByText(harness!.root, '+ Ещё вариант')?.disabled).toBe(true);
   });
@@ -501,6 +524,20 @@ describe('VoicePanel — лента', () => {
     expect(textOf(root)).toContain('Не нашли окно вложений Fansly');
   });
 
+  it('re-probes the live route/composer synchronously at the attach click', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const attach = harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach')!;
+    harness!.sent.length = 0;
+
+    // The button was rendered while valid, then the SPA moved before its
+    // polling watcher repainted the surface.
+    harness!.setProbe({ ok: false });
+    attach.click();
+
+    expect(harness!.sent.some((message) => message.type === 'voice:attachToken')).toBe(false);
+  });
+
   it('shows the Fansly modal guidance immediately on attach handoff', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);
@@ -514,6 +551,7 @@ describe('VoicePanel — лента', () => {
     const grant = harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'tok-1',
       fanUsername: 'alice',
     });
@@ -537,6 +575,7 @@ describe('VoicePanel — лента', () => {
     await harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'stale-token',
       fanUsername: 'alice',
     });
@@ -545,6 +584,41 @@ describe('VoicePanel — лента', () => {
     expect(textOf(harness!.root)).not.toContain('вложение должно появиться');
     expect(textOf(harness!.root)).not.toContain('Если войс прикрепился');
     expect(harness!.attachCalls).toHaveLength(0);
+  });
+
+  it('uses and marks the exact granted take when selection changes during attestation', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    await harness!.controller.generateAnotherTake();
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-3',
+      view: view({ voiceNoteId: 2, state: 'completed', audioSha256: 'b'.repeat(64), audioBytesLen: 3 }),
+    });
+    await feed({
+      type: 'voice:audioBytes',
+      attemptId,
+      voiceNoteId: 2,
+      bytes: new ArrayBuffer(3),
+    });
+    await harness!.controller.selectTake(2);
+
+    await harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      voiceNoteId: 1,
+      token: 'take-1-token',
+      fanUsername: 'alice',
+    });
+
+    expect(harness!.attachCalls).toEqual([
+      expect.objectContaining({ voiceNoteId: 1, token: 'take-1-token' }),
+    ]);
+    expect(harness!.controller.getAttempt()?.takes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ voiceNoteId: 1, attached: true }),
+      expect.objectContaining({ voiceNoteId: 2, attached: false }),
+    ]));
   });
 
   it('an uncertain outcome stays calm and never auto-repeats', async () => {
@@ -556,6 +630,7 @@ describe('VoicePanel — лента', () => {
     await harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'tok-1',
       fanUsername: 'alice',
     });
@@ -633,6 +708,7 @@ describe('VoicePanel — лента', () => {
     await harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'tok-1',
       fanUsername: 'alice',
     });
@@ -697,11 +773,39 @@ describe('VoicePanel — лента', () => {
     );
   });
 
-  it('surfaces an indeterminate create (no take yet) as a non-scary free status check', async () => {
+  it('pauses a failed automatic status poll and offers an explicit free check', async () => {
+    const attemptId = await toScriptPhase();
+    await harness!.controller.generateTake();
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-2',
+      view: view({ state: 'dispatched' }),
+    });
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'status',
+      voiceNoteId: 1,
+      code: 'voice_retrieval_disabled',
+      message: 'raw',
+      status: 403,
+    });
+
+    expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    harness!.sent.length = 0;
+    buttonByText(harness!.root, 'Проверить статус — бесплатно')!.click();
+    expect(harness!.sent).toContainEqual(
+      expect.objectContaining({ type: 'voice:noteStatus', voiceNoteId: 1 }),
+    );
+  });
+
+  it('surfaces an indeterminate create as recovery of the same approved request', async () => {
     const attemptId = await toScriptPhase();
     await harness!.controller.generateTake();
     // A 5xx create outcome is indeterminate — the controller keeps the pending
-    // create, and the panel must not imply characters were burned.
+    // create, and the panel must not claim that replaying the approved request
+    // is itself a free status-only call.
     await feed({
       type: 'voice:noteError',
       attemptId,
@@ -711,10 +815,12 @@ describe('VoicePanel — лента', () => {
       status: 503,
     });
 
-    expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    expect(textOf(harness!.root)).toContain('Запрос не подтверждён — символы могли списаться.');
+    expect(textOf(harness!.root)).toContain('Восстановить этот запрос');
+    expect(textOf(harness!.root)).not.toContain('Проверить статус — бесплатно');
   });
 
-  it('surfaces a replay 409 as a free reconcile instead of a definite error', async () => {
+  it('surfaces a replay 409 as same-request recovery instead of a definite error', async () => {
     const attemptId = await toScriptPhase();
     await harness!.controller.generateTake();
     await harness!.controller.handlePortDisconnected();
@@ -729,7 +835,7 @@ describe('VoicePanel — лента', () => {
       status: 409,
     });
 
-    expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    expect(textOf(harness!.root)).toContain('Восстановить этот запрос');
     expect(textOf(harness!.root)).not.toContain('Create conflict.');
   });
 
@@ -771,6 +877,7 @@ describe('VoicePanel — лента', () => {
     await harness!.panel.handleAttachGrant({
       type: 'voice:attachGrant',
       attemptId,
+      voiceNoteId: 1,
       token: 'tok-1',
       fanUsername: 'alice',
     });
@@ -809,6 +916,7 @@ describe('VoicePanel — лента', () => {
         void harness!.panel.handleAttachGrant({
           type: 'voice:attachGrant',
           attemptId,
+          voiceNoteId: 1,
           token: 'tok-1',
           fanUsername: 'alice',
         });

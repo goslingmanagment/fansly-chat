@@ -33,6 +33,8 @@ export interface KernelFeatureRequest {
   pageLabel: string;
   /** Fansly fan account id (conversation partner). */
   conversationRef: string;
+  /** Explicit erasure/indexing identity; voice-script always supplies it. */
+  fanRef?: string;
   personaKey?: string | null;
   /** Exact catalog definition expected to assemble the prompt. */
   expectedPersonaDefinitionId?: string;
@@ -298,6 +300,7 @@ export function createKernelFeatureGateway(
             pageLabel: request.pageLabel,
             platform: 'fansly',
             conversationRef: request.conversationRef,
+            ...(request.fanRef !== undefined ? { fanRef: request.fanRef } : {}),
             ...(request.personaKey != null ? { personaKey: request.personaKey } : {}),
             ...(request.expectedPersonaDefinitionId !== undefined
               ? { expectedPersonaDefinitionId: request.expectedPersonaDefinitionId }

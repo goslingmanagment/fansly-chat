@@ -282,7 +282,7 @@ export class VoicePanel {
       const needsReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
       if (needsReconcile) {
         // Indeterminate create: the controller keeps the pending create for a
-        // free re-poll. Nothing is known to have billed — no scary notice.
+        // same-request recovery. Billing is unknown, so avoid a false verdict.
         this.pendingReconcile = true;
         this.lastError = null;
       } else {
@@ -299,8 +299,8 @@ export class VoicePanel {
 
   async handleAttachGrant(grant: VoiceAttachGrant): Promise<void> {
     const attempt = this.deps.controller.getAttempt();
-    const take = attempt?.takes.find((candidate) => candidate.voiceNoteId === attempt.selectedTakeId);
-    // Drift check on the concrete selected take: canAttachSelectedTake() is now
+    const take = attempt?.takes.find((candidate) => candidate.voiceNoteId === grant.voiceNoteId);
+    // Drift check on the concrete requested take: canAttachSelectedTake() is now
     // gated by the in-flight flag (true here, since this grant answers our own
     // request), so it cannot serve as the guard — assert the take fields directly.
     if (
@@ -351,8 +351,10 @@ export class VoicePanel {
     // reflect it in the view-local phase.
     this.deps.controller.reportAttachOutcome(outcome);
     if (outcome === 'confirmed') {
-      await this.deps.controller.markAttached();
+      await this.deps.controller.markAttached(grant.voiceNoteId);
       this.attachPhase = 'confirmed';
+    } else if (outcome === 'aborted') {
+      this.attachPhase = 'aborted';
     } else {
       this.attachPhase = 'uncertain';
     }
@@ -383,7 +385,9 @@ export class VoicePanel {
     if (document.activeElement !== this.editorEl) {
       this.editorEl.value = attempt.script;
     }
-    this.editorEl.disabled = false;
+    // Script deltas own the editor until the free LLM step completes. Take
+    // synthesis remains non-blocking and leaves the finished script editable.
+    this.editorEl.disabled = attempt.phase === 'generating';
 
     // Лента-only compactness toggle (dormant while the студия owns the editor).
     const collapseScript =
@@ -533,17 +537,18 @@ export class VoicePanel {
       el(
         'div',
         'chatgoose-voice-reconcile-text',
-        'Статус войса не подтверждён — символы могли не списаться.',
+        'Запрос не подтверждён — символы могли списаться.',
       ),
     );
     const check = el(
       'button',
       'chatgoose-button chatgoose-button-secondary chatgoose-voice-check-status',
-      'Проверить статус — бесплатно',
+      'Восстановить этот запрос',
     );
     check.type = 'button';
     check.addEventListener('click', () => {
-      // A free re-poll: the controller re-issues the same idempotent create.
+      // Re-issue the same idempotent create that the chatter already approved;
+      // this never mints another take or silently changes the frozen payload.
       void this.deps.controller.handlePortReconnect();
     });
     block.append(check);
@@ -633,7 +638,7 @@ export class VoicePanel {
       row.append(this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`));
     }
 
-    const recovery = this.renderTakeRecovery(take.voiceNoteId, state);
+    const recovery = this.renderTakeRecovery(take);
     if (recovery) {
       row.append(recovery);
     }
@@ -662,11 +667,11 @@ export class VoicePanel {
     }
   }
 
-  private renderTakeRecovery(
-    voiceNoteId: number,
-    state: VoiceTake['view']['state'],
-  ): HTMLElement | null {
-    const needsFreeCheck = state === 'indeterminate';
+  private renderTakeRecovery(take: VoiceTake): HTMLElement | null {
+    const state = take.view.state;
+    const needsFreeCheck = state === 'indeterminate' || (
+      (state === 'queued' || state === 'dispatched') && Boolean(take.view.errorCode)
+    );
     const needsPaidRegen =
       state === 'indeterminate' ||
       state === 'failed_after_dispatch' ||
@@ -683,7 +688,7 @@ export class VoicePanel {
       );
       check.type = 'button';
       check.addEventListener('click', () => {
-        this.deps.controller.checkStatus(voiceNoteId);
+        this.deps.controller.checkStatus(take.voiceNoteId);
       });
       actions.append(check);
     }
@@ -747,6 +752,12 @@ export class VoicePanel {
     attach.disabled = !this.deps.controller.canAttachSelectedTake();
     attach.addEventListener('click', () => {
       this.lastError = null;
+      // Re-probe synchronously at the human click. Production's probe also
+      // verifies the real pathname, closing the route-watcher polling gap.
+      if (!this.deps.probeComposer().ok) {
+        this.render();
+        return;
+      }
       this.deps.controller.requestAttach();
     });
     region.append(attach);

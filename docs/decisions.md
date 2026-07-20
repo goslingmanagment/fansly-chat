@@ -61,6 +61,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
 | E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
 | E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
+| E45 | 2026-07-20 | Voice notes: fan-pinned paid recovery, exact-take/live-route attach custody, bounded MP3 handoff, and explicit storage.session/MV3 limits |
 
 ## Entries
 
@@ -1002,35 +1003,47 @@ E40–E43 technical decisions and their hand-curated plans/spec stay in history
 with explicit 2.0-deferred banners rather than being deleted.
 
 **E45 (2026-07-20).** Voice notes extension lane (phase 2 of the voice
-effort; kernel half = core #15 / Decision #174). The extension gains a
-dedicated `voice:*` port protocol — deliberately NOT `operation:*`, so the
-voice flow is exempt from the generic disconnect cleanup and the generic
-lane's transparent `service_unavailable` retry; `voice-script` joins
-FeatureType as a panel-only feature excluded from every insert/accept/
-compare surface (type-level via `isOperationFeatureType`). Billing safety
-is client-enforced end-to-end: the content attempt-controller owns
-`clientRequestId` per take, canonicalizes the script once (NFC, CRLF→LF,
-trim) into a durable `storage.session` snapshot persisted BEFORE the paid
-create is sent, replays the same id on boot/reconnect (kernel replays
-idempotently), burns quota-denied ids forever, classifies create errors by
-a `source` discriminator + definite-status set (409 on a replay is
-needs-reconcile, never a definite loss), and pins the background-derived
-`conversationRef` (fanAccountId ?? groupId, acked back and persisted) so
-recovery replays stay byte-identical across event-page restarts. Attach is
-at-most-once behind a background-attested single-use token bound to the
-tab/account/group/fan/routeNonce tuple; re-mint is allowed only for
-non-confirmed attempts on explicit human re-request, gated at the
-controller (`phase === 'attached'` + attachInFlight). The adapter uses the
-spike-proven native-input handoff (DataTransfer + bubbling change; page-
-context cloneInto fallback) with the Upload-modal reality encoded in UX:
-the Free/PPV hint shows at handoff, `uncertain` within the 10s waveform
-budget is a calm normal path. Two views, one controller: the студия
-overlay re-parents the лента's live slot nodes (state loss impossible by
-construction) and auto-collapses at attach handoff so the native modal is
-never stranded behind the scrim. Audio bytes are validated (type, length
-≤2 MiB, sha256) in the background before crossing the port, live only in
-memory + revocable blob URLs, and are never persisted or logged. No
-storage.local changes; `storage.session` attempt snapshots are versioned
-(`voiceAttemptV1:`) and TTL-bounded. The feature renders only when the
-kernel's `capabilities.voiceNotes` hint is true (fail-closed plumbing
-through TabUiState); the kernel remains authoritative at create.
+effort; kernel half = core #15 / Decisions #174–#175). The extension gains a
+dedicated `voice:*` port protocol — deliberately NOT `operation:*`, so paid
+voice recovery is exempt from generic disconnect cleanup and transparent
+`service_unavailable` retry. `voice-script` is panel-only and remains excluded
+from insert/accept/compare surfaces via `isOperationFeatureType`.
+
+The content attempt controller owns one `clientRequestId` per take. The free
+script step must first resolve the Fansly fan account id; `scriptComplete`
+returns that canonical id, and content freezes it as both `conversationRef`
+and `pinnedConversationRef` in the versioned `storage.session` snapshot BEFORE
+the paid create is posted. Group-id and unresolved-fan fallbacks are forbidden.
+Boot/reconnect replays only the same frozen id and payload. Once a dispatch may
+have occurred, a later replay rejection remains `needs-reconcile`; only the
+kernel's durable `voice_quota_denied` record proves the id unbilled and burns
+it. The recovery UI therefore says it restores the same approved request, not
+that it performs a free status-only read.
+
+Attach custody is bound to the exact clicked `voiceNoteId`. Background grants
+only after comparing the current tab/account/group/fan/routeNonce tuple; token
+single-use is enforced by the content adapter, not claimed as a background
+consume protocol. The adapter also checks the real live pathname both at the
+human click and immediately before the native file-input mutation, closing the
+polling route-watcher gap. An uncertain handoff never auto-repeats; PPV and Send
+remain manual in Fansly. The adapter uses the spike-proven DataTransfer/change
+handoff with the Firefox page-context fallback. The студия and лента retain one
+controller and the overlay collapses before Fansly's Upload modal opens.
+
+The background streams audio under the 2 MiB cap and validates `audio/mpeg`,
+MP3 structure, declared/actual length, and sha256 before bytes cross the port.
+Audio remains memory-only behind revocable blob URLs. Attempt snapshots contain
+the frozen script and refs but never audio; keys use `voiceAttemptV1:` and a
+6-hour TTL. Expired-key deletion is lazy on the next store load, not an eager
+timer. Firefox exposes `storage.session` to content with the area-wide
+`TRUSTED_AND_UNTRUSTED_CONTEXTS` access level: this also makes the existing
+spenders and quota session keys available to extension content contexts. Fansly
+page JavaScript remains in a separate world without direct WebExtension API
+access. This area-wide widening and lazy TTL are accepted for the pilot; no
+`storage.local` schema migration is implied.
+
+After an MV3 worker restart, persisted create/status recovery still works, but
+the background's in-memory attach attestation is gone, so already-created takes
+degrade to Download MP3 rather than weakening recipient checks. The Voice UI is
+hidden unless the kernel capability hint is true, while the default-off kernel
+kill switch and fail-closed allowlist remain authoritative for every paid call.

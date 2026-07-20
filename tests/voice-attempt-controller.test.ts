@@ -116,6 +116,7 @@ async function finishScript(
   controller: VoiceAttemptController,
   script = 'A ready script',
   generationRef = 'generation-1',
+  conversationRef = 'fan-1',
 ): Promise<void> {
   const attemptId = controller.getAttempt()?.attemptId;
   if (!attemptId) {
@@ -126,6 +127,7 @@ async function finishScript(
     attemptId,
     script,
     generationRef,
+    conversationRef,
   });
 }
 
@@ -153,6 +155,9 @@ describe('VoiceAttemptController', () => {
     onError?: (message: Extract<BackgroundPortMessage, {
       type: 'voice:scriptError' | 'voice:noteError' | 'voice:attachRefuse';
     }>) => void;
+    onAttachGrant?: (message: Extract<BackgroundPortMessage, {
+      type: 'voice:attachGrant';
+    }>) => void;
   } = {}) {
     const port = options.port ?? createPort();
     const store = new VoiceAttemptStore({ now: options.now });
@@ -160,11 +165,11 @@ describe('VoiceAttemptController', () => {
       port,
       store,
       route: options.route ?? ROUTE,
-      conversationRef: 'fan-1',
       randomUUID: createUuidFactory(options.uuids ?? [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2]),
       createBlobUrl: options.createBlobUrl ?? (() => 'blob:voice-1'),
       revokeBlobUrl: options.revokeBlobUrl ?? vi.fn(),
       onError: options.onError,
+      onAttachGrant: options.onAttachGrant,
     });
     controllers.push(controller);
     return { controller, port, store };
@@ -209,6 +214,7 @@ describe('VoiceAttemptController', () => {
       attemptId: ATTEMPT_ID,
       clientRequestId: TAKE_ID_1,
       conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
       script: 'Café\nline',
     });
@@ -379,6 +385,17 @@ describe('VoiceAttemptController', () => {
     await expect(controller.generateTake()).resolves.toBe(TAKE_ID_2);
   });
 
+  it('refuses a paid create when script provenance has no frozen fan id', async () => {
+    const { controller, port } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script', 'generation-1', '');
+
+    await expect(controller.generateTake()).rejects.toThrow('voice source generation is unavailable');
+    expect(messagesOfType(port, 'voice:noteCreate')).toHaveLength(0);
+  });
+
   it('returns to the script phase after a definite create rejection with no take, surviving reload', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('Draft', 'none');
@@ -435,28 +452,41 @@ describe('VoiceAttemptController', () => {
       attemptId: ATTEMPT_ID,
       clientRequestId: TAKE_ID_1,
       conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-original',
       script: 'voice\nscript',
     }]);
     expect(second.controller.getAttempt()?.canonicalScript).toBe('voice\nscript');
   });
 
-  it('persists the background-derived conversation pin and includes it on every replay', async () => {
+  it('persists the script-derived conversation pin before the first paid send', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('Draft', 'none');
-    await finishScript(first.controller, 'Voice script', 'generation-original');
+    await finishScript(
+      first.controller,
+      'Voice script',
+      'generation-original',
+      'fan-derived-by-script',
+    );
+    first.port.connected = false;
     await first.controller.generateTake();
-    await first.controller.handleMessage({
-      type: 'voice:noteCreateAck',
-      attemptId: ATTEMPT_ID,
-      clientRequestId: TAKE_ID_1,
-      conversationRef: 'fan-derived-by-background',
+
+    const firstPendingWrite = session.set.mock.calls
+      .map(([items]) => Object.values(items as Record<string, unknown>)[0] as {
+        pendingCreate?: Record<string, unknown> | null;
+      })
+      .find((entry) => entry.pendingCreate)?.pendingCreate;
+    expect(firstPendingWrite).toMatchObject({
+      conversationRef: 'fan-derived-by-script',
+      pinnedConversationRef: 'fan-derived-by-script',
+      sentOnce: false,
     });
 
     expect((await first.store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
       clientRequestId: TAKE_ID_1,
-      pinnedConversationRef: 'fan-derived-by-background',
-      sentOnce: true,
+      conversationRef: 'fan-derived-by-script',
+      pinnedConversationRef: 'fan-derived-by-script',
+      sentOnce: false,
     });
     first.controller.destroy();
 
@@ -466,8 +496,8 @@ describe('VoiceAttemptController', () => {
       type: 'voice:noteCreate',
       attemptId: ATTEMPT_ID,
       clientRequestId: TAKE_ID_1,
-      conversationRef: 'fan-1',
-      pinnedConversationRef: 'fan-derived-by-background',
+      conversationRef: 'fan-derived-by-script',
+      pinnedConversationRef: 'fan-derived-by-script',
       sourceGenerationRef: 'generation-original',
       script: 'Voice script',
     }]);
@@ -547,7 +577,17 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:scriptStart')).toHaveLength(scriptStarts);
   });
 
-  it('keeps a replay 409 as needs-reconcile because the create may have billed', async () => {
+  it.each([
+    { status: 400, code: 'hub_request_failed' },
+    { status: 401, code: 'hub_invalid_api_key' },
+    { status: 403, code: 'hub_invalid_api_key' },
+    { status: 404, code: 'hub_request_failed' },
+    { status: 409, code: 'idempotency_mismatch' },
+    { status: 429, code: 'rate_limited' },
+  ])('keeps replay $status/$code as needs-reconcile because the original may have billed', async ({
+    status,
+    code,
+  }) => {
     const { controller, port, store } = createController({
       uuids: [ATTEMPT_ID, TAKE_ID_1],
     });
@@ -564,9 +604,9 @@ describe('VoiceAttemptController', () => {
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
       source: 'create',
-      code: 'idempotency_mismatch',
-      message: 'Create conflict.',
-      status: 409,
+      code,
+      message: 'Replay rejected.',
+      status,
     });
 
     expect((await store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
@@ -575,6 +615,32 @@ describe('VoiceAttemptController', () => {
       sentOnce: true,
     });
     expect(controller.hasPendingCreateNeedsReconcile()).toBe(true);
+  });
+
+  it('clears a replay carrying the kernel durable quota-denied result', async () => {
+    const { controller, port, store } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handlePortDisconnected();
+    port.connected = true;
+    await controller.handlePortReconnect();
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'create',
+      code: 'voice_quota_denied',
+      message: 'Quota denied.',
+      status: 429,
+    });
+
+    expect((await store.load(ROUTE))[0]).toMatchObject({
+      pendingCreate: null,
+      burnedClientRequestIds: [TAKE_ID_1],
+    });
   });
 
   it('keeps first-send 409 definite and clears the pending snapshot', async () => {
@@ -616,10 +682,11 @@ describe('VoiceAttemptController', () => {
 
     const resumed = createController({ uuids: [TAKE_ID_3] });
     await resumed.controller.boot();
-    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toHaveLength(1);
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toHaveLength(0);
     expect((await resumed.store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
       sentOnce: true,
       pinnedConversationRef: null,
+      phase: 'needs-reconcile',
     });
   });
 
@@ -628,7 +695,7 @@ describe('VoiceAttemptController', () => {
     await toAttachableTake(first.controller);
     expect(first.controller.requestAttach()).toBe(true);
     first.controller.reportAttachOutcome('confirmed');
-    await first.controller.markAttached();
+    await first.controller.markAttached(42);
     first.controller.destroy();
 
     const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
@@ -676,6 +743,7 @@ describe('VoiceAttemptController', () => {
         attemptId: ATTEMPT_ID,
         clientRequestId: TAKE_ID_1,
         conversationRef: 'fan-1',
+        pinnedConversationRef: 'fan-1',
         sourceGenerationRef: 'generation-first',
         script: 'First script',
       },
@@ -684,6 +752,7 @@ describe('VoiceAttemptController', () => {
         attemptId: ATTEMPT_ID_2,
         clientRequestId: TAKE_ID_2,
         conversationRef: 'fan-1',
+        pinnedConversationRef: 'fan-1',
         sourceGenerationRef: 'generation-second',
         script: 'Second script',
       },
@@ -830,6 +899,7 @@ describe('VoiceAttemptController', () => {
       attemptId: ATTEMPT_ID,
       clientRequestId: TAKE_ID_1,
       conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
       script: 'Voice script',
     }]);
@@ -973,13 +1043,29 @@ describe('VoiceAttemptController', () => {
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
     }]);
+
+    await controller.handleMessage({
+      type: 'voice:noteError',
+      attemptId: ATTEMPT_ID,
+      source: 'status',
+      voiceNoteId: 42,
+      code: 'voice_retrieval_disabled',
+      message: 'retrieval disabled',
+      status: 403,
+    });
+    const pausedCount = messagesOfType(port, 'voice:noteStatus').length;
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS * 3);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(pausedCount);
+    expect(controller.checkStatus(42)).toBe(true);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(pausedCount + 1);
+
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
       view: voiceView(42, 'dispatched'),
     });
     await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
-    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(pausedCount + 2);
 
     await controller.handleMessage({
       type: 'voice:noteView',
@@ -1036,6 +1122,7 @@ describe('VoiceAttemptController', () => {
       attemptId: ATTEMPT_ID,
       clientRequestId: TAKE_ID_2,
       conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
       script: 'Voice script',
     }]);
@@ -1207,7 +1294,7 @@ describe('VoiceAttemptController', () => {
     // Attach → grant round-trip → confirmed.
     expect(controller.requestAttach()).toBe(true);
     controller.reportAttachOutcome('confirmed');
-    await controller.markAttached();
+    await controller.markAttached(42);
     expect(controller.getAttempt()?.phase).toBe('attached');
     const tokenCount = messagesOfType(port, 'voice:attachToken').length;
 
@@ -1228,7 +1315,7 @@ describe('VoiceAttemptController', () => {
     await toAttachableTake(controller);
     expect(controller.requestAttach()).toBe(true);
     controller.reportAttachOutcome('confirmed');
-    await controller.markAttached();
+    await controller.markAttached(42);
 
     await controller.generateAnotherTake();
     await controller.handleMessage({
@@ -1278,6 +1365,25 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:attachToken')).toHaveLength(2);
   });
 
+  it('does not auto-select a newly-created take during an attach round-trip', async () => {
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
+    });
+    await toAttachableTake(controller);
+    expect(controller.requestAttach()).toBe(true);
+
+    await controller.generateAnotherTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_2,
+      view: voiceView(84, 'queued'),
+    });
+
+    expect(controller.getAttempt()?.selectedTakeId).toBe(42);
+    controller.reportAttachOutcome('aborted');
+  });
+
   it('releases the attach gate when the service refuses the token', async () => {
     const { controller } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await toAttachableTake(controller);
@@ -1290,6 +1396,41 @@ describe('VoiceAttemptController', () => {
       attemptId: ATTEMPT_ID,
       reason: 'unknown',
     });
+    expect(controller.canAttachSelectedTake()).toBe(true);
+  });
+
+  it('releases the attach gate when the port disconnects mid-grant', async () => {
+    const { controller, port } = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await toAttachableTake(controller);
+
+    expect(controller.requestAttach()).toBe(true);
+    expect(controller.canAttachSelectedTake()).toBe(false);
+    await controller.handlePortDisconnected();
+    port.connected = true;
+    await controller.handlePortReconnect();
+
+    expect(controller.canAttachSelectedTake()).toBe(true);
+    expect(controller.requestAttach()).toBe(true);
+  });
+
+  it('accepts an attach grant only for the exact requested take', async () => {
+    const onAttachGrant = vi.fn();
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+      onAttachGrant,
+    });
+    await toAttachableTake(controller);
+    expect(controller.requestAttach()).toBe(true);
+
+    await controller.handleMessage({
+      type: 'voice:attachGrant',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 84,
+      token: 'wrong-take-token',
+      fanUsername: 'alice',
+    });
+
+    expect(onAttachGrant).not.toHaveBeenCalled();
     expect(controller.canAttachSelectedTake()).toBe(true);
   });
 });

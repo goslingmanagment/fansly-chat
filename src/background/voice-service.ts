@@ -197,9 +197,12 @@ function noteFailure(error: unknown): { code: string; message: string; status: n
       numericStatus(body?.statusCode) ||
       (isRecord(error.details) ? numericStatus(error.details.status) : 0)
     : 0;
-  const code = status === 401 || status === 403
+  const structuredCode = structuredErrorCode(error, 'hub_request_failed');
+  // A real kernel voice code is more specific than the transport status.
+  // Only generic 401/403 bodies map to the credential guidance.
+  const code = (status === 401 || status === 403) && structuredCode === 'hub_request_failed'
     ? 'hub_invalid_api_key'
-    : structuredErrorCode(error, 'hub_request_failed');
+    : structuredCode;
   return {
     code,
     message: safeMessageForCode(code, 'hub_request_failed'),
@@ -249,6 +252,9 @@ function attachRefusal(
   if (!sameRoute(binding, context)) {
     return 'route_changed';
   }
+  if (!binding.fanAccountId || !context?.fanAccountId) {
+    return 'fan_mismatch';
+  }
   return context?.fanAccountId === binding.fanAccountId ? null : 'fan_mismatch';
 }
 
@@ -266,6 +272,102 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
     new Uint8Array(digest),
     (byte) => byte.toString(16).padStart(2, '0'),
   ).join('');
+}
+
+class VoiceArtifactValidationError extends Error {}
+
+async function readBoundedAudioBytes(response: Response): Promise<ArrayBuffer> {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const declared = Number(contentLength);
+    if (!Number.isInteger(declared) || declared < 0 || declared > VOICE_AUDIO_MAX_BYTES) {
+      throw new VoiceArtifactValidationError('invalid voice content length');
+    }
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new VoiceArtifactValidationError('voice response has no body');
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+      if (total + value.byteLength > VOICE_AUDIO_MAX_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        throw new VoiceArtifactValidationError('voice response exceeds byte cap');
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined.buffer;
+}
+
+function isMp3FrameHeader(bytes: Uint8Array, offset: number): boolean {
+  if (offset + 3 >= bytes.byteLength) {
+    return false;
+  }
+  const first = bytes[offset]!;
+  const second = bytes[offset + 1]!;
+  const third = bytes[offset + 2]!;
+  const version = (second >> 3) & 0b11;
+  const layer = (second >> 1) & 0b11;
+  const bitrate = (third >> 4) & 0b1111;
+  const sampleRate = (third >> 2) & 0b11;
+  return first === 0xff &&
+    (second & 0xe0) === 0xe0 &&
+    version !== 0b01 &&
+    layer === 0b01 &&
+    bitrate !== 0 &&
+    bitrate !== 0b1111 &&
+    sampleRate !== 0b11;
+}
+
+/** Cheap worker-safe validation. Web Audio decoding is not available in a
+ * Firefox MV3 background worker, so reject empty/text/corrupt payloads by
+ * requiring a structurally valid MPEG audio frame after any ID3v2 tag. */
+function isLikelyMp3(bytes: ArrayBuffer): boolean {
+  const view = new Uint8Array(bytes);
+  if (view.byteLength < 4) {
+    return false;
+  }
+  let start = 0;
+  if (
+    view.byteLength >= 10 &&
+    view[0] === 0x49 &&
+    view[1] === 0x44 &&
+    view[2] === 0x33
+  ) {
+    if ([view[6], view[7], view[8], view[9]].some((byte) => (byte! & 0x80) !== 0)) {
+      return false;
+    }
+    const tagSize = (view[6]! << 21) |
+      (view[7]! << 14) |
+      (view[8]! << 7) |
+      view[9]!;
+    start = 10 + tagSize + ((view[5]! & 0x10) !== 0 ? 10 : 0);
+    if (start >= view.byteLength) {
+      return false;
+    }
+  }
+  return isMp3FrameHeader(view, start);
 }
 
 /** Dedicated voice lane. It never enters OperationRegistry, acceptance
@@ -456,6 +558,9 @@ export class VoiceService {
       const fanAccountId = (group?.users ?? []).find(
         (user) => user.userId && user.userId !== account.id,
       )?.userId ?? context.fanAccountId;
+      if (!fanAccountId) {
+        throw new ChatGooseError('voice_source_invalid');
+      }
       const purchaseEvidence = await loadMediaPurchaseEvidence({
         fanslyClient: this.deps.fanslyClient,
         pages: messageLoad.pages,
@@ -473,22 +578,20 @@ export class VoiceService {
       const clientTranscript = formatTranscriptForKernel(transcriptMessages);
 
       let fanDisplayName = context.fanDisplayName?.trim() || 'fan';
-      if (fanAccountId) {
-        try {
-          const [fan] = await this.deps.fanslyClient.getAccountNames(
-            [fanAccountId],
-            session,
-            controller.signal,
-          );
-          fanDisplayName = fan?.username?.trim() ||
-            fan?.displayName?.trim() ||
-            fanDisplayName;
-        } catch (error) {
-          if (controller.signal.aborted) {
-            throw error;
-          }
-          // Display-name enrichment is optional; the live context remains valid.
+      try {
+        const [fan] = await this.deps.fanslyClient.getAccountNames(
+          [fanAccountId],
+          session,
+          controller.signal,
+        );
+        fanDisplayName = fan?.username?.trim() ||
+          fan?.displayName?.trim() ||
+          fanDisplayName;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw error;
         }
+        // Display-name enrichment is optional; the live context remains valid.
       }
       if (!sameRoute(routeBinding, this.deps.tabContexts.get(tabId))) {
         throw new ChatGooseError('chat_changed');
@@ -512,7 +615,8 @@ export class VoiceService {
           feature: 'voice-script',
           clientRequestId,
           pageLabel: page.pageLabel,
-          conversationRef: fanAccountId ?? context.groupId,
+          conversationRef: fanAccountId,
+          fanRef: fanAccountId,
           replyTone: message.replyTone,
           draftText: message.draftText,
           isRegeneration,
@@ -554,6 +658,7 @@ export class VoiceService {
         attemptId: message.attemptId,
         script,
         generationRef,
+        conversationRef: fanAccountId,
       });
     } catch (error) {
       if (!this.isActiveScript(tabId, message.attemptId) || isAbortError(error)) {
@@ -579,15 +684,15 @@ export class VoiceService {
     emit: VoiceEmitter,
   ): Promise<void> {
     const context = this.deps.tabContexts.get(tabId);
-    // First send: derive exactly like voice-script. Recovery: use the pin that
-    // this service returned before the original create dispatch, even if a new
-    // MV3 worker has not resolved fanAccountId yet. The legacy conversationRef
-    // field remains display/recovery context and is never trusted as the pin.
-    const derivedConversationRef = context
-      ? context.fanAccountId ?? context.groupId
-      : null;
-    const conversationRef = message.pinnedConversationRef ?? derivedConversationRef;
-    if (!context || conversationRef === null) {
+    const conversationRef = message.pinnedConversationRef.trim();
+    // The free script step already resolved and persisted the canonical fan id.
+    // Paid create accepts only that exact pin while the live route still agrees.
+    if (
+      !context ||
+      !context.groupId ||
+      !conversationRef ||
+      message.conversationRef !== conversationRef
+    ) {
       this.emitLocalNoteError(
         message.attemptId,
         { source: 'create' },
@@ -596,19 +701,70 @@ export class VoiceService {
       );
       return;
     }
-    const binding = bindingFromContext(context);
-    // Pin the background-owned derivation before any await (including page
-    // resolution). Content persists it against this exact clientRequestId, so
-    // a dropped port cannot leave an accepted create unreplayable after a
-    // worker restart.
-    emit({
-      type: 'voice:noteCreateAck',
-      attemptId: message.attemptId,
-      clientRequestId: message.clientRequestId,
-      conversationRef,
-    });
+    const routeBinding = bindingFromContext(context);
     const controller = new AbortController();
     try {
+      let fanAccountId = context.fanAccountId;
+      if (!fanAccountId) {
+        const session = this.deps.sessionStore.getSessionForTab(tabId);
+        if (!session?.connected) {
+          throw new ChatGooseError('not_connected');
+        }
+        const [account, group] = await Promise.all([
+          this.deps.fanslyClient.getAuthenticatedAccount(session, controller.signal),
+          this.deps.fanslyClient.getGroup(context.groupId, session, controller.signal),
+        ]);
+        if (!sameRoute(routeBinding, this.deps.tabContexts.get(tabId))) {
+          this.emitLocalNoteError(
+            message.attemptId,
+            { source: 'create' },
+            'voice_source_invalid',
+            emit,
+          );
+          return;
+        }
+        fanAccountId = (group.users ?? []).find(
+          (user) => user.userId && user.userId !== account.id,
+        )?.userId ?? null;
+        if (!fanAccountId) {
+          this.emitLocalNoteError(
+            message.attemptId,
+            { source: 'create' },
+            'voice_source_invalid',
+            emit,
+          );
+          return;
+        }
+        this.deps.tabContexts.setFan(
+          tabId,
+          fanAccountId,
+          context.fanDisplayName,
+        );
+      }
+      if (fanAccountId !== conversationRef) {
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'create' },
+          'voice_source_invalid',
+          emit,
+        );
+        return;
+      }
+      const liveContext = this.deps.tabContexts.get(tabId);
+      if (
+        !liveContext ||
+        !sameRoute(routeBinding, liveContext) ||
+        liveContext.fanAccountId !== conversationRef
+      ) {
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'create' },
+          'voice_source_invalid',
+          emit,
+        );
+        return;
+      }
+      const binding = bindingFromContext(liveContext);
       const state = await this.deps.storageCoordinator.getState();
       const page = await this.resolvePageForTab(tabId, controller.signal, state.settings);
       if (attachRefusal(binding, this.deps.tabContexts.get(tabId)) !== null) {
@@ -742,8 +898,9 @@ export class VoiceService {
         );
         return;
       }
-      const bytes = await response.arrayBuffer();
+      const bytes = await readBoundedAudioBytes(response);
       if (
+        !isLikelyMp3(bytes) ||
         bytes.byteLength !== message.expectedBytes ||
         bytes.byteLength > VOICE_AUDIO_MAX_BYTES ||
         (await sha256Hex(bytes)) !== message.expectedSha256.trim().toLowerCase()
@@ -763,12 +920,21 @@ export class VoiceService {
         bytes,
       });
     } catch (error) {
-      this.emitNoteError(
-        message.attemptId,
-        { source: 'audio', voiceNoteId: message.voiceNoteId },
-        error,
-        emit,
-      );
+      if (error instanceof VoiceArtifactValidationError) {
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'audio', voiceNoteId: message.voiceNoteId },
+          'voice_artifact_corrupt',
+          emit,
+        );
+      } else {
+        this.emitNoteError(
+          message.attemptId,
+          { source: 'audio', voiceNoteId: message.voiceNoteId },
+          error,
+          emit,
+        );
+      }
     }
   }
 
@@ -807,6 +973,7 @@ export class VoiceService {
               [context.fanAccountId],
               session,
               new AbortController().signal,
+              'none',
             );
             fanUsername = fan?.username?.trim() || fan?.displayName?.trim() || '';
           }
@@ -835,6 +1002,7 @@ export class VoiceService {
       emit({
         type: 'voice:attachGrant',
         attemptId: message.attemptId,
+        voiceNoteId: message.voiceNoteId,
         token: this.randomUUID(),
         fanUsername,
       });

@@ -5,6 +5,7 @@ import type { BackgroundPortMessage, ContentPortMessage } from '../shared/types.
 interface PortClientCallbacks {
   onMessage: (message: BackgroundPortMessage) => void;
   onDisconnected: () => void;
+  onConnected?: () => void;
 }
 
 export class PortClient {
@@ -36,6 +37,7 @@ export class PortClient {
     if (this.lastInit) {
       this.send(this.lastInit);
     }
+    this.callbacks.onConnected?.();
   }
 
   private scheduleReconnect(): void {
