@@ -91,6 +91,16 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
     generatedAt: record.generatedAt,
   };
 
+  if (record.transcriptCoverage === 'full-history' || record.transcriptCoverage === 'window') {
+    entry.transcriptCoverage = record.transcriptCoverage;
+  }
+  if (
+    isFiniteNumber(record.keptCount) &&
+    Number.isInteger(record.keptCount) &&
+    record.keptCount >= 0
+  ) {
+    entry.keptCount = record.keptCount;
+  }
   if (typeof record.spendingDataVerified === 'boolean') {
     entry.spendingDataVerified = record.spendingDataVerified;
   }

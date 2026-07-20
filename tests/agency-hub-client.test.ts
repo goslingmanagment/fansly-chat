@@ -1199,14 +1199,16 @@ describe('AgencyHubClient', () => {
     requestedCount: 3000,
     keptCount: 2900,
   };
+  const recapPersonaDefinitionId = 'v1:persona-one-definition';
 
   it('getRecapStatus: returns state ok with the slots when the Hub answers', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+    const fetchMock = vi.fn(async (url: URL | string) => {
       if (String(url).startsWith('http://localhost:3000/api/v1/ai/recap-status')) {
         return jsonResponse({ full: recapSlot, short: null });
       }
       throw new Error(`Unexpected URL: ${String(url)}`);
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
     (globalThis as Record<string, unknown>).browser = {
       permissions: { contains: vi.fn(async () => true) },
     };
@@ -1214,11 +1216,18 @@ describe('AgencyHubClient', () => {
     const client = new AgencyHubClient(fetch);
     const result = await client.getRecapStatus(
       makeSettings(),
-      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: 'fan-1' },
+      {
+        pageLabel: 'creator-fs',
+        conversationRef: 'group-1',
+        fanRef: 'fan-1',
+        personaDefinitionId: recapPersonaDefinitionId,
+      },
       new AbortController().signal,
     );
 
     expect(result).toEqual({ state: 'ok', full: recapSlot, short: null });
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requestUrl.searchParams.get('personaDefinitionId')).toBe(recapPersonaDefinitionId);
   });
 
   it('getRecapStatus: maps a 404 to UNAVAILABLE (endpoint unreadable, not confirmed-no-recap)', async () => {
@@ -1237,7 +1246,12 @@ describe('AgencyHubClient', () => {
     const client = new AgencyHubClient(fetch);
     const result = await client.getRecapStatus(
       makeSettings(),
-      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+      {
+        pageLabel: 'creator-fs',
+        conversationRef: 'group-1',
+        fanRef: null,
+        personaDefinitionId: recapPersonaDefinitionId,
+      },
       new AbortController().signal,
     );
 
@@ -1259,7 +1273,12 @@ describe('AgencyHubClient', () => {
     await expect(
       client.getRecapStatus(
         makeSettings(),
-        { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+        {
+          pageLabel: 'creator-fs',
+          conversationRef: 'group-1',
+          fanRef: null,
+          personaDefinitionId: recapPersonaDefinitionId,
+        },
         new AbortController().signal,
       ),
     ).rejects.toThrow();
@@ -1273,7 +1292,12 @@ describe('AgencyHubClient', () => {
     const client = new AgencyHubClient(fetchMock as unknown as typeof fetch);
     const result = await client.getRecapStatus(
       makeSettings(),
-      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+      {
+        pageLabel: 'creator-fs',
+        conversationRef: 'group-1',
+        fanRef: null,
+        personaDefinitionId: recapPersonaDefinitionId,
+      },
       new AbortController().signal,
     );
     expect(result).toEqual({ state: 'unavailable', full: null, short: null });

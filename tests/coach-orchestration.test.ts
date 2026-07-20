@@ -166,6 +166,14 @@ function staleSlot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 /** The last op:start payload the app sent. */
 function lastSent(app: any): any {
   const calls = (app.port.send as any).mock.calls;
@@ -194,6 +202,56 @@ describe('Coach orchestration', () => {
     expect(app.coachOverlayModel).not.toBeNull();
     expect(app.coachOverlayModel.kind).toBe('coach');
     expect(app.activeFeature).toBeNull();
+  });
+
+  it('scopes both Coach and standalone recap-status reads to the mapped persona definition', async () => {
+    const app = await makeReadyApp();
+    const sendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
+
+    app.openRecapPicker();
+    await flush();
+    expect(sendMessage).toHaveBeenLastCalledWith({
+      type: 'getRecapStatus',
+      groupId: 'group-1',
+      fanAccountId: null,
+      personaDefinitionId: 'v1:persona-one-definition',
+    });
+
+    app.closeRecapPicker();
+    sendMessage.mockClear();
+    app.openCoach();
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'getRecapStatus',
+      groupId: 'group-1',
+      fanAccountId: null,
+      personaDefinitionId: 'v1:persona-one-definition',
+    });
+  });
+
+  it('does not issue an unscoped recap-status read without a mapped persona definition', async () => {
+    const app = await makeReadyApp();
+    const sendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
+    app.tabState = readyState({ mappedPersonaDefinitionId: null });
+
+    app.openRecapPicker();
+    await flush();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(app.recapPickerModel.recapStatus).toEqual({
+      state: 'unavailable',
+      full: null,
+      short: null,
+    });
+
+    app.closeRecapPicker();
+    app.openCoach();
+    await flush();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(app.activeCoachSession.recapStatus).toEqual({
+      state: 'unavailable',
+      full: null,
+      short: null,
+    });
   });
 
   it('opening Coach with no resolvable fan/group shows a toast and does not open', async () => {
@@ -255,7 +313,7 @@ describe('Coach orchestration', () => {
     ]);
   });
 
-  it('blocks submit when the port drops the start and clears the pending marker', async () => {
+  it('restores the question when the port drops the start and clears the pending marker', async () => {
     const app = await makeReadyApp();
     app.port.send = vi.fn(() => false);
     app.openCoach();
@@ -263,6 +321,7 @@ describe('Coach orchestration', () => {
     await app.submitCoachQuestion('dropped');
 
     expect(app.activeCoachSession.pending).toBeUndefined();
+    expect(app.activeCoachSession.composerText).toBe('dropped');
     expect(app.activeFeature).toBeNull();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-07');
     // A dropped start never became a turn — no failed-attempt feed item.
@@ -530,6 +589,7 @@ describe('Coach orchestration', () => {
       operationId: opId,
       error: { code: 'CG-AI-01', message: 'nope' },
     });
+    app.handleCoachComposerInput('new unsent question');
     (app.port.send as any).mockClear();
 
     await app.handleCoachRetry('retry me');
@@ -538,6 +598,9 @@ describe('Coach orchestration', () => {
     expect(payload).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'retry me' });
     // A NEW operation id (spec §8: retry = fresh UUID + fresh transcript).
     expect(payload.operationId).not.toBe(opId);
+    // Retrying an older failed turn must not erase a different question the
+    // chatter has already typed into the composer.
+    expect(app.activeCoachSession.composerText).toBe('new unsent question');
   });
 
   it('explicit recap refresh (onCoachRecap) runs an in-feed recap step, Coach stays open, no question chains', async () => {
@@ -571,6 +634,42 @@ describe('Coach orchestration', () => {
     expect(app.coachRecapChain).toBeNull();
     // No coach-chat op followed the explicit refresh.
     expect((app.port.send as any).mock.calls.every((c: any) => c[0].feature !== 'coach-chat')).toBe(true);
+  });
+
+  it('an explicit recap success consumes auto-recap even when its status refresh is still in flight', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { state: 'ok', full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    app.handleCoachRecap('full');
+    const recapOpId = app.coachRecapChain.operationId;
+    const refreshedStatus = deferred<unknown>();
+    recapStatusResponse = refreshedStatus.promise;
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'fresh explicit recap', parts: [] },
+    });
+    (app.port.send as any).mockClear();
+
+    // Do not wait for the status GET: the successful explicit recap itself is
+    // enough to prevent a second paid recap, and normal Coach stays responsive.
+    await app.submitCoachQuestion('use the recap I just made');
+
+    expect((app.port.send as any).mock.calls.filter((call: any) =>
+      call[0]?.feature === 'fan-summary')).toHaveLength(0);
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'use the recap I just made',
+    });
+    expect(app.activeCoachSession.autoRecapAttempted).toBe(true);
+
+    refreshedStatus.resolve({ state: 'ok', full: freshSlot(), short: null });
+    await flush();
+    expect(app.activeCoachSession.recapStatus.full).not.toBeNull();
   });
 
   it('dispatchHotkey handles the coach and recap-picker arms (returns true)', async () => {
@@ -634,6 +733,24 @@ describe('Coach orchestration', () => {
 
     expect((app.port.send as any).mock.calls.some((c: any) => c[0]?.type === 'operation:start')).toBe(false);
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-APP-03');
+  });
+
+  it('«Открыть последний» treats unavailable status as unknown and checks local caches', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { state: 'unavailable', full: null, short: null };
+    app.openRecapPicker();
+    await flush();
+    (app.port.send as any).mockClear();
+
+    app.openLastRecap();
+
+    expect(lastSent(app)).toMatchObject({
+      feature: 'fan-summary',
+      viewCachedOnly: true,
+      forceRegenerate: false,
+    });
+    expect(lastSent(app).summaryMode).toBeUndefined();
+    expect(app.viewLastFallbackMode).toBe('short');
   });
 
   it('no_saved_recap surfaces as a toast, not an error overlay', async () => {
@@ -704,6 +821,27 @@ describe('Coach orchestration', () => {
     expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'quick q' });
   });
 
+  it('waits for the opening status read before deciding the first auto-recap', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    const status = deferred<unknown>();
+    recapStatusResponse = status.promise;
+    app.openCoach();
+    (app.port.send as any).mockClear();
+
+    const submission = app.submitCoachQuestion('use the fresh recap');
+    await Promise.resolve();
+    status.resolve({ state: 'ok', full: freshSlot(), short: null });
+    await submission;
+
+    expect((app.port.send as any).mock.calls.some((call: any) =>
+      call[0]?.feature === 'fan-summary')).toBe(false);
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'use the fresh recap',
+    });
+  });
+
   it('auto-recap full is NOT satisfied by a full at a different deepMessageCount', async () => {
     const app = await makeReadyApp();
     (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
@@ -770,7 +908,7 @@ describe('Coach orchestration', () => {
     expect(step.note).toBeUndefined();
   });
 
-  it('failure taxonomy — PROCEED: a recap-specific model failure answers anyway with a fallback note', async () => {
+  it('failure taxonomy — PROCEED: unusable/empty recap output answers anyway with a fallback note', async () => {
     const app = await makeReadyApp();
     (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
     // An older recap exists (short slot), so the note references its age.
@@ -784,7 +922,9 @@ describe('Coach orchestration', () => {
     app.handleOperationError({
       type: 'operation:error',
       operationId: recapOpId,
-      error: { key: 'ai_output_unusable', code: 'CG-API-06', message: 'truncated' },
+      // The gateway maps Core's exact provider_output_empty frame code to this
+      // recap-specific key; it must not become a provider-outage STOP.
+      error: { key: 'ai_output_unusable', code: 'CG-API-06', message: 'empty output' },
     });
     await flush();
 
@@ -793,6 +933,51 @@ describe('Coach orchestration', () => {
     expect(step.status).toBe('failed');
     expect(step.note).toContain('обновить Recap не удалось');
     expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'answer me anyway' });
+  });
+
+  it('failure taxonomy — PROCEED: not_enough_history answers without a refreshed recap', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('answer with limited history');
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'not_enough_history', code: 'CG-FLOW-03', message: 'too short' },
+    });
+    await flush();
+
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'answer with limited history',
+    });
+  });
+
+  it('failure taxonomy — STOP: an unlisted infrastructure error preserves the question', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('do not retry through an outage');
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'hub_request_failed', code: 'CG-HUB-07', message: 'offline' },
+    });
+    await flush();
+
+    expect((app.port.send as any).mock.calls.some((call: any) =>
+      call[0]?.feature === 'coach-chat')).toBe(false);
+    expect(app.activeCoachSession.composerText).toBe('do not retry through an outage');
   });
 
   it('cancelling the recap chain stops it and preserves the question', async () => {
@@ -905,6 +1090,49 @@ describe('Coach orchestration', () => {
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-APP-04');
   });
 
+  it('restores a submitted question to the old session when the route changes during preflight', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    app.activeCoachSession.composerText = '';
+    const storageRead = deferred<Record<string, unknown>>();
+    (globalThis.browser.storage.local.get as any).mockImplementationOnce(
+      () => storageRead.promise,
+    );
+
+    const submission = app.submitCoachQuestion('survive the route change');
+    app.handleRouteChange('group-2');
+    storageRead.resolve({ ...mockStorageState });
+    await submission;
+
+    const retained = app.coachStore.getOrCreate('account-1', 'group-1');
+    expect(retained.composerText).toBe('survive the route change');
+    expect(retained.pending).toBeUndefined();
+  });
+
+  it('restores a submitted question when another operation arms during preflight', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    app.activeCoachSession.composerText = '';
+    const storageRead = deferred<Record<string, unknown>>();
+    (globalThis.browser.storage.local.get as any).mockImplementationOnce(
+      () => storageRead.promise,
+    );
+    (app.port.send as any).mockClear();
+
+    const submission = app.submitCoachQuestion('survive the competing op');
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'other-op';
+    storageRead.resolve({ ...mockStorageState });
+    await submission;
+
+    expect(app.activeCoachSession.composerText).toBe('survive the competing op');
+    expect((app.port.send as any).mock.calls.some((call: any) =>
+      call[0]?.feature === 'coach-chat')).toBe(false);
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-04');
+  });
+
   it('P2: a standalone SHORT recap does not mark a full summary available or cache it', async () => {
     const app = await makeReadyApp();
     app.openRecapPicker();
@@ -1013,6 +1241,51 @@ describe('Coach orchestration', () => {
     // Question preserved in the retained store session; overlay collapsed.
     expect(app.coachStore.getOrCreate('account-1', 'group-1').composerText).toBe('held during insert');
     expect(app.coachOverlayModel).toBeNull();
+  });
+
+  it('onClose during a streaming Coach turn cancels it before collapsing', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('first');
+    const firstOpId = pendingOpId(app);
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: firstOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'Advice\n```draft\nUse this\n```', parts: [] },
+      generationRef: 'gen-first',
+    });
+    await app.submitCoachQuestion('second is streaming');
+    const liveOpId = pendingOpId(app);
+    (app.port.send as any).mockClear();
+
+    // Draft Insert fires this callback after insertion/acceptance.
+    app.overlay.callbacks.onClose();
+
+    expect(app.port.send).toHaveBeenCalledWith({
+      type: 'operation:cancel',
+      operationId: liveOpId,
+    });
+    expect(app.suppressedTerminalOpIds.has(liveOpId)).toBe(true);
+    expect(app.coachOverlayModel).toBeNull();
+    const retained = app.coachStore.getOrCreate('account-1', 'group-1');
+    expect(retained.pending).toBeUndefined();
+    expect(retained.feedItems).toContainEqual(expect.objectContaining({
+      kind: 'failed-attempt',
+      question: 'second is streaming',
+      errorCode: 'cancelled',
+    }));
+
+    // A late paid terminal is consumed silently and cannot commit the answer.
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: liveOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'late answer', parts: [] },
+      generationRef: 'gen-late',
+    });
+    expect(retained.completedExchanges).toHaveLength(1);
   });
 
   it('onClose during a SHORT recap chain suppresses the terminal — no cache pollution', async () => {

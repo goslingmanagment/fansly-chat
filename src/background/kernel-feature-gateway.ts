@@ -95,6 +95,13 @@ export interface KernelFeatureUsage {
   costApproximate: boolean;
 }
 
+/** Coach-only provenance for the recap bodies Core actually retained in the
+ * finalized prompt. This may differ from the earlier recap-status read. */
+export interface KernelFeatureAttachedRecaps {
+  full: { generatedAt: string; ageMs: number } | null;
+  short: { generatedAt: string; ageMs: number } | null;
+}
+
 export interface KernelFeatureCallbacks {
   onText: (text: string) => void;
   /** Gateway meta frame: requestId = the generation ref (acceptance correlation). */
@@ -103,6 +110,7 @@ export interface KernelFeatureCallbacks {
     clientRequestId: string;
     model: string;
     personaDefinitionId?: string;
+    attachedRecaps?: KernelFeatureAttachedRecaps;
   }) => void;
   onUsage?: (usage: KernelFeatureUsage) => void;
   onReasoningDelta?: (text: string) => void;
@@ -149,7 +157,18 @@ function mapKernelGateError(error: KernelApiError): ChatGooseError | null {
   return null;
 }
 
-function toChatGooseError(error: unknown): ChatGooseError {
+/** A pre-Coach Hub rejects the new strict body before feature dispatch, so it
+ * returns Fastify's generic 400 rather than the newer structured 404. Match
+ * only that additional-key validation shape; current-Hub Coach 400s retain
+ * their real error instead of being mislabeled as a version gap. */
+function isLegacyCoachBodyValidation(error: KernelApiError): boolean {
+  return error.status === 400 &&
+    error.code === 'Bad Request' &&
+    /(?:unrecognized key|additional propert)/i.test(error.message) &&
+    /\b(?:chatterQuestion|coachHistory|transcriptCoverage)\b/.test(error.message);
+}
+
+function toChatGooseError(error: unknown, feature?: FeatureType): ChatGooseError {
   if (error instanceof ChatGooseError) {
     return error;
   }
@@ -157,6 +176,9 @@ function toChatGooseError(error: unknown): ChatGooseError {
     const gate = mapKernelGateError(error);
     if (gate) {
       return gate;
+    }
+    if (feature === 'coach-chat' && isLegacyCoachBodyValidation(error)) {
+      return new ChatGooseError('coach_requires_newer_hub', { message: error.message });
     }
     // Structured `unknown_ai_feature` (404): this page's Hub predates the
     // feature (coach-chat). Only the STRUCTURED code maps to the actionable
@@ -247,8 +269,17 @@ export function createKernelFeatureGateway(
         // chat_changed, and before EOF collapses it into the generic
         // "ended without completing" truncation error.
         if (frame.type === 'error') {
+          // Empty/whitespace provider output is a completed-but-unusable model
+          // result, not a provider outage. Preserve that distinction so an
+          // auto-recap may take its explicit PROCEED branch, while genuine
+          // provider/proxy stream failures remain STOP errors.
+          const errorKey = frame.code === 'provider_output_empty'
+            ? 'ai_output_unusable'
+            : frame.code.startsWith('provider')
+              ? 'hub_provider_failed'
+              : 'hub_request_failed';
           throw new ChatGooseError(
-            frame.code.startsWith('provider') ? 'hub_provider_failed' : 'hub_request_failed',
+            errorKey,
             {
               details: { status: 0, responseSnippet: `${frame.code}: ${frame.message}` },
               ...(typeof frame.retryAfterMs === 'number'
@@ -292,6 +323,9 @@ export function createKernelFeatureGateway(
               model: frame.model,
               ...(frame.personaDefinitionId !== undefined
                 ? { personaDefinitionId: frame.personaDefinitionId }
+                : {}),
+              ...(frame.attachedRecaps !== undefined
+                ? { attachedRecaps: frame.attachedRecaps }
                 : {}),
             });
             return;
@@ -384,7 +418,7 @@ export function createKernelFeatureGateway(
       try {
         await handle.done;
       } catch (error) {
-        const mapped = toChatGooseError(error);
+        const mapped = toChatGooseError(error, request.feature);
         if (mapped.key === 'chat_changed') {
           refreshPersonaCatalog();
         }

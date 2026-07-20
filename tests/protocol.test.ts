@@ -79,12 +79,13 @@ describe('protocol boundary guards', () => {
 
     // Coach recap-status metadata read (one-shot). fanAccountId is nullable
     // (the chatter may coach a conversation with no resolved fan yet); groupId
-    // is required — same E8/E23 lesson: no protocol case ⇒ silent drop.
+    // and the exact persona definition are required.
     expect(
       getRuntimeRequestType({
         type: 'getRecapStatus',
         groupId: 'group-1',
         fanAccountId: 'fan-1',
+        personaDefinitionId: 'v1:persona-one-definition',
       }),
     ).toBe('getRecapStatus');
     expect(
@@ -92,6 +93,7 @@ describe('protocol boundary guards', () => {
         type: 'getRecapStatus',
         groupId: 'group-1',
         fanAccountId: null,
+        personaDefinitionId: 'v1:persona-one-definition',
       }),
     ).toBe('getRecapStatus');
     expect(
@@ -102,6 +104,7 @@ describe('protocol boundary guards', () => {
         type: 'getRecapStatus',
         groupId: 42,
         fanAccountId: null,
+        personaDefinitionId: 'v1:persona-one-definition',
       }),
     ).toBeNull();
     expect(
@@ -109,6 +112,22 @@ describe('protocol boundary guards', () => {
         type: 'getRecapStatus',
         groupId: 'group-1',
         fanAccountId: 42,
+        personaDefinitionId: 'v1:persona-one-definition',
+      }),
+    ).toBeNull();
+    expect(
+      getRuntimeRequestType({
+        type: 'getRecapStatus',
+        groupId: 'group-1',
+        fanAccountId: null,
+      }),
+    ).toBeNull();
+    expect(
+      getRuntimeRequestType({
+        type: 'getRecapStatus',
+        groupId: 'group-1',
+        fanAccountId: null,
+        personaDefinitionId: '   ',
       }),
     ).toBeNull();
   });

@@ -102,12 +102,10 @@ export interface FanSummaryMeta {
   syncStatus?: FanSummarySyncStatus;
   /** Recap coverage of the generated summary (spec §5/§6): 'full-history' when
    * the provider reached the oldest edge with no window/char trimming, else
-   * 'window'. Drives the recap coverage header. Only present on freshly
-   * GENERATED recaps (a cache hit does not persist coverage). */
+   * 'window'. Drives the recap coverage header. Absent on legacy cache entries. */
   transcriptCoverage?: 'full-history' | 'window';
   /** The KEPT message count fed to the kernel (post char-cap trim) — the N in
-   * the coverage header «вся переписка (N сообщений)» / «последние N». Present
-   * alongside {@link transcriptCoverage} on generated recaps only. */
+   * the coverage header «вся переписка (N сообщений)» / «последние N». */
   keptCount?: number;
 }
 
@@ -121,6 +119,10 @@ export interface SummaryCacheEntry {
   /** Exact Hub+credential catalog source. Missing legacy entries invalidate. */
   personaCatalogSource: string | null;
   generatedAt: number;
+  /** Coverage metadata is persisted for current entries so cache hits keep the
+   * same honest recap header. Legacy entries remain valid without either field. */
+  transcriptCoverage?: 'full-history' | 'window';
+  keptCount?: number;
   spendingDataVerified?: boolean;
   subscriptionLookupVerified?: boolean;
   modelId?: string;
@@ -850,6 +852,9 @@ export interface RuntimeResponseMap {
 export interface RecapStatusRequest {
   groupId: string;
   fanAccountId: string | null;
+  /** Exact active persona definition; recap slots from another definition must
+   * never be reported as usable for the current Coach session. */
+  personaDefinitionId: string;
 }
 
 /** Freshest-usable recap metadata for one slot (full or short). Mirrors the
@@ -1605,6 +1610,9 @@ export interface CoachOverlaySessionView {
   composerEnabled: boolean;
   /** Per-session auto-recap override (spec §5); drives the topbar cycle control. */
   autoRecapOverride: CoachAutoRecapOverride;
+  /** Fansly conversation this feed belongs to; draft insertion re-checks it
+   * against the live URL so a route change cannot target the next fan. */
+  groupId: string;
   /** `(accountId, groupId)` session identity; a change swaps the whole feed. */
   sessionKey: string;
 }

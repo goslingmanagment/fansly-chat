@@ -538,27 +538,66 @@ describe(`OperationCoordinator (${part})`, () => {
     const { coordinator } = await createCoordinatorHarness();
     const fences = coordinator as {
       reserveSummaryCommitToken(): number;
-      registerSummaryCommit(groupId: string, operationId: string, token: number): void;
+      registerSummaryCommit(
+        groupId: string,
+        mode: 'short' | 'full',
+        operationId: string,
+        token: number,
+      ): void;
       isLatestSummaryCommit(
         groupId: string,
+        mode: 'short' | 'full',
         operationId: string,
         token: number,
       ): boolean;
     };
 
     const firstToken = fences.reserveSummaryCommitToken();
-    fences.registerSummaryCommit('first-group', 'first-operation', firstToken);
+    fences.registerSummaryCommit('first-group', 'full', 'first-operation', firstToken);
 
     for (let index = 0; index < 200; index += 1) {
       const token = fences.reserveSummaryCommitToken();
-      fences.registerSummaryCommit(`other-group-${index}`, `other-operation-${index}`, token);
+      fences.registerSummaryCommit(
+        `other-group-${index}`,
+        'full',
+        `other-operation-${index}`,
+        token,
+      );
     }
 
     expect(fences.isLatestSummaryCommit(
       'first-group',
+      'full',
       'first-operation',
       firstToken,
     )).toBe(true);
+  });
+
+  it('keeps full and short recap commit fences independent for one group', async () => {
+    const { coordinator } = await createCoordinatorHarness();
+    const fences = coordinator as {
+      reserveSummaryCommitToken(): number;
+      registerSummaryCommit(
+        groupId: string,
+        mode: 'short' | 'full',
+        operationId: string,
+        token: number,
+      ): void;
+      isLatestSummaryCommit(
+        groupId: string,
+        mode: 'short' | 'full',
+        operationId: string,
+        token: number,
+      ): boolean;
+    };
+
+    const fullToken = fences.reserveSummaryCommitToken();
+    fences.registerSummaryCommit('group-1', 'full', 'full-op', fullToken);
+    const shortToken = fences.reserveSummaryCommitToken();
+    fences.registerSummaryCommit('group-1', 'short', 'short-op', shortToken);
+
+    expect(fences.isLatestSummaryCommit('group-1', 'full', 'full-op', fullToken)).toBe(true);
+    expect(fences.isLatestSummaryCommit('group-1', 'short', 'short-op', shortToken)).toBe(true);
   });
 
   it('keeps the last-good durable cache until a forced refresh can replace it', async () => {
@@ -1462,8 +1501,10 @@ describe(`OperationCoordinator (${part})`, () => {
     const verifiedRequests = verifyCalls[0]?.[0] ?? [];
     const prompt = flattenUserBlocksFromStreamCall(kernelGateway);
     expect(verifiedRequests).toHaveLength(FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
-    expect(prompt).toContain('[Video — PPV $33.00, not purchased] ppv 1');
-    expect(prompt).toContain('[Video — PPV $33.00, unknown] ppv 11');
+    expect((verifiedRequests as Array<{ contentId: string }>).map(({ contentId }) => contentId))
+      .toEqual(ids.slice(1).reverse());
+    expect(prompt).toContain('[Video — PPV $33.00, unknown] ppv 1');
+    expect(prompt).toContain('[Video — PPV $33.00, not purchased] ppv 11');
   });
 
   it('includes the selected tone in fast-reply debug prompts and uncached user blocks', async () => {
@@ -2455,7 +2496,7 @@ describe(`OperationCoordinator (${part})`, () => {
   }
 
   if (part === 'profiling-and-summary') {
-  it('revalidates an uncached Scan task after fan-id resolution and before Hub push', async () => {
+  it('does not generate or enqueue Hub sync when a recap fan cannot be resolved', async () => {
     delete mockStorage['summary:group-1'];
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -2464,24 +2505,7 @@ describe(`OperationCoordinator (${part})`, () => {
       agencyHubDeviceToken: '',
     };
     const fanslyClient = buildFanslyClientMock();
-    let groupCalls = 0;
-    let resolveSyncGroup: ((value: { users: Array<{ userId: string }> }) => void) | null = null;
-    let markSyncGroupStarted: (() => void) | null = null;
-    const syncGroupStarted = new Promise<void>((resolve) => {
-      markSyncGroupStarted = resolve;
-    });
-    fanslyClient.getGroup.mockImplementation(() => {
-      groupCalls += 1;
-      if (groupCalls === 1) {
-        // No fan id during generation => enrichment incomplete and no local
-        // cache, while the existing fire-and-forget Hub path still runs.
-        return Promise.resolve({ users: [{ userId: 'account-1' }] });
-      }
-      markSyncGroupStarted?.();
-      return new Promise((resolve) => {
-        resolveSyncGroup = resolve;
-      });
-    });
+    fanslyClient.getGroup.mockResolvedValue({ users: [{ userId: 'account-1' }] });
     const agencyHubClient = {
       isConfigured: vi.fn(() => true),
       resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
@@ -2493,7 +2517,7 @@ describe(`OperationCoordinator (${part})`, () => {
         pageLabel: 'creator-fs',
       })),
     };
-    const { coordinator } = await createCoordinatorHarness({
+    const { coordinator, kernelGateway, port } = await createCoordinatorHarness({
       anthropicRawText: 'Uncached summary',
       fanslyClient,
       agencyHubClient,
@@ -2508,16 +2532,16 @@ describe(`OperationCoordinator (${part})`, () => {
       domFanDisplayName: 'alice',
       forceRegenerate: false,
     });
-    await syncGroupStarted;
 
-    // Again reproduce committed storage bytes before onChanged dispatch.
-    mockStorage.personaCatalog = [
-      { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:personality-one-revised', version: 1001, status: 'active' },
-    ];
-    resolveSyncGroup!({ users: [{ userId: 'account-1' }, { userId: 'fan-1' }] });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
     expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'operation:error',
+        operationId: 'uncached-summary-op',
+        error: expect.objectContaining({ key: 'coach_fan_unresolved' }),
+      }),
+    ]));
   });
 
   it('includes llmSpend in non-debug progress and completion payloads once usage arrives', async () => {
@@ -3551,6 +3575,7 @@ describe(`OperationCoordinator (${part})`, () => {
 
   it('viewCachedOnly serves the stored recap without generating (spec §5 «Открыть последний»)', async () => {
     const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+    fanslyClient.getGroup.mockRejectedValue(new Error('fan lookup unavailable'));
 
     await coordinator.startOperation(1, {
       type: 'operation:start',
@@ -3568,8 +3593,9 @@ describe(`OperationCoordinator (${part})`, () => {
         message.type === 'operation:complete',
     );
     expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
-    // No message pagination for a pure cache view.
+    // A pure local cache view neither paginates nor requires fan resolution.
     expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
   });
 
   it('viewCachedOnly fails with no_saved_recap when nothing is stored (no generation)', async () => {
@@ -3997,6 +4023,148 @@ describe(`OperationCoordinator (${part})`, () => {
     }
   });
 
+  it('allows concurrent full and short recaps for one fan to commit independently', async () => {
+    delete mockStorage['summary:group-1'];
+    delete mockStorage['summary-short:group-1'];
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    let resolveFullStream: ((value: string) => void) | null = null;
+    let markFullStreamStarted: (() => void) | null = null;
+    const fullStreamStarted = new Promise<void>((resolve) => {
+      markFullStreamStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(
+        (_settings: unknown, request: { summaryMode?: 'short' }) => {
+          if (request.summaryMode === 'short') {
+            return Promise.resolve('Short recap body');
+          }
+          markFullStreamStarted?.();
+          return new Promise<string>((resolve) => {
+            resolveFullStream = resolve;
+          });
+        },
+      ),
+    };
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({
+      fanslyClient,
+      kernelGateway,
+    });
+    sessionStore.registerCapture(2, SESSION_CAPTURE);
+    const secondPort = createMockRuntimePort(2);
+    coordinator.registerPort(secondPort as never);
+    const payload = {
+      type: 'operation:start' as const,
+      feature: 'fan-summary' as const,
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    };
+
+    const fullOperation = coordinator.startOperation(1, {
+      ...payload,
+      operationId: 'full-scan',
+    });
+    await fullStreamStarted;
+    await coordinator.startOperation(2, {
+      ...payload,
+      operationId: 'short-scan',
+      summaryMode: 'short',
+    });
+    resolveFullStream!('Full recap body');
+    await fullOperation;
+
+    expect(mockStorage['summary:group-1']).toMatchObject({ summary: 'Full recap body' });
+    expect(mockStorage['summary-short:group-1']).toMatchObject({ summary: 'Short recap body' });
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'operation:complete', operationId: 'full-scan' }),
+    ]));
+    expect(postedMessages(secondPort)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'operation:complete', operationId: 'short-scan' }),
+    ]));
+  });
+
+  it.each([
+    { label: 'cache hit', hasCachedRecap: true },
+    { label: 'cache miss', hasCachedRecap: false },
+  ])('a cross-tab cached-only full view ($label) cannot fence a paid full recap', async ({ hasCachedRecap }) => {
+    if (!hasCachedRecap) {
+      delete mockStorage['summary:group-1'];
+    }
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    let resolveWriter: ((value: string) => void) | null = null;
+    let markWriterStarted: (() => void) | null = null;
+    const writerStarted = new Promise<void>((resolve) => {
+      markWriterStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(() => {
+        markWriterStarted?.();
+        return new Promise<string>((resolve) => {
+          resolveWriter = resolve;
+        });
+      }),
+    };
+    const { coordinator, port, sessionStore } = await createCoordinatorHarness({
+      fanslyClient,
+      kernelGateway,
+    });
+    sessionStore.registerCapture(2, SESSION_CAPTURE);
+    const secondPort = createMockRuntimePort(2);
+    coordinator.registerPort(secondPort as never);
+
+    const writer = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'paid-full-scan',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+    await writerStarted;
+
+    await coordinator.startOperation(2, {
+      type: 'operation:start',
+      operationId: 'read-only-full',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    if (hasCachedRecap) {
+      expect(postedMessages(secondPort)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'operation:complete', operationId: 'read-only-full' }),
+      ]));
+    } else {
+      expect(postedMessages(secondPort)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'operation:error',
+          operationId: 'read-only-full',
+          error: expect.objectContaining({ key: 'no_saved_recap' }),
+        }),
+      ]));
+    }
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+
+    resolveWriter!('Paid full recap body');
+    await writer;
+
+    expect(mockStorage['summary:group-1']).toMatchObject({ summary: 'Paid full recap body' });
+    expect(postedMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'operation:complete', operationId: 'paid-full-scan' }),
+    ]));
+  });
+
   it('falls through to generation when the Hub has no stored summary', async () => {
     delete mockStorage['summary:group-1'];
     mockStorage.settings = {
@@ -4217,6 +4385,11 @@ describe(`OperationCoordinator (${part})`, () => {
       forceRegenerate: false,
     });
 
+    expect(mockStorage['summary:group-1']).toMatchObject({
+      transcriptCoverage: 'window',
+      keptCount: 30,
+    });
+
     await coordinator.startOperation(1, {
       type: 'operation:start',
       operationId: 'summary-op-2',
@@ -4238,6 +4411,8 @@ describe(`OperationCoordinator (${part})`, () => {
       rawText: 'Generated summary',
       summaryMeta: {
         cached: true,
+        transcriptCoverage: 'window',
+        keptCount: 30,
       },
     });
     expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
@@ -6081,8 +6256,8 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(request.fanRef).toBe('fan-1');
   });
 
-  it('fan-summary falls back to the legacy shape (no fanRef) when the fan is unresolved', async () => {
-    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+  it('fan-summary fails before the kernel call when the fan is unresolved', async () => {
+    const { coordinator, kernelGateway, port, fanslyClient } = await createCoordinatorHarness({
       anthropicRawText: 'Fresh summary',
     });
     fanslyClient.getGroup.mockResolvedValue({ users: [{ userId: 'account-1' }] });
@@ -6097,11 +6272,15 @@ describe(`OperationCoordinator (${part})`, () => {
       forceRegenerate: true,
     });
 
-    const request = kernelRequestFromStreamCall(kernelGateway);
-    // Legacy: conversationRef = fanAccountId ?? groupId = groupId; NO fanRef.
-    // A canonical groupId ref never ships without a fanRef (guard invariant).
-    expect(request.conversationRef).toBe('group-1');
-    expect(request.fanRef).toBeUndefined();
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'coach_fan_unresolved',
+      code: 'CG-APP-02',
+    });
   });
 
   it('custom-name rule: a lookup failure sends "fan", never the DOM custom name', async () => {
@@ -6185,7 +6364,7 @@ describe(`OperationCoordinator (${part})`, () => {
   });
 
   it('short recap: 300-message clamp, short cache key, no full overwrite, no hub sync', async () => {
-    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+    const { coordinator, kernelGateway, fanslyClient, port } = await createCoordinatorHarness({
       anthropicRawText: 'Short recap body',
     });
     // Verified enrichment so the short result is actually cached.
@@ -6219,9 +6398,36 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(request.clientContext.transcriptCoverage).toBe('window');
     // Short body lands under the mode-qualified key; the durable FULL summary
     // is left untouched, and nothing is pushed to the Hub dossier.
-    expect(mockStorage['summary-short:group-1']).toMatchObject({ summary: 'Short recap body' });
+    expect(mockStorage['summary-short:group-1']).toMatchObject({
+      summary: 'Short recap body',
+      transcriptCoverage: 'window',
+      keptCount: 300,
+    });
     expect((mockStorage['summary:group-1'] as SummaryCacheEntry).summary).toBe('Old summary');
     expect(enqueueSpy).not.toHaveBeenCalled();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'short-recap-cache-hit',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      summaryMode: 'short',
+      forceRegenerate: false,
+    });
+
+    const cacheHit = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete' &&
+        message.operationId === 'short-recap-cache-hit',
+    );
+    expect(cacheHit?.result.summaryMeta).toMatchObject({
+      cached: true,
+      transcriptCoverage: 'window',
+      keptCount: 300,
+    });
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
   });
 
   it('short recap never sends summaryMode for a full run', async () => {

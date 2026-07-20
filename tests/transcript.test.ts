@@ -7,6 +7,8 @@ import {
   analyzePingSegment,
   resolvePingSegment,
   buildTranscriptWindowStart,
+  buildPurchaseEvidence,
+  collectUnverifiedPpvAttachmentRequests,
   estimateTargetPages,
   extractOldestMessageId,
 } from '../src/shared/transcript.js';
@@ -40,6 +42,48 @@ function makePage(overrides: Partial<FanslyMessagePageResponse> = {}): FanslyMes
     ...overrides,
   };
 }
+
+it('orders PPV verification candidates newest-first without reversing fresh page maps', () => {
+  const ppvMedia = (id: string) => ({
+    id,
+    media: { type: 2, mimetype: 'video/mp4' },
+    permissions: { permissionFlags: [{ flags: 1, price: 10_000 }] },
+  });
+  const message = (id: number, contentId: string) => ({
+    id: String(id),
+    type: 1,
+    content: `m${id}`,
+    groupId: 'g1',
+    senderId: MODEL_ID,
+    createdAt: id,
+    attachments: [{ contentType: 1, contentId }],
+    embeds: [],
+    totalTipAmount: 0,
+  });
+  const newestIds = Array.from({ length: 10 }, (_, index) => 11 - index);
+  const pages: FanslyMessagePageResponse[] = [
+    // Coach cache order: oldest page first. This stale declaration is free.
+    makePage({
+      messages: [message(1, 'shared')],
+      accountMedia: [{ id: 'shared', media: { type: 2, mimetype: 'video/mp4' } }],
+    }),
+    // Fresh page last: re-declares `shared` as PPV and owns the newest rows.
+    makePage({
+      messages: newestIds.map((id) => message(id, `media-${id}`)),
+      accountMedia: [ppvMedia('shared'), ...newestIds.map((id) => ppvMedia(`media-${id}`))],
+    }),
+  ];
+
+  const requests = collectUnverifiedPpvAttachmentRequests(
+    pages,
+    buildPurchaseEvidence(pages, FAN_ID),
+  );
+
+  expect(requests.map((request) => request.contentId)).toEqual([
+    ...newestIds.map((id) => `media-${id}`),
+    'shared',
+  ]);
+});
 
 // ─── normalizeTranscript ────────────────────────────────────────────────
 

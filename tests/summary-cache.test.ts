@@ -138,6 +138,22 @@ describe('summary cache boundaries', () => {
     expect(getSummaryCacheEntry(entries, 'group-2')).toBeNull();
   });
 
+  it('preserves recap coverage metadata while accepting legacy entries without it', () => {
+    const currentEntry: SummaryCacheEntry = {
+      ...validEntry,
+      transcriptCoverage: 'window',
+      keptCount: 300,
+    };
+
+    expect(normalizeSummaryCacheEntry(currentEntry)).toEqual(currentEntry);
+    expect(normalizeSummaryCacheEntry(validEntry)).toEqual(validEntry);
+    expect(normalizeSummaryCacheEntry({
+      ...validEntry,
+      transcriptCoverage: 'unknown',
+      keptCount: -1,
+    })).toEqual(validEntry);
+  });
+
   it('lists corrupt raw entries separately from normalized cache entries', () => {
     expect(
       getInvalidSummaryCacheKeys({
