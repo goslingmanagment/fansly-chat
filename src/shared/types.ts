@@ -1,6 +1,6 @@
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
-export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'voice-script';
+export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat' | 'voice-script';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers' | 'media';
@@ -28,6 +28,10 @@ export interface Settings {
   debugMode: boolean;
   promptCachingEnabled: boolean;
   uiTheme: UiThemeSetting;
+  /** Coach: how many prior coach turns are retained/replayed (clamped [1,20]). */
+  coachHistoryLimit: number;
+  /** Coach: whether an automatic recap runs, and at what depth. */
+  coachAutoRecap: 'off' | 'short' | 'full';
 }
 
 export interface Personality {
@@ -96,6 +100,15 @@ export interface FanSummaryMeta {
   stale: boolean;
   cached: boolean;
   syncStatus?: FanSummarySyncStatus;
+  /** Recap coverage of the generated summary (spec §5/§6): 'full-history' when
+   * the provider reached the oldest edge with no window/char trimming, else
+   * 'window'. Drives the recap coverage header. Only present on freshly
+   * GENERATED recaps (a cache hit does not persist coverage). */
+  transcriptCoverage?: 'full-history' | 'window';
+  /** The KEPT message count fed to the kernel (post char-cap trim) — the N in
+   * the coverage header «вся переписка (N сообщений)» / «последние N». Present
+   * alongside {@link transcriptCoverage} on generated recaps only. */
+  keptCount?: number;
 }
 
 export interface SummaryCacheEntry {
@@ -113,6 +126,13 @@ export interface SummaryCacheEntry {
   modelId?: string;
   fanAccountId?: string | null;
   agencyHubSync?: AgencyHubSummarySyncMetadata;
+  /** Written ONLY on entries produced behind the exhaustion + empty fail-closed
+   * guards, so the cached recap is known to be a complete, trusted generation. A
+   * cache hit REQUIRES it (isValidSummaryCacheEntry), so a pre-guard entry — e.g.
+   * a max_tokens/length-truncated recap cached before fan-summary was
+   * exhaustion-guarded — is treated as a MISS and regenerated. Cheap (one recap
+   * per fan) and self-healing; legacy entries need no migration drop. */
+  trustedTerminal?: boolean;
 }
 
 export interface PersistedState {
@@ -667,6 +687,10 @@ export type UserErrorKey =
   | 'gate_voice_disabled'
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
+  | 'coach_requires_newer_hub'
+  | 'coach_fan_unresolved'
+  | 'no_saved_recap'
+  | 'settings_load_failed'
   | 'insertion_failed'
   | 'unknown_error';
 
@@ -802,6 +826,7 @@ export interface RuntimeRequestMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
+  getRecapStatus: RecapStatusRequest;
   openDebugPrompt: DebugPromptTokenRequest;
   getDebugPromptSnapshot: DebugPromptTokenRequest;
 }
@@ -813,8 +838,40 @@ export interface RuntimeResponseMap {
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
+  getRecapStatus: RecapStatusResponse;
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
+}
+
+/** Coach recap-status metadata read (spec §3/§5): the freshest usable full +
+ * short fan-summary recap for one conversation — metadata only, NO generation
+ * and NO AI spend. The background maps this to the kernel `aiRecapStatus`
+ * query; the content script renders the "recap status line" from it. */
+export interface RecapStatusRequest {
+  groupId: string;
+  fanAccountId: string | null;
+}
+
+/** Freshest-usable recap metadata for one slot (full or short). Mirrors the
+ * SDK's `aiRecapSlotSchema`: metadata only — never the recap text itself. */
+export interface RecapSlot {
+  generatedAt: string;
+  ageMs: number;
+  transcriptCoverage: 'full-history' | 'window' | null;
+  requestedCount: number | null;
+  keptCount: number | null;
+}
+
+export interface RecapStatusResponse {
+  /** Whether the Hub was actually reached. 'unavailable' (not connected / no page
+   * match / Hub down / not configured) MUST NOT be shown as "no recap" — those are
+   * distinct (E43 honest empty-states). 'ok' means the Hub answered; then null
+   * slots genuinely mean no recap. OPTIONAL: the producing handler/client always
+   * set it, but the field was added mid-stack (round 10) after consumers already
+   * read `full`/`short`, so an absent state reads as 'ok' for backward-compat. */
+  state?: 'ok' | 'unavailable';
+  full: RecapSlot | null;
+  short: RecapSlot | null;
 }
 
 /** E28 viewer handshake. The token is the whole authority — it is minted per
@@ -1054,6 +1111,16 @@ export interface RouteChangedPayload extends PortEnvelopeBase {
   routeNonce: number;
 }
 
+/** One replayed coach turn — the shape carried both on the content→background
+ * wire (`OperationStartPayload.coachHistory`) and in the kernel request body.
+ * Bounds are enforced by the protocol guard (`isCoachHistoryEntry`): question
+ * 1..COACH_QUESTION_MAX_CHARS, answer 1..COACH_ANSWER_MAX_CHARS, ≤20 entries.
+ * Answers are already PROJECTED (head+tail) before they land here. */
+export interface CoachHistoryEntry {
+  question: string;
+  answer: string;
+}
+
 export interface OperationStartPayload extends PortEnvelopeBase {
   type: 'operation:start';
   operationId: string;
@@ -1065,6 +1132,25 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;
+  /** coach-chat: the chatter's live question for this turn. */
+  chatterQuestion?: string;
+  /** coach-chat: prior turns replayed as dialog memory (answers projected). */
+  coachHistory?: CoachHistoryEntry[];
+  /** coach-chat: 'short' | 'full' on THIS (content→background) wire. The
+   * background maps 'full' → omit on the kernel wire (the kernel body accepts
+   * only the literal 'short'); 'short' passes through. */
+  summaryMode?: 'short' | 'full';
+  /** coach-chat: the content-side coach session id (random per page-load,
+   * reset on «Новый диалог»/persona change). Keys the background transcript
+   * session cache (spec §3/§6) so a reload or new dialog forces a reseed, while
+   * a rolling dialog refreshes only the newest tail. Absent ⇒ no session
+   * isolation (a stable empty key), so the cache degrades to a per-tab window. */
+  coachSessionId?: string;
+  /** fan-summary only: «Открыть последний» (spec §5). When true the background
+   * serves the stored recap from the local summary cache and NEVER generates —
+   * a cache miss fails with `no_saved_recap` instead of paginating + calling the
+   * kernel. Keeps the standalone "view last recap" action AI-spend-free. */
+  viewCachedOnly?: boolean;
 }
 
 export interface CompareStartPayload extends PortEnvelopeBase {
@@ -1155,6 +1241,10 @@ export interface OperationAcceptancePayload extends PortEnvelopeBase {
   operationId: string;
   action: 'copied' | 'inserted';
   partIndex: number;
+  /** Coach only: the exchange's kernel generation ref, so the background can
+   * correlate the acceptance even when its in-memory op→ref map is gone (SW
+   * restart / eviction). Absent for the short-lived inline/overlay part paths. */
+  generationRef?: string;
 }
 
 // Background → Content
@@ -1204,6 +1294,10 @@ export interface CompletePayload extends PortEnvelopeBase {
   fanDisplayName: string;
   llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
+  /** coach-chat: the gateway meta-frame requestId, stored on the exchange so a
+   * later acceptance can correlate the sent draft back to its generation.
+   * Optional — only coach operations fill it. */
+  generationRef?: string;
 }
 
 export interface ErrorPayload extends PortEnvelopeBase {
@@ -1442,6 +1536,79 @@ export interface CompareInlineViewModel {
   canRegenerate: boolean;
 }
 
+/** One draft card inside a rendered coach exchange (spec §3 "Draft cards").
+ * `index` is the draft's position within its exchange answer — the `partIndex`
+ * threaded to `onAcceptance` for copied/inserted provenance. */
+export interface CoachOverlayDraft {
+  text: string;
+  index: number;
+}
+
+/** A rendered coach feed item — the overlay projection of the content-side
+ * `CoachFeedItem` (spec §3 "Session state model"). Exchanges are keyed by their
+ * own `operationId`; failed-attempt / recap-step items by feed index. Prose is
+ * ALWAYS the draft-stripped text and is rendered via `textContent` (never
+ * markdown/innerHTML) — the draft fences are already lifted into `drafts`. */
+export type CoachOverlayFeedItem =
+  | {
+      kind: 'exchange';
+      /** The exchange's own op id: the render key AND the acceptance-attribution
+       * id for its draft cards (NEVER the session's live/top-level op). */
+      operationId: string;
+      /** The kernel generation ref for this exchange (spec §3). Threaded to draft
+       * acceptance as a correlation FALLBACK: the background's op→ref map is a
+       * bounded in-memory cache that dies with the service worker, so a copy /
+       * insert after an SW restart or 50-entry eviction would otherwise lose its
+       * attribution. */
+      generationRef?: string;
+      question: string;
+      answerProse: string;
+      drafts: CoachOverlayDraft[];
+    }
+  | {
+      kind: 'failed-attempt';
+      question: string;
+      errorCode: string;
+      retryable: boolean;
+    }
+  | {
+      kind: 'recap-step';
+      mode: 'short' | 'full';
+      origin: 'auto' | 'explicit';
+      status: 'running' | 'done' | 'failed';
+      /** Fallback copy shown when an auto-recap FAILED but the chain proceeded
+       * to the coach turn with an older/no recap (spec §5 failure taxonomy),
+       * e.g. «обновить Recap не удалось — использую рекап от 3 дн». Absent for
+       * running/done steps and for chain-stopping failures. */
+      note?: string;
+    };
+
+/** Per-session auto-recap override (spec §5): `inherit` falls back to the
+ * `coachAutoRecap` setting; the others force a mode for THIS session only. */
+export type CoachAutoRecapOverride = 'inherit' | 'off' | 'short' | 'full';
+
+/** The coach overlay's session projection (spec §3). Built by the content
+ * orchestrator (T10) from the `CoachSession` store; the renderer keeps no
+ * session state of its own beyond this. */
+export interface CoachOverlaySessionView {
+  feedItems: CoachOverlayFeedItem[];
+  /** The in-flight question, shown as the pending item's bubble while streaming. */
+  pendingQuestion?: string;
+  /** The in-flight answer streamed so far (draft fences are lifted only on
+   * commit, so this is raw prose); rendered via textContent. */
+  pendingAnswerText?: string;
+  /** Pre-formatted recap freshness line, or '' to hide it (spec §5). */
+  recapStatusLine: string;
+  /** Unsent composer text for restore-on-reopen (spec §3). */
+  composerText: string;
+  /** False while a turn streams — the composer is locked (spec §3). */
+  composerEnabled: boolean;
+  /** Per-session auto-recap override (spec §5); drives the topbar cycle control. */
+  autoRecapOverride: CoachAutoRecapOverride;
+  /** `(accountId, groupId)` session identity; a change swaps the whole feed. */
+  sessionKey: string;
+}
+
 export type OverlayViewModel =
   | { kind: 'hidden' }
   | {
@@ -1520,6 +1687,29 @@ export type OverlayViewModel =
       llmSpend?: LlmSpendSummary;
       profiling?: OperationProfilingSnapshot;
       error: UserFacingError;
+    }
+  | {
+      // Coach chat mode (spec §3) — rendered exclusively by
+      // OverlayController's coach render path (createCoachView / updateCoachView)
+      // off the CoachSession store. Coach models BYPASS CompletedOverlayCache
+      // and overlayRawText entirely (spec §10).
+      kind: 'coach';
+      fanDisplayName: string;
+      /** Non-null == a turn is streaming: drives Esc=cancel-and-stay-open and
+       * the composer lock. Null == idle: Esc=close. NEVER an acceptance id. */
+      operationId: string | null;
+      sessionView: CoachOverlaySessionView;
+    }
+  | {
+      // Standalone Recap start dialog (spec §5): ⌘⇧S / the Recap button opens
+      // this instead of instantly generating. Полный (focused; Enter keeps the
+      // old ⌘⇧S+Enter muscle memory) / Короткий / «Открыть последний». Esc
+      // cancels. Creates NO generation until a mode is picked.
+      kind: 'recap-picker';
+      fanDisplayName: string;
+      /** Freshest-usable recap metadata (spec §5 read), or null until it loads.
+       * Gates + labels «Открыть последний» and picks its mode. */
+      recapStatus: RecapStatusResponse | null;
     };
 
 export type CompletedOverlayViewModel = Extract<

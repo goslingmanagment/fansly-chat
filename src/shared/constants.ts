@@ -7,8 +7,14 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 14;
+export const STORAGE_SCHEMA_VERSION = 15;
+/** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
+/** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
+ * run must never overwrite the durable full dossier, so it gets its own key and
+ * is NEVER pushed to `fan_profiles`. Disjoint from `summary:` (the ':' vs '-'
+ * at index 7 means neither prefix matches the other's keys). */
+export const SUMMARY_SHORT_CACHE_PREFIX = 'summary-short:';
 export const KNOWN_ACCOUNTS_KEY = 'knownAccounts';
 export const LEGACY_PERSONA_SNAPSHOT_KEY = 'legacyPersonaSnapshotV1';
 export const PERSONA_CATALOG_STORAGE_KEY = 'personaCatalog';
@@ -96,14 +102,57 @@ export const PING_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
 export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
 export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
-export const DEEP_DEFAULT_MESSAGE_COUNT = 1500;
+// v15: the deep-window default rose 1500 → 3000. The forward-only migration
+// (src/shared/migrations.ts) bumps a pre-v15 install still on the OLD default
+// to this new one; a user-chosen value is left untouched.
+export const DEEP_DEFAULT_MESSAGE_COUNT = 3000;
 export const DEEP_MIN_MESSAGE_COUNT = 100;
 export const DEEP_MAX_MESSAGE_COUNT = 3000;
+
+// ─── Coach ───────────────────────────────────────────────────────────────
+
+/** Fixed message window for a SHORT recap (spec §5) — a constant, never a
+ * user setting (full recap uses `deepMessageCount`). Also the hard ceiling the
+ * client clamps the loaded window to before sending, so a short recap's
+ * `clientContext.messageCount` is always ≤ this. */
+export const SHORT_SUMMARY_MESSAGE_COUNT = 300;
+
+/** How many prior coach turns are retained/replayed by default. */
+export const COACH_HISTORY_LIMIT_DEFAULT = 10;
+export const COACH_HISTORY_LIMIT_MIN = 1;
+export const COACH_HISTORY_LIMIT_MAX = 20;
+
+/** Wire ceiling for a single replayed coach answer, MIRRORING the vendored
+ * kernel SDK's `COACH_ANSWER_MAX_CHARS` (contracts/routes:
+ * `coachHistory[].answer` and the coach output stream both cap here). That
+ * constant is defined in the SDK but is NOT re-exported through the
+ * `@kernel/sdk` barrel, so the boundary validator mirrors its value here rather
+ * than importing it (the value is pinned by the coach body contract test in
+ * core; a drift would fail the kernel's own zod bound at request time). */
+export const COACH_ANSWER_MAX_CHARS = 64_000;
+
+/** Kernel-side ceiling for a coach question, mirroring the SDK schema bound.
+ * Enforced HERE only for replayed `coachHistory[].question` entries (the
+ * boundary array validator); the live `chatterQuestion` is passed through as a
+ * plain optional string and the kernel body schema is its real gate. */
+export const COACH_QUESTION_MAX_CHARS = 2_000;
+
+/** Staleness threshold for the auto-recap decision (spec §5): a stored recap
+ * older than this is considered stale and the auto-recap chain refreshes it
+ * before the first coach question. 24h. */
+export const COACH_RECAP_FRESH_MS = 24 * 60 * 60 * 1000;
 
 // ─── Timeouts ────────────────────────────────────────────────────────────
 
 export const QUICK_OPERATION_TIMEOUT_MS = 60_000;
-export const DEEP_OPERATION_PREP_TIMEOUT_MS = 180_000;
+// Budget for the deep-feature PREP stage (live-read pagination of the Fansly DOM
+// before the LLM stream). Sized for the deep window ceiling: 3000 msgs = 120
+// pages × 300ms pagination delay ≈ 36s of pure pacing floor, before per-request
+// network latency stacks on top. The old 180s was sized for a 1500-msg window;
+// the v15 deep default doubled to 3000 (DEEP_DEFAULT_MESSAGE_COUNT), so the
+// prep budget doubles to 360s to keep a full-window coach/recap load from
+// timing out mid-pagination.
+export const DEEP_OPERATION_PREP_TIMEOUT_MS = 360_000;
 export const DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS = 45_000;
 export const DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS = 45_000;
 export const DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS = 300_000;
@@ -191,6 +240,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   'ping': 'Ping',
   'hi-greeting': 'Hi',
   'voice-script': 'Voice',
+  'coach-chat': 'Coach',
 };
 
 // ─── Default Settings ───────────────────────────────────────────────────
@@ -206,6 +256,8 @@ export const DEFAULT_SETTINGS: Settings = {
   debugMode: false,
   promptCachingEnabled: true,
   uiTheme: 'system',
+  coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
+  coachAutoRecap: 'off',
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

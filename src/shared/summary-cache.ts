@@ -1,4 +1,4 @@
-import { SUMMARY_CACHE_PREFIX } from './constants.js';
+import { SUMMARY_CACHE_PREFIX, SUMMARY_SHORT_CACHE_PREFIX } from './constants.js';
 import { normalizeAgencyHubSummarySyncMetadata } from './agency-hub.js';
 import type {
   AgencyHubSummarySyncMetadata,
@@ -7,7 +7,14 @@ import type {
 } from './types.js';
 import { findActivePersona } from './persona-catalog.js';
 
-export type SummaryCacheKey = `${typeof SUMMARY_CACHE_PREFIX}${string}`;
+/** Recap size for the local cache. `full` uses the legacy `summary:` prefix so
+ * unqualified pre-coach keys keep reading as full (no key migration); `short`
+ * gets its own `summary-short:` prefix (spec §5). */
+export type SummaryCacheMode = 'full' | 'short';
+
+export type SummaryCacheKey =
+  | `${typeof SUMMARY_CACHE_PREFIX}${string}`
+  | `${typeof SUMMARY_SHORT_CACHE_PREFIX}${string}`;
 
 interface SummaryCacheStorageArea {
   get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>;
@@ -21,12 +28,17 @@ interface SummaryCacheStoreOptions {
   afterRemove?: (keys: SummaryCacheKey[]) => void;
 }
 
-export function summaryCacheKey(groupId: string): SummaryCacheKey {
-  return `${SUMMARY_CACHE_PREFIX}${groupId}`;
+export function summaryCacheKey(
+  groupId: string,
+  mode: SummaryCacheMode = 'full',
+): SummaryCacheKey {
+  return mode === 'short'
+    ? `${SUMMARY_SHORT_CACHE_PREFIX}${groupId}`
+    : `${SUMMARY_CACHE_PREFIX}${groupId}`;
 }
 
 export function isSummaryCacheKey(key: string): key is SummaryCacheKey {
-  return key.startsWith(SUMMARY_CACHE_PREFIX);
+  return key.startsWith(SUMMARY_CACHE_PREFIX) || key.startsWith(SUMMARY_SHORT_CACHE_PREFIX);
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -91,6 +103,12 @@ export function normalizeSummaryCacheEntry(value: unknown): SummaryCacheEntry | 
   if (typeof record.fanAccountId === 'string' || record.fanAccountId === null) {
     entry.fanAccountId = record.fanAccountId;
   }
+  // Preserve the trusted-terminal marker so entries written behind the
+  // fail-closed guards keep it through collect/migration; a legacy entry simply
+  // lacks it (structurally still valid — it fails the HIT gate lazily below).
+  if (record.trustedTerminal === true) {
+    entry.trustedTerminal = true;
+  }
 
   const agencyHubSync = normalizeSummarySyncMetadata(record.agencyHubSync);
   if (agencyHubSync) {
@@ -138,8 +156,9 @@ export function listSummaryCacheEntries(
 export function getSummaryCacheEntry(
   storage: object,
   groupId: string,
+  mode: SummaryCacheMode = 'full',
 ): SummaryCacheEntry | null {
-  const value = (storage as Record<string, unknown>)[summaryCacheKey(groupId)];
+  const value = (storage as Record<string, unknown>)[summaryCacheKey(groupId, mode)];
   return normalizeSummaryCacheEntry(value);
 }
 
@@ -197,14 +216,21 @@ export class SummaryCacheStore {
     private readonly options: SummaryCacheStoreOptions,
   ) {}
 
-  async get(groupId: string): Promise<SummaryCacheEntry | null> {
-    const key = summaryCacheKey(groupId);
+  async get(
+    groupId: string,
+    mode: SummaryCacheMode = 'full',
+  ): Promise<SummaryCacheEntry | null> {
+    const key = summaryCacheKey(groupId, mode);
     const result = await this.storage.get(key);
     return normalizeSummaryCacheEntry(result[key]);
   }
 
-  async save(groupId: string, entry: SummaryCacheEntry): Promise<void> {
-    const key = summaryCacheKey(groupId);
+  async save(
+    groupId: string,
+    entry: SummaryCacheEntry,
+    mode: SummaryCacheMode = 'full',
+  ): Promise<void> {
+    const key = summaryCacheKey(groupId, mode);
     const normalizedEntry = normalizeSummaryCacheEntry(entry);
     if (!normalizedEntry) {
       throw new Error('Invalid summary cache entry');
@@ -227,9 +253,10 @@ export class SummaryCacheStore {
   async update(
     groupId: string,
     updater: (entry: SummaryCacheEntry) => SummaryCacheEntry,
+    mode: SummaryCacheMode = 'full',
   ): Promise<SummaryCacheEntry | null> {
-    const key = summaryCacheKey(groupId);
-    const currentEntry = getSummaryCacheEntry(await this.loadState(), groupId);
+    const key = summaryCacheKey(groupId, mode);
+    const currentEntry = getSummaryCacheEntry(await this.loadState(), groupId, mode);
     if (!currentEntry) {
       return null;
     }
@@ -243,8 +270,8 @@ export class SummaryCacheStore {
     return nextEntry;
   }
 
-  async remove(groupId: string): Promise<void> {
-    await this.removeKeys([summaryCacheKey(groupId)]);
+  async remove(groupId: string, mode: SummaryCacheMode = 'full'): Promise<void> {
+    await this.removeKeys([summaryCacheKey(groupId, mode)]);
   }
 
   private async setEntry(
@@ -280,7 +307,12 @@ export function isValidSummaryCacheEntry(
     entry.personaCatalogSource === personaCatalogSource &&
     (entry.modelId ?? null) === (modelId ?? null) &&
     entry.spendingDataVerified === true &&
-    entry.subscriptionLookupVerified === true
+    entry.subscriptionLookupVerified === true &&
+    // A cache hit requires proof the recap was a complete, trusted generation.
+    // Entries cached before the exhaustion+empty fail-closed guards (including a
+    // pre-v15 truncated recap) lack this marker and are treated as a MISS, so a
+    // truncated recap can never be served or Hub-pushed again — it regenerates.
+    entry.trustedTerminal === true
   );
 }
 

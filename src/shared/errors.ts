@@ -294,6 +294,15 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'This conversation has too many messages for a greeting.',
     description: 'Hi works best for new conversations (10 messages or fewer). Use Reply instead.',
   },
+  coach_requires_newer_hub: {
+    key: 'coach_requires_newer_hub',
+    code: 'CG-HUB-11',
+    // Structured `unknown_ai_feature` (404) from the gateway: THIS page's
+    // Agency Hub predates the coach-chat feature. A generic 404 (missing page /
+    // unauthorized) keeps its own code and must never be relabelled as this.
+    message: 'Coach requires a newer Agency Hub.',
+    description: 'This page\'s Agency Hub does not yet support Coach. Ask a manager to update the Hub.',
+  },
   insertion_failed: {
     key: 'insertion_failed',
     code: 'CG-UI-01',
@@ -305,6 +314,32 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     code: 'CG-APP-01',
     message: 'Something went wrong.',
     description: 'Try again. If it keeps failing, report the error code.',
+  },
+  coach_fan_unresolved: {
+    key: 'coach_fan_unresolved',
+    code: 'CG-APP-02',
+    // Coach needs a resolved fan (fanRef is REQUIRED kernel-side). The group
+    // lookup could not identify the conversation partner — potentially
+    // persistent, so the copy points at reopening the chat, not a blind retry.
+    message: 'Couldn\'t identify the fan in this conversation.',
+    description: 'Reopen the chat and try again.',
+  },
+  no_saved_recap: {
+    key: 'no_saved_recap',
+    code: 'CG-APP-03',
+    // «Открыть последний» (spec §5): a view-cached-only recap read found no
+    // stored recap for this fan/persona. Not a failure — just nothing to show
+    // yet; the copy points at generating one.
+    message: 'No saved recap for this fan yet.',
+    description: 'Run Полный or Короткий to generate one.',
+  },
+  settings_load_failed: {
+    key: 'settings_load_failed',
+    code: 'CG-APP-04',
+    // A coach submit could not read local settings (browser.storage failure).
+    // The question is preserved in the composer; a retry usually succeeds.
+    message: 'Couldn\'t read your settings.',
+    description: 'Your question is kept — try sending it again.',
   },
 };
 

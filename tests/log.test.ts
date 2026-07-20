@@ -103,6 +103,8 @@ describe('isDebugEnabled', () => {
       debugMode: true,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
     })).toBe(true);
   });
 
@@ -118,6 +120,8 @@ describe('isDebugEnabled', () => {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
     })).toBe(false);
   });
 

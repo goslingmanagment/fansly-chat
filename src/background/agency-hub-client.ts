@@ -24,11 +24,13 @@ import {
   toUserError,
 } from '../shared/errors.js';
 import { logWarn } from '../shared/log.js';
+import { isRecapStatusResponse } from '../shared/protocol.js';
 import type {
   AgencyHubAiUsageBatchResponse,
   AgencyHubAiUsageEvent,
   AgencyHubConnectionTestResponse,
   AgencyHubSummarySyncMetadata,
+  RecapStatusResponse,
   Settings,
   SpendersStreamState,
   UserFacingError,
@@ -480,6 +482,62 @@ export class AgencyHubClient {
       this.sdkOptions(baseUrl, bearer, signal),
       { pageLabel, id },
     );
+  }
+
+  /** Coach recap-status read (spec §3/§5): the freshest usable full + short
+   * fan-summary recap for one conversation — metadata only, NO generation and
+   * NO AI spend. Honest availability (E43/E45): ONLY a valid 200 confirms
+   * reality — then `state: 'ok'` with slots that may be null (genuinely no recap).
+   * A 404 proves only that the status could NOT be read (an old Hub without the
+   * route, or a page deleted mid-flight), and any other failure (timeout, 401/403,
+   * hub_request_failed) likewise means "could not check" — all of these report
+   * `state: 'unavailable'` (404 returned here; the rest throw and the caller
+   * coalesces to unavailable), which the consumer must NOT render as "no recap".
+   * Unlike `getConversationProfile`, a 404 is deliberately NOT treated as a
+   * confirmed domain "none". Canonical identity (§5): `conversationRef = groupId`,
+   * `fanRef = fanAccountId`. */
+  async getRecapStatus(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    params: { pageLabel: string; conversationRef: string; fanRef?: string | null },
+    signal: AbortSignal,
+  ): Promise<RecapStatusResponse> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl || !bearer || !await this.hasHostPermission(baseUrl)) {
+      // Not configured / no host permission — the Hub was never reached, so the
+      // caller must NOT read this as "no recap" (E43 honest empty-states).
+      return { state: 'unavailable', full: null, short: null };
+    }
+    try {
+      const response = await this.sdkFor(baseUrl, bearer, signal).aiRecapStatus({
+        query: {
+          pageLabel: params.pageLabel,
+          conversationRef: params.conversationRef,
+          ...(params.fanRef ? { fanRef: params.fanRef } : {}),
+        },
+      });
+      // Defense-in-depth at this untrusted boundary (item 4): the SDK already
+      // safeParses the 200 against aiRecapStatusResponseSchema, but re-validate
+      // the shape here so a drifted/old Hub whose reply somehow slips through can
+      // never reach the consumer as a trusted 'ok' — fail closed to unavailable.
+      if (!isRecapStatusResponse(response)) {
+        return { state: 'unavailable', full: null, short: null };
+      }
+      // Only a VALID 200 confirms reality — then null slots genuinely mean "no recap".
+      return { state: 'ok', full: response.full, short: response.short };
+    } catch (error) {
+      // A 404 only proves the endpoint/conversation could not be READ (an old Hub
+      // without the route, or a page deleted between the pageLabel resolve and
+      // this call) — it does NOT confirm "no recap". Only a valid 200 can. So a
+      // 404, like any other failure, reports 'unavailable', never confirmed-empty.
+      // (Core signals genuine absence as a 200 with null slots, never a 404.)
+      if (error instanceof KernelApiError && error.status === 404) {
+        return { state: 'unavailable', full: null, short: null };
+      }
+      // Timeout / hub_request_failed / 401/403 → could not check; surface as a
+      // throw so the caller reports 'unavailable', not "no recap".
+      throw this.toHubError(error, 'recap status fetch');
+    }
   }
 
   /** Stage 32 Task 4: one kernel query replaces the board's Fansly earnings

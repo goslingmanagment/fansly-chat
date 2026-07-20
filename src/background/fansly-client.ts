@@ -122,6 +122,11 @@ export interface MessageLoadResult {
   pages: FanslyMessagePageResponse[];
   pagesLoaded: number;
   targetPages: number;
+  /** True when pagination stopped because a page came back short/empty (the
+   * provider's history end was reached); false when it stopped because
+   * `requestedCount` was satisfied (more history may exist below the window).
+   * Feeds the coach `transcriptCoverage` derivation (spec §5/§6). */
+  reachedEnd: boolean;
 }
 
 export interface MessageLoadProgress {
@@ -978,6 +983,7 @@ export class FanslyClient {
     let collectedCount = 0;
     let before: string | null = null;
     let currentPage = 0;
+    let reachedEnd = false;
 
     while (collectedCount < requestedCount) {
       const page = await this.getMessagePage(groupId, before, session, signal);
@@ -994,6 +1000,8 @@ export class FanslyClient {
 
       before = extractOldestMessageId(messages);
       if (!before || messages.length < FANSLY_PAGE_LIMIT) {
+        // A short/empty page means we exhausted the conversation's history.
+        reachedEnd = true;
         break;
       }
 
@@ -1004,6 +1012,7 @@ export class FanslyClient {
       pages,
       pagesLoaded: currentPage,
       targetPages,
+      reachedEnd,
     };
   }
 }

@@ -166,6 +166,7 @@ function createHarness(options: {
       pages: [messagePage()],
       pagesLoaded: 1,
       targetPages: 1,
+      reachedEnd: true,
     })),
     getGroup: vi.fn<FanslyClient['getGroup']>(options.getGroup ?? (async () => ({
       id: 'group-1',
@@ -187,7 +188,12 @@ function createHarness(options: {
   const tabContexts = {
     get: vi.fn(() => currentContext),
     getOrCreate: vi.fn(() => currentContext),
-    setFan: vi.fn((_tabId: number, fanAccountId: string | null, fanDisplayName: string | null) => {
+    setFan: vi.fn((
+      _tabId: number,
+      _groupId: string | null,
+      fanAccountId: string | null,
+      fanDisplayName: string | null,
+    ) => {
       currentContext.fanAccountId = fanAccountId;
       currentContext.fanDisplayName = fanDisplayName;
       return currentContext;

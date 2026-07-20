@@ -188,11 +188,25 @@ function buildFanslyClientMock() {
       _messageCount: number,
       _session: unknown,
       _signal?: AbortSignal,
-    ) => ({
+    ): Promise<{
+      pages: FanslyMessagePageResponse[];
+      pagesLoaded: number;
+      targetPages: number;
+      // Optional in the mock so pre-Task-7 overrides that omit it still type;
+      // an absent value degrades transcriptCoverage to 'window' (safe default).
+      reachedEnd?: boolean;
+    }> => ({
       pages: buildMessagePages(30),
       pagesLoaded: 2,
       targetPages: 2,
+      reachedEnd: false,
     })),
+    getMessagePage: vi.fn(async (
+      _groupId: string,
+      _before: string | null,
+      _session: unknown,
+      _signal?: AbortSignal,
+    ) => buildMessagePages(1)[0]!),
     getGroup: vi.fn(async () => ({
       users: [{ userId: 'account-1' }, { userId: 'fan-1' }],
     })),
@@ -341,6 +355,7 @@ async function createCoordinatorHarness(options?: {
     kernelGateway as never,
     storageCoordinator,
     agencyHubClient as never,
+    options?.unusedReporter as never,
   ) as any;
   const port = createMockRuntimePort(1);
   coordinator.registerPort(port as never);
@@ -444,6 +459,7 @@ describe('OperationCoordinator', () => {
         spendingDataVerified: true,
         subscriptionLookupVerified: true,
         modelId: 'kernel',
+        trustedTerminal: true,
       },
     };
 
@@ -750,6 +766,64 @@ describe('OperationCoordinator', () => {
       const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
 
       await tabInit(coordinator, 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
+    it('reports no available summary for an untrusted recap and never re-pushes it via tab-state', async () => {
+      // Round-9 P1: an untrusted (pre-guard, possibly truncated) recap is a local
+      // cache MISS, so hasAvailableSummary is false and the opportunistic tab-state
+      // re-push never even fires. (The guard branch itself is pinned separately
+      // below — this only covers the tab-state GATE.)
+      hubConfiguredSettings();
+      delete (mockStorage['summary:group-1'] as Record<string, unknown>).trustedTerminal;
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator, port } = await createCoordinatorHarness({ agencyHubClient });
+
+      await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(postedMessages(port)).toContainEqual(expect.objectContaining({
+        type: 'tab:state',
+        state: expect.objectContaining({ hasAvailableSummary: false }),
+      }));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
+    it('the retrySummaryHubSync guard itself refuses an untrusted recap on a direct call (item 4)', async () => {
+      // Round-11 item 4: the tab-state assertion above stays green even if
+      // operations.ts's `trustedTerminal !== true` guard is deleted (retrySummaryHubSync
+      // is never reached when hasAvailableSummary is false). Exercise the guard
+      // DIRECTLY — the cache-swap race: the entry was trusted when tab state was
+      // computed, then replaced by a legacy one before the async re-read — so
+      // removing the guard makes this test go red.
+      hubConfiguredSettings();
+      // Untrusted + unsynced (base fixture has no agencyHubSync), otherwise fully
+      // push-eligible: baseUrl set, persona matches, not-yet-saved. So the ONLY
+      // thing that can stop the push is the trustedTerminal guard — deleting it
+      // (grep operations.ts) makes this test go red.
+      delete (mockStorage['summary:group-1'] as Record<string, unknown>).trustedTerminal;
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator } = await createCoordinatorHarness({ agencyHubClient });
+
+      // tab:init wires the tab route + session. hasAvailableSummary is false for the
+      // untrusted entry, so tab:init does NOT re-push (no retry-state pollution).
+      await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+
+      // Direct call reaches the guard branch itself (the cache-swap race). Refuses.
+      await (coordinator as any).retrySummaryHubSync(1);
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
@@ -1895,6 +1969,66 @@ describe('OperationCoordinator', () => {
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
   });
 
+  it('fails a compare card closed on a truncated stream (provider length)', async () => {
+    // Round-4 P2: compare cards are replies; the literal 'max_tokens' check
+    // missed OpenRouter's provider 'length'. isOutputExhausted normalizes both,
+    // so a truncated card is non-insertable instead of presented.
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: unknown,
+        callbacks: { onStopReason?: (reason: string | null) => void },
+      ) => {
+        callbacks.onStopReason?.('length');
+        return 'Hey babe, I was just thinking about the custom you asked for and';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const currentError = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
+        message.type === 'compare:cardError' && message.cardId === 'current:personality-1',
+    );
+    expectUserErrorIdentity(currentError?.error, {
+      key: 'ai_output_unusable',
+      code: 'CG-API-06',
+    });
+    // Fail closed: the truncated card is never presented as a completed card.
+    expect(
+      messages.some(
+        (message) =>
+          message.type === 'compare:cardComplete' &&
+          message.cardId === 'current:personality-1',
+      ),
+    ).toBe(false);
+  });
+
   it('treats unexpected compare card aborts as connection errors and still completes', async () => {
     await mockCompareCards([
       {
@@ -2252,6 +2386,60 @@ describe('OperationCoordinator', () => {
       message.type === 'operation:complete' &&
       message.operationId === 'old-validation-scan'
     )).toBe(false);
+  });
+
+  it('P1-1: a route-change during validateStart kills the stale start and leaves the new chat intact', async () => {
+    // A reserved-but-not-yet-active op on group-1 must NOT re-poison the tab
+    // context when the chatter switches to group-2 mid-validation: it dies with
+    // chat_changed and never re-touches the context (no setRoute rollback that
+    // would let its setFan write a cross-group fan).
+    const fanslyClient = buildFanslyClientMock();
+    const { coordinator, port } = await createCoordinatorHarness({ fanslyClient });
+    await coordinator.handlePortMessage(1, { type: 'tab:init', groupId: 'group-1', routeNonce: 1 });
+
+    // Hang validateStart's browser.tabs.get until we've switched routes.
+    let resolveTab: ((value: { url: string }) => void) | null = null;
+    let markValidationStarted: (() => void) | null = null;
+    const validationStarted = new Promise<void>((resolve) => {
+      markValidationStarted = resolve;
+    });
+    (globalThis as any).browser.tabs.get = vi.fn(() => {
+      markValidationStarted?.();
+      return new Promise((resolve) => {
+        resolveTab = resolve;
+      });
+    });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'stale-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+    await validationStarted;
+
+    // The chatter switches to group-2 while the op validates.
+    await coordinator.handlePortMessage(1, { type: 'tab:routeChanged', groupId: 'group-2', routeNonce: 2 });
+
+    // validateStart's tab.url still shows the OLD chat (URLs lag routeChanged) — so
+    // its own URL check passes; only the routeNonce re-check catches the stale start.
+    resolveTab!({ url: 'https://fansly.com/messages/group-1' });
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage?.error).toMatchObject({ key: 'chat_changed' });
+    // The context stays on the NEW chat — never rolled back to group-1.
+    expect((coordinator as any).tabContexts.get(1)).toMatchObject({
+      groupId: 'group-2',
+      fanAccountId: null,
+    });
   });
 
   it('revalidates an uncached Scan task after fan-id resolution and before Hub push', async () => {
@@ -2898,6 +3086,137 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb')).toBeUndefined();
   });
 
+  it('coach-chat PREP uses the QUICK budget, not the 360s deep-prep (round-13 P2-6)', async () => {
+    // coach reads only the quick window (~4 pages), so its PREP aborts at
+    // QUICK_OPERATION_TIMEOUT_MS (60s), NOT the 360s deep-prep budget — a hung
+    // Fansly read during Coach must not freeze the chatter for 6 minutes. (Its
+    // STREAM timeouts stay deep — pinned by the next test.)
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+
+    let resolveLoadStarted: (() => void) | null = null;
+    const loadStarted = new Promise<void>((resolve) => {
+      resolveLoadStarted = resolve;
+    });
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockImplementation(
+      async (
+        _groupId: string,
+        _messageCount: number,
+        _session: unknown,
+        signal?: AbortSignal,
+      ) => new Promise((_, reject) => {
+        resolveLoadStarted?.();
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      }),
+    );
+    const { coordinator, port } = await createCoordinatorHarness({ fanslyClient });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'coach-op',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await loadStarted;
+
+    // Just before the quick prep ceiling: still running.
+    await vi.advanceTimersByTimeAsync(QUICK_OPERATION_TIMEOUT_MS - 1_000);
+    expect(
+      postedMessages(port).some((message) => message.type === 'operation:error'),
+    ).toBe(false);
+
+    // At the quick prep ceiling: prep times out — NOT waiting for the 360s deep-prep.
+    await vi.advanceTimersByTimeAsync(1_000);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, {
+      key: 'timed_out',
+      code: 'CG-NET-02',
+    });
+    // Aborted at prep (load-messages), never reached the stream (llm-ttfb).
+    expect(
+      errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb'),
+    ).toBeUndefined();
+  });
+
+  it('coach-chat STREAM uses the DEEP TTFB budget, not the 60s quick-total (round-13 P2-6)', async () => {
+    // The other half of the split: once the (quick) prep completes and the stream
+    // starts, coach's stream timeouts are DEEP — a hung TTFB aborts at the deep
+    // TTFB budget, proving the stream is NOT under a 60s quick-total ceiling.
+    vi.useFakeTimers();
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      debugMode: true,
+    };
+    let resolveStreamStarted: (() => void) | null = null;
+    const streamStarted = new Promise<void>((resolve) => {
+      resolveStreamStarted = resolve;
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(
+        (
+          _settings: unknown,
+          _request: unknown,
+          _callbacks: unknown,
+          signal: AbortSignal,
+        ) => new Promise<string>((_resolve, reject) => {
+          resolveStreamStarted?.();
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }),
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    const startPromise = coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'coach-stream',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    await streamStarted;
+    // Just before the deep TTFB budget: coach stream still running.
+    await vi.advanceTimersByTimeAsync(DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS - 1_000);
+    expect(
+      postedMessages(port).some((message) => message.type === 'operation:error'),
+    ).toBe(false);
+
+    // At the deep TTFB budget the stream aborts via the llm-ttfb STAGE — a stage a
+    // quick-total feature never arms (it would run to the 60s total instead). So
+    // the presence of a failed llm-ttfb stage proves the stream is on the deep path.
+    await vi.advanceTimersByTimeAsync(1_000);
+    await startPromise;
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, { key: 'timed_out', code: 'CG-NET-02' });
+    expect(
+      errorMessage?.profiling?.stages.find((stage) => stage.key === 'llm-ttfb'),
+    ).toMatchObject({ status: 'failed' });
+  });
+
   it('times out deep operations when LLM TTFB exceeds the stage budget', async () => {
     vi.useFakeTimers();
     mockStorage.settings = {
@@ -3217,6 +3536,53 @@ describe('OperationCoordinator', () => {
     expect(errorMessage?.profiling?.stages.find((stage) => stage.key === 'ping-analysis')?.detail).toBe('active');
   });
 
+  it('viewCachedOnly serves the stored recap without generating (spec §5 «Открыть последний»)', async () => {
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'view-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: true });
+    // No message pagination for a pure cache view.
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
+  it('viewCachedOnly fails with no_saved_recap when nothing is stored (no generation)', async () => {
+    const { coordinator, port, fanslyClient } = await createCoordinatorHarness();
+    delete mockStorage['summary:group-1'];
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'view-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      viewCachedOnly: true,
+    });
+
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expectUserErrorIdentity(errorMessage?.error, { key: 'no_saved_recap', code: 'CG-APP-03' });
+    // Fail-closed: no pagination, no kernel call.
+    expect(fanslyClient.loadMessages).not.toHaveBeenCalled();
+  });
+
   it('returns summary-cache profiling for fan summary cache hits in debug mode', async () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
@@ -3369,6 +3735,9 @@ describe('OperationCoordinator', () => {
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
+      // A fresh generation sits behind the fail-closed guards, so it is marked
+      // trusted-terminal — that marker is what makes it a valid future cache hit.
+      trustedTerminal: true,
     });
     expect(JSON.stringify(mockStorage['summary:group-1'])).not.toContain('Stale Hub summary');
     expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
@@ -3888,7 +4257,7 @@ describe('OperationCoordinator', () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
     fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
-    const { coordinator, port } = await createCoordinatorHarness({
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({
       anthropicRawText: 'Fresh summary',
       agencyHubClient,
       fanslyClient,
@@ -3909,9 +4278,17 @@ describe('OperationCoordinator', () => {
         message.type === 'operation:complete',
     );
 
+    // P2-messageCount: the REQUESTED window (deepMessageCount = 500 in the
+    // harness) rides the kernel request top-level so core records requestedCount
+    // correctly — distinct from clientContext.messageCount (the kept count).
+    expect(kernelRequestFromStreamCall(kernelGateway).messageCount).toBe(500);
+
     expect(completeMessage?.result.summaryMeta).toMatchObject({
       cached: false,
       syncStatus: { state: 'saving' },
+      // Coverage header data (spec §5) rides on every freshly generated recap.
+      keptCount: expect.any(Number),
+      transcriptCoverage: expect.stringMatching(/^(full-history|window)$/),
     });
     expect(postedMessages(port).find((message) => message.type === 'operation:error')).toBeUndefined();
 
@@ -3936,6 +4313,92 @@ describe('OperationCoordinator', () => {
         pageLabel: 'creator-fs',
       });
     });
+  });
+
+  it('trustedTerminal survives the hub-sync update, so the synced recap stays a cache hit (round-13 P2-7)', async () => {
+    // trustedTerminal is the ONLY key to a cache hit and it survives the async
+    // sync-status update SOLELY via persistSummarySyncStatus's object spread. Pin
+    // it: a refactor that rebuilds the entry explicitly would silently drop the
+    // marker after the first successful push → EVERY recap a permanent cache-miss
+    // (AI spend + full deep pagination every time).
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: '',
+    };
+    delete mockStorage['summary:group-1'];
+    const fetchMock = vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      if (href === 'http://localhost:3000/api/v1/pages') {
+        return jsonResponse([hubPageRow()]);
+      }
+      if (href === 'http://localhost:3000/api/v1/pages/creator-fs/fans/fan-1/profile') {
+        return jsonResponse(hubProfileRecord(1));
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { AgencyHubClient } = await import('../src/background/agency-hub-client.js');
+    const agencyHubClient = new AgencyHubClient(fetch);
+    (agencyHubClient as any).resolvePageLabelForUsername = vi.fn(async () => 'creator-fs');
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, any>,
+        callbacks: { onText: (text: string) => void; onMeta?: (meta: Record<string, unknown>) => void },
+      ) => {
+        callbacks.onMeta?.({ requestId: 'gen-1', clientRequestId: 'summary-op-1', model: 'claude-sonnet-4-5' });
+        callbacks.onText('Fresh summary');
+        return 'Fresh summary';
+      }),
+    };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+    const { coordinator, port } = await createCoordinatorHarness({
+      kernelGateway,
+      agencyHubClient,
+      fanslyClient,
+    });
+
+    // First run: generate + Hub-sync.
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-1',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    await vi.waitFor(() => {
+      const cacheEntry = mockStorage['summary:group-1'] as SummaryCacheEntry | undefined;
+      expect(cacheEntry?.agencyHubSync).toMatchObject({ state: 'saved' });
+      // The marker MUST survive the sync-status update.
+      expect(cacheEntry?.trustedTerminal).toBe(true);
+    });
+
+    // Second run WITHOUT forceRegenerate: the marked, synced entry is a cache HIT.
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op-2',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    const secondComplete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete' && message.operationId === 'summary-op-2',
+    );
+    expect(secondComplete?.result.summaryMeta).toMatchObject({ cached: true });
+    // Cache hit ⇒ no regeneration: streamFeature ran exactly once (the first op).
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
   });
 
   it('W9.4/A18: caches a fresh fan summary even when the meta frame names a real vendor model', async () => {
@@ -4009,6 +4472,7 @@ describe('OperationCoordinator', () => {
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
+      trustedTerminal: true,
     };
 
     const fetchMock = vi.fn(async (url: URL | string) => {
@@ -4213,6 +4677,7 @@ describe('OperationCoordinator', () => {
       subscriptionLookupVerified: true,
       modelId: 'kernel',
       fanAccountId: 'fan-1',
+      trustedTerminal: true,
       agencyHubSync: {
         baseUrl: 'http://hub-a.test',
         pageLabel: 'creator-fs',
@@ -4364,6 +4829,309 @@ describe('OperationCoordinator', () => {
       key: 'ai_output_unusable',
       code: 'CG-API-06',
     });
+  });
+
+  it('fails closed on a truncated coach stream (max_tokens AND provider length)', async () => {
+    // Round-4 P1: coach-chat is promptMode 'analysis', so the reply-only guard
+    // let a truncated coach answer through and present as a result — a hard-rule
+    // violation. isOutputExhausted normalizes BOTH the kernel 'max_tokens' and
+    // OpenRouter's provider 'length'; the guard now covers coach-chat.
+    for (const stopReason of ['max_tokens', 'length'] as const) {
+      const kernelGateway = {
+        isConfigured: vi.fn(() => true),
+        streamFeature: vi.fn(
+          async (
+            _settings: unknown,
+            _request: unknown,
+            callbacks: { onStopReason?: (reason: string | null) => void },
+            _signal: unknown,
+          ) => {
+            callbacks.onStopReason?.(stopReason);
+            return 'Try leading with a question about her weekend, then bridge to the';
+          },
+        ),
+      };
+      const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+      await coordinator.startOperation(1, {
+        type: 'operation:start',
+        operationId: `coach-op-${stopReason}`,
+        feature: 'coach-chat',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        forceRegenerate: false,
+      });
+
+      const messages = postedMessages(port);
+      const errorMessage = messages.find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          message.type === 'operation:error',
+      );
+      expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+      // Fail closed: the truncated coach answer is NEVER presented as a result.
+      expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+    }
+  });
+
+  it('fails closed on a truncated shipped reply feature (fast-reply, provider length)', async () => {
+    // Round-11 P2: widening the exhaustion guard to isOutputExhausted ('length'
+    // too) changed live behaviour for the FOUR shipped reply features — a provider
+    // 'length' stop now hard-fails where a truncated-but-insertable reply used to
+    // reach the fan. Pin fast-reply, the highest-frequency path; a revert to the
+    // literal `max_tokens` check would go red here.
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(
+        async (
+          _settings: unknown,
+          _request: unknown,
+          callbacks: { onStopReason?: (reason: string | null) => void },
+          _signal: unknown,
+        ) => {
+          callbacks.onStopReason?.('length');
+          // Non-empty, normally-insertable text — the point is that 'length' fails
+          // it closed anyway (normalizeReplyParts would otherwise yield a part).
+          return 'Hey babe, I was just thinking about you and';
+        },
+      ),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-length',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const messages = postedMessages(port);
+    const errorMessage = messages.find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+    expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+  });
+
+  it('fails closed on a truncated analysis feature (help-me AND chat-review, max_tokens + length)', async () => {
+    // Round-12 P1-1: the exhaustion guard is now UNCONDITIONAL. help-me and
+    // chat-review parse XML (valid:false rather than throwing), so before this a
+    // truncated analysis result reached the chatter as a valid:false fallback —
+    // violating "a truncated stream is an error, never presented" with NO
+    // exceptions (CLAUDE.md). Every feature × both stop reasons must fail closed.
+    for (const feature of ['help-me', 'chat-review'] as const) {
+      for (const stopReason of ['max_tokens', 'length'] as const) {
+        const kernelGateway = {
+          isConfigured: vi.fn(() => true),
+          streamFeature: vi.fn(
+            async (
+              _settings: unknown,
+              _request: unknown,
+              callbacks: { onStopReason?: (reason: string | null) => void },
+              _signal: unknown,
+            ) => {
+              callbacks.onStopReason?.(stopReason);
+              // A parseable-but-truncated analysis body — the point is it fails
+              // closed even though parseXml would otherwise yield a valid:false result.
+              return '<coaching>Lead with warmth then bridge to the';
+            },
+          ),
+        };
+        const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+        await coordinator.startOperation(1, {
+          type: 'operation:start',
+          operationId: `${feature}-${stopReason}`,
+          feature,
+          groupId: 'group-1',
+          routeNonce: 1,
+          domFanDisplayName: 'alice',
+          forceRegenerate: false,
+        });
+
+        const messages = postedMessages(port);
+        const errorMessage = messages.find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+            message.type === 'operation:error',
+        );
+        expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+        expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+      }
+    }
+  });
+
+  it('fails closed on a truncated fan-summary stream and caches nothing', async () => {
+    // Round-4 extended the exhaustion guard to fan-summary; this pins it. A
+    // truncated recap must fail closed — never presented AND, the whole point for
+    // recaps, never written to the summary cache (a truncated recap there would
+    // poison later reads and any Hub dossier push). Cover the kernel 'max_tokens'
+    // and OpenRouter's provider 'length'.
+    for (const stopReason of ['max_tokens', 'length'] as const) {
+      delete mockStorage['summary:group-1'];
+      const kernelGateway = {
+        isConfigured: vi.fn(() => true),
+        streamFeature: vi.fn(
+          async (
+            _settings: unknown,
+            _request: unknown,
+            callbacks: { onStopReason?: (reason: string | null) => void },
+            _signal: unknown,
+          ) => {
+            callbacks.onStopReason?.(stopReason);
+            return 'Alice is a long-term whale who mostly buys customs and responds best to';
+          },
+        ),
+      };
+      const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+      await coordinator.startOperation(1, {
+        type: 'operation:start',
+        operationId: `summary-op-${stopReason}`,
+        feature: 'fan-summary',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        forceRegenerate: false,
+      });
+
+      const messages = postedMessages(port);
+      const errorMessage = messages.find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          message.type === 'operation:error',
+      );
+      expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+      // Nothing presented, and the truncated summary is NEVER cached.
+      expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+      expect(mockStorage['summary:group-1']).toBeUndefined();
+    }
+  });
+
+  it('fails closed on an empty or whitespace-only coach/recap stream (nothing cached)', async () => {
+    // Round-6 P1-1: buildFeatureResult returns any rawText for coach + recap
+    // (incl. '' or whitespace), and the exhaustion guard only fires on a stop
+    // reason. A meta→done stream with no content — or a whitespace end_turn
+    // answer — must fail closed, never present, and never enter the summary cache.
+    for (const feature of ['coach-chat', 'fan-summary'] as const) {
+      for (const emptyish of ['', '   \n\t  ']) {
+        delete mockStorage['summary:group-1'];
+        const kernelGateway = {
+          isConfigured: vi.fn(() => true),
+          streamFeature: vi.fn(async () => emptyish),
+        };
+        const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+        await coordinator.startOperation(1, {
+          type: 'operation:start',
+          operationId: `empty-${feature}-${emptyish.length}`,
+          feature,
+          groupId: 'group-1',
+          routeNonce: 1,
+          domFanDisplayName: 'alice',
+          forceRegenerate: false,
+        });
+
+        const messages = postedMessages(port);
+        const errorMessage = messages.find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+            message.type === 'operation:error',
+        );
+        expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+        expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+        expect(mockStorage['summary:group-1']).toBeUndefined();
+      }
+    }
+  });
+
+  it('fails closed on an empty help-me or chat-review stream (round-13 P1-4)', async () => {
+    // The empty-output guard is now UNCONDITIONAL. parseHelpMeXml('') /
+    // parseChatReviewXml('') return valid:false (they do NOT throw), and
+    // assertInsertableFeatureResult guards only reply kinds — so before this an
+    // empty analysis result reached operation:complete and rendered an empty card
+    // as success. Every feature must fail closed on empty output.
+    for (const feature of ['help-me', 'chat-review'] as const) {
+      for (const emptyish of ['', '   \n\t  ']) {
+        const kernelGateway = {
+          isConfigured: vi.fn(() => true),
+          streamFeature: vi.fn(async () => emptyish),
+        };
+        const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+        await coordinator.startOperation(1, {
+          type: 'operation:start',
+          operationId: `empty-${feature}-${emptyish.length}`,
+          feature,
+          groupId: 'group-1',
+          routeNonce: 1,
+          domFanDisplayName: 'alice',
+          forceRegenerate: false,
+        });
+
+        const messages = postedMessages(port);
+        const errorMessage = messages.find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+            message.type === 'operation:error',
+        );
+        expect(errorMessage?.error).toMatchObject({ key: 'ai_output_unusable' });
+        expect(messages.some((message) => message.type === 'operation:complete')).toBe(false);
+      }
+    }
+  });
+
+  it('does not serve a pre-guard (legacy, unmarked) cached recap — regenerates instead', async () => {
+    // Round-6 P1-2: a recap cached before fan-summary was exhaustion-guarded (a
+    // possibly-truncated recap) carries no trustedTerminal marker. isValidSummaryCacheEntry
+    // now requires the marker, so such an entry is a cache MISS: the truncated
+    // recap is never served or Hub-pushed again — it regenerates and self-heals.
+    mockStorage['summary:group-1'] = {
+      summary: 'Legacy possibly-truncated recap',
+      personalityId: 'personality-1',
+      personaDefinitionId: 'v1:personality-one-definition',
+      personalityUpdatedAt: 1000,
+      personaCatalogSource: null,
+      generatedAt: 2000,
+      spendingDataVerified: true,
+      subscriptionLookupVerified: true,
+      modelId: 'kernel',
+      // NOTE: no trustedTerminal — this is a pre-guard/legacy entry.
+    };
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async () => 'Fresh complete recap'),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-legacy',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+    });
+
+    // The legacy entry did NOT serve as a cache hit: the stream ran
+    // (regeneration) and the completed recap is the fresh one, marked cached:false.
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    const completeMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(completeMessage?.result.rawText).toBe('Fresh complete recap');
+    expect(completeMessage?.result.summaryMeta).toMatchObject({ cached: false });
+    // The legacy (possibly-truncated) recap was never presented to the chatter.
+    expect(
+      postedMessages(port).every(
+        (message) =>
+          message.type !== 'operation:complete' ||
+          message.result.rawText !== 'Legacy possibly-truncated recap',
+      ),
+    ).toBe(true);
   });
 
   it('passes the configured temperature for each operation type', async () => {
@@ -5056,6 +5824,45 @@ describe('OperationCoordinator', () => {
     expect(unusedReporter.enqueue).not.toHaveBeenCalled();
   });
 
+  it('P2: acceptance falls back to the client generationRef when the op→ref context is gone', async () => {
+    const reporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({ unusedReporter: reporter });
+    // Reconnect populated the tab route (as tab:init would); no op ran this SW
+    // lifetime, so the in-memory op→ref context is empty (post-restart accept).
+    coordinator.tabContexts.setRoute(1, 'group-1', 1);
+
+    await coordinator.handlePortMessage(1, {
+      type: 'operation:acceptance',
+      operationId: 'evicted-op',
+      action: 'inserted',
+      partIndex: 0,
+      generationRef: 'gen-survivor',
+    });
+
+    expect(reporter.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'gen-survivor',
+        feature: 'coach-chat',
+        conversationRef: 'group-1',
+        action: 'inserted',
+      }),
+    );
+  });
+
+  it('P2: acceptance with neither context nor generationRef enqueues nothing', async () => {
+    const reporter = { enqueue: vi.fn() };
+    const { coordinator } = await createCoordinatorHarness({ unusedReporter: reporter });
+
+    await coordinator.handlePortMessage(1, {
+      type: 'operation:acceptance',
+      operationId: 'evicted-op',
+      action: 'copied',
+      partIndex: 0,
+    });
+
+    expect(reporter.enqueue).not.toHaveBeenCalled();
+  });
+
   it('does not report discarded operations', async () => {
     const unusedReporter = { enqueue: vi.fn() };
     let streamStarted: (() => void) | null = null;
@@ -5105,5 +5912,426 @@ describe('OperationCoordinator', () => {
     await startPromise;
 
     expect(unusedReporter.enqueue).not.toHaveBeenCalled();
+  });
+
+  // ─── Coach + recap kernel threading (Task 7) ──────────────────────────────
+
+  function coachStart(overrides: Record<string, unknown> = {}) {
+    return {
+      type: 'operation:start' as const,
+      operationId: 'coach-op',
+      feature: 'coach-chat' as const,
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      coachSessionId: 'sess-1',
+      chatterQuestion: 'how do I sell this?',
+      coachHistory: [{ question: 'earlier?', answer: 'earlier advice' }],
+      ...overrides,
+    };
+  }
+
+  it('coach happy path: canonical refs + question + history + full-history coverage', async () => {
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Here is some coaching advice.',
+    });
+    // A short, provider-exhausted window → full-history coverage.
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(12),
+      pagesLoaded: 1,
+      targetPages: 1,
+      reachedEnd: true,
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request).toMatchObject({
+      feature: 'coach-chat',
+      conversationRef: 'group-1',
+      fanRef: 'fan-1',
+      chatterQuestion: 'how do I sell this?',
+      coachHistory: [{ question: 'earlier?', answer: 'earlier advice' }],
+      clientContext: { transcriptCoverage: 'full-history' },
+    });
+    // First coach turn seeds via the full-window loader; no single-page refresh.
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getMessagePage).not.toHaveBeenCalled();
+  });
+
+  it('P2-bio: a coach request carries the fan bio when account.about is present', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAccountNames.mockResolvedValue([
+      { id: 'fan-1', username: 'alice', displayName: 'Alice', about: 'Loves gym & travel.' },
+    ] as never);
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    // includesFanBio policy is true for coach-chat (not just hi-greeting).
+    expect(kernelRequestFromStreamCall(kernelGateway).clientContext.fanBio).toBe(
+      'Loves gym & travel.',
+    );
+  });
+
+  it('P2-messageCount: a coach request carries the requested quick window', async () => {
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    // quickMessageCount is 100 in the harness settings.
+    expect(kernelRequestFromStreamCall(kernelGateway).messageCount).toBe(100);
+  });
+
+  it('coach follow-up turn refreshes via a single page, not a full reload', async () => {
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+    });
+
+    // Turn 1 seeds the window via the full-window loader.
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-1' }));
+    // Turn 2 (same coach session) reconciles against the cache with one page.
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-2' }));
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(2);
+    // The full-window loader ran ONCE (the seed); the follow-up used the
+    // single-page refresh loader instead of paginating the whole window again.
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getMessagePage).toHaveBeenCalled();
+  });
+
+  it('coach is blocked before the kernel call when the fan is unresolved', async () => {
+    const { coordinator, kernelGateway, port, fanslyClient } = await createCoordinatorHarness();
+    // Group has only the creator — no distinct fan → fanAccountId null.
+    fanslyClient.getGroup.mockResolvedValue({ users: [{ userId: 'account-1' }] });
+
+    await coordinator.startOperation(1, coachStart());
+
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    const errorMessage = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+        message.type === 'operation:error',
+    );
+    expect(errorMessage?.error).toMatchObject({
+      key: 'coach_fan_unresolved',
+      code: 'CG-APP-02',
+    });
+  });
+
+  it('coach caps the merged window to the quick bucket (quickMessageCount)', async () => {
+    // quickMessageCount is 100 in the harness settings; a merged/seeded window
+    // larger than that must be capped to the newest 100 before the kernel call.
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'advice',
+    });
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(150),
+      pagesLoaded: 6,
+      targetPages: 6,
+      reachedEnd: false,
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.clientContext.messageCount).toBe(100);
+    // The cap is window-trimming → coverage is 'window', never 'full-history'.
+    expect(request.clientContext.transcriptCoverage).toBe('window');
+  });
+
+  it('fan-summary sends canonical refs when the fan is resolved', async () => {
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'Fresh summary',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.conversationRef).toBe('group-1');
+    expect(request.fanRef).toBe('fan-1');
+  });
+
+  it('fan-summary falls back to the legacy shape (no fanRef) when the fan is unresolved', async () => {
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Fresh summary',
+    });
+    fanslyClient.getGroup.mockResolvedValue({ users: [{ userId: 'account-1' }] });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'summary-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: true,
+    });
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    // Legacy: conversationRef = fanAccountId ?? groupId = groupId; NO fanRef.
+    // A canonical groupId ref never ships without a fanRef (guard invariant).
+    expect(request.conversationRef).toBe('group-1');
+    expect(request.fanRef).toBeUndefined();
+  });
+
+  it('custom-name rule: a lookup failure sends "fan", never the DOM custom name', async () => {
+    const { coordinator, kernelGateway, port, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'reply',
+    });
+    // The chatter's private custom fan name rides the DOM label; the account
+    // lookup fails, so it must NOT leak into the prompt.
+    fanslyClient.getAccountNames.mockRejectedValue(new Error('lookup failed'));
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'SECRET-PET-NAME',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.clientContext.fanDisplayName).toBe('fan');
+    expect(request.clientContext.fanDisplayName).not.toContain('SECRET');
+    // The UI-facing display name may still carry the DOM label.
+    const complete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(complete?.fanDisplayName).toBe('SECRET-PET-NAME');
+  });
+
+  it('custom-name rule (compare): a lookup failure sends "fan" to every card, never the DOM custom name', async () => {
+    // Analogous compare-lane guard to the fast-reply case above: the chatter's
+    // private custom fan name rides the DOM label, the account lookup fails, so
+    // the kernel-facing name on EVERY compare card must degrade to "fan".
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, any>,
+        callbacks: { onText: (text: string) => void },
+      ) => {
+        callbacks.onText('Reply');
+        return 'Reply';
+      }),
+    };
+    const { coordinator, fanslyClient } = await createCoordinatorHarness({ kernelGateway });
+    fanslyClient.getAccountNames.mockRejectedValue(new Error('lookup failed'));
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'SECRET-PET-NAME',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalled();
+    for (let index = 0; index < kernelGateway.streamFeature.mock.calls.length; index += 1) {
+      const request = kernelRequestFromStreamCall(kernelGateway, index);
+      expect(request.clientContext.fanDisplayName).toBe('fan');
+      expect(request.clientContext.fanDisplayName).not.toContain('SECRET');
+    }
+  });
+
+  it('short recap: 300-message clamp, short cache key, no full overwrite, no hub sync', async () => {
+    const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Short recap body',
+    });
+    // Verified enrichment so the short result is actually cached.
+    fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+    // More than 300 messages available → the client must clamp to 300.
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(400),
+      pagesLoaded: 16,
+      targetPages: 16,
+      reachedEnd: false,
+    });
+    const enqueueSpy = vi.spyOn(coordinator, 'enqueueAgencyHubSummarySync');
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'short-recap-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      summaryMode: 'short',
+      forceRegenerate: true,
+    });
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.summaryMode).toBe('short');
+    expect(request.conversationRef).toBe('group-1');
+    expect(request.fanRef).toBe('fan-1');
+    expect(request.clientContext.messageCount).toBe(300);
+    // Clamp = window trim → coverage is 'window', never 'full-history'.
+    expect(request.clientContext.transcriptCoverage).toBe('window');
+    // Short body lands under the mode-qualified key; the durable FULL summary
+    // is left untouched, and nothing is pushed to the Hub dossier.
+    expect(mockStorage['summary-short:group-1']).toMatchObject({ summary: 'Short recap body' });
+    expect((mockStorage['summary:group-1'] as SummaryCacheEntry).summary).toBe('Old summary');
+    expect(enqueueSpy).not.toHaveBeenCalled();
+  });
+
+  it('short recap never sends summaryMode for a full run', async () => {
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'Fresh full summary',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'full-recap-op',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      summaryMode: 'full',
+      forceRegenerate: true,
+    });
+
+    expect(kernelRequestFromStreamCall(kernelGateway).summaryMode).toBeUndefined();
+  });
+
+  it('exhaustion fails closed for coach and both recap sizes (nothing cached/pushed)', async () => {
+    const exhaustingGateway = () => ({
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, unknown>,
+        callbacks: {
+          onMeta?: (m: { requestId: string; clientRequestId: string; model: string }) => void;
+          onText?: (t: string) => void;
+          onStopReason?: (s: string | null) => void;
+        },
+      ) => {
+        callbacks.onMeta?.({ requestId: 'gen-x', clientRequestId: 'op', model: 'anthropic:claude' });
+        callbacks.onText?.('truncated');
+        callbacks.onStopReason?.('max_tokens');
+        return 'truncated';
+      }),
+    });
+
+    // Coach: fails closed, nothing committed.
+    {
+      const { coordinator, port, fanslyClient } = await createCoordinatorHarness({
+        kernelGateway: exhaustingGateway(),
+      });
+      fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+      await coordinator.startOperation(1, coachStart());
+      const error = postedMessages(port).find(
+        (m): m is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          m.type === 'operation:error',
+      );
+      expect(error?.error.key).toBe('ai_output_unusable');
+    }
+
+    // Full recap: the exhausted output must not overwrite the durable cache.
+    {
+      const { coordinator, port, fanslyClient } = await createCoordinatorHarness({
+        kernelGateway: exhaustingGateway(),
+      });
+      fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+      await coordinator.startOperation(1, {
+        type: 'operation:start',
+        operationId: 'full-recap-op',
+        feature: 'fan-summary',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        forceRegenerate: true,
+      });
+      const error = postedMessages(port).find(
+        (m): m is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          m.type === 'operation:error',
+      );
+      expect(error?.error.key).toBe('ai_output_unusable');
+      expect((mockStorage['summary:group-1'] as SummaryCacheEntry).summary).toBe('Old summary');
+    }
+
+    // Short recap: nothing cached under the short key.
+    {
+      const { coordinator, port, fanslyClient } = await createCoordinatorHarness({
+        kernelGateway: exhaustingGateway(),
+      });
+      fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+      await coordinator.startOperation(1, {
+        type: 'operation:start',
+        operationId: 'short-recap-op',
+        feature: 'fan-summary',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        summaryMode: 'short',
+        forceRegenerate: true,
+      });
+      const error = postedMessages(port).find(
+        (m): m is Extract<BackgroundPortMessage, { type: 'operation:error' }> =>
+          m.type === 'operation:error',
+      );
+      expect(error?.error.key).toBe('ai_output_unusable');
+      expect(mockStorage['summary-short:group-1']).toBeUndefined();
+    }
+  });
+
+  it('operation:complete carries the generationRef from the meta frame for coach', async () => {
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, unknown>,
+        callbacks: {
+          onMeta?: (m: { requestId: string; clientRequestId: string; model: string }) => void;
+          onText?: (t: string) => void;
+        },
+      ) => {
+        callbacks.onMeta?.({ requestId: 'gen-ref-123', clientRequestId: 'coach-op', model: 'anthropic:claude' });
+        callbacks.onText?.('Advice');
+        return 'Advice';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startOperation(1, coachStart());
+
+    const complete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    expect(complete?.generationRef).toBe('gen-ref-123');
   });
 });

@@ -76,6 +76,7 @@ function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> 
     onReplyModeToggle: noop,
     onToneSelect: noop,
     onVoiceClick: noop,
+    onCoachClick: noop,
     ...overrides,
   });
 }
@@ -125,7 +126,6 @@ describe('ButtonBar toolbar visibility', () => {
 
     const platform = detectLabelPlatform();
     const replyHotkey = featureHotkeyLabel('fast-reply', platform)!;
-    const recapHotkey = featureHotkeyLabel('fan-summary', platform)!;
 
     const reply = buttonByLabel(bar.root, 'Reply');
     const replyChip = reply?.querySelector('.chatgoose-toolbar-hotkey');
@@ -136,14 +136,15 @@ describe('ButtonBar toolbar visibility', () => {
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
 
+    // Recap left HOTKEY_FEATURE in the Coach extension phase (plan §Task 2):
+    // ⌘⇧S now opens the recap picker (an app action), not this button's direct
+    // fan-summary start — so featureHotkeyLabel('fan-summary') is null and the
+    // button no longer advertises a (now-mismatched) shortcut chip.
+    expect(featureHotkeyLabel('fan-summary', platform)).toBeNull();
     const recap = buttonByLabel(bar.root, 'Recap');
-    const recapChip = recap?.querySelector('.chatgoose-toolbar-hotkey');
-    expect(recapChip?.textContent).toBe(recapHotkey.short);
-    expect(recapChip?.getAttribute('aria-hidden')).toBe('true');
-    expect(recap?.title).toContain(recapHotkey.full);
-    expect(recap?.getAttribute('aria-keyshortcuts')).toBe(
-      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${recapHotkey.short}`,
-    );
+    expect(recap).toBeDefined();
+    expect(recap?.querySelector('.chatgoose-toolbar-hotkey')).toBeNull();
+    expect(recap?.getAttribute('aria-keyshortcuts')).toBeNull();
 
     // The Split reply-mode flag is a labelled pill with no bound key — no chip,
     // no keyshortcuts.
@@ -167,6 +168,37 @@ describe('ButtonBar toolbar visibility', () => {
     bar.render(buildState(), null, 'default', 'none', true, false, false);
     expect(reply?.querySelector('.chatgoose-spinner')).toBeNull();
     expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(false);
+  });
+
+  it('renders a Coach button after Recap that fires onCoachClick', () => {
+    const onCoachClick = vi.fn();
+    const bar = makeBar({ onCoachClick });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const coach = buttonByLabel(bar.root, 'Coach');
+    expect(coach).toBeDefined();
+
+    // Ordering: Coach sits after Recap.
+    const buttons = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'));
+    const recapIndex = buttons.findIndex((b) => b.textContent === 'Recap');
+    const coachIndex = buttons.findIndex((b) => b.textContent === 'Coach');
+    expect(coachIndex).toBeGreaterThan(recapIndex);
+
+    coach!.click();
+    expect(onCoachClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables Coach while another feature operation is active', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
+    expect(buttonByLabel(bar.root, 'Coach')?.disabled).toBe(true);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+    expect(buttonByLabel(bar.root, 'Coach')?.disabled).toBe(false);
   });
 
   it('marks a ready summary on the Recap button', () => {
@@ -417,7 +449,7 @@ describe('ButtonBar improve draft state', () => {
     expect(buttonByLabel(bar.root, 'Fix')?.disabled).toBe(true);
   });
 
-  it('orders Reply, tone groove, Split, Fix, Hi, Ping, Recap, then the personality pill', () => {
+  it('orders Reply through Recap, Coach, personality, then Voice', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -437,8 +469,12 @@ describe('ButtonBar improve draft state', () => {
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
     const recapIndex = children.findIndex((child) => labelOf(child) === 'Recap');
+    const coachIndex = children.findIndex((child) => labelOf(child) === 'Coach');
     const personalityIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-personality-end'),
+    );
+    const voiceIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-voice'),
     );
 
     // Reply cluster (trigger + options) → draft tool → openers → fan side.
@@ -449,7 +485,10 @@ describe('ButtonBar improve draft state', () => {
     expect(hiIndex).toBeGreaterThan(fixIndex);
     expect(pingIndex).toBe(hiIndex + 1);
     expect(recapIndex).toBe(pingIndex + 1);
-    expect(personalityIndex).toBe(recapIndex + 1);
+    // Coach joins the fan-side cluster right after Recap (spec §10).
+    expect(coachIndex).toBe(recapIndex + 1);
+    expect(personalityIndex).toBe(coachIndex + 1);
+    expect(voiceIndex).toBe(personalityIndex + 1);
 
     // Meaning-groups are seamed with hairlines, and Recap opens the
     // right-pinned cluster.

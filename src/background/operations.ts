@@ -12,12 +12,16 @@ import {
   DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
   DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
   DEEP_OPERATION_PREP_TIMEOUT_MS,
+  FANSLY_PAGE_LIMIT,
+  FANSLY_PAGINATION_DELAY_MS,
   HI_GREETING_MAX_TRANSCRIPT,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
+  SHORT_SUMMARY_MESSAGE_COUNT,
   STREAM_CHUNK_FLUSH_MS,
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../shared/constants.js';
+import { isOutputExhausted } from '@kernel/sdk';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
   aggregateMonthlyEarnings,
@@ -35,6 +39,7 @@ import {
   toUserError,
 } from '../shared/errors.js';
 import {
+  featureIncludesFanBio,
   featureRequiresDraft,
   featureUsesPingSegment,
   getFeaturePolicy,
@@ -53,6 +58,7 @@ import {
   getSummaryCacheEntry,
   hasAvailableFanSummary,
   isValidSummaryCacheEntry,
+  type SummaryCacheMode,
 } from '../shared/summary-cache.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
@@ -71,6 +77,7 @@ import type {
   ContentPortMessage,
   DiscardedPayload,
   ErrorPayload,
+  FanslyMessagePageResponse,
   FanSummarySyncState,
   FanSummarySyncStatus,
   FeatureType,
@@ -117,7 +124,15 @@ import {
   type CompareOperationsContext,
 } from './compare-operations.js';
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
-import type { SubscriptionLookupTraceEvent } from './fansly-client.js';
+import {
+  CoachTranscriptCache,
+  type CoachTranscriptCacheKeyParts,
+  type CoachTranscriptWindow,
+} from './coach-transcript-cache.js';
+import type {
+  MessageLoadProgress,
+  SubscriptionLookupTraceEvent,
+} from './fansly-client.js';
 import type { FanslyClient } from './fansly-client.js';
 import { clearFlushTimer } from './operation-cleanup.js';
 import {
@@ -322,7 +337,48 @@ function usesDeepOperationTimeouts(feature: FeatureType): boolean {
   return getFeaturePolicy(feature).timeoutBucket === 'deep';
 }
 
-function buildFeatureResult(
+/** A deep-timeout feature whose PREP stage is capped at the quick budget (coach:
+ * a small quick window ⇒ no 360s prep budget, while its STREAM stays deep). */
+function usesQuickPrepBudget(feature: FeatureType): boolean {
+  return getFeaturePolicy(feature).prepTimeoutBucket === 'quick';
+}
+
+/**
+ * Canonical vs legacy conversation identity (spec §5). Coach + fan-summary send
+ * `conversationRef = groupId` + `fanRef = fanAccountId` once the fan is
+ * resolved; otherwise the LEGACY shape (`conversationRef = fanAccountId ?? groupId`,
+ * NO fanRef). Deriving both in the SAME branch makes a "canonical groupId
+ * without fanRef" request unbuildable — the groupId conversationRef only ever
+ * ships alongside a fanRef. Coach never reaches the legacy branch: it fails
+ * before the kernel call when the fan is unresolved. Every other feature keeps
+ * the legacy shape unchanged this phase.
+ */
+function buildConversationRefs(
+  feature: FeatureType,
+  fanAccountId: string | null,
+  groupId: string,
+): { conversationRef: string; fanRef?: string } {
+  const usesCanonicalRefs = feature === 'coach-chat' || feature === 'fan-summary';
+  if (usesCanonicalRefs && fanAccountId) {
+    return { conversationRef: groupId, fanRef: fanAccountId };
+  }
+  return { conversationRef: fanAccountId ?? groupId };
+}
+
+/**
+ * Custom-name rule (spec §4): the kernel-facing fan display name comes ONLY
+ * from the Fansly account lookup (username → displayName), falling back to a
+ * neutral "fan" when the lookup fails. The DOM label may carry a chatter's
+ * private custom fan name and must NEVER reach a prompt — it stays a local UI
+ * label. Applies to every feature.
+ */
+function kernelFanDisplayName(
+  account: { username?: string | null; displayName?: string | null } | undefined,
+): string {
+  return account?.username?.trim() || account?.displayName?.trim() || 'fan';
+}
+
+export function buildFeatureResult(
   feature: FeatureType,
   rawText: string,
   replyMode?: OperationStartPayload['replyMode'],
@@ -332,6 +388,11 @@ function buildFeatureResult(
       return { rawText, helpMe: parseHelpMeXml(rawText) };
     case 'chat-review':
       return { rawText, chatReview: parseChatReviewXml(rawText) };
+    // Coach streams free-form advice; the raw text is the result — no XML
+    // sections, no reply-part splitting. Draft cards (if any) arrive on the
+    // wire via result.parts, handled by the overlay, not synthesized here.
+    case 'coach-chat':
+      return { rawText };
     case 'single-reply':
       return {
         rawText,
@@ -398,6 +459,10 @@ export class OperationCoordinator {
     string,
     { operationId: string; token: number }
   >();
+  /** Coach transcript session cache (spec §6): overlap-and-replace so a rolling
+   * coach dialog refreshes only the newest tail each turn instead of paginating
+   * the whole quick window. In-memory, LRU 5, keyed per content coach session. */
+  private readonly coachTranscriptCache = new CoachTranscriptCache();
 
   constructor(
     private readonly sessionStore: SessionStore,
@@ -574,6 +639,23 @@ export class OperationCoordinator {
         if (context && this.acceptance) {
           this.acceptance.enqueue({
             ...context,
+            // Prefer the live context's ref; fall back to the client-carried one.
+            requestId: context.requestId ?? message.generationRef ?? null,
+            action: message.action,
+            at: new Date().toISOString(),
+          });
+        } else if (message.generationRef && this.acceptance) {
+          // The in-memory op→ref context is gone (SW restart / 50-entry eviction),
+          // but the coach feed still holds the generation ref, so correlate via it
+          // (P2). pageLabel is not cheaply recoverable here (a Hub round-trip); the
+          // kernel matches by generationRef, so a degraded pageLabel is acceptable.
+          const ctx = this.tabContexts.get(tabId);
+          this.acceptance.enqueue({
+            operationId: message.operationId,
+            requestId: message.generationRef,
+            feature: 'coach-chat',
+            pageLabel: '',
+            conversationRef: ctx?.groupId ?? '',
             action: message.action,
             at: new Date().toISOString(),
           });
@@ -764,6 +846,18 @@ export class OperationCoordinator {
     }
     const cached = await this.storageCoordinator.getSummaryCache(groupId);
     if (!cached) {
+      return;
+    }
+    // Round-9 P1: never re-push an UNTRUSTED cached recap to the Hub. A recap
+    // cached before fan-summary was exhaustion-guarded (possibly truncated) lacks
+    // `trustedTerminal`; trustedTerminal already makes it a local cache MISS, but
+    // this opportunistic re-push must ALSO refuse it so a stale/truncated body is
+    // never (re)written to the fan_profiles dossier the kernel injects into other
+    // prompts. It self-heals only via a fresh trusted regeneration, whose own
+    // sync path overwrites the Hub copy. (The caller already gates on
+    // hasAvailableSummary, which is false for untrusted entries — this is the
+    // explicit local invariant.)
+    if (cached.trustedTerminal !== true) {
       return;
     }
     const baseUrl = normalizeAgencyHubBaseUrl(storage.settings.agencyHubBaseUrl);
@@ -1436,11 +1530,23 @@ export class OperationCoordinator {
         reservedSummaryCommitToken,
       );
     }
+    // P1-1: capture the tab's route identity BEFORE validateStart's awaits. A
+    // route-change to another chat during those awaits advances the context but
+    // only cancels an ACTIVE op — this reserved-but-not-yet-active start survives,
+    // and its setRoute below would roll the context back onto the abandoned chat
+    // (then its setFan would pass the same-group guard). validateStart's own URL
+    // check misses this because the tab.url can still lag the routeChanged message.
+    const startRouteNonce = this.tabContexts.getOrCreate(tabId).routeNonce;
     let timeoutController: OperationTimeoutController<OperationTimeoutKey> | null = null;
     let controller: AbortController | null = null;
     let debugEnabled = false;
     try {
       const validated = await this.validateStart(tabId, payload);
+      // Stale start: the route advanced while we validated. Die with chat_changed
+      // and never re-touch the tab context (no setRoute/activate/setFan).
+      if (this.tabContexts.getOrCreate(tabId).routeNonce !== startRouteNonce) {
+        throw new ChatGooseError('chat_changed');
+      }
       debugEnabled = validated.storage.settings.debugMode;
       const profiler = createOperationProfiler(debugEnabled);
       const operationTimeoutController = new OperationTimeoutController<OperationTimeoutKey>();
@@ -1475,7 +1581,13 @@ export class OperationCoordinator {
         operationTimeoutController.clear('llm-max-stream');
       };
       if (usesDeepOperationTimeouts(payload.feature)) {
-        operationTimeoutController.arm('deep-prep', DEEP_OPERATION_TIMEOUTS.prep);
+        // The PREP budget is split from the STREAM budget (P2-6): coach paginates a
+        // small quick window, so it gets the quick prep ceiling even though its
+        // stream timeouts below stay deep. deep-prep is cleared on stream start.
+        const prepBudget = usesQuickPrepBudget(payload.feature)
+          ? QUICK_OPERATION_TIMEOUT_MS
+          : DEEP_OPERATION_TIMEOUTS.prep;
+        operationTimeoutController.arm('deep-prep', prepBudget);
       } else {
         operationTimeoutController.arm('quick-total', QUICK_OPERATION_TIMEOUT_MS);
       }
@@ -1728,6 +1840,16 @@ export class OperationCoordinator {
       // invalidate once — the desktop cutover's recorded trade).
       const resolvedModel = KERNEL_MODEL_ID;
 
+      // Recap sizing (spec §5): a SHORT recap is a fan-summary run with a fixed
+      // 300-message window (NOT deepMessageCount), its own local cache key, and
+      // no Hub dossier push. A full recap and every other feature are unchanged.
+      const isShortRecap =
+        payload.feature === 'fan-summary' && payload.summaryMode === 'short';
+      const summaryCacheMode: SummaryCacheMode = isShortRecap ? 'short' : 'full';
+      const effectiveMessageCount = isShortRecap
+        ? SHORT_SUMMARY_MESSAGE_COUNT
+        : validated.messageCount;
+
       let cachedSummary = null;
       let hasValidCachedSummary = false;
       if (payload.feature === 'fan-summary') {
@@ -1737,7 +1859,7 @@ export class OperationCoordinator {
         }
         cachedSummary = payload.forceRegenerate
           ? null
-          : await this.storageCoordinator.getSummaryCache(validated.urlGroupId);
+          : await this.storageCoordinator.getSummaryCache(validated.urlGroupId, summaryCacheMode);
         hasValidCachedSummary = isValidSummaryCacheEntry(
           cachedSummary,
           personality.key,
@@ -1745,6 +1867,14 @@ export class OperationCoordinator {
           storage.personaCatalogSource,
           resolvedModel,
         );
+        // «Открыть последний» (spec §5): view the stored recap WITHOUT ever
+        // generating. A cache miss is not an error to a normal Recap run (it
+        // would generate), but here it must fail closed — no pagination, no
+        // kernel call, no AI spend — so the standalone "view last" action stays
+        // spend-free and honest about there being nothing stored.
+        if (payload.viewCachedOnly && !(cachedSummary && hasValidCachedSummary)) {
+          throw new ChatGooseError('no_saved_recap');
+        }
       }
 
       if (payload.feature === 'fan-summary' && cachedSummary && hasValidCachedSummary) {
@@ -1757,6 +1887,31 @@ export class OperationCoordinator {
           summaryCommitToken,
         );
         await this.assertPersonaIdentityCurrent(personaIdentity);
+
+        if (isShortRecap) {
+          // Short recaps never touch the Hub dossier (spec §5): serve the
+          // cached short body with NO sync status, NO persist, NO enqueue.
+          const shortResult: FeatureResult = {
+            rawText: cachedSummary.summary,
+            summaryMeta: {
+              generatedAt: cachedSummary.generatedAt,
+              stale: false,
+              cached: true,
+            },
+          };
+          this.assertActive(tabId, payload.operationId);
+          completeStage('summary-cache-check', 'Short recap cache hit', 'cache hit');
+          sendDebugEchoStatus({ state: 'cache-hit' });
+          this.sendComplete(tabId, {
+            type: 'operation:complete',
+            operationId: payload.operationId,
+            result: shortResult,
+            fanDisplayName: payload.domFanDisplayName ?? 'fan',
+          }, createZeroLlmSpendSummary(), profiler);
+          this.clearCompletedOperation(tabId);
+          return;
+        }
+
         const normalizedCachedSync = normalizeAgencyHubSummarySyncMetadata(
           cachedSummary.agencyHubSync,
         );
@@ -1872,15 +2027,11 @@ export class OperationCoordinator {
       }
 
       startStage('load-messages', 'Load messages');
-      profiler.log(`Requested ${validated.messageCount} messages`);
+      profiler.log(`Requested ${effectiveMessageCount} messages`);
       sendDebugProgress();
       const shouldReportMessageProgress =
         profiler.enabled || isDeepFeature(payload.feature);
-      const messageLoad = await this.fanslyClient.loadMessages(
-        validated.urlGroupId,
-        validated.messageCount,
-        validated.session,
-        signal,
+      const messageProgress: ((progress: MessageLoadProgress) => void) | undefined =
         shouldReportMessageProgress
           ? (progress) => {
               if (profiler.enabled) {
@@ -1901,12 +2052,78 @@ export class OperationCoordinator {
                 targetPages: progress.targetPages,
               });
             }
-          : undefined,
-      );
+          : undefined;
+
+      // `transcriptPages` is what normalizeTranscript sees; `providerReachedEnd`
+      // feeds transcriptCoverage (spec §5/§6). Coach reads via the session cache
+      // (oldest-first, freshest tail); every other feature paginates fresh.
+      let transcriptPages: FanslyMessagePageResponse[];
+      let providerReachedEnd: boolean;
+      let pagesLoadedLabel: number;
+      if (payload.feature === 'coach-chat') {
+        const cacheParts: CoachTranscriptCacheKeyParts = {
+          tabId,
+          coachSessionId: payload.coachSessionId ?? '',
+          accountId: resolvedAccountId,
+          groupId: validated.urlGroupId,
+          quickMessageCount: effectiveMessageCount,
+        };
+        const loadFullWindow = async () => {
+          const loaded = await this.fanslyClient.loadMessages(
+            validated.urlGroupId,
+            effectiveMessageCount,
+            validated.session,
+            signal,
+            messageProgress,
+          );
+          return { pages: loaded.pages, reachedEnd: loaded.reachedEnd };
+        };
+        const loadPage = async (before: string | null) => {
+          // The common refresh is a single page-1 fetch (immediate overlap); a
+          // rarer no-overlap walk respects Fansly's pagination cadence between
+          // pages (DP 1-B — never burst the model's own session).
+          if (before !== null) {
+            await delay(FANSLY_PAGINATION_DELAY_MS, signal);
+          }
+          const page = await this.fanslyClient.getMessagePage(
+            validated.urlGroupId,
+            before,
+            validated.session,
+            signal,
+          );
+          const messages = page.messages ?? [];
+          return { page, reachedEnd: messages.length < FANSLY_PAGE_LIMIT };
+        };
+        // Try a tail refresh first; a 'miss' (first turn / evicted / SW restart)
+        // or 'reload-required' (continuity lost — the cache self-evicts) both
+        // fall back to a full quick-window (re)seed. This decision happens
+        // BEFORE the kernel call, so acquiring context never burns a generation.
+        const refreshResult = await this.coachTranscriptCache.refresh(cacheParts, loadPage);
+        let window: CoachTranscriptWindow;
+        if (refreshResult.status === 'refreshed') {
+          window = refreshResult.window;
+        } else {
+          window = await this.coachTranscriptCache.getOrSeed(cacheParts, loadFullWindow);
+        }
+        transcriptPages = window.pages;
+        providerReachedEnd = window.reachedEnd;
+        pagesLoadedLabel = window.pages.length;
+      } else {
+        const messageLoad = await this.fanslyClient.loadMessages(
+          validated.urlGroupId,
+          effectiveMessageCount,
+          validated.session,
+          signal,
+          messageProgress,
+        );
+        transcriptPages = messageLoad.pages;
+        providerReachedEnd = messageLoad.reachedEnd;
+        pagesLoadedLabel = messageLoad.pagesLoaded;
+      }
       completeStage(
         'load-messages',
-        `Loaded messages: ${messageLoad.pagesLoaded} pages`,
-        `${messageLoad.pagesLoaded} pages`,
+        `Loaded messages: ${pagesLoadedLabel} pages`,
+        `${pagesLoadedLabel} pages`,
       );
 
       let groupUsers: Array<{ userId: string }> | null = null;
@@ -1948,16 +2165,28 @@ export class OperationCoordinator {
       }
 
       let fanAccountId: string | null = null;
+      // UI-facing label (may carry the chatter's private custom fan name via
+      // the DOM fallback). NEVER used for the kernel — see kernelFanName below.
       let fanDisplayName = payload.domFanDisplayName ?? 'fan';
+      // Kernel-facing name (custom-name rule, spec §4): account lookup ONLY,
+      // neutral "fan" on failure — the DOM label must not reach a prompt.
+      let kernelFanName = 'fan';
       let fanBio: string | undefined;
       fanAccountId =
         groupUsers?.find(
           (user) => user.userId !== resolvedAccountId,
         )?.userId ?? null;
 
+      if (payload.feature === 'coach-chat' && !fanAccountId) {
+        // Coach uses canonical refs ONLY with a resolved fan (fanRef is REQUIRED
+        // kernel-side); it cannot start otherwise. Fail BEFORE the kernel call
+        // so acquiring context never burns a generation (spec §4/§5).
+        throw new ChatGooseError('coach_fan_unresolved');
+      }
+
       const purchaseEvidence = await loadMediaPurchaseEvidence({
         fanslyClient: this.fanslyClient,
-        pages: messageLoad.pages,
+        pages: transcriptPages,
         fanAccountId,
         session: validated.session,
         signal,
@@ -1968,12 +2197,28 @@ export class OperationCoordinator {
       // resolved fan id for fan-perspective purchase state. When the lookup
       // fails or is skipped, fanAccountId is null and PPV labels degrade to
       // "unknown" rather than misclassifying.
-      const transcriptMessages = normalizeTranscript(
-        messageLoad.pages,
+      let transcriptMessages = normalizeTranscript(
+        transcriptPages,
         resolvedAccountId,
         fanAccountId,
         purchaseEvidence,
       );
+
+      // Cap to the window (spec §5 / §6.5 "Sort, cap to the window"), before
+      // formatting. Two overshoot sources: a coach session's MERGED window grows
+      // unbounded over a long dialog with an active fan (each refresh appends
+      // fresh rows, nothing else caps it), and a short recap's page-granular
+      // load can overshoot 300. `effectiveMessageCount` is the target window for
+      // both (coach = quickMessageCount, short = 300). When the cap bites it is
+      // window-trimming, forcing transcriptCoverage='window'.
+      let windowTrimmed = false;
+      if (
+        (payload.feature === 'coach-chat' || isShortRecap) &&
+        transcriptMessages.length > effectiveMessageCount
+      ) {
+        transcriptMessages = transcriptMessages.slice(-effectiveMessageCount);
+        windowTrimmed = true;
+      }
 
       if (
         isDeepFeature(payload.feature) &&
@@ -2029,12 +2274,17 @@ export class OperationCoordinator {
             signal,
           );
           const account = accounts[0];
+          // UI label may fall back to the DOM name; the KERNEL name must not.
           fanDisplayName =
             account?.username?.trim() ||
             account?.displayName?.trim() ||
             payload.domFanDisplayName ||
             'fan';
-          if (payload.feature === 'hi-greeting' && account?.about?.trim()) {
+          kernelFanName = kernelFanDisplayName(account);
+          // Bio inclusion is a per-feature policy (spec §7): hi-greeting, help-me,
+          // and coach-chat — NOT a hardcoded hi-greeting check (that omitted the
+          // bio for coach + help-me, the bug this fixes).
+          if (featureIncludesFanBio(payload.feature) && account?.about?.trim()) {
             fanBio = account.about.trim();
           }
           completeStage(
@@ -2043,6 +2293,12 @@ export class OperationCoordinator {
             `resolved ${fanDisplayName}`,
           );
         } catch (error) {
+          // Belt-and-braces (conversation-context-loader pattern): if the lookup
+          // was aborted by a route-change cancel, re-throw so this op unwinds
+          // instead of falling through to write a now-stale fan.
+          if (signal.aborted) {
+            throw error;
+          }
           const failureCode = errorCode(error);
           failStage(
             'account-name-lookup',
@@ -2062,7 +2318,9 @@ export class OperationCoordinator {
         );
       }
 
-      this.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
+      // Pass THIS op's groupId; the store no-ops if the context has moved on (the
+      // structural stale-fan guard).
+      this.tabContexts.setFan(tabId, validated.urlGroupId, fanAccountId, fanDisplayName);
       sendOperationProgress({
         phase: 'generating',
         message: 'Generating…',
@@ -2337,28 +2595,64 @@ export class OperationCoordinator {
       if (!pageLabel) {
         throw new ChatGooseError('hub_page_match_failed');
       }
+      // Coverage (spec §5/§6): 'full-history' only when the provider reached the
+      // conversation's oldest edge AND no window trim happened AND the char-cap
+      // formatter kept every normalized message. Computed for EVERY run so the
+      // recap coverage header (spec §5) can render on any fan-summary result…
+      const computedTranscriptCoverage: 'full-history' | 'window' =
+        providerReachedEnd &&
+        !windowTrimmed &&
+        keptMessageCount === transcriptMessages.length
+          ? 'full-history'
+          : 'window';
+      // …but only SENT to the kernel for coach + short recap (spec §7 rollback
+      // gating — old cores never see the field from a full run).
+      const transcriptCoverage: 'full-history' | 'window' | undefined =
+        payload.feature === 'coach-chat' || isShortRecap
+          ? computedTranscriptCoverage
+          : undefined;
+      const refs = buildConversationRefs(
+        payload.feature,
+        fanAccountId,
+        validated.urlGroupId,
+      );
       const kernelRequest = {
         feature: payload.feature,
         clientRequestId: payload.operationId,
         pageLabel,
-        conversationRef: fanAccountId ?? validated.urlGroupId,
+        conversationRef: refs.conversationRef,
+        ...(refs.fanRef !== undefined ? { fanRef: refs.fanRef } : {}),
         personaKey: personality.key,
         expectedPersonaDefinitionId: personality.definitionId,
         replyTone: payload.replyTone,
         replyMode: payload.replyMode,
         draftText: payload.draftText,
         isRegeneration: Boolean(payload.forceRegenerate),
+        ...(payload.feature === 'coach-chat' && payload.chatterQuestion !== undefined
+          ? { chatterQuestion: payload.chatterQuestion }
+          : {}),
+        ...(payload.feature === 'coach-chat' && payload.coachHistory !== undefined
+          ? { coachHistory: payload.coachHistory }
+          : {}),
+        ...(isShortRecap ? { summaryMode: 'short' as const } : {}),
+        // The REQUESTED window (kernel records requestedCount from this): the
+        // short const for a short recap, else the feature's window (deep for a
+        // full recap). Distinct from clientContext.messageCount (the kept count).
+        messageCount: effectiveMessageCount,
         // E28: ask only in debug mode. The kernel answers only inside an
         // owner-set time-bounded window, so this is a request, not a right.
         debugPromptEcho: profiler.enabled,
         clientContext: {
           transcript: formattedTranscript,
           messageCount: keptMessageCount,
-          fanDisplayName,
+          // Custom-name rule (spec §4): kernel-facing name is account-lookup
+          // only — never the DOM label (which fanDisplayName still uses for UI).
+          fanDisplayName: kernelFanName,
           fanSpendingData: spendingData,
           fanSubscriptionData: subscriptionData,
           ...(fanBio !== undefined ? { fanBio } : {}),
           ...(pingSegment !== undefined ? { pingSegment } : {}),
+          ...(transcriptCoverage !== undefined ? { transcriptCoverage } : {}),
         },
       } as const;
       completeStage(
@@ -2636,10 +2930,28 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
-      if (
-        latestLlmStopReason === 'max_tokens' &&
-        getFeaturePolicy(payload.feature).promptMode === 'reply'
-      ) {
+      // Output-exhaustion fail-closed (spec §8, CLAUDE.md family law): a provider
+      // hitting its token ceiling (normalized cross-provider by isOutputExhausted:
+      // kernel 'max_tokens' + OpenRouter 'length') makes the generation
+      // non-committable for EVERY feature — "a truncated stream is an error, never
+      // presented as a result", with NO exceptions. Applies before buildFeatureResult,
+      // so a truncated help-me/chat-review can't slip through as a valid: false
+      // XML fallback either. This is the universal guard; do not re-narrow it to a
+      // feature/promptMode list — the rule is unconditional.
+      if (isOutputExhausted(latestLlmStopReason)) {
+        throw new ChatGooseError('ai_output_unusable');
+      }
+
+      // Empty / whitespace-only output fails closed for EVERY feature, symmetric
+      // to the exhaustion guard above — a meta→done stream with no content, or a
+      // whitespace end_turn answer, is not a usable result. This is unconditional:
+      // help-me/chat-review's parseHelpMeXml('')/parseChatReviewXml('') return
+      // valid:false (they do NOT throw), and assertInsertableFeatureResult only
+      // guards reply kinds, so an empty analysis result would otherwise reach
+      // operation:complete and render an empty card as success. Sits before the
+      // result build and the summary-cache write, so nothing empty is ever
+      // presented or cached. Do not re-narrow to a feature list.
+      if (!rawText.trim()) {
         throw new ChatGooseError('ai_output_unusable');
       }
 
@@ -2662,22 +2974,6 @@ export class OperationCoordinator {
           summaryCommitToken,
         );
         const generatedAt = Date.now();
-        const shouldAttemptSync = shouldAttemptAgencyHubSummarySync(
-          this.agencyHubClient,
-          validated.storage.settings,
-          rawText,
-        );
-        const initialSyncStatus = createFanSummarySyncStatus(
-          shouldAttemptSync ? 'saving' : 'not-set-up',
-          generatedAt,
-          { baseUrl: validated.storage.settings.agencyHubBaseUrl },
-        );
-        result.summaryMeta = {
-          generatedAt,
-          stale: false,
-          cached: false,
-          syncStatus: initialSyncStatus,
-        };
         // W9.4/A18: the old `actualModel === resolvedModel` gate made this
         // write DEAD post-cutover — resolvedModel is the 'kernel' cache
         // sentinel while actualModel becomes the meta frame's real vendor
@@ -2685,58 +2981,128 @@ export class OperationCoordinator {
         // cached. Model choice is kernel config now; the sentinel pin below
         // is the cache identity, and the equality gate is gone.
         const shouldCacheSummary = spendingDataVerified && subscriptionLookupVerified;
-        if (shouldCacheSummary) {
-          const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(
+        const isCommitCurrent = (state: PersistedState): boolean =>
+          this.isLatestSummaryCommit(
             validated.urlGroupId,
-            {
-            summary: rawText,
-            personalityId: personality.key,
-            personaDefinitionId: personality.definitionId,
-            personalityUpdatedAt: personality.version,
-            personaCatalogSource: personaIdentity.personaCatalogSource,
+            payload.operationId,
+            summaryCommitToken,
+          ) && isPersonaOperationIdentityCurrent(state, personaIdentity);
+
+        if (isShortRecap) {
+          // Short recap (spec §5): own mode-qualified cache key, and NEVER a Hub
+          // dossier push — a short run must not overwrite the durable full
+          // dossier. No sync status, no summarySyncTask. Coverage header data
+          // (spec §5) rides on the freshly generated result.
+          result.summaryMeta = {
             generatedAt,
-            spendingDataVerified: true,
-            subscriptionLookupVerified: true,
-            modelId: resolvedModel,
-            fanAccountId,
-            agencyHubSync: initialSyncStatus,
-            },
-            (state) => this.isLatestSummaryCommit(
+            stale: false,
+            cached: false,
+            transcriptCoverage: computedTranscriptCoverage,
+            keptCount: keptMessageCount,
+          };
+          if (shouldCacheSummary) {
+            const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(
               validated.urlGroupId,
-              payload.operationId,
-              summaryCommitToken,
-            ) && isPersonaOperationIdentityCurrent(state, personaIdentity),
+              {
+                summary: rawText,
+                personalityId: personality.key,
+                personaDefinitionId: personality.definitionId,
+                personalityUpdatedAt: personality.version,
+                personaCatalogSource: personaIdentity.personaCatalogSource,
+                generatedAt,
+                spendingDataVerified: true,
+                subscriptionLookupVerified: true,
+                modelId: resolvedModel,
+                fanAccountId,
+                // Behind the exhaustion + empty guards ⇒ a complete, trusted
+                // generation. Required by isValidSummaryCacheEntry for a hit.
+                trustedTerminal: true,
+              },
+              isCommitCurrent,
+              'short',
+            );
+            if (!committed) {
+              throw new ChatGooseError('chat_changed');
+            }
+          }
+          // summarySyncTask intentionally left null → no dossier enqueue below.
+        } else {
+          const shouldAttemptSync = shouldAttemptAgencyHubSummarySync(
+            this.agencyHubClient,
+            validated.storage.settings,
+            rawText,
           );
-          if (!committed) {
+          const initialSyncStatus = createFanSummarySyncStatus(
+            shouldAttemptSync ? 'saving' : 'not-set-up',
+            generatedAt,
+            { baseUrl: validated.storage.settings.agencyHubBaseUrl },
+          );
+          result.summaryMeta = {
+            generatedAt,
+            stale: false,
+            cached: false,
+            syncStatus: initialSyncStatus,
+            transcriptCoverage: computedTranscriptCoverage,
+            keptCount: keptMessageCount,
+          };
+          if (shouldCacheSummary) {
+            const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(
+              validated.urlGroupId,
+              {
+                summary: rawText,
+                personalityId: personality.key,
+                personaDefinitionId: personality.definitionId,
+                personalityUpdatedAt: personality.version,
+                personaCatalogSource: personaIdentity.personaCatalogSource,
+                generatedAt,
+                spendingDataVerified: true,
+                subscriptionLookupVerified: true,
+                modelId: resolvedModel,
+                fanAccountId,
+                agencyHubSync: initialSyncStatus,
+                // Behind the exhaustion + empty guards ⇒ a complete, trusted
+                // generation. Required by isValidSummaryCacheEntry for a hit.
+                trustedTerminal: true,
+              },
+              isCommitCurrent,
+            );
+            if (!committed) {
+              throw new ChatGooseError('chat_changed');
+            }
+          }
+          summarySyncTask = {
+            tabId,
+            groupId: validated.urlGroupId,
+            settings: validated.storage.settings,
+            summary: rawText,
+            generatedAt,
+            existingSync: initialSyncStatus,
+            fanAccountId,
+            session: validated.session,
+            resolvedAccountId,
+            debugEnabled,
+            personaIdentity,
+            requireCachedEntry: shouldCacheSummary,
+            operationId: payload.operationId,
+            summaryCommitToken,
+          };
+          if (!await this.isSummarySyncTaskCurrent(summarySyncTask)) {
             throw new ChatGooseError('chat_changed');
           }
         }
-        summarySyncTask = {
-          tabId,
-          groupId: validated.urlGroupId,
-          settings: validated.storage.settings,
-          summary: rawText,
-          generatedAt,
-          existingSync: initialSyncStatus,
-          fanAccountId,
-          session: validated.session,
-          resolvedAccountId,
-          debugEnabled,
-          personaIdentity,
-          requireCachedEntry: shouldCacheSummary,
-          operationId: payload.operationId,
-          summaryCommitToken,
-        };
-        if (!await this.isSummarySyncTaskCurrent(summarySyncTask)) {
-          throw new ChatGooseError('chat_changed');
-        }
       }
       const completedSpend = latestLlmSpend ?? createZeroLlmSpendSummary();
+      // generationRef (spec §3): the gateway meta-frame requestId, captured in
+      // acceptanceContexts on onMeta. Threaded to content so a later coach draft
+      // acceptance can correlate back to its generation. Harmless for all.
+      const generationRef =
+        this.acceptanceContexts.get(payload.operationId)?.requestId;
       this.sendComplete(tabId, {
         type: 'operation:complete',
         operationId: payload.operationId,
         result,
         fanDisplayName,
+        ...(generationRef != null ? { generationRef } : {}),
       }, completedSpend, profiler);
 
       this.clearCompletedOperation(tabId);

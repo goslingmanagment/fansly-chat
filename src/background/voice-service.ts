@@ -596,7 +596,12 @@ export class VoiceService {
       if (!sameRoute(routeBinding, this.deps.tabContexts.get(tabId))) {
         throw new ChatGooseError('chat_changed');
       }
-      this.deps.tabContexts.setFan(tabId, fanAccountId, fanDisplayName);
+      this.deps.tabContexts.setFan(
+        tabId,
+        routeBinding.groupId,
+        fanAccountId,
+        fanDisplayName,
+      );
 
       const page = await this.resolvePageForSettings(
         tabId,
@@ -737,6 +742,7 @@ export class VoiceService {
         }
         this.deps.tabContexts.setFan(
           tabId,
+          routeBinding.groupId,
           fanAccountId,
           context.fanDisplayName,
         );

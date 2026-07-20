@@ -1189,4 +1189,95 @@ describe('AgencyHubClient', () => {
       baseUrl: 'http://localhost:3000',
     });
   });
+
+  // Round-10: getRecapStatus was untested; pin the three branches (mirrors the
+  // getConversationProfile 404 test) under the discriminated {state} shape.
+  const recapSlot = {
+    generatedAt: '2026-07-18T12:00:00.000Z',
+    ageMs: 1_000,
+    transcriptCoverage: 'full-history' as const,
+    requestedCount: 3000,
+    keptCount: 2900,
+  };
+
+  it('getRecapStatus: returns state ok with the slots when the Hub answers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      if (String(url).startsWith('http://localhost:3000/api/v1/ai/recap-status')) {
+        return jsonResponse({ full: recapSlot, short: null });
+      }
+      throw new Error(`Unexpected URL: ${String(url)}`);
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.getRecapStatus(
+      makeSettings(),
+      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: 'fan-1' },
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({ state: 'ok', full: recapSlot, short: null });
+  });
+
+  it('getRecapStatus: maps a 404 to UNAVAILABLE (endpoint unreadable, not confirmed-no-recap)', async () => {
+    // Round-11 P1: a 404 only proves the status could not be read (old Hub / page
+    // deleted mid-flight); only a valid 200 can confirm empty slots.
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      if (String(url).startsWith('http://localhost:3000/api/v1/ai/recap-status')) {
+        return jsonResponse({ error: 'not found' }, 404);
+      }
+      throw new Error(`Unexpected URL: ${String(url)}`);
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    const result = await client.getRecapStatus(
+      makeSettings(),
+      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({ state: 'unavailable', full: null, short: null });
+  });
+
+  it('getRecapStatus: rethrows a non-404 Hub failure so the caller reports unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      if (String(url).startsWith('http://localhost:3000/api/v1/ai/recap-status')) {
+        return jsonResponse({ error: 'server error' }, 500);
+      }
+      throw new Error(`Unexpected URL: ${String(url)}`);
+    }));
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+    };
+
+    const client = new AgencyHubClient(fetch);
+    await expect(
+      client.getRecapStatus(
+        makeSettings(),
+        { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('getRecapStatus: returns unavailable when the Hub is not configured / lacks host permission', async () => {
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => false) },
+    };
+    const fetchMock = vi.fn();
+    const client = new AgencyHubClient(fetchMock as unknown as typeof fetch);
+    const result = await client.getRecapStatus(
+      makeSettings(),
+      { pageLabel: 'creator-fs', conversationRef: 'group-1', fanRef: null },
+      new AbortController().signal,
+    );
+    expect(result).toEqual({ state: 'unavailable', full: null, short: null });
+    // Never even hit the network without permission.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
