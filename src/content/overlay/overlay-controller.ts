@@ -36,11 +36,14 @@ import {
   getActiveConversationDraftText,
 } from '../textarea.js';
 import {
+  createSplitContractNote,
   createUserErrorBlock,
   formatLoadingStatus,
   getInsertButtonLabel,
   getNextInsertablePart,
   getReplyPartTitle,
+  getSplitContractNote,
+  getSplitPartCardOptions,
   insertedFeedbackDelayMs,
   isEditableElement,
   isInsertFeedbackActive,
@@ -1850,14 +1853,13 @@ export class OverlayController {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
     }
 
-    if (model.splitModeRequested && !model.error) {
-      const helper = document.createElement('div');
-      helper.className = 'chatgoose-inline-note';
-      helper.textContent =
-        model.parts.length > 1
-          ? 'Split mode was on. Start with message 1, send it manually in Fansly, then use the follow-up if it still feels right.'
-          : 'Split mode expected at least 2 messages, but this result contains one. Try Regenerate to retry the split.';
-      section.append(helper);
+    const splitNote = getSplitContractNote(
+      model.splitModeRequested,
+      Boolean(model.error),
+      model.parts.length,
+    );
+    if (splitNote) {
+      section.append(createSplitContractNote(splitNote));
     }
 
     if (model.error) {
@@ -1866,15 +1868,9 @@ export class OverlayController {
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {
-        const isSplit = model.splitModeRequested && model.parts.length > 1;
         parts.append(
           this.createPartCard(getReplyPartTitle(part, model.splitModeRequested), part, {
-            hint: isSplit
-              ? (part.sequenceIndex === 0 ? 'Suggested first send.' : 'Suggested follow-up after message 1.')
-              : undefined,
-            emphasis: isSplit
-              ? (part.sequenceIndex === 0 ? 'recommended' : 'followup')
-              : undefined,
+            ...getSplitPartCardOptions(part, model.splitModeRequested, model.parts.length),
             status: part.insertedOnce ? 'Inserted earlier.' : undefined,
             autoPassThrough: true,
           }),

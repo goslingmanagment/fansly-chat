@@ -280,6 +280,37 @@ describe('ChatGooseContentApp', () => {
       .not.toContain('Напишите черновик');
   });
 
+  it('shows a one-part Split warning on the default inline surface (E49)', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    app.port.send = vi.fn();
+    app.tabState = readyState({ hasAvailableSummary: false });
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fast-reply';
+    app.activeOperationId = 'reply-op';
+    app.lastFeature = 'fast-reply';
+    app.quickSurfaceEverOpened = true;
+    app.quickInlineVisible = true;
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'reply-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Only one message',
+        parts: ['Only one message'],
+        splitModeRequested: true,
+      },
+    });
+
+    const inlineRoot = app.inlinePanel.root as HTMLElement;
+    expect(inlineRoot.classList.contains('chatgoose-hidden')).toBe(false);
+    const note = inlineRoot.querySelector('.chatgoose-inline-note');
+    expect(note).not.toBeNull();
+    expect(note!.classList.contains('chatgoose-inline-note-warn')).toBe(true);
+    expect(note!.textContent).toContain('Try Regenerate');
+  });
+
   it('reopens the cached completed reply in the inline panel and preserves insert state', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

@@ -508,6 +508,68 @@ describe('InlinePanelController', () => {
     expect(cards).toHaveLength(2);
     const firstHeaderRow = requireElement(cards[0] as HTMLElement, '.chatgoose-card-header-row');
     expect(requireElement(firstHeaderRow, '.chatgoose-card-hint').textContent).toBe('Suggested first send.');
+    expect((cards[0] as HTMLElement).classList.contains('chatgoose-card-recommended')).toBe(true);
+    const secondHeaderRow = requireElement(cards[1] as HTMLElement, '.chatgoose-card-header-row');
+    expect(requireElement(secondHeaderRow, '.chatgoose-card-hint').textContent).toBe(
+      'Suggested follow-up after message 1.',
+    );
+    expect((cards[1] as HTMLElement).classList.contains('chatgoose-card-followup')).toBe(true);
+  });
+
+  it('shows a one-part Split violation while preserving Insert and Regenerate', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const model = createReplyModel([createPart('Only one')]);
+    model.splitModeRequested = true;
+    controller.render(model);
+
+    const note = requireElement(controller.root, '.chatgoose-inline-note');
+    expect(note.classList.contains('chatgoose-inline-note-warn')).toBe(true);
+    expect(note.textContent).toContain('Try Regenerate');
+    const buttons = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-button'),
+    ).map((button) => button.textContent);
+    expect(buttons).toContain('Insert');
+    expect(buttons).toContain('Regenerate');
+  });
+
+  it('shows neutral guidance for a successful two-part Split', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const model = createReplyModel([createPart('First', 0), createPart('Second', 1)]);
+    model.splitModeRequested = true;
+    controller.render(model);
+
+    const note = requireElement(controller.root, '.chatgoose-inline-note');
+    expect(note.classList.contains('chatgoose-inline-note-warn')).toBe(false);
+    expect(note.textContent).toContain('Split mode was on');
+  });
+
+  it('shows a one-part Split violation on the active Compare tab', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel({
+      progress: null,
+      canCancel: false,
+      tabs: [
+        {
+          cardId: 'current',
+          label: 'Current',
+          source: 'current',
+          status: 'reply',
+          rawText: 'Only one',
+          parts: [createPart('Only one')],
+          splitModeRequested: true,
+        },
+      ],
+    }));
+
+    const note = requireElement(controller.root, '.chatgoose-inline-note');
+    expect(note.classList.contains('chatgoose-inline-note-warn')).toBe(true);
+    expect(note.textContent).toContain('at least 2 messages');
   });
 
   it('reply Regenerate button calls onRerun', () => {

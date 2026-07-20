@@ -65,6 +65,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E46 | 2026-07-19 | Coach feature (client-side): per-fan in-memory sessions, canonical conversationRef=groupId + required fanRef, transcript overlap-and-replace cache, recap two sizes + picker (`summary-short:` key, short never syncs to Hub), auto-recap STOP/PROCEED taxonomy (timed_out/network_error STOP by design), serialization on lifecycle.reserve, empty-pageLabel acceptance fallback, custom-name rule both lanes |
 | E47 | 2026-07-20 | Voice notes: fan-pinned paid recovery, exact-take/live-route attach custody, bounded MP3 handoff, and explicit storage.session/MV3 limits |
 | E48 | 2026-07-20 | Docs cleanup: `docs/project-kernel/` retired (tombstone); superseded Pass-1 maps deleted and their living regeneration prompt moved under `docs/generated/` |
+| E49 | 2026-07-20 | Split-contract presentation is shared across overlay, default inline reply, and Compare: one part warns in amber, successful Split guidance stays neutral, and part-card hints/emphasis come from one helper; follows core Decision #156 without changing wire/output parsing |
 
 ## Entries
 
@@ -1200,3 +1201,18 @@ each is recoverable from Git and fully replaced by the point-in-time maps under
 `docs/generated/REGENERATION-PROMPT.md` with its title and output paths updated.
 Generated-map banners still cite the historical path and will self-correct on
 the next regeneration; generated documentation is exempt from hand editing.
+
+**E49 (2026-07-20).** Split-result presentation is one shared contract across
+the expanded overlay, the default inline reply surface, and Compare tabs. Core
+Decision #156 makes `preferSplit` a strict prompt request for 2–3 parts while
+deliberately keeping provider output tolerant; consequently a completed
+one-part result remains usable but carries an amber warning and an explicit
+Regenerate suggestion on every surface. Two or more parts get neutral manual-
+send guidance. Green is not used because it remains reserved for money.
+
+`getSplitContractNote` owns the note semantics and
+`getSplitPartCardOptions` owns the matching first-send/follow-up hints and
+emphasis, preventing per-surface drift. Errors and empty results retain their
+existing fail-closed surfaces, and output above the requested maximum is not
+silently truncated. This is presentation-only: no storage migration, kernel
+contract, parsing, automatic send, or retry behavior changes.

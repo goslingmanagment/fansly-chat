@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
+  createSplitContractNote,
   createUserErrorBlock,
   formatLoadingStatus,
   getInsertButtonLabel,
   getNextInsertablePart,
+  getSplitContractNote,
+  getSplitPartCardOptions,
   isInsertFeedbackActive,
 } from '../src/content/ui/view-helpers.js';
 import { getErrorMessage } from '../src/shared/errors.js';
@@ -78,5 +81,60 @@ describe('content view helpers', () => {
     const block = createUserErrorBlock(getErrorMessage('hub_request_failed'));
     expect(block.querySelector('.chatgoose-error-detail')).toBeNull();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('getSplitContractNote (E49)', () => {
+  it('returns null when Split was not requested', () => {
+    expect(getSplitContractNote(false, false, 1)).toBeNull();
+    expect(getSplitContractNote(undefined, false, 1)).toBeNull();
+  });
+
+  it('returns null for errored or empty results', () => {
+    expect(getSplitContractNote(true, true, 1)).toBeNull();
+    expect(getSplitContractNote(true, false, 0)).toBeNull();
+  });
+
+  it('marks one part as a violation and 2+ parts as guidance', () => {
+    expect(getSplitContractNote(true, false, 1)).toMatchObject({
+      tone: 'violation',
+    });
+    for (const count of [2, 3, 4]) {
+      expect(getSplitContractNote(true, false, count)?.tone).toBe('guidance');
+    }
+  });
+
+  it('adds the amber warning modifier only to violations', () => {
+    installDom();
+    const violation = createSplitContractNote(getSplitContractNote(true, false, 1)!);
+    const guidance = createSplitContractNote(getSplitContractNote(true, false, 2)!);
+
+    expect(violation.className).toBe('chatgoose-inline-note chatgoose-inline-note-warn');
+    expect(violation.textContent).toContain('Try Regenerate');
+    expect(guidance.className).toBe('chatgoose-inline-note');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('getSplitPartCardOptions (E49)', () => {
+  it('returns no presentation when Split was not requested or only one part exists', () => {
+    expect(getSplitPartCardOptions(part(0), false, 2)).toEqual({});
+    expect(getSplitPartCardOptions(part(0), undefined, 2)).toEqual({});
+    expect(getSplitPartCardOptions(part(0), true, 1)).toEqual({});
+  });
+
+  it('marks the first part recommended and every later part as a follow-up', () => {
+    expect(getSplitPartCardOptions(part(0), true, 2)).toEqual({
+      hint: 'Suggested first send.',
+      emphasis: 'recommended',
+    });
+    expect(getSplitPartCardOptions(part(1), true, 2)).toEqual({
+      hint: 'Suggested follow-up after message 1.',
+      emphasis: 'followup',
+    });
+    expect(getSplitPartCardOptions(part(2), true, 3)).toEqual({
+      hint: 'Suggested follow-up after message 1.',
+      emphasis: 'followup',
+    });
   });
 });
