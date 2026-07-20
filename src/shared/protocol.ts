@@ -219,7 +219,8 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalReplyTone(record) &&
     isOptionalString(record, 'chatterQuestion') &&
     isOptionalCoachHistory(record) &&
-    isOptionalSummaryMode(record);
+    isOptionalSummaryMode(record) &&
+    isOptionalString(record, 'coachSessionId');
 }
 
 function isCompareStartMessage(record: Record<string, unknown>): boolean {

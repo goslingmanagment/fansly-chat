@@ -126,6 +126,87 @@ describe('kernel feature gateway', () => {
       .toBe('Bearer agency_hub_device_x');
   });
 
+  it('threads the coach body fields: fanRef, chatterQuestion, coachHistory, transcriptCoverage', async () => {
+    const calls: Array<{ init: RequestInit | undefined }> = [];
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      calls.push({ init });
+      return sseResponse([META, { type: 'content_delta', text: 'ok' }, { type: 'done', stopReason: 'end_turn' }]);
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    await gateway.streamFeature(settings(), request({
+      feature: 'coach-chat',
+      conversationRef: 'group-1',
+      fanRef: 'fan-1',
+      chatterQuestion: 'how do I sell this?',
+      coachHistory: [{ question: 'earlier?', answer: 'earlier advice' }],
+      clientContext: {
+        transcript: '[10:00] Fan: hey',
+        messageCount: 5,
+        fanDisplayName: 'Charles',
+        fanSpendingData: '',
+        fanSubscriptionData: '',
+        transcriptCoverage: 'full-history',
+      },
+    }), { onText: () => {} }, new AbortController().signal);
+
+    const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      conversationRef: 'group-1',
+      fanRef: 'fan-1',
+      chatterQuestion: 'how do I sell this?',
+      coachHistory: [{ question: 'earlier?', answer: 'earlier advice' }],
+      clientContext: { transcriptCoverage: 'full-history' },
+    });
+    // summaryMode is coach-irrelevant and must not leak onto a coach body.
+    expect(body).not.toHaveProperty('summaryMode');
+  });
+
+  it('sends summaryMode only for a short recap; a full recap omits it', async () => {
+    const bodyFor = async (summaryMode: 'short' | undefined): Promise<Record<string, unknown>> => {
+      const calls: Array<{ init: RequestInit | undefined }> = [];
+      const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+        calls.push({ init });
+        return sseResponse([META, { type: 'content_delta', text: 'ok' }, { type: 'done', stopReason: 'end_turn' }]);
+      });
+      const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+      await gateway.streamFeature(settings(), request({
+        feature: 'fan-summary',
+        conversationRef: 'group-1',
+        fanRef: 'fan-1',
+        ...(summaryMode ? { summaryMode } : {}),
+      }), { onText: () => {} }, new AbortController().signal);
+      return JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
+    };
+
+    expect(await bodyFor('short')).toMatchObject({ summaryMode: 'short', fanRef: 'fan-1' });
+    expect(await bodyFor(undefined)).not.toHaveProperty('summaryMode');
+  });
+
+  it('maps a structured unknown_ai_feature 404 to coach_requires_newer_hub, not a bare 404', async () => {
+    const failWith = async (payload: object, status: number): Promise<ChatGooseError> => {
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        }));
+      const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+      try {
+        await gateway.streamFeature(settings(), request({ feature: 'coach-chat' }), { onText: () => {} }, new AbortController().signal);
+        throw new Error('expected a throw');
+      } catch (error) {
+        if (error instanceof ChatGooseError) return error;
+        throw error;
+      }
+    };
+
+    const gated = await failWith({ error: 'unknown_ai_feature', message: 'feature not found', statusCode: 404 }, 404);
+    expect(gated.key).toBe('coach_requires_newer_hub');
+    expect(gated.code).toBe('CG-HUB-11');
+    // A generic 404 (missing/unauthorized page) must NOT be relabelled.
+    const generic = await failWith({ error: 'not_found', message: 'no such page', statusCode: 404 }, 404);
+    expect(generic.key).toBe('hub_request_failed');
+  });
+
   it('maps kernel product-gate wordings onto the extension error keys', async () => {
     const gate = async (message: string): Promise<ChatGooseError> => {
       const fetchMock = vi.fn(async () =>

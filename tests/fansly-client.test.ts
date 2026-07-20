@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FanslyClient } from '../src/background/fansly-client.js';
 import { SessionStore } from '../src/background/session-store.js';
-import type { FanslySubscriberSubscriptionRecord, MonthlyEarningsRow } from '../src/shared/types.js';
+import {
+  FANSLY_PAGE_LIMIT,
+  FANSLY_PAGINATION_DELAY_MS,
+} from '../src/shared/constants.js';
+import type {
+  FanslyMessage,
+  FanslyMessagePageResponse,
+  FanslySubscriberSubscriptionRecord,
+  MonthlyEarningsRow,
+} from '../src/shared/types.js';
 
 const SESSION_CAPTURE = {
   accountId: 'account-1',
@@ -467,5 +476,75 @@ describe('FanslyClient findGroupIdForFan', () => {
     );
 
     expect(groupId).toBeNull();
+  });
+});
+
+// ── Coach transcript strategy: reachedEnd coverage signal (spec §6) ──────────
+
+function buildMessagePage(count: number): FanslyMessagePageResponse {
+  const messages: FanslyMessage[] = Array.from({ length: count }, (_, index) => ({
+    id: String(1000 - index),
+    type: 1,
+    content: 'hi',
+    groupId: 'group-1',
+    senderId: 'fan-1',
+    createdAt: 1000 - index,
+    attachments: [],
+    embeds: [],
+  }));
+  return {
+    messages,
+    accountMedia: [],
+    accountMediaBundles: [],
+    accountMediaOrders: [],
+  };
+}
+
+describe('FanslyClient loadMessages reachedEnd', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('reports reachedEnd=true when a short final page ends pagination', async () => {
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () => jsonSuccessResponse(buildMessagePage(3)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.loadMessages(
+      'group-1',
+      100,
+      session,
+      new AbortController().signal,
+    );
+
+    expect(result.reachedEnd).toBe(true);
+    expect(result.pagesLoaded).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports reachedEnd=false when pagination stops because requestedCount is satisfied', async () => {
+    vi.useFakeTimers();
+    const { client, session } = createClientHarness();
+    const fetchMock = vi.fn(async () =>
+      jsonSuccessResponse(buildMessagePage(FANSLY_PAGE_LIMIT)),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = client.loadMessages(
+      'group-1',
+      FANSLY_PAGE_LIMIT,
+      session,
+      new AbortController().signal,
+    );
+    // A full page satisfies requestedCount; the loop still schedules one
+    // pagination delay before re-checking the while-condition and exiting.
+    await vi.advanceTimersByTimeAsync(FANSLY_PAGINATION_DELAY_MS + 10);
+    const result = await promise;
+
+    expect(result.reachedEnd).toBe(false);
+    expect(result.pagesLoaded).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

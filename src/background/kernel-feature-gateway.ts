@@ -24,6 +24,17 @@ export interface KernelFeatureClientContext {
   fanSubscriptionData: string;
   fanBio?: string;
   pingSegment?: PingSegment;
+  /** Coach + short-recap only (spec §5/§6): whether the shipped transcript is
+   * the fan's whole history or a bounded window. Kernel-bound only — it never
+   * rides the content→background protocol. */
+  transcriptCoverage?: 'full-history' | 'window';
+}
+
+/** One replayed coach exchange (oldest-first), already char-projected client
+ * side. Mirrors the SDK body's `coachHistory[]` strict shape. */
+export interface KernelCoachHistoryEntry {
+  question: string;
+  answer: string;
 }
 
 export interface KernelFeatureRequest {
@@ -31,8 +42,12 @@ export interface KernelFeatureRequest {
   /** = operationId; the kernel dedup/correlation key. Must be a UUID. */
   clientRequestId: string;
   pageLabel: string;
-  /** Fansly fan account id (conversation partner). */
+  /** Fansly fan account id (conversation partner) OR — for coach + recap —
+   * the canonical Fansly group id (spec §5). */
   conversationRef: string;
+  /** Canonical fan identity, separate from `conversationRef` (spec §5). Sent
+   * for coach-chat (REQUIRED there) and fan-summary once the fan is resolved. */
+  fanRef?: string | null;
   personaKey?: string | null;
   /** Exact catalog definition expected to assemble the prompt. */
   expectedPersonaDefinitionId?: string;
@@ -40,6 +55,14 @@ export interface KernelFeatureRequest {
   replyMode?: 'default' | 'preferSplit';
   draftText?: string;
   isRegeneration?: boolean;
+  /** coach-chat: the chatter's live question for this turn (kernel requires it
+   * for coach-chat, rejects it elsewhere). */
+  chatterQuestion?: string;
+  /** coach-chat: prior completed exchanges replayed as dialog memory. */
+  coachHistory?: KernelCoachHistoryEntry[];
+  /** fan-summary: sent ONLY as 'short' (a full run omits it — an old kernel
+   * then never sees the field, keeping rollback safe). */
+  summaryMode?: 'short';
   clientContext: KernelFeatureClientContext;
   /** Debug mode only (E28): ask the kernel to echo the prompt it assembled.
    * Rides a capability HEADER, never the request body — an old kernel ignores
@@ -126,6 +149,13 @@ function toChatGooseError(error: unknown): ChatGooseError {
     const gate = mapKernelGateError(error);
     if (gate) {
       return gate;
+    }
+    // Structured `unknown_ai_feature` (404): this page's Hub predates the
+    // feature (coach-chat). Only the STRUCTURED code maps to the actionable
+    // "newer Hub" card — a bare 404 (missing/unauthorized page) must keep its
+    // generic handling below, never be mislabelled as a version gap.
+    if (error.status === 404 && error.code === 'unknown_ai_feature') {
+      return new ChatGooseError('coach_requires_newer_hub', { message: error.message });
     }
     if (error.status === 429) {
       // The AI gateway's daily-cap denial ships code "quota_denied" (its
@@ -297,6 +327,7 @@ export function createKernelFeatureGateway(
             pageLabel: request.pageLabel,
             platform: 'fansly',
             conversationRef: request.conversationRef,
+            ...(request.fanRef != null ? { fanRef: request.fanRef } : {}),
             ...(request.personaKey != null ? { personaKey: request.personaKey } : {}),
             ...(request.expectedPersonaDefinitionId !== undefined
               ? { expectedPersonaDefinitionId: request.expectedPersonaDefinitionId }
@@ -304,6 +335,15 @@ export function createKernelFeatureGateway(
             ...(request.replyTone !== undefined ? { replyTone: request.replyTone } : {}),
             ...(request.replyMode !== undefined ? { replyMode: request.replyMode } : {}),
             ...(request.draftText !== undefined ? { draftText: request.draftText } : {}),
+            ...(request.chatterQuestion !== undefined
+              ? { chatterQuestion: request.chatterQuestion }
+              : {}),
+            ...(request.coachHistory !== undefined
+              ? { coachHistory: request.coachHistory }
+              : {}),
+            // Only ever 'short'; a full recap omits the field entirely so an old
+            // kernel (which never learned it) still runs a legacy full summary.
+            ...(request.summaryMode === 'short' ? { summaryMode: 'short' } : {}),
             isRegeneration: request.isRegeneration ?? false,
             clientContext: {
               transcript: request.clientContext.transcript,
@@ -316,6 +356,9 @@ export function createKernelFeatureGateway(
                 : {}),
               ...(request.clientContext.pingSegment !== undefined
                 ? { pingSegment: request.clientContext.pingSegment }
+                : {}),
+              ...(request.clientContext.transcriptCoverage !== undefined
+                ? { transcriptCoverage: request.clientContext.transcriptCoverage }
                 : {}),
             },
           },
