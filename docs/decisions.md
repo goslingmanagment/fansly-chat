@@ -62,6 +62,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
 | E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
 | E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` cache-hit marker invalidates every pre-guard recap (one forced regen per fan, self-healing) with a documented Hub-residual gap owned by core #136 |
+| E46 | 2026-07-19 | Coach feature (client-side): per-fan in-memory sessions, canonical conversationRef=groupId + required fanRef, transcript overlap-and-replace cache, recap two sizes + picker (`summary-short:` key, short never syncs to Hub), auto-recap STOP/PROCEED taxonomy (timed_out/network_error STOP by design), serialization on lifecycle.reserve, empty-pageLabel acceptance fallback, custom-name rule both lanes |
 
 ## Entries
 
@@ -1085,3 +1086,57 @@ exposure is one possibly-truncated dossier per never-re-run fan feeding other
 prompts — bounded, low, and self-healing on the next recap. (A working note also
 sits in the repo's `.agentic/` scratch backlog, but THIS entry is the source of
 truth.)
+
+**E46 (2026-07-19).** The Coach feature ships as a client-side conversational
+coaching lane over the same kernel feature-lane (SSE) as the other AI actions.
+**Sessions:** per-fan in-memory coach sessions (LRU, ≤5 per tab) hold the exchange
+history; nothing coach-specific persists to storage. **Canonical identity:** Coach
+and the new Recap requests adopt the contract's identity split —
+`conversationRef = Fansly groupId` and `fanRef = fanAccountId` — instead of the
+legacy `fanAccountId ?? groupId` collapse; the attach lookup searches both keys
+during transition. Coach-chat REQUIRES a resolved fanRef and fails closed with
+`coach_fan_unresolved` BEFORE the kernel call, so acquiring context never burns a
+generation (spec §4/§5). **Transcript strategy:** per-turn freshness without ~40
+Fansly requests uses a background session cache with **overlap-and-replace**
+(`coach-transcript-cache.ts`) — the first turn seeds the full quick window (≤4
+pages at defaults), follow-up turns fetch only page 1 (newest 25) and replace the
+cached suffix that page overlaps (Fansly rows are mutable: edits/deletions land
+within the refreshed region; no blind concat), keep paging on no-overlap, and
+full-reload before the kernel call when continuity is impossible. The client
+history sent on the wire (`serializeCoachHistory`) is an OPTIMIZATION, not the
+source of truth — the kernel is authoritative. **Recap: two sizes + picker
+(client-side):** short and full recaps are distinct, mode-qualified summary-cache
+keys — short gets its own `summary-short:` prefix (`SUMMARY_SHORT_CACHE_PREFIX`)
+so it never overwrites the full recap, and a short recap NEVER syncs to the Hub
+dossier (dossier stays full-recap only). **Auto-recap chain**
+(`coachAutoRecap: off|short|full`; per-session override `inherit|off|short|full`;
+24h staleness `COACH_RECAP_FRESH_MS`; at most once per session) runs a `recap-step`
+then optionally chains the coach turn, governed by a STOP/PROCEED taxonomy
+(`classifyRecapChainFailure`): user cancel, route/account change, auth/credential/
+setup failure, global quota, and transcript-acquisition failure STOP the chain
+(question preserved in the composer); a recap-specific model failure or a feature
+ceiling PROCEEDS to the coach turn with the older/no recap and honest fallback
+copy. **Documented deviation from spec §5's letter:** `timed_out` and
+`network_error` are classified STOP even though a *kernel recap-stream* stall would
+by the letter PROCEED — those two codes cover BOTH Fansly-pagination failure and a
+kernel-stream stall and the client cannot tell them apart, so the deliberate safe
+direction is to never answer the coach question while silently pretending the
+recap succeeded (`hub_quota_exceeded` is STOP for the same safe reason: a per-
+feature ceiling is indistinguishable from global quota). **Storage schema is v15**
+— see E45; not restated here. **Serialization guarantee:** coach transcript-cache
+concurrency rests ENTIRELY on the background `lifecycle.reserve` single-op-per-tab
+gate — a streaming coach turn holds the tab's only op slot, so two turns never
+touch a session's cache at once; there is deliberately NO cache-level single-
+flight. **Acceptance-fallback degradation:** after an SW restart (or 50-entry
+op→ref eviction) the in-memory acceptance context is gone, so a coach accept/
+dismiss enqueues with an EMPTY `pageLabel` (recovering it would cost a Hub round-
+trip) — the kernel correlates the event by `generationRef`, which the coach feed
+still carries, so the degraded pageLabel is acceptable. **Custom-name rule (spec
+§4) held end to end:** the kernel-facing `clientContext.fanDisplayName` is account-
+lookup only (username/displayName) and degrades to the neutral `"fan"` on lookup
+failure — the chatter's private custom fan name (the DOM label) rides ONLY the
+UI-facing display name and never reaches a prompt, on both the reply and compare
+lanes (named guard tests in `tests/operations.test.ts`). Recorded in the same PR
+that implements the feature (family law). Spec:
+docs/superpowers/specs/2026-07-17-coach-chat-design.md; plan:
+docs/superpowers/plans/2026-07-18-coach-chat-extension.md.

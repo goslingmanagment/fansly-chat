@@ -39,6 +39,7 @@ import {
   toUserError,
 } from '../shared/errors.js';
 import {
+  featureIncludesFanBio,
   featureRequiresDraft,
   featureUsesPingSegment,
   getFeaturePolicy,
@@ -631,6 +632,23 @@ export class OperationCoordinator {
         if (context && this.acceptance) {
           this.acceptance.enqueue({
             ...context,
+            // Prefer the live context's ref; fall back to the client-carried one.
+            requestId: context.requestId ?? message.generationRef ?? null,
+            action: message.action,
+            at: new Date().toISOString(),
+          });
+        } else if (message.generationRef && this.acceptance) {
+          // The in-memory op→ref context is gone (SW restart / 50-entry eviction),
+          // but the coach feed still holds the generation ref, so correlate via it
+          // (P2). pageLabel is not cheaply recoverable here (a Hub round-trip); the
+          // kernel matches by generationRef, so a degraded pageLabel is acceptable.
+          const ctx = this.tabContexts.get(tabId);
+          this.acceptance.enqueue({
+            operationId: message.operationId,
+            requestId: message.generationRef,
+            feature: 'coach-chat',
+            pageLabel: '',
+            conversationRef: ctx?.groupId ?? '',
             action: message.action,
             at: new Date().toISOString(),
           });
@@ -1840,6 +1858,14 @@ export class OperationCoordinator {
           storage.personaCatalogSource,
           resolvedModel,
         );
+        // «Открыть последний» (spec §5): view the stored recap WITHOUT ever
+        // generating. A cache miss is not an error to a normal Recap run (it
+        // would generate), but here it must fail closed — no pagination, no
+        // kernel call, no AI spend — so the standalone "view last" action stays
+        // spend-free and honest about there being nothing stored.
+        if (payload.viewCachedOnly && !(cachedSummary && hasValidCachedSummary)) {
+          throw new ChatGooseError('no_saved_recap');
+        }
       }
 
       if (payload.feature === 'fan-summary' && cachedSummary && hasValidCachedSummary) {
@@ -2246,7 +2272,10 @@ export class OperationCoordinator {
             payload.domFanDisplayName ||
             'fan';
           kernelFanName = kernelFanDisplayName(account);
-          if (payload.feature === 'hi-greeting' && account?.about?.trim()) {
+          // Bio inclusion is a per-feature policy (spec §7): hi-greeting, help-me,
+          // and coach-chat — NOT a hardcoded hi-greeting check (that omitted the
+          // bio for coach + help-me, the bug this fixes).
+          if (featureIncludesFanBio(payload.feature) && account?.about?.trim()) {
             fanBio = account.about.trim();
           }
           completeStage(
@@ -2557,16 +2586,21 @@ export class OperationCoordinator {
       if (!pageLabel) {
         throw new ChatGooseError('hub_page_match_failed');
       }
-      // Coverage (spec §5/§6): only 'full-history' when the provider reached the
+      // Coverage (spec §5/§6): 'full-history' only when the provider reached the
       // conversation's oldest edge AND no window trim happened AND the char-cap
-      // formatter kept every normalized message. Sent for coach + short recap.
+      // formatter kept every normalized message. Computed for EVERY run so the
+      // recap coverage header (spec §5) can render on any fan-summary result…
+      const computedTranscriptCoverage: 'full-history' | 'window' =
+        providerReachedEnd &&
+        !windowTrimmed &&
+        keptMessageCount === transcriptMessages.length
+          ? 'full-history'
+          : 'window';
+      // …but only SENT to the kernel for coach + short recap (spec §7 rollback
+      // gating — old cores never see the field from a full run).
       const transcriptCoverage: 'full-history' | 'window' | undefined =
         payload.feature === 'coach-chat' || isShortRecap
-          ? (providerReachedEnd &&
-              !windowTrimmed &&
-              keptMessageCount === transcriptMessages.length
-              ? 'full-history'
-              : 'window')
+          ? computedTranscriptCoverage
           : undefined;
       const refs = buildConversationRefs(
         payload.feature,
@@ -2592,6 +2626,10 @@ export class OperationCoordinator {
           ? { coachHistory: payload.coachHistory }
           : {}),
         ...(isShortRecap ? { summaryMode: 'short' as const } : {}),
+        // The REQUESTED window (kernel records requestedCount from this): the
+        // short const for a short recap, else the feature's window (deep for a
+        // full recap). Distinct from clientContext.messageCount (the kept count).
+        messageCount: effectiveMessageCount,
         // E28: ask only in debug mode. The kernel answers only inside an
         // owner-set time-bounded window, so this is a request, not a right.
         debugPromptEcho: profiler.enabled,
@@ -2944,8 +2982,15 @@ export class OperationCoordinator {
         if (isShortRecap) {
           // Short recap (spec §5): own mode-qualified cache key, and NEVER a Hub
           // dossier push — a short run must not overwrite the durable full
-          // dossier. No sync status, no summarySyncTask.
-          result.summaryMeta = { generatedAt, stale: false, cached: false };
+          // dossier. No sync status, no summarySyncTask. Coverage header data
+          // (spec §5) rides on the freshly generated result.
+          result.summaryMeta = {
+            generatedAt,
+            stale: false,
+            cached: false,
+            transcriptCoverage: computedTranscriptCoverage,
+            keptCount: keptMessageCount,
+          };
           if (shouldCacheSummary) {
             const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(
               validated.urlGroupId,
@@ -2988,6 +3033,8 @@ export class OperationCoordinator {
             stale: false,
             cached: false,
             syncStatus: initialSyncStatus,
+            transcriptCoverage: computedTranscriptCoverage,
+            keptCount: keptMessageCount,
           };
           if (shouldCacheSummary) {
             const committed = await this.storageCoordinator.saveSummaryCacheIfCurrent(

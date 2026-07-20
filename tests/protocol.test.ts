@@ -181,6 +181,34 @@ describe('protocol boundary guards', () => {
     ).toBe(true);
   });
 
+  it('accepts viewCachedOnly on a fan-summary operation:start; rejects a non-boolean', () => {
+    const base = {
+      type: 'operation:start',
+      operationId: 'op-view-1',
+      feature: 'fan-summary',
+      groupId: 'group-1',
+      routeNonce: 3,
+      domFanDisplayName: 'Alice',
+    };
+    expect(isContentPortMessage({ ...base, viewCachedOnly: true })).toBe(true);
+    // Absent is fine (optional).
+    expect(isContentPortMessage(base)).toBe(true);
+    // A non-boolean is rejected at the boundary.
+    expect(isContentPortMessage({ ...base, viewCachedOnly: 'yes' })).toBe(false);
+  });
+
+  it('accepts operation:acceptance with an optional generationRef; rejects a non-string', () => {
+    const base = {
+      type: 'operation:acceptance',
+      operationId: 'op-1',
+      action: 'inserted' as const,
+      partIndex: 0,
+    };
+    expect(isContentPortMessage(base)).toBe(true);
+    expect(isContentPortMessage({ ...base, generationRef: 'gen-1' })).toBe(true);
+    expect(isContentPortMessage({ ...base, generationRef: 42 })).toBe(false);
+  });
+
   it('rejects malformed coach fields on operation:start', () => {
     const base = {
       type: 'operation:start',

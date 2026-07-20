@@ -39,6 +39,8 @@ describe('buildHotkeyBindings', () => {
       .map((b) => HOTKEY_FEATURE[b.action])
       .filter((f): f is NonNullable<typeof f> => f !== undefined);
     expect(new Set(featureActions).size).toBe(featureActions.length);
+    // fan-summary is NO LONGER a direct feature-start hotkey — it became an app
+    // action (the recap picker) in the Coach extension phase (plan §Task 2).
     expect(featureActions).toEqual(
       expect.arrayContaining([
         'fast-reply',
@@ -46,18 +48,24 @@ describe('buildHotkeyBindings', () => {
         'help-me',
         'hi-greeting',
         'ping',
-        'fan-summary',
         'chat-review',
       ]),
     );
+    expect(featureActions).not.toContain('fan-summary');
   });
 
-  it('includes the spenders-board and cheatsheet app actions', () => {
+  it('includes the spenders-board, coach, recap-picker and cheatsheet app actions', () => {
     const actions = new Set<HotkeyAction>(mac.map((b) => b.action));
     expect(actions.has('spenders-board')).toBe(true);
     expect(actions.has('cheatsheet')).toBe(true);
     expect(actions.has('cycle-tone')).toBe(true);
     expect(actions.has('cancel')).toBe(true);
+    // coach + fan-summary are hotkey actions but NOT in HOTKEY_FEATURE (app
+    // actions: Coach chat / recap picker; dispatch arms land in Task 10).
+    expect(actions.has('coach')).toBe(true);
+    expect(HOTKEY_FEATURE.coach).toBeUndefined();
+    expect(actions.has('fan-summary')).toBe(true);
+    expect(HOTKEY_FEATURE['fan-summary']).toBeUndefined();
   });
 
   it('resolves a real keypress through the assembled keymap', () => {
