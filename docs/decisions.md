@@ -66,6 +66,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E47 | 2026-07-20 | Voice notes: fan-pinned paid recovery, exact-take/live-route attach custody, bounded MP3 handoff, and explicit storage.session/MV3 limits |
 | E48 | 2026-07-20 | Docs cleanup: `docs/project-kernel/` retired (tombstone); superseded Pass-1 maps deleted and their living regeneration prompt moved under `docs/generated/` |
 | E49 | 2026-07-20 | Split-contract presentation is shared across overlay, default inline reply, and Compare: one part warns in amber, successful Split guidance stays neutral, and part-card hints/emphasis come from one helper; follows core Decision #156 without changing wire/output parsing |
+| E50 | 2026-07-20 | Ping sends a bounded whole-day fan-silence gap from the same clock and latest fan text as segment selection; follows Core Decision #127 and current SDK contract |
 
 ## Entries
 
@@ -1216,3 +1217,20 @@ emphasis, preventing per-surface drift. Errors and empty results retain their
 existing fail-closed surfaces, and output above the requested maximum is not
 silently truncated. This is presentation-only: no storage migration, kernel
 contract, parsing, automatic send, or retry behavior changes.
+
+**E50 (2026-07-20).** Ping now sends the model the missing magnitude behind
+its existing segment label: optional `clientContext.fanSilenceDays` is the
+floored whole-day gap since the latest authored fan text. A later creator/model
+message does not reset it, no fan text omits it, future timestamps clamp to
+zero, and implausibly old timestamps clamp to the strict `20_000` wire ceiling.
+The gap and `pingSegment` share one `Date.now()` sample so they cannot disagree
+at a time boundary. This follows Core Decision #127; prompt assembly remains
+kernel-only and the extension still performs only its existing live Fansly
+read.
+
+The SDK is regenerated, not hand-edited, from Core
+`12a9515aa6b08b8d6b6f03cb815b1974f34d7f38` (contract
+`692d858456403456f7045c76851b199b97b363e9915fa5411dfe4663e680bd52`).
+Core must deploy first because older strict request schemas reject the new
+field. No storage schema, automatic send, or retry behavior changes; the old
+stranded implementation branch is archaeology and was not merged wholesale.

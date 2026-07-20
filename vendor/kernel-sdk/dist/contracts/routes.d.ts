@@ -4202,6 +4202,7 @@ export declare const aiFeatureStreamParamsSchema: z.ZodObject<{
     feature: z.ZodString;
 }, z.core.$strip>;
 export declare const COACH_ANSWER_MAX_CHARS = 64000;
+export declare const FAN_SILENCE_DAYS_MAX = 20000;
 export declare const AI_FEATURE_STREAM_BODY_LIMIT_BYTES: number;
 export declare const aiFeatureStreamBodySchema: z.ZodObject<{
     clientRequestId: z.ZodString;
@@ -4254,6 +4255,7 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
             "segment-a": "segment-a";
             "segment-b": "segment-b";
         }>>;
+        fanSilenceDays: z.ZodOptional<z.ZodNumber>;
         transcriptCoverage: z.ZodOptional<z.ZodEnum<{
             window: "window";
             "full-history": "full-history";
@@ -19781,6 +19783,7 @@ export declare const routeSchemas: {
                     "segment-a": "segment-a";
                     "segment-b": "segment-b";
                 }>>;
+                fanSilenceDays: z.ZodOptional<z.ZodNumber>;
                 transcriptCoverage: z.ZodOptional<z.ZodEnum<{
                     window: "window";
                     "full-history": "full-history";

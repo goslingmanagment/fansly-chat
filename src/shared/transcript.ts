@@ -10,9 +10,14 @@ import type {
   PingSegmentAnalysis,
   PingSegment,
 } from './types.js';
-import { KERNEL_TRANSCRIPT_MAX_CHARS, PING_MIN_FAN_MESSAGES } from './constants.js';
+import {
+  FAN_SILENCE_DAYS_MAX,
+  KERNEL_TRANSCRIPT_MAX_CHARS,
+  PING_MIN_FAN_MESSAGES,
+} from './constants.js';
 import { millsToUsd } from './earnings.js';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
 const PING_ACTIVE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
 
 const ATTACHMENT_CONTENT_TYPE_MEDIA = 1;
@@ -633,6 +638,20 @@ export function analyzePingSegment(
 
 export function resolvePingSegment(messages: NormalizedTranscriptMessage[], nowMs: number): PingSegment {
   return analyzePingSegment(messages, nowMs).segment;
+}
+
+/** Whole days since the fan's latest text message, or null when the fan has
+ * never written text. Call with the same `nowMs` used by `analyzePingSegment`
+ * so the segment and gap cannot disagree at a clock boundary (Core #127). */
+export function fanSilenceDaysFromAnalysis(
+  analysis: PingSegmentAnalysis,
+  nowMs: number,
+): number | null {
+  if (analysis.latestFanTextAtMs === null) {
+    return null;
+  }
+  const elapsedDays = Math.floor((nowMs - analysis.latestFanTextAtMs) / DAY_MS);
+  return Math.min(FAN_SILENCE_DAYS_MAX, Math.max(0, elapsedDays));
 }
 
 export function estimateTargetPages(requestedCount: number): number {

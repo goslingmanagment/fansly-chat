@@ -63,6 +63,7 @@ import {
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   analyzePingSegment,
+  fanSilenceDaysFromAnalysis,
   formatTranscriptForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
@@ -2267,13 +2268,18 @@ export class OperationCoordinator {
       }
 
       let pingSegment: PingSegment | undefined;
+      let fanSilenceDays: number | undefined;
       if (featureUsesPingSegment(payload.feature)) {
         startStage('ping-analysis', 'Analyze ping segment');
+        // One clock sample owns both values (Core #127), avoiding a boundary
+        // disagreement between segment selection and the whole-day gap.
+        const pingNowMs = Date.now();
         const pingAnalysis = analyzePingSegment(
           transcriptMessages,
-          Date.now(),
+          pingNowMs,
         );
         pingSegment = pingAnalysis.segment;
+        fanSilenceDays = fanSilenceDaysFromAnalysis(pingAnalysis, pingNowMs) ?? undefined;
         completeStage(
           'ping-analysis',
           `Ping segment selected: ${pingAnalysis.segment}`,
@@ -2284,6 +2290,7 @@ export class OperationCoordinator {
           segment: pingAnalysis.segment,
           fanTextMessageCount: pingAnalysis.fanTextMessageCount,
           latestFanTextAtMs: pingAnalysis.latestFanTextAtMs,
+          fanSilenceDays,
         });
 
         if (pingSegment === 'active') {
@@ -2684,6 +2691,7 @@ export class OperationCoordinator {
           fanSubscriptionData: subscriptionData,
           ...(fanBio !== undefined ? { fanBio } : {}),
           ...(pingSegment !== undefined ? { pingSegment } : {}),
+          ...(fanSilenceDays !== undefined ? { fanSilenceDays } : {}),
           ...(transcriptCoverage !== undefined ? { transcriptCoverage } : {}),
         },
       } as const;

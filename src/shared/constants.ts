@@ -99,6 +99,10 @@ export const QUICK_MAX_MESSAGE_COUNT = 200;
 export const PING_DEFAULT_MESSAGE_COUNT = QUICK_DEFAULT_MESSAGE_COUNT;
 export const PING_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const PING_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;
+/** Strict Core wire bound for `clientContext.fanSilenceDays` (Decision #127).
+ * The SDK barrel does not export the contract constant, so keep the matching
+ * finite ceiling here and pin it against the vendored schema in tests. */
+export const FAN_SILENCE_DAYS_MAX = 20_000;
 export const IMPROVE_DEFAULT_MESSAGE_COUNT = 25;
 export const IMPROVE_MIN_MESSAGE_COUNT = QUICK_MIN_MESSAGE_COUNT;
 export const IMPROVE_MAX_MESSAGE_COUNT = QUICK_MAX_MESSAGE_COUNT;

@@ -5,6 +5,7 @@ import {
   formatTranscript,
   formatTranscriptForKernel,
   analyzePingSegment,
+  fanSilenceDaysFromAnalysis,
   resolvePingSegment,
   buildTranscriptWindowStart,
   buildPurchaseEvidence,
@@ -12,7 +13,10 @@ import {
   estimateTargetPages,
   extractOldestMessageId,
 } from '../src/shared/transcript.js';
-import { KERNEL_TRANSCRIPT_MAX_CHARS } from '../src/shared/constants.js';
+import {
+  FAN_SILENCE_DAYS_MAX,
+  KERNEL_TRANSCRIPT_MAX_CHARS,
+} from '../src/shared/constants.js';
 import type { FanslyMessagePageResponse, NormalizedTranscriptMessage } from '../src/shared/types.js';
 
 const MODEL_ID = 'model-1';
@@ -1026,6 +1030,54 @@ describe('resolvePingSegment', () => {
       makeNormalized({ createdAt: Math.floor((NOW - 1 * DAY_MS) / 1000), senderLabel: 'Fan' }),
     ];
     expect(resolvePingSegment(messages, NOW)).toBe('active');
+  });
+});
+
+// ─── fanSilenceDaysFromAnalysis (Core #127) ─────────────────────────────
+
+describe('fanSilenceDaysFromAnalysis', () => {
+  const NOW = new Date('2026-03-02T00:00:00Z').getTime();
+
+  it('floors the gap from the latest fan text to whole days', () => {
+    const messages = [
+      makeNormalized({
+        createdAt: Math.floor((NOW - 8.4 * DAY_MS) / 1000),
+        senderLabel: 'Fan',
+      }),
+    ];
+    expect(fanSilenceDaysFromAnalysis(analyzePingSegment(messages, NOW), NOW)).toBe(8);
+  });
+
+  it('returns null when the fan has no text', () => {
+    expect(fanSilenceDaysFromAnalysis(analyzePingSegment([], NOW), NOW)).toBeNull();
+  });
+
+  it('uses the fan text even when the model wrote more recently', () => {
+    const messages = [
+      makeNormalized({
+        id: 'fan-text',
+        createdAt: Math.floor((NOW - 30 * DAY_MS) / 1000),
+        senderLabel: 'Fan',
+      }),
+      makeNormalized({
+        id: 'model-text',
+        createdAt: Math.floor((NOW - DAY_MS) / 1000),
+        senderLabel: 'Model',
+        senderId: MODEL_ID,
+      }),
+    ];
+    expect(fanSilenceDaysFromAnalysis(analyzePingSegment(messages, NOW), NOW)).toBe(30);
+  });
+
+  it('clamps future and implausibly old timestamps to the strict wire range', () => {
+    const future = [makeNormalized({ createdAt: Math.floor((NOW + DAY_MS) / 1000) })];
+    const ancient = [makeNormalized({
+      createdAt: Math.floor((NOW - (FAN_SILENCE_DAYS_MAX + 1) * DAY_MS) / 1000),
+    })];
+
+    expect(fanSilenceDaysFromAnalysis(analyzePingSegment(future, NOW), NOW)).toBe(0);
+    expect(fanSilenceDaysFromAnalysis(analyzePingSegment(ancient, NOW), NOW))
+      .toBe(FAN_SILENCE_DAYS_MAX);
   });
 });
 
