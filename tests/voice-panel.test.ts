@@ -15,6 +15,7 @@ import type {
   VoiceNoteState,
 } from '../src/shared/types.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
+import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import { VoicePanel, type VoicePanelAttachParams } from '../src/content/voice/voice-panel.js';
 
 function installDom(): InstanceType<typeof JSDOM> {
@@ -177,6 +178,12 @@ function view(overrides: Partial<{
 }
 
 const SCRIPT = 'Adapted script text';
+const PAGE_LABEL = 'creator-fs';
+const SOURCE_FINGERPRINT = personaCatalogSource({
+  agencyHubBaseUrl: 'https://hub.test',
+  agencyHubApiKey: '',
+  agencyHubDeviceToken: 'device-token',
+})!;
 
 /** Move the attempt from empty → script phase with a usable generationRef. */
 async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
@@ -188,6 +195,8 @@ async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
     script: SCRIPT,
     generationRef: 'gen-1',
     conversationRef: 'fan-1',
+    sourceFingerprint: SOURCE_FINGERPRINT,
+    pageLabel: PAGE_LABEL,
   });
   return attemptId;
 }
@@ -243,7 +252,7 @@ async function wireRealAttachService(attemptId: string) {
     kernelGateway: { streamFeature: vi.fn() } as never,
     agencyHubClient: {
       resolvePageForUsername: vi.fn(async () => ({
-        pageLabel: 'creator-fs',
+        pageLabel: PAGE_LABEL,
         voiceNotesCapable: true,
       })),
       createVoiceNote: vi.fn(async () => completed),
@@ -291,6 +300,8 @@ async function wireRealAttachService(attemptId: string) {
     conversationRef: 'fan-1',
     pinnedConversationRef: 'fan-1',
     sourceGenerationRef: 'gen-1',
+    sourceFingerprint: SOURCE_FINGERPRINT,
+    pageLabel: PAGE_LABEL,
     script: SCRIPT,
   }, () => undefined);
 
@@ -365,8 +376,24 @@ describe('VoicePanel — лента', () => {
       script: SCRIPT,
       generationRef: 'gen-1',
       conversationRef: 'fan-1',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
     });
     expect(editor?.disabled).toBe(false);
+  });
+
+  it('lets the chatter explicitly cancel a stalled free script generation', async () => {
+    await harness!.controller.startScript('hey babe', 'none');
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-cancel-script')!.click();
+    await flush();
+
+    expect(harness!.sent).toContainEqual({
+      type: 'voice:scriptCancel',
+      attemptId: harness!.attemptId(),
+    });
+    expect(harness!.controller.getAttempt()?.phase).toBe('script');
+    expect(harness!.root.querySelector('.chatgoose-voice-cancel-script')).toBeNull();
   });
 
   it('restore swaps the raw draft back into the editor', async () => {

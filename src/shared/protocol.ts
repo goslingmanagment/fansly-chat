@@ -478,13 +478,20 @@ export function isContentPortMessage(message: unknown): message is ContentPortMe
         isString(message.conversationRef) &&
         isString(message.pinnedConversationRef) &&
         isString(message.sourceGenerationRef) &&
+        isString(message.sourceFingerprint) &&
+        isString(message.pageLabel) &&
         isString(message.script);
     case 'voice:noteStatus':
     case 'voice:attachToken':
-      return hasAttemptId(message) && isNumber(message.voiceNoteId);
+      return hasAttemptId(message) &&
+        isNumber(message.voiceNoteId) &&
+        isString(message.sourceFingerprint) &&
+        isString(message.pageLabel);
     case 'voice:audioFetch':
       return hasAttemptId(message) &&
         isNumber(message.voiceNoteId) &&
+        isString(message.sourceFingerprint) &&
+        isString(message.pageLabel) &&
         isString(message.expectedSha256) &&
         isNumber(message.expectedBytes);
     default:
@@ -563,7 +570,9 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return hasAttemptId(message) &&
         isString(message.script) &&
         isString(message.generationRef) &&
-        isString(message.conversationRef);
+        isString(message.conversationRef) &&
+        isString(message.sourceFingerprint) &&
+        isString(message.pageLabel);
     case 'voice:scriptError':
       return hasAttemptId(message) &&
         isString(message.code) &&

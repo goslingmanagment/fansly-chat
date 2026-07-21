@@ -68,6 +68,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E49 | 2026-07-20 | Split-contract presentation is shared across overlay, default inline reply, and Compare: one part warns in amber, successful Split guidance stays neutral, and part-card hints/emphasis come from one helper; follows core Decision #156 without changing wire/output parsing |
 | E50 | 2026-07-20 | Ping sends a bounded whole-day fan-silence gap from the same clock and latest fan text as segment selection; follows Core Decision #127 and current SDK contract |
 | E51 | 2026-07-21 | Options waits for a durable MV3 storage-readiness barrier; custody-layout repair is independent of schemaVersion and failures render no settings writer |
+| E52 | 2026-07-21 | Voice hardening: fail-closed/bounded script SSE, V2 Hub-principal+page custody, bounded paid/free requests, single-flight monotonic status, explicit cancel; custom-name and cross-tab behavior remain intentional |
 
 ## Entries
 
@@ -1249,3 +1250,38 @@ writer; the successful path preserves the existing synchronous pagehide
 adds no logical field. The distinct mixed-version v16→v15 observer-delivery window
 still follows E37's mandatory reload-on-extension-update rule; closing it without
 a storage CAS would require moving all Options writes behind a background journal.
+
+**E52 (2026-07-21).** Voice closes three pilot boundary gaps without changing
+its paid-send or recipient policy. The free `voice-script` stream now shares the
+repository's fail-closed terminal rule: provider exhaustion (`max_tokens` or
+provider-equivalent `length`) and empty/whitespace output produce
+`ai_output_unusable`, never `scriptComplete`. Its whole live-Fansly + kernel lane
+has a 60-second wall-clock bound and an explicit chatter Cancel action.
+
+Every recoverable attempt now freezes a credential-safe Hub source fingerprint
+(normalized base URL + sha256 of the selected device-token/API-key bearer) and
+the exact resolved `pageLabel` alongside the fan and generation refs. Paid
+create, free status/audio reads, and attach grants require exact agreement with
+that binding and the current Hub principal/page. `storage.session` therefore
+moves to `voiceAttemptV2:`; source-less `voiceAttemptV1:` records are ephemeral
+and deleted on load because they cannot be recovered safely. This is not a
+`storage.local` settings-shape change and does not increment schema v15. An MV3
+worker restart may still recover status/audio, but only after re-resolving the
+same source and page; attachment continues to require its worker-memory route
+attestation as established by E47.
+
+The script/create/retrieval budgets are respectively 60s/30s/15s. A paid-create
+timeout is intentionally ambiguous: content preserves the frozen idempotency
+snapshot as `needs-reconcile` and never auto-mints or retries another paid take.
+Status reads are single-flight per attempt/take, and their state reducer rejects
+backward or terminal-resurrecting responses (with `completed → artifact_expired`
+the deliberate expiry transition), so late reads cannot revoke valid completed
+audio or restart polling.
+
+Two product choices from the review remain unchanged. Voice intentionally may
+use the live TabContext fan label, including a chatter custom name, as its
+`clientContext.fanDisplayName` fallback when account-name enrichment is
+unavailable; E46's stricter reply/compare rule is not extended to Voice. No
+single-tab lease is added to an attempt: concurrent tab/content lifecycles are
+an accepted pilot behavior, while source/page, fan, route, exact-take, and
+explicit-human-attach guards remain authoritative.
