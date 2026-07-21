@@ -69,6 +69,16 @@ function v12Store(overrides: Record<string, unknown> = {}): Record<string, unkno
   };
 }
 
+function fullStateWrites(): Record<string, unknown>[] {
+  return vi.mocked(browser.storage.local.set).mock.calls
+    .map(([items]) => items)
+    .filter((items) =>
+      Object.prototype.hasOwnProperty.call(items, 'settings') ||
+      Object.prototype.hasOwnProperty.call(items, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY) ||
+      Object.prototype.hasOwnProperty.call(items, AGENCY_HUB_API_KEY_STORAGE_KEY),
+    );
+}
+
 beforeEach(() => {
   mockStorage = {};
   vi.clearAllMocks();
@@ -109,6 +119,38 @@ describe('v12 → v13 migration', () => {
     // custody keys must win in BOTH directions (fresh token, cleared key).
     expect(state.settings.agencyHubDeviceToken).toBe('fresh-token');
     expect(state.settings.agencyHubApiKey).toBe('');
+  });
+
+  it('leaves current-schema custody repair to the fenced background coordinator', async () => {
+    mockStorage = v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION });
+
+    const snapshot = await storage.readStorageStateSnapshot();
+
+    expect(snapshot.state.settings.agencyHubDeviceToken).toBe('old-token');
+    expect(snapshot.state.settings.agencyHubApiKey).toBe('legacy-key');
+    expect(snapshot.repair).toMatchObject({
+      persistState: false,
+      custodyLayoutNeedsRepair: true,
+    });
+    expect(fullStateWrites()).toEqual([]);
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBeUndefined();
+    expect(mockStorage.settings).toHaveProperty('agencyHubDeviceToken', 'old-token');
+  });
+
+  it('never lets a direct current-schema read replace fresher custody values', async () => {
+    mockStorage = {
+      ...v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION }),
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+    };
+
+    const state = await storage.loadStorageState();
+
+    expect(state.settings.agencyHubDeviceToken).toBe('fresh-token');
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('fresh-token');
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    expect(mockStorage.settings).toHaveProperty('agencyHubDeviceToken', 'old-token');
+    expect(fullStateWrites()).toEqual([]);
   });
 });
 

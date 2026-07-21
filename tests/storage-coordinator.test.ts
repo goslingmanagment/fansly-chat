@@ -22,7 +22,9 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
   ];
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    settings: createDefaultSettings(),
+    settings: stripSecretSettings(createDefaultSettings()),
+    [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+    [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
     personalities,
     legacyPersonaSnapshotV1: {
       schemaVersion: 1,
@@ -334,6 +336,37 @@ describe('StorageCoordinator', () => {
     await coordinator.getState();
     await vi.waitFor(() => expect(storageSet).toHaveBeenCalledTimes(1));
     expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+  });
+
+  it('refuses an external writer until current-schema legacy credentials are durably repaired', async () => {
+    mockStorage = createStorage({
+      settings: {
+        ...createDefaultSettings(),
+        agencyHubApiKey: 'legacy-key',
+        agencyHubDeviceToken: 'legacy-token',
+      },
+    });
+    delete mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY];
+    delete mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY];
+    const { coordinator, enableProbeEvents, storageSet } =
+      await installStorageCoordinatorHarness({ disableProbeEvents: true });
+
+    await expect(coordinator.ensurePersistedState()).rejects.toThrow(
+      'Storage repair could not be durably completed',
+    );
+    expect(storageSet).not.toHaveBeenCalled();
+
+    enableProbeEvents();
+    await expect(coordinator.ensurePersistedState()).resolves.toMatchObject({
+      settings: {
+        agencyHubApiKey: 'legacy-key',
+        agencyHubDeviceToken: 'legacy-token',
+      },
+    });
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('legacy-key');
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('legacy-token');
+    expect(mockStorage.settings).not.toHaveProperty('agencyHubApiKey');
+    expect(mockStorage.settings).not.toHaveProperty('agencyHubDeviceToken');
   });
 
   it('fresh-reads current storage after an initially unobserved barrier', async () => {

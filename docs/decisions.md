@@ -61,12 +61,13 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E42 | 2026-07-17 | changelog.html rebuilt in the family web register (Fraunces/paper/clay, uniform collapsed cards + inline opener, dark theme): zero release-text rewrites (317 li preserved), canon+dates via committed tests/fixtures/changelog-manifest.ts, both deploy stamp slots byte-exact |
 | E43 | 2026-07-17 | Options P3: persona catalog presented as human rows (built-in badge, vN, аккаунтов-счётчик, honest empty-states incl. fetchedAt-stamped confirmed-empty), «Выйти» = background signOutAgencyHub (durable wipe-first, then best-effort revoke; four honest outcomes), identity line rides P2 statusModel — schema stays v14 |
 | E44 | 2026-07-18 | 1.9.11 restores the 1.9.9 runtime after the accidental 1.9.10 Settings preview; E40–E43 move to 2.0, storage stays v14, production-aligned generated SDK stays |
-| E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` cache-hit marker invalidates every pre-guard recap (one forced regen per fan, self-healing) with a documented Hub-residual gap owned by core #136 |
+| E45 | 2026-07-18 | Coach settings-shape ships as storage schema v15 (coachHistoryLimit, coachAutoRecap; deep-window default 1500→3000 via a raw pre-v15 bump; durable schemaVersion stamped on every save); Fansly-egress/cost assessed; output-exhaustion fail-closed extended to fan-summary + compare cards + an empty-output guard; `trustedTerminal` invalidates every pre-guard local recap; the former Hub residual is resolved by Core #177 |
 | E46 | 2026-07-19 | Coach feature (client-side): per-fan in-memory sessions, canonical conversationRef=groupId + required fanRef, transcript overlap-and-replace cache, recap two sizes + picker (`summary-short:` key, short never syncs to Hub), auto-recap STOP/PROCEED taxonomy (timed_out/network_error STOP by design), serialization on lifecycle.reserve, empty-pageLabel acceptance fallback, custom-name rule both lanes |
 | E47 | 2026-07-20 | Voice notes: fan-pinned paid recovery, exact-take/live-route attach custody, bounded MP3 handoff, and explicit storage.session/MV3 limits |
 | E48 | 2026-07-20 | Docs cleanup: `docs/project-kernel/` retired (tombstone); superseded Pass-1 maps deleted and their living regeneration prompt moved under `docs/generated/` |
 | E49 | 2026-07-20 | Split-contract presentation is shared across overlay, default inline reply, and Compare: one part warns in amber, successful Split guidance stays neutral, and part-card hints/emphasis come from one helper; follows core Decision #156 without changing wire/output parsing |
 | E50 | 2026-07-20 | Ping sends a bounded whole-day fan-silence gap from the same clock and latest fan text as segment selection; follows Core Decision #127 and current SDK contract |
+| E51 | 2026-07-21 | Options waits for a durable MV3 storage-readiness barrier; custody-layout repair is independent of schemaVersion and failures render no settings writer |
 
 ## Entries
 
@@ -1073,23 +1074,14 @@ regeneration MUST be called out in CHANGELOG.md when this stack ships (the coach
 feature is unreleased today, so there is no release entry to carry it yet) so the
 one-time fleet spend is not a surprise on the bill.
 
-**Hub-residual gap (round 9) — client cannot fully heal the dossier.**
-`trustedTerminal` guards only the LOCAL cache. A pre-guard truncated recap already
-pushed to the Hub `fan_profiles` dossier — which the kernel injects into OTHER
-features' prompts (core #136) — stays the Hub's latest version regardless of local
-invalidation. Client-side mitigation shipped here: the opportunistic Hub re-push
-(`retrySummaryHubSync`) refuses an untrusted entry, and a fresh trusted
-regeneration's own sync path overwrites the Hub copy — so the self-heal story is
-"regenerate → auto re-push." RESIDUAL: a fan whose recap is never re-run
-(`coachAutoRecap: 'off'` and never manually triggered) keeps a stale Hub dossier
-indefinitely. The client cannot reach into the Hub to delete or quarantine it, so
-this residual risk is accepted and OWNED here in the decision log: the structural
-fix belongs to core #136's dossier rework (Hub-side provenance / trusted-terminal
-+ kernel-side filtering of un-provenanced dossiers), and until that lands the
-exposure is one possibly-truncated dossier per never-re-run fan feeding other
-prompts — bounded, low, and self-healing on the next recap. (A working note also
-sits in the repo's `.agentic/` scratch backlog, but THIS entry is the source of
-truth.)
+**Hub-residual gap (round 9; resolved by Core Decision #177).**
+`trustedTerminal` still guards the LOCAL cache and the opportunistic Hub re-push
+still refuses an untrusted entry. Core now independently admits a Hub dossier to
+prompts only when its exact body matches Core's own usable, completed full-summary
+terminal record for the same page/fan. A pre-guard exhausted or indeterminate
+recap therefore remains an auditable profile version but cannot feed any prompt;
+fresh trusted regeneration plus the existing auto-sync remains the self-heal path.
+No extension wire field or SDK change was needed.
 
 **E46 (2026-07-19).** The Coach feature ships as a client-side conversational
 coaching lane over the same kernel feature-lane (SSE) as the other AI actions.
@@ -1234,3 +1226,26 @@ The SDK is regenerated, not hand-edited, from Core
 Core must deploy first because older strict request schemas reject the new
 field. No storage schema, automatic send, or retry behavior changes; the old
 stranded implementation branch is archaeology and was not merged wholesale.
+
+**E51 (2026-07-21).** Options may become a writer only after the MV3 background
+worker confirms that the current storage snapshot is durably normalized. Storage
+repair now treats credential custody as a layout invariant independent of
+`schemaVersion`: either missing top-level Hub credential key, or either credential
+still present in the `settings` blob, requires the background coordinator to run
+a fenced full persist through `serializePersistedState`. Generic readers only
+report that need and never persist a current-schema snapshot, so they cannot
+overwrite newer custody values. Thus a current-v15 record whose older v12→v13
+custody write never completed is still repaired; existing top-level values retain
+precedence over stale blob values.
+
+Options installs its future-schema observer first, then sends the internal
+`ensureStorageReady` handshake before reading state, starting Fansly session
+discovery, or rendering any editable control. The coordinator may normally expose
+a read-only normalized state after an unobserved startup-listener probe, but this
+durable barrier retries the deferred repair and throws while it remains
+unproven. A failed or old worker produces a static reload screen and no settings
+writer; the successful path preserves the existing synchronous pagehide
+`storage.set`. Storage stays v15 because this repairs the v13 physical layout and
+adds no logical field. The distinct mixed-version v16→v15 observer-delivery window
+still follows E37's mandatory reload-on-extension-update rule; closing it without
+a storage CAS would require moving all Options writes behind a background journal.

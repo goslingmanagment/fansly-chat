@@ -91,6 +91,11 @@ export function registerRuntimeApi({
         return undefined;
       }
 
+      if (requestType === 'ensureStorageReady') {
+        await storageCoordinator.ensurePersistedState();
+        return { ready: true } as const;
+      }
+
       if (requestType === 'getPopupStatus') {
         let tabId: number | undefined;
         let tabUrl: string | undefined;
