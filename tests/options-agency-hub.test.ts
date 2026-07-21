@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
+import { stripSecretSettings } from '../src/shared/migrations.js';
 import { createBundledPersonalities } from '../src/shared/personalities.js';
 import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
 
@@ -29,6 +32,7 @@ interface LoadOptionsPageOptions {
       settings?: AgencyHubConnectionTestRequest['settings'];
     },
   ) => Promise<unknown>;
+  storageReadyImpl?: () => Promise<unknown>;
   storageSetImpl?: (data: Record<string, unknown>) => Promise<void>;
 }
 
@@ -160,12 +164,19 @@ async function loadOptionsPage(
 
   const permissionsOnAdded = createPermissionsEvent();
   const permissionsOnRemoved = createPermissionsEvent();
+  const storageRecord: Record<string, unknown> = {
+    ...state,
+    settings: stripSecretSettings(state.settings),
+    [AGENCY_HUB_API_KEY_STORAGE_KEY]: state.settings.agencyHubApiKey,
+    [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: state.settings.agencyHubDeviceToken,
+  };
 
   (globalThis as Record<string, unknown>).browser = {
     storage: {
       local: {
-        get: vi.fn(async () => state),
+        get: vi.fn(async () => ({ ...storageRecord })),
         set: vi.fn(async (data: Record<string, unknown>) => {
+          Object.assign(storageRecord, data);
           if (data.settings) {
             savedSettings = data.settings as Record<string, unknown>;
           }
@@ -181,7 +192,15 @@ async function loadOptionsPage(
     },
     runtime: {
       getManifest: vi.fn(() => ({ version: '1.0.0' })),
-      sendMessage: vi.fn(options.runtimeSendMessageImpl ?? (async (message: { type: string }) => {
+      sendMessage: vi.fn(async (message: { type: string; settings?: AgencyHubConnectionTestRequest['settings'] }) => {
+        if (message.type === 'ensureStorageReady') {
+          return options.storageReadyImpl
+            ? await options.storageReadyImpl()
+            : { ready: true };
+        }
+        if (options.runtimeSendMessageImpl) {
+          return options.runtimeSendMessageImpl(message);
+        }
         if (message.type === 'getSessionsSnapshot') {
           return [];
         }
@@ -196,7 +215,7 @@ async function loadOptionsPage(
           };
         }
         return undefined;
-      })),
+      }),
       openOptionsPage: vi.fn(async () => undefined),
     },
     permissions: {

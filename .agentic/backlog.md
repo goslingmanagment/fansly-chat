@@ -1,39 +1,66 @@
-# Backlog — отложенные улучшения (рабочие заметки, НЕ канон)
+# Backlog — актуальные отложенные улучшения (рабочие заметки, НЕ канон)
 
 Канон решений — `docs/decisions.md`. Здесь только короткие указатели, чтобы анализ
 не дублировался и не расходился с decision-логом.
 
-## BL-001 — Hub-residual: усечённый pre-guard recap в Hub-dossier
+## Активно
 
-Указатель на **E45** (`docs/decisions.md`, секция «Hub-residual gap») — там источник
-истины: остаточный риск, клиентский self-heal (regenerate → auto re-push) и
-структурный владелец core #136. Здесь анализ намеренно НЕ повторяется.
+### BL-002 — узкое mixed-version окно Options
 
-## BL-002 — Options-path schemaVersion stamp vs MV3 ephemeral-worker custody
+Cred-strip часть закрыта E51: до durable background-handshake Options не создаёт
+writer, а repair детектит незавершённую custody-layout независимо от версии.
 
-`saveSettings` штампует `schemaVersion` рядом с partial-write (E45 требует маркер,
-иначе deep-window bump перезапустится). На Options-пути этот штамп нельзя защитить
-disk-read'ом — pagehide/blur обязаны диспатчить `storage.set` синхронно (тесты
-`options-accounts` это закрепляют). Остаются два узких, но реальных остатка,
-которые синхронный guard закрыть НЕ может:
+Остаётся только downgrade-гонка обновления: диск подняли до v16 после загрузки
+старой v15 Options, но её async `storage.onChanged` ещё не доставил новый marker;
+синхронный pagehide-save в этом микроскопическом окне способен снова поставить
+v15. Без storage CAS это требует background-журнала для всех Options writes и
+меняет pagehide-архитектуру. Текущий rollout-контракт E37 — при обновлении
+расширения закрыть/перезагрузить старые extension contexts.
 
-1. **downgrade-гонка**: диск подняли до v16 ПОСЛЕ загрузки Options, но ДО того как
-   async `storage.onChanged`-обсервер выставил `futureSchemaObserved`; save в этом
-   окне запишет `schemaVersion: 15` поверх v16 → новый воркер прогонит v15→v16
-   повторно. `migrateState` (migrations.ts:311) кидает на future только при
-   ЗАГРУЗКЕ, поэтому Options никогда не грузится поверх future — окно только
-   пост-загрузочное.
-2. **cred-strip** (острее): на MV3, если фоновый воркер спал и `loadStorageState`
-   ещё не перенёс креды v12-блоба в custody-ключи, а Options успел сохранить
-   любой не-cred патч — `stripSecretSettings` вычистит cred из блоба, а custody-ключ
-   его не получит (пишется только для явно названных в патче ключей — инвариант
-   v13/E19, ослаблять нельзя). После штампа `schemaVersion:15`
-   `repair.persistState` (storage.ts:75-77) навсегда `false`, и отложенный полный
-   `serializePersistedState` больше не выполнится.
+### Release 2.0 — обязательная заметка в CHANGELOG
 
-Правильный фикс — сделать триггер отложенного full-persist НЕ зависящим от одного
-только маркера `schemaVersion` (детектить «custody не установлена» независимо), но
-это редизайн фонового load-пути вне бюджета текущего раунда. Round-14 добавил
-disk-read-барьер только на read/modify/write-путь (`baseSettings` отсутствует) как
-явный co-located guard над `migrateState`; Options-путь по-прежнему опирается на
-обсервер.
+При создании секции 2.0 в `CHANGELOG.md` явно предупредить об одной принудительной
+перегенерации full recap на каждого фана после перехода на `trustedTerminal`.
+Это уже канонически требуется E45; добавлять фиктивную секцию релиза до bump/version
+stamp нельзя.
+
+### Core deploy — безопасное применение migration 0106
+
+До первого применения Core migration `0106_ai_generation_content_fan_ref.sql` в
+окружении проверить `schema_migrations` и `pg_index.indisvalid`. Если `0106` ещё
+не применена, заранее выполнить metadata-only column add и неблокирующую сборку
+индекса отдельными autocommit-командами (не внутри transaction block):
+
+```sql
+ALTER TABLE ai_generation_content ADD COLUMN IF NOT EXISTS fan_ref text;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ai_generation_content_page_fan_idx
+  ON ai_generation_content (page_id, fan_ref) WHERE fan_ref IS NOT NULL;
+```
+
+Затем запускать обычный migration runner: его plain `CREATE INDEX IF NOT EXISTS`
+станет быстрым no-op. Уже опубликованную forward-only migration не переписывать;
+новая migration после 0106 не может устранить блокировку внутри самой 0106.
+
+### Неблокирующий cleanup после 2.0
+
+- Coach draft parser не знает про внешние обычные code fences: quoted
+  `draft`-блок внутри такого fence может стать карточкой. Отправка всё равно
+  ручная; добавить fence-state в parser.
+- `coach_output_too_long` пока показывает общий CG-HUB-07; дать отдельную
+  подсказку сузить вопрос.
+- Recap picker поверх idle Coach требует два Escape; свести возврат к одному
+  предсказуемому surface transition.
+- Streaming UI пересобирает весь feed на каждом chunk, а `feedItems` не имеет
+  отдельного DOM-cap; профилировать и ограничить перед оптимизацией renderer.
+- Удалить неиспользуемый `LORA_PERSONALITY_CONTENT` и расширить AI-cutover gate,
+  чтобы dead prompt sources тоже не возвращались.
+- Добавить request-count telemetry для многоходового Coach; текущий учёт
+  стоимости не показывает отдельные enrichment-запросы.
+
+## Закрыто (не активный backlog)
+
+- **BL-001:** закрыт Core Decision #177 — в prompt попадает только dossier,
+  доказанный Core terminal-ledger; усечённая pre-guard версия остаётся лишь
+  историей.
+- **BL-002 cred-strip:** закрыт E51 — независимый custody repair + обязательный
+  readiness barrier до появления Options writer.

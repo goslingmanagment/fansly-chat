@@ -5,6 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeSchemas } from '@kernel/sdk';
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
   DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
   DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
@@ -15,6 +17,7 @@ import {
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../src/shared/constants.js';
 import { ChatGooseError } from '../src/shared/errors.js';
+import { migrateState, stripSecretSettings } from '../src/shared/migrations.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import {
   createMockRuntimePort,
@@ -28,7 +31,6 @@ import type {
   FanslyMessagePageResponse,
   MonthlyEarningsRow,
   NormalizedTranscriptMessage,
-  Settings,
   SummaryCacheEntry,
 } from '../src/shared/types.js';
 
@@ -313,7 +315,7 @@ async function createCoordinatorHarness(options?: {
   };
 }) {
   mockStorage.personaCatalogSource = personaCatalogSource(
-    mockStorage.settings as Settings,
+    migrateState(mockStorage).settings,
   );
   const [{ OperationCoordinator }, { SessionStore }, { StorageCoordinator }, { TabContextStore }] =
     await Promise.all([
@@ -737,13 +739,16 @@ describe(`OperationCoordinator (${part})`, () => {
   // opportunistically on chat open — bounded by in-flight dedup + cooldown.
   describe('summary hub-sync retry on chat open', () => {
     function hubConfiguredSettings(): void {
-      mockStorage.settings = {
-        ...(mockStorage.settings as Record<string, unknown>),
+      const settings = {
+        ...migrateState(mockStorage).settings,
         agencyHubBaseUrl: 'http://localhost:3000',
         agencyHubApiKey: 'hub-key',
       };
+      mockStorage.settings = stripSecretSettings(settings);
+      mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY] = settings.agencyHubApiKey;
+      mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = settings.agencyHubDeviceToken;
       (mockStorage['summary:group-1'] as Record<string, unknown>).personaCatalogSource =
-        personaCatalogSource(mockStorage.settings as Settings);
+        personaCatalogSource(settings);
     }
 
     function retryHubClient(
@@ -1115,12 +1120,12 @@ describe(`OperationCoordinator (${part})`, () => {
     await identityStarted;
 
     const settingsB = {
-      ...(mockStorage.settings as Settings),
+      ...migrateState(mockStorage).settings,
       agencyHubBaseUrl: 'http://hub-b.test',
     };
     const sourceB = personaCatalogSource(settingsB);
     await (globalThis as any).browser.storage.local.set({
-      settings: settingsB,
+      settings: stripSecretSettings(settingsB),
       personaCatalogSource: sourceB,
       personaCatalog: mockStorage.personaCatalog,
     });
@@ -1800,11 +1805,11 @@ describe(`OperationCoordinator (${part})`, () => {
     await identityStarted;
 
     const settingsB = {
-      ...(mockStorage.settings as Settings),
+      ...migrateState(mockStorage).settings,
       agencyHubBaseUrl: 'http://hub-b.test',
     };
     await (globalThis as any).browser.storage.local.set({
-      settings: settingsB,
+      settings: stripSecretSettings(settingsB),
       personaCatalogSource: personaCatalogSource(settingsB),
       personaCatalog: mockStorage.personaCatalog,
     });
@@ -1874,10 +1879,10 @@ describe(`OperationCoordinator (${part})`, () => {
     await pageLabelStarted;
 
     const settingsB = {
-      ...(mockStorage.settings as Settings),
+      ...migrateState(mockStorage).settings,
       agencyHubBaseUrl: 'http://hub-b.test',
     };
-    mockStorage.settings = settingsB;
+    mockStorage.settings = stripSecretSettings(settingsB);
     mockStorage.personaCatalogSource = personaCatalogSource(settingsB);
     resolvePageLabel!('creator-fs');
     await compare;
@@ -3667,7 +3672,7 @@ describe(`OperationCoordinator (${part})`, () => {
       agencyHubDeviceToken: '',
     };
     (mockStorage['summary:group-1'] as Record<string, unknown>).personaCatalogSource =
-      personaCatalogSource(mockStorage.settings as Settings);
+      personaCatalogSource(migrateState(mockStorage).settings);
 
     const agencyHubClient = {
       isConfigured: vi.fn(() => true),
@@ -3771,7 +3776,7 @@ describe(`OperationCoordinator (${part})`, () => {
       summary: 'Generated summary',
       personalityId: 'personality-1',
       personalityUpdatedAt: 1000,
-      personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
+      personaCatalogSource: personaCatalogSource(migrateState(mockStorage).settings),
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
       modelId: 'kernel',
@@ -4656,7 +4661,7 @@ describe(`OperationCoordinator (${part})`, () => {
       personalityId: 'personality-1',
       personaDefinitionId: 'v1:personality-one-definition',
       personalityUpdatedAt: 1000,
-      personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
+      personaCatalogSource: personaCatalogSource(migrateState(mockStorage).settings),
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,
@@ -4860,7 +4865,7 @@ describe(`OperationCoordinator (${part})`, () => {
       personalityId: 'personality-1',
       personaDefinitionId: 'v1:personality-one-definition',
       personalityUpdatedAt: 1000,
-      personaCatalogSource: personaCatalogSource(mockStorage.settings as Settings),
+      personaCatalogSource: personaCatalogSource(migrateState(mockStorage).settings),
       generatedAt: 2000,
       spendingDataVerified: true,
       subscriptionLookupVerified: true,

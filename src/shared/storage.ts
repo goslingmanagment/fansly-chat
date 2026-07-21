@@ -55,6 +55,7 @@ function arraysEqual(left: string[], right: string[]): boolean {
 
 export interface StorageRepairPlan {
   invalidSummaryKeys: string[];
+  custodyLayoutNeedsRepair: boolean;
   persistState: boolean;
 }
 
@@ -67,11 +68,28 @@ function materializeStorageState(raw: Record<string, unknown>): StorageStateSnap
   const invalidSummaryKeys = getInvalidSummaryCacheKeys(raw);
   const state = migrateState(raw);
   state.settings = sanitizeSettings(state.settings);
+  const rawSettings = raw.settings && typeof raw.settings === 'object'
+    ? raw.settings as Record<string, unknown>
+    : null;
+  const hasOwn = (record: Record<string, unknown>, key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(record, key);
+  // v13 custody repair is a LAYOUT invariant, not merely a schema migration.
+  // A worker could sleep while an Options page normalized a current-version
+  // legacy blob, so detect missing custody keys and secret-bearing blobs even
+  // when schemaVersion already equals the current version.
+  const custodyLayoutNeedsRepair =
+    !hasOwn(raw, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY) ||
+    !hasOwn(raw, AGENCY_HUB_API_KEY_STORAGE_KEY) ||
+    (rawSettings !== null && (
+      hasOwn(rawSettings, 'agencyHubDeviceToken') ||
+      hasOwn(rawSettings, 'agencyHubApiKey')
+    ));
 
   return {
     state,
     repair: {
       invalidSummaryKeys,
+      custodyLayoutNeedsRepair,
       persistState:
         (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION,
     },
@@ -113,9 +131,11 @@ export async function loadStorageState(): Promise<PersistedState> {
     );
   }
   if (repair.persistState) {
-    // v13 (A41/I116-4): full-state persists go through the serializer —
-    // credentials land in their own keys, never back into the blob. The
-    // v12→v13 pass IS this write: it moves the secrets out of the blob.
+    // v13 (A41/I116-4): schema migrations go through the serializer —
+    // credentials land in their own keys, never back into the blob. A
+    // current-schema custody-layout repair is coordinator-only: allowing any
+    // direct reader to full-persist its snapshot would reopen the stale-token
+    // clobber E19 removed.
     await browser.storage.local.set(serializePersistedState(state));
   }
 
