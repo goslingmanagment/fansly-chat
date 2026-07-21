@@ -822,6 +822,7 @@ export interface SessionSnapshotEntry {
 // ─── Runtime API ─────────────────────────────────────────────────────────
 
 export interface RuntimeRequestMap {
+  ensureStorageReady: undefined;
   getPopupStatus: GetPopupStatusRequest | undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
@@ -834,6 +835,7 @@ export interface RuntimeRequestMap {
 }
 
 export interface RuntimeResponseMap {
+  ensureStorageReady: { ready: true };
   getPopupStatus: PopupStatus;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;

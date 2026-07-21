@@ -178,6 +178,26 @@ export class StorageCoordinator {
     return this.getState();
   }
 
+  /** Durable barrier for another extension context that is about to write.
+   * getState() may intentionally return a read-only normalized projection when
+   * the startup listener probe was not observed; Options must not write from
+   * that projection because doing so could strip legacy blob credentials before
+   * their top-level custody keys exist. */
+  async ensurePersistedState(): Promise<PersistedState> {
+    await this.getState();
+    if (this.deferredRepairNeeded) {
+      await this.retryDeferredRepair();
+    }
+    if (this.deferredRepairNeeded) {
+      throw new Error('Storage repair could not be durably completed');
+    }
+    const state = this.state;
+    if (!state) {
+      throw new Error('Storage state is unavailable after durable repair');
+    }
+    return state;
+  }
+
   private assertSupportedSchema(): void {
     if (this.unsupportedSchemaVersion !== null) {
       throw new UnsupportedFutureStorageSchemaError(this.unsupportedSchemaVersion);
@@ -537,7 +557,7 @@ export class StorageCoordinator {
 
   private async repairStartupStorage(repair: StorageRepairPlan): Promise<void> {
     this.assertSupportedSchema();
-    if (repair.persistState) {
+    if (repair.persistState || repair.custodyLayoutNeedsRepair) {
       const state = this.state;
       if (!state) {
         throw new Error('Storage state is unavailable for startup repair');

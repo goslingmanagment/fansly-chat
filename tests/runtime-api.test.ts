@@ -61,6 +61,9 @@ async function installRuntimeApiHarness(fanslyClient: {
     resolveCapability: (tabId: number) => Promise<boolean>;
   };
   tabContexts?: TabContextStoreClass;
+  storageCoordinator?: {
+    ensurePersistedState: () => Promise<unknown>;
+  };
 }) {
   vi.resetModules();
   onMessageListener = undefined;
@@ -123,7 +126,7 @@ async function installRuntimeApiHarness(fanslyClient: {
   ]);
 
   const sessionStore = new SessionStore();
-  const storageCoordinator = new StorageCoordinator();
+  const storageCoordinator = options?.storageCoordinator ?? new StorageCoordinator();
   const agencyHubClient = options?.agencyHubClient ?? {
     testConnection: vi.fn(async () => ({ ok: true })),
   };
@@ -149,7 +152,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     sessionStore,
     spendersService: spendersService as never,
     tabContexts,
-    storageCoordinator,
+    storageCoordinator: storageCoordinator as never,
     debugPrompts: debugPrompts as never,
     emitToTab: options?.emitToTab,
     onAgencyHubReady: options?.onAgencyHubReady,
@@ -172,6 +175,50 @@ async function installRuntimeApiHarness(fanslyClient: {
     send: (message: unknown, sender?: MessageSenderLike) => onMessageListener!(message, sender),
   };
 }
+
+describe('runtime-api storage readiness barrier', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('acknowledges only after durable repair and propagates repair failure', async () => {
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ensurePersistedState = vi.fn(async () => barrier);
+    const readyHarness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      { storageCoordinator: { ensurePersistedState } },
+    );
+
+    let settled = false;
+    const pending = readyHarness.send({ type: 'ensureStorageReady' })
+      .finally(() => {
+        settled = true;
+      });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+    await expect(pending).resolves.toEqual({ ready: true });
+    expect(ensurePersistedState).toHaveBeenCalledTimes(1);
+
+    const failedHarness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      {
+        storageCoordinator: {
+          ensurePersistedState: vi.fn(async () => {
+            throw new Error('repair failed');
+          }),
+        },
+      },
+    );
+    await expect(failedHarness.send({ type: 'ensureStorageReady' })).rejects.toThrow(
+      'repair failed',
+    );
+  });
+});
 
 describe('runtime-api getSessionsSnapshot', () => {
   beforeEach(() => {

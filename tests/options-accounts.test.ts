@@ -119,9 +119,11 @@ async function loadOptionsPage(options: {
   sessions: SessionSnapshotEntry[];
   onSnapshotRequest?: () => void;
   onStorageRead?: () => void;
+  onStorageReadyRequest?: () => unknown | Promise<unknown>;
   onRuntimeRequest?: (message: unknown) => unknown | Promise<unknown>;
   snapshotPromise?: Promise<SessionSnapshotEntry[]>;
   waitForHydration?: boolean;
+  expectStorageFailure?: boolean;
 }): Promise<void> {
   vi.resetModules();
   installDom();
@@ -188,6 +190,11 @@ async function loadOptionsPage(options: {
         const requestType = message && typeof message === 'object'
           ? (message as { type?: unknown }).type
           : undefined;
+        if (requestType === 'ensureStorageReady') {
+          return options.onStorageReadyRequest
+            ? await options.onStorageReadyRequest()
+            : { ready: true };
+        }
         if (requestType === 'getSessionsSnapshot') {
           callOrder.push('snapshot');
           onSnapshotRequest?.();
@@ -206,6 +213,12 @@ async function loadOptionsPage(options: {
   };
 
   await import('../src/options/index.js');
+  if (options.expectStorageFailure) {
+    await vi.waitFor(() => {
+      expect(document.querySelector('h1')?.textContent).toBe('ChatGoose Settings Unavailable');
+    }, { timeout: 2000 });
+    return;
+  }
   await vi.waitFor(() => {
     getSectionByTitle('Connection Status');
   }, { timeout: 2000 });
@@ -221,6 +234,45 @@ describe('Options page account sections', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('renders no settings writer until the background confirms durable storage readiness', async () => {
+    const ready = deferred<{ ready: true }>();
+    const loading = loadOptionsPage({
+      state: makeState(),
+      sessions: [],
+      onStorageReadyRequest: () => ready.promise,
+    });
+
+    await vi.waitFor(() => {
+      expect(vi.mocked(browser.runtime.sendMessage)).toHaveBeenCalledWith({
+        type: 'ensureStorageReady',
+      });
+    });
+    expect(document.querySelector('input')).toBeNull();
+    expect(callOrder).not.toContain('snapshot');
+
+    ready.resolve({ ready: true });
+    await loading;
+    expect(document.querySelector('input')).not.toBeNull();
+  });
+
+  it('fails closed without editable controls when durable storage readiness fails', async () => {
+    await loadOptionsPage({
+      state: makeState(),
+      sessions: [],
+      onStorageReadyRequest: async () => {
+        throw new Error('worker repair unavailable');
+      },
+      expectStorageFailure: true,
+    });
+
+    expect(document.querySelector('input')).toBeNull();
+    expect(document.querySelector('select')).toBeNull();
+    expect(callOrder).not.toContain('snapshot');
+    const settingsWrites = vi.mocked(browser.storage.local.set).mock.calls
+      .filter(([items]) => Object.prototype.hasOwnProperty.call(items, 'settings'));
+    expect(settingsWrites).toHaveLength(0);
   });
 
   it('preserves legacy personas before session discovery and hydrates rekeyed accounts cleanly', async () => {

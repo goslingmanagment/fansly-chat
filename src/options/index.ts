@@ -149,6 +149,29 @@ function renderLegacyPersonaRecovery(): void {
   root.append(hero, recovery);
 }
 
+function renderStorageUnavailable(): void {
+  root.replaceChildren();
+  root.style.paddingBottom = '24px';
+  const hero = document.createElement('div');
+  hero.style.padding = '28px 20px 4px';
+  hero.style.display = 'grid';
+  hero.style.gap = '8px';
+  const title = document.createElement('h1');
+  title.textContent = 'ChatGoose Settings Unavailable';
+  const subtitle = document.createElement('div');
+  subtitle.textContent = 'Local storage could not be safely prepared. Reload Settings before editing.';
+  subtitle.style.color = 'var(--chatgoose-ink-mid)';
+  hero.append(createVersionTag(extensionVersion), title, subtitle);
+  const reload = createButton('Reload Settings', true);
+  reload.addEventListener('click', () => window.location.reload());
+  const recovery = createSection(
+    'Storage protection',
+    'This Settings page did not apply any edits. Reloading wakes the background worker and retries the protected migration.',
+  );
+  recovery.append(reload);
+  root.append(hero, recovery);
+}
+
 async function render(): Promise<void> {
   await renderCleanup?.();
   renderCleanup = null;
@@ -195,6 +218,22 @@ async function render(): Promise<void> {
     cleanupTasks.push(() => {
       browser.storage.onChanged.removeListener(handleFutureSchemaChange);
     });
+  }
+  // Options is a synchronous writer on pagehide. Before it reads or renders an
+  // editable snapshot, wake the MV3 worker and require a DURABLE migration
+  // barrier: legacy credentials must already live in their top-level custody
+  // keys. An old/failed worker returns no structured acknowledgement, so fail
+  // closed instead of risking a secret-stripping current-schema write.
+  try {
+    const readiness = await sendRuntimeRequest('ensureStorageReady');
+    if (readiness?.ready !== true) {
+      throw new Error('Background storage readiness was not acknowledged');
+    }
+  } catch (error) {
+    console.error('Failed to prepare Settings storage', error);
+    cleanupTasks.forEach((cleanup) => cleanup());
+    renderStorageUnavailable();
+    return;
   }
   // Start live session discovery immediately, but do not put it on the
   // critical path for the local settings UI. getSessionsSnapshot may spend up

@@ -350,6 +350,8 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
   }
 
   switch (message.type) {
+    case 'ensureStorageReady':
+      return 'ensureStorageReady';
     case 'getPopupStatus':
       return message.tabId === undefined || isNumber(message.tabId)
         ? 'getPopupStatus'
