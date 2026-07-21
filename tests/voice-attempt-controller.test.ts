@@ -6,6 +6,7 @@ import {
 } from '../src/content/voice/attempt-controller.js';
 import { VoiceAttemptStore } from '../src/content/voice/attempt-store.js';
 import {
+  VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX,
   VOICE_ATTEMPT_SESSION_KEY_PREFIX,
   VOICE_ATTEMPT_TTL_MS,
   VOICE_STATUS_POLL_MS,
@@ -28,6 +29,8 @@ const ATTEMPT_ID_2 = '55555555-5555-4555-8555-555555555555';
 const TAKE_ID_1 = '22222222-2222-4222-8222-222222222222';
 const TAKE_ID_2 = '33333333-3333-4333-8333-333333333333';
 const TAKE_ID_3 = '44444444-4444-4444-8444-444444444444';
+const SOURCE_FINGERPRINT = 'https://hub.test|credential-hash';
+const PAGE_LABEL = 'creator-fs';
 
 interface FakeSessionStorage {
   readonly data: Record<string, unknown>;
@@ -128,6 +131,8 @@ async function finishScript(
     script,
     generationRef,
     conversationRef,
+    sourceFingerprint: SOURCE_FINGERPRINT,
+    pageLabel: PAGE_LABEL,
   });
 }
 
@@ -216,6 +221,8 @@ describe('VoiceAttemptController', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
       script: 'Café\nline',
     });
     expect(controller.getAttempt()).toMatchObject({
@@ -454,6 +461,8 @@ describe('VoiceAttemptController', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-original',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
       script: 'voice\nscript',
     }]);
     expect(second.controller.getAttempt()?.canonicalScript).toBe('voice\nscript');
@@ -499,6 +508,8 @@ describe('VoiceAttemptController', () => {
       conversationRef: 'fan-derived-by-script',
       pinnedConversationRef: 'fan-derived-by-script',
       sourceGenerationRef: 'generation-original',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
       script: 'Voice script',
     }]);
 
@@ -666,7 +677,7 @@ describe('VoiceAttemptController', () => {
     expect(controller.hasPendingCreateNeedsReconcile()).toBe(false);
   });
 
-  it('treats a legacy V1 pending create without sentOnce as possibly dispatched', async () => {
+  it('drops a malformed V2 create snapshot instead of guessing paid-request custody', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('Draft', 'none');
     await finishScript(first.controller, 'Voice script');
@@ -683,11 +694,19 @@ describe('VoiceAttemptController', () => {
     const resumed = createController({ uuids: [TAKE_ID_3] });
     await resumed.controller.boot();
     expect(messagesOfType(resumed.port, 'voice:noteCreate')).toHaveLength(0);
-    expect((await resumed.store.load(ROUTE))[0]?.pendingCreate).toMatchObject({
-      sentOnce: true,
-      pinnedConversationRef: null,
-      phase: 'needs-reconcile',
-    });
+    expect(await resumed.store.load(ROUTE)).toEqual([]);
+    expect(session.data[key]).toBeUndefined();
+  });
+
+  it('removes source-less V1 session snapshots instead of recovering them', async () => {
+    const key = `${VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
+    session.data[key] = { version: 1, attempt: { attemptId: ATTEMPT_ID } };
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await expect(resumed.controller.boot()).resolves.toBeNull();
+
+    expect(session.data[key]).toBeUndefined();
+    expect(session.remove).toHaveBeenCalledWith([key]);
   });
 
   it('loads legacy stored takes while upgrading phase-attached custody per take', async () => {
@@ -745,6 +764,8 @@ describe('VoiceAttemptController', () => {
         conversationRef: 'fan-1',
         pinnedConversationRef: 'fan-1',
         sourceGenerationRef: 'generation-first',
+        sourceFingerprint: SOURCE_FINGERPRINT,
+        pageLabel: PAGE_LABEL,
         script: 'First script',
       },
       {
@@ -754,6 +775,8 @@ describe('VoiceAttemptController', () => {
         conversationRef: 'fan-1',
         pinnedConversationRef: 'fan-1',
         sourceGenerationRef: 'generation-second',
+        sourceFingerprint: SOURCE_FINGERPRINT,
+        pageLabel: PAGE_LABEL,
         script: 'Second script',
       },
     ]);
@@ -829,6 +852,8 @@ describe('VoiceAttemptController', () => {
       type: 'voice:audioFetch',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 10,
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
       expectedSha256: 'abc123',
       expectedBytes: 3,
     });
@@ -901,6 +926,8 @@ describe('VoiceAttemptController', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
       script: 'Voice script',
     }]);
   });
@@ -1042,6 +1069,8 @@ describe('VoiceAttemptController', () => {
       type: 'voice:noteStatus',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
     }]);
 
     await controller.handleMessage({
@@ -1085,6 +1114,87 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:noteCreate').at(-1)?.clientRequestId).toBe(TAKE_ID_2);
   });
 
+  it('keeps status polling single-flight until the matching response settles', async () => {
+    const { controller, port } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: voiceView(42, 'queued'),
+    });
+    port.sent.length = 0;
+
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS * 4);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(1);
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'dispatched'),
+    });
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
+  });
+
+  it('ignores stale status regressions and preserves completed audio custody', async () => {
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+      createBlobUrl: () => 'blob:completed',
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: voiceView(42, 'queued'),
+    });
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'dispatched'),
+    });
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'queued'),
+    });
+    expect(controller.getAttempt()?.takes[0]?.view.state).toBe('dispatched');
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'completed', {
+        billed: true,
+        audioSha256: 'abc123',
+        audioBytesLen: 3,
+      }),
+    });
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2, 3]).buffer,
+    });
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(42, 'dispatched'),
+    });
+
+    expect(controller.getAttempt()?.takes[0]).toMatchObject({
+      view: { state: 'completed' },
+      blobUrl: 'blob:completed',
+    });
+    expect(controller.getAttempt()?.takes[0]?.audio).toBeInstanceOf(ArrayBuffer);
+  });
+
   it('preserves voice state on disconnect and re-arms pending creates and polling only on handshake', async () => {
     const { controller, port } = createController({
       uuids: [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2],
@@ -1116,6 +1226,8 @@ describe('VoiceAttemptController', () => {
       type: 'voice:noteStatus',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 7,
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
     }]);
     expect(messagesOfType(port, 'voice:noteCreate')).toEqual([{
       type: 'voice:noteCreate',
@@ -1124,9 +1236,18 @@ describe('VoiceAttemptController', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
       script: 'Voice script',
     }]);
 
+    await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
+    expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(1);
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: voiceView(7, 'queued'),
+    });
     await vi.advanceTimersByTimeAsync(VOICE_STATUS_POLL_MS);
     expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
   });

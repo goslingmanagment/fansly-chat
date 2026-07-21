@@ -174,6 +174,8 @@ function view(overrides: Partial<{
 }
 
 const SCRIPT = 'Adapted script text';
+const SOURCE_FINGERPRINT = 'https://hub.test|credential-hash';
+const PAGE_LABEL = 'creator-fs';
 
 async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
   await harness!.controller.startScript('hey babe', tone);
@@ -184,6 +186,8 @@ async function toScriptPhase(tone: ReplyTone = 'none'): Promise<string> {
     script: SCRIPT,
     generationRef: 'gen-1',
     conversationRef: 'fan-1',
+    sourceFingerprint: SOURCE_FINGERPRINT,
+    pageLabel: PAGE_LABEL,
   });
   return attemptId;
 }

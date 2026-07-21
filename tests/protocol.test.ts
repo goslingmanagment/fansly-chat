@@ -346,17 +346,23 @@ describe('protocol boundary guards', () => {
         conversationRef: 'conversation-1',
         pinnedConversationRef: 'fan-1',
         sourceGenerationRef: 'generation-1',
+        sourceFingerprint: 'https://hub.test|credential-hash',
+        pageLabel: 'creator-fs',
         script: '[warmly] Hello there',
       },
       {
         type: 'voice:noteStatus',
         attemptId: 'attempt-1',
         voiceNoteId: 42,
+        sourceFingerprint: 'https://hub.test|credential-hash',
+        pageLabel: 'creator-fs',
       },
       {
         type: 'voice:audioFetch',
         attemptId: 'attempt-1',
         voiceNoteId: 42,
+        sourceFingerprint: 'https://hub.test|credential-hash',
+        pageLabel: 'creator-fs',
         expectedSha256: 'abc123',
         expectedBytes: 1024,
       },
@@ -364,6 +370,8 @@ describe('protocol boundary guards', () => {
         type: 'voice:attachToken',
         attemptId: 'attempt-1',
         voiceNoteId: 42,
+        sourceFingerprint: 'https://hub.test|credential-hash',
+        pageLabel: 'creator-fs',
       },
     ];
 
@@ -398,12 +406,20 @@ describe('protocol boundary guards', () => {
           conversationRef: 'conversation-1',
           pinnedConversationRef: 'fan-1',
           sourceGenerationRef: 'generation-1',
+          sourceFingerprint: 'https://hub.test|credential-hash',
+          pageLabel: 'creator-fs',
           script: '[warmly] Hello there',
         },
         requiredKey: 'sourceGenerationRef',
       },
       {
-        message: { type: 'voice:noteStatus', attemptId: 'attempt-1', voiceNoteId: 42 },
+        message: {
+          type: 'voice:noteStatus',
+          attemptId: 'attempt-1',
+          voiceNoteId: 42,
+          sourceFingerprint: 'https://hub.test|credential-hash',
+          pageLabel: 'creator-fs',
+        },
         requiredKey: 'voiceNoteId',
       },
       {
@@ -411,13 +427,21 @@ describe('protocol boundary guards', () => {
           type: 'voice:audioFetch',
           attemptId: 'attempt-1',
           voiceNoteId: 42,
+          sourceFingerprint: 'https://hub.test|credential-hash',
+          pageLabel: 'creator-fs',
           expectedSha256: 'abc123',
           expectedBytes: 1024,
         },
         requiredKey: 'expectedBytes',
       },
       {
-        message: { type: 'voice:attachToken', attemptId: 'attempt-1', voiceNoteId: 42 },
+        message: {
+          type: 'voice:attachToken',
+          attemptId: 'attempt-1',
+          voiceNoteId: 42,
+          sourceFingerprint: 'https://hub.test|credential-hash',
+          pageLabel: 'creator-fs',
+        },
         requiredKey: 'voiceNoteId',
       },
     ];
@@ -432,6 +456,16 @@ describe('protocol boundary guards', () => {
         `${String(message.type)} missing type`,
       ).toBe(false);
     }
+
+    const boundStatus = {
+      type: 'voice:noteStatus',
+      attemptId: 'attempt-1',
+      voiceNoteId: 42,
+      sourceFingerprint: 'https://hub.test|credential-hash',
+      pageLabel: 'creator-fs',
+    };
+    expect(isContentPortMessage(withoutKey(boundStatus, 'sourceFingerprint'))).toBe(false);
+    expect(isContentPortMessage(withoutKey(boundStatus, 'pageLabel'))).toBe(false);
 
     expect(isContentPortMessage({
       type: 'voice:scriptStart',
@@ -549,6 +583,8 @@ describe('protocol boundary guards', () => {
         script: '[warmly] Hello there',
         generationRef: 'generation-1',
         conversationRef: 'fan-1',
+        sourceFingerprint: 'https://hub.test|credential-hash',
+        pageLabel: 'creator-fs',
       },
       {
         type: 'voice:scriptError',
@@ -654,6 +690,8 @@ describe('protocol boundary guards', () => {
           script: 'hello',
           generationRef: 'generation-1',
           conversationRef: 'fan-1',
+          sourceFingerprint: 'https://hub.test|credential-hash',
+          pageLabel: 'creator-fs',
         },
         requiredKey: 'generationRef',
       },

@@ -31,6 +31,8 @@ export interface VoiceAttempt {
   script: string;
   canonicalScript: string | null;
   generationRef: string | null;
+  sourceFingerprint: string | null;
+  pageLabel: string | null;
   tone: ReplyTone;
   takes: VoiceTake[];
   selectedTakeId: number | null;
@@ -113,8 +115,41 @@ function compareTakeCreatedAt(left: VoiceTake, right: VoiceTake): number {
   return byCreatedAt || left.voiceNoteId - right.voiceNoteId;
 }
 
-function audioFetchKey(attemptId: string, voiceNoteId: number): string {
+function takeRequestKey(attemptId: string, voiceNoteId: number): string {
   return `${attemptId}:${voiceNoteId}`;
+}
+
+const IMMUTABLE_TERMINAL_STATES = new Set<VoiceNoteStatusView['state']>([
+  'failed_definite',
+  'failed_after_dispatch',
+  'quota_denied',
+  'artifact_expired',
+]);
+
+/** Core voice state is monotonic. Ignore a stale response that would move a
+ * take backwards or resurrect a terminal failure. A completed artifact may
+ * later become artifact_expired, and an indeterminate job may reconcile to a
+ * more specific terminal state after an explicit free check. */
+function canApplyVoiceState(
+  current: VoiceNoteStatusView['state'],
+  next: VoiceNoteStatusView['state'],
+): boolean {
+  if (current === next) {
+    return true;
+  }
+  if (current === 'completed') {
+    return next === 'artifact_expired';
+  }
+  if (IMMUTABLE_TERMINAL_STATES.has(current)) {
+    return false;
+  }
+  if (current === 'indeterminate') {
+    return !POLLED_STATES.has(next);
+  }
+  if (current === 'dispatched' && next === 'queued') {
+    return false;
+  }
+  return true;
 }
 
 function isVoiceMessageForAttempt(
@@ -141,6 +176,7 @@ export class VoiceAttemptController {
   private readonly records = new Map<string, RuntimeAttemptRecord>();
   private readonly issuedClientRequestIds = new Set<string>();
   private readonly audioFetchesInFlight = new Set<string>();
+  private readonly statusFetchesInFlight = new Set<string>();
   private activeAttemptId: string | null = null;
   private attachInFlight = false;
   private attachVoiceNoteIdInFlight: number | null = null;
@@ -178,6 +214,7 @@ export class VoiceAttemptController {
     this.activeAttemptId = null;
     this.issuedClientRequestIds.clear();
     this.audioFetchesInFlight.clear();
+    this.statusFetchesInFlight.clear();
 
     const entries = await this.store.load(this.route);
     for (const entry of entries) {
@@ -190,6 +227,9 @@ export class VoiceAttemptController {
         // text, return to the editor, and require a manual regeneration.
         record.attempt.phase = 'script';
         record.attempt.generationRef = null;
+        record.attempt.sourceFingerprint = null;
+        record.attempt.pageLabel = null;
+        record.conversationRef = '';
         await this.persist(record);
       }
     }
@@ -211,6 +251,8 @@ export class VoiceAttemptController {
         script: '',
         canonicalScript: null,
         generationRef: null,
+        sourceFingerprint: null,
+        pageLabel: null,
         tone,
         takes: [],
         selectedTakeId: null,
@@ -256,6 +298,8 @@ export class VoiceAttemptController {
     record.attempt.script = '';
     record.attempt.canonicalScript = null;
     record.attempt.generationRef = null;
+    record.attempt.sourceFingerprint = null;
+    record.attempt.pageLabel = null;
     record.conversationRef = '';
     record.attempt.tone = tone;
     record.attempt.takes = [];
@@ -278,6 +322,24 @@ export class VoiceAttemptController {
       await this.persist(record);
       this.notifyChange();
     }
+  }
+
+  async cancelScript(): Promise<void> {
+    const record = this.requireActiveRecord();
+    if (record.attempt.phase !== 'generating') {
+      return;
+    }
+    this.post({
+      type: 'voice:scriptCancel',
+      attemptId: record.attempt.attemptId,
+    });
+    record.attempt.phase = 'script';
+    record.attempt.generationRef = null;
+    record.attempt.sourceFingerprint = null;
+    record.attempt.pageLabel = null;
+    record.conversationRef = '';
+    await this.persist(record);
+    this.notifyChange();
   }
 
   async editScript(script: string): Promise<void> {
@@ -333,14 +395,11 @@ export class VoiceAttemptController {
 
   checkStatus(voiceNoteId: number): boolean {
     const record = this.requireActiveRecord();
-    if (!record.attempt.takes.some((take) => take.voiceNoteId === voiceNoteId)) {
+    const take = record.attempt.takes.find((candidate) => candidate.voiceNoteId === voiceNoteId);
+    if (!take) {
       return false;
     }
-    return this.post({
-      type: 'voice:noteStatus',
-      attemptId: record.attempt.attemptId,
-      voiceNoteId,
-    });
+    return this.requestStatus(record, take);
   }
 
   canAttachSelectedTake(): boolean {
@@ -369,7 +428,12 @@ export class VoiceAttemptController {
 
   requestAttach(): boolean {
     const record = this.requireActiveRecord();
-    if (!this.canAttachSelectedTake() || record.attempt.selectedTakeId === null) {
+    if (
+      !this.canAttachSelectedTake() ||
+      record.attempt.selectedTakeId === null ||
+      !record.attempt.sourceFingerprint ||
+      !record.attempt.pageLabel
+    ) {
       return false;
     }
     // Claim the gate BEFORE dispatch so a synchronous re-entrant request (or a
@@ -381,6 +445,8 @@ export class VoiceAttemptController {
       type: 'voice:attachToken',
       attemptId: record.attempt.attemptId,
       voiceNoteId: record.attempt.selectedTakeId,
+      sourceFingerprint: record.attempt.sourceFingerprint,
+      pageLabel: record.attempt.pageLabel,
     });
     if (!sent) {
       this.attachInFlight = false;
@@ -450,9 +516,17 @@ export class VoiceAttemptController {
         if (record.attempt.phase !== 'generating') {
           return;
         }
-        if (!message.conversationRef.trim()) {
+        if (
+          !message.script.trim() ||
+          !message.generationRef.trim() ||
+          !message.conversationRef.trim() ||
+          !message.sourceFingerprint.trim() ||
+          !message.pageLabel.trim()
+        ) {
           record.attempt.phase = 'script';
           record.attempt.generationRef = null;
+          record.attempt.sourceFingerprint = null;
+          record.attempt.pageLabel = null;
           record.conversationRef = '';
           await this.persist(record);
           this.notifyChange();
@@ -461,6 +535,8 @@ export class VoiceAttemptController {
         record.attempt.phase = 'script';
         record.attempt.script = message.script;
         record.attempt.generationRef = message.generationRef;
+        record.attempt.sourceFingerprint = message.sourceFingerprint;
+        record.attempt.pageLabel = message.pageLabel;
         record.conversationRef = message.conversationRef.trim();
         record.attempt.canonicalScript = null;
         record.attempt.stale = false;
@@ -473,12 +549,18 @@ export class VoiceAttemptController {
         }
         record.attempt.phase = 'script';
         record.attempt.generationRef = null;
+        record.attempt.sourceFingerprint = null;
+        record.attempt.pageLabel = null;
         record.conversationRef = '';
         await this.persist(record);
         this.notifyChange();
         this.onError?.(message);
         return;
       case 'voice:noteView':
+        this.statusFetchesInFlight.delete(takeRequestKey(
+          record.attempt.attemptId,
+          message.view.voiceNoteId,
+        ));
         await this.applyNoteView(record, message.view, message.clientRequestId);
         return;
       case 'voice:noteError':
@@ -520,12 +602,15 @@ export class VoiceAttemptController {
     // Requests on the dead port cannot answer. A reconnect must be allowed to
     // re-fetch completed audio instead of treating the lost request as live.
     this.audioFetchesInFlight.clear();
+    this.statusFetchesInFlight.clear();
     for (const record of this.records.values()) {
       if (record.attempt.phase !== 'generating') {
         continue;
       }
       record.attempt.phase = 'script';
       record.attempt.generationRef = null;
+      record.attempt.sourceFingerprint = null;
+      record.attempt.pageLabel = null;
       record.conversationRef = '';
       await this.persist(record);
     }
@@ -544,6 +629,8 @@ export class VoiceAttemptController {
     this.revokeRecordBlobUrls(record);
     this.records.delete(record.attempt.attemptId);
     this.activeAttemptId = null;
+    this.audioFetchesInFlight.clear();
+    this.statusFetchesInFlight.clear();
     await this.store.remove(record.attempt.attemptId);
     this.syncPolling();
     this.notifyChange();
@@ -557,6 +644,7 @@ export class VoiceAttemptController {
     this.stopPolling();
     this.revokeAllBlobUrls();
     this.audioFetchesInFlight.clear();
+    this.statusFetchesInFlight.clear();
   }
 
   /**
@@ -663,7 +751,9 @@ export class VoiceAttemptController {
   ): Promise<string> {
     this.assertCanBeginCreate(record);
     const generationRef = record.attempt.generationRef;
-    if (!generationRef) {
+    const sourceFingerprint = record.attempt.sourceFingerprint;
+    const pageLabel = record.attempt.pageLabel;
+    if (!generationRef || !sourceFingerprint || !pageLabel) {
       // Narrowed by assertCanBeginCreate; retained as a local fail-closed
       // guard so the immutable snapshot can never receive an empty ref.
       throw new Error('voice source generation is unavailable');
@@ -674,6 +764,8 @@ export class VoiceAttemptController {
       conversationRef: record.conversationRef,
       pinnedConversationRef: record.conversationRef,
       sourceGenerationRef: generationRef,
+      sourceFingerprint,
+      pageLabel,
       script: canonicalScript,
       phase: 'in-flight',
       sentOnce: false,
@@ -689,6 +781,9 @@ export class VoiceAttemptController {
   private assertCanBeginCreate(record: RuntimeAttemptRecord): void {
     if (!record.attempt.generationRef) {
       throw new Error('voice source generation is unavailable');
+    }
+    if (!record.attempt.sourceFingerprint || !record.attempt.pageLabel) {
+      throw new Error('voice Hub source is unavailable');
     }
     if (record.pendingCreate) {
       throw new Error('voice take creation is already in flight');
@@ -736,6 +831,8 @@ export class VoiceAttemptController {
       conversationRef: snapshot.conversationRef,
       pinnedConversationRef: snapshot.pinnedConversationRef,
       sourceGenerationRef: snapshot.sourceGenerationRef,
+      sourceFingerprint: snapshot.sourceFingerprint,
+      pageLabel: snapshot.pageLabel,
       script: snapshot.script,
     });
     if (sent) {
@@ -756,6 +853,9 @@ export class VoiceAttemptController {
   ): Promise<void> {
     let take = record.attempt.takes.find(({ voiceNoteId }) => voiceNoteId === view.voiceNoteId);
     if (take) {
+      if (!canApplyVoiceState(take.view.state, view.state)) {
+        return;
+      }
       take.view = { ...view };
       if (view.state !== 'completed') {
         this.revokeTakeBlobUrl(take);
@@ -812,6 +912,12 @@ export class VoiceAttemptController {
     let changed = false;
     if (message.source === 'status' || message.source === 'audio') {
       if (message.voiceNoteId !== undefined) {
+        if (message.source === 'status') {
+          this.statusFetchesInFlight.delete(takeRequestKey(
+            record.attempt.attemptId,
+            message.voiceNoteId,
+          ));
+        }
         const take = record.attempt.takes.find(
           ({ voiceNoteId }) => voiceNoteId === message.voiceNoteId,
         );
@@ -820,7 +926,7 @@ export class VoiceAttemptController {
           changed = true;
         }
         if (message.source === 'audio') {
-          this.audioFetchesInFlight.delete(audioFetchKey(
+          this.audioFetchesInFlight.delete(takeRequestKey(
             record.attempt.attemptId,
             message.voiceNoteId,
           ));
@@ -869,7 +975,7 @@ export class VoiceAttemptController {
     voiceNoteId: number,
     bytes: ArrayBuffer,
   ): Promise<void> {
-    this.audioFetchesInFlight.delete(audioFetchKey(record.attempt.attemptId, voiceNoteId));
+    this.audioFetchesInFlight.delete(takeRequestKey(record.attempt.attemptId, voiceNoteId));
     const take = record.attempt.takes.find((candidate) => candidate.voiceNoteId === voiceNoteId);
     if (!take || take.view.state !== 'completed') {
       return;
@@ -887,11 +993,13 @@ export class VoiceAttemptController {
       !take.view.audioSha256 ||
       take.view.audioBytesLen === null ||
       !Number.isInteger(take.view.audioBytesLen) ||
-      take.view.audioBytesLen < 0
+      take.view.audioBytesLen < 0 ||
+      !record.attempt.sourceFingerprint ||
+      !record.attempt.pageLabel
     ) {
       return false;
     }
-    const key = audioFetchKey(record.attempt.attemptId, take.voiceNoteId);
+    const key = takeRequestKey(record.attempt.attemptId, take.voiceNoteId);
     if (this.audioFetchesInFlight.has(key)) {
       return false;
     }
@@ -899,11 +1007,34 @@ export class VoiceAttemptController {
       type: 'voice:audioFetch',
       attemptId: record.attempt.attemptId,
       voiceNoteId: take.voiceNoteId,
+      sourceFingerprint: record.attempt.sourceFingerprint,
+      pageLabel: record.attempt.pageLabel,
       expectedSha256: take.view.audioSha256,
       expectedBytes: take.view.audioBytesLen,
     });
     if (sent) {
       this.audioFetchesInFlight.add(key);
+    }
+    return sent;
+  }
+
+  private requestStatus(record: RuntimeAttemptRecord, take: VoiceTake): boolean {
+    if (!record.attempt.sourceFingerprint || !record.attempt.pageLabel) {
+      return false;
+    }
+    const key = takeRequestKey(record.attempt.attemptId, take.voiceNoteId);
+    if (this.statusFetchesInFlight.has(key)) {
+      return false;
+    }
+    const sent = this.post({
+      type: 'voice:noteStatus',
+      attemptId: record.attempt.attemptId,
+      voiceNoteId: take.voiceNoteId,
+      sourceFingerprint: record.attempt.sourceFingerprint,
+      pageLabel: record.attempt.pageLabel,
+    });
+    if (sent) {
+      this.statusFetchesInFlight.add(key);
     }
     return sent;
   }
@@ -914,11 +1045,7 @@ export class VoiceAttemptController {
     }
     for (const record of this.records.values()) {
       for (const take of record.attempt.takes) {
-        if (!this.post({
-          type: 'voice:noteStatus',
-          attemptId: record.attempt.attemptId,
-          voiceNoteId: take.voiceNoteId,
-        })) {
+        if (!this.requestStatus(record, take) && !this.connected) {
           return;
         }
       }
@@ -956,11 +1083,7 @@ export class VoiceAttemptController {
         if (!POLLED_STATES.has(take.view.state) || take.view.errorCode) {
           continue;
         }
-        if (!this.post({
-          type: 'voice:noteStatus',
-          attemptId: record.attempt.attemptId,
-          voiceNoteId: take.voiceNoteId,
-        })) {
+        if (!this.requestStatus(record, take) && !this.connected) {
           return;
         }
       }
@@ -1000,6 +1123,8 @@ export class VoiceAttemptController {
         script: record.attempt.script,
         canonicalScript: record.attempt.canonicalScript,
         generationRef: record.attempt.generationRef,
+        sourceFingerprint: record.attempt.sourceFingerprint,
+        pageLabel: record.attempt.pageLabel,
         tone: record.attempt.tone,
         takes: record.attempt.takes.map((take) => ({
           voiceNoteId: take.voiceNoteId,
@@ -1041,6 +1166,7 @@ export class VoiceAttemptController {
     this.records.clear();
     this.activeAttemptId = null;
     this.audioFetchesInFlight.clear();
+    this.statusFetchesInFlight.clear();
     await Promise.all(attemptIds.map((attemptId) => this.store.remove(attemptId)));
   }
 

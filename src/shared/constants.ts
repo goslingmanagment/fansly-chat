@@ -186,9 +186,20 @@ export const PING_MIN_FAN_MESSAGES = 3;
 export const VOICE_SCRIPT_MAX_CHARS_ADVISORY = 600;
 export const VOICE_CHARS_PER_SECOND = 14;
 export const VOICE_AUDIO_MAX_BYTES = 2_097_152;
-export const VOICE_ATTEMPT_SESSION_KEY_PREFIX = 'voiceAttemptV1:';
+/** V2 binds every recoverable take to the exact Hub principal + page that
+ * created it. Source-less V1 snapshots cannot be recovered safely. */
+export const VOICE_ATTEMPT_SESSION_KEY_PREFIX = 'voiceAttemptV2:';
+export const VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX = 'voiceAttemptV1:';
 export const VOICE_ATTEMPT_TTL_MS = 6 * 3600_000;
 export const VOICE_STATUS_POLL_MS = 1500;
+/** Voice-script owns a dedicated lane, but retains the quick-operation wall
+ * clock budget so a silent SSE can never strand the editor indefinitely. */
+export const VOICE_SCRIPT_TIMEOUT_MS = QUICK_OPERATION_TIMEOUT_MS;
+/** Paid create is never auto-retried after this ambiguity boundary; content
+ * moves the frozen idempotency snapshot to needs-reconcile instead. */
+export const VOICE_CREATE_TIMEOUT_MS = 30_000;
+/** Free status/audio reads are single-flight and manually retryable. */
+export const VOICE_RETRIEVAL_TIMEOUT_MS = 15_000;
 
 // ─── Earnings ────────────────────────────────────────────────────────────
 
