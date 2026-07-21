@@ -1,6 +1,10 @@
+import { isOutputExhausted } from '@kernel/sdk';
 import {
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   VOICE_AUDIO_MAX_BYTES,
+  VOICE_CREATE_TIMEOUT_MS,
+  VOICE_RETRIEVAL_TIMEOUT_MS,
+  VOICE_SCRIPT_TIMEOUT_MS,
 } from '../shared/constants.js';
 import {
   ChatGooseError,
@@ -9,6 +13,7 @@ import {
 } from '../shared/errors.js';
 import { resolveFeatureMessageCount } from '../shared/features.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
+import { personaCatalogSource } from '../shared/persona-catalog.js';
 import { isContentPortMessage } from '../shared/protocol.js';
 import {
   formatTranscriptForKernel,
@@ -85,6 +90,7 @@ interface AttemptBinding {
 
 interface VoiceAttemptRecord {
   attemptId: string;
+  sourceFingerprint: string;
   pageLabel: string;
   voiceNoteId: number;
   binding: AttemptBinding;
@@ -260,6 +266,26 @@ function attachRefusal(
 
 function isAbortError(error: unknown): boolean {
   return isRecord(error) && error.name === 'AbortError';
+}
+
+interface TimedAbort {
+  controller: AbortController;
+  clear(): void;
+  normalizeError(error: unknown): unknown;
+}
+
+function createTimedAbort(timeoutMs: number): TimedAbort {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  return {
+    controller,
+    clear: () => globalThis.clearTimeout(timeout),
+    normalizeError: (error) => timedOut ? new ChatGooseError('timed_out') : error,
+  };
 }
 
 function voiceTakeKey(attemptId: string, voiceNoteId: number): string {
@@ -515,7 +541,8 @@ export class VoiceService {
       this.scriptAttemptIds.has(message.attemptId);
     this.scriptAttemptIds.add(message.attemptId);
     const clientRequestId = this.randomUUID();
-    const controller = new AbortController();
+    const deadline = createTimedAbort(VOICE_SCRIPT_TIMEOUT_MS);
+    const { controller } = deadline;
     const active: ActiveScript = { attemptId: message.attemptId, controller };
     this.activeScriptsByTabId.set(tabId, active);
 
@@ -614,6 +641,7 @@ export class VoiceService {
       }
 
       let generationRef: string | null = null;
+      let stopReason: string | null = null;
       const script = await this.deps.kernelGateway.streamFeature(
         state.settings,
         {
@@ -645,6 +673,9 @@ export class VoiceService {
           onMeta: (meta) => {
             generationRef = meta.requestId;
           },
+          onStopReason: (reason) => {
+            stopReason = reason;
+          },
         },
         controller.signal,
       );
@@ -655,8 +686,15 @@ export class VoiceService {
       ) {
         return;
       }
+      if (isOutputExhausted(stopReason) || !script.trim()) {
+        throw new ChatGooseError('ai_output_unusable');
+      }
       if (!generationRef) {
         throw new ChatGooseError('hub_request_failed');
+      }
+      const sourceFingerprint = personaCatalogSource(state.settings);
+      if (!sourceFingerprint) {
+        throw new ChatGooseError('hub_missing_api_key');
       }
       emit({
         type: 'voice:scriptComplete',
@@ -664,12 +702,18 @@ export class VoiceService {
         script,
         generationRef,
         conversationRef: fanAccountId,
+        sourceFingerprint,
+        pageLabel: page.pageLabel,
       });
     } catch (error) {
-      if (!this.isActiveScript(tabId, message.attemptId) || isAbortError(error)) {
+      if (!this.isActiveScript(tabId, message.attemptId)) {
         return;
       }
-      const code = structuredErrorCode(error, 'hub_request_failed');
+      const normalizedError = deadline.normalizeError(error);
+      if (isAbortError(normalizedError)) {
+        return;
+      }
+      const code = structuredErrorCode(normalizedError, 'hub_request_failed');
       emit({
         type: 'voice:scriptError',
         attemptId: message.attemptId,
@@ -677,6 +721,7 @@ export class VoiceService {
         message: safeMessageForCode(code, 'hub_request_failed'),
       });
     } finally {
+      deadline.clear();
       if (this.isActiveScript(tabId, message.attemptId)) {
         this.activeScriptsByTabId.delete(tabId);
       }
@@ -707,7 +752,8 @@ export class VoiceService {
       return;
     }
     const routeBinding = bindingFromContext(context);
-    const controller = new AbortController();
+    const deadline = createTimedAbort(VOICE_CREATE_TIMEOUT_MS);
+    const { controller } = deadline;
     try {
       let fanAccountId = context.fanAccountId;
       if (!fanAccountId) {
@@ -772,7 +818,14 @@ export class VoiceService {
       }
       const binding = bindingFromContext(liveContext);
       const state = await this.deps.storageCoordinator.getState();
+      const sourceFingerprint = personaCatalogSource(state.settings);
+      if (!sourceFingerprint || sourceFingerprint !== message.sourceFingerprint) {
+        throw new ChatGooseError('voice_source_invalid');
+      }
       const page = await this.resolvePageForTab(tabId, controller.signal, state.settings);
+      if (page.pageLabel !== message.pageLabel) {
+        throw new ChatGooseError('voice_source_invalid');
+      }
       if (attachRefusal(binding, this.deps.tabContexts.get(tabId)) !== null) {
         this.emitLocalNoteError(
           message.attemptId,
@@ -795,6 +848,7 @@ export class VoiceService {
       );
       this.attemptsByTakeKey.set(voiceTakeKey(message.attemptId, view.voiceNoteId), {
         attemptId: message.attemptId,
+        sourceFingerprint,
         pageLabel: page.pageLabel,
         voiceNoteId: view.voiceNoteId,
         binding,
@@ -806,7 +860,14 @@ export class VoiceService {
         view,
       });
     } catch (error) {
-      this.emitNoteError(message.attemptId, { source: 'create' }, error, emit);
+      this.emitNoteError(
+        message.attemptId,
+        { source: 'create' },
+        deadline.normalizeError(error),
+        emit,
+      );
+    } finally {
+      deadline.clear();
     }
   }
 
@@ -815,13 +876,16 @@ export class VoiceService {
     message: Extract<VoiceContentMessage, { type: 'voice:noteStatus' }>,
     emit: VoiceEmitter,
   ): Promise<void> {
-    const controller = new AbortController();
+    const deadline = createTimedAbort(VOICE_RETRIEVAL_TIMEOUT_MS);
+    const { controller } = deadline;
     try {
       const state = await this.deps.storageCoordinator.getState();
       const pageLabel = await this.pageLabelForAttempt(
         tabId,
         message.attemptId,
         message.voiceNoteId,
+        message.sourceFingerprint,
+        message.pageLabel,
         state.settings,
         controller.signal,
       );
@@ -836,9 +900,11 @@ export class VoiceService {
       this.emitNoteError(
         message.attemptId,
         { source: 'status', voiceNoteId: message.voiceNoteId },
-        error,
+        deadline.normalizeError(error),
         emit,
       );
+    } finally {
+      deadline.clear();
     }
   }
 
@@ -861,13 +927,16 @@ export class VoiceService {
       return;
     }
 
-    const controller = new AbortController();
+    const deadline = createTimedAbort(VOICE_RETRIEVAL_TIMEOUT_MS);
+    const { controller } = deadline;
     try {
       const state = await this.deps.storageCoordinator.getState();
       const pageLabel = await this.pageLabelForAttempt(
         tabId,
         message.attemptId,
         message.voiceNoteId,
+        message.sourceFingerprint,
+        message.pageLabel,
         state.settings,
         controller.signal,
       );
@@ -937,10 +1006,12 @@ export class VoiceService {
         this.emitNoteError(
           message.attemptId,
           { source: 'audio', voiceNoteId: message.voiceNoteId },
-          error,
+          deadline.normalizeError(error),
           emit,
         );
       }
+    } finally {
+      deadline.clear();
     }
   }
 
@@ -962,6 +1033,15 @@ export class VoiceService {
     }
     this.attachGrantsInFlight.add(key);
     try {
+      const state = await this.deps.storageCoordinator.getState();
+      if (
+        message.sourceFingerprint !== attempt.sourceFingerprint ||
+        message.pageLabel !== attempt.pageLabel ||
+        personaCatalogSource(state.settings) !== attempt.sourceFingerprint
+      ) {
+        this.emitAttachRefusal(message.attemptId, 'unknown', emit);
+        return;
+      }
       const context = this.deps.tabContexts.get(tabId);
       const refusal = attachRefusal(attempt.binding, context);
       if (refusal) {
@@ -972,13 +1052,14 @@ export class VoiceService {
 
       let fanUsername = context?.fanDisplayName?.trim() ?? '';
       if (!fanUsername && context?.fanAccountId) {
+        const deadline = createTimedAbort(VOICE_RETRIEVAL_TIMEOUT_MS);
         try {
           const session = this.deps.sessionStore.getSessionForTab(tabId);
           if (session) {
             const [fan] = await this.deps.fanslyClient.getAccountNames(
               [context.fanAccountId],
               session,
-              new AbortController().signal,
+              deadline.controller.signal,
               'none',
             );
             fanUsername = fan?.username?.trim() || fan?.displayName?.trim() || '';
@@ -986,6 +1067,8 @@ export class VoiceService {
         } catch {
           // The attestation remains valid, but without a fan label it cannot be
           // safely handed to the DOM attach path.
+        } finally {
+          deadline.clear();
         }
       }
       const afterLookupRefusal = attachRefusal(
@@ -1012,6 +1095,8 @@ export class VoiceService {
         token: this.randomUUID(),
         fanUsername,
       });
+    } catch {
+      this.emitAttachRefusal(message.attemptId, 'unknown', emit);
     } finally {
       this.attachGrantsInFlight.delete(key);
     }
@@ -1094,20 +1179,36 @@ export class VoiceService {
     tabId: number,
     attemptId: string,
     voiceNoteId: number,
+    sourceFingerprint: string,
+    pageLabel: string,
     settings: Settings,
     signal: AbortSignal,
   ): Promise<string> {
+    if (
+      !sourceFingerprint ||
+      !pageLabel ||
+      personaCatalogSource(settings) !== sourceFingerprint
+    ) {
+      throw new ChatGooseError('voice_source_invalid');
+    }
     const attempt = this.attemptsByTakeKey.get(voiceTakeKey(attemptId, voiceNoteId));
     if (attempt) {
-      if (attempt.binding.tabId !== tabId) {
+      if (
+        attempt.binding.tabId !== tabId ||
+        attempt.sourceFingerprint !== sourceFingerprint ||
+        attempt.pageLabel !== pageLabel
+      ) {
         throw new ChatGooseError('voice_source_invalid');
       }
-      return attempt.pageLabel;
     }
-    // A worker restart may lose the in-memory attempt while the content-side
-    // session record survives. Status/audio remain page-scoped server reads;
-    // only attachment requires the original in-memory tuple attestation.
-    return (await this.resolvePageForTab(tabId, signal, settings)).pageLabel;
+    // A worker restart may lose the in-memory attempt while the content-side V2
+    // snapshot survives. Re-resolve the live page and require exact agreement
+    // with that persisted source instead of silently retargeting the read.
+    const livePage = await this.resolvePageForTab(tabId, signal, settings);
+    if (livePage.pageLabel !== pageLabel) {
+      throw new ChatGooseError('voice_source_invalid');
+    }
+    return pageLabel;
   }
 
   private emitNoteError(

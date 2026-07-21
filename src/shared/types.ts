@@ -1195,7 +1195,14 @@ export interface VoiceScriptCancelPayload extends PortEnvelopeBase {
   attemptId: string;
 }
 
-export interface VoiceNoteCreatePayload extends PortEnvelopeBase {
+/** Credential-safe identity of the Hub principal and exact page that owns a
+ * voice generation/take. The fingerprint contains no bearer bytes. */
+export interface VoiceSourceBinding {
+  sourceFingerprint: string;
+  pageLabel: string;
+}
+
+export interface VoiceNoteCreatePayload extends PortEnvelopeBase, VoiceSourceBinding {
   type: 'voice:noteCreate';
   attemptId: string;
   clientRequestId: string;
@@ -1206,13 +1213,13 @@ export interface VoiceNoteCreatePayload extends PortEnvelopeBase {
   script: string;
 }
 
-export interface VoiceNoteStatusPayload extends PortEnvelopeBase {
+export interface VoiceNoteStatusPayload extends PortEnvelopeBase, VoiceSourceBinding {
   type: 'voice:noteStatus';
   attemptId: string;
   voiceNoteId: number;
 }
 
-export interface VoiceAudioFetchPayload extends PortEnvelopeBase {
+export interface VoiceAudioFetchPayload extends PortEnvelopeBase, VoiceSourceBinding {
   type: 'voice:audioFetch';
   attemptId: string;
   voiceNoteId: number;
@@ -1220,7 +1227,7 @@ export interface VoiceAudioFetchPayload extends PortEnvelopeBase {
   expectedBytes: number;
 }
 
-export interface VoiceAttachTokenPayload extends PortEnvelopeBase {
+export interface VoiceAttachTokenPayload extends PortEnvelopeBase, VoiceSourceBinding {
   type: 'voice:attachToken';
   attemptId: string;
   voiceNoteId: number;
@@ -1399,7 +1406,7 @@ export interface VoiceScriptDeltaPayload extends PortEnvelopeBase {
   text: string;
 }
 
-export interface VoiceScriptCompletePayload extends PortEnvelopeBase {
+export interface VoiceScriptCompletePayload extends PortEnvelopeBase, VoiceSourceBinding {
   type: 'voice:scriptComplete';
   attemptId: string;
   script: string;

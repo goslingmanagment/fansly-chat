@@ -7,7 +7,13 @@ import type { KernelFeatureGateway } from '../src/background/kernel-feature-gate
 import { createMockRuntimePort, postedMessages } from './helpers/port.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import { VOICE_AUDIO_MAX_BYTES } from '../src/shared/constants.js';
+import { personaCatalogSource } from '../src/shared/persona-catalog.js';
+import {
+  VOICE_AUDIO_MAX_BYTES,
+  VOICE_CREATE_TIMEOUT_MS,
+  VOICE_RETRIEVAL_TIMEOUT_MS,
+  VOICE_SCRIPT_TIMEOUT_MS,
+} from '../src/shared/constants.js';
 import type {
   BackgroundPortMessage,
   FanslyMessagePageResponse,
@@ -57,6 +63,11 @@ function storageState(): PersistedState {
     knownAccounts: [],
   };
 }
+
+const SOURCE_BINDING = {
+  sourceFingerprint: personaCatalogSource(storageState().settings)!,
+  pageLabel: 'creator-fs',
+} as const;
 
 function voiceView(overrides: Partial<VoiceNoteStatusView> = {}): VoiceNoteStatusView {
   return {
@@ -229,6 +240,7 @@ async function createAttempt(harness: ReturnType<typeof createHarness>): Promise
     conversationRef: 'fan-1',
     pinnedConversationRef: 'fan-1',
     sourceGenerationRef: 'generation-1',
+    ...SOURCE_BINDING,
     script: '[warmly] Hello Alice',
   }, harness.emit);
 }
@@ -236,6 +248,17 @@ async function createAttempt(harness: ReturnType<typeof createHarness>): Promise
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes.buffer as ArrayBuffer);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 describe('VoiceService script runner', () => {
@@ -251,6 +274,7 @@ describe('VoiceService script runner', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
+      ...SOURCE_BINDING,
       script: '[warmly] Hello Alice',
     });
 
@@ -285,6 +309,7 @@ describe('VoiceService script runner', () => {
         script: '[warmly] Hello Alice',
         generationRef: 'generation-1',
         conversationRef: 'fan-1',
+        ...SOURCE_BINDING,
       },
     ]);
     expect(harness.streamFeature).toHaveBeenCalledTimes(1);
@@ -392,6 +417,68 @@ describe('VoiceService script runner', () => {
     ]);
     expect(JSON.stringify(harness.sent)).not.toContain('SECRET SCRIPT TEXT');
   });
+
+  it.each([
+    { label: 'token exhaustion', text: 'Partial script', stopReason: 'length' },
+    { label: 'empty output', text: '   ', stopReason: null },
+  ])('fails closed on $label instead of completing a paid-source script', async ({
+    text,
+    stopReason,
+  }) => {
+    const harness = createHarness({
+      streamFeature: vi.fn(async (_settings, _request, callbacks) => {
+        callbacks.onMeta?.({
+          requestId: 'generation-1',
+          clientRequestId: ATTEMPT_ID,
+          model: 'voice-script-model',
+        });
+        if (text.trim()) {
+          callbacks.onText(text);
+        }
+        callbacks.onStopReason?.(stopReason);
+        return text;
+      }),
+    });
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:scriptStart',
+      attemptId: ATTEMPT_ID,
+      draftText: 'Tell Alice about tonight',
+      replyTone: 'flirty',
+    }, harness.emit);
+
+    expect(harness.sent).toContainEqual(expect.objectContaining({
+      type: 'voice:scriptError',
+      attemptId: ATTEMPT_ID,
+      code: 'ai_output_unusable',
+    }));
+    expect(harness.sent.some((message) => message.type === 'voice:scriptComplete')).toBe(false);
+  });
+
+  it('bounds the full voice-script lane and surfaces a timeout instead of hanging', async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness({
+        streamFeature: vi.fn(async (_settings, _request, _callbacks, signal) =>
+          rejectOnAbort(signal)),
+      });
+      const pending = harness.service.handleMessage(TAB_ID, {
+        type: 'voice:scriptStart',
+        attemptId: ATTEMPT_ID,
+        draftText: 'Tell Alice about tonight',
+        replyTone: 'flirty',
+      }, harness.emit);
+
+      await vi.advanceTimersByTimeAsync(VOICE_SCRIPT_TIMEOUT_MS);
+      await pending;
+
+      expect(harness.sent).toEqual([
+        expect.objectContaining({ type: 'voice:scriptError', code: 'timed_out' }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('VoiceService SDK transport', () => {
@@ -419,6 +506,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:noteStatus',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.hub.getVoiceNoteStatus).toHaveBeenCalledWith(
@@ -432,6 +520,167 @@ describe('VoiceService SDK transport', () => {
       attemptId: ATTEMPT_ID,
       view: statusView,
     }]);
+  });
+
+  it('recovers status after a worker restart only when the persisted source still matches', async () => {
+    const statusView = voiceView({ state: 'dispatched' });
+    const restarted = createHarness({
+      getVoiceNoteStatus: vi.fn(async () => statusView),
+    });
+
+    await restarted.service.handleMessage(TAB_ID, {
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      ...SOURCE_BINDING,
+    }, restarted.emit);
+
+    expect(restarted.hub.getVoiceNoteStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      SOURCE_BINDING.pageLabel,
+      42,
+      expect.any(AbortSignal),
+    );
+    expect(restarted.sent).toEqual([{
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: statusView,
+    }]);
+  });
+
+  it('rejects Hub-principal or page drift before a paid create or retrieval', async () => {
+    let currentState = storageState();
+    const harness = createHarness({ getState: async () => currentState });
+
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: CLIENT_REQUEST_ID,
+      conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      sourceFingerprint: 'wrong-principal',
+      pageLabel: SOURCE_BINDING.pageLabel,
+      script: '[warmly] Hello Alice',
+    }, harness.emit);
+    expect(harness.hub.createVoiceNote).not.toHaveBeenCalled();
+    expect(harness.sent.at(-1)).toEqual(expect.objectContaining({
+      type: 'voice:noteError',
+      source: 'create',
+      code: 'voice_source_invalid',
+    }));
+
+    harness.sent.length = 0;
+    await createAttempt(harness);
+    harness.sent.length = 0;
+    currentState = {
+      ...currentState,
+      settings: {
+        ...currentState.settings,
+        agencyHubDeviceToken: 'different-device-token',
+      },
+    };
+    await harness.service.handleMessage(TAB_ID, {
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      ...SOURCE_BINDING,
+    }, harness.emit);
+
+    expect(harness.hub.getVoiceNoteStatus).not.toHaveBeenCalled();
+    expect(harness.sent).toEqual([
+      expect.objectContaining({
+        type: 'voice:noteError',
+        source: 'status',
+        code: 'voice_source_invalid',
+      }),
+    ]);
+  });
+
+  it('rejects a mismatched persisted page instead of retargeting a status read', async () => {
+    const restarted = createHarness();
+
+    await restarted.service.handleMessage(TAB_ID, {
+      type: 'voice:noteStatus',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      sourceFingerprint: SOURCE_BINDING.sourceFingerprint,
+      pageLabel: 'different-page',
+    }, restarted.emit);
+
+    expect(restarted.hub.getVoiceNoteStatus).not.toHaveBeenCalled();
+    expect(restarted.sent).toEqual([
+      expect.objectContaining({
+        type: 'voice:noteError',
+        source: 'status',
+        code: 'voice_source_invalid',
+      }),
+    ]);
+  });
+
+  it('bounds an ambiguous paid create and reports timed_out without retrying it', async () => {
+    vi.useFakeTimers();
+    try {
+      const createVoiceNote = vi.fn(async (
+        _settings: unknown,
+        _pageLabel: string,
+        _body: unknown,
+        signal: AbortSignal,
+      ) => rejectOnAbort(signal));
+      const harness = createHarness({ createVoiceNote: createVoiceNote as never });
+      const pending = createAttempt(harness);
+
+      await vi.advanceTimersByTimeAsync(VOICE_CREATE_TIMEOUT_MS);
+      await pending;
+
+      expect(createVoiceNote).toHaveBeenCalledTimes(1);
+      expect(harness.sent).toEqual([
+        expect.objectContaining({
+          type: 'voice:noteError',
+          source: 'create',
+          code: 'timed_out',
+          status: 0,
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a free status read and reports timed_out so polling can re-arm', async () => {
+    const getVoiceNoteStatus = vi.fn(async (
+      _settings: unknown,
+      _pageLabel: string,
+      _voiceNoteId: number,
+      signal: AbortSignal,
+    ) => rejectOnAbort(signal));
+    const harness = createHarness({ getVoiceNoteStatus: getVoiceNoteStatus as never });
+    await createAttempt(harness);
+    harness.sent.length = 0;
+    vi.useFakeTimers();
+    try {
+      const pending = harness.service.handleMessage(TAB_ID, {
+        type: 'voice:noteStatus',
+        attemptId: ATTEMPT_ID,
+        voiceNoteId: 42,
+        ...SOURCE_BINDING,
+      }, harness.emit);
+
+      await vi.advanceTimersByTimeAsync(VOICE_RETRIEVAL_TIMEOUT_MS);
+      await pending;
+
+      expect(getVoiceNoteStatus).toHaveBeenCalledTimes(1);
+      expect(harness.sent).toEqual([
+        expect.objectContaining({
+          type: 'voice:noteError',
+          source: 'status',
+          code: 'timed_out',
+          status: 0,
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses create unless the persisted fan pin matches a resolved live fan', async () => {
@@ -448,6 +697,7 @@ describe('VoiceService SDK transport', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-other',
       sourceGenerationRef: 'generation-1',
+      ...SOURCE_BINDING,
       script: '[warmly] Hello Alice',
     } as const;
 
@@ -499,6 +749,7 @@ describe('VoiceService SDK transport', () => {
       conversationRef: 'fan-1',
       pinnedConversationRef: 'fan-1',
       sourceGenerationRef: 'generation-1',
+      ...SOURCE_BINDING,
       script: '[warmly] Hello Alice',
     }, harness.emit);
     harness.sent.length = 0;
@@ -507,11 +758,13 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:noteStatus',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
     await harness.service.handleMessage(TAB_ID, {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.hub.getVoiceNoteStatus).toHaveBeenCalledWith(
@@ -545,6 +798,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:noteStatus',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.sent).toEqual([
@@ -672,6 +926,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:audioFetch',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
       expectedSha256: '0'.repeat(64),
       expectedBytes: 1,
     }, harness.emit);
@@ -705,6 +960,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:audioFetch',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
       expectedSha256: badSha ? '0'.repeat(64) : await sha256Hex(bytes),
       expectedBytes,
     }, harness.emit);
@@ -735,6 +991,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:audioFetch',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
       expectedSha256: await sha256Hex(bytes),
       expectedBytes: bytes.byteLength,
     }, harness.emit);
@@ -766,6 +1023,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:audioFetch',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
       expectedSha256: '0'.repeat(64),
       expectedBytes: VOICE_AUDIO_MAX_BYTES,
     }, harness.emit);
@@ -792,6 +1050,7 @@ describe('VoiceService SDK transport', () => {
       type: 'voice:audioFetch',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
       expectedSha256: await sha256Hex(bytes),
       expectedBytes: bytes.byteLength,
     }, harness.emit);
@@ -817,6 +1076,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken' as const,
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     };
     await harness.service.handleMessage(TAB_ID, request, harness.emit);
     await harness.service.handleMessage(TAB_ID, request, harness.emit);
@@ -846,6 +1106,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
     await createAttempt(harness);
     harness.sent.length = 0;
@@ -854,6 +1115,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.sent).toEqual([{
@@ -879,6 +1141,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.sent).toEqual([{
@@ -897,6 +1160,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
     harness.sent.length = 0;
     harness.currentContext.routeNonce += 1;
@@ -905,6 +1169,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.sent).toEqual([{
@@ -921,6 +1186,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
     harness.sent.length = 0;
     harness.currentContext.fanAccountId = 'fan-2';
@@ -929,6 +1195,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.sent).toEqual([{
@@ -948,6 +1215,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.sent).toEqual([{
@@ -967,6 +1235,7 @@ describe('VoiceService attach attestation', () => {
       type: 'voice:attachToken',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
+      ...SOURCE_BINDING,
     }, harness.emit);
 
     expect(harness.fanslyClient.getAccountNames).toHaveBeenLastCalledWith(

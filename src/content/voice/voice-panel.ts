@@ -505,9 +505,18 @@ export class VoicePanel {
 
   private renderBusy(attempt: VoiceAttempt): void {
     if (attempt.phase === 'generating') {
-      this.busySlot.replaceChildren(
-        this.busyRow('Скрипт генерируется…'),
+      const row = this.busyRow('Скрипт генерируется…');
+      const cancel = el(
+        'button',
+        'chatgoose-button chatgoose-button-secondary chatgoose-voice-cancel-script',
+        'Отменить',
       );
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => {
+        void this.deps.controller.cancelScript();
+      });
+      row.append(cancel);
+      this.busySlot.replaceChildren(row);
       return;
     }
     if (this.deps.controller.hasPendingCreate() && !this.pendingReconcile) {

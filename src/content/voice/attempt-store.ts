@@ -1,4 +1,5 @@
 import {
+  VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX,
   VOICE_ATTEMPT_SESSION_KEY_PREFIX,
   VOICE_ATTEMPT_TTL_MS,
 } from '../../shared/constants.js';
@@ -19,6 +20,8 @@ export interface VoiceTakeCreateSnapshot {
   conversationRef: string;
   pinnedConversationRef: string | null;
   sourceGenerationRef: string;
+  sourceFingerprint: string;
+  pageLabel: string;
   script: string;
   phase: 'in-flight' | 'needs-reconcile';
   /** Durable evidence that this idempotency key may already have reached the
@@ -40,6 +43,8 @@ export interface StoredVoiceAttempt {
   script: string;
   canonicalScript: string | null;
   generationRef: string | null;
+  sourceFingerprint: string | null;
+  pageLabel: string | null;
   tone: ReplyTone;
   takes: StoredVoiceTake[];
   selectedTakeId: number | null;
@@ -65,7 +70,7 @@ export interface VoiceAttemptStorageArea {
 }
 
 interface StoredEnvelope extends VoiceAttemptStoreSnapshot {
-  version: 1;
+  version: 2;
   savedAt: number;
 }
 
@@ -163,6 +168,8 @@ function parseStoredAttempt(value: unknown): StoredVoiceAttempt | null {
     typeof value.script !== 'string' ||
     !isNullableString(value.canonicalScript) ||
     !isNullableString(value.generationRef) ||
+    !isNullableString(value.sourceFingerprint) ||
+    !isNullableString(value.pageLabel) ||
     typeof value.tone !== 'string' ||
     !REPLY_TONES.has(value.tone as ReplyTone) ||
     !Array.isArray(value.takes) ||
@@ -173,6 +180,12 @@ function parseStoredAttempt(value: unknown): StoredVoiceAttempt | null {
   ) {
     return null;
   }
+  const hasBoundSource =
+    typeof value.sourceFingerprint === 'string' && value.sourceFingerprint.trim().length > 0 &&
+    typeof value.pageLabel === 'string' && value.pageLabel.trim().length > 0;
+  if ((value.generationRef !== null || takes.length > 0) && !hasBoundSource) {
+    return null;
+  }
   return {
     attemptId: value.attemptId,
     phase: value.phase,
@@ -180,6 +193,8 @@ function parseStoredAttempt(value: unknown): StoredVoiceAttempt | null {
     script: value.script,
     canonicalScript: value.canonicalScript,
     generationRef: value.generationRef,
+    sourceFingerprint: value.sourceFingerprint,
+    pageLabel: value.pageLabel,
     tone: value.tone as ReplyTone,
     takes: takes as StoredVoiceTake[],
     selectedTakeId: value.selectedTakeId as number | null,
@@ -195,13 +210,13 @@ function parseCreateSnapshot(value: unknown): VoiceTakeCreateSnapshot | null {
     typeof value.conversationRef !== 'string' ||
     !(value.pinnedConversationRef === undefined || isNullableString(value.pinnedConversationRef)) ||
     typeof value.sourceGenerationRef !== 'string' ||
+    typeof value.sourceFingerprint !== 'string' ||
+    value.sourceFingerprint.trim().length === 0 ||
+    typeof value.pageLabel !== 'string' ||
+    value.pageLabel.trim().length === 0 ||
     typeof value.script !== 'string' ||
-    !(value.sentOnce === undefined || typeof value.sentOnce === 'boolean') ||
-    !(
-      value.phase === undefined ||
-      value.phase === 'in-flight' ||
-      value.phase === 'needs-reconcile'
-    )
+    typeof value.sentOnce !== 'boolean' ||
+    !(value.phase === 'in-flight' || value.phase === 'needs-reconcile')
   ) {
     return null;
   }
@@ -210,13 +225,11 @@ function parseCreateSnapshot(value: unknown): VoiceTakeCreateSnapshot | null {
     conversationRef: value.conversationRef,
     pinnedConversationRef: value.pinnedConversationRef ?? null,
     sourceGenerationRef: value.sourceGenerationRef,
+    sourceFingerprint: value.sourceFingerprint,
+    pageLabel: value.pageLabel,
     script: value.script,
-    // Development snapshots from before the discriminator landed are safe to
-    // recover as ordinary in-flight creates.
-    phase: value.phase ?? 'in-flight',
-    // A legacy persisted pending create may already have reached the server.
-    // Treat missing evidence conservatively so a replay 409 cannot erase it.
-    sentOnce: value.sentOnce ?? true,
+    phase: value.phase,
+    sentOnce: value.sentOnce,
   };
 }
 
@@ -227,11 +240,15 @@ function parseEnvelope(value: unknown): StoredEnvelope | null {
     : null;
   if (
     !isRecord(value) ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     !Number.isFinite(value.savedAt) ||
     !attempt ||
     typeof value.conversationRef !== 'string' ||
     !(value.pendingCreate === null || pendingCreate) ||
+    (pendingCreate !== null && (
+      pendingCreate.sourceFingerprint !== attempt.sourceFingerprint ||
+      pendingCreate.pageLabel !== attempt.pageLabel
+    )) ||
     !Array.isArray(value.burnedClientRequestIds) ||
     !value.burnedClientRequestIds.every((id) => typeof id === 'string')
   ) {
@@ -262,7 +279,7 @@ function defaultSessionStorage(): VoiceAttemptStorageArea {
 
 function serializeSnapshot(snapshot: VoiceAttemptStoreSnapshot, savedAt: number): StoredEnvelope {
   return {
-    version: 1,
+    version: 2,
     savedAt,
     conversationRef: snapshot.conversationRef,
     pendingCreate: snapshot.pendingCreate
@@ -276,6 +293,8 @@ function serializeSnapshot(snapshot: VoiceAttemptStoreSnapshot, savedAt: number)
       script: snapshot.attempt.script,
       canonicalScript: snapshot.attempt.canonicalScript,
       generationRef: snapshot.attempt.generationRef,
+      sourceFingerprint: snapshot.attempt.sourceFingerprint,
+      pageLabel: snapshot.attempt.pageLabel,
       tone: snapshot.attempt.tone,
       takes: snapshot.attempt.takes.map((take) => ({
         voiceNoteId: take.voiceNoteId,
@@ -291,7 +310,7 @@ function serializeSnapshot(snapshot: VoiceAttemptStoreSnapshot, savedAt: number)
 }
 
 /**
- * storage.session custody for voice attempts. Each attempt has its own V1 key,
+ * storage.session custody for voice attempts. Each attempt has its own V2 key,
  * and writes are serialized so a slow older transition cannot overwrite a
  * newer one. Runtime-only audio and blob URLs are structurally absent here.
  */
@@ -325,6 +344,12 @@ export class VoiceAttemptStore {
     const entries: VoiceAttemptStoreEntry[] = [];
 
     for (const [key, value] of Object.entries(values)) {
+      if (key.startsWith(VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX)) {
+        // V1 has no Hub/principal/page binding. It cannot be proven safe after
+        // an extension update, so fail closed and remove the ephemeral record.
+        removeKeys.push(key);
+        continue;
+      }
       if (!key.startsWith(VOICE_ATTEMPT_SESSION_KEY_PREFIX)) {
         continue;
       }
