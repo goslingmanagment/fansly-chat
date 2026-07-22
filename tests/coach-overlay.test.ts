@@ -1261,6 +1261,15 @@ describe('OverlayController — coach chat mode', () => {
     expect(document.activeElement).toBe(items[0]);
   });
 
+  it('the menu panel is height-bounded with internal scroll (review P1 — clipping ancestor)', () => {
+    // JSDOM cannot lay out; pin the CSS contract like the container-query test.
+    expect(contentStyles).toMatch(
+      /\.chatgoose-coach-recap-panel\s*\{[^}]*max-height:\s*min\(60vh, 340px\)/,
+    );
+    expect(contentStyles).toMatch(/\.chatgoose-coach-recap-panel\s*\{[^}]*overflow-y:\s*auto/,
+    );
+  });
+
   it('Tab out of the open menu dismisses it without stealing focus back (review round 13)', () => {
     const { controller } = makeController();
     controller.render(createCoachModel());

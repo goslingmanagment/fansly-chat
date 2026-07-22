@@ -1080,6 +1080,11 @@
   border: 1px solid var(--chatgoose-line-strong);
   border-radius: var(--chatgoose-radius-menu);
   box-shadow: var(--chatgoose-shadow-pop);
+  /* A short viewport / high zoom must scroll INSIDE the menu (review P1): the
+   * coach panel ancestor clips (overflow: hidden), so an unconstrained popup
+   * simply cuts off its bottom radio items. */
+  max-height: min(60vh, 340px);
+  overflow-y: auto;
 }
 
 .chatgoose-coach-recap-item {
