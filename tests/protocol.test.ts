@@ -316,6 +316,14 @@ describe('protocol boundary guards', () => {
     };
     // Absent is valid (old-background tolerance).
     expect(isBackgroundPortMessage(base)).toBe(true);
+    // attachedRecaps ABSENT within a present turnContext is valid too (round
+    // 12: «kernel did not report» ≠ «kernel confirmed none»).
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: { sentMessageCount: 42, transcriptCoverage: 'window' },
+      }),
+    ).toBe(true);
     // Full valid shape.
     expect(
       isBackgroundPortMessage({

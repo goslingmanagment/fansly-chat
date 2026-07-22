@@ -1407,6 +1407,12 @@ the append-new-exchange path. Round 11: the question's origin rides the
 DISPATCHED attempt too (CoachAttempt.fromComposer), so the route-change and
 disconnect teardowns no longer park a canned chip/Retry string in the
 composer; the epoch purge's safety property — never evicting OTHER sessions —
-is pinned across all four identity conjuncts (other sessions stay cache-hits). All coach-OWNED copy is now Russian; the shared
+is pinned across all four identity conjuncts (other sessions stay cache-hits). Round 12: the preflight lock is a Map of per-call
+tokens (a single pointer misbehaved under overlapping preflights in either
+completion order — each finally releases only its own token); `turnContext
+.attachedRecaps` is OPTIONAL end-to-end, so a kernel that did not report the
+attach renders «рекап: нет данных» instead of a confirmed «нет» (the E43
+honest-empty-state rule this file already applies to the status line); the
+empty-state hint chips lock with the composer during the submit preflight. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

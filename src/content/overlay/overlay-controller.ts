@@ -1865,6 +1865,16 @@ export class OverlayController {
         view.emptyStateNode = this.createCoachEmptyState(view);
         view.feedEl.append(view.emptyStateNode);
       }
+      // The submit preflight is a busy state (review round 12): the hint chips
+      // lock with the composer they prefill.
+      const locked = !model.sessionView.composerEnabled;
+      for (const chip of view.emptyStateNode.querySelectorAll<HTMLButtonElement>(
+        '.chatgoose-coach-hint',
+      )) {
+        if (chip.disabled !== locked) {
+          chip.disabled = locked;
+        }
+      }
     } else if (view.emptyStateNode) {
       view.emptyStateNode.remove();
       view.emptyStateNode = null;
@@ -1961,13 +1971,20 @@ export class OverlayController {
     const coverage =
       turnContext.transcriptCoverage === 'full-history' ? 'вся история' : 'окно';
     const recapParts: string[] = [];
-    if (turnContext.attachedRecaps.full) {
+    if (turnContext.attachedRecaps?.full) {
       recapParts.push(`полный ${formatCoachAgeMs(turnContext.attachedRecaps.full.ageMs)}`);
     }
-    if (turnContext.attachedRecaps.short) {
+    if (turnContext.attachedRecaps?.short) {
       recapParts.push(`короткий ${formatCoachAgeMs(turnContext.attachedRecaps.short.ageMs)}`);
     }
-    const recapSummary = recapParts.length > 0 ? recapParts.join(', ') : 'нет';
+    // «Не сообщено» ≠ «нет» (round 12, E43): a kernel that did not report the
+    // attach must not be quoted as confirming an empty one.
+    const recapSummary =
+      recapParts.length > 0
+        ? recapParts.join(', ')
+        : turnContext.attachedRecaps !== undefined
+          ? 'нет'
+          : 'нет данных';
 
     const summary = document.createElement('summary');
     summary.className = 'chatgoose-coach-turncontext-summary';
@@ -1985,7 +2002,10 @@ export class OverlayController {
     transcriptLine.textContent =
       `Переписка: ${turnContext.sentMessageCount} сообщ. (${coverage}) — отправлено браузером, до бюджета ядра`;
     const recapLine = document.createElement('div');
-    recapLine.textContent = `Рекап: ${recapSummary} — подтверждено ядром после сборки промпта`;
+    recapLine.textContent =
+      turnContext.attachedRecaps !== undefined
+        ? `Рекап: ${recapSummary} — подтверждено ядром после сборки промпта`
+        : 'Рекап: нет данных — ядро не сообщило состав приложенного';
     const caveatLine = document.createElement('div');
     caveatLine.textContent =
       'Ядро может дополнительно ужать контекст под бюджет промпта.';

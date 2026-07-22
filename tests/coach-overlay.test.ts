@@ -1173,6 +1173,35 @@ describe('OverlayController — coach chat mode', () => {
     expect(document.getElementById(labelId!)?.textContent).toBe('Авто-рекап');
   });
 
+  it('a missing kernel recap report renders «нет данных», never a confirmed «нет» (round 12)', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            ...exchangeItem('x-op', 'q', 'advice'),
+            turnContext: { sentMessageCount: 100, transcriptCoverage: 'window' },
+          } as CoachOverlayFeedItem,
+        ],
+      }),
+    );
+    const summary = requireElement<HTMLElement>('.chatgoose-coach-turncontext-summary');
+    expect(summary.textContent).toContain('рекап: нет данных');
+    const detail = requireElement<HTMLDivElement>('.chatgoose-coach-turncontext-detail');
+    expect(detail.textContent).toContain('ядро не сообщило');
+    expect(detail.textContent).not.toContain('подтверждено ядром');
+  });
+
+  it('empty-state hint chips lock with the composer (review round 12)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ composerEnabled: false }));
+    const chips = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-hint'),
+    );
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.every((chip) => chip.disabled)).toBe(true);
+  });
+
   it('the turn-context expansion carries provenance the summary lacks (review P2)', () => {
     const { controller } = makeController();
     controller.render(

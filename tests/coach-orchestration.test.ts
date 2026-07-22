@@ -1547,6 +1547,66 @@ describe('Coach orchestration', () => {
     await flush();
   });
 
+  it('overlapping preflights: B finishing FIRST keeps a still-running A locked (review round 12)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    const sessionA = app.activeCoachSession;
+
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    const stall = () => {
+      let released = false;
+      const pending: Array<(value: unknown) => void> = [];
+      const get = vi.fn(
+        () => new Promise((resolve) => {
+          if (released) {
+            resolve({ ...mockStorageState });
+            return;
+          }
+          pending.push(resolve);
+        }),
+      );
+      return {
+        get,
+        release: () => {
+          released = true;
+          for (const resolve of pending.splice(0)) {
+            resolve({ ...mockStorageState });
+          }
+        },
+      };
+    };
+    const stallA = stall();
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    const firstA = app.submitCoachQuestion('question A');
+
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    const stallB = stall();
+    (globalThis as any).browser.storage.local.get = stallB.get;
+    const firstB = app.submitCoachQuestion('question B');
+
+    // B resolves FIRST — its token release must not free A's lock.
+    stallB.release();
+    await firstB;
+    await flush();
+    // Back on fan A: its preflight still holds — the composer stays locked and
+    // a re-submit is rejected (no double dispatch when A finally resolves).
+    app.handleRouteChange('group-1');
+    app.openCoach();
+    await flush();
+    expect(app.activeCoachSession).toBe(sessionA);
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    stallA.release();
+    await firstA;
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await flush();
+  });
+
   it('overlapping preflights: finishing A does not unlock a still-running B (review round 10)', async () => {
     const app = await makeReadyApp();
     app.openCoach();

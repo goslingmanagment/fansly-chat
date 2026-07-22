@@ -262,9 +262,15 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
  * an extra field or a wrong type is a producer bug on a DOM-adjacent projection
  * (E28), so validate exactly rather than pass through. */
 function isCoachTurnContext(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  // attachedRecaps is OPTIONAL (round 12): absent = «kernel did not report»,
+  // distinct from a reported empty attach — when present, exact-keyed as before.
+  const keySignature = Object.keys(value).sort().join(',');
   if (
-    !isObjectRecord(value) ||
-    !hasExactKeys(value, ['sentMessageCount', 'transcriptCoverage', 'attachedRecaps'])
+    keySignature !== 'attachedRecaps,sentMessageCount,transcriptCoverage' &&
+    keySignature !== 'sentMessageCount,transcriptCoverage'
   ) {
     return false;
   }
@@ -277,12 +283,15 @@ function isCoachTurnContext(value: unknown): boolean {
     slot === null ||
     (isObjectRecord(slot) && hasExactKeys(slot, ['ageMs']) && countOk(slot.ageMs));
   const recaps = value.attachedRecaps;
+  const recapsOk =
+    recaps === undefined ||
+    (isObjectRecord(recaps) &&
+      hasExactKeys(recaps, ['full', 'short']) &&
+      slotOk(recaps.full) &&
+      slotOk(recaps.short));
   return countOk(value.sentMessageCount) &&
     (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
-    isObjectRecord(recaps) &&
-    hasExactKeys(recaps, ['full', 'short']) &&
-    slotOk(recaps.full) &&
-    slotOk(recaps.short);
+    recapsOk;
 }
 
 function isOptionalCoachTurnContext(record: Record<string, unknown>): boolean {

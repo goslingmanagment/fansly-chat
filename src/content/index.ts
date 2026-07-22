@@ -362,12 +362,14 @@ export class ChatGooseContentApp {
     | null = null;
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
   // await (the auto-recap decision needs live settings before arming anything).
-  // The submit preflight lock, keyed by SESSION (review rounds 8/9): both the
-  // busy projection AND the admission guard must agree, or another fan's coach
-  // looks usable while every Send bounces. A same-session re-entry is blocked;
-  // a different session may proceed — the post-await defensive re-check catches
-  // the rare cross-session dispatch race honestly.
-  private coachSubmitPreflightSession: CoachSession | null = null;
+  // The submit preflight locks, keyed by SESSION with a per-call token (review
+  // rounds 8/9/12): both the busy projection AND the admission guard must
+  // agree, or another fan's coach looks usable while every Send bounces. A
+  // same-session re-entry is blocked; different sessions proceed
+  // independently, and each finally releases ONLY its own token — a single
+  // pointer could be overwritten/cleared by an overlapping preflight in either
+  // completion order.
+  private readonly coachSubmitPreflights = new Map<CoachSession, symbol>();
   // Opening Coach and successful recap steps start metadata reads without
   // blocking normal Coach turns. Only a still-unconsumed first auto-recap
   // decision awaits the latest read, so stale status cannot trigger duplicate
@@ -1924,7 +1926,7 @@ export class ChatGooseContentApp {
       this.activeFeature ||
       this.activeCompareModel?.operationId ||
       this.coachRecapChain ||
-      this.coachSubmitPreflightSession === session
+      this.coachSubmitPreflights.has(session)
     ) {
       // The renderer clears the textarea BEFORE onCoachSubmit, so a rejected
       // submit must put the question back or it is silently lost (review P1).
@@ -1947,7 +1949,8 @@ export class ChatGooseContentApp {
       return;
     }
 
-    this.coachSubmitPreflightSession = session;
+    const preflightToken = Symbol('coach-preflight');
+    this.coachSubmitPreflights.set(session, preflightToken);
     let settings;
     try {
       // Project the lock immediately (review P1) — the await below opens a real
@@ -1987,10 +1990,10 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('settings_load_failed'));
       return;
     } finally {
-      // Clear only OUR lock (review round 10): a second session's preflight may
-      // have legitimately taken it while we awaited.
-      if (this.coachSubmitPreflightSession === session) {
-        this.coachSubmitPreflightSession = null;
+      // Release only OUR token (review rounds 10/12): overlapping preflights of
+      // other sessions — in either completion order — keep theirs.
+      if (this.coachSubmitPreflights.get(session) === preflightToken) {
+        this.coachSubmitPreflights.delete(session);
       }
       // Rebuild whatever coach is active NOW (review round 8): the preflight
       // may have started on a different fan's session.
@@ -2631,7 +2634,7 @@ export class ChatGooseContentApp {
     // The submit preflight (settings/status await) counts as busy too (review
     // P1): the composer, chips and topbar must lock the moment a chip fires,
     // or a second Send in that window clears text the guard then rejects.
-    const busy = streaming || chainOpId !== null || this.coachSubmitPreflightSession === session;
+    const busy = streaming || chainOpId !== null || this.coachSubmitPreflights.has(session);
     return {
       kind: 'coach',
       fanDisplayName: getActiveConversationDisplayName() ?? 'fan',

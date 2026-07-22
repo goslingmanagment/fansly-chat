@@ -1582,8 +1582,10 @@ export interface CoachTurnContext {
   /** Whether that transcript was the whole history or a bounded window. */
   transcriptCoverage: 'full-history' | 'window';
   /** The recap slots Core actually retained in the finalized prompt, each with
-   * its age at attach time (ms). Null when that slot was not attached. */
-  attachedRecaps: {
+   * its age at attach time (ms). Null when that slot was not attached. ABSENT
+   * when the kernel did not report the field at all (review round 12, E43
+   * honesty): «не сообщено» must never render as a confirmed «нет». */
+  attachedRecaps?: {
     full: { ageMs: number } | null;
     short: { ageMs: number } | null;
   };

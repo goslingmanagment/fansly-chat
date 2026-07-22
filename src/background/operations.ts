@@ -3171,16 +3171,21 @@ export class OperationCoordinator {
           ? {
               sentMessageCount: keptMessageCount,
               transcriptCoverage: computedTranscriptCoverage,
-              attachedRecaps: {
-                // Floored: the content-side validator requires non-negative
-                // INTEGER ages (exact-shape declassification, E28).
-                full: attachedRecaps?.full
-                  ? { ageMs: Math.max(0, Math.floor(attachedRecaps.full.ageMs)) }
-                  : null,
-                short: attachedRecaps?.short
-                  ? { ageMs: Math.max(0, Math.floor(attachedRecaps.short.ageMs)) }
-                  : null,
-              },
+              // «Not reported» stays ABSENT (round 12, E43): only a kernel
+              // that actually sent the field yields a recap claim. Floored:
+              // the content-side validator requires non-negative INTEGER ages.
+              ...(attachedRecaps !== undefined
+                ? {
+                    attachedRecaps: {
+                      full: attachedRecaps.full
+                        ? { ageMs: Math.max(0, Math.floor(attachedRecaps.full.ageMs)) }
+                        : null,
+                      short: attachedRecaps.short
+                        ? { ageMs: Math.max(0, Math.floor(attachedRecaps.short.ageMs)) }
+                        : null,
+                    },
+                  }
+                : {}),
             }
           : undefined;
       this.sendComplete(tabId, {
