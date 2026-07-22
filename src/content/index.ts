@@ -354,14 +354,19 @@ export class ChatGooseContentApp {
          * the post-recap dispatch still re-reads the CURRENT Fansly draft
          * (review P1 — it used to be dropped at both continuations). */
         forceDraftRead: boolean;
+        /** Whether the held question was COMPOSER-typed (review round 9): the
+         * chain resubmit must keep the original origin, or a post-recap
+         * rejection silently eats the chatter's own text. */
+        fromComposer: boolean;
       }
     | null = null;
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
   // await (the auto-recap decision needs live settings before arming anything).
-  private coachSubmitInFlight = false;
-  // The preflight's BUSY projection is per-session (review round 8): a global
-  // lock left a freshly opened coach of ANOTHER fan disabled forever when the
-  // original session's finally-rebuild found it no longer active.
+  // The submit preflight lock, keyed by SESSION (review rounds 8/9): both the
+  // busy projection AND the admission guard must agree, or another fan's coach
+  // looks usable while every Send bounces. A same-session re-entry is blocked;
+  // a different session may proceed — the post-await defensive re-check catches
+  // the rare cross-session dispatch race honestly.
   private coachSubmitPreflightSession: CoachSession | null = null;
   // Opening Coach and successful recap steps start metadata reads without
   // blocking normal Coach turns. Only a still-unconsumed first auto-recap
@@ -1895,7 +1900,7 @@ export class ChatGooseContentApp {
   /** Send the chatter's question as a coach turn (spec §3), possibly gated by an
    * auto-recap chain (spec §5). Async because the auto-recap decision AND the
    * wire history need live settings (`coachAutoRecap`, `deepMessageCount`,
-   * `coachHistoryLimit`); a synchronous `coachSubmitInFlight` guard blocks a
+   * `coachHistoryLimit`); a synchronous same-session preflight guard blocks a
    * re-entrant submit across the await. */
   async submitCoachQuestion(
     question: string,
@@ -1919,7 +1924,7 @@ export class ChatGooseContentApp {
       this.activeFeature ||
       this.activeCompareModel?.operationId ||
       this.coachRecapChain ||
-      this.coachSubmitInFlight
+      this.coachSubmitPreflightSession === session
     ) {
       // The renderer clears the textarea BEFORE onCoachSubmit, so a rejected
       // submit must put the question back or it is silently lost (review P1).
@@ -1942,14 +1947,14 @@ export class ChatGooseContentApp {
       return;
     }
 
-    this.coachSubmitInFlight = true;
     this.coachSubmitPreflightSession = session;
-    // Project the lock immediately (review P1) — the await below opens a real
-    // interaction window on slow storage.
-    this.rebuildCoachModel();
-    this.renderAll();
     let settings;
     try {
+      // Project the lock immediately (review P1) — the await below opens a real
+      // interaction window on slow storage. Inside the try (review round 9): a
+      // throwing render must not strand the lock the finally alone resets.
+      this.rebuildCoachModel();
+      this.renderAll();
       ({ settings } = await loadStorageState());
       const effectiveMode = resolveEffectiveAutoRecap(
         session.autoRecapOverride,
@@ -1982,7 +1987,6 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('settings_load_failed'));
       return;
     } finally {
-      this.coachSubmitInFlight = false;
       this.coachSubmitPreflightSession = null;
       // Rebuild whatever coach is active NOW (review round 8): the preflight
       // may have started on a different fan's session.
@@ -2025,7 +2029,7 @@ export class ChatGooseContentApp {
     if (!session.autoRecapAttempted && effectiveMode !== 'off') {
       session.autoRecapAttempted = true;
       if (!hasFreshMatchingRecap(session.recapStatus, effectiveMode, settings.deepMessageCount)) {
-        this.startCoachRecapChain(session, effectiveMode, 'auto', trimmed, opts?.forceDraftRead ?? false);
+        this.startCoachRecapChain(session, effectiveMode, 'auto', trimmed, opts?.forceDraftRead ?? false, opts?.fromComposer !== false);
         return;
       }
     }
@@ -2184,7 +2188,7 @@ export class ChatGooseContentApp {
     if (!session) {
       return;
     }
-    this.startCoachRecapChain(session, mode, 'explicit', null, false);
+    this.startCoachRecapChain(session, mode, 'explicit', null, false, false);
   }
 
   /** Set the per-session auto-recap override from the «Рекап ▾» menu radio group
@@ -2250,6 +2254,7 @@ export class ChatGooseContentApp {
     origin: 'auto' | 'explicit',
     pendingQuestion: string | null,
     forceDraftRead: boolean,
+    fromComposer: boolean,
   ): void {
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
@@ -2274,7 +2279,7 @@ export class ChatGooseContentApp {
     const domFanDisplayName = getActiveConversationDisplayName();
     // Set the chain BEFORE initializeFeatureOperation so its renderSurfaces keeps
     // the coach overlay on top (the running step is already in the feed).
-    this.coachRecapChain = { operationId, session, step, origin, pendingQuestion, forceDraftRead };
+    this.coachRecapChain = { operationId, session, step, origin, pendingQuestion, forceDraftRead, fromComposer };
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
     this.rebuildCoachModel();
     // Recap refresh bypasses the summary/overlay caches (spec §5): forceRegenerate.
@@ -2330,7 +2335,7 @@ export class ChatGooseContentApp {
     this.renderAll();
     if (chain.origin === 'auto' && chain.pendingQuestion && chain.session === this.activeCoachSession) {
       // autoRecapAttempted is already set, so this submit sends a plain turn.
-      void this.submitCoachQuestion(chain.pendingQuestion, { forceDraftRead: chain.forceDraftRead, fromComposer: false });
+      void this.submitCoachQuestion(chain.pendingQuestion, { forceDraftRead: chain.forceDraftRead, fromComposer: chain.fromComposer });
     }
   }
 
@@ -2349,7 +2354,7 @@ export class ChatGooseContentApp {
     }
     const errorKey = message.error?.key ?? 'unknown_error';
     const classification = classifyRecapChainFailure(errorKey);
-    const { origin, pendingQuestion, session, step, forceDraftRead } = chain;
+    const { origin, pendingQuestion, session, step, forceDraftRead, fromComposer } = chain;
     step.status = 'failed';
     this.coachRecapChain = null;
     this.clearCoachOperationState();
@@ -2376,7 +2381,7 @@ export class ChatGooseContentApp {
       this.rebuildCoachModel();
       this.renderAll();
       if (session === this.activeCoachSession) {
-        void this.submitCoachQuestion(pendingQuestion, { forceDraftRead, fromComposer: false });
+        void this.submitCoachQuestion(pendingQuestion, { forceDraftRead, fromComposer });
       }
       return;
     }

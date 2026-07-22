@@ -1486,6 +1486,67 @@ describe('Coach orchestration', () => {
     expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'chip question' });
   });
 
+  it('a post-recap resubmit failure RESTORES the composer-typed question (review round 9)', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('мой собственный вопрос');
+    const recapOpId = app.coachRecapChain.operationId;
+    expect(app.coachRecapChain.fromComposer).toBe(true);
+
+    // The recap completes, but the follow-up settings read fails.
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(async () => {
+      throw new Error('storage down');
+    });
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'recap body', parts: [] },
+    });
+    await flush();
+    (globalThis as any).browser.storage.local.get = storageGet;
+
+    // The chatter's own text is back in the composer — not silently eaten.
+    expect(app.activeCoachSession.composerText).toBe('мой собственный вопрос');
+  });
+
+  it('a Send from ANOTHER session during a stalled preflight is admitted (review round 9)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('slow question');
+
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('question from fan B');
+    // Fan B's question dispatches — the guard is per-session, matching the
+    // per-session busy projection.
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'question from fan B',
+    });
+
+    releaseStorage();
+    await first;
+    await flush();
+  });
+
   it('a rejected CANNED submit never writes its text into the composer (review round 8)', async () => {
     const app = await makeReadyApp();
     app.openCoach();

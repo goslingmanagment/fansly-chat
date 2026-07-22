@@ -1384,6 +1384,17 @@ role="group" (a bare div inside role="menu" is invalid ARIA); the menu-item
 hover override matches the base button-hover specificity (the clay chip frame
 no longer appears on borderless rows); the turn-context expansion carries the
 provenance split (browser pre-budget vs kernel post-attach) instead of
-restating the summary. All coach-OWNED copy is now Russian; the shared
+restating the summary. Round 8: follow-up chips lock with the composer during
+the submit preflight, and a rejected CANNED submit (chip, Retry) is never
+written into the composer — the round-7 restore applies to composer-typed
+questions only (a chip double-click used to inject its canned text into an
+empty field). Round 9: the auto-recap chain CARRIES the question's origin, so
+a post-recap resubmit failure restores the chatter's own text (round 8 had
+mislabeled chain resubmits as canned — three rejection paths silently ate the
+typed question); the preflight admission guard is per-session like the busy
+projection (another fan's coach both looks usable AND is usable; the
+post-await re-check covers the cross-session dispatch race), and the lock is
+set inside the try whose finally resets it, so a throwing render cannot strand
+the coach rejecting every future question. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.
