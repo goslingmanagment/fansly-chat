@@ -1,9 +1,7 @@
-/** Ship-gate for the coach draft-attach control (spec §10.2 / E53): core must
- * consume `draftText` for coach-chat (core#22) BEFORE this control may render —
- * a checkbox that silently does nothing is worse than none (fail-honest, review
- * P1). Flip to `true` in its own commit once core#22 is merged, together with
- * the pin in tests/coach-draft-gate.test.ts. */
-export const COACH_DRAFT_ATTACH_ENABLED = false;
+/** Ship-gate for the coach draft-attach control (spec §10.2 / E53). FLIPPED
+ * 2026-07-22: core#22 (optional coach draftText consumption) is merged, so the
+ * control is honest — the kernel actually reads what the checkbox attaches. */
+export const COACH_DRAFT_ATTACH_ENABLED = true;
 
 /** The dispatch-site gate conjunct (review rounds 5/6). Honest coverage note:
  * the orchestration suite mocks this module, so the helper's semantics are
