@@ -69,6 +69,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E50 | 2026-07-20 | Ping sends a bounded whole-day fan-silence gap from the same clock and latest fan text as segment selection; follows Core Decision #127 and current SDK contract |
 | E51 | 2026-07-21 | Options waits for a durable MV3 storage-readiness barrier; custody-layout repair is independent of schemaVersion and failures render no settings writer |
 | E52 | 2026-07-21 | Voice hardening: fail-closed/bounded script SSE, V2 Hub-principal+page custody, bounded paid/free requests, single-flight monotonic status, explicit cancel; custom-name and cross-tab behavior remain intentional |
+| E53 | 2026-07-22 | Coach panel UI redesign (presentation-only, no migration): coach-scoped header/CSS polish, one «Рекап ▾» menu replacing three buttons, structured recap status line, grouped empty state, per-turn draft-attach intent (`draftText` sent only when the live Fansly draft is non-empty at dispatch), a content-owned `transcriptEpoch` reseed key, a coach settings snapshot, and `turnContext` plumbing (background stops discarding `attachedRecaps`); Russian copy for all coach-owned strings |
 
 ## Entries
 
@@ -1285,3 +1286,69 @@ unavailable; E46's stricter reply/compare rule is not extended to Voice. No
 single-tab lease is added to an attempt: concurrent tab/content lifecycles are
 an accepted pilot behavior, while source/page, fan, route, exact-take, and
 explicit-human-attach guards remain authoritative.
+
+**E53 (2026-07-22).** The Coach panel gets the layout/localization pass its
+behavior spec (E46) never had (spec:
+`docs/superpowers/specs/2026-07-21-coach-ui-layout.md`). It is presentation-plus-
+plumbing only: **no storage migration** (§7 reuses the existing v15
+`coachHistoryLimit`/`coachAutoRecap` fields), no vendor SDK change, and no new
+out-of-band Fansly request. **Header/CSS:** the shared overlay shell is
+untouched; the clay eyebrow «Коуч», the bare `@<fan>` title (feature name lives
+in the eyebrow, no subtitle), and the header hairline are all scoped under
+`.chatgoose-overlay-coach`, and the long-referenced-but-undefined
+`--chatgoose-clay-soft` question-bubble token is finally added to both theme
+blocks. **Topbar:** the three recap buttons collapse into one `role="menu"`
+«Рекап ▾» (short/full refresh, «Обновить переписку», and the «Авто-рекап» radio
+group mapped 1:1 to the per-session `inherit|off|short|full` override); Esc with
+the menu open closes the MENU, not the overlay, and returns focus to the trigger.
+**Draft attach (§5):** «Приложить мой недописанный ответ» holds an INTENT stored
+next to `composerText`; the live Fansly draft is read ONCE immediately before the
+`operation:start` dispatch (after any recap step) via
+`getActiveConversationDraftText`, and only non-empty text is actually sent as the
+already-contracted `draftText` (`includedDraft` means «sent», not «requested»).
+The intent resets after every DISPATCHED attempt and is preserved when the chain
+stops before dispatch (auto-recap STOP, route change, port-send failure); Retry
+re-reads the CURRENT live draft rather than resenting a stale one. Core still
+ignores `draftText` for coach today, so this must not ship enabled before the
+core optional-draft PR lands (fail-honest); it accumulates for the 2.0 release
+with the rest of the coach stack — no deploy. **Freshness (§8.4):** «Обновить
+переписку» bumps a content-owned `transcriptEpoch` folded into the background
+transcript-cache key, so the next turn is a guaranteed miss + full quick-window
+reseed with no live read on click and no dependency on a live service worker.
+**Turn context (§8.2):** the gateway already parsed the kernel's post-attach
+`attachedRecaps`, but the operation callback discarded it; the coach
+`operation:complete` message now carries an optional `turnContext` (kept-count,
+coverage, attached-recap ages), retained on the exchange and rendered as the
+collapsed «Отправлено коучу…» line. It follows E28's counts-only declassification
+rule — a typed, numbers-only projection, never the raw meta payload — and an
+absent field (old background) simply renders no line. **Settings (§7):** a
+content-owned snapshot of the two v15 coach fields hydrates on open and refreshes
+on the existing `settings:changed` path (stale-session guarded), positioning the
+memory-window divider (§8.1, derived from feed exchange identities, not the
+50-capped `completedExchanges.length`) and labelling «По настройке (<x>)».
+Follow-up chips (§8.3) submit a canned question with normal semantics, leaving
+unsent composer text untouched. Hardened through sixteen adversarial review rounds on PR #24 (claude +
+codex, blind, with per-finding verification); the round-by-round record —
+what each round found, what was fixed, and which findings were refuted —
+lives in the published review reports on the PR, not here. The durable
+rules that emerged: canned text (chips, Retry, chain resubmits) is never
+written into the composer and every never-dispatched path restores a
+composer-typed question and re-arms a Retry's re-read intent; the submit
+preflight is a busy state locking composer, chips, hints and menu, keyed
+per-session by token; «Новый диалог» is refused during a preflight and a
+rotated sessionId aborts the raced submit; the draft-attach control ships
+behind COACH_DRAFT_ATTACH_ENABLED (flip = one commit after core#22, with
+its pin test); turnContext follows E43/E28 honesty (exact-keyed validation,
+optional attachedRecaps, «нет данных» when the kernel did not report);
+PortClient maps a throwing postMessage to its false contract; the recap
+menu follows the WAI-ARIA menu-button pattern incl. Tab dismissal; the
+transcript-cache epoch purge never touches other sessions; and the settings
+snapshot swaps atomically under a generation guard on every settings-bearing
+event including reconnect replays. Closing hardening: the «Рекап» menu is height-bounded
+relative to the panel's own formula with internal scroll (a viewport-only cap
+still clipped at ~300px heights inside the overflow-hidden ancestor), and an
+INVALID turnContext degrades to «absent» at the consumer instead of rejecting
+the whole paid operation:complete (the shape gate is isCoachTurnContext; E28
+holds by ignoring, not by discarding terminals). Follow-up recorded: extract
+the orchestration test harness so the ship-gate's dispatch site gains a
+behavioural (unmocked) pin.

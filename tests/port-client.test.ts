@@ -50,4 +50,25 @@ describe('PortClient boundary guard', () => {
       text: 'hello',
     });
   });
+
+  it('maps a throwing postMessage to the documented false return (review round 14)', () => {
+    const port = createMockRuntimePort(1);
+    port.postMessage = vi.fn(() => {
+      // A dead port whose disconnect has not been delivered yet.
+      throw new Error('Attempt to postMessage on disconnected port');
+    });
+    (globalThis as Record<string, unknown>).browser = {
+      runtime: { connect: vi.fn(() => port) },
+    };
+    const client = new PortClient({
+      onMessage: vi.fn(),
+      onDisconnected: vi.fn(),
+      onConnected: vi.fn(),
+    });
+    client.connect();
+    expect(
+      client.send({ type: 'operation:cancel', operationId: 'op-1' } as never),
+    ).toBe(false);
+  });
+
 });

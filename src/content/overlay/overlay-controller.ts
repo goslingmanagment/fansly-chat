@@ -1,10 +1,13 @@
 import { COACH_QUESTION_MAX_CHARS } from '../../shared/constants.js';
+import { formatCoachAgeMs } from '../../shared/coach-format.js';
 import { ChatGooseError, toUserError } from '../../shared/errors.js';
 import type {
   CoachAutoRecapOverride,
   CoachOverlayDraft,
   CoachOverlayFeedItem,
   CoachOverlaySessionView,
+  CoachRecapStatusView,
+  CoachTurnContext,
   DebugPromptEchoStatus,
   LlmSpendSummary,
   LlmUsageMetrics,
@@ -79,15 +82,24 @@ interface OverlayCallbacks {
    * into the Fansly DOM it renders into. */
   onOpenDebugPrompt?: () => void;
   /** Coach chat (spec §3). Optional so non-coach constructions stay valid. */
-  onCoachSubmit?: (question: string) => void;
+  /** `origin` distinguishes a composer-typed question from a canned one (chip)
+   * — a rejected canned submit must NOT be restored into the composer. */
+  onCoachSubmit?: (question: string, origin?: 'composer' | 'canned') => void;
   /** «New dialog» — clears the session (the orchestrator confirms if non-empty). */
   onCoachNewDialog?: () => void;
   /** Explicit recap refresh from within coach (short/full, spec §5). */
   onCoachRecap?: (mode: 'short' | 'full') => void;
-  /** Cycle the per-session auto-recap override (spec §5 topbar control). */
-  onCoachAutoRecapCycle?: () => void;
-  /** Retry a failed/cancelled turn — replays its question (spec §8). */
-  onCoachRetry?: (question: string) => void;
+  /** Set the per-session auto-recap override from the «Рекап ▾» radio group
+   * (spec §3). */
+  onCoachSetAutoRecap?: (override: CoachAutoRecapOverride) => void;
+  /** «Обновить переписку» (spec §8.4): reseed the transcript on the next turn. */
+  onCoachRefreshTranscript?: () => void;
+  /** Draft-attach intent toggled in the composer (spec §5). */
+  onCoachDraftIntentChange?: (intent: boolean) => void;
+  /** Retry a failed/cancelled turn — replays its question (spec §8). `includedDraft`
+   * is the failed attempt's honest sent-flag; Retry re-reads the live draft when
+   * true (spec §5). */
+  onCoachRetry?: (question: string, includedDraft: boolean) => void;
   /** Live composer edits, so the orchestrator can persist `composerText`
    * across close/switch (spec §3 "unsent question survives close/switch").
    * Optional: the renderer never depends on it for its own correctness. */
@@ -152,9 +164,15 @@ interface CoachViewState {
    * independently of the pending / empty-state nodes appended after it. */
   itemsEl: HTMLDivElement;
   recapStatusEl: HTMLDivElement;
-  recapStatusText: Text;
-  /** The per-session auto-recap override cycle button (spec §5). */
-  autoRecapButton: HTMLButtonElement;
+  /** Serialized signature of the last-rendered recap status, so an unchanged
+   * structured line performs no DOM rebuild. */
+  recapStatusSig: string;
+  /** The «Рекап ▾» topbar menu (spec §3). */
+  recapMenu: CoachRecapMenu;
+  /** The draft-attach checkbox + its helper line (spec §5). Absent while the
+   * ship-gate is off (spec §10.2 — core must consume draftText first). */
+  draftCheckbox?: HTMLInputElement;
+  draftHelperText?: Text;
   composerTextarea: HTMLTextAreaElement;
   sendButton: HTMLButtonElement;
   cancelButton: HTMLButtonElement;
@@ -162,12 +180,36 @@ interface CoachViewState {
   /** The last-rendered item per key, so a reused index-key whose content
    * changed (feed reset) rebuilds instead of showing a stale node. */
   renderedItems: Map<string, CoachOverlayFeedItem>;
+  /** The memory-window divider (spec §8.1), positioned before the oldest tail
+   * exchange; null when not shown. */
+  memoryDividerNode: HTMLElement | null;
+  /** The follow-up chips row under the latest completed answer (spec §8.3). */
+  followupsNode: HTMLElement | null;
   /** The in-flight turn's node (question bubble + streaming answer); null idle. */
   pendingNode: HTMLElement | null;
   /** The ONLY node mutated as stream chunks arrive. */
   pendingAnswerTextNode: Text | null;
   pendingQuestion: string | null;
   emptyStateNode: HTMLElement | null;
+}
+
+/** The «Рекап ▾» topbar menu handle (spec §3). Owns the trigger + popup; the
+ * controller drives it (busy-disable, auto-recap radio state) and consults
+ * `isOpen()`/`close()` so an Esc closes the MENU, not the overlay. */
+interface CoachRecapMenu {
+  root: HTMLDivElement;
+  trigger: HTMLButtonElement;
+  isOpen(): boolean;
+  close(): void;
+  /** close() for a DISCARDED view: drops the document-level outside-click
+   * listener without touching focus (the trigger may already be detached) —
+   * review P2: the listener used to outlive the view. */
+  dispose(): void;
+  setBusy(busy: boolean): void;
+  updateAutoRecap(
+    override: CoachAutoRecapOverride,
+    resolvedDefault: 'off' | 'short' | 'full' | null,
+  ): void;
 }
 
 type OverlayViewState = StaticViewState | LoadingViewState | CoachViewState;
@@ -256,11 +298,77 @@ function operationIdForModel(model: OverlayViewModel): string | null {
   return 'operationId' in model ? model.operationId ?? null : null;
 }
 
-/** Empty-state starter prompts (spec §3): clicking one prefills the composer. */
-const COACH_STARTER_HINTS: readonly string[] = [
-  'How do I sell this to him?',
-  'What is he actually into?',
-  'How do I re-open a cold chat?',
+/** Empty-state starter prompts (spec §6): 9 hints in three labeled groups.
+ * Clicking one prefills the composer (existing mechanism). */
+interface CoachHintGroup {
+  label: string;
+  hints: readonly string[];
+}
+const COACH_HINT_GROUPS: readonly CoachHintGroup[] = [
+  {
+    label: 'Продать',
+    hints: [
+      'Не знаю, как продать — подскажи',
+      'Как подать цену, чтобы не спугнуть?',
+      'Просит скидку — что ответить?',
+    ],
+  },
+  {
+    label: 'Вернуть',
+    hints: [
+      'Как оживить остывший чат?',
+      'Прочитал и молчит — что написать?',
+      'Пропал после цены — как вернуть?',
+    ],
+  },
+  {
+    label: 'Понять',
+    hints: [
+      'Что этому фану реально заходит?',
+      'Разбери его: что за человек?',
+      'О чём говорить, кроме продаж?',
+    ],
+  },
+];
+
+/** Follow-up chips under the latest completed answer (spec §8.3). A click SUBMITS
+ * the canned question (normal semantics); the composer text is untouched. */
+const COACH_FOLLOWUP_CHIPS: readonly string[] = [
+  'Другой вариант',
+  'Сделай короче',
+  'А если откажет?',
+];
+
+/** The «Авто-рекап» radio item labels (spec §3/§6). The `inherit` label carries
+ * the resolved global default in parentheses when the §7 snapshot is known. */
+function autoRecapItemLabel(
+  override: CoachAutoRecapOverride,
+  resolvedDefault: 'off' | 'short' | 'full' | null,
+): string {
+  switch (override) {
+    case 'inherit': {
+      if (resolvedDefault === null) {
+        return 'По настройке';
+      }
+      const resolved =
+        resolvedDefault === 'off' ? 'выкл' : resolvedDefault === 'short' ? 'короткий' : 'полный';
+      return `По настройке (${resolved})`;
+    }
+    case 'off':
+      return 'Выкл';
+    case 'short':
+      return 'Короткий';
+    case 'full':
+      return 'Полный';
+  }
+}
+
+/** The four «Авто-рекап» radio options, in menu order (spec §3). */
+const COACH_AUTO_RECAP_OPTIONS: readonly CoachAutoRecapOverride[] = [
+  'inherit',
+  'off',
+  'short',
+  'full',
 ];
 
 /** Structural equality for a feed item at a reused key — drives the rebuild vs
@@ -280,7 +388,8 @@ function sameCoachFeedItem(
     return (
       previous.question === next.question &&
       previous.errorCode === next.errorCode &&
-      previous.retryable === next.retryable
+      previous.retryable === next.retryable &&
+      previous.includedDraft === next.includedDraft
     );
   }
   if (previous.kind === 'recap-step' && next.kind === 'recap-step') {
@@ -294,18 +403,6 @@ function sameCoachFeedItem(
   return false;
 }
 
-/** The per-session auto-recap override cycle button label (spec §5). */
-function autoRecapLabel(override: CoachAutoRecapOverride): string {
-  const value =
-    override === 'inherit'
-      ? 'default'
-      : override === 'off'
-        ? 'off'
-        : override === 'short'
-          ? 'short'
-          : 'full';
-  return `Auto-recap: ${value}`;
-}
 
 export class OverlayController {
   private readonly root = ensureOverlayRoot();
@@ -338,6 +435,12 @@ export class OverlayController {
       // Escape during an IME composition cancels the composition, not the
       // overlay — never dismiss mid-compose (matters for the coach composer).
       if (event.key === 'Escape' && this.model.kind !== 'hidden' && !event.isComposing) {
+        // Spec §3: Esc with the «Рекап ▾» menu open closes the MENU only, never
+        // the overlay. Focus returns to the trigger inside close().
+        if (this.currentView?.kind === 'coach' && this.currentView.recapMenu.isOpen()) {
+          this.currentView.recapMenu.close();
+          return;
+        }
         this.handleDismiss();
       }
     });
@@ -590,12 +693,21 @@ export class OverlayController {
     this.headerSubtitleEl = subtitle;
     this.inlineErrorEl = inlineError;
     this.bodyEl = body;
+    this.disposeCoachView();
     this.currentView = null;
     return true;
   }
 
+  /** Drop a discarded coach view's document-level menu listener (review P2). */
+  private disposeCoachView(): void {
+    if (this.currentView?.kind === 'coach') {
+      this.currentView.recapMenu.dispose();
+    }
+  }
+
   private teardownShell(): void {
     this.clearLoadingElapsedTimer();
+    this.disposeCoachView();
     this.root.replaceChildren();
     this.shellEl = null;
     this.backdropEl = null;
@@ -618,19 +730,24 @@ export class OverlayController {
       model.kind === 'loading' || model.kind === 'reply' || model.kind === 'helpMe' || model.kind === 'readOnly'
         ? titleForFeature(model.feature)
         : model.kind === 'coach'
-          ? 'Coach'
+          ? 'Коуч'
           : model.kind === 'recap-picker'
             ? 'Recap'
             : 'ChatGoose';
+    // Coach header (spec §2/§6): the feature name lives in the clay eyebrow, so
+    // the title is bare «@<fan>» — no «Коуч / Коуч» doubling.
     const titleText =
       model.kind === 'error'
         ? 'ChatGoose'
-        : `${feature} — @${model.fanDisplayName || 'fan'}`;
+        : model.kind === 'coach'
+          ? `@${model.fanDisplayName || 'fan'}`
+          : `${feature} — @${model.fanDisplayName || 'fan'}`;
+    // Coach has NO subtitle (spec §2): '' hides the row.
     const subtitleText =
       model.kind === 'error'
         ? 'Something went wrong'
         : model.kind === 'coach'
-          ? 'Ask about this fan. You send messages manually.'
+          ? ''
           : model.kind === 'recap-picker'
             ? 'Choose a recap. Nothing is generated until you pick.'
             : 'Preview only. You send messages manually.';
@@ -644,6 +761,7 @@ export class OverlayController {
     if (this.headerSubtitleEl.textContent !== subtitleText) {
       this.headerSubtitleEl.textContent = subtitleText;
     }
+    this.headerSubtitleEl.classList.toggle('chatgoose-hidden', subtitleText === '');
   }
 
   private updateInlineError(model: VisibleOverlayModel): void {
@@ -686,6 +804,7 @@ export class OverlayController {
       }
       const view = this.createCoachView(model);
       this.bodyEl.replaceChildren(view.root);
+      this.disposeCoachView();
       this.currentView = view;
       // A rebuild is a (re)open: the feed is only measurable once attached
       // (createCoachView runs updateCoachView while detached → scrollHeight 0),
@@ -713,6 +832,7 @@ export class OverlayController {
           };
 
     this.bodyEl.replaceChildren(nextView.root);
+    this.disposeCoachView();
     this.currentView = nextView;
 
     // Auto-focus the first Insert button for newly visible completed fast replies
@@ -1152,50 +1272,37 @@ export class OverlayController {
     const root = document.createElement('div');
     root.className = 'chatgoose-coach';
 
-    // Topbar: recap freshness line + explicit refresh controls + New dialog.
+    // Topbar: recap freshness line (left) + «Рекап ▾» menu + «Новый диалог».
     const topbar = document.createElement('div');
     topbar.className = 'chatgoose-coach-topbar';
 
     const recap = document.createElement('div');
     recap.className = 'chatgoose-coach-recap';
-    const recapText = document.createTextNode('');
-    recap.append(recapText);
 
     const topbarActions = document.createElement('div');
     topbarActions.className = 'chatgoose-coach-topbar-actions';
-    const shortRecap = this.createCoachButton('Short recap', 'chatgoose-button-secondary', () =>
-      this.callbacks.onCoachRecap?.('short'),
-    );
-    const fullRecap = this.createCoachButton('Full recap', 'chatgoose-button-secondary', () =>
-      this.callbacks.onCoachRecap?.('full'),
-    );
-    // Per-session auto-recap override cycle (spec §5): inherit → off → short →
-    // full. Its label is refreshed in updateCoachView.
-    const autoRecap = this.createCoachButton(
-      autoRecapLabel(model.sessionView.autoRecapOverride),
-      'chatgoose-button-secondary chatgoose-coach-autorecap',
-      () => this.callbacks.onCoachAutoRecapCycle?.(),
-    );
+    const recapMenu = this.createCoachRecapMenu();
+
     // «Новый диалог» — a two-step inline confirm (spec §3), mirroring the
     // Replace-draft button below: NO window.confirm (it blocks the extension).
-    // A NON-EMPTY dialog arms a "Confirm new dialog" state on the first click;
-    // the second click resets. An EMPTY dialog resets immediately. Blur /
-    // outside-click / «Keep» abandons the confirm so a stale armed state never
-    // lingers. Emptiness is read live from the current model at click time.
+    // A NON-EMPTY dialog arms a «Точно сбросить?» state on the first click; the
+    // second click resets. An EMPTY dialog resets immediately. Blur /
+    // outside-click / «Оставить» abandons the confirm so a stale armed state
+    // never lingers. Emptiness is read live from the current model at click time.
     const newDialog = document.createElement('button');
     newDialog.type = 'button';
     newDialog.className = 'chatgoose-button chatgoose-button-secondary';
-    newDialog.textContent = 'New dialog';
+    newDialog.textContent = 'Новый диалог';
     const newDialogKeep = document.createElement('button');
     newDialogKeep.type = 'button';
     newDialogKeep.className = 'chatgoose-button chatgoose-button-secondary chatgoose-hidden';
-    newDialogKeep.textContent = 'Keep';
+    newDialogKeep.textContent = 'Оставить';
     let newDialogArmed = false;
     const disarmNewDialog = (): void => {
       newDialogArmed = false;
       newDialog.classList.remove('chatgoose-coach-newdialog-armed');
       newDialogKeep.classList.add('chatgoose-hidden');
-      newDialog.textContent = 'New dialog';
+      newDialog.textContent = 'Новый диалог';
     };
     newDialogKeep.addEventListener('click', () => disarmNewDialog());
     newDialog.addEventListener('blur', () => {
@@ -1212,7 +1319,7 @@ export class OverlayController {
           this.model.sessionView.composerText.trim().length > 0);
       if (hasContent && !newDialogArmed) {
         newDialogArmed = true;
-        newDialog.textContent = 'Confirm new dialog';
+        newDialog.textContent = 'Точно сбросить?';
         newDialog.classList.add('chatgoose-coach-newdialog-armed');
         newDialogKeep.classList.remove('chatgoose-hidden');
         return;
@@ -1220,7 +1327,7 @@ export class OverlayController {
       disarmNewDialog();
       this.callbacks.onCoachNewDialog?.();
     });
-    topbarActions.append(autoRecap, shortRecap, fullRecap, newDialog, newDialogKeep);
+    topbarActions.append(recapMenu.root, newDialog, newDialogKeep);
     topbar.append(recap, topbarActions);
 
     // Feed — a separately-scrolling log. Committed items live in itemsEl so
@@ -1240,7 +1347,7 @@ export class OverlayController {
     const textarea = document.createElement('textarea');
     textarea.className = 'chatgoose-coach-input';
     textarea.rows = 2;
-    textarea.placeholder = 'Ask about this fan…';
+    textarea.placeholder = 'Спроси про этого фана…';
     // Cap the question at the kernel bound (spec §7) at the DOM level so an
     // over-long question is prevented up front, not failed late + generic.
     textarea.maxLength = COACH_QUESTION_MAX_CHARS;
@@ -1257,17 +1364,52 @@ export class OverlayController {
       }
     });
 
+    // Draft-attach block (spec §5/§2.1): checkbox + helper line stacked under
+    // the label, left of the send/cancel buttons. Built ONLY behind the ship
+    // gate (spec §10.2, review P1): until core consumes draftText for coach,
+    // a rendered checkbox would silently do nothing — worse than none.
+    let draftAttach: HTMLDivElement | null = null;
+    let draftCheckbox: HTMLInputElement | undefined;
+    let draftHelperText: Text | undefined;
+    if (model.sessionView.draftAttachEnabled) {
+      draftAttach = document.createElement('div');
+      draftAttach.className = 'chatgoose-coach-draft-attach';
+      const draftLabel = document.createElement('label');
+      draftLabel.className = 'chatgoose-coach-draft-attach-label';
+      draftCheckbox = document.createElement('input');
+      draftCheckbox.type = 'checkbox';
+      draftCheckbox.className = 'chatgoose-coach-draft-attach-box';
+      const draftLabelText = document.createElement('span');
+      draftLabelText.textContent = 'Приложить мой недописанный ответ';
+      draftLabel.append(draftCheckbox, draftLabelText);
+      const draftHelper = document.createElement('div');
+      draftHelper.className = 'chatgoose-coach-draft-attach-help';
+      draftHelperText = document.createTextNode('');
+      draftHelper.append(draftHelperText);
+      draftAttach.append(draftLabel, draftHelper);
+      const box = draftCheckbox;
+      box.addEventListener('change', () => {
+        this.callbacks.onCoachDraftIntentChange?.(box.checked);
+      });
+    }
+
     const composerActions = document.createElement('div');
     composerActions.className = 'chatgoose-coach-composer-actions';
-    const send = this.createCoachButton('Send', '', () => this.submitCoachQuestion(textarea));
+    const buttons = document.createElement('div');
+    buttons.className = 'chatgoose-coach-composer-buttons';
+    const send = this.createCoachButton('Отправить', '', () => this.submitCoachQuestion(textarea));
     send.classList.add('chatgoose-coach-send');
-    const cancel = this.createCoachButton('Cancel', 'chatgoose-button-danger', () => {
+    const cancel = this.createCoachButton('Отменить', 'chatgoose-button-danger', () => {
       if (this.model.kind === 'coach' && this.model.operationId) {
         this.callbacks.onCancel(this.model.operationId);
       }
     });
     cancel.classList.add('chatgoose-coach-cancel', 'chatgoose-hidden');
-    composerActions.append(send, cancel);
+    buttons.append(send, cancel);
+    if (draftAttach) {
+      composerActions.append(draftAttach);
+    }
+    composerActions.append(buttons);
     composer.append(textarea, composerActions);
 
     root.append(topbar, feed, composer);
@@ -1279,13 +1421,17 @@ export class OverlayController {
       feedEl: feed,
       itemsEl: items,
       recapStatusEl: recap,
-      recapStatusText: recapText,
-      autoRecapButton: autoRecap,
+      recapStatusSig: '',
+      recapMenu,
+      ...(draftCheckbox !== undefined ? { draftCheckbox } : {}),
+      ...(draftHelperText !== undefined ? { draftHelperText } : {}),
       composerTextarea: textarea,
       sendButton: send,
       cancelButton: cancel,
       itemNodes: new Map(),
       renderedItems: new Map(),
+      memoryDividerNode: null,
+      followupsNode: null,
       pendingNode: null,
       pendingAnswerTextNode: null,
       pendingQuestion: null,
@@ -1303,25 +1449,26 @@ export class OverlayController {
     view.operationId = model.operationId;
     const streaming = model.operationId !== null;
 
-    // Recap status line (guarded — an unchanged line is not rewritten).
-    if (view.recapStatusText.data !== sv.recapStatusLine) {
-      view.recapStatusText.data = sv.recapStatusLine;
-    }
-    view.recapStatusEl.classList.toggle('chatgoose-hidden', sv.recapStatusLine === '');
+    // Recap status line (guarded — an unchanged structured line is not rebuilt).
+    this.renderCoachRecapStatus(view, sv.recapStatusLine);
 
     // Composer lock + Send/Cancel affordance (all guarded).
     const disabled = !sv.composerEnabled;
 
-    // Auto-recap override label (guarded); the control is disabled while the
-    // coach is busy (a streaming turn or a running recap step) — the mode must
-    // not change mid-turn.
-    const autoRecapText = autoRecapLabel(sv.autoRecapOverride);
-    if (view.autoRecapButton.textContent !== autoRecapText) {
-      view.autoRecapButton.textContent = autoRecapText;
-    }
-    if (view.autoRecapButton.disabled !== disabled) {
-      view.autoRecapButton.disabled = disabled;
-    }
+    // «Рекап ▾» menu: disabled while busy (a streaming turn / running recap step)
+    // — no refresh, reseed, or mode change mid-turn (spec §3). The resolved
+    // auto-recap radio state + «По настройке (<x>)» label come from the §7
+    // snapshot; absent → the label drops its value.
+    view.recapMenu.setBusy(disabled);
+    view.recapMenu.updateAutoRecap(
+      sv.autoRecapOverride,
+      sv.settingsSnapshot?.coachAutoRecap ?? null,
+    );
+
+    // Draft-attach checkbox (spec §5): force-unchecked + disabled while the live
+    // Fansly composer is empty; else reflects the session intent. Re-evaluated
+    // every render.
+    this.reconcileCoachDraftAttach(view, sv);
 
     if (view.composerTextarea.disabled !== disabled) {
       view.composerTextarea.disabled = disabled;
@@ -1331,9 +1478,14 @@ export class OverlayController {
     }
     view.sendButton.classList.toggle('chatgoose-hidden', streaming);
     view.cancelButton.classList.toggle('chatgoose-hidden', !streaming);
-    // Restore the composer text ONLY when unfocused — never clobber a live caret.
+    // Restore the composer text when unfocused — never clobber a live caret.
+    // Exception (review round 15): restoring into an EMPTY focused textarea is
+    // safe (there is no caret work to lose) and required — after a rejected
+    // Send the focus stays in the field, and the model-side restore was
+    // invisible until blur.
     if (
-      document.activeElement !== view.composerTextarea &&
+      (document.activeElement !== view.composerTextarea ||
+        view.composerTextarea.value === '') &&
       view.composerTextarea.value !== sv.composerText
     ) {
       view.composerTextarea.value = sv.composerText;
@@ -1344,12 +1496,273 @@ export class OverlayController {
     const wasNearBottom = this.isScrolledToBottom(view.feedEl);
 
     this.reconcileCoachFeed(view, sv);
+    this.reconcileCoachMemoryDivider(view, sv);
     this.reconcileCoachPending(view, model);
+    this.reconcileCoachFollowups(view, model);
     this.reconcileCoachEmptyState(view, model);
 
     if (wasNearBottom) {
       this.scrollCoachFeedToBottom(view);
     }
+  }
+
+  /** Reflect the draft-attach checkbox from the live Fansly composer + session
+   * intent (spec §5/§2.1). Empty live draft → dimmed, force-unchecked, helper
+   * «Поле ответа Fansly пустое»; never mutates the stored intent. */
+  private reconcileCoachDraftAttach(view: CoachViewState, sv: CoachOverlaySessionView): void {
+    if (!view.draftCheckbox || !view.draftHelperText) {
+      return; // ship-gate off (spec §10.2) — no control was built
+    }
+    const draftAvailable = getActiveConversationDraftText().trim() !== '';
+    const checked = draftAvailable && sv.draftIntent;
+    // Busy turns lock the checkbox too (review P1): a dispatched attempt's
+    // composition can no longer be changed, so the control must not look live.
+    const disabled = !draftAvailable || !sv.composerEnabled;
+    if (view.draftCheckbox.checked !== checked) {
+      view.draftCheckbox.checked = checked;
+    }
+    if (view.draftCheckbox.disabled !== disabled) {
+      view.draftCheckbox.disabled = disabled;
+    }
+    const helper = draftAvailable
+      ? 'Коуч увидит текст, набранный в поле ответа Fansly.'
+      : 'Поле ответа Fansly пустое';
+    if (view.draftHelperText.data !== helper) {
+      view.draftHelperText.data = helper;
+    }
+  }
+
+  /** Rebuild the structured recap freshness line (spec §2.1) — label muted, age
+   * values emphasized — only when its serialized signature changed. */
+  private renderCoachRecapStatus(view: CoachViewState, status: CoachRecapStatusView): void {
+    const sig = JSON.stringify(status);
+    if (view.recapStatusSig === sig) {
+      return;
+    }
+    view.recapStatusSig = sig;
+    view.recapStatusEl.replaceChildren();
+    view.recapStatusEl.classList.toggle('chatgoose-hidden', status.state === 'hidden');
+    if (status.state === 'hidden') {
+      return;
+    }
+    if (status.state === 'unavailable') {
+      view.recapStatusEl.textContent = 'Рекап: не удалось проверить';
+      return;
+    }
+    const lead = document.createElement('span');
+    lead.className = 'chatgoose-coach-recap-lead';
+    lead.textContent = 'Рекап —';
+    view.recapStatusEl.append(lead);
+    const slots: Array<{ label: string; value: string }> = [];
+    if (status.fullAge !== null) {
+      slots.push({ label: 'полный:', value: status.fullAge });
+    }
+    if (status.shortAge !== null) {
+      slots.push({ label: 'короткий:', value: status.shortAge });
+    }
+    slots.forEach((slot, index) => {
+      const label = document.createElement('span');
+      label.className = 'chatgoose-coach-recap-label';
+      // The « · » separator is folded into the label prefix so spacing stays
+      // exact — «Рекап — полный: 3 дн · короткий: 10 мин».
+      label.textContent = `${index === 0 ? ' ' : ' · '}${slot.label} `;
+      const value = document.createElement('span');
+      value.className = 'chatgoose-coach-recap-value';
+      value.textContent = slot.value;
+      view.recapStatusEl.append(label, value);
+    });
+  }
+
+  /** The «Рекап ▾» topbar menu (spec §3): explicit short/full refresh, «Обновить
+   * переписку» (§8.4), and the «Авто-рекап» radio group (1:1 with the session
+   * override). Opens on click; closes on item select, outside click, or Esc
+   * (Esc is intercepted at the controller level so it never dismisses the
+   * overlay). a11y: aria-haspopup/expanded, role=menu, menuitem/menuitemradio,
+   * arrow-key focus, focus returns to the trigger on close. */
+  private createCoachRecapMenu(): CoachRecapMenu {
+    const root = document.createElement('div');
+    root.className = 'chatgoose-coach-recap-menu';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className =
+      'chatgoose-button chatgoose-button-secondary chatgoose-coach-recap-trigger';
+    trigger.textContent = 'Рекап ▾';
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+
+    const panel = document.createElement('div');
+    panel.className = 'chatgoose-coach-recap-panel chatgoose-hidden';
+    panel.setAttribute('role', 'menu');
+
+    let open = false;
+    let outsideHandler: ((event: MouseEvent) => void) | null = null;
+
+    const menuItems = (): HTMLButtonElement[] =>
+      Array.from(panel.querySelectorAll<HTMLButtonElement>('[role="menuitem"],[role="menuitemradio"]'));
+
+    const close = (): void => {
+      if (!open) {
+        return;
+      }
+      open = false;
+      panel.classList.add('chatgoose-hidden');
+      trigger.setAttribute('aria-expanded', 'false');
+      if (outsideHandler) {
+        document.removeEventListener('mousedown', outsideHandler);
+        outsideHandler = null;
+      }
+      if (!trigger.disabled) {
+        trigger.focus();
+      }
+    };
+
+    const dispose = (): void => {
+      open = false;
+      panel.classList.add('chatgoose-hidden');
+      trigger.setAttribute('aria-expanded', 'false');
+      if (outsideHandler) {
+        document.removeEventListener('mousedown', outsideHandler);
+        outsideHandler = null;
+      }
+    };
+
+    const openMenu = (): void => {
+      if (open || trigger.disabled) {
+        return;
+      }
+      open = true;
+      panel.classList.remove('chatgoose-hidden');
+      trigger.setAttribute('aria-expanded', 'true');
+      outsideHandler = (event: MouseEvent): void => {
+        if (!root.contains(event.target as Node)) {
+          close();
+        }
+      };
+      document.addEventListener('mousedown', outsideHandler);
+      menuItems()[0]?.focus();
+    };
+
+    trigger.addEventListener('click', () => {
+      if (open) {
+        close();
+      } else {
+        openMenu();
+      }
+    });
+
+    // Arrow-key focus within the menu (spec §3 a11y). Esc is handled at the
+    // controller level so it closes the menu, not the overlay.
+    panel.addEventListener('keydown', (event) => {
+      const items = menuItems();
+      if (items.length === 0) {
+        return;
+      }
+      const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        items[(activeIndex + 1 + items.length) % items.length]?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        items[(activeIndex - 1 + items.length) % items.length]?.focus();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        items[0]?.focus();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        items[items.length - 1]?.focus();
+      } else if (event.key === 'Tab') {
+        // WAI-ARIA menu-button pattern (spec §3, review round 13): tabbing out
+        // dismisses the menu. dispose(), not close() — focus is moving away by
+        // the user's own choice, so it must not be stolen back to the trigger.
+        dispose();
+      }
+    });
+
+    const addItem = (label: string, role: 'menuitem' | 'menuitemradio', onSelect: () => void): HTMLButtonElement => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'chatgoose-button chatgoose-coach-recap-item';
+      item.setAttribute('role', role);
+      item.textContent = label;
+      item.addEventListener('click', () => {
+        close();
+        onSelect();
+      });
+      panel.append(item);
+      return item;
+    };
+
+    const addSeparator = (): void => {
+      const sep = document.createElement('div');
+      sep.className = 'chatgoose-coach-recap-menu-sep';
+      sep.setAttribute('role', 'separator');
+      panel.append(sep);
+    };
+
+    addItem('Короткий рекап', 'menuitem', () => this.callbacks.onCoachRecap?.('short'));
+    addItem('Полный рекап', 'menuitem', () => this.callbacks.onCoachRecap?.('full'));
+    addSeparator();
+    addItem('Обновить переписку', 'menuitem', () => this.callbacks.onCoachRefreshTranscript?.());
+    addSeparator();
+
+    // Valid menu ARIA (review P2): a bare div inside role="menu" is ignored or
+    // read unpredictably — the label is presentational and NAMES the radio
+    // group, and the four menuitemradio buttons live inside role="group".
+    const groupLabel = document.createElement('div');
+    groupLabel.className = 'chatgoose-coach-recap-menu-group';
+    groupLabel.textContent = 'Авто-рекап';
+    groupLabel.id = `chatgoose-coach-autorecap-label-${crypto.randomUUID()}`;
+    groupLabel.setAttribute('role', 'presentation');
+    panel.append(groupLabel);
+    const radioGroup = document.createElement('div');
+    radioGroup.setAttribute('role', 'group');
+    radioGroup.setAttribute('aria-labelledby', groupLabel.id);
+    panel.append(radioGroup);
+
+    const radioItems = new Map<CoachAutoRecapOverride, HTMLButtonElement>();
+    for (const override of COACH_AUTO_RECAP_OPTIONS) {
+      const item = addItem(autoRecapItemLabel(override, null), 'menuitemradio', () =>
+        this.callbacks.onCoachSetAutoRecap?.(override),
+      );
+      radioGroup.append(item);
+      item.setAttribute('aria-checked', 'false');
+      radioItems.set(override, item);
+    }
+
+    root.append(trigger, panel);
+
+    return {
+      root,
+      trigger,
+      isOpen: () => open,
+      close,
+      dispose,
+      setBusy: (busy: boolean) => {
+        if (trigger.disabled !== busy) {
+          trigger.disabled = busy;
+        }
+        if (busy) {
+          close();
+        }
+      },
+      updateAutoRecap: (override, resolvedDefault) => {
+        const inheritItem = radioItems.get('inherit');
+        if (inheritItem) {
+          const label = autoRecapItemLabel('inherit', resolvedDefault);
+          if (inheritItem.textContent !== label) {
+            inheritItem.textContent = label;
+          }
+        }
+        for (const [value, item] of radioItems) {
+          const checked = value === override ? 'true' : 'false';
+          if (item.getAttribute('aria-checked') !== checked) {
+            item.setAttribute('aria-checked', checked);
+          }
+          item.classList.toggle('chatgoose-coach-recap-item-checked', value === override);
+        }
+      },
+    };
   }
 
   /** Pin the feed to its newest turn. Called unconditionally on a (re)open
@@ -1398,13 +1811,22 @@ export class OverlayController {
     }
 
     // Order itemsEl to match desiredKeys — append-only in practice, so an
-    // unchanged feed performs no DOM moves at all.
-    desiredKeys.forEach((key, index) => {
-      const node = nodesByKey.get(key)!;
-      if (view.itemsEl.children[index] !== node) {
-        view.itemsEl.insertBefore(node, view.itemsEl.children[index] ?? null);
+    // unchanged feed performs no DOM moves at all. The memory divider (§8.1)
+    // stays ATTACHED and is skipped by the walk (review P2: the old
+    // detach/reinsert churned two DOM mutations per streaming frame);
+    // reconcileCoachMemoryDivider then moves it only when its target changed.
+    let cursor: ChildNode | null = view.itemsEl.firstChild;
+    for (const key of desiredKeys) {
+      while (cursor !== null && cursor === view.memoryDividerNode) {
+        cursor = cursor.nextSibling;
       }
-    });
+      const node = nodesByKey.get(key)!;
+      if (cursor === node) {
+        cursor = node.nextSibling;
+      } else {
+        view.itemsEl.insertBefore(node, cursor);
+      }
+    }
   }
 
   private reconcileCoachPending(
@@ -1453,6 +1875,16 @@ export class OverlayController {
         view.emptyStateNode = this.createCoachEmptyState(view);
         view.feedEl.append(view.emptyStateNode);
       }
+      // The submit preflight is a busy state (review round 12): the hint chips
+      // lock with the composer they prefill.
+      const locked = !model.sessionView.composerEnabled;
+      for (const chip of view.emptyStateNode.querySelectorAll<HTMLButtonElement>(
+        '.chatgoose-coach-hint',
+      )) {
+        if (chip.disabled !== locked) {
+          chip.disabled = locked;
+        }
+      }
     } else if (view.emptyStateNode) {
       view.emptyStateNode.remove();
       view.emptyStateNode = null;
@@ -1478,7 +1910,7 @@ export class OverlayController {
     this.autosizeCoachComposer(textarea);
     // Keep the orchestrator's persisted composerText in sync with the clear.
     this.callbacks.onCoachComposerInput?.('');
-    this.callbacks.onCoachSubmit?.(question);
+    this.callbacks.onCoachSubmit?.(question, 'composer');
   }
 
   private autosizeCoachComposer(textarea: HTMLTextAreaElement): void {
@@ -1529,7 +1961,67 @@ export class OverlayController {
       }
       wrapper.append(drafts);
     }
+
+    // Collapsed «Отправлено коучу…» context line (spec §8.2); absent turnContext
+    // (old background) → no line.
+    if (item.turnContext) {
+      wrapper.append(this.createCoachTurnContextLine(item.turnContext));
+    }
     return wrapper;
+  }
+
+  /** The collapsed, expand-in-place «Отправлено коучу…» line (spec §8.2). The
+   * transcript figures are what the BROWSER sent (pre-budget); the recap part is
+   * the kernel's post-attach report. Native <details> expands in place, so the
+   * feed scroll is preserved. */
+  private createCoachTurnContextLine(turnContext: CoachTurnContext): HTMLDetailsElement {
+    const details = document.createElement('details');
+    details.className = 'chatgoose-coach-turncontext';
+
+    const coverage =
+      turnContext.transcriptCoverage === 'full-history' ? 'вся история' : 'окно';
+    const recapParts: string[] = [];
+    if (turnContext.attachedRecaps?.full) {
+      recapParts.push(`полный ${formatCoachAgeMs(turnContext.attachedRecaps.full.ageMs)}`);
+    }
+    if (turnContext.attachedRecaps?.short) {
+      recapParts.push(`короткий ${formatCoachAgeMs(turnContext.attachedRecaps.short.ageMs)}`);
+    }
+    // «Не сообщено» ≠ «нет» (round 12, E43): a kernel that did not report the
+    // attach must not be quoted as confirming an empty one.
+    const recapSummary =
+      recapParts.length > 0
+        ? recapParts.join(', ')
+        : turnContext.attachedRecaps !== undefined
+          ? 'нет'
+          : 'нет данных';
+
+    const summary = document.createElement('summary');
+    summary.className = 'chatgoose-coach-turncontext-summary';
+    summary.textContent =
+      `Отправлено коучу: ${turnContext.sentMessageCount} сообщ. (${coverage}) · рекап: ${recapSummary}`;
+    details.append(summary);
+
+    // The expansion carries what the summary does NOT (review P2 — it used to
+    // restate the same two values): the provenance split. Transcript figures
+    // are the browser's PRE-budget send; the recap line is the kernel's
+    // POST-attach confirmation; the kernel may shed further for prompt budget.
+    const detail = document.createElement('div');
+    detail.className = 'chatgoose-coach-turncontext-detail';
+    const transcriptLine = document.createElement('div');
+    transcriptLine.textContent =
+      `Переписка: ${turnContext.sentMessageCount} сообщ. (${coverage}) — отправлено браузером, до бюджета ядра`;
+    const recapLine = document.createElement('div');
+    recapLine.textContent =
+      turnContext.attachedRecaps !== undefined
+        ? `Рекап: ${recapSummary} — подтверждено ядром после сборки промпта`
+        : 'Рекап: нет данных — ядро не сообщило состав приложенного';
+    const caveatLine = document.createElement('div');
+    caveatLine.textContent =
+      'Ядро может дополнительно ужать контекст под бюджет промпта.';
+    detail.append(transcriptLine, recapLine, caveatLine);
+    details.append(detail);
+    return details;
   }
 
   private createCoachFailedNode(
@@ -1541,15 +2033,15 @@ export class OverlayController {
 
     const error = document.createElement('div');
     error.className = 'chatgoose-coach-error';
-    error.textContent = `Couldn't finish this turn (${item.errorCode}).`;
+    error.textContent = `Не получилось закончить ответ (${item.errorCode}).`;
     wrapper.append(error);
 
     if (item.retryable) {
       const actions = document.createElement('div');
       actions.className = 'chatgoose-coach-failed-actions';
       actions.append(
-        this.createCoachButton('Retry', 'chatgoose-button-secondary', () =>
-          this.callbacks.onCoachRetry?.(item.question),
+        this.createCoachButton('Повторить', 'chatgoose-button-secondary', () =>
+          this.callbacks.onCoachRetry?.(item.question, item.includedDraft),
         ),
       );
       wrapper.append(actions);
@@ -1580,10 +2072,10 @@ export class OverlayController {
   private coachRecapStepLabel(
     item: Extract<CoachOverlayFeedItem, { kind: 'recap-step' }>,
   ): string {
-    const mode = item.mode === 'full' ? 'Full recap' : 'Short recap';
-    const origin = item.origin === 'auto' ? 'auto' : 'manual';
+    const mode = item.mode === 'full' ? 'Полный рекап' : 'Короткий рекап';
+    const origin = item.origin === 'auto' ? 'авто' : 'вручную';
     const status =
-      item.status === 'running' ? 'refreshing…' : item.status === 'done' ? 'updated' : 'failed';
+      item.status === 'running' ? 'обновляется…' : item.status === 'done' ? 'обновлён' : 'не удался';
     const base = `${mode} (${origin}) · ${status}`;
     // A failed-but-proceeded auto-recap carries the fallback copy (spec §5).
     return item.note ? `${base} · ${item.note}` : base;
@@ -1616,22 +2108,132 @@ export class OverlayController {
 
     const heading = document.createElement('div');
     heading.className = 'chatgoose-coach-empty-heading';
-    heading.textContent = 'Ask the coach about this fan';
+    heading.textContent = 'Спроси коуча про этого фана';
     empty.append(heading);
 
-    const hintList = document.createElement('div');
-    hintList.className = 'chatgoose-coach-empty-hints';
-    for (const hint of COACH_STARTER_HINTS) {
-      const chip = this.createCoachButton(hint, 'chatgoose-coach-hint', () => {
-        view.composerTextarea.value = hint;
-        this.autosizeCoachComposer(view.composerTextarea);
-        this.callbacks.onCoachComposerInput?.(hint);
-        view.composerTextarea.focus();
-      });
-      hintList.append(chip);
+    const context = document.createElement('div');
+    context.className = 'chatgoose-coach-empty-context';
+    context.textContent = 'Контекст подтянется сам: переписка, траты, рекап, персона модели';
+    empty.append(context);
+
+    // 9 hints in three labeled columns (spec §6); a click prefills the composer.
+    const groups = document.createElement('div');
+    groups.className = 'chatgoose-coach-empty-groups';
+    for (const group of COACH_HINT_GROUPS) {
+      const column = document.createElement('div');
+      column.className = 'chatgoose-coach-empty-group';
+      const label = document.createElement('div');
+      label.className = 'chatgoose-coach-empty-group-label';
+      label.textContent = group.label;
+      column.append(label);
+      for (const hint of group.hints) {
+        const chip = this.createCoachButton(hint, 'chatgoose-coach-hint', () => {
+          view.composerTextarea.value = hint;
+          this.autosizeCoachComposer(view.composerTextarea);
+          this.callbacks.onCoachComposerInput?.(hint);
+          view.composerTextarea.focus();
+        });
+        column.append(chip);
+      }
+      groups.append(column);
     }
-    empty.append(hintList);
+    empty.append(groups);
     return empty;
+  }
+
+  /** The memory-window boundary divider (spec §8.1). */
+  private createCoachMemoryDivider(): HTMLDivElement {
+    const divider = document.createElement('div');
+    divider.className = 'chatgoose-coach-memory-divider';
+    const label = document.createElement('span');
+    label.className = 'chatgoose-coach-memory-divider-label';
+    label.textContent = 'выше — не входит в окно памяти коуча';
+    divider.append(label);
+    return divider;
+  }
+
+  /** The follow-up chips row (spec §8.3): a click SUBMITS the canned question. */
+  private createCoachFollowups(): HTMLDivElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'chatgoose-coach-followups';
+    for (const chip of COACH_FOLLOWUP_CHIPS) {
+      wrap.append(
+        this.createCoachButton(chip, 'chatgoose-coach-followup-chip', () => {
+          // Normal submission (spec §8.3); the composer text is untouched.
+          this.callbacks.onCoachSubmit?.(chip, 'canned');
+        }),
+      );
+    }
+    return wrap;
+  }
+
+  /** Position the memory-window divider (spec §8.1). Counts COMPLETED exchange
+   * feed items only; renders iff that count exceeds `coachHistoryLimit`
+   * (§7 snapshot); sits immediately before the oldest exchange of the last-N
+   * tail. Derived from feed exchange identities — NOT completedExchanges.length,
+   * which the 50-cap can trim while older exchanges stay visible. */
+  private reconcileCoachMemoryDivider(view: CoachViewState, sv: CoachOverlaySessionView): void {
+    const limit = sv.settingsSnapshot?.coachHistoryLimit;
+    const exchangeKeys: string[] = [];
+    sv.feedItems.forEach((item, index) => {
+      if (item.kind === 'exchange') {
+        exchangeKeys.push(this.coachFeedKey(item, index));
+      }
+    });
+    const show = limit !== undefined && exchangeKeys.length > limit;
+    const targetKey = show ? exchangeKeys[exchangeKeys.length - limit] : undefined;
+    const targetNode = targetKey !== undefined ? view.itemNodes.get(targetKey) : undefined;
+    if (!show || !targetNode) {
+      if (view.memoryDividerNode) {
+        view.memoryDividerNode.remove();
+        view.memoryDividerNode = null;
+      }
+      return;
+    }
+    if (!view.memoryDividerNode) {
+      view.memoryDividerNode = this.createCoachMemoryDivider();
+    }
+    if (targetNode.previousSibling !== view.memoryDividerNode) {
+      view.itemsEl.insertBefore(view.memoryDividerNode, targetNode);
+    }
+  }
+
+  /** Show the follow-up chips (spec §8.3) under the LATEST completed answer:
+   * recap steps after an answer must NOT hide them (review P1 — an explicit
+   * refresh used to bury the chips for good); only streaming or a NEWER failed
+   * attempt suppresses (a failed question is retried, not followed up). */
+  private reconcileCoachFollowups(
+    view: CoachViewState,
+    model: Extract<OverlayViewModel, { kind: 'coach' }>,
+  ): void {
+    const sv = model.sessionView;
+    let anchor: CoachOverlayFeedItem | undefined;
+    for (let i = sv.feedItems.length - 1; i >= 0; i -= 1) {
+      const item = sv.feedItems[i]!;
+      if (item.kind === 'recap-step') {
+        continue;
+      }
+      anchor = item;
+      break;
+    }
+    // Busy covers the submit PREFLIGHT too (review round 8): chips stayed
+    // clickable in that window and a rejected click injected its canned text.
+    const show =
+      model.operationId === null && sv.composerEnabled && anchor?.kind === 'exchange';
+    if (!show) {
+      if (view.followupsNode) {
+        view.followupsNode.remove();
+        view.followupsNode = null;
+      }
+      return;
+    }
+    if (!view.followupsNode) {
+      view.followupsNode = this.createCoachFollowups();
+    }
+    // Keep it the last child of the feed (directly under the newest exchange).
+    if (view.feedEl.lastChild !== view.followupsNode) {
+      view.feedEl.append(view.followupsNode);
+    }
   }
 
   private createCoachDraftCard(
@@ -1643,8 +2245,9 @@ export class OverlayController {
     card.className = 'chatgoose-card chatgoose-coach-draft';
 
     const title = document.createElement('div');
-    title.className = 'chatgoose-card-title';
-    title.textContent = draft.index === 0 ? 'Draft' : `Draft ${draft.index + 1}`;
+    // Mono micro-caps «ЧЕРНОВИК» (spec §2.1); text stays «Черновик» — CSS caps it.
+    title.className = 'chatgoose-card-title chatgoose-coach-draft-title';
+    title.textContent = draft.index === 0 ? 'Черновик' : `Черновик ${draft.index + 1}`;
 
     const text = document.createElement('div');
     text.className = 'chatgoose-card-text';
@@ -1655,26 +2258,27 @@ export class OverlayController {
 
     const insert = document.createElement('button');
     insert.type = 'button';
-    insert.className = 'chatgoose-button';
+    // «Вставить» clay-tinted (spec §2.1): clay-soft bg, clay-line border, clay-ink.
+    insert.className = 'chatgoose-button chatgoose-coach-draft-insert';
 
     const keep = document.createElement('button');
     keep.type = 'button';
     keep.className = 'chatgoose-button chatgoose-button-secondary chatgoose-hidden';
-    keep.textContent = 'Keep draft';
+    keep.textContent = 'Оставить мой';
 
     // Two-step inline confirm — NO browser dialog (window.confirm blocks the
     // extension). Insert into an empty composer is one click; replacing an
-    // unsent draft arms a "Confirm replace" state first.
+    // unsent draft arms a «Подтвердить замену» state first.
     let armed = false;
     const disarm = (): void => {
       armed = false;
       insert.classList.remove('chatgoose-coach-draft-armed');
       keep.classList.add('chatgoose-hidden');
-      insert.textContent = getActiveConversationDraftText().trim() ? 'Replace draft…' : 'Insert';
+      insert.textContent = getActiveConversationDraftText().trim() ? 'Заменить черновик…' : 'Вставить';
     };
     keep.addEventListener('click', () => disarm());
     // Moving focus away from an armed Replace abandons the confirm (outside
-    // click / blur), so a stale "Confirm replace" never lingers.
+    // click / blur), so a stale «Подтвердить замену» never lingers.
     insert.addEventListener('blur', () => {
       if (armed) {
         disarm();
@@ -1684,7 +2288,7 @@ export class OverlayController {
       const hasDraft = getActiveConversationDraftText().trim() !== '';
       if (hasDraft && !armed) {
         armed = true;
-        insert.textContent = 'Confirm replace';
+        insert.textContent = 'Подтвердить замену';
         insert.classList.add('chatgoose-coach-draft-armed');
         keep.classList.remove('chatgoose-hidden');
         return;
@@ -1692,12 +2296,12 @@ export class OverlayController {
       disarm();
       void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'inserted');
     });
-    insert.textContent = getActiveConversationDraftText().trim() ? 'Replace draft…' : 'Insert';
+    insert.textContent = getActiveConversationDraftText().trim() ? 'Заменить черновик…' : 'Вставить';
 
     const copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'chatgoose-button chatgoose-button-secondary';
-    copy.textContent = 'Copy';
+    copy.textContent = 'Копировать';
     copy.addEventListener('click', () => {
       void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'copied');
     });

@@ -3,8 +3,7 @@ import {
   getRuntimeRequestType,
   isBackgroundPortMessage,
   isContentPortMessage,
-  isRecapStatusResponse,
-} from '../src/shared/protocol.js';
+  isRecapStatusResponse, isCoachTurnContext } from '../src/shared/protocol.js';
 
 function withoutKey(
   record: Record<string, unknown>,
@@ -305,6 +304,113 @@ describe('protocol boundary guards', () => {
     expect(isBackgroundPortMessage({ ...base, generationRef: 'gen-abc' })).toBe(true);
     // Present but not a string is rejected.
     expect(isBackgroundPortMessage({ ...base, generationRef: 42 })).toBe(false);
+  });
+
+  it('validates the coach turnContext shape at the SANITIZER (spec §8.2, closing round)', () => {
+    const base = {
+      type: 'operation:complete',
+      operationId: 'op-1',
+      result: { text: 'ok' },
+      fanDisplayName: 'Alice',
+    };
+    // Absent is valid (old-background tolerance).
+    expect(isBackgroundPortMessage(base)).toBe(true);
+    // The envelope tolerates ANY turnContext (a paid terminal must survive a
+    // presentational-field skew); the SHAPE gate is isCoachTurnContext, used at
+    // the consumer, which degrades an invalid value to «absent».
+    expect(
+      isBackgroundPortMessage({ ...base, turnContext: { smuggled: 'garbage' } }),
+    ).toBe(true);
+
+    // Valid shapes.
+    expect(
+      isCoachTurnContext({ sentMessageCount: 42, transcriptCoverage: 'window' }),
+    ).toBe(true); // attachedRecaps absent = «kernel did not report» (round 12)
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 1000 }, short: null },
+      }),
+    ).toBe(true);
+
+    // Invalid shapes — E28 declassification boundary: exact keys at every
+    // level, non-negative integer counts.
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'partial',
+        attachedRecaps: { full: null, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: {}, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null },
+        extra: 'nope',
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null, third: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 1000, rawBody: 'smuggled' }, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: -1,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 10.5 }, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 'lots',
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null },
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts draftText + transcriptEpoch on a coach operation:start; rejects a non-numeric epoch', () => {
+    const base = {
+      type: 'operation:start',
+      operationId: 'op-coach-4',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 3,
+      domFanDisplayName: 'Alice',
+      chatterQuestion: 'help',
+    };
+    // draftText is an optional string (spec §5); transcriptEpoch an optional number (§8.4).
+    expect(isContentPortMessage({ ...base, draftText: 'my unsent reply', transcriptEpoch: 2 })).toBe(true);
+    // Both absent is fine.
+    expect(isContentPortMessage(base)).toBe(true);
+    // A non-numeric epoch is rejected at the boundary.
+    expect(isContentPortMessage({ ...base, transcriptEpoch: 'two' })).toBe(false);
   });
 
   it('accepts valid content port messages at the background boundary', () => {

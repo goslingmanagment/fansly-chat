@@ -6608,6 +6608,101 @@ describe(`OperationCoordinator (${part})`, () => {
     );
     expect(complete?.generationRef).toBe('gen-ref-123');
   });
+
+  it('operation:complete carries a floored, counts-only turnContext for coach (review P2)', async () => {
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, unknown>,
+        callbacks: {
+          onMeta?: (m: Record<string, unknown>) => void;
+          onText?: (t: string) => void;
+        },
+      ) => {
+        callbacks.onMeta?.({
+          requestId: 'gen-ref-tc',
+          clientRequestId: 'coach-op',
+          model: 'anthropic:claude',
+          // Fractional age — the producer must FLOOR it (the content-side
+          // validator rejects non-integers, and a rejected complete would drop
+          // the whole paid answer).
+          attachedRecaps: { full: { generatedAt: '2026-07-01T00:00:00Z', ageMs: 1000.7 }, short: null },
+        });
+        callbacks.onText?.('Advice');
+        return 'Advice';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startOperation(1, coachStart());
+
+    const complete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    const turnContext = complete?.turnContext;
+    expect(turnContext).toBeDefined();
+    // Counts-only exact shape (E28): no extra keys at any level.
+    expect(Object.keys(turnContext!).sort()).toEqual([
+      'attachedRecaps',
+      'sentMessageCount',
+      'transcriptCoverage',
+    ]);
+    expect(turnContext!.attachedRecaps).toEqual({ full: { ageMs: 1000 }, short: null });
+    expect(Number.isInteger(turnContext!.sentMessageCount)).toBe(true);
+    expect(['full-history', 'window']).toContain(turnContext!.transcriptCoverage);
+  });
+
+  it('meta WITHOUT attachedRecaps yields a turnContext with the key ABSENT (round 12 honesty)', async () => {
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, unknown>,
+        callbacks: {
+          onMeta?: (m: Record<string, unknown>) => void;
+          onText?: (t: string) => void;
+        },
+      ) => {
+        // No attachedRecaps field at all — «not reported», not «none».
+        callbacks.onMeta?.({ requestId: 'gen-nr', clientRequestId: 'coach-op', model: 'm' });
+        callbacks.onText?.('Advice');
+        return 'Advice';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+    await coordinator.startOperation(1, coachStart());
+    const complete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    const turnContext = complete?.turnContext;
+    expect(turnContext).toBeDefined();
+    // The key is ABSENT — a regression to an unconditional {full:null,short:null}
+    // would render a confirmed «рекап: нет» for an unreporting kernel.
+    expect(Object.keys(turnContext!).sort()).toEqual(['sentMessageCount', 'transcriptCoverage']);
+  });
+
+  it('a bumped transcriptEpoch forces a full quick-window reseed (review P2)', async () => {
+    const { coordinator, fanslyClient } = await createCoordinatorHarness({
+      anthropicRawText: 'Advice',
+    });
+
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-op-1', transcriptEpoch: 0 }));
+    const loadsAfterFirst = fanslyClient.loadMessages.mock.calls.length;
+    expect(loadsAfterFirst).toBeGreaterThan(0);
+
+    // Same epoch → the session cache serves the window (refresh path, no full reload).
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-op-2', transcriptEpoch: 0 }));
+    const loadsAfterSecond = fanslyClient.loadMessages.mock.calls.length;
+
+    // Bumped epoch («Обновить переписку», spec §8.4) → guaranteed miss → the
+    // full quick-window load runs again.
+    await coordinator.startOperation(1, coachStart({ operationId: 'coach-op-3', transcriptEpoch: 1 }));
+    const loadsAfterBump = fanslyClient.loadMessages.mock.calls.length;
+    expect(loadsAfterBump).toBeGreaterThan(loadsAfterSecond);
+  });
   }
 });
 }

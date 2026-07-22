@@ -24,6 +24,7 @@ import { serializeCoachHistory } from '../shared/coach-history.js';
 import type {
   CoachAutoRecapOverride,
   CoachHistoryEntry,
+  CoachTurnContext,
   RecapStatusResponse,
 } from '../shared/types.js';
 
@@ -52,6 +53,10 @@ export interface CoachExchange {
   /** Parsed on completion; never parsed from a failed attempt (spec §3). */
   readonly drafts: readonly CoachDraft[];
   readonly completedAt: number;
+  /** The kernel's post-attach turn context (spec §8.2), retained for the
+   * collapsed «Отправлено коучу…» line. Absent when the background predated the
+   * field (old-background tolerance). */
+  readonly turnContext?: CoachTurnContext;
 }
 
 /** The feed's reference to a committed exchange: the live `CoachExchange` object
@@ -72,6 +77,9 @@ export interface CoachFailedAttemptFeedItem {
   question: string;
   errorCode: string;
   retryable: boolean;
+  /** Whether the failed turn actually SENT a draft (spec §5). Retry re-reads the
+   * CURRENT live draft when this is true (a stale draft is never resent). */
+  includedDraft: boolean;
 }
 
 /** A visible recap run inside the coach feed (spec §3/§5). `status` transitions
@@ -99,6 +107,15 @@ export interface CoachAttempt {
   operationId: string;
   question: string;
   startedAt: number;
+  /** Whether this in-flight turn actually SENT a draft (spec §5) — recorded at
+   * dispatch, so a terminal failure/cancel carries the honest «sent» flag onto
+   * the failed-attempt feed item. */
+  includedDraft: boolean;
+  /** Whether the question was COMPOSER-typed (review round 11): the dispatched-
+   * turn teardowns (route change, disconnect) restore the pending question into
+   * the composer only for composer-typed turns — a canned chip/Retry string
+   * must never be parked there. */
+  fromComposer: boolean;
 }
 
 export interface CoachSession {
@@ -125,6 +142,15 @@ export interface CoachSession {
    * §5: "at most once per session, even after failure"). Reset by «Новый
    * диалог» so the fresh dialog gets its own single auto-recap chance. */
   autoRecapAttempted: boolean;
+  /** Draft-attach INTENT (spec §5): whether «Приложить мой недописанный ответ»
+   * is armed. Default off; survives close/reopen and an auto-recap chain
+   * unchanged; reset by «Новый диалог» and after every DISPATCHED turn. The live
+   * draft is read once at dispatch — this holds only the intent, never text. */
+  draftIntent: boolean;
+  /** Content-owned transcript epoch (spec §8.4). «Обновить переписку» bumps it;
+   * it rides the background transcript-cache key so the next turn is a guaranteed
+   * cache miss + full quick-window reseed. */
+  transcriptEpoch: number;
 }
 
 /** The completed-stream payload committed as an exchange. */
@@ -133,6 +159,9 @@ export interface CoachCommitInput {
   generationRef: string;
   question: string;
   answerRaw: string;
+  /** The kernel's post-attach turn context (spec §8.2), if the background sent
+   * it; retained verbatim on the exchange. */
+  turnContext?: CoachTurnContext;
 }
 
 export interface CoachSessionStore {
@@ -140,8 +169,16 @@ export interface CoachSessionStore {
    * `sessionId`) on first use and touching it as most-recently-used. */
   getOrCreate(accountId: string, groupId: string): CoachSession;
   /** Marks a turn in-flight. Does not touch the feed (the renderer shows the
-   * pending question from `session.pending`). Returns the created attempt. */
-  beginPending(session: CoachSession, question: string, operationId: string): CoachAttempt;
+   * pending question from `session.pending`). `includedDraft` records whether a
+   * non-empty draft was actually SENT with this dispatch (spec §5). Returns the
+   * created attempt. */
+  beginPending(
+    session: CoachSession,
+    question: string,
+    operationId: string,
+    includedDraft: boolean,
+    fromComposer: boolean,
+  ): CoachAttempt;
   /** Drops the in-flight marker (cancel with nothing recorded, or supersession). */
   clearPending(session: CoachSession): void;
   /** Commits a usably-completed stream: parses drafts, appends to BOTH the feed
@@ -160,6 +197,11 @@ export interface CoachSessionStore {
     errorCode: string,
     retryable: boolean,
   ): CoachFailedAttemptFeedItem | null;
+  /** Set the draft-attach intent (spec §5). */
+  setDraftIntent(session: CoachSession, intent: boolean): void;
+  /** «Обновить переписку» (spec §8.4): bump the transcript epoch so the next
+   * turn misses the background cache and reseeds the full quick window. */
+  bumpTranscriptEpoch(session: CoachSession): void;
   /** Appends a `running` recap step to the feed and returns the live item so the
    * caller can transition its `status` to done/failed. */
   recordRecapStep(
@@ -213,6 +255,8 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       recapStatus: null,
       autoRecapOverride: 'inherit',
       autoRecapAttempted: false,
+      draftIntent: false,
+      transcriptEpoch: 0,
     };
   }
 
@@ -238,8 +282,14 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       return session;
     },
 
-    beginPending(session, question, operationId) {
-      const attempt: CoachAttempt = { operationId, question, startedAt: now() };
+    beginPending(session, question, operationId, includedDraft, fromComposer) {
+      const attempt: CoachAttempt = {
+        operationId,
+        question,
+        startedAt: now(),
+        includedDraft,
+        fromComposer,
+      };
       session.pending = attempt;
       return attempt;
     },
@@ -257,6 +307,7 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
         answerRaw: input.answerRaw,
         drafts,
         completedAt: now(),
+        ...(input.turnContext !== undefined ? { turnContext: input.turnContext } : {}),
       };
       session.completedExchanges.push(exchange);
       // Hard in-memory cap: trim oldest whole exchanges from the wire list only.
@@ -286,6 +337,8 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
         question,
         errorCode,
         retryable,
+        // «sent», not «requested»: honest flag from the dispatched attempt (§5).
+        includedDraft: session.pending.includedDraft,
       };
       session.feedItems.push(item);
       // A failed/cancelled turn ends the in-flight attempt.
@@ -303,6 +356,14 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       session.autoRecapOverride = override;
     },
 
+    setDraftIntent(session, intent) {
+      session.draftIntent = intent;
+    },
+
+    bumpTranscriptEpoch(session) {
+      session.transcriptEpoch += 1;
+    },
+
     resetSession(session) {
       session.feedItems = [];
       session.completedExchanges = [];
@@ -311,6 +372,10 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       session.sessionId = newSessionId();
       // A fresh dialog gets its own single auto-recap chance (spec §5).
       session.autoRecapAttempted = false;
+      // «Новый диалог» resets the draft-attach intent (spec §5). A new sessionId
+      // already forces a background reseed, so the transcript epoch need not be
+      // touched here.
+      session.draftIntent = false;
       // recapStatus (fan-level) and autoRecapOverride (a session preference the
       // user set) intentionally preserved across «Новый диалог».
     },

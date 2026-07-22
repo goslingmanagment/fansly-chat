@@ -74,7 +74,18 @@ export class PortClient {
     if (!this.port) {
       return false;
     }
-    this.port.postMessage(message);
+    try {
+      this.port.postMessage(message);
+    } catch {
+      // A dead port whose disconnect event has not been delivered yet throws
+      // («Attempt to postMessage on disconnected port»). The contract of this
+      // method is «false = the start never reached the background» — every
+      // caller already handles that honestly, so the throw window must map to
+      // the same outcome for ALL dispatch sites (review round 14: only
+      // sendCoachTurn had its own belt-and-braces catch; startCoachRecapChain
+      // armed the chain and leaked the exception into a menu click handler).
+      return false;
+    }
     return true;
   }
 }
