@@ -1368,6 +1368,13 @@ made the divider blink and shift scroll on every Options save — it now swaps
 atomically on resolve, generation-guarded, with null-on-open retained);
 «Обновить переписку» acknowledges the click with an info toast (state-only
 semantics unchanged); the epoch purge ignores quickMessageCount so a
-count-change between epochs cannot strand a dead LRU window. All coach-OWNED copy is now Russian; the shared
+count-change between epochs cannot strand a dead LRU window. Round 6
+(correction): the round-5 claim that the unmocked gate pin covers the dispatch
+SITE was overstated — the orchestration suite mocks the module, so the dispatch
+site is pinned by a source-text assertion beside the unmocked semantics pin,
+and the render gate remains the load-bearing layer; menu arrow-navigation and
+outside-click close are behaviour-tested; a THROWING port send gets the same
+never-dispatched rollback as a false return; multi-draft acceptance attributes
+the card's own index (nonzero-index pin restored). All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

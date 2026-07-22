@@ -892,20 +892,30 @@ describe('OverlayController — coach chat mode', () => {
     expect(document.querySelector('.chatgoose-coach-feed')).not.toBeNull();
   });
 
-  it('draft «Копировать» does NOT collapse the overlay', async () => {
+  it('draft «Копировать» does NOT collapse the overlay and attributes the CARD index', async () => {
     const { controller, callbacks } = makeController();
     controller.render(
       createCoachModel({
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Hey love', index: 0 }])],
+        // Two drafts: the SECOND card must attribute index 1 (review round 6 —
+        // a hardcoded 0 would misattribute multi-draft acceptances).
+        feedItems: [
+          exchangeItem('x-op', 'q', 'advice', [
+            { text: 'Hey love', index: 0 },
+            { text: 'Second option', index: 1 },
+          ]),
+        ],
       }),
     );
+    const cards = Array.from(document.querySelectorAll('.chatgoose-coach-draft'));
+    expect(cards).toHaveLength(2);
+    expect(cards[1]?.textContent).toContain('Черновик 2');
     const copy = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+      cards[1]!.querySelectorAll<HTMLButtonElement>('.chatgoose-card-actions button'),
     ).find((button) => button.textContent === 'Копировать');
     copy!.click();
 
     await vi.waitFor(() => {
-      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0, undefined);
+      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 1, undefined);
     });
     expect(callbacks.onClose).not.toHaveBeenCalled();
   });
@@ -1108,6 +1118,38 @@ describe('OverlayController — coach chat mode', () => {
     // The CSS contract that keeps «Отправить» right-aligned WITHOUT a sibling
     // (review P1: space-between with one child parks it left).
     expect(contentStyles).toMatch(/\.chatgoose-coach-composer-buttons\s*\{[^}]*margin-left:\s*auto/);
+  });
+
+  it('menu arrow keys cycle focus through the items (spec §3 a11y)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').click();
+    const panel = requireElement<HTMLDivElement>('.chatgoose-coach-recap-panel');
+    const items = Array.from(
+      panel.querySelectorAll<HTMLButtonElement>('[role="menuitem"],[role="menuitemradio"]'),
+    );
+    expect(items.length).toBeGreaterThan(2);
+    expect(document.activeElement).toBe(items[0]);
+
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(items[1]);
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(document.activeElement).toBe(items[0]);
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(items[items.length - 1]);
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it('an outside mousedown actually CLOSES the menu (spec §3)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    const trigger = requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger');
+    trigger.click();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('disposes the menu outside-click listener when the coach view is discarded (review P2)', () => {

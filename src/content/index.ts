@@ -2049,7 +2049,14 @@ export class ChatGooseContentApp {
       // Only a non-empty draft rides the wire (spec §5 / §9 protocol test).
       ...(draftText !== undefined ? { draftText } : {}),
     };
-    const sent = this.port.send(payload);
+    // A throwing send is the same never-dispatched outcome as a false return
+    // (review round 6): the rollback below must run for both.
+    let sent = false;
+    try {
+      sent = this.port.send(payload);
+    } catch {
+      sent = false;
+    }
     if (!sent) {
       // The port is mid-reconnect; the start never reached the background so no
       // terminal will arrive. The turn never started — clearPending (not a

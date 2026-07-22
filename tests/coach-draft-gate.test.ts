@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import {
   COACH_DRAFT_ATTACH_ENABLED,
@@ -18,5 +19,17 @@ describe('coach draft-attach ship-gate (spec §10.2)', () => {
     // re-read must still put NO draftText on the wire.
     expect(coachDraftAttachAllowed(true)).toBe(false);
     expect(coachDraftAttachAllowed(false)).toBe(false);
+  });
+
+  it('sendCoachTurn consults the helper — source pin (review round 6)', () => {
+    // The orchestration suite mocks this module, so no behavioural test runs
+    // the dispatch site with the real constant. This source assertion is the
+    // honest second layer: dropping the coachDraftAttachAllowed() call from
+    // the dispatch site fails HERE with the real gate semantics pinned above.
+    const source = readFileSync(
+      new URL('../src/content/index.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toMatch(/attachDraft = coachDraftAttachAllowed\(/);
   });
 });

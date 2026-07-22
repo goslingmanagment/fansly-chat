@@ -1457,6 +1457,22 @@ describe('Coach orchestration', () => {
     expect(app.activeCoachSession.draftIntent).toBe(false);
   });
 
+  it('a THROWING port send gets the same never-dispatched rollback (review round 6)', async () => {
+    const app = await makeReadyApp();
+    app.port.send = vi.fn(() => {
+      throw new Error('disconnected port');
+    });
+    draftHolder.value = 'attach me';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+
+    await app.submitCoachQuestion('thrown');
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('thrown');
+    expect(app.activeCoachSession.pending).toBeUndefined();
+  });
+
   it('a never-dispatched turn (port drop) preserves the draft intent', async () => {
     const app = await makeReadyApp();
     app.port.send = vi.fn(() => false);
