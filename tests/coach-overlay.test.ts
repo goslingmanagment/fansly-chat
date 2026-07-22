@@ -1264,7 +1264,7 @@ describe('OverlayController — coach chat mode', () => {
   it('the menu panel is height-bounded with internal scroll (review P1 — clipping ancestor)', () => {
     // JSDOM cannot lay out; pin the CSS contract like the container-query test.
     expect(contentStyles).toMatch(
-      /\.chatgoose-coach-recap-panel\s*\{[^}]*max-height:\s*min\(60vh, 340px\)/,
+      /\.chatgoose-coach-recap-panel\s*\{[^}]*max-height:\s*min\(calc\(84vh - 140px\), 340px\)/,
     );
     expect(contentStyles).toMatch(/\.chatgoose-coach-recap-panel\s*\{[^}]*overflow-y:\s*auto/,
     );

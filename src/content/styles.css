@@ -1083,7 +1083,10 @@
   /* A short viewport / high zoom must scroll INSIDE the menu (review P1): the
    * coach panel ancestor clips (overflow: hidden), so an unconstrained popup
    * simply cuts off its bottom radio items. */
-  max-height: min(60vh, 340px);
+  /* Bounded by the PANEL's own height formula (min(84vh, 860px)) minus the
+   * header/topbar allowance — a viewport-relative cap alone still clipped at
+   * ~300px CSS heights, hiding part of the scrollport itself. */
+  max-height: min(calc(84vh - 140px), 340px);
   overflow-y: auto;
 }
 

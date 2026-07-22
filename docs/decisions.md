@@ -1344,6 +1344,11 @@ PortClient maps a throwing postMessage to its false contract; the recap
 menu follows the WAI-ARIA menu-button pattern incl. Tab dismissal; the
 transcript-cache epoch purge never touches other sessions; and the settings
 snapshot swaps atomically under a generation guard on every settings-bearing
-event including reconnect replays. Follow-up recorded: extract the
-orchestration test harness so the ship-gate's dispatch site gains a
+event including reconnect replays. Closing hardening: the «Рекап» menu is height-bounded
+relative to the panel's own formula with internal scroll (a viewport-only cap
+still clipped at ~300px heights inside the overflow-hidden ancestor), and an
+INVALID turnContext degrades to «absent» at the consumer instead of rejecting
+the whole paid operation:complete (the shape gate is isCoachTurnContext; E28
+holds by ignoring, not by discarding terminals). Follow-up recorded: extract
+the orchestration test harness so the ship-gate's dispatch site gains a
 behavioural (unmocked) pin.

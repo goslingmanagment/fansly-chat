@@ -5,6 +5,7 @@ import {
 } from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
 import type {
+  CoachTurnContext,
   AgencyHubConnectionTestRequest,
   BackgroundPortMessage,
   ContentPortMessage,
@@ -261,7 +262,12 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
 /** coach-chat operation:complete turn context (spec §8.2). Counts-only shape —
  * an extra field or a wrong type is a producer bug on a DOM-adjacent projection
  * (E28), so validate exactly rather than pass through. */
-function isCoachTurnContext(value: unknown): boolean {
+/** Exported for the consumption-site sanitizer (closing round): an INVALID
+ * turnContext must degrade to «absent» at the consumer — embedding it in the
+ * message conjunction dropped the whole paid operation:complete over a purely
+ * presentational field. E28 still holds: an unvalidated shape never reaches
+ * the DOM side — it is ignored, not forwarded. */
+export function isCoachTurnContext(value: unknown): value is CoachTurnContext {
   if (!isObjectRecord(value)) {
     return false;
   }
@@ -292,10 +298,6 @@ function isCoachTurnContext(value: unknown): boolean {
   return countOk(value.sentMessageCount) &&
     (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
     recapsOk;
-}
-
-function isOptionalCoachTurnContext(record: Record<string, unknown>): boolean {
-  return record.turnContext === undefined || isCoachTurnContext(record.turnContext);
 }
 
 function isVoiceNoteStatusView(value: unknown): boolean {
@@ -565,8 +567,7 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return hasOperationId(message) &&
         hasFeatureResult(message) &&
         isString(message.fanDisplayName) &&
-        isOptionalString(message, 'generationRef') &&
-        isOptionalCoachTurnContext(message);
+        isOptionalString(message, 'generationRef');
     case 'operation:error':
     case 'operation:discarded':
       return hasOperationId(message) && hasUserFacingError(message);

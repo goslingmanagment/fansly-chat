@@ -1,6 +1,7 @@
 import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
 import { formatCoachAgeMs } from '../shared/coach-format.js';
+import { isCoachTurnContext } from '../shared/protocol.js';
 import { COACH_DRAFT_ATTACH_ENABLED, coachDraftAttachAllowed } from '../shared/coach-draft-gate.js';
 import {
   createCoachSessionStore,
@@ -2494,8 +2495,11 @@ export class ChatGooseContentApp {
         question,
         answerRaw,
         // Post-attach turn context (spec §8.2); absent from an old background →
-        // the collapsed «Отправлено коучу…» line is simply not rendered.
-        ...(message.turnContext !== undefined ? { turnContext: message.turnContext } : {}),
+        // the collapsed «Отправлено коучу…» line is simply not rendered. An
+        // INVALID shape degrades the same way (closing round): validating it in
+        // the message conjunction dropped the whole paid complete over a purely
+        // presentational field — E28 holds by ignoring, not by rejecting.
+        ...(isCoachTurnContext(message.turnContext) ? { turnContext: message.turnContext } : {}),
       });
     }
     this.clearCoachOperationState();

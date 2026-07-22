@@ -3,8 +3,7 @@ import {
   getRuntimeRequestType,
   isBackgroundPortMessage,
   isContentPortMessage,
-  isRecapStatusResponse,
-} from '../src/shared/protocol.js';
+  isRecapStatusResponse, isCoachTurnContext } from '../src/shared/protocol.js';
 
 function withoutKey(
   record: Record<string, unknown>,
@@ -307,7 +306,7 @@ describe('protocol boundary guards', () => {
     expect(isBackgroundPortMessage({ ...base, generationRef: 42 })).toBe(false);
   });
 
-  it('accepts a valid coach turnContext on operation:complete; rejects malformed shapes (spec §8.2)', () => {
+  it('validates the coach turnContext shape at the SANITIZER (spec §8.2, closing round)', () => {
     const base = {
       type: 'operation:complete',
       operationId: 'op-1',
@@ -316,110 +315,82 @@ describe('protocol boundary guards', () => {
     };
     // Absent is valid (old-background tolerance).
     expect(isBackgroundPortMessage(base)).toBe(true);
-    // attachedRecaps ABSENT within a present turnContext is valid too (round
-    // 12: «kernel did not report» ≠ «kernel confirmed none»).
+    // The envelope tolerates ANY turnContext (a paid terminal must survive a
+    // presentational-field skew); the SHAPE gate is isCoachTurnContext, used at
+    // the consumer, which degrades an invalid value to «absent».
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: { sentMessageCount: 42, transcriptCoverage: 'window' },
+      isBackgroundPortMessage({ ...base, turnContext: { smuggled: 'garbage' } }),
+    ).toBe(true);
+
+    // Valid shapes.
+    expect(
+      isCoachTurnContext({ sentMessageCount: 42, transcriptCoverage: 'window' }),
+    ).toBe(true); // attachedRecaps absent = «kernel did not report» (round 12)
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 1000 }, short: null },
       }),
     ).toBe(true);
-    // Full valid shape.
+
+    // Invalid shapes — E28 declassification boundary: exact keys at every
+    // level, non-negative integer counts.
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: { ageMs: 1000 }, short: null },
-        },
-      }),
-    ).toBe(true);
-    // Bad coverage enum.
-    expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'partial',
-          attachedRecaps: { full: null, short: null },
-        },
-      }),
-    ).toBe(false);
-    // A recap slot missing ageMs.
-    expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: {}, short: null },
-        },
-      }),
-    ).toBe(false);
-    // Review P1 — the validator IS the E28 declassification boundary: any extra
-    // key at any level (e.g. a smuggled raw body) must be rejected, and counts
-    // must be non-negative integers.
-    expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: null, short: null },
-          extra: 'nope',
-        },
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'partial',
+        attachedRecaps: { full: null, short: null },
       }),
     ).toBe(false);
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: null, short: null, third: null },
-        },
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: {}, short: null },
       }),
     ).toBe(false);
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: { ageMs: 1000, rawBody: 'smuggled' }, short: null },
-        },
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null },
+        extra: 'nope',
       }),
     ).toBe(false);
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: -1,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: null, short: null },
-        },
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null, third: null },
       }),
     ).toBe(false);
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 42,
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: { ageMs: 10.5 }, short: null },
-        },
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 1000, rawBody: 'smuggled' }, short: null },
       }),
     ).toBe(false);
-    // Non-numeric count.
     expect(
-      isBackgroundPortMessage({
-        ...base,
-        turnContext: {
-          sentMessageCount: 'lots',
-          transcriptCoverage: 'window',
-          attachedRecaps: { full: null, short: null },
-        },
+      isCoachTurnContext({
+        sentMessageCount: -1,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 10.5 }, short: null },
+      }),
+    ).toBe(false);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 'lots',
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: null, short: null },
       }),
     ).toBe(false);
   });
