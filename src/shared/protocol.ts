@@ -5,6 +5,7 @@ import {
 } from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
 import type {
+  CoachTurnContext,
   AgencyHubConnectionTestRequest,
   BackgroundPortMessage,
   ContentPortMessage,
@@ -254,7 +255,49 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalCoachHistory(record) &&
     isOptionalSummaryMode(record) &&
     isOptionalString(record, 'coachSessionId') &&
+    isOptionalNumber(record, 'transcriptEpoch') &&
     isOptionalBoolean(record, 'viewCachedOnly');
+}
+
+/** coach-chat operation:complete turn context (spec §8.2). Counts-only shape —
+ * an extra field or a wrong type is a producer bug on a DOM-adjacent projection
+ * (E28), so validate exactly rather than pass through. */
+/** Exported for the consumption-site sanitizer (closing round): an INVALID
+ * turnContext must degrade to «absent» at the consumer — embedding it in the
+ * message conjunction dropped the whole paid operation:complete over a purely
+ * presentational field. E28 still holds: an unvalidated shape never reaches
+ * the DOM side — it is ignored, not forwarded. */
+export function isCoachTurnContext(value: unknown): value is CoachTurnContext {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  // attachedRecaps is OPTIONAL (round 12): absent = «kernel did not report»,
+  // distinct from a reported empty attach — when present, exact-keyed as before.
+  const keySignature = Object.keys(value).sort().join(',');
+  if (
+    keySignature !== 'attachedRecaps,sentMessageCount,transcriptCoverage' &&
+    keySignature !== 'sentMessageCount,transcriptCoverage'
+  ) {
+    return false;
+  }
+  // Exact keys + non-negative integers at EVERY level (review P1): this
+  // validator is the E28 declassification boundary — a slot smuggling an extra
+  // field (e.g. a raw body) must be rejected, not forwarded to the DOM side.
+  const countOk = (candidate: unknown): boolean =>
+    typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0;
+  const slotOk = (slot: unknown): boolean =>
+    slot === null ||
+    (isObjectRecord(slot) && hasExactKeys(slot, ['ageMs']) && countOk(slot.ageMs));
+  const recaps = value.attachedRecaps;
+  const recapsOk =
+    recaps === undefined ||
+    (isObjectRecord(recaps) &&
+      hasExactKeys(recaps, ['full', 'short']) &&
+      slotOk(recaps.full) &&
+      slotOk(recaps.short));
+  return countOk(value.sentMessageCount) &&
+    (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
+    recapsOk;
 }
 
 function isVoiceNoteStatusView(value: unknown): boolean {

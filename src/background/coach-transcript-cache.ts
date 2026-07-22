@@ -49,6 +49,10 @@ export interface CoachTranscriptCacheKeyParts {
   /** The quick-window message count in force when the window was seeded. A
    * changed value is a different key (miss → reseed), matching spec §3. */
   quickMessageCount: number;
+  /** Content-owned transcript epoch (spec §8.4). «Обновить переписку» bumps it;
+   * a changed value is a different key (guaranteed miss → full reseed). Absent
+   * on the wire ⇒ 0 (a stable key part), so an old client stays compatible. */
+  transcriptEpoch: number;
 }
 
 /** The merged window handed back to the caller. `pages` is ordered oldest-first
@@ -96,6 +100,7 @@ function serializeKey(parts: CoachTranscriptCacheKeyParts): string {
     parts.accountId,
     parts.groupId,
     parts.quickMessageCount,
+    parts.transcriptEpoch,
   ].join(':');
 }
 
@@ -318,6 +323,24 @@ export class CoachTranscriptCache {
     window: CoachTranscriptWindow,
   ): CoachTranscriptWindow {
     const boundedWindow = trimWindow(window, parts.quickMessageCount);
+    // A bumped transcriptEpoch makes every PRIOR epoch of the same logical
+    // session unreachable — purge them REGARDLESS of quickMessageCount (review
+    // round 5: a count change between epochs stranded the old-count window
+    // forever), or repeated «Обновить переписку» would fill the LRU with dead
+    // windows and evict other sessions. Same-epoch variants stay: the content
+    // side can legitimately return to them after a window-setting change.
+    for (const [existingKey, entry] of this.entries) {
+      if (
+        existingKey !== key &&
+        entry.parts.tabId === parts.tabId &&
+        entry.parts.coachSessionId === parts.coachSessionId &&
+        entry.parts.accountId === parts.accountId &&
+        entry.parts.groupId === parts.groupId &&
+        entry.parts.transcriptEpoch !== parts.transcriptEpoch
+      ) {
+        this.entries.delete(existingKey);
+      }
+    }
     this.entries.delete(key);
     this.entries.set(key, { parts, window: boundedWindow });
     while (this.entries.size > this.maxSessions) {

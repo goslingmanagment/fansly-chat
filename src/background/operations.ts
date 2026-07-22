@@ -112,6 +112,7 @@ import {
   formatKernelUsageLog,
 } from '../shared/spend.js';
 import {
+  type KernelFeatureAttachedRecaps,
   type KernelFeatureDebugInput,
   type KernelFeatureGateway,
   type KernelFeatureUsage,
@@ -2099,6 +2100,9 @@ export class OperationCoordinator {
           accountId: resolvedAccountId,
           groupId: validated.urlGroupId,
           quickMessageCount: effectiveMessageCount,
+          // «Обновить переписку» bumps this content-owned epoch → guaranteed miss
+          // + full quick-window reseed on the next turn (spec §8.4).
+          transcriptEpoch: payload.transcriptEpoch ?? 0,
         };
         const loadFullWindow = async () => {
           const loaded = await this.fanslyClient.loadMessages(
@@ -2731,6 +2735,11 @@ export class OperationCoordinator {
       let reasoningObserved = false;
       let reasoningDebugText = '';
       let latestLlmStopReason: string | null = null;
+      // coach-chat turn context (spec §8.2): the gateway parses attachedRecaps on
+      // the meta frame; capture it here so the operation:complete message can
+      // carry the honest post-attach recap provenance (the callback used to
+      // discard it). Undefined until/unless the meta frame reports it.
+      let attachedRecaps: KernelFeatureAttachedRecaps | undefined;
       const actualModelName = (): string => actualModel;
       startStage('llm-ttfb', 'Wait for AI TTFB');
       profiler.log(`Waiting for ${actualModelName()}`);
@@ -2838,11 +2847,21 @@ export class OperationCoordinator {
           current.flushBuffer += chunk;
           this.scheduleChunkFlush(tabId, current);
         },
-        onMeta: (meta: { requestId: string; clientRequestId: string; model: string }) => {
+        onMeta: (meta: {
+          requestId: string;
+          clientRequestId: string;
+          model: string;
+          attachedRecaps?: KernelFeatureAttachedRecaps;
+        }) => {
           // The kernel names the model (client model config died with the
           // vendor lane); requestId is the generation ref — the acceptance
           // correlation key kernel-side.
           actualModel = meta.model;
+          // Coach-only: the recap slots Core actually attached this turn (spec
+          // §8.2) — retained for the collapsed «Отправлено коучу…» line.
+          if (meta.attachedRecaps !== undefined) {
+            attachedRecaps = meta.attachedRecaps;
+          }
           this.rememberAcceptanceContext(payload.operationId, {
             operationId: payload.operationId,
             requestId: meta.requestId,
@@ -3144,12 +3163,38 @@ export class OperationCoordinator {
       // acceptance can correlate back to its generation. Harmless for all.
       const generationRef =
         this.acceptanceContexts.get(payload.operationId)?.requestId;
+      // coach-chat turn context (spec §8.2): kept-count + coverage the BROWSER
+      // sent (pre-budget) plus the recap slots Core actually attached, each with
+      // its age. Counts-only projection (E28) — never the raw meta payload.
+      const turnContext =
+        payload.feature === 'coach-chat'
+          ? {
+              sentMessageCount: keptMessageCount,
+              transcriptCoverage: computedTranscriptCoverage,
+              // «Not reported» stays ABSENT (round 12, E43): only a kernel
+              // that actually sent the field yields a recap claim. Floored:
+              // the content-side validator requires non-negative INTEGER ages.
+              ...(attachedRecaps !== undefined
+                ? {
+                    attachedRecaps: {
+                      full: attachedRecaps.full
+                        ? { ageMs: Math.max(0, Math.floor(attachedRecaps.full.ageMs)) }
+                        : null,
+                      short: attachedRecaps.short
+                        ? { ageMs: Math.max(0, Math.floor(attachedRecaps.short.ageMs)) }
+                        : null,
+                    },
+                  }
+                : {}),
+            }
+          : undefined;
       this.sendComplete(tabId, {
         type: 'operation:complete',
         operationId: payload.operationId,
         result,
         fanDisplayName,
         ...(generationRef != null ? { generationRef } : {}),
+        ...(turnContext !== undefined ? { turnContext } : {}),
       }, completedSpend, profiler);
 
       this.clearCompletedOperation(tabId);

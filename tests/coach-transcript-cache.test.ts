@@ -63,6 +63,7 @@ function key(
     accountId: MODEL_ID,
     groupId: 'group-1',
     quickMessageCount: 100,
+    transcriptEpoch: 0,
     ...overrides,
   };
 }
@@ -111,6 +112,23 @@ describe('CoachTranscriptCache — seed', () => {
     const second = await cache.getOrSeed(key(), loadFull);
     expect(loadFull).toHaveBeenCalledTimes(1); // still cached — no second load
     expect(normalizedIds(second)).toEqual(['10', '20', '30', '40', '50']);
+  });
+
+  it('a changed transcriptEpoch is a cache miss → full reseed (spec §8.4 «Обновить переписку»)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([50, 40, 30]), makePage([20, 10])], true));
+
+    await cache.getOrSeed(key(), loadFull);
+    expect(loadFull).toHaveBeenCalledTimes(1);
+
+    // The «Обновить переписку» epoch bump gives a DIFFERENT key: a refresh at the
+    // bumped epoch finds nothing cached (a plain miss — loadPage is never called).
+    const loadPage = vi.fn();
+    expect((await cache.refresh(key({ transcriptEpoch: 1 }), loadPage)).status).toBe('miss');
+    expect(loadPage).not.toHaveBeenCalled();
+    // …and getOrSeed at the bumped epoch reseeds the full window.
+    await cache.getOrSeed(key({ transcriptEpoch: 1 }), loadFull);
+    expect(loadFull).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -413,4 +431,49 @@ describe('CoachTranscriptCache — LRU', () => {
     expect(cache.peek(key({ groupId: 'g1' }))).toBeDefined();
     expect(cache.peek(key({ groupId: 'g6' }))).toBeDefined();
   });
+
+  it('purges prior-epoch entries of the same logical session on store (review P2)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([20, 10])], true));
+    await cache.getOrSeed(key({ transcriptEpoch: 0 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 1 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 2 }), loadFull);
+    // Only the newest epoch survives — dead epochs must not occupy LRU slots
+    // and evict other sessions' windows.
+    expect(cache.size).toBe(1);
+  });
+
+  it('purges prior epochs even when quickMessageCount changed between them (review round 5)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([20, 10])], true));
+    await cache.getOrSeed(key({ transcriptEpoch: 0, quickMessageCount: 100 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 1, quickMessageCount: 200 }), loadFull);
+    // The epoch-0/count-100 window is unreachable forever — it must not strand
+    // an LRU slot.
+    expect(cache.size).toBe(1);
+  });
+
+  it('an epoch bump never evicts OTHER sessions (review round 11 — the purge safety property)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([20, 10])], true));
+    // Three distinct logical sessions: other group, other tab, other session id.
+    await cache.getOrSeed(key({ groupId: 'group-other' }), loadFull);
+    await cache.getOrSeed(key({ tabId: 2 }), loadFull);
+    await cache.getOrSeed(key({ coachSessionId: 'session-b' }), loadFull);
+
+    await cache.getOrSeed(key({ transcriptEpoch: 0 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 1 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 2 }), loadFull);
+
+    // The bumped session holds ONE entry; every other session survived — the
+    // purge predicate must match on the FULL logical identity (dropping any
+    // conjunct would wipe them and re-trigger full Fansly reseeds, DP 1-B).
+    expect(cache.size).toBe(4);
+    const loadsBefore = loadFull.mock.calls.length;
+    await cache.getOrSeed(key({ groupId: 'group-other' }), loadFull);
+    await cache.getOrSeed(key({ tabId: 2 }), loadFull);
+    await cache.getOrSeed(key({ coachSessionId: 'session-b' }), loadFull);
+    expect(loadFull.mock.calls.length).toBe(loadsBefore); // all three were HITS
+  });
+
 });

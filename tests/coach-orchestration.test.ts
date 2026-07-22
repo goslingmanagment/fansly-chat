@@ -4,8 +4,25 @@
    closure-held state, and the app surface is intentionally not a public API. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { tabRefreshMessageForStorageChanges } from '../src/background/storage-change-policy.js';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import type { TabUiState } from '../src/shared/types.js';
+
+// The live Fansly draft the coach reads at dispatch (spec §5). A hoisted holder
+// so the module mock's factory can close over a per-test mutable value.
+const draftHolder = vi.hoisted(() => ({ value: '' }));
+// The draft-attach ship-gate (spec §10.2) is OFF in the shipped constant until
+// core#22 lands; this suite tests the ENABLED semantics, so flip it here.
+vi.mock('../src/shared/coach-draft-gate.js', () => ({
+  COACH_DRAFT_ATTACH_ENABLED: true,
+  coachDraftAttachAllowed: (intentOrForce: boolean) => intentOrForce,
+}));
+vi.mock('../src/content/textarea.js', () => ({
+  getActiveConversationDraftText: vi.fn(() => draftHolder.value),
+  insertIntoFanslyTextarea: vi.fn(async () => undefined),
+  copyToClipboard: vi.fn(async () => undefined),
+  focusActiveConversationTextarea: vi.fn(() => null),
+}));
 
 let mockStorageState: Record<string, unknown>;
 let recapStatusResponse: unknown;
@@ -184,6 +201,7 @@ describe('Coach orchestration', () => {
   beforeEach(() => {
     mockStorageState = createStorageState();
     recapStatusResponse = { full: null, short: null };
+    draftHolder.value = '';
     installDom();
   });
 
@@ -1021,10 +1039,8 @@ describe('Coach orchestration', () => {
     recapStatusResponse = { full: staleSlot(), short: null };
     app.openCoach();
     await flush();
-    // inherit → off → short → full
-    app.cycleCoachAutoRecapOverride();
-    app.cycleCoachAutoRecapOverride();
-    app.cycleCoachAutoRecapOverride();
+    // The «Авто-рекап» radio group sets the override directly (spec §3).
+    app.setCoachAutoRecapOverride('full');
     expect(app.activeCoachSession.autoRecapOverride).toBe('full');
     (app.port.send as any).mockClear();
 
@@ -1366,5 +1382,944 @@ describe('Coach orchestration', () => {
 
     coachButton!.click();
     expect(openSpy).toHaveBeenCalled();
+  });
+
+  // ─── Draft attach state machine (spec §5) ─────────────────────────────────
+
+  it('does NOT send draftText when the intent is off, even with a live draft', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'my unsent reply';
+    app.openCoach();
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBeUndefined();
+    expect(app.activeCoachSession.pending.includedDraft).toBe(false);
+  });
+
+  it('sends the live draft as draftText when armed, records includedDraft, resets intent after dispatch', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'attach this';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBe('attach this');
+    // `includedDraft` = actually sent, not requested.
+    expect(app.activeCoachSession.pending.includedDraft).toBe(true);
+    // A dispatched turn consumes the intent (spec §5).
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+  });
+
+  it('armed but empty live draft at dispatch → no draftText, includedDraft false', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = '';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBeUndefined();
+    expect(app.activeCoachSession.pending.includedDraft).toBe(false);
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+  });
+
+  it('reads the live draft at DISPATCH, not at arm time', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'stale at arm';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    // The composer changes between arming and sending.
+    draftHolder.value = 'fresh at dispatch';
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBe('fresh at dispatch');
+  });
+
+  it('intent survives close/reopen and is reset by «Новый диалог»', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+
+    // Close/reopen retains the session, so the intent persists.
+    app.closeCoach();
+    app.openCoach();
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+
+    // «Новый диалог» resets it.
+    app.resetCoachSession();
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+  });
+
+  it('the submit preflight locks the composer and a rejected Send restores its text (review P1)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    // Stall the settings read to hold the preflight window open.
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+
+    const first = app.submitCoachQuestion('chip question');
+    // The lock is projected IMMEDIATELY: the rendered model is busy.
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    // A second Send in the window is rejected AND the typed text survives.
+    await app.submitCoachQuestion('typed while waiting');
+    expect(app.activeCoachSession.composerText).toBe('typed while waiting');
+
+    releaseStorage();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await first;
+    await flush();
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'chip question' });
+  });
+
+  it('a post-recap resubmit failure RESTORES the composer-typed question (review round 9)', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+
+    await app.submitCoachQuestion('мой собственный вопрос');
+    const recapOpId = app.coachRecapChain.operationId;
+    expect(app.coachRecapChain.fromComposer).toBe(true);
+
+    // The recap completes, but the follow-up settings read fails.
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(async () => {
+      throw new Error('storage down');
+    });
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'recap body', parts: [] },
+    });
+    await flush();
+    (globalThis as any).browser.storage.local.get = storageGet;
+
+    // The chatter's own text is back in the composer — not silently eaten.
+    expect(app.activeCoachSession.composerText).toBe('мой собственный вопрос');
+  });
+
+  it('a Send from ANOTHER session during a stalled preflight is admitted (review round 9)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('slow question');
+
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('question from fan B');
+    // Fan B's question dispatches — the guard is per-session, matching the
+    // per-session busy projection.
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'question from fan B',
+    });
+
+    releaseStorage();
+    await first;
+    await flush();
+  });
+
+  it('overlapping preflights: B finishing FIRST keeps a still-running A locked (review round 12)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    const sessionA = app.activeCoachSession;
+
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    const stall = () => {
+      let released = false;
+      const pending: Array<(value: unknown) => void> = [];
+      const get = vi.fn(
+        () => new Promise((resolve) => {
+          if (released) {
+            resolve({ ...mockStorageState });
+            return;
+          }
+          pending.push(resolve);
+        }),
+      );
+      return {
+        get,
+        release: () => {
+          released = true;
+          for (const resolve of pending.splice(0)) {
+            resolve({ ...mockStorageState });
+          }
+        },
+      };
+    };
+    const stallA = stall();
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    const firstA = app.submitCoachQuestion('question A');
+
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    const stallB = stall();
+    (globalThis as any).browser.storage.local.get = stallB.get;
+    const firstB = app.submitCoachQuestion('question B');
+
+    // B resolves FIRST — its token release must not free A's lock.
+    stallB.release();
+    await firstB;
+    await flush();
+    // Back on fan A: its preflight still holds — the composer stays locked and
+    // a re-submit is rejected (no double dispatch when A finally resolves).
+    app.handleRouteChange('group-1');
+    app.openCoach();
+    await flush();
+    expect(app.activeCoachSession).toBe(sessionA);
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    stallA.release();
+    await firstA;
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await flush();
+  });
+
+  it('overlapping preflights: finishing A does not unlock a still-running B (review round 10)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    // loadStorageState reads storage more than once — a stalled stub must hold
+    // EVERY call until released, then let later calls through.
+    const makeStalledStorage = () => {
+      let released = false;
+      const pending: Array<(value: unknown) => void> = [];
+      const get = vi.fn(
+        () => new Promise((resolve) => {
+          if (released) {
+            resolve({ ...mockStorageState });
+            return;
+          }
+          pending.push(resolve);
+        }),
+      );
+      const release = () => {
+        released = true;
+        for (const resolve of pending.splice(0)) {
+          resolve({ ...mockStorageState });
+        }
+      };
+      return { get, release };
+    };
+
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    const stallA = makeStalledStorage();
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    const firstA = app.submitCoachQuestion('question A');
+
+    // Open fan B's coach with REAL storage (its snapshot hydration reads too),
+    // then stall only B's submit read.
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    const stallB = makeStalledStorage();
+    (globalThis as any).browser.storage.local.get = stallB.get;
+    const firstB = app.submitCoachQuestion('question B');
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    // A resolves first — B's lock must survive A's finally. A's later reads go
+    // through its released stub; B's stub still holds B.
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    stallA.release();
+    await firstA;
+    (globalThis as any).browser.storage.local.get = stallB.get;
+    await flush();
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    stallB.release();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await firstB;
+    await flush();
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false); // B dispatched → streaming lock
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'question B' });
+  });
+
+  it('a tab:state replay after reconnect rehydrates the settings snapshot (review round 10)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+
+    // The settings changed while the port was down; the reconnect replay is a
+    // plain tab:state — it must carry the refresh.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    app.handlePortMessage({ type: 'tab:state', state: readyState() });
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'short',
+    });
+  });
+
+  it('a dispatched CANNED turn torn down by route change / disconnect leaves the composer empty (round 11)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('Сделай короче', { fromComposer: false });
+    expect(app.activeCoachSession.pending?.fromComposer).toBe(false);
+
+    // Route change mid-stream: the canned string must not be parked.
+    const session = app.activeCoachSession;
+    app.handleRouteChange('group-2');
+    expect(session.composerText).toBe('');
+
+    // Disconnect variant, composer-typed control case.
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('мой вопрос');
+    expect(app.activeCoachSession.pending?.fromComposer).toBe(true);
+    app.recoverCoachOnDisconnect();
+    expect(app.activeCoachSession.composerText).toBe('мой вопрос');
+  });
+
+  it('a chip-started chain STOP leaves the composer EMPTY (review round 10)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    // First turn with auto off — autoRecapAttempted stays false.
+    await app.submitCoachQuestion('первый вопрос');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: pendingOpId(app),
+      fanDisplayName: 'alice',
+      result: { rawText: 'ответ', parts: [] },
+    });
+    await flush();
+
+    // Chip fires a canned question; the override now arms an auto chain.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.submitCoachQuestion('Сделай короче', { fromComposer: false });
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(app.coachRecapChain.fromComposer).toBe(false);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: app.coachRecapChain.operationId,
+      error: { key: 'session_expired', code: 'CG-FAN-02', message: 'expired' },
+    });
+    await flush();
+
+    // The canned text must NOT be parked in the composer by the STOP restore.
+    expect(app.activeCoachSession.composerText).toBe('');
+  });
+
+  it('a rejected CANNED submit never writes its text into the composer (review round 8)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('Другой вариант', { fromComposer: false });
+    // Second chip click inside the preflight window: rejected, and the canned
+    // text must NOT appear in the (empty) composer.
+    await app.submitCoachQuestion('Сделай короче', { fromComposer: false });
+    expect(app.activeCoachSession.composerText).toBe('');
+
+    releaseStorage();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await first;
+  });
+
+  it('the preflight busy projection is per-session — a fan switch does not strand the new coach (review round 8)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('slow question');
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    // Fan switch during the preflight; the NEW session's coach must be usable.
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(true);
+
+    releaseStorage();
+    await first;
+    await flush();
+    // The finished preflight of the OLD session leaves the new one untouched.
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(true);
+  });
+
+  it('typing into the Fansly composer re-renders the open coach surface (review P2)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = '';
+    app.openCoach();
+    await flush();
+    const box = document.querySelector<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(box?.disabled).toBe(true);
+
+    draftHolder.value = 'now non-empty';
+    (app as any).handleDraftInput();
+    const after = document.querySelector<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(after?.disabled).toBe(false);
+  });
+
+  it('a prereq-refused retry chain re-arms the intent AND the rendered model agrees (closing round)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    // Prereqs break (mapping lost) so the retry's chain refuses to start.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    app.tabState = { ...app.tabState, mappedPersonalityId: null };
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    // The RENDERED model agrees — no unchecked box over an armed session.
+    expect(app.coachOverlayModel.sessionView.draftIntent).toBe(true);
+  });
+
+  it('«Новый диалог» during the preflight is refused; a raced reset never receives the old question (round 15)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('старый вопрос');
+    // The reset is refused during the preflight (armed question).
+    app.resetCoachSession();
+    expect(app.activeCoachSession.feedItems).toEqual([]);
+    const idBefore = app.activeCoachSession.sessionId;
+
+    // Even if a future path rotated the id mid-await, the submit aborts: force
+    // the rotation directly to pin the sessionId guard.
+    app.activeCoachSession.sessionId = 'rotated';
+    (app.port.send as any).mockClear();
+    releaseStorage();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await first;
+    expect((app.port.send as any).mock.calls.length).toBe(0);
+    app.activeCoachSession.sessionId = idBefore;
+  });
+
+  it('a THROWING send during the recap-chain start takes the clean STOP rollback (round 14)', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    app.port.send = vi.fn(() => {
+      throw new Error('disconnected port');
+    });
+
+    // Must not leak an exception out of the submit, must not leave the chain
+    // armed, and the question survives in the composer.
+    await app.submitCoachQuestion('вопрос через рекап');
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.activeFeature).toBeNull();
+    expect(app.activeCoachSession.composerText).toBe('вопрос через рекап');
+  });
+
+  it('a THROWING port send gets the same never-dispatched rollback (review round 6)', async () => {
+    const app = await makeReadyApp();
+    app.port.send = vi.fn(() => {
+      throw new Error('disconnected port');
+    });
+    draftHolder.value = 'attach me';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+
+    await app.submitCoachQuestion('thrown');
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('thrown');
+    expect(app.activeCoachSession.pending).toBeUndefined();
+  });
+
+  it('a never-dispatched turn (port drop) preserves the draft intent', async () => {
+    const app = await makeReadyApp();
+    app.port.send = vi.fn(() => false);
+    draftHolder.value = 'attach me';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+
+    await app.submitCoachQuestion('dropped');
+
+    // The start never reached the background → intent preserved for the retry.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('dropped');
+  });
+
+  it('Retry re-reads the CURRENT live draft when the failed attempt included one', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    const opId = pendingOpId(app);
+    expect(lastSent(app).draftText).toBe('first draft');
+
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: opId,
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(failed.includedDraft).toBe(true);
+
+    // The live draft has changed since; Retry re-reads it (never resent from memory).
+    draftHolder.value = 'retry draft';
+    (app.port.send as any).mockClear();
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(lastSent(app).draftText).toBe('retry draft');
+  });
+
+  it('Retry with an empty live draft now proceeds WITHOUT a draft', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    const opId = pendingOpId(app);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: opId,
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    draftHolder.value = '';
+    (app.port.send as any).mockClear();
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(lastSent(app).draftText).toBeUndefined();
+  });
+
+  it('Retry re-reads the live draft THROUGH a successful auto-recap chain (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail'); // auto-recap off → plain dispatch
+    const opId = pendingOpId(app);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: opId,
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(failed.includedDraft).toBe(true);
+
+    // The chatter arms auto-recap AFTER the failure; the stale recap forces a
+    // chain on the retry. The re-read intent must survive the chain.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    draftHolder.value = 'retry draft';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(app.coachRecapChain.forceDraftRead).toBe(true);
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'recap body', parts: [] },
+    });
+    await flush();
+
+    // The post-recap dispatch re-read the CURRENT live draft.
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'will fail',
+      draftText: 'retry draft',
+    });
+  });
+
+  it('Retry PROCEED-chain failure still carries the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    draftHolder.value = 'retry draft';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'ai_output_unusable', code: 'CG-API-06', message: 'empty output' },
+    });
+    await flush();
+
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', draftText: 'retry draft' });
+  });
+
+  it('a STOP inside the retry chain re-arms the draft intent (never dispatched, spec §5)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(app.activeCoachSession.draftIntent).toBe(false); // consumed by the dispatch
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: app.coachRecapChain.operationId,
+      error: { key: 'session_expired', code: 'CG-FAN-02', message: 'expired' },
+    });
+    await flush();
+
+    // The coach turn never dispatched → the re-read intent is preserved as the
+    // stored session intent, so the manual resend still attaches the draft.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+  });
+
+  it('a route change during the retry chain re-arms the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    const session = app.activeCoachSession;
+    expect(app.coachRecapChain.forceDraftRead).toBe(true);
+
+    app.handleRouteChange('group-2');
+
+    expect(session.draftIntent).toBe(true);
+  });
+
+  it('a port disconnect during the retry chain re-arms the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    expect(app.coachRecapChain.forceDraftRead).toBe(true);
+
+    app.recoverCoachOnDisconnect();
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+  });
+
+  it('consumes the intent BEFORE the pre-dispatch render — the streaming view is unarmed (review P1)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'attach me';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('go');
+    // Dispatched: both the stored intent and the RENDERED model are unarmed
+    // while the turn streams — no armed clickable checkbox of a sent attempt.
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+    expect(app.coachOverlayModel.sessionView.draftIntent).toBe(false);
+    expect(lastSent(app).draftText).toBe('attach me');
+  });
+
+  it('a settings-read failure during Retry re-arms the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(async () => {
+      throw new Error('storage down');
+    });
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    (globalThis as any).browser.storage.local.get = storageGet;
+
+    // The retry never dispatched — its re-read intent is preserved as stored
+    // intent. The CANNED question is deliberately NOT written to the composer
+    // (round 8): the failed-attempt item keeps its «Повторить» for a re-try.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('');
+    expect(
+      app.activeCoachSession.feedItems.some((i: any) => i.kind === 'failed-attempt'),
+    ).toBe(true);
+  });
+
+  it('a port drop during a force-only Retry re-arms the intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    app.port.send = vi.fn(() => false);
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    // Canned retry question stays out of the composer (round 8).
+    expect(app.activeCoachSession.composerText).toBe('');
+  });
+
+  it('reopen drops the settings snapshot until the fresh read lands (review P1)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    app.closeCoach();
+    app.openCoach();
+    // Invalidated BEFORE the first render — the stale 'off' snapshot must not
+    // survive into the reopened model (fallbacks render instead).
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toBeUndefined();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'short',
+    });
+  });
+
+  // ─── §8.4 transcript epoch ────────────────────────────────────────────────
+
+  it('«Обновить переписку» bumps the transcript epoch carried on the next turn', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('first');
+    expect(lastSent(app).transcriptEpoch).toBe(0);
+    // Finish the turn so the composer unlocks for the next submit.
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: pendingOpId(app),
+      fanDisplayName: 'alice',
+      result: { rawText: 'answer', parts: [] },
+      generationRef: 'gen-1',
+    });
+
+    const feedBefore = app.activeCoachSession.feedItems.length;
+    app.handleCoachRefreshTranscript();
+    expect(app.activeCoachSession.transcriptEpoch).toBe(1);
+    // Feed/composer untouched by the reseed request.
+    expect(app.activeCoachSession.feedItems.length).toBe(feedBefore);
+
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('second');
+    expect(lastSent(app).transcriptEpoch).toBe(1);
+  });
+
+  // ─── §8.2 turnContext ─────────────────────────────────────────────────────
+
+  it('retains turnContext from operation:complete on the committed exchange', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await app.submitCoachQuestion('advise me');
+    const opId = pendingOpId(app);
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: opId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'Try this.', parts: [] },
+      generationRef: 'gen-1',
+      turnContext: {
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 3 * 24 * 60 * 60 * 1000 }, short: null },
+      },
+    });
+
+    const exchange = app.activeCoachSession.completedExchanges[0];
+    expect(exchange.turnContext).toEqual({
+      sentMessageCount: 42,
+      transcriptCoverage: 'window',
+      attachedRecaps: { full: { ageMs: 3 * 24 * 60 * 60 * 1000 }, short: null },
+    });
+    const feedExchange = app.coachOverlayModel.sessionView.feedItems.find(
+      (i: any) => i.kind === 'exchange',
+    );
+    expect(feedExchange.turnContext.sentMessageCount).toBe(42);
+  });
+
+  it('an operation:complete WITHOUT turnContext (old background) commits no line', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await app.submitCoachQuestion('advise me');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: pendingOpId(app),
+      fanDisplayName: 'alice',
+      result: { rawText: 'Try this.', parts: [] },
+      generationRef: 'gen-1',
+    });
+    expect(app.activeCoachSession.completedExchanges[0].turnContext).toBeUndefined();
+  });
+
+  // ─── §7 settings snapshot ─────────────────────────────────────────────────
+
+  it('«Обновить переписку» acknowledges the click with an info toast (review round 5)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    const before = app.activeCoachSession.transcriptEpoch;
+    app.handleCoachRefreshTranscript();
+    expect(app.activeCoachSession.transcriptEpoch).toBe(before + 1);
+    expect(document.querySelector('#chatgoose-toast-root')?.textContent).toContain(
+      'Переписка обновится со следующим вопросом',
+    );
+  });
+
+  it('refreshes the snapshot on an ORDINARY settings write (mapping:changed per the classifier)', async () => {
+    // An Options-page write of coach settings classifies as 'mapping:changed'
+    // (review P1 — 'settings:changed' fires only for hub-context changes);
+    // pin the classifier and the handler together.
+    expect(
+      tabRefreshMessageForStorageChanges({ settings: { newValue: {} } } as never, 'local'),
+    ).toBe('mapping:changed');
+
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    app.handlePortMessage({ type: 'mapping:changed', state: readyState() });
+    // Review round 5: the SHOWN snapshot survives until the fresh read lands —
+    // no blink of the divider/label on an ordinary Options save.
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'short',
+    });
+  });
+
+  it('hydrates the coach settings snapshot on open and refreshes it on settings:changed', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachSettingsSnapshot).toEqual({ coachHistoryLimit: 10, coachAutoRecap: 'off' });
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toEqual({
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
+    });
+
+    // A settings change updates the live values (spec §7).
+    (mockStorageState.settings as any).coachAutoRecap = 'short';
+    (mockStorageState.settings as any).coachHistoryLimit = 5;
+    app.handlePortMessage({ type: 'settings:changed', state: readyState() });
+    await flush();
+    expect(app.coachSettingsSnapshot).toEqual({ coachHistoryLimit: 5, coachAutoRecap: 'short' });
   });
 });
