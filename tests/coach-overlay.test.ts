@@ -1024,6 +1024,37 @@ describe('OverlayController — coach chat mode', () => {
     expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Другой вариант', 'canned');
   });
 
+  it('appending a new exchange walks past the divider and the divider advances (review round 10)', () => {
+    const { controller } = makeController();
+    const exchanges = Array.from({ length: 4 }, (_, i) => exchangeItem(`x${i}`, `q${i}`, `a${i}`));
+    controller.render(
+      createCoachModel({
+        feedItems: exchanges,
+        settingsSnapshot: { coachHistoryLimit: 2, coachAutoRecap: 'off' },
+      }),
+    );
+    const divider = requireElement<HTMLElement>('.chatgoose-coach-memory-divider');
+
+    // A NEW exchange lands (a completed turn): the cursor walk must skip the
+    // interspersed divider, append at the end, and the divider must move one
+    // position right — same node, correct order.
+    const grown = [...exchanges, exchangeItem('x4', 'q4', 'a4')];
+    controller.render(
+      createCoachModel({
+        feedItems: grown,
+        settingsSnapshot: { coachHistoryLimit: 2, coachAutoRecap: 'off' },
+      }),
+    );
+    const items = requireElement<HTMLDivElement>('.chatgoose-coach-items');
+    const keys = Array.from(items.children).map((node) =>
+      node.classList.contains('chatgoose-coach-memory-divider')
+        ? 'DIVIDER'
+        : (node as HTMLElement).dataset.coachKey,
+    );
+    expect(keys).toEqual(['x:x0', 'x:x1', 'x:x2', 'DIVIDER', 'x:x3', 'x:x4']);
+    expect(requireElement<HTMLElement>('.chatgoose-coach-memory-divider')).toBe(divider);
+  });
+
   it('keeps the memory divider node attached and identity-stable across an unchanged re-render (review P2)', () => {
     const { controller } = makeController();
     const exchanges = Array.from({ length: 4 }, (_, i) => exchangeItem(`x${i}`, `q${i}`, `a${i}`));

@@ -1547,6 +1547,116 @@ describe('Coach orchestration', () => {
     await flush();
   });
 
+  it('overlapping preflights: finishing A does not unlock a still-running B (review round 10)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    // loadStorageState reads storage more than once — a stalled stub must hold
+    // EVERY call until released, then let later calls through.
+    const makeStalledStorage = () => {
+      let released = false;
+      const pending: Array<(value: unknown) => void> = [];
+      const get = vi.fn(
+        () => new Promise((resolve) => {
+          if (released) {
+            resolve({ ...mockStorageState });
+            return;
+          }
+          pending.push(resolve);
+        }),
+      );
+      const release = () => {
+        released = true;
+        for (const resolve of pending.splice(0)) {
+          resolve({ ...mockStorageState });
+        }
+      };
+      return { get, release };
+    };
+
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    const stallA = makeStalledStorage();
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    const firstA = app.submitCoachQuestion('question A');
+
+    // Open fan B's coach with REAL storage (its snapshot hydration reads too),
+    // then stall only B's submit read.
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    const stallB = makeStalledStorage();
+    (globalThis as any).browser.storage.local.get = stallB.get;
+    const firstB = app.submitCoachQuestion('question B');
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    // A resolves first — B's lock must survive A's finally. A's later reads go
+    // through its released stub; B's stub still holds B.
+    (globalThis as any).browser.storage.local.get = stallA.get;
+    stallA.release();
+    await firstA;
+    (globalThis as any).browser.storage.local.get = stallB.get;
+    await flush();
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    stallB.release();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await firstB;
+    await flush();
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false); // B dispatched → streaming lock
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'question B' });
+  });
+
+  it('a tab:state replay after reconnect rehydrates the settings snapshot (review round 10)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+
+    // The settings changed while the port was down; the reconnect replay is a
+    // plain tab:state — it must carry the refresh.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    app.handlePortMessage({ type: 'tab:state', state: readyState() });
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'short',
+    });
+  });
+
+  it('a chip-started chain STOP leaves the composer EMPTY (review round 10)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    // First turn with auto off — autoRecapAttempted stays false.
+    await app.submitCoachQuestion('первый вопрос');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: pendingOpId(app),
+      fanDisplayName: 'alice',
+      result: { rawText: 'ответ', parts: [] },
+    });
+    await flush();
+
+    // Chip fires a canned question; the override now arms an auto chain.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.submitCoachQuestion('Сделай короче', { fromComposer: false });
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(app.coachRecapChain.fromComposer).toBe(false);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: app.coachRecapChain.operationId,
+      error: { key: 'session_expired', code: 'CG-FAN-02', message: 'expired' },
+    });
+    await flush();
+
+    // The canned text must NOT be parked in the composer by the STOP restore.
+    expect(app.activeCoachSession.composerText).toBe('');
+  });
+
   it('a rejected CANNED submit never writes its text into the composer (review round 8)', async () => {
     const app = await makeReadyApp();
     app.openCoach();

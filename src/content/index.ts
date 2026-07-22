@@ -1987,7 +1987,11 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('settings_load_failed'));
       return;
     } finally {
-      this.coachSubmitPreflightSession = null;
+      // Clear only OUR lock (review round 10): a second session's preflight may
+      // have legitimately taken it while we awaited.
+      if (this.coachSubmitPreflightSession === session) {
+        this.coachSubmitPreflightSession = null;
+      }
       // Rebuild whatever coach is active NOW (review round 8): the preflight
       // may have started on a different fan's session.
       if (this.activeCoachSession) {
@@ -2267,7 +2271,7 @@ export class ChatGooseContentApp {
       if (forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
       }
-      if (origin === 'auto' && pendingQuestion && session.composerText === '') {
+      if (origin === 'auto' && fromComposer && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
         this.rebuildCoachModel();
         this.renderAll();
@@ -2295,7 +2299,7 @@ export class ChatGooseContentApp {
       if (forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
       }
-      if (origin === 'auto' && pendingQuestion && session.composerText === '') {
+      if (origin === 'auto' && fromComposer && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
       }
       this.coachRecapChain = null;
@@ -2365,7 +2369,7 @@ export class ChatGooseContentApp {
       if (forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
       }
-      if (origin === 'auto' && pendingQuestion && session.composerText === '') {
+      if (origin === 'auto' && fromComposer && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
       }
       this.rebuildCoachModel();
@@ -2403,7 +2407,7 @@ export class ChatGooseContentApp {
     if (chain.forceDraftRead) {
       this.coachStore.setDraftIntent(chain.session, true);
     }
-    if (chain.origin === 'auto' && chain.pendingQuestion && chain.session.composerText === '') {
+    if (chain.origin === 'auto' && chain.fromComposer && chain.pendingQuestion && chain.session.composerText === '') {
       chain.session.composerText = chain.pendingQuestion;
     }
     this.coachRecapChain = null;
@@ -2510,7 +2514,7 @@ export class ChatGooseContentApp {
     // suppression branch; preserve its held question into the composer first.
     const chain = this.coachRecapChain;
     if (chain) {
-      if (chain.pendingQuestion && chain.session.composerText === '') {
+      if (chain.fromComposer && chain.pendingQuestion && chain.session.composerText === '') {
         chain.session.composerText = chain.pendingQuestion;
       }
       // A never-dispatched retry keeps its live-draft re-read intent (spec §5,
@@ -2542,7 +2546,7 @@ export class ChatGooseContentApp {
   private recoverCoachOnDisconnect(): void {
     const chain = this.coachRecapChain;
     if (chain) {
-      if (chain.pendingQuestion && chain.session.composerText === '') {
+      if (chain.fromComposer && chain.pendingQuestion && chain.session.composerText === '') {
         chain.session.composerText = chain.pendingQuestion;
       }
       // A never-dispatched retry keeps its live-draft re-read intent (spec §5,
@@ -2816,18 +2820,16 @@ export class ChatGooseContentApp {
         this.tabState = message.state;
         // Coach UI settings snapshot (spec §7): a settings change may alter
         // coachHistoryLimit / coachAutoRecap while Coach is open — refresh the
-        // snapshot so the menu label and memory divider stay current. BOTH
-        // settings-bearing events qualify (review P1: an ordinary settings
-        // write classifies as 'mapping:changed'; 'settings:changed' is the
-        // broad hub-context event). The shown snapshot is KEPT until the fresh
-        // read resolves (review round 5: nulling first made the memory divider
-        // blink out and shift scroll on every Options save) — the generation
-        // guard discards a stale resolve, and refreshCoachSettingsSnapshot
-        // rebuilds/renders on apply.
-        if (
-          (message.type === 'settings:changed' || message.type === 'mapping:changed') &&
-          this.activeCoachSession
-        ) {
+        // snapshot so the menu label and memory divider stay current. ALL
+        // THREE events qualify: an ordinary settings write classifies as
+        // 'mapping:changed', 'settings:changed' is the broad hub-context
+        // event, and 'tab:state' replays after a port RECONNECT (review round
+        // 10 — a settings change made while the port was down had no event to
+        // carry it). The shown snapshot is KEPT until the fresh read resolves
+        // (review round 5: nulling first made the memory divider blink) — the
+        // generation guard discards stale resolves, and the atomic swap makes
+        // an unchanged re-read a no-op.
+        if (this.activeCoachSession) {
           this.coachSettingsSnapshotGeneration += 1;
           void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
         }

@@ -1395,6 +1395,14 @@ typed question); the preflight admission guard is per-session like the busy
 projection (another fan's coach both looks usable AND is usable; the
 post-await re-check covers the cross-session dispatch race), and the lock is
 set inside the try whose finally resets it, so a throwing render cannot strand
-the coach rejecting every future question. All coach-OWNED copy is now Russian; the shared
+the coach rejecting every future question. Round 10: the finally clears only
+its OWN lock (an overlapping second-session preflight legitimately takes it —
+finishing A must not unlock a still-running B); the settings snapshot also
+rehydrates on 'tab:state' (a reconnect replay — a settings change made while
+the port was down had no event to carry it; the generation-guarded atomic swap
+makes an unchanged re-read a no-op); the chain STOP/teardown restores gate on
+the held question's origin too, so a chip-started chain STOP never parks
+canned text in the composer; the divider-skipping cursor walk is pinned for
+the append-new-exchange path. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.
