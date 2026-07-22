@@ -1,7 +1,7 @@
 import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
 import { formatCoachAgeMs } from '../shared/coach-format.js';
-import { COACH_DRAFT_ATTACH_ENABLED } from '../shared/coach-draft-gate.js';
+import { COACH_DRAFT_ATTACH_ENABLED, coachDraftAttachAllowed } from '../shared/coach-draft-gate.js';
 import {
   createCoachSessionStore,
   type CoachSession,
@@ -2006,8 +2006,7 @@ export class ChatGooseContentApp {
     // Live draft read (spec §5): once, right before dispatch. `getActive…` is
     // synchronous, so nothing can mutate the composer between this read and the
     // start below.
-    const attachDraft =
-      COACH_DRAFT_ATTACH_ENABLED && (session.draftIntent || forceDraftRead);
+    const attachDraft = coachDraftAttachAllowed(session.draftIntent || forceDraftRead);
     const liveDraft = attachDraft ? getActiveConversationDraftText().trim() : '';
     const draftText = liveDraft.length > 0 ? liveDraft : undefined;
     const includedDraft = draftText !== undefined;
@@ -2167,6 +2166,13 @@ export class ChatGooseContentApp {
       return;
     }
     this.coachStore.bumpTranscriptEpoch(session);
+    // Review round 5: the bump is state-only by design (spec §8.4 — no click-time
+    // Fansly read), but the CLICK still needs an acknowledgment or the chatter
+    // re-clicks a seemingly dead menu item.
+    this.toast.show('Переписка обновится со следующим вопросом', {
+      tone: 'info',
+      dedupeKey: 'coach-refresh-transcript',
+    });
   }
 
   /** Run a recap step INSIDE the coach feed (spec §5 orchestration). A
@@ -2740,19 +2746,18 @@ export class ChatGooseContentApp {
         // Coach UI settings snapshot (spec §7): a settings change may alter
         // coachHistoryLimit / coachAutoRecap while Coach is open — refresh the
         // snapshot so the menu label and memory divider stay current. BOTH
-        // events qualify (review P1): an ordinary settings write classifies as
-        // 'mapping:changed' (storage-change-policy — 'settings:changed' is the
-        // broad hub-context event only), and the generation guard makes an
-        // over-refresh harmless. Guarded on an open session (a persona/account
-        // change above may have closed Coach).
-        if (this.activeCoachSession) {
-          // Review P1: stale values must not survive a settings change — drop
-          // the snapshot (fallbacks render) and re-hydrate under a fresh
-          // generation.
-          this.coachSettingsSnapshot = null;
+        // settings-bearing events qualify (review P1: an ordinary settings
+        // write classifies as 'mapping:changed'; 'settings:changed' is the
+        // broad hub-context event). The shown snapshot is KEPT until the fresh
+        // read resolves (review round 5: nulling first made the memory divider
+        // blink out and shift scroll on every Options save) — the generation
+        // guard discards a stale resolve, and refreshCoachSettingsSnapshot
+        // rebuilds/renders on apply.
+        if (
+          (message.type === 'settings:changed' || message.type === 'mapping:changed') &&
+          this.activeCoachSession
+        ) {
           this.coachSettingsSnapshotGeneration += 1;
-          this.rebuildCoachModel();
-          this.renderSurfaces();
           void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
         }
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));

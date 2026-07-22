@@ -1361,6 +1361,13 @@ Round 4: the snapshot also refreshes on 'mapping:changed' — an ordinary
 settings write classifies as mapping:changed per storage-change-policy, and
 the settings:changed-only guard left an open Coach showing a stale «По
 настройке» label and divider; the test pins the classifier output and the
-handler together. All coach-OWNED copy is now Russian; the shared
+handler together. Round 5: the dispatch conjunct lives in
+coachDraftAttachAllowed() so the UNMOCKED gate pin covers the dispatch site; a
+settings change no longer nulls the shown snapshot (the round-2 invalidation
+made the divider blink and shift scroll on every Options save — it now swaps
+atomically on resolve, generation-guarded, with null-on-open retained);
+«Обновить переписку» acknowledges the click with an info toast (state-only
+semantics unchanged); the epoch purge ignores quickMessageCount so a
+count-change between epochs cannot strand a dead LRU window. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

@@ -324,8 +324,11 @@ export class CoachTranscriptCache {
   ): CoachTranscriptWindow {
     const boundedWindow = trimWindow(window, parts.quickMessageCount);
     // A bumped transcriptEpoch makes every PRIOR epoch of the same logical
-    // session unreachable — purge them, or repeated «Обновить переписку» would
-    // fill the LRU with dead windows and evict other sessions (review P2).
+    // session unreachable — purge them REGARDLESS of quickMessageCount (review
+    // round 5: a count change between epochs stranded the old-count window
+    // forever), or repeated «Обновить переписку» would fill the LRU with dead
+    // windows and evict other sessions. Same-epoch variants stay: the content
+    // side can legitimately return to them after a window-setting change.
     for (const [existingKey, entry] of this.entries) {
       if (
         existingKey !== key &&
@@ -333,7 +336,7 @@ export class CoachTranscriptCache {
         entry.parts.coachSessionId === parts.coachSessionId &&
         entry.parts.accountId === parts.accountId &&
         entry.parts.groupId === parts.groupId &&
-        entry.parts.quickMessageCount === parts.quickMessageCount
+        entry.parts.transcriptEpoch !== parts.transcriptEpoch
       ) {
         this.entries.delete(existingKey);
       }

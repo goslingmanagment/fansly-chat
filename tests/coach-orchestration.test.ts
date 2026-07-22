@@ -13,7 +13,10 @@ import type { TabUiState } from '../src/shared/types.js';
 const draftHolder = vi.hoisted(() => ({ value: '' }));
 // The draft-attach ship-gate (spec §10.2) is OFF in the shipped constant until
 // core#22 lands; this suite tests the ENABLED semantics, so flip it here.
-vi.mock('../src/shared/coach-draft-gate.js', () => ({ COACH_DRAFT_ATTACH_ENABLED: true }));
+vi.mock('../src/shared/coach-draft-gate.js', () => ({
+  COACH_DRAFT_ATTACH_ENABLED: true,
+  coachDraftAttachAllowed: (intentOrForce: boolean) => intentOrForce,
+}));
 vi.mock('../src/content/textarea.js', () => ({
   getActiveConversationDraftText: vi.fn(() => draftHolder.value),
   insertIntoFanslyTextarea: vi.fn(async () => undefined),
@@ -1822,6 +1825,18 @@ describe('Coach orchestration', () => {
 
   // ─── §7 settings snapshot ─────────────────────────────────────────────────
 
+  it('«Обновить переписку» acknowledges the click with an info toast (review round 5)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    const before = app.activeCoachSession.transcriptEpoch;
+    app.handleCoachRefreshTranscript();
+    expect(app.activeCoachSession.transcriptEpoch).toBe(before + 1);
+    expect(document.querySelector('#chatgoose-toast-root')?.textContent).toContain(
+      'Переписка обновится со следующим вопросом',
+    );
+  });
+
   it('refreshes the snapshot on an ORDINARY settings write (mapping:changed per the classifier)', async () => {
     // An Options-page write of coach settings classifies as 'mapping:changed'
     // (review P1 — 'settings:changed' fires only for hub-context changes);
@@ -1839,6 +1854,11 @@ describe('Coach orchestration', () => {
 
     (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
     app.handlePortMessage({ type: 'mapping:changed', state: readyState() });
+    // Review round 5: the SHOWN snapshot survives until the fresh read lands —
+    // no blink of the divider/label on an ordinary Options save.
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
     await flush();
     expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
       coachAutoRecap: 'short',

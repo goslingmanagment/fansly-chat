@@ -1458,14 +1458,11 @@
  * (spec §10.2) the buttons are the ONLY child, and space-between alone would
  * park «Отправить» at the left edge (review P1). */
 .chatgoose-coach-composer-buttons {
-  margin-left: auto;
-}
-
-.chatgoose-coach-composer-buttons {
   display: flex;
   gap: 6px;
   flex: 0 0 auto;
   align-items: flex-start;
+  margin-left: auto;
 }
 
 /* «Отправить» filled clay, slightly larger than the secondary buttons (spec §2.1). */

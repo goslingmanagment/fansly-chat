@@ -443,4 +443,14 @@ describe('CoachTranscriptCache — LRU', () => {
     expect(cache.size).toBe(1);
   });
 
+  it('purges prior epochs even when quickMessageCount changed between them (review round 5)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([20, 10])], true));
+    await cache.getOrSeed(key({ transcriptEpoch: 0, quickMessageCount: 100 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 1, quickMessageCount: 200 }), loadFull);
+    // The epoch-0/count-100 window is unreachable forever — it must not strand
+    // an LRU slot.
+    expect(cache.size).toBe(1);
+  });
+
 });
