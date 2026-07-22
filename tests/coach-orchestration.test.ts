@@ -1804,6 +1804,31 @@ describe('Coach orchestration', () => {
     expect(after?.disabled).toBe(false);
   });
 
+  it('a prereq-refused retry chain re-arms the intent AND the rendered model agrees (closing round)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    // Prereqs break (mapping lost) so the retry's chain refuses to start.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    app.tabState = { ...app.tabState, mappedPersonalityId: null };
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    // The RENDERED model agrees — no unchecked box over an armed session.
+    expect(app.coachOverlayModel.sessionView.draftIntent).toBe(true);
+  });
+
   it('«Новый диалог» during the preflight is refused; a raced reset never receives the old question (round 15)', async () => {
     const app = await makeReadyApp();
     app.openCoach();

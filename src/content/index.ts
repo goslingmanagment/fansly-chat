@@ -2286,9 +2286,12 @@ export class ChatGooseContentApp {
       }
       if (origin === 'auto' && fromComposer && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
-        this.rebuildCoachModel();
-        this.renderAll();
       }
+      // Render UNCONDITIONALLY after the mutations above (closing round): a
+      // re-armed intent without a rebuild left the checkbox showing unchecked
+      // while the session would attach — the state≠view class again.
+      this.rebuildCoachModel();
+      this.renderAll();
       return;
     }
     const step = this.coachStore.recordRecapStep(session, mode, origin);
