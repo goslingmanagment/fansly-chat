@@ -798,6 +798,22 @@ describe('OverlayController — coach chat mode', () => {
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
 
+  it('a model-side restore lands in an EMPTY focused textarea (review round 15)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.value).toBe('');
+
+    // The rejected-submit restore path: model has the question back while the
+    // field is still focused and empty — the sync must not be skipped.
+    controller.render(createCoachModel({ composerText: 'восстановленный вопрос' }));
+    expect(requireElement<HTMLTextAreaElement>('.chatgoose-coach-input').value).toBe(
+      'восстановленный вопрос',
+    );
+  });
+
   it('preserves composer focus and value across a re-render (no textarea rebuild)', () => {
     const { controller } = makeController();
     controller.render(createCoachModel());

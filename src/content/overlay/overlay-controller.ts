@@ -1478,9 +1478,14 @@ export class OverlayController {
     }
     view.sendButton.classList.toggle('chatgoose-hidden', streaming);
     view.cancelButton.classList.toggle('chatgoose-hidden', !streaming);
-    // Restore the composer text ONLY when unfocused — never clobber a live caret.
+    // Restore the composer text when unfocused — never clobber a live caret.
+    // Exception (review round 15): restoring into an EMPTY focused textarea is
+    // safe (there is no caret work to lose) and required — after a rejected
+    // Send the focus stays in the field, and the model-side restore was
+    // invisible until blur.
     if (
-      document.activeElement !== view.composerTextarea &&
+      (document.activeElement !== view.composerTextarea ||
+        view.composerTextarea.value === '') &&
       view.composerTextarea.value !== sv.composerText
     ) {
       view.composerTextarea.value = sv.composerText;

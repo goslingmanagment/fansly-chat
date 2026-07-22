@@ -1804,6 +1804,35 @@ describe('Coach orchestration', () => {
     expect(after?.disabled).toBe(false);
   });
 
+  it('«Новый диалог» during the preflight is refused; a raced reset never receives the old question (round 15)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('старый вопрос');
+    // The reset is refused during the preflight (armed question).
+    app.resetCoachSession();
+    expect(app.activeCoachSession.feedItems).toEqual([]);
+    const idBefore = app.activeCoachSession.sessionId;
+
+    // Even if a future path rotated the id mid-await, the submit aborts: force
+    // the rotation directly to pin the sessionId guard.
+    app.activeCoachSession.sessionId = 'rotated';
+    (app.port.send as any).mockClear();
+    releaseStorage();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await first;
+    expect((app.port.send as any).mock.calls.length).toBe(0);
+    app.activeCoachSession.sessionId = idBefore;
+  });
+
   it('a THROWING send during the recap-chain start takes the clean STOP rollback (round 14)', async () => {
     const app = await makeReadyApp();
     (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';

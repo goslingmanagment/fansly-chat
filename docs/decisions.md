@@ -1422,6 +1422,11 @@ disconnect has not landed yet) to its documented false return AT THE SOURCE —
 every dispatch site, including the recap-chain start that used to leak the
 exception into a menu click handler, now takes its own never-dispatched
 rollback; the producer's «kernel did not report attachedRecaps» branch is
-coordinator-pinned. All coach-OWNED copy is now Russian; the shared
+coordinator-pinned. Round 15: «Новый диалог» is refused during the submit
+preflight AND the submit aborts on a rotated sessionId (a raced reset must
+never receive the discarded dialog's question); a model-side restore lands in
+an empty focused textarea (the caret guard only protects non-empty fields —
+after a rejected Send the restore was invisible until blur); the PortClient
+throw→false mapping is pinned at its own level. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

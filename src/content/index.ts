@@ -1966,6 +1966,11 @@ export class ChatGooseContentApp {
     }
 
     const preflightToken = Symbol('coach-preflight');
+    // «Новый диалог» during the await rotates sessionId on the SAME object
+    // (review round 15): a reset dialog must never receive the pre-reset
+    // question, so the submit aborts silently when the id changed (the reset's
+    // own confirm already warned about unsent text).
+    const sessionIdAtStart = session.sessionId;
     this.coachSubmitPreflights.set(session, preflightToken);
     let settings;
     try {
@@ -2007,6 +2012,11 @@ export class ChatGooseContentApp {
         this.rebuildCoachModel();
         this.renderAll();
       }
+    }
+    // «Новый диалог» during the await: the question belonged to the DISCARDED
+    // dialog — do not dispatch it into the fresh one, do not restore it.
+    if (session.sessionId !== sessionIdAtStart) {
+      return;
     }
     // A route/persona change during the await tore the session/route down.
     if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
@@ -2152,6 +2162,12 @@ export class ChatGooseContentApp {
   private resetCoachSession(): void {
     const session = this.activeCoachSession;
     if (!session) {
+      return;
+    }
+    // A submit preflight is an armed question (review round 15): refuse the
+    // reset like a mid-turn reset, instead of racing it.
+    if (this.coachSubmitPreflights.has(session)) {
+      this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
     // The composer is locked while streaming, but the topbar New-dialog button
