@@ -82,7 +82,9 @@ interface OverlayCallbacks {
    * into the Fansly DOM it renders into. */
   onOpenDebugPrompt?: () => void;
   /** Coach chat (spec §3). Optional so non-coach constructions stay valid. */
-  onCoachSubmit?: (question: string) => void;
+  /** `origin` distinguishes a composer-typed question from a canned one (chip)
+   * — a rejected canned submit must NOT be restored into the composer. */
+  onCoachSubmit?: (question: string, origin?: 'composer' | 'canned') => void;
   /** «New dialog» — clears the session (the orchestrator confirms if non-empty). */
   onCoachNewDialog?: () => void;
   /** Explicit recap refresh from within coach (short/full, spec §5). */
@@ -1888,7 +1890,7 @@ export class OverlayController {
     this.autosizeCoachComposer(textarea);
     // Keep the orchestrator's persisted composerText in sync with the clear.
     this.callbacks.onCoachComposerInput?.('');
-    this.callbacks.onCoachSubmit?.(question);
+    this.callbacks.onCoachSubmit?.(question, 'composer');
   }
 
   private autosizeCoachComposer(textarea: HTMLTextAreaElement): void {
@@ -2128,7 +2130,7 @@ export class OverlayController {
       wrap.append(
         this.createCoachButton(chip, 'chatgoose-coach-followup-chip', () => {
           // Normal submission (spec §8.3); the composer text is untouched.
-          this.callbacks.onCoachSubmit?.(chip);
+          this.callbacks.onCoachSubmit?.(chip, 'canned');
         }),
       );
     }
@@ -2184,7 +2186,10 @@ export class OverlayController {
       anchor = item;
       break;
     }
-    const show = model.operationId === null && anchor?.kind === 'exchange';
+    // Busy covers the submit PREFLIGHT too (review round 8): chips stayed
+    // clickable in that window and a rejected click injected its canned text.
+    const show =
+      model.operationId === null && sv.composerEnabled && anchor?.kind === 'exchange';
     if (!show) {
       if (view.followupsNode) {
         view.followupsNode.remove();

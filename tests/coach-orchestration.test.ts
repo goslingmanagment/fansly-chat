@@ -1486,6 +1486,58 @@ describe('Coach orchestration', () => {
     expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'chip question' });
   });
 
+  it('a rejected CANNED submit never writes its text into the composer (review round 8)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('Другой вариант', { fromComposer: false });
+    // Second chip click inside the preflight window: rejected, and the canned
+    // text must NOT appear in the (empty) composer.
+    await app.submitCoachQuestion('Сделай короче', { fromComposer: false });
+    expect(app.activeCoachSession.composerText).toBe('');
+
+    releaseStorage();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await first;
+  });
+
+  it('the preflight busy projection is per-session — a fan switch does not strand the new coach (review round 8)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+    const first = app.submitCoachQuestion('slow question');
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    // Fan switch during the preflight; the NEW session's coach must be usable.
+    (globalThis as any).browser.storage.local.get = storageGet;
+    app.handleRouteChange('group-2');
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(true);
+
+    releaseStorage();
+    await first;
+    await flush();
+    // The finished preflight of the OLD session leaves the new one untouched.
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(true);
+  });
+
   it('typing into the Fansly composer re-renders the open coach surface (review P2)', async () => {
     const app = await makeReadyApp();
     draftHolder.value = '';
@@ -1762,9 +1814,13 @@ describe('Coach orchestration', () => {
     (globalThis as any).browser.storage.local.get = storageGet;
 
     // The retry never dispatched — its re-read intent is preserved as stored
-    // intent, so the manual Send still attaches the live draft.
+    // intent. The CANNED question is deliberately NOT written to the composer
+    // (round 8): the failed-attempt item keeps its «Повторить» for a re-try.
     expect(app.activeCoachSession.draftIntent).toBe(true);
-    expect(app.activeCoachSession.composerText).toBe('will fail');
+    expect(app.activeCoachSession.composerText).toBe('');
+    expect(
+      app.activeCoachSession.feedItems.some((i: any) => i.kind === 'failed-attempt'),
+    ).toBe(true);
   });
 
   it('a port drop during a force-only Retry re-arms the intent (review P1)', async () => {
@@ -1784,7 +1840,8 @@ describe('Coach orchestration', () => {
     await app.handleCoachRetry(failed.question, failed.includedDraft);
 
     expect(app.activeCoachSession.draftIntent).toBe(true);
-    expect(app.activeCoachSession.composerText).toBe('will fail');
+    // Canned retry question stays out of the composer (round 8).
+    expect(app.activeCoachSession.composerText).toBe('');
   });
 
   it('reopen drops the settings snapshot until the fresh read lands (review P1)', async () => {

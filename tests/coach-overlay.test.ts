@@ -386,7 +386,7 @@ describe('OverlayController — coach chat mode', () => {
     textarea.value = 'как продать?';
 
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('как продать?');
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('как продать?', 'composer');
     expect(textarea.value).toBe('');
   });
 
@@ -694,9 +694,20 @@ describe('OverlayController — coach chat mode', () => {
     Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-followup-chip'))
       .find((c) => c.textContent === 'Сделай короче')!
       .click();
-    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Сделай короче');
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Сделай короче', 'canned');
     // Composer text deliberately untouched by a chip click.
     expect(textarea.value).toBe('typed');
+  });
+
+  it('hides follow-up chips while the composer is locked (submit preflight, review round 8)', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x1', 'q1', 'advice')],
+        composerEnabled: false,
+      }),
+    );
+    expect(document.querySelector('.chatgoose-coach-followup-chip')).toBeNull();
   });
 
   it('hides follow-up chips while streaming and when the latest item is a failed attempt', () => {
@@ -1010,7 +1021,7 @@ describe('OverlayController — coach chat mode', () => {
     ).find((button) => button.textContent === 'Другой вариант');
     expect(chip).toBeDefined();
     chip!.click();
-    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Другой вариант');
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Другой вариант', 'canned');
   });
 
   it('keeps the memory divider node attached and identity-stable across an unchanged re-render (review P2)', () => {

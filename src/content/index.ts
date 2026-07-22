@@ -359,6 +359,10 @@ export class ChatGooseContentApp {
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
   // await (the auto-recap decision needs live settings before arming anything).
   private coachSubmitInFlight = false;
+  // The preflight's BUSY projection is per-session (review round 8): a global
+  // lock left a freshly opened coach of ANOTHER fan disabled forever when the
+  // original session's finally-rebuild found it no longer active.
+  private coachSubmitPreflightSession: CoachSession | null = null;
   // Opening Coach and successful recap steps start metadata reads without
   // blocking normal Coach turns. Only a still-unconsumed first auto-recap
   // decision awaits the latest read, so stale status cannot trigger duplicate
@@ -610,8 +614,8 @@ export class ChatGooseContentApp {
       this.quickInlineVisible = true;
       this.renderSurfaces();
     },
-    onCoachSubmit: (question) => {
-      void this.submitCoachQuestion(question);
+    onCoachSubmit: (question, origin) => {
+      void this.submitCoachQuestion(question, { fromComposer: origin !== 'canned' });
     },
     onCoachNewDialog: () => this.resetCoachSession(),
     onCoachRecap: (mode) => this.handleCoachRecap(mode),
@@ -1895,7 +1899,13 @@ export class ChatGooseContentApp {
    * re-entrant submit across the await. */
   async submitCoachQuestion(
     question: string,
-    opts?: { forceDraftRead?: boolean },
+    opts?: {
+      forceDraftRead?: boolean;
+      /** False for canned sources (chips, Retry, chain resubmits): a rejected
+       * canned submit must never be written into the composer (review round 8
+       * — a chip double-click used to inject its text into an empty field). */
+      fromComposer?: boolean;
+    },
   ): Promise<void> {
     const session = this.activeCoachSession;
     if (!session) {
@@ -1913,7 +1923,9 @@ export class ChatGooseContentApp {
     ) {
       // The renderer clears the textarea BEFORE onCoachSubmit, so a rejected
       // submit must put the question back or it is silently lost (review P1).
-      restoreCoachComposerText(session, trimmed);
+      if (opts?.fromComposer !== false) {
+        restoreCoachComposerText(session, trimmed);
+      }
       if (opts?.forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
       }
@@ -1931,6 +1943,7 @@ export class ChatGooseContentApp {
     }
 
     this.coachSubmitInFlight = true;
+    this.coachSubmitPreflightSession = session;
     // Project the lock immediately (review P1) — the await below opens a real
     // interaction window on slow storage.
     this.rebuildCoachModel();
@@ -1955,7 +1968,9 @@ export class ChatGooseContentApp {
       // (it emits onCoachComposerInput('') before onCoachSubmit). Nothing was
       // armed yet — settings are read first — so restore the question into the
       // composer so it is not silently lost, and tell the user to retry.
-      restoreCoachComposerText(session, trimmed);
+      if (opts?.fromComposer !== false) {
+        restoreCoachComposerText(session, trimmed);
+      }
       // A Retry that never dispatched keeps its re-read intent (spec §5).
       if (opts?.forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
@@ -1968,14 +1983,19 @@ export class ChatGooseContentApp {
       return;
     } finally {
       this.coachSubmitInFlight = false;
-      if (this.activeCoachSession === session) {
+      this.coachSubmitPreflightSession = null;
+      // Rebuild whatever coach is active NOW (review round 8): the preflight
+      // may have started on a different fan's session.
+      if (this.activeCoachSession) {
         this.rebuildCoachModel();
         this.renderAll();
       }
     }
     // A route/persona change during the await tore the session/route down.
     if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
-      restoreCoachComposerText(session, trimmed);
+      if (opts?.fromComposer !== false) {
+        restoreCoachComposerText(session, trimmed);
+      }
       if (opts?.forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
       }
@@ -1984,7 +2004,9 @@ export class ChatGooseContentApp {
     // Defensive re-check: the in-flight guard blocked re-entrant submits, but a
     // terminal elsewhere could conceivably have armed an op during the await.
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
-      restoreCoachComposerText(session, trimmed);
+      if (opts?.fromComposer !== false) {
+        restoreCoachComposerText(session, trimmed);
+      }
       if (opts?.forceDraftRead) {
         this.coachStore.setDraftIntent(session, true);
       }
@@ -2008,7 +2030,14 @@ export class ChatGooseContentApp {
       }
     }
 
-    this.sendCoachTurn(session, groupId, trimmed, settings.coachHistoryLimit, opts?.forceDraftRead ?? false);
+    this.sendCoachTurn(
+      session,
+      groupId,
+      trimmed,
+      settings.coachHistoryLimit,
+      opts?.forceDraftRead ?? false,
+      opts?.fromComposer !== false,
+    );
   }
 
   /** Arm the single-op markers + pending marker and send a coach turn (spec §3).
@@ -2026,6 +2055,7 @@ export class ChatGooseContentApp {
     trimmed: string,
     coachHistoryLimit: number,
     forceDraftRead: boolean,
+    fromComposer: boolean,
   ): void {
     // Live draft read (spec §5): once, right before dispatch. `getActive…` is
     // synchronous, so nothing can mutate the composer between this read and the
@@ -2090,7 +2120,9 @@ export class ChatGooseContentApp {
       // Never dispatched (spec §5): the consumed intent — and a Retry's re-read
       // intent — are restored for the manual resend (review P1).
       this.coachStore.setDraftIntent(session, priorIntent || forceDraftRead);
-      restoreCoachComposerText(session, trimmed);
+      if (fromComposer) {
+        restoreCoachComposerText(session, trimmed);
+      }
       this.clearCoachOperationState();
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.rebuildCoachModel();
@@ -2105,7 +2137,7 @@ export class ChatGooseContentApp {
    * draft (spec §5): empty now → proceed without; a stale draft is never resent
    * from memory. */
   private async handleCoachRetry(question: string, includedDraft: boolean): Promise<void> {
-    await this.submitCoachQuestion(question, { forceDraftRead: includedDraft });
+    await this.submitCoachQuestion(question, { forceDraftRead: includedDraft, fromComposer: false });
   }
 
   /** «Новый диалог» (spec §3): reset the open session in place — new sessionId
@@ -2298,7 +2330,7 @@ export class ChatGooseContentApp {
     this.renderAll();
     if (chain.origin === 'auto' && chain.pendingQuestion && chain.session === this.activeCoachSession) {
       // autoRecapAttempted is already set, so this submit sends a plain turn.
-      void this.submitCoachQuestion(chain.pendingQuestion, { forceDraftRead: chain.forceDraftRead });
+      void this.submitCoachQuestion(chain.pendingQuestion, { forceDraftRead: chain.forceDraftRead, fromComposer: false });
     }
   }
 
@@ -2344,7 +2376,7 @@ export class ChatGooseContentApp {
       this.rebuildCoachModel();
       this.renderAll();
       if (session === this.activeCoachSession) {
-        void this.submitCoachQuestion(pendingQuestion, { forceDraftRead });
+        void this.submitCoachQuestion(pendingQuestion, { forceDraftRead, fromComposer: false });
       }
       return;
     }
@@ -2588,7 +2620,7 @@ export class ChatGooseContentApp {
     // The submit preflight (settings/status await) counts as busy too (review
     // P1): the composer, chips and topbar must lock the moment a chip fires,
     // or a second Send in that window clears text the guard then rejects.
-    const busy = streaming || chainOpId !== null || this.coachSubmitInFlight;
+    const busy = streaming || chainOpId !== null || this.coachSubmitPreflightSession === session;
     return {
       kind: 'coach',
       fanDisplayName: getActiveConversationDisplayName() ?? 'fan',
