@@ -2439,6 +2439,11 @@ export class ChatGooseContentApp {
       if (chain.pendingQuestion && chain.session.composerText === '') {
         chain.session.composerText = chain.pendingQuestion;
       }
+      // A never-dispatched retry keeps its live-draft re-read intent (spec §5,
+      // review P1 — route/disconnect teardowns used to drop it).
+      if (chain.forceDraftRead) {
+        this.coachStore.setDraftIntent(chain.session, true);
+      }
       chain.step.status = 'failed';
       this.coachRecapChain = null;
     }
@@ -2465,6 +2470,11 @@ export class ChatGooseContentApp {
     if (chain) {
       if (chain.pendingQuestion && chain.session.composerText === '') {
         chain.session.composerText = chain.pendingQuestion;
+      }
+      // A never-dispatched retry keeps its live-draft re-read intent (spec §5,
+      // review P1 — route/disconnect teardowns used to drop it).
+      if (chain.forceDraftRead) {
+        this.coachStore.setDraftIntent(chain.session, true);
       }
       chain.step.status = 'failed';
       this.coachRecapChain = null;

@@ -1615,6 +1615,55 @@ describe('Coach orchestration', () => {
     expect(app.activeCoachSession.draftIntent).toBe(true);
   });
 
+  it('a route change during the retry chain re-arms the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    const session = app.activeCoachSession;
+    expect(app.coachRecapChain.forceDraftRead).toBe(true);
+
+    app.handleRouteChange('group-2');
+
+    expect(session.draftIntent).toBe(true);
+  });
+
+  it('a port disconnect during the retry chain re-arms the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    expect(app.coachRecapChain.forceDraftRead).toBe(true);
+
+    app.recoverCoachOnDisconnect();
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+  });
+
   it('consumes the intent BEFORE the pre-dispatch render — the streaming view is unarmed (review P1)', async () => {
     const app = await makeReadyApp();
     draftHolder.value = 'attach me';

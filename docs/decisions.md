@@ -1351,6 +1351,11 @@ on a streaming turn; restored on a failed send), the checkbox locks while the
 composer is locked, every pre-dispatch exit of submitCoachQuestion re-arms a
 Retry's re-read intent, and the transcript cache purges prior-epoch entries of
 the same logical session so «Обновить переписку» cannot evict other sessions'
-windows. All coach-OWNED copy is now Russian; the shared
+windows. Round 3: the send/cancel group right-aligns via its own auto margin
+(space-between with the gated-off draft block's lone child parked «Отправить»
+left); route-change and disconnect chain teardowns re-arm the retry intent like
+every other pre-dispatch stop; a discarded coach view disposes its menu's
+document-level outside-click listener; the background producer lane
+(turnContext flooring/shape, epoch→reseed threading) is coordinator-tested. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

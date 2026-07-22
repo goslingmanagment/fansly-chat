@@ -1099,6 +1099,31 @@ describe('OverlayController — coach chat mode', () => {
     expect(document.querySelector('.chatgoose-coach-draft-attach')).toBeNull();
   });
 
+  it('ship-gate off: the buttons are the lone composer-actions child, right-aligned by auto margin', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ draftAttachEnabled: false }));
+    const actions = requireElement<HTMLDivElement>('.chatgoose-coach-composer-actions');
+    expect(actions.children).toHaveLength(1);
+    expect(actions.firstElementChild?.classList.contains('chatgoose-coach-composer-buttons')).toBe(true);
+    // The CSS contract that keeps «Отправить» right-aligned WITHOUT a sibling
+    // (review P1: space-between with one child parks it left).
+    expect(contentStyles).toMatch(/\.chatgoose-coach-composer-buttons\s*\{[^}]*margin-left:\s*auto/);
+  });
+
+  it('disposes the menu outside-click listener when the coach view is discarded (review P2)', () => {
+    const addSpy = vi.spyOn(document, 'addEventListener');
+    const removeSpy = vi.spyOn(document, 'removeEventListener');
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').click();
+    const added = addSpy.mock.calls.filter(([type]) => type === 'mousedown').length;
+    expect(added).toBeGreaterThan(0);
+
+    controller.render({ kind: 'hidden' });
+    const removed = removeSpy.mock.calls.filter(([type]) => type === 'mousedown').length;
+    expect(removed).toBe(added);
+  });
+
   it('locks the draft checkbox while a turn streams (review P1)', () => {
     vi.mocked(getActiveConversationDraftText).mockReturnValue('live draft');
     const { controller } = makeController();

@@ -199,6 +199,10 @@ interface CoachRecapMenu {
   trigger: HTMLButtonElement;
   isOpen(): boolean;
   close(): void;
+  /** close() for a DISCARDED view: drops the document-level outside-click
+   * listener without touching focus (the trigger may already be detached) —
+   * review P2: the listener used to outlive the view. */
+  dispose(): void;
   setBusy(busy: boolean): void;
   updateAutoRecap(
     override: CoachAutoRecapOverride,
@@ -687,12 +691,21 @@ export class OverlayController {
     this.headerSubtitleEl = subtitle;
     this.inlineErrorEl = inlineError;
     this.bodyEl = body;
+    this.disposeCoachView();
     this.currentView = null;
     return true;
   }
 
+  /** Drop a discarded coach view's document-level menu listener (review P2). */
+  private disposeCoachView(): void {
+    if (this.currentView?.kind === 'coach') {
+      this.currentView.recapMenu.dispose();
+    }
+  }
+
   private teardownShell(): void {
     this.clearLoadingElapsedTimer();
+    this.disposeCoachView();
     this.root.replaceChildren();
     this.shellEl = null;
     this.backdropEl = null;
@@ -702,6 +715,7 @@ export class OverlayController {
     this.headerSubtitleEl = null;
     this.inlineErrorEl = null;
     this.bodyEl = null;
+    this.disposeCoachView();
     this.currentView = null;
     this.lastFocusedReplyOpId = null;
   }
@@ -789,6 +803,7 @@ export class OverlayController {
       }
       const view = this.createCoachView(model);
       this.bodyEl.replaceChildren(view.root);
+      this.disposeCoachView();
       this.currentView = view;
       // A rebuild is a (re)open: the feed is only measurable once attached
       // (createCoachView runs updateCoachView while detached → scrollHeight 0),
@@ -816,6 +831,7 @@ export class OverlayController {
           };
 
     this.bodyEl.replaceChildren(nextView.root);
+    this.disposeCoachView();
     this.currentView = nextView;
 
     // Auto-focus the first Insert button for newly visible completed fast replies
@@ -1595,6 +1611,16 @@ export class OverlayController {
       }
     };
 
+    const dispose = (): void => {
+      open = false;
+      panel.classList.add('chatgoose-hidden');
+      trigger.setAttribute('aria-expanded', 'false');
+      if (outsideHandler) {
+        document.removeEventListener('mousedown', outsideHandler);
+        outsideHandler = null;
+      }
+    };
+
     const openMenu = (): void => {
       if (open || trigger.disabled) {
         return;
@@ -1690,6 +1716,7 @@ export class OverlayController {
       trigger,
       isOpen: () => open,
       close,
+      dispose,
       setBusy: (busy: boolean) => {
         if (trigger.disabled !== busy) {
           trigger.disabled = busy;
