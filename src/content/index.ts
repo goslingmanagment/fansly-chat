@@ -75,6 +75,8 @@ import { installUiTheme } from '../shared/theme.js';
 import type {
   CoachAutoRecapOverride,
   CoachOverlayFeedItem,
+  CoachRecapStatusView,
+  CoachSettingsSnapshot,
   DebugPromptEchoStatus,
   LlmSpendSummary,
   BackgroundPortMessage,
@@ -175,26 +177,24 @@ function formatCoachRecapAge(ageMs: number): string {
   return `${Math.floor(hours / 24)} дн`;
 }
 
-/** The pre-formatted recap freshness line for the coach empty state (spec §5),
- * or '' when nothing is stored (the renderer hides the line on ''). */
-function formatCoachRecapStatusLine(status: RecapStatusResponse | null): string {
+/** The structured recap freshness line for the coach empty state (spec §2.1/§5),
+ * or `{ state: 'hidden' }` when nothing is stored (the renderer draws nothing). */
+function formatCoachRecapStatusLine(status: RecapStatusResponse | null): CoachRecapStatusView {
   if (!status) {
-    return '';
+    return { state: 'hidden' };
   }
   // Honest empty-state (E43): the Hub could not be REACHED (not connected, no
   // page match, Hub down/absent) — that is NOT "no recap". Surface it distinctly
   // so the chatter doesn't read a false «нет рекапа» and regenerate needlessly.
   if (status.state === 'unavailable') {
-    return 'Рекап: не удалось проверить';
+    return { state: 'unavailable' };
   }
-  const parts: string[] = [];
-  if (status.full) {
-    parts.push(`Полный: ${formatCoachRecapAge(status.full.ageMs)}`);
+  const fullAge = status.full ? formatCoachRecapAge(status.full.ageMs) : null;
+  const shortAge = status.short ? formatCoachRecapAge(status.short.ageMs) : null;
+  if (fullAge === null && shortAge === null) {
+    return { state: 'hidden' };
   }
-  if (status.short) {
-    parts.push(`Короткий: ${formatCoachRecapAge(status.short.ageMs)}`);
-  }
-  return parts.join(' · ');
+  return { state: 'ages', fullAge, shortAge };
 }
 
 /** The auto-recap mode a session runs with: `inherit` defers to the setting. */
@@ -278,9 +278,6 @@ function restoreCoachComposerText(session: CoachSession, question: string): void
     session.composerText = question;
   }
 }
-
-/** The topbar auto-recap override cycle order (spec §5 per-session control). */
-const AUTO_RECAP_CYCLE: readonly CoachAutoRecapOverride[] = ['inherit', 'off', 'short', 'full'];
 
 export class ChatGooseContentApp {
   private routeNonce = 0;
@@ -384,6 +381,12 @@ export class ChatGooseContentApp {
   // view-cached-only op 404s with no_saved_recap (the local cache may hold one
   // size but not the other), or null when there is nothing left to fall back to.
   private viewLastFallbackMode: 'short' | 'full' | null = null;
+  // Content-owned snapshot of the two v15 coach settings the renderer needs live
+  // (spec §7): coachHistoryLimit (memory-window divider §8.1) + the global
+  // coachAutoRecap default (the «По настройке (<x>)» menu label §3). Null until
+  // hydrated on openCoach; refreshed on the settings:changed path. Fallbacks are
+  // in buildCoachModel (menu label drops the value; divider not rendered).
+  private coachSettingsSnapshot: CoachSettingsSnapshot | null = null;
 
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
@@ -610,11 +613,13 @@ export class ChatGooseContentApp {
     },
     onCoachNewDialog: () => this.resetCoachSession(),
     onCoachRecap: (mode) => this.handleCoachRecap(mode),
-    onCoachAutoRecapCycle: () => this.cycleCoachAutoRecapOverride(),
-    onCoachRetry: (question) => {
-      void this.handleCoachRetry(question);
+    onCoachSetAutoRecap: (override) => this.setCoachAutoRecapOverride(override),
+    onCoachRetry: (question, includedDraft) => {
+      void this.handleCoachRetry(question, includedDraft);
     },
     onCoachComposerInput: (text) => this.handleCoachComposerInput(text),
+    onCoachDraftIntentChange: (intent) => this.handleCoachDraftIntentChange(intent),
+    onCoachRefreshTranscript: () => this.handleCoachRefreshTranscript(),
     onRecapPick: (mode) => this.pickStandaloneRecap(mode),
     onRecapOpenLast: () => this.openLastRecap(),
   });
@@ -1857,6 +1862,9 @@ export class ChatGooseContentApp {
     // break opening; null slots are fine.
     const promise = this.refreshCoachRecapStatus(session);
     this.coachRecapStatusRead = { session, promise };
+    // Coach UI settings snapshot (spec §7): async, best-effort — a failure just
+    // leaves the menu label without its value and the memory divider unrendered.
+    void this.refreshCoachSettingsSnapshot(session);
   }
 
   /** Drop the coach overlay while RETAINING the store session for reopen (spec
@@ -1878,7 +1886,10 @@ export class ChatGooseContentApp {
    * wire history need live settings (`coachAutoRecap`, `deepMessageCount`,
    * `coachHistoryLimit`); a synchronous `coachSubmitInFlight` guard blocks a
    * re-entrant submit across the await. */
-  async submitCoachQuestion(question: string): Promise<void> {
+  async submitCoachQuestion(
+    question: string,
+    opts?: { forceDraftRead?: boolean },
+  ): Promise<void> {
     const session = this.activeCoachSession;
     if (!session) {
       return;
@@ -1962,17 +1973,33 @@ export class ChatGooseContentApp {
       }
     }
 
-    this.sendCoachTurn(session, groupId, trimmed, settings.coachHistoryLimit);
+    this.sendCoachTurn(session, groupId, trimmed, settings.coachHistoryLimit, opts?.forceDraftRead ?? false);
   }
 
   /** Arm the single-op markers + pending marker and send a coach turn (spec §3).
-   * Synchronous — settings are already resolved by the caller. */
+   * Synchronous — settings are already resolved by the caller.
+   *
+   * Draft attach (spec §5): the live Fansly draft is read ONCE here, immediately
+   * before dispatch (after any recap step), when the session intent is armed OR a
+   * Retry forces it (`forceDraftRead`). Only non-empty text is actually SENT
+   * (`includedDraft = "sent"`, not "requested"). A dispatched turn consumes the
+   * intent — reset to off after the start reaches the background; a
+   * never-dispatched turn preserves it for the manual retry. */
   private sendCoachTurn(
     session: CoachSession,
     groupId: string,
     trimmed: string,
     coachHistoryLimit: number,
+    forceDraftRead: boolean,
   ): void {
+    // Live draft read (spec §5): once, right before dispatch. `getActive…` is
+    // synchronous, so nothing can mutate the composer between this read and the
+    // start below.
+    const attachDraft = session.draftIntent || forceDraftRead;
+    const liveDraft = attachDraft ? getActiveConversationDraftText().trim() : '';
+    const draftText = liveDraft.length > 0 ? liveDraft : undefined;
+    const includedDraft = draftText !== undefined;
+
     const operationId = crypto.randomUUID();
     this.activeFeature = 'coach-chat';
     this.activeOperationId = operationId;
@@ -1981,7 +2008,7 @@ export class ChatGooseContentApp {
     this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
     this.activeFanDisplayName = getActiveConversationDisplayName() ?? 'fan';
     this.lastFeature = 'coach-chat';
-    this.coachStore.beginPending(session, trimmed, operationId);
+    this.coachStore.beginPending(session, trimmed, operationId, includedDraft);
     this.coachPendingAnswerText = '';
     this.rebuildCoachModel();
     this.renderAll();
@@ -2001,25 +2028,36 @@ export class ChatGooseContentApp {
       // Carry-forward 2: the session id keys the background transcript cache; a
       // per-tab fallback would lose «Новый диалог» reseed isolation.
       coachSessionId: session.sessionId,
+      // «Обновить переписку» reseed key (spec §8.4).
+      transcriptEpoch: session.transcriptEpoch,
+      // Only a non-empty draft rides the wire (spec §5 / §9 protocol test).
+      ...(draftText !== undefined ? { draftText } : {}),
     };
     const sent = this.port.send(payload);
     if (!sent) {
       // The port is mid-reconnect; the start never reached the background so no
       // terminal will arrive. The turn never started — clearPending (not a
-      // failed-attempt) and ask the user to retry.
+      // failed-attempt), preserve the draft intent (never dispatched), and ask
+      // the user to retry.
       this.coachStore.clearPending(session);
       restoreCoachComposerText(session, trimmed);
       this.clearCoachOperationState();
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
       this.rebuildCoachModel();
       this.renderAll();
+      return;
     }
+    // Dispatched (spec §5): consume the intent regardless of eventual outcome.
+    this.coachStore.setDraftIntent(session, false);
   }
 
   /** Retry a failed/cancelled turn: replays its question as a FRESH operation
-   * (new UUID, freshly refreshed transcript background-side) — spec §8. */
-  private async handleCoachRetry(question: string): Promise<void> {
-    await this.submitCoachQuestion(question);
+   * (new UUID, freshly refreshed transcript background-side) — spec §8. If the
+   * failed attempt had actually SENT a draft, Retry re-reads the CURRENT live
+   * draft (spec §5): empty now → proceed without; a stale draft is never resent
+   * from memory. */
+  private async handleCoachRetry(question: string, includedDraft: boolean): Promise<void> {
+    await this.submitCoachQuestion(question, { forceDraftRead: includedDraft });
   }
 
   /** «Новый диалог» (spec §3): reset the open session in place — new sessionId
@@ -2069,18 +2107,46 @@ export class ChatGooseContentApp {
     this.startCoachRecapChain(session, mode, 'explicit', null);
   }
 
-  /** Cycle the per-session auto-recap override (spec §5 topbar control):
-   * inherit → off → short → full → inherit. */
-  private cycleCoachAutoRecapOverride(): void {
+  /** Set the per-session auto-recap override from the «Рекап ▾» menu radio group
+   * (spec §3): the four items map 1:1 to `inherit | off | short | full`. */
+  private setCoachAutoRecapOverride(override: CoachAutoRecapOverride): void {
     const session = this.activeCoachSession;
     if (!session) {
       return;
     }
-    const index = AUTO_RECAP_CYCLE.indexOf(session.autoRecapOverride);
-    const next = AUTO_RECAP_CYCLE[(index + 1) % AUTO_RECAP_CYCLE.length]!;
-    this.coachStore.setAutoRecapOverride(session, next);
+    if (session.autoRecapOverride === override) {
+      return;
+    }
+    this.coachStore.setAutoRecapOverride(session, override);
     this.rebuildCoachModel();
     this.renderAll();
+  }
+
+  /** Toggle the draft-attach intent (spec §5). No re-render: the checkbox owns
+   * its own checked state; the stored intent is read at the next dispatch and
+   * reflected on the next model rebuild. */
+  private handleCoachDraftIntentChange(intent: boolean): void {
+    if (this.activeCoachSession) {
+      this.coachStore.setDraftIntent(this.activeCoachSession, intent);
+    }
+  }
+
+  /** «Обновить переписку» (spec §8.4): bump the content-owned transcript epoch so
+   * the NEXT coach turn misses the background cache and reseeds the full quick
+   * window. Feed, composer, auto-recap state, and history are untouched; there is
+   * no live Fansly read on click and no dependency on a live service worker. */
+  private handleCoachRefreshTranscript(): void {
+    const session = this.activeCoachSession;
+    if (!session) {
+      return;
+    }
+    // Busy guard: the menu disables the item while streaming/recapping, but a
+    // mid-turn epoch bump would still be harmless (it only affects the next
+    // turn's cache key); refuse it anyway to match the menu's disabled state.
+    if (this.activeFeature === 'coach-chat' || this.coachRecapChain) {
+      return;
+    }
+    this.coachStore.bumpTranscriptEpoch(session);
   }
 
   /** Run a recap step INSIDE the coach feed (spec §5 orchestration). A
@@ -2291,6 +2357,9 @@ export class ChatGooseContentApp {
         generationRef: message.generationRef ?? '',
         question,
         answerRaw,
+        // Post-attach turn context (spec §8.2); absent from an old background →
+        // the collapsed «Отправлено коучу…» line is simply not rendered.
+        ...(message.turnContext !== undefined ? { turnContext: message.turnContext } : {}),
       });
     }
     this.clearCoachOperationState();
@@ -2408,6 +2477,8 @@ export class ChatGooseContentApp {
           question: exchange.question,
           answerProse: prose,
           drafts: exchange.drafts.map((draft) => ({ text: draft.text, index: draft.index })),
+          // Collapsed «Отправлено коучу…» line (spec §8.2); absent → no line.
+          ...(exchange.turnContext !== undefined ? { turnContext: exchange.turnContext } : {}),
         };
       }
       if (item.kind === 'failed-attempt') {
@@ -2416,6 +2487,7 @@ export class ChatGooseContentApp {
           question: item.question,
           errorCode: item.errorCode,
           retryable: item.retryable,
+          includedDraft: item.includedDraft,
         };
       }
       return {
@@ -2444,6 +2516,11 @@ export class ChatGooseContentApp {
         composerText: session.composerText,
         composerEnabled: !busy,
         autoRecapOverride: session.autoRecapOverride,
+        draftIntent: session.draftIntent,
+        // §7 snapshot: absent (fallbacks) until the async read lands.
+        ...(this.coachSettingsSnapshot !== null
+          ? { settingsSnapshot: this.coachSettingsSnapshot }
+          : {}),
         groupId: this.currentGroupId ?? '',
         // (creator account, group) identity — a change swaps the whole feed.
         // Coach is context-bound and closes on route/persona change, so the
@@ -2487,6 +2564,31 @@ export class ChatGooseContentApp {
     } catch {
       // Recap status is best-effort; a failure just leaves the line empty.
     }
+  }
+
+  /** Hydrate/refresh the coach UI settings snapshot (spec §7): the two v15 fields
+   * the renderer needs live — `coachHistoryLimit` (memory divider §8.1) and the
+   * global `coachAutoRecap` default (the «По настройке (<x>)» menu label §3).
+   * Best-effort: a read failure leaves the snapshot as-is (fallbacks apply).
+   * Stale-session guard: only fold the result in while the SAME coach session is
+   * still open, so a late read after close/switch never disturbs a new dialog. */
+  private async refreshCoachSettingsSnapshot(session: CoachSession): Promise<void> {
+    let snapshot: CoachSettingsSnapshot;
+    try {
+      const { settings } = await loadStorageState();
+      snapshot = {
+        coachHistoryLimit: settings.coachHistoryLimit,
+        coachAutoRecap: settings.coachAutoRecap,
+      };
+    } catch {
+      return;
+    }
+    if (this.activeCoachSession !== session) {
+      return;
+    }
+    this.coachSettingsSnapshot = snapshot;
+    this.rebuildCoachModel();
+    this.renderSurfaces();
   }
 
   // ─── Port Messages ──────────────────────────────────────────────────
@@ -2587,6 +2689,13 @@ export class ChatGooseContentApp {
           this.closeCoach();
         }
         this.tabState = message.state;
+        // Coach UI settings snapshot (spec §7): a settings change may alter
+        // coachHistoryLimit / coachAutoRecap while Coach is open — refresh the
+        // snapshot so the menu label and memory divider stay current. Guarded on
+        // an open session (a persona/account change above may have closed Coach).
+        if (message.type === 'settings:changed' && this.activeCoachSession) {
+          void this.refreshCoachSettingsSnapshot(this.activeCoachSession);
+        }
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
         if (personaChanged) {
           this.renderSurfaces();

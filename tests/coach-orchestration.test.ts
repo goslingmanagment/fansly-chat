@@ -7,6 +7,16 @@ import { JSDOM } from 'jsdom';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import type { TabUiState } from '../src/shared/types.js';
 
+// The live Fansly draft the coach reads at dispatch (spec §5). A hoisted holder
+// so the module mock's factory can close over a per-test mutable value.
+const draftHolder = vi.hoisted(() => ({ value: '' }));
+vi.mock('../src/content/textarea.js', () => ({
+  getActiveConversationDraftText: vi.fn(() => draftHolder.value),
+  insertIntoFanslyTextarea: vi.fn(async () => undefined),
+  copyToClipboard: vi.fn(async () => undefined),
+  focusActiveConversationTextarea: vi.fn(() => null),
+}));
+
 let mockStorageState: Record<string, unknown>;
 let recapStatusResponse: unknown;
 
@@ -184,6 +194,7 @@ describe('Coach orchestration', () => {
   beforeEach(() => {
     mockStorageState = createStorageState();
     recapStatusResponse = { full: null, short: null };
+    draftHolder.value = '';
     installDom();
   });
 
@@ -1021,10 +1032,8 @@ describe('Coach orchestration', () => {
     recapStatusResponse = { full: staleSlot(), short: null };
     app.openCoach();
     await flush();
-    // inherit → off → short → full
-    app.cycleCoachAutoRecapOverride();
-    app.cycleCoachAutoRecapOverride();
-    app.cycleCoachAutoRecapOverride();
+    // The «Авто-рекап» radio group sets the override directly (spec §3).
+    app.setCoachAutoRecapOverride('full');
     expect(app.activeCoachSession.autoRecapOverride).toBe('full');
     (app.port.send as any).mockClear();
 
@@ -1366,5 +1375,233 @@ describe('Coach orchestration', () => {
 
     coachButton!.click();
     expect(openSpy).toHaveBeenCalled();
+  });
+
+  // ─── Draft attach state machine (spec §5) ─────────────────────────────────
+
+  it('does NOT send draftText when the intent is off, even with a live draft', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'my unsent reply';
+    app.openCoach();
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBeUndefined();
+    expect(app.activeCoachSession.pending.includedDraft).toBe(false);
+  });
+
+  it('sends the live draft as draftText when armed, records includedDraft, resets intent after dispatch', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'attach this';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBe('attach this');
+    // `includedDraft` = actually sent, not requested.
+    expect(app.activeCoachSession.pending.includedDraft).toBe(true);
+    // A dispatched turn consumes the intent (spec §5).
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+  });
+
+  it('armed but empty live draft at dispatch → no draftText, includedDraft false', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = '';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBeUndefined();
+    expect(app.activeCoachSession.pending.includedDraft).toBe(false);
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+  });
+
+  it('reads the live draft at DISPATCH, not at arm time', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'stale at arm';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    // The composer changes between arming and sending.
+    draftHolder.value = 'fresh at dispatch';
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('help me');
+
+    expect(lastSent(app).draftText).toBe('fresh at dispatch');
+  });
+
+  it('intent survives close/reopen and is reset by «Новый диалог»', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+
+    // Close/reopen retains the session, so the intent persists.
+    app.closeCoach();
+    app.openCoach();
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+
+    // «Новый диалог» resets it.
+    app.resetCoachSession();
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+  });
+
+  it('a never-dispatched turn (port drop) preserves the draft intent', async () => {
+    const app = await makeReadyApp();
+    app.port.send = vi.fn(() => false);
+    draftHolder.value = 'attach me';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+
+    await app.submitCoachQuestion('dropped');
+
+    // The start never reached the background → intent preserved for the retry.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('dropped');
+  });
+
+  it('Retry re-reads the CURRENT live draft when the failed attempt included one', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    const opId = pendingOpId(app);
+    expect(lastSent(app).draftText).toBe('first draft');
+
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: opId,
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(failed.includedDraft).toBe(true);
+
+    // The live draft has changed since; Retry re-reads it (never resent from memory).
+    draftHolder.value = 'retry draft';
+    (app.port.send as any).mockClear();
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(lastSent(app).draftText).toBe('retry draft');
+  });
+
+  it('Retry with an empty live draft now proceeds WITHOUT a draft', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    const opId = pendingOpId(app);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: opId,
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    draftHolder.value = '';
+    (app.port.send as any).mockClear();
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(lastSent(app).draftText).toBeUndefined();
+  });
+
+  // ─── §8.4 transcript epoch ────────────────────────────────────────────────
+
+  it('«Обновить переписку» bumps the transcript epoch carried on the next turn', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('first');
+    expect(lastSent(app).transcriptEpoch).toBe(0);
+    // Finish the turn so the composer unlocks for the next submit.
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: pendingOpId(app),
+      fanDisplayName: 'alice',
+      result: { rawText: 'answer', parts: [] },
+      generationRef: 'gen-1',
+    });
+
+    const feedBefore = app.activeCoachSession.feedItems.length;
+    app.handleCoachRefreshTranscript();
+    expect(app.activeCoachSession.transcriptEpoch).toBe(1);
+    // Feed/composer untouched by the reseed request.
+    expect(app.activeCoachSession.feedItems.length).toBe(feedBefore);
+
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('second');
+    expect(lastSent(app).transcriptEpoch).toBe(1);
+  });
+
+  // ─── §8.2 turnContext ─────────────────────────────────────────────────────
+
+  it('retains turnContext from operation:complete on the committed exchange', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await app.submitCoachQuestion('advise me');
+    const opId = pendingOpId(app);
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: opId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'Try this.', parts: [] },
+      generationRef: 'gen-1',
+      turnContext: {
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 3 * 24 * 60 * 60 * 1000 }, short: null },
+      },
+    });
+
+    const exchange = app.activeCoachSession.completedExchanges[0];
+    expect(exchange.turnContext).toEqual({
+      sentMessageCount: 42,
+      transcriptCoverage: 'window',
+      attachedRecaps: { full: { ageMs: 3 * 24 * 60 * 60 * 1000 }, short: null },
+    });
+    const feedExchange = app.coachOverlayModel.sessionView.feedItems.find(
+      (i: any) => i.kind === 'exchange',
+    );
+    expect(feedExchange.turnContext.sentMessageCount).toBe(42);
+  });
+
+  it('an operation:complete WITHOUT turnContext (old background) commits no line', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await app.submitCoachQuestion('advise me');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: pendingOpId(app),
+      fanDisplayName: 'alice',
+      result: { rawText: 'Try this.', parts: [] },
+      generationRef: 'gen-1',
+    });
+    expect(app.activeCoachSession.completedExchanges[0].turnContext).toBeUndefined();
+  });
+
+  // ─── §7 settings snapshot ─────────────────────────────────────────────────
+
+  it('hydrates the coach settings snapshot on open and refreshes it on settings:changed', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachSettingsSnapshot).toEqual({ coachHistoryLimit: 10, coachAutoRecap: 'off' });
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toEqual({
+      coachHistoryLimit: 10,
+      coachAutoRecap: 'off',
+    });
+
+    // A settings change updates the live values (spec §7).
+    (mockStorageState.settings as any).coachAutoRecap = 'short';
+    (mockStorageState.settings as any).coachHistoryLimit = 5;
+    app.handlePortMessage({ type: 'settings:changed', state: readyState() });
+    await flush();
+    expect(app.coachSettingsSnapshot).toEqual({ coachHistoryLimit: 5, coachAutoRecap: 'short' });
   });
 });

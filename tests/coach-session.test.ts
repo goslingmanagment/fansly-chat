@@ -126,7 +126,7 @@ describe('CoachSessionStore — commit discipline', () => {
   });
 
   it('records a failed attempt in the feed ONLY — question retained, partial text discarded', () => {
-    store.beginPending(session, 'question that failed', 'op-fail');
+    store.beginPending(session, 'question that failed', 'op-fail', false);
     const returned = store.recordFailedAttempt(
       session,
       'op-fail',
@@ -145,8 +145,9 @@ describe('CoachSessionStore — commit discipline', () => {
     expect(item.errorCode).toBe('output_exhausted');
     expect(item.retryable).toBe(true);
     // Structurally impossible to have stored any partial answer text: the item
-    // carries EXACTLY these four keys, nothing answer-shaped.
-    expect(Object.keys(item)).toEqual(['kind', 'question', 'errorCode', 'retryable']);
+    // carries EXACTLY these keys, nothing answer-shaped (includedDraft is the
+    // honest sent-flag, spec §5).
+    expect(Object.keys(item)).toEqual(['kind', 'question', 'errorCode', 'retryable', 'includedDraft']);
     expect('answerRaw' in item).toBe(false);
     expect('answer' in item).toBe(false);
   });
@@ -174,7 +175,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('begins and clears a pending attempt', () => {
-    const attempt = store.beginPending(session, 'draft question', 'op-9');
+    const attempt = store.beginPending(session, 'draft question', 'op-9', false);
     expect(session.pending).toBe(attempt);
     expect(attempt.operationId).toBe('op-9');
     expect(attempt.question).toBe('draft question');
@@ -185,7 +186,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('clears pending on a matching commit', () => {
-    store.beginPending(session, 'q', 'op-1');
+    store.beginPending(session, 'q', 'op-1', false);
     store.commitExchange(session, {
       operationId: 'op-1',
       generationRef: 'gen-1',
@@ -196,7 +197,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('clears pending on a failed attempt whose operationId matches', () => {
-    store.beginPending(session, 'q', 'op-1');
+    store.beginPending(session, 'q', 'op-1', false);
     const item = store.recordFailedAttempt(session, 'op-1', 'q', 'cancelled', true);
     expect(item).not.toBeNull();
     expect(session.pending).toBeUndefined();
@@ -204,9 +205,9 @@ describe('CoachSessionStore — pending lifecycle', () => {
 
   it('ignores a stale failure whose operationId no longer matches the live pending (cancel → retry race)', () => {
     // Attempt A is cancelled and retried as B; A's terminal failure lands LATE.
-    store.beginPending(session, 'the question', 'op-A');
+    store.beginPending(session, 'the question', 'op-A', false);
     store.clearPending(session); // cancel A
-    const attemptB = store.beginPending(session, 'the question', 'op-B'); // retry as B
+    const attemptB = store.beginPending(session, 'the question', 'op-B', false); // retry as B
 
     const result = store.recordFailedAttempt(session, 'op-A', 'the question', 'cancelled', true);
 
@@ -224,7 +225,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('never serializes a pending attempt to the wire', () => {
-    store.beginPending(session, 'unsent q', 'op-1');
+    store.beginPending(session, 'unsent q', 'op-1', false);
     expect(store.serializeForWire(session, 10)).toEqual([]);
   });
 });
@@ -279,11 +280,11 @@ describe('CoachSessionStore — reset semantics', () => {
     session.composerText = 'half-typed question';
     // Populate every structure the reset must clear: a committed exchange (feed +
     // wire), a recorded failure (feed), and a live pending marker.
-    store.beginPending(session, 'qc', 'op-commit');
+    store.beginPending(session, 'qc', 'op-commit', false);
     store.commitExchange(session, { operationId: 'op-commit', generationRef: 'g', question: 'qc', answerRaw: 'a' });
-    store.beginPending(session, 'qf', 'op-fail');
+    store.beginPending(session, 'qf', 'op-fail', false);
     store.recordFailedAttempt(session, 'op-fail', 'qf', 'e', true);
-    store.beginPending(session, 'qp', 'op-pending');
+    store.beginPending(session, 'qp', 'op-pending', false);
 
     store.resetSession(session);
 
@@ -313,5 +314,70 @@ describe('CoachSessionStore — reset semantics', () => {
     expect(bAfter).not.toBe(b);
     expect(aAfter.sessionId).not.toBe(a.sessionId);
     expect(bAfter.sessionId).not.toBe(b.sessionId);
+  });
+});
+
+describe('CoachSessionStore — draft intent + transcript epoch + turnContext', () => {
+  it('defaults draftIntent off and transcriptEpoch 0; setDraftIntent + bumpTranscriptEpoch mutate them', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acc', 'grp');
+    expect(session.draftIntent).toBe(false);
+    expect(session.transcriptEpoch).toBe(0);
+
+    store.setDraftIntent(session, true);
+    expect(session.draftIntent).toBe(true);
+
+    store.bumpTranscriptEpoch(session);
+    store.bumpTranscriptEpoch(session);
+    expect(session.transcriptEpoch).toBe(2);
+  });
+
+  it('«Новый диалог» resets draftIntent to off (spec §5)', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acc', 'grp');
+    store.setDraftIntent(session, true);
+
+    store.resetSession(session);
+    expect(session.draftIntent).toBe(false);
+  });
+
+  it('records includedDraft from the pending attempt onto the failed-attempt item', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acc', 'grp');
+    store.beginPending(session, 'q', 'op-1', true);
+
+    const item = store.recordFailedAttempt(session, 'op-1', 'q', 'cancelled', true);
+    expect(item?.includedDraft).toBe(true);
+  });
+
+  it('commitExchange retains the turnContext (spec §8.2), and omits it when absent', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acc', 'grp');
+    store.beginPending(session, 'q', 'op-1', false);
+    const exchange = store.commitExchange(session, {
+      operationId: 'op-1',
+      generationRef: 'gen-1',
+      question: 'q',
+      answerRaw: 'answer',
+      turnContext: {
+        sentMessageCount: 12,
+        transcriptCoverage: 'window',
+        attachedRecaps: { full: { ageMs: 1000 }, short: null },
+      },
+    });
+    expect(exchange.turnContext).toEqual({
+      sentMessageCount: 12,
+      transcriptCoverage: 'window',
+      attachedRecaps: { full: { ageMs: 1000 }, short: null },
+    });
+
+    store.beginPending(session, 'q2', 'op-2', false);
+    const plain = store.commitExchange(session, {
+      operationId: 'op-2',
+      generationRef: 'gen-2',
+      question: 'q2',
+      answerRaw: 'answer2',
+    });
+    expect(plain.turnContext).toBeUndefined();
   });
 });

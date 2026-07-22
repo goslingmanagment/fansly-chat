@@ -28,6 +28,9 @@
   --chatgoose-clay-ink: #c2603f;
   --chatgoose-clay-bg: #f7e8e1;
   --chatgoose-clay-line: #e8c3b3;
+  /* Coach question-bubble tint (spec §4) — a separate token so the bubble can be
+     tuned independently of clay-bg later. */
+  --chatgoose-clay-soft: #f7e8e1;
   /* Money green (the only other color voice) */
   --chatgoose-green: #3a7d44;
   --chatgoose-green-bg: #e9f1e5;
@@ -75,6 +78,7 @@
   --chatgoose-clay-ink: #d97757;
   --chatgoose-clay-bg: #3f2b21;
   --chatgoose-clay-line: #61412f;
+  --chatgoose-clay-soft: #3f2b21;
   --chatgoose-green: #54a263;
   --chatgoose-green-bg: #233a28;
   --chatgoose-green-line: #38583f;
@@ -1021,6 +1025,8 @@
   min-height: 0;
   width: 100%;
   gap: 12px;
+  /* Size container for the empty-state column stacking (spec §2.1). */
+  container-type: inline-size;
 }
 
 .chatgoose-coach-topbar {
@@ -1031,15 +1037,96 @@
   flex: 0 0 auto;
 }
 
+/* Structured recap freshness line (spec §2.1): lead + label muted, values
+   emphasized. */
 .chatgoose-coach-recap {
   font-size: 12px;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-coach-recap-lead,
+.chatgoose-coach-recap-label,
+.chatgoose-coach-recap-sep {
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-coach-recap-value {
   color: var(--chatgoose-ink-mid);
+  font-weight: 600;
 }
 
 .chatgoose-coach-topbar-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+/* «Рекап ▾» menu (spec §3). */
+.chatgoose-coach-recap-menu {
+  position: relative;
+}
+
+.chatgoose-coach-recap-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  min-width: 200px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--chatgoose-bg1);
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-menu);
+  box-shadow: var(--chatgoose-shadow-pop);
+}
+
+.chatgoose-coach-recap-item {
+  position: relative;
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  border-color: transparent;
+  color: var(--chatgoose-ink);
+  padding: 7px 10px;
+}
+
+.chatgoose-coach-recap-item:hover {
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-coach-recap-item[role='menuitemradio'] {
+  padding-left: 26px;
+}
+
+.chatgoose-coach-recap-item-checked {
+  color: var(--chatgoose-clay-ink);
+  font-weight: 600;
+}
+
+.chatgoose-coach-recap-item-checked::before {
+  content: '✓';
+  position: absolute;
+  margin-left: -16px;
+}
+
+.chatgoose-coach-recap-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--chatgoose-line);
+}
+
+.chatgoose-coach-recap-menu-group {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+  padding: 5px 10px 2px;
 }
 
 /* The separately-scrolling log. */
@@ -1063,10 +1150,11 @@
   border-radius: 3px;
 }
 
+/* ~20px between exchanges; question/answer/card grouped tight (~8px) — spec §2.1. */
 .chatgoose-coach-items {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 
 .chatgoose-coach-exchange {
@@ -1075,11 +1163,12 @@
   gap: 8px;
 }
 
+/* Directional bubbles (spec §2.1): clay-soft question, right, radius 12 12 4 12. */
 .chatgoose-coach-question {
   align-self: flex-end;
-  max-width: 85%;
+  max-width: 82%;
   padding: 8px 12px;
-  border-radius: var(--chatgoose-radius-card);
+  border-radius: 12px 12px 4px 12px;
   background: var(--chatgoose-clay-soft, var(--chatgoose-bg2));
   color: var(--chatgoose-ink);
   font-size: 13px;
@@ -1087,14 +1176,16 @@
   overflow-wrap: anywhere;
 }
 
+/* Answer bubble: bg2, NO border, radius 12 12 12 4, sans (approved E13 exception
+   — conversational UI reads better in the UI face) — spec §2.1. */
 .chatgoose-coach-answer {
   align-self: flex-start;
-  max-width: 100%;
+  max-width: 92%;
   padding: 10px 12px;
-  border-radius: var(--chatgoose-radius-card);
-  border: 1px solid var(--chatgoose-line);
+  border-radius: 12px 12px 12px 4px;
   background: var(--chatgoose-bg2);
   color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font);
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -1111,9 +1202,28 @@
   margin-top: 2px;
 }
 
+/* Draft card polish (spec §2.1): mono micro-caps «ЧЕРНОВИК» title in clay-ink;
+   «Вставить» clay-tinted; «Копировать» stays ghost (button-secondary). The
+   fan-facing draft body keeps its serif + dashed clay border from .chatgoose-card. */
+.chatgoose-coach-draft-title {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-coach-draft-insert {
+  background: var(--chatgoose-clay-soft, var(--chatgoose-clay-bg));
+  border-color: var(--chatgoose-clay-line);
+  color: var(--chatgoose-clay-ink);
+}
+
 .chatgoose-coach-draft-armed,
 .chatgoose-coach-newdialog-armed {
   background: var(--chatgoose-warn, var(--chatgoose-amber, var(--chatgoose-clay)));
+  border-color: var(--chatgoose-warn, var(--chatgoose-amber, var(--chatgoose-clay)));
   color: #fff;
 }
 
@@ -1127,24 +1237,97 @@
   gap: 6px;
 }
 
+/* Recap-step feed item (spec §2.1): a centered system line flanked by hairline
+   rules on both sides. The text is a single anonymous flex item between the two
+   pseudo-element rules, so setting textContent never disturbs them. */
 .chatgoose-coach-recap-step {
-  align-self: center;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 11px;
   color: var(--chatgoose-ink-low);
-  padding: 3px 10px;
-  border-radius: var(--chatgoose-radius-chip);
-  background: var(--chatgoose-bg0);
-  border: 1px solid var(--chatgoose-line);
+  text-align: center;
+}
+
+.chatgoose-coach-recap-step::before,
+.chatgoose-coach-recap-step::after {
+  content: '';
+  flex: 1 1 auto;
+  border-top: 1px solid var(--chatgoose-line);
 }
 
 .chatgoose-coach-recap-step[data-status='failed'] {
   color: var(--chatgoose-bad);
 }
 
-/* Per-session auto-recap override cycle button (spec §5). */
-.chatgoose-coach-autorecap {
-  font-variant-numeric: tabular-nums;
+/* Memory-window boundary divider (spec §8.1): same centered-hairline treatment. */
+.chatgoose-coach-memory-divider {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chatgoose-coach-memory-divider::before,
+.chatgoose-coach-memory-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  border-top: 1px dashed var(--chatgoose-line);
+}
+
+.chatgoose-coach-memory-divider-label {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--chatgoose-ink-low);
   white-space: nowrap;
+}
+
+/* Collapsed «Отправлено коучу…» context line (spec §8.2). */
+.chatgoose-coach-turncontext {
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+  align-self: flex-start;
+  max-width: 92%;
+}
+
+.chatgoose-coach-turncontext-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.chatgoose-coach-turncontext-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chatgoose-coach-turncontext-summary::before {
+  content: '▶ ';
+  font-size: 8px;
+}
+
+.chatgoose-coach-turncontext[open] .chatgoose-coach-turncontext-summary::before {
+  content: '▼ ';
+}
+
+.chatgoose-coach-turncontext-detail {
+  margin: 4px 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--chatgoose-ink-mid);
+}
+
+/* Follow-up chips under the latest completed answer (spec §8.3). */
+.chatgoose-coach-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: 92%;
+}
+
+.chatgoose-coach-followup-chip {
+  font-size: 12px;
 }
 
 /* Recap coverage header on a generated recap result (spec §5). */
@@ -1174,30 +1357,66 @@
   font-weight: 600;
 }
 
+/* Empty state (spec §2.1): vertically centered, heading + one muted context
+   line + 9 hints in three labeled columns. */
 .chatgoose-coach-empty {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 8px 2px;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px 2px;
   color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-coach-empty-heading {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--chatgoose-ink);
 }
 
-.chatgoose-coach-empty-hints {
+.chatgoose-coach-empty-context {
+  font-size: 12px;
+  color: var(--chatgoose-ink-low);
+  max-width: 40ch;
+}
+
+.chatgoose-coach-empty-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.chatgoose-coach-empty-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  align-items: flex-start;
+  align-items: stretch;
+}
+
+.chatgoose-coach-empty-group-label {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+  text-align: left;
 }
 
 .chatgoose-coach-hint {
   font-size: 12px;
   text-align: left;
+}
+
+/* Narrow overlay (spec §2.1): columns stack, groups keep their labels. */
+@container (max-width: 560px) {
+  .chatgoose-coach-empty-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Sticky composer — never scrolls with the feed. */
@@ -1231,8 +1450,68 @@
 
 .chatgoose-coach-composer-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.chatgoose-coach-composer-buttons {
+  display: flex;
   gap: 6px;
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
+
+/* «Отправить» filled clay, slightly larger than the secondary buttons (spec §2.1). */
+.chatgoose-coach-send {
+  background: var(--chatgoose-clay);
+  border-color: var(--chatgoose-clay);
+  color: #fff;
+  padding: 8px 16px;
+  font-weight: 600;
+}
+
+.chatgoose-coach-send:hover:not(:disabled) {
+  background: var(--chatgoose-clay-deep);
+  border-color: var(--chatgoose-clay-deep);
+}
+
+/* Draft-attach block (spec §5/§2.1): checkbox + helper stacked under the label,
+   the helper indented past the box. */
+.chatgoose-coach-draft-attach {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chatgoose-coach-draft-attach-label {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--chatgoose-ink-mid);
+  cursor: pointer;
+}
+
+.chatgoose-coach-draft-attach-box {
+  flex: 0 0 auto;
+}
+
+.chatgoose-coach-draft-attach-help {
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+  padding-left: 22px;
+}
+
+.chatgoose-coach-draft-attach-box:disabled {
+  opacity: 0.5;
+}
+
+.chatgoose-coach-draft-attach-box:disabled ~ span,
+.chatgoose-coach-draft-attach-label:has(.chatgoose-coach-draft-attach-box:disabled) {
+  opacity: 0.6;
+  cursor: default;
 }
 
 @keyframes chatgoose-caret-blink {
@@ -1277,6 +1556,18 @@
 .chatgoose-subtitle {
   font-size: 13px;
   color: var(--chatgoose-ink-mid);
+}
+
+/* Coach-scoped header (spec §2): the eyebrow goes clay and a hairline sits under
+   the header. Scoped under .chatgoose-overlay-coach — the shell (and its
+   ink-low eyebrow, borderless header) is shared by every overlay surface. */
+.chatgoose-overlay-coach .chatgoose-overlay-header {
+  border-bottom: 1px solid var(--chatgoose-line);
+  padding-bottom: 12px;
+}
+
+.chatgoose-overlay-coach .chatgoose-eyebrow {
+  color: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-close {

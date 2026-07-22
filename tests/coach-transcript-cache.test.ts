@@ -63,6 +63,7 @@ function key(
     accountId: MODEL_ID,
     groupId: 'group-1',
     quickMessageCount: 100,
+    transcriptEpoch: 0,
     ...overrides,
   };
 }
@@ -111,6 +112,23 @@ describe('CoachTranscriptCache — seed', () => {
     const second = await cache.getOrSeed(key(), loadFull);
     expect(loadFull).toHaveBeenCalledTimes(1); // still cached — no second load
     expect(normalizedIds(second)).toEqual(['10', '20', '30', '40', '50']);
+  });
+
+  it('a changed transcriptEpoch is a cache miss → full reseed (spec §8.4 «Обновить переписку»)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([50, 40, 30]), makePage([20, 10])], true));
+
+    await cache.getOrSeed(key(), loadFull);
+    expect(loadFull).toHaveBeenCalledTimes(1);
+
+    // The «Обновить переписку» epoch bump gives a DIFFERENT key: a refresh at the
+    // bumped epoch finds nothing cached (a plain miss — loadPage is never called).
+    const loadPage = vi.fn();
+    expect((await cache.refresh(key({ transcriptEpoch: 1 }), loadPage)).status).toBe('miss');
+    expect(loadPage).not.toHaveBeenCalled();
+    // …and getOrSeed at the bumped epoch reseeds the full window.
+    await cache.getOrSeed(key({ transcriptEpoch: 1 }), loadFull);
+    expect(loadFull).toHaveBeenCalledTimes(2);
   });
 });
 

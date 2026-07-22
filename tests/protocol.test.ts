@@ -307,6 +307,79 @@ describe('protocol boundary guards', () => {
     expect(isBackgroundPortMessage({ ...base, generationRef: 42 })).toBe(false);
   });
 
+  it('accepts a valid coach turnContext on operation:complete; rejects malformed shapes (spec §8.2)', () => {
+    const base = {
+      type: 'operation:complete',
+      operationId: 'op-1',
+      result: { text: 'ok' },
+      fanDisplayName: 'Alice',
+    };
+    // Absent is valid (old-background tolerance).
+    expect(isBackgroundPortMessage(base)).toBe(true);
+    // Full valid shape.
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: { ageMs: 1000 }, short: null },
+        },
+      }),
+    ).toBe(true);
+    // Bad coverage enum.
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'partial',
+          attachedRecaps: { full: null, short: null },
+        },
+      }),
+    ).toBe(false);
+    // A recap slot missing ageMs.
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: {}, short: null },
+        },
+      }),
+    ).toBe(false);
+    // Non-numeric count.
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 'lots',
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: null, short: null },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts draftText + transcriptEpoch on a coach operation:start; rejects a non-numeric epoch', () => {
+    const base = {
+      type: 'operation:start',
+      operationId: 'op-coach-4',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 3,
+      domFanDisplayName: 'Alice',
+      chatterQuestion: 'help',
+    };
+    // draftText is an optional string (spec §5); transcriptEpoch an optional number (§8.4).
+    expect(isContentPortMessage({ ...base, draftText: 'my unsent reply', transcriptEpoch: 2 })).toBe(true);
+    // Both absent is fine.
+    expect(isContentPortMessage(base)).toBe(true);
+    // A non-numeric epoch is rejected at the boundary.
+    expect(isContentPortMessage({ ...base, transcriptEpoch: 'two' })).toBe(false);
+  });
+
   it('accepts valid content port messages at the background boundary', () => {
     expect(isContentPortMessage({
       type: 'operation:start',

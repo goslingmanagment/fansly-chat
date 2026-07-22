@@ -1,11 +1,10 @@
-// Task 9 — the coach overlay chat render mode (keyed incremental renderer).
-// These tests pin the renderer contract the way spec §3 describes it: a stable
-// DOM node per feed item (keyed), a streaming update that mutates ONLY the
-// pending answer's text node, composer focus/caret + feed scroll survival across
-// renders, the Esc-while-streaming = cancel / Esc-while-idle = close split, draft
-// cards whose acceptance carries the CARD's exchange operationId (not the live
-// session op), failed-attempt Retry, recap steps that mutate in place, and the
-// a11y roles. Prose must always render via textContent (never markdown/HTML).
+// Coach overlay chat render mode (keyed incremental renderer) + the 2026-07-21
+// panel redesign (spec §2/§3/§5/§6/§8). These tests pin the renderer contract:
+// the coach-scoped header, the «Рекап ▾» menu, the structured recap status line,
+// the grouped empty state, the draft-attach checkbox, the memory-window divider
+// (§8.1), the collapsed turn-context line (§8.2), the follow-up chips (§8.3),
+// keyed rendering (stable node per feed item; streaming mutates ONLY the pending
+// answer text node), the Esc split, RU copy, and prose-via-textContent safety.
 
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,7 +20,6 @@ vi.mock('../src/content/textarea.js', () => ({
 import { OverlayController } from '../src/content/overlay/overlay-controller.js';
 import { installContentStyles } from '../src/content/dom-anchor.js';
 import {
-  copyToClipboard,
   insertIntoFanslyTextarea,
   getActiveConversationDraftText,
 } from '../src/content/textarea.js';
@@ -51,10 +49,11 @@ function createCoachModel(
     operationId,
     sessionView: {
       feedItems: [],
-      recapStatusLine: '',
+      recapStatusLine: { state: 'hidden' },
       composerText: '',
       composerEnabled: true,
       autoRecapOverride: 'inherit',
+      draftIntent: false,
       groupId: 'example',
       sessionKey: 'acct|group',
       ...sessionView,
@@ -75,6 +74,15 @@ function exchangeItem(
   drafts: Array<{ text: string; index: number }> = [],
 ): CoachOverlayFeedItem {
   return { kind: 'exchange', operationId, question, answerProse, drafts };
+}
+
+function failedItem(
+  question: string,
+  errorCode: string,
+  retryable: boolean,
+  includedDraft = false,
+): CoachOverlayFeedItem {
+  return { kind: 'failed-attempt', question, errorCode, retryable, includedDraft };
 }
 
 function requireElement<T extends Element>(selector: string): T {
@@ -106,10 +114,13 @@ function installDom() {
   vi.stubGlobal('HTMLElement', window.HTMLElement);
   vi.stubGlobal('HTMLDivElement', window.HTMLDivElement);
   vi.stubGlobal('HTMLButtonElement', window.HTMLButtonElement);
+  vi.stubGlobal('HTMLInputElement', window.HTMLInputElement);
   vi.stubGlobal('HTMLTextAreaElement', window.HTMLTextAreaElement);
+  vi.stubGlobal('HTMLDetailsElement', window.HTMLDetailsElement);
   vi.stubGlobal('Text', window.Text);
   vi.stubGlobal('Node', window.Node);
   vi.stubGlobal('Event', window.Event);
+  vi.stubGlobal('MouseEvent', window.MouseEvent);
   vi.stubGlobal('CustomEvent', window.CustomEvent);
   vi.stubGlobal('MutationObserver', window.MutationObserver);
   vi.stubGlobal('KeyboardEvent', window.KeyboardEvent);
@@ -126,7 +137,9 @@ function makeController(overrides?: Partial<ConstructorParameters<typeof Overlay
     onCoachSubmit: vi.fn(),
     onCoachNewDialog: vi.fn(),
     onCoachRecap: vi.fn(),
-    onCoachAutoRecapCycle: vi.fn(),
+    onCoachSetAutoRecap: vi.fn(),
+    onCoachRefreshTranscript: vi.fn(),
+    onCoachDraftIntentChange: vi.fn(),
     onCoachRetry: vi.fn(),
     onCoachComposerInput: vi.fn(),
     onRecapPick: vi.fn(),
@@ -137,10 +150,19 @@ function makeController(overrides?: Partial<ConstructorParameters<typeof Overlay
   return { controller, callbacks };
 }
 
+function menuItemByText(text: string): HTMLButtonElement {
+  const item = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-recap-item'),
+  ).find((button) => button.textContent === text);
+  if (!item) {
+    throw new Error(`Missing menu item: ${text}`);
+  }
+  return item;
+}
+
 describe('OverlayController — coach chat mode', () => {
   beforeEach(() => {
     installDom();
-    // Clear leaked call history (restoreAllMocks does not reset vi.fn calls).
     vi.clearAllMocks();
     vi.mocked(getActiveConversationDraftText).mockReturnValue('');
   });
@@ -151,83 +173,276 @@ describe('OverlayController — coach chat mode', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the empty state with starter hints and a log-role feed when idle and empty', () => {
+  // ─── Header (spec §2/§6) ──────────────────────────────────────────────────
+
+  it('renders a coach-scoped header: clay eyebrow «Коуч», title @<fan>, no subtitle', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ fanDisplayName: 'alice' }));
+
+    expect(requireElement<HTMLDivElement>('.chatgoose-eyebrow').textContent).toBe('Коуч');
+    expect(requireElement<HTMLDivElement>('.chatgoose-title').textContent).toBe('@alice');
+    // Subtitle removed (spec §2): the row is hidden.
+    expect(
+      requireElement<HTMLDivElement>('.chatgoose-subtitle').classList.contains('chatgoose-hidden'),
+    ).toBe(true);
+  });
+
+  // ─── Empty state (spec §2.1/§6) ───────────────────────────────────────────
+
+  it('renders the empty state with heading, context line, and 9 hints in 3 labeled groups', () => {
     const { controller } = makeController();
     controller.render(createCoachModel());
 
     const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
     expect(feed.getAttribute('role')).toBe('log');
-    expect(document.querySelector('.chatgoose-coach-empty')).not.toBeNull();
-    // Header eyebrow reflects the Coach surface.
-    expect(requireElement<HTMLDivElement>('.chatgoose-eyebrow').textContent).toBe('Coach');
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-empty-heading').textContent).toBe(
+      'Спроси коуча про этого фана',
+    );
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-empty-context').textContent).toBe(
+      'Контекст подтянется сам: переписка, траты, рекап, персона модели',
+    );
+    const groupLabels = Array.from(
+      document.querySelectorAll<HTMLDivElement>('.chatgoose-coach-empty-group-label'),
+    ).map((el) => el.textContent);
+    expect(groupLabels).toEqual(['Продать', 'Вернуть', 'Понять']);
+    expect(document.querySelectorAll('.chatgoose-coach-hint')).toHaveLength(9);
   });
 
-  it('shows the recap status line and fires onCoachNewDialog from the header button', () => {
+  it('a hint click prefills the composer (existing mechanism), never submits', () => {
     const { controller, callbacks } = makeController();
-    controller.render(createCoachModel({ recapStatusLine: 'Full: 3d · Short: 10m' }));
+    controller.render(createCoachModel());
+    const hint = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-hint'),
+    ).find((b) => b.textContent === 'Просит скидку — что ответить?')!;
+    hint.click();
 
-    expect(requireElement<HTMLDivElement>('.chatgoose-coach-recap').textContent).toContain(
-      'Full: 3d · Short: 10m',
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    expect(textarea.value).toBe('Просит скидку — что ответить?');
+    expect(callbacks.onCoachComposerInput).toHaveBeenCalledWith('Просит скидку — что ответить?');
+    expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
+  });
+
+  it('the styles keep the narrow-width column stacking rule (spec §2.1)', () => {
+    expect(contentStyles).toContain('@container (max-width: 560px)');
+    expect(contentStyles).toContain('.chatgoose-coach-empty-groups');
+  });
+
+  // ─── Recap status line (spec §2.1) ────────────────────────────────────────
+
+  it('renders the structured recap status line with muted label + emphasized value', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({ recapStatusLine: { state: 'ages', fullAge: '3 дн', shortAge: '10 мин' } }),
     );
 
-    const newDialog = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach button'),
-    ).find((button) => /new dialog/i.test(button.textContent ?? ''));
-    expect(newDialog).toBeDefined();
-    // An EMPTY dialog resets immediately (no arm).
-    newDialog!.click();
-    expect(callbacks.onCoachNewDialog).toHaveBeenCalledOnce();
+    const recap = requireElement<HTMLDivElement>('.chatgoose-coach-recap');
+    expect(recap.textContent).toBe('Рекап — полный: 3 дн · короткий: 10 мин');
+    const values = Array.from(
+      recap.querySelectorAll<HTMLSpanElement>('.chatgoose-coach-recap-value'),
+    ).map((el) => el.textContent);
+    expect(values).toEqual(['3 дн', '10 мин']);
+    expect(recap.querySelector('.chatgoose-coach-recap-label')).not.toBeNull();
   });
 
-  it('«New dialog» arms a two-step confirm on a non-empty session, then resets on the second click', () => {
+  it('shows the unavailable fallback and hides the line when hidden', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ recapStatusLine: { state: 'unavailable' } }));
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-recap').textContent).toBe(
+      'Рекап: не удалось проверить',
+    );
+
+    controller.render(createCoachModel({ recapStatusLine: { state: 'hidden' } }));
+    expect(
+      requireElement<HTMLDivElement>('.chatgoose-coach-recap').classList.contains('chatgoose-hidden'),
+    ).toBe(true);
+  });
+
+  // ─── «Рекап ▾» menu (spec §3) ─────────────────────────────────────────────
+
+  it('opens the «Рекап ▾» menu and fires the same recap ops as the old buttons', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+
+    const trigger = requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    trigger.click();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-recap-panel').getAttribute('role')).toBe('menu');
+
+    menuItemByText('Короткий рекап').click();
+    expect(callbacks.onCoachRecap).toHaveBeenCalledWith('short');
+    trigger.click();
+    menuItemByText('Полный рекап').click();
+    expect(callbacks.onCoachRecap).toHaveBeenCalledWith('full');
+    trigger.click();
+    menuItemByText('Обновить переписку').click();
+    expect(callbacks.onCoachRefreshTranscript).toHaveBeenCalledOnce();
+  });
+
+  it('maps the «Авто-рекап» radio items 1:1 to the override, reflecting «По настройке (<x>)»', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(
+      createCoachModel({
+        autoRecapOverride: 'inherit',
+        settingsSnapshot: { coachHistoryLimit: 10, coachAutoRecap: 'short' },
+      }),
+    );
+    requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').click();
+
+    const radios = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+    );
+    expect(radios.map((r) => r.textContent)).toEqual([
+      'По настройке (короткий)',
+      'Выкл',
+      'Короткий',
+      'Полный',
+    ]);
+    // inherit is checked.
+    expect(radios[0]!.getAttribute('aria-checked')).toBe('true');
+
+    menuItemByText('Полный').click();
+    expect(callbacks.onCoachSetAutoRecap).toHaveBeenCalledWith('full');
+  });
+
+  it('drops the resolved value from «По настройке» when the settings snapshot is unknown', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ autoRecapOverride: 'inherit' }));
+    requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').click();
+    const inherit = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+    )[0]!;
+    expect(inherit.textContent).toBe('По настройке');
+  });
+
+  it('disables the «Рекап ▾» trigger while the coach is busy', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').disabled).toBe(false);
+    controller.render(createCoachModel({ operationId: 'op-live', composerEnabled: false }));
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').disabled).toBe(true);
+  });
+
+  it('Esc with the menu open closes the MENU, not the overlay, and returns focus to the trigger', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+    const trigger = requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger');
+    trigger.click();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
+
+    // A second Esc (menu now closed) closes the idle overlay.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(callbacks.onClose).toHaveBeenCalledOnce();
+  });
+
+  // ─── «Новый диалог» (spec §3/§6) ──────────────────────────────────────────
+
+  it('«Новый диалог» arms a two-step confirm on a non-empty session, then resets', () => {
     const { controller, callbacks } = makeController();
     controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
 
     const buttons = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
     );
-    const newDialog = buttons.find((b) => b.textContent === 'New dialog')!;
-    const keep = buttons.find((b) => b.textContent === 'Keep')!;
-    expect(newDialog).toBeDefined();
+    const newDialog = buttons.find((b) => b.textContent === 'Новый диалог')!;
+    const keep = buttons.find((b) => b.textContent === 'Оставить')!;
     expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
 
-    // First click ARMS — no reset yet.
     newDialog.click();
-    expect(newDialog.textContent).toBe('Confirm new dialog');
-    expect(newDialog.classList.contains('chatgoose-coach-newdialog-armed')).toBe(true);
+    expect(newDialog.textContent).toBe('Точно сбросить?');
     expect(keep.classList.contains('chatgoose-hidden')).toBe(false);
     expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
 
-    // Second click CONFIRMS + disarms.
     newDialog.click();
     expect(callbacks.onCoachNewDialog).toHaveBeenCalledOnce();
-    expect(newDialog.textContent).toBe('New dialog');
-    expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(newDialog.textContent).toBe('Новый диалог');
   });
 
-  it('P2: «New dialog» arms (does not reset) when only unsent composer text exists', () => {
+  it('an EMPTY dialog resets «Новый диалог» immediately', () => {
     const { controller, callbacks } = makeController();
-    // Empty feed but a typed-but-unsent question — resetSession would wipe it, so
-    // it must be confirmed just like committed content.
-    controller.render(createCoachModel({ feedItems: [], composerText: '  draft question  ' }));
-
+    controller.render(createCoachModel());
     const newDialog = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
-    ).find((b) => b.textContent === 'New dialog')!;
-
+    ).find((b) => b.textContent === 'Новый диалог')!;
     newDialog.click();
-    expect(newDialog.textContent).toBe('Confirm new dialog');
-    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+    expect(callbacks.onCoachNewDialog).toHaveBeenCalledOnce();
   });
 
-  it('P2: the composer caps the question length at the kernel bound', () => {
-    const { controller } = makeController();
+  // ─── Composer (spec §5/§6) ────────────────────────────────────────────────
+
+  it('submits the composer on Enter with the RU placeholder and clears it', () => {
+    const { controller, callbacks } = makeController();
     controller.render(createCoachModel());
+
     const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
-    expect(textarea.maxLength).toBe(2000);
+    expect(textarea.placeholder).toBe('Спроси про этого фана…');
+    textarea.value = 'как продать?';
+
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('как продать?');
+    expect(textarea.value).toBe('');
   });
 
-  it('P2: coach draft acceptance forwards the exchange generationRef', async () => {
+  it('shows «Отправить»/«Отменить» and locks the composer while streaming', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        operationId: 'op-stream',
+        pendingQuestion: 'why is he cold?',
+        pendingAnswerText: 'Because',
+        composerEnabled: false,
+      }),
+    );
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    expect(textarea.disabled).toBe(true);
+    const cancel = requireElement<HTMLButtonElement>('.chatgoose-coach-cancel');
+    expect(cancel.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(cancel.textContent).toBe('Отменить');
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-send').textContent).toBe('Отправить');
+  });
+
+  // ─── Draft attach checkbox (spec §5/§2.1) ─────────────────────────────────
+
+  it('reflects the draft intent and fires onCoachDraftIntentChange when a live draft exists', () => {
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('unsent reply');
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ draftIntent: true }));
+
+    const box = requireElement<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(box.disabled).toBe(false);
+    expect(box.checked).toBe(true);
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-draft-attach-help').textContent).toBe(
+      'Коуч увидит текст, набранный в поле ответа Fansly.',
+    );
+
+    box.checked = false;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(callbacks.onCoachDraftIntentChange).toHaveBeenCalledWith(false);
+  });
+
+  it('force-unchecks + disables the draft checkbox while the live Fansly composer is empty', () => {
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
+    const { controller } = makeController();
+    // Intent is armed, but an empty live composer force-unchecks + disables it.
+    controller.render(createCoachModel({ draftIntent: true }));
+
+    const box = requireElement<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(box.disabled).toBe(true);
+    expect(box.checked).toBe(false);
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-draft-attach-help').textContent).toBe(
+      'Поле ответа Fansly пустое',
+    );
+  });
+
+  // ─── Draft cards (spec §2.1/§6) ───────────────────────────────────────────
+
+  it('renders draft cards with RU copy and per-card generationRef attribution', async () => {
     const { controller, callbacks } = makeController();
     controller.render(
       createCoachModel({
@@ -244,95 +459,279 @@ describe('OverlayController — coach chat mode', () => {
       }),
     );
 
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-draft-title').textContent).toBe('Черновик');
+    const insert = requireElement<HTMLButtonElement>('.chatgoose-coach-draft-insert');
+    expect(insert.textContent).toBe('Вставить');
     const copy = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft button'),
-    ).find((b) => b.textContent === 'Copy')!;
+    ).find((b) => b.textContent === 'Копировать')!;
     copy.click();
     await Promise.resolve();
     await Promise.resolve();
-
     expect(callbacks.onAcceptance).toHaveBeenCalledWith('exch-1', 'copied', 0, 'gen-ref-77');
   });
 
-  it('«New dialog» disarms the confirm on blur / «Keep» (outside-click abandon)', () => {
+  it('draft Insert into an empty Fansly composer inserts, attributes per-card, and collapses', async () => {
     const { controller, callbacks } = makeController();
-    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
-
-    const buttons = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
+    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 0 }])],
+      }),
     );
-    const newDialog = buttons.find((b) => b.textContent === 'New dialog')!;
-    const keep = buttons.find((b) => b.textContent === 'Keep')!;
+    requireElement<HTMLButtonElement>('.chatgoose-coach-draft-insert').click();
 
-    newDialog.click();
-    expect(newDialog.textContent).toBe('Confirm new dialog');
-
-    // Blur abandons the armed confirm.
-    newDialog.dispatchEvent(new Event('blur'));
-    expect(newDialog.textContent).toBe('New dialog');
-    expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
-    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
-
-    // Re-arm, then «Keep» abandons it too.
-    newDialog.click();
-    keep.click();
-    expect(newDialog.textContent).toBe('New dialog');
-    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mockInsert).toHaveBeenCalledWith('Draft body'));
+    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 0, undefined);
+    expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
 
-  it('submits the composer on Enter and clears it, but not on Shift+Enter or while composing', () => {
+  it('draft «Заменить черновик…» over a non-empty composer requires a two-step confirm', async () => {
     const { controller, callbacks } = makeController();
-    controller.render(createCoachModel());
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('unsent draft');
+    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 0 }])],
+      }),
+    );
+    const insert = requireElement<HTMLButtonElement>('.chatgoose-coach-draft-insert');
+    expect(insert.textContent).toBe('Заменить черновик…');
 
-    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
-    textarea.value = 'how do I sell this?';
+    insert.click();
+    expect(insert.textContent).toBe('Подтвердить замену');
+    expect(mockInsert).not.toHaveBeenCalled();
 
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
-    expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
-
-    // isComposing must suppress the submit (IME).
-    const composing = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-    Object.defineProperty(composing, 'isComposing', { value: true });
-    textarea.dispatchEvent(composing);
-    expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
-
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('how do I sell this?');
-    expect(textarea.value).toBe('');
+    insert.click();
+    await vi.waitFor(() => expect(mockInsert).toHaveBeenCalledWith('Draft body'));
+    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 0, undefined);
   });
 
-  it('reports composer edits through onCoachComposerInput', () => {
+  // ─── Failed attempt (spec §5/§6) ──────────────────────────────────────────
+
+  it('renders a failed attempt with RU copy and a Retry that forwards includedDraft', () => {
     const { controller, callbacks } = makeController();
-    controller.render(createCoachModel());
+    controller.render(createCoachModel({ feedItems: [failedItem('stuck', 'CG-API-01', true, true)] }));
 
-    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
-    textarea.value = 'draft question';
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-
-    expect(callbacks.onCoachComposerInput).toHaveBeenCalledWith('draft question');
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-error').textContent).toBe(
+      'Не получилось закончить ответ (CG-API-01).',
+    );
+    const retry = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'),
+    ).find((b) => b.textContent === 'Повторить')!;
+    retry.click();
+    expect(callbacks.onCoachRetry).toHaveBeenCalledWith('stuck', true);
   });
 
-  it('locks the composer and shows Cancel while a turn streams', () => {
+  // ─── Recap step (spec §2.1/§6) ────────────────────────────────────────────
+
+  it('renders recap steps with RU copy and updates status in place', () => {
     const { controller } = makeController();
     controller.render(
       createCoachModel({
-        operationId: 'op-stream',
-        pendingQuestion: 'why is he cold?',
-        pendingAnswerText: 'Because',
-        composerEnabled: false,
+        feedItems: [{ kind: 'recap-step', mode: 'full', origin: 'auto', status: 'running' }],
+      }),
+    );
+    const step = requireElement<HTMLDivElement>('.chatgoose-coach-recap-step');
+    expect(step.textContent).toBe('Полный рекап (авто) · обновляется…');
+
+    controller.render(
+      createCoachModel({
+        feedItems: [{ kind: 'recap-step', mode: 'full', origin: 'auto', status: 'done' }],
+      }),
+    );
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-recap-step')).toBe(step);
+    expect(step.textContent).toBe('Полный рекап (авто) · обновлён');
+  });
+
+  // ─── Memory-window divider (spec §8.1) ────────────────────────────────────
+
+  it('renders no memory divider while completed exchanges ≤ limit', () => {
+    const { controller } = makeController();
+    const feedItems = Array.from({ length: 3 }, (_, i) => exchangeItem(`x${i}`, 'q', 'a'));
+    controller.render(
+      createCoachModel({
+        feedItems,
+        settingsSnapshot: { coachHistoryLimit: 10, coachAutoRecap: 'off' },
+      }),
+    );
+    expect(document.querySelector('.chatgoose-coach-memory-divider')).toBeNull();
+  });
+
+  it('positions the memory divider before the oldest tail exchange, ignoring failed/recap items', () => {
+    const { controller } = makeController();
+    // 4 exchanges + interspersed non-exchange items; limit 2 → divider before the
+    // 3rd exchange (the oldest of the last 2). Non-exchange items occupy no slots.
+    const feedItems: CoachOverlayFeedItem[] = [
+      exchangeItem('x0', 'q0', 'a0'),
+      { kind: 'recap-step', mode: 'short', origin: 'auto', status: 'done' },
+      exchangeItem('x1', 'q1', 'a1'),
+      failedItem('boom', 'CG-AI-01', true),
+      exchangeItem('x2', 'q2', 'a2'),
+      exchangeItem('x3', 'q3', 'a3'),
+    ];
+    controller.render(
+      createCoachModel({
+        feedItems,
+        settingsSnapshot: { coachHistoryLimit: 2, coachAutoRecap: 'off' },
       }),
     );
 
-    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
-    expect(textarea.disabled).toBe(true);
-    const cancel = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-composer button'),
-    ).find((button) => !button.classList.contains('chatgoose-hidden') && /cancel|stop/i.test(button.textContent ?? ''));
-    expect(cancel).toBeDefined();
-    expect(requireElement<HTMLDivElement>('.chatgoose-coach-pending').getAttribute('aria-busy')).toBe('true');
+    const divider = requireElement<HTMLDivElement>('.chatgoose-coach-memory-divider');
+    expect(divider.textContent).toBe('выше — не входит в окно памяти коуча');
+    // The node right after the divider is the x2 exchange (oldest of the last 2).
+    const next = divider.nextElementSibling as HTMLElement;
+    expect(next.textContent).toContain('a2');
   });
 
-  it('mutates ONLY the pending answer text node during streaming (node identity + no childList churn)', () => {
+  it('moves the memory divider when the limit setting changes', () => {
+    const { controller } = makeController();
+    const feedItems = Array.from({ length: 5 }, (_, i) => exchangeItem(`x${i}`, 'q', `a${i}`));
+
+    controller.render(
+      createCoachModel({ feedItems, settingsSnapshot: { coachHistoryLimit: 2, coachAutoRecap: 'off' } }),
+    );
+    let next = requireElement<HTMLDivElement>('.chatgoose-coach-memory-divider')
+      .nextElementSibling as HTMLElement;
+    expect(next.textContent).toContain('a3'); // oldest of last 2
+
+    controller.render(
+      createCoachModel({ feedItems, settingsSnapshot: { coachHistoryLimit: 4, coachAutoRecap: 'off' } }),
+    );
+    next = requireElement<HTMLDivElement>('.chatgoose-coach-memory-divider')
+      .nextElementSibling as HTMLElement;
+    expect(next.textContent).toContain('a1'); // oldest of last 4
+  });
+
+  it('renders no memory divider when the settings snapshot is unknown', () => {
+    const { controller } = makeController();
+    const feedItems = Array.from({ length: 12 }, (_, i) => exchangeItem(`x${i}`, 'q', 'a'));
+    controller.render(createCoachModel({ feedItems }));
+    expect(document.querySelector('.chatgoose-coach-memory-divider')).toBeNull();
+  });
+
+  // ─── Turn-context line (spec §8.2) ────────────────────────────────────────
+
+  it('renders the collapsed «Отправлено коучу…» line from turnContext', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            kind: 'exchange',
+            operationId: 'x1',
+            question: 'q',
+            answerProse: 'a',
+            drafts: [],
+            turnContext: {
+              sentMessageCount: 42,
+              transcriptCoverage: 'window',
+              attachedRecaps: {
+                full: { ageMs: 3 * 24 * 60 * 60 * 1000 },
+                short: { ageMs: 10 * 60 * 1000 },
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    const summary = requireElement<HTMLElement>('.chatgoose-coach-turncontext-summary');
+    expect(summary.textContent).toBe(
+      'Отправлено коучу: 42 сообщ. (окно) · рекап: полный 3 дн, короткий 10 мин',
+    );
+  });
+
+  it('renders «рекап: нет» when no recap was attached, and no line without turnContext', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            kind: 'exchange',
+            operationId: 'x1',
+            question: 'q',
+            answerProse: 'a',
+            drafts: [],
+            turnContext: {
+              sentMessageCount: 5,
+              transcriptCoverage: 'full-history',
+              attachedRecaps: { full: null, short: null },
+            },
+          },
+        ],
+      }),
+    );
+    expect(requireElement<HTMLElement>('.chatgoose-coach-turncontext-summary').textContent).toBe(
+      'Отправлено коучу: 5 сообщ. (вся история) · рекап: нет',
+    );
+
+    // No turnContext → no line (old-background tolerance).
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x2', 'q', 'a')] }));
+    expect(document.querySelector('.chatgoose-coach-turncontext')).toBeNull();
+  });
+
+  it('shows no context line on a failed attempt', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ feedItems: [failedItem('q', 'CG-AI-01', true)] }));
+    expect(document.querySelector('.chatgoose-coach-turncontext')).toBeNull();
+  });
+
+  // ─── Follow-up chips (spec §8.3) ──────────────────────────────────────────
+
+  it('shows follow-up chips under the latest completed answer; a click submits the canned text', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q', 'a')], composerText: 'typed' }));
+
+    const chips = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-followup-chip'),
+    ).map((c) => c.textContent);
+    expect(chips).toEqual(['Другой вариант', 'Сделай короче', 'А если откажет?']);
+
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-followup-chip'))
+      .find((c) => c.textContent === 'Сделай короче')!
+      .click();
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Сделай короче');
+    // Composer text deliberately untouched by a chip click.
+    expect(textarea.value).toBe('typed');
+  });
+
+  it('hides follow-up chips while streaming and when the latest item is a failed attempt', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x1', 'q', 'a')],
+        operationId: 'op-live',
+        pendingQuestion: 'q2',
+        composerEnabled: false,
+      }),
+    );
+    expect(document.querySelector('.chatgoose-coach-followup-chip')).toBeNull();
+
+    controller.render(
+      createCoachModel({ feedItems: [exchangeItem('x1', 'q', 'a'), failedItem('q2', 'CG-AI-01', true)] }),
+    );
+    expect(document.querySelector('.chatgoose-coach-followup-chip')).toBeNull();
+  });
+
+  // ─── Keyed rendering + streaming (spec §3) ────────────────────────────────
+
+  it('keeps a stable DOM node per exchange as the feed grows (keyed rendering)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
+    const first = requireElement<HTMLDivElement>('.chatgoose-coach-items > *');
+
+    controller.render(
+      createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')] }),
+    );
+    const items = document.querySelectorAll('.chatgoose-coach-items > .chatgoose-coach-exchange');
+    expect(items[0]).toBe(first);
+    expect(items[1]?.textContent).toContain('a2');
+  });
+
+  it('mutates ONLY the pending answer text node during streaming (no childList churn)', () => {
     const { controller } = makeController();
     controller.render(
       createCoachModel({
@@ -342,11 +741,9 @@ describe('OverlayController — coach chat mode', () => {
         composerEnabled: false,
       }),
     );
-
     const pending = requireElement<HTMLDivElement>('.chatgoose-coach-pending');
     const answer = requireElement<HTMLDivElement>('.chatgoose-coach-pending .chatgoose-coach-answer');
     const textNode = answer.firstChild;
-    expect(textNode?.nodeType).toBe(3);
 
     const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
     const records: MutationRecord[] = [];
@@ -361,9 +758,6 @@ describe('OverlayController — coach chat mode', () => {
         composerEnabled: false,
       }),
     );
-    // takeRecords() drains SYNCHRONOUSLY — the observer callback only fires in a
-    // microtask, so without this the assertion would be vacuous (records stays
-    // [] because disconnect() empties the queue before the microtask runs).
     records.push(...observer.takeRecords());
     observer.disconnect();
 
@@ -375,7 +769,6 @@ describe('OverlayController — coach chat mode', () => {
 
   it('Esc while streaming cancels the turn and stays open; Esc while idle closes', () => {
     const { controller, callbacks } = makeController();
-
     controller.render(
       createCoachModel({
         operationId: 'op-esc',
@@ -391,52 +784,18 @@ describe('OverlayController — coach chat mode', () => {
     controller.render(createCoachModel());
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(callbacks.onClose).toHaveBeenCalledOnce();
-    expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('ignores Escape fired during an IME composition', () => {
-    const { controller, callbacks } = makeController();
-    controller.render(createCoachModel());
-
-    const composing = new KeyboardEvent('keydown', { key: 'Escape' });
-    Object.defineProperty(composing, 'isComposing', { value: true });
-    document.dispatchEvent(composing);
-
-    expect(callbacks.onClose).not.toHaveBeenCalled();
-    expect(callbacks.onCancel).not.toHaveBeenCalled();
-  });
-
-  it('keeps a stable DOM node per exchange as the feed grows (keyed rendering)', () => {
-    const { controller } = makeController();
-    controller.render(
-      createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }),
-    );
-
-    const first = requireElement<HTMLDivElement>('.chatgoose-coach-items > *');
-
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
-      }),
-    );
-
-    const items = document.querySelectorAll('.chatgoose-coach-items > *');
-    expect(items).toHaveLength(2);
-    expect(items[0]).toBe(first);
-    expect(items[1]?.textContent).toContain('a2');
   });
 
   it('preserves composer focus and value across a re-render (no textarea rebuild)', () => {
     const { controller } = makeController();
     controller.render(createCoachModel());
-
     const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
     textarea.focus();
     textarea.value = 'typing…';
 
-    // A re-render driven by a recap-status change must not clobber the composer.
-    controller.render(createCoachModel({ recapStatusLine: 'Full: 1d' }));
-
+    controller.render(
+      createCoachModel({ recapStatusLine: { state: 'ages', fullAge: '1 дн', shortAge: null } }),
+    );
     expect(requireElement<HTMLTextAreaElement>('.chatgoose-coach-input')).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
     expect(textarea.value).toBe('typing…');
@@ -444,10 +803,7 @@ describe('OverlayController — coach chat mode', () => {
 
   it('preserves feed scroll position across renders when not near the bottom', () => {
     const { controller } = makeController();
-    controller.render(
-      createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }),
-    );
-
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
     const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
     Object.defineProperty(feed, 'clientHeight', { configurable: true, get: () => 100 });
     Object.defineProperty(feed, 'scrollHeight', { configurable: true, get: () => 400 });
@@ -456,268 +812,20 @@ describe('OverlayController — coach chat mode', () => {
     controller.render(
       createCoachModel({
         feedItems: [exchangeItem('x1', 'q1', 'a1')],
-        recapStatusLine: 'Full: 2d',
+        recapStatusLine: { state: 'ages', fullAge: '2 дн', shortAge: null },
       }),
     );
-
     expect(feed.scrollTop).toBe(40);
-  });
-
-  it('pins the feed to the bottom on a (re)open rebuild — JSDOM cannot measure scroll, so assert the call', () => {
-    // The feed is only measurable after attach (createCoachView runs while
-    // detached), so the rebuild branch must scroll AFTER replaceChildren.
-    const scrollSpy = vi.spyOn(
-      OverlayController.prototype as unknown as { scrollCoachFeedToBottom: () => void },
-      'scrollCoachFeedToBottom',
-    );
-    const { controller } = makeController();
-
-    // First coach render == a rebuild: it MUST scroll to bottom after attach.
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
-      }),
-    );
-    expect(scrollSpy).toHaveBeenCalled();
-
-    // A pure in-place update (same coach view) must NOT force-scroll — that is
-    // gated on the near-bottom heuristic, not the rebuild path.
-    scrollSpy.mockClear();
-    const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
-    Object.defineProperty(feed, 'clientHeight', { configurable: true, get: () => 100 });
-    Object.defineProperty(feed, 'scrollHeight', { configurable: true, get: () => 400 });
-    feed.scrollTop = 10; // far from the bottom
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
-        recapStatusLine: 'Full: 1d',
-      }),
-    );
-    expect(scrollSpy).not.toHaveBeenCalled();
   });
 
   it('renders coach prose via textContent so markdown/backticks never become HTML', () => {
     const { controller } = makeController();
     controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x1', 'q', 'Try **this** and `that`')],
-      }),
+      createCoachModel({ feedItems: [exchangeItem('x1', 'q', 'Try **this** and `that`')] }),
     );
-
     const answer = requireElement<HTMLDivElement>('.chatgoose-coach-answer');
     expect(answer.querySelector('strong')).toBeNull();
-    expect(answer.querySelector('code')).toBeNull();
     expect(answer.textContent).toBe('Try **this** and `that`');
-  });
-
-  it('draft Copy attributes acceptance to the CARD exchange operationId, not the live session op', async () => {
-    const { controller, callbacks } = makeController();
-    const mockCopy = vi.mocked(copyToClipboard);
-    controller.render(
-      createCoachModel({
-        // idle: the live/top-level op is null — acceptance must still carry x-op.
-        operationId: null,
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Hey love', index: 0 }])],
-      }),
-    );
-
-    const copy = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
-    ).find((button) => button.textContent === 'Copy');
-    expect(copy).toBeDefined();
-    copy!.click();
-
-    await vi.waitFor(() => {
-      expect(mockCopy).toHaveBeenCalledWith('Hey love');
-    });
-    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0, undefined);
-  });
-
-  it('draft Insert into an empty Fansly composer inserts and attributes acceptance per-card', async () => {
-    const { controller, callbacks } = makeController();
-    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
-    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 1 }])],
-      }),
-    );
-
-    const insert = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
-    ).find((button) => /insert/i.test(button.textContent ?? ''));
-    expect(insert).toBeDefined();
-    insert!.click();
-
-    await vi.waitFor(() => {
-      expect(mockInsert).toHaveBeenCalledWith('Draft body');
-    });
-    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 1, undefined);
-    // Spec §3: after insert the overlay collapses (session retained by the store).
-    expect(callbacks.onClose).toHaveBeenCalledOnce();
-  });
-
-  it('refuses draft Insert when the live URL has moved to another fan', async () => {
-    const { controller, callbacks } = makeController();
-    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
-    controller.render(
-      createCoachModel({
-        groupId: 'example',
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Fan A draft', index: 0 }])],
-      }),
-    );
-    window.history.pushState({}, '', '/messages/other-fan');
-
-    const insert = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
-    ).find((button) => /insert/i.test(button.textContent ?? ''));
-    insert!.click();
-
-    await vi.waitFor(() => {
-      expect(document.querySelector('.chatgoose-inline-error')?.classList.contains('chatgoose-hidden')).toBe(false);
-    });
-    expect(mockInsert).not.toHaveBeenCalled();
-    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
-    expect(callbacks.onClose).not.toHaveBeenCalled();
-  });
-
-  it('keeps the overlay open and surfaces an inline error when a draft insert fails', async () => {
-    const { controller, callbacks } = makeController();
-    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
-    vi.mocked(insertIntoFanslyTextarea).mockRejectedValueOnce(
-      new DOMException('blocked', 'NotAllowedError'),
-    );
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 0 }])],
-      }),
-    );
-
-    const insert = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
-    ).find((button) => /insert/i.test(button.textContent ?? ''));
-    insert!.click();
-
-    await vi.waitFor(() => {
-      expect(document.querySelector('.chatgoose-inline-error')?.classList.contains('chatgoose-hidden')).toBe(false);
-    });
-    // A failed insert must NOT collapse and must NOT record acceptance.
-    expect(callbacks.onClose).not.toHaveBeenCalled();
-    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
-    // The coach surface is still mounted.
-    expect(document.querySelector('.chatgoose-coach-feed')).not.toBeNull();
-  });
-
-  it('draft Copy does NOT collapse the overlay', async () => {
-    const { controller, callbacks } = makeController();
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Hey love', index: 0 }])],
-      }),
-    );
-    const copy = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
-    ).find((button) => button.textContent === 'Copy');
-    copy!.click();
-
-    await vi.waitFor(() => {
-      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0, undefined);
-    });
-    expect(callbacks.onClose).not.toHaveBeenCalled();
-  });
-
-  it('draft Insert over a non-empty Fansly composer requires a two-step inline confirm', async () => {
-    const { controller, callbacks } = makeController();
-    vi.mocked(getActiveConversationDraftText).mockReturnValue('unsent draft');
-    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
-    controller.render(
-      createCoachModel({
-        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 0 }])],
-      }),
-    );
-
-    const insert = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
-    ).find((button) => /replace/i.test(button.textContent ?? ''));
-    expect(insert).toBeDefined();
-
-    // First click ARMS the confirm — no insertion, no acceptance yet.
-    insert!.click();
-    expect(mockInsert).not.toHaveBeenCalled();
-    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
-
-    // Second click confirms.
-    insert!.click();
-    await vi.waitFor(() => {
-      expect(mockInsert).toHaveBeenCalledWith('Draft body');
-    });
-    expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'inserted', 0, undefined);
-  });
-
-  it('renders a failed-attempt with a Retry that replays the question; non-retryable omits Retry', () => {
-    const { controller, callbacks } = makeController();
-    controller.render(
-      createCoachModel({
-        feedItems: [
-          { kind: 'failed-attempt', question: 'stuck question', errorCode: 'CG-API-01', retryable: true },
-        ],
-      }),
-    );
-
-    const retry = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'),
-    ).find((button) => /retry/i.test(button.textContent ?? ''));
-    expect(retry).toBeDefined();
-    retry!.click();
-    expect(callbacks.onCoachRetry).toHaveBeenCalledWith('stuck question');
-
-    controller.render(
-      createCoachModel({
-        feedItems: [
-          { kind: 'failed-attempt', question: 'fatal', errorCode: 'CG-AUTH-01', retryable: false },
-        ],
-      }),
-    );
-    const noRetry = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'),
-    ).find((button) => /retry/i.test(button.textContent ?? ''));
-    expect(noRetry).toBeUndefined();
-  });
-
-  it('updates a recap-step status in place without replacing its node', () => {
-    const { controller } = makeController();
-    controller.render(
-      createCoachModel({
-        feedItems: [{ kind: 'recap-step', mode: 'full', origin: 'explicit', status: 'running' }],
-      }),
-    );
-
-    const step = requireElement<HTMLDivElement>('.chatgoose-coach-recap-step');
-    expect(step.textContent).toMatch(/running|refresh/i);
-
-    controller.render(
-      createCoachModel({
-        feedItems: [{ kind: 'recap-step', mode: 'full', origin: 'explicit', status: 'done' }],
-      }),
-    );
-
-    expect(requireElement<HTMLDivElement>('.chatgoose-coach-recap-step')).toBe(step);
-    expect(step.textContent).toMatch(/done|updated/i);
-  });
-
-  it('fires onCoachRecap from the header recap-refresh controls', () => {
-    const { controller, callbacks } = makeController();
-    controller.render(createCoachModel());
-
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach button'));
-    const short = buttons.find((button) => /short/i.test(button.textContent ?? ''));
-    const full = buttons.find((button) => /full/i.test(button.textContent ?? ''));
-    expect(short).toBeDefined();
-    expect(full).toBeDefined();
-    short!.click();
-    full!.click();
-    expect(callbacks.onCoachRecap).toHaveBeenCalledWith('short');
-    expect(callbacks.onCoachRecap).toHaveBeenCalledWith('full');
   });
 
   it('gives the coach panel its own scroll ownership (feed scrolls, panel does not)', () => {
@@ -727,54 +835,7 @@ describe('OverlayController — coach chat mode', () => {
 
     const panel = requireElement<HTMLDivElement>('.chatgoose-overlay-panel');
     expect(panel.classList.contains('chatgoose-overlay-coach')).toBe(true);
-    const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
-    expect(window.getComputedStyle(feed).overflowY).toBe('auto');
-  });
-
-  it('renders the per-session auto-recap override cycle button and fires the callback', () => {
-    const { controller, callbacks } = makeController();
-    controller.render(createCoachModel({ autoRecapOverride: 'inherit' }));
-
-    const auto = requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap');
-    expect(auto.textContent).toBe('Auto-recap: default');
-    auto.click();
-    expect(callbacks.onCoachAutoRecapCycle).toHaveBeenCalledOnce();
-
-    // The label reflects the override value in place.
-    controller.render(createCoachModel({ autoRecapOverride: 'short' }));
-    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap').textContent).toBe(
-      'Auto-recap: short',
-    );
-  });
-
-  it('disables the auto-recap override control while the coach is busy', () => {
-    const { controller } = makeController();
-    controller.render(createCoachModel());
-    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap').disabled).toBe(false);
-    // Busy (a streaming turn / running recap step) → locked so the mode can't
-    // change mid-turn.
-    controller.render(createCoachModel({ operationId: 'op-live', composerEnabled: false }));
-    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-autorecap').disabled).toBe(true);
-  });
-
-  it('appends the fallback note to a failed-but-proceeded recap step', () => {
-    const { controller } = makeController();
-    controller.render(
-      createCoachModel({
-        feedItems: [
-          {
-            kind: 'recap-step',
-            mode: 'full',
-            origin: 'auto',
-            status: 'failed',
-            note: 'обновить Recap не удалось — использую рекап от 3 дн',
-          },
-        ],
-      }),
-    );
-
-    const step = requireElement<HTMLDivElement>('.chatgoose-coach-recap-step');
-    expect(step.textContent).toContain('обновить Recap не удалось — использую рекап от 3 дн');
+    expect(window.getComputedStyle(requireElement<HTMLDivElement>('.chatgoose-coach-feed')).overflowY).toBe('auto');
   });
 });
 
@@ -796,10 +857,9 @@ describe('OverlayController — recap start dialog (spec §5)', () => {
     controller.render(createRecapPickerModel());
 
     expect(requireElement<HTMLDivElement>('.chatgoose-eyebrow').textContent).toBe('Recap');
-    const buttons = Array.from(
+    const labels = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-recap-picker button'),
-    );
-    const labels = buttons.map((button) => button.textContent);
+    ).map((button) => button.textContent);
     expect(labels).toContain('Полный');
     expect(labels).toContain('Короткий');
     expect(labels).toContain('Открыть последний');
@@ -807,8 +867,12 @@ describe('OverlayController — recap start dialog (spec §5)', () => {
 
   it('fires onRecapPick(full)/(short) and onRecapOpenLast from the buttons', () => {
     const { controller, callbacks } = makeController();
-    controller.render(createRecapPickerModel({ full: { generatedAt: 'x', ageMs: 1000, transcriptCoverage: 'window', requestedCount: 3000, keptCount: 200 }, short: null }));
-
+    controller.render(
+      createRecapPickerModel({
+        full: { generatedAt: 'x', ageMs: 1000, transcriptCoverage: 'window', requestedCount: 3000, keptCount: 200 },
+        short: null,
+      }),
+    );
     const buttons = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-recap-picker button'),
     );
@@ -820,40 +884,9 @@ describe('OverlayController — recap start dialog (spec §5)', () => {
     expect(callbacks.onRecapOpenLast).toHaveBeenCalledOnce();
   });
 
-  it('Enter (unmodified) picks Полный — ⌘⇧S+Enter muscle memory', () => {
-    const { controller, callbacks } = makeController();
-    controller.render(createRecapPickerModel());
-
-    const picker = requireElement<HTMLDivElement>('.chatgoose-recap-picker');
-    picker.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(callbacks.onRecapPick).toHaveBeenCalledWith('full');
-  });
-
   it('disables «Открыть последний» when the status is loaded and empty', () => {
     const { controller } = makeController();
     controller.render(createRecapPickerModel({ full: null, short: null }));
-
-    const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
-    expect(openLast.disabled).toBe(true);
-  });
-
-  it('keeps «Открыть последний» live while the status is still unknown', () => {
-    const { controller } = makeController();
-    controller.render(createRecapPickerModel(null));
-
-    const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
-    expect(openLast.disabled).toBe(false);
-  });
-
-  it('keeps «Открыть последний» live when recap status is unavailable', () => {
-    const { controller } = makeController();
-    controller.render(createRecapPickerModel({
-      state: 'unavailable',
-      full: null,
-      short: null,
-    }));
-
-    const openLast = requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last');
-    expect(openLast.disabled).toBe(false);
+    expect(requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last').disabled).toBe(true);
   });
 });

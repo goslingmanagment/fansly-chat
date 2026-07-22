@@ -1153,6 +1153,12 @@ export interface OperationStartPayload extends PortEnvelopeBase {
    * a rolling dialog refreshes only the newest tail. Absent ⇒ no session
    * isolation (a stable empty key), so the cache degrades to a per-tab window. */
   coachSessionId?: string;
+  /** coach-chat: a content-owned epoch counter (spec §8.4) folded into the
+   * background transcript-cache key. «Обновить переписку» bumps it, forcing the
+   * next turn to miss the cache and reseed the full quick window — with no live
+   * Fansly read on click and no dependency on a live service worker. Absent ⇒
+   * epoch 0 (a stable key part), so an old background stays compatible. */
+  transcriptEpoch?: number;
   /** fan-summary only: «Открыть последний» (spec §5). When true the background
    * serves the stored recap from the local summary cache and NEVER generates —
    * a cache miss fails with `no_saved_recap` instead of paginating + calling the
@@ -1312,6 +1318,12 @@ export interface CompletePayload extends PortEnvelopeBase {
    * later acceptance can correlate the sent draft back to its generation.
    * Optional — only coach operations fill it. */
   generationRef?: string;
+  /** coach-chat: the kernel's post-attach turn context (spec §8.2) — kept
+   * transcript count/coverage the browser sent plus the recap slots Core
+   * actually attached, each with its age. Retained on the committed exchange and
+   * rendered as the collapsed «Отправлено коучу…» line. Only coach operations
+   * fill it; absent ⇒ the line is not rendered (old-background tolerance). */
+  turnContext?: CoachTurnContext;
 }
 
 export interface ErrorPayload extends PortEnvelopeBase {
@@ -1558,6 +1570,25 @@ export interface CoachOverlayDraft {
   index: number;
 }
 
+/** Per-turn context provenance for a completed coach exchange (spec §8.2), shown
+ * in the collapsed «Отправлено коучу…» line. Counts-only / typed — it follows
+ * E28's declassification rule (no raw kernel payload passthrough): the transcript
+ * figures describe what the BROWSER sent pre-budget, and `attachedRecaps` is the
+ * kernel's post-attach report carrying only each slot's age in ms (never the raw
+ * generated-at string or body). */
+export interface CoachTurnContext {
+  /** Kept transcript message count shipped to the kernel this turn. */
+  sentMessageCount: number;
+  /** Whether that transcript was the whole history or a bounded window. */
+  transcriptCoverage: 'full-history' | 'window';
+  /** The recap slots Core actually retained in the finalized prompt, each with
+   * its age at attach time (ms). Null when that slot was not attached. */
+  attachedRecaps: {
+    full: { ageMs: number } | null;
+    short: { ageMs: number } | null;
+  };
+}
+
 /** A rendered coach feed item — the overlay projection of the content-side
  * `CoachFeedItem` (spec §3 "Session state model"). Exchanges are keyed by their
  * own `operationId`; failed-attempt / recap-step items by feed index. Prose is
@@ -1578,12 +1609,19 @@ export type CoachOverlayFeedItem =
       question: string;
       answerProse: string;
       drafts: CoachOverlayDraft[];
+      /** The kernel's post-attach turn context (spec §8.2). Absent when the
+       * background predates the field (old-background tolerance) → the collapsed
+       * «Отправлено коучу…» line is not rendered. */
+      turnContext?: CoachTurnContext;
     }
   | {
       kind: 'failed-attempt';
       question: string;
       errorCode: string;
       retryable: boolean;
+      /** Whether the failed turn actually SENT a draft (spec §5): drives Retry's
+       * live-draft re-read (a stale draft is never resent from memory). */
+      includedDraft: boolean;
     }
   | {
       kind: 'recap-step';
@@ -1601,6 +1639,26 @@ export type CoachOverlayFeedItem =
  * `coachAutoRecap` setting; the others force a mode for THIS session only. */
 export type CoachAutoRecapOverride = 'inherit' | 'off' | 'short' | 'full';
 
+/** A content-owned snapshot of the two v15 coach settings the coach renderer
+ * needs live (spec §7): `coachHistoryLimit` positions the memory-window divider
+ * (§8.1), `coachAutoRecap` labels the «Авто-рекап · По настройке (<x>)» menu
+ * item (§3). Absent on the session view while unknown — the divider is not
+ * rendered and the label drops its value. No migration: v15 already carries
+ * both fields. */
+export interface CoachSettingsSnapshot {
+  coachHistoryLimit: number;
+  coachAutoRecap: 'off' | 'short' | 'full';
+}
+
+/** The coach recap freshness line (spec §2.1), as STRUCTURED parts so the
+ * renderer can style the leading/label text muted and the age values emphasized
+ * — «Рекап — полный: 3 дн · короткий: 10 мин». `hidden` renders nothing;
+ * `unavailable` is the «Рекап: не удалось проверить» honest fallback (E43). */
+export type CoachRecapStatusView =
+  | { state: 'hidden' }
+  | { state: 'unavailable' }
+  | { state: 'ages'; fullAge: string | null; shortAge: string | null };
+
 /** The coach overlay's session projection (spec §3). Built by the content
  * orchestrator (T10) from the `CoachSession` store; the renderer keeps no
  * session state of its own beyond this. */
@@ -1611,14 +1669,22 @@ export interface CoachOverlaySessionView {
   /** The in-flight answer streamed so far (draft fences are lifted only on
    * commit, so this is raw prose); rendered via textContent. */
   pendingAnswerText?: string;
-  /** Pre-formatted recap freshness line, or '' to hide it (spec §5). */
-  recapStatusLine: string;
+  /** Recap freshness line (spec §2.1/§5), structured for label/value styling. */
+  recapStatusLine: CoachRecapStatusView;
   /** Unsent composer text for restore-on-reopen (spec §3). */
   composerText: string;
   /** False while a turn streams — the composer is locked (spec §3). */
   composerEnabled: boolean;
-  /** Per-session auto-recap override (spec §5); drives the topbar cycle control. */
+  /** Per-session auto-recap override (spec §5); drives the topbar radio group. */
   autoRecapOverride: CoachAutoRecapOverride;
+  /** Draft-attach intent (spec §5): whether the chatter armed «Приложить мой
+   * недописанный ответ». Persisted in the session (survives close/reopen; reset
+   * by «Новый диалог»). The renderer force-unchecks + disables the box while the
+   * live Fansly composer is empty, but never mutates this stored intent. */
+  draftIntent: boolean;
+  /** Live v15 settings snapshot (spec §7): positions the §8.1 memory divider and
+   * labels the §3 auto-recap «По настройке (<x>)» item. Absent while unknown. */
+  settingsSnapshot?: CoachSettingsSnapshot;
   /** Fansly conversation this feed belongs to; draft insertion re-checks it
    * against the live URL so a route change cannot target the next fan. */
   groupId: string;

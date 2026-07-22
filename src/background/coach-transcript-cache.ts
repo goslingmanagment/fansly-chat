@@ -49,6 +49,10 @@ export interface CoachTranscriptCacheKeyParts {
   /** The quick-window message count in force when the window was seeded. A
    * changed value is a different key (miss → reseed), matching spec §3. */
   quickMessageCount: number;
+  /** Content-owned transcript epoch (spec §8.4). «Обновить переписку» bumps it;
+   * a changed value is a different key (guaranteed miss → full reseed). Absent
+   * on the wire ⇒ 0 (a stable key part), so an old client stays compatible. */
+  transcriptEpoch: number;
 }
 
 /** The merged window handed back to the caller. `pages` is ordered oldest-first
@@ -96,6 +100,7 @@ function serializeKey(parts: CoachTranscriptCacheKeyParts): string {
     parts.accountId,
     parts.groupId,
     parts.quickMessageCount,
+    parts.transcriptEpoch,
   ].join(':');
 }
 

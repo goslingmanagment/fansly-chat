@@ -53,10 +53,11 @@ const coachModel: OverlayViewModel = {
   operationId: null,
   sessionView: {
     feedItems: [],
-    recapStatusLine: '',
+    recapStatusLine: { state: 'hidden' },
     composerText: '',
     composerEnabled: true,
     autoRecapOverride: 'inherit',
+    draftIntent: false,
     groupId: 'group-1',
     sessionKey: 'account-1|group-1',
   },

@@ -254,7 +254,29 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalCoachHistory(record) &&
     isOptionalSummaryMode(record) &&
     isOptionalString(record, 'coachSessionId') &&
+    isOptionalNumber(record, 'transcriptEpoch') &&
     isOptionalBoolean(record, 'viewCachedOnly');
+}
+
+/** coach-chat operation:complete turn context (spec §8.2). Counts-only shape —
+ * an extra field or a wrong type is a producer bug on a DOM-adjacent projection
+ * (E28), so validate exactly rather than pass through. */
+function isCoachTurnContext(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  const recaps = value.attachedRecaps;
+  const slotOk = (slot: unknown): boolean =>
+    slot === null || (isObjectRecord(slot) && isNumber(slot.ageMs));
+  return isNumber(value.sentMessageCount) &&
+    (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
+    isObjectRecord(recaps) &&
+    slotOk(recaps.full) &&
+    slotOk(recaps.short);
+}
+
+function isOptionalCoachTurnContext(record: Record<string, unknown>): boolean {
+  return record.turnContext === undefined || isCoachTurnContext(record.turnContext);
 }
 
 function isVoiceNoteStatusView(value: unknown): boolean {
@@ -524,7 +546,8 @@ export function isBackgroundPortMessage(message: unknown): message is Background
       return hasOperationId(message) &&
         hasFeatureResult(message) &&
         isString(message.fanDisplayName) &&
-        isOptionalString(message, 'generationRef');
+        isOptionalString(message, 'generationRef') &&
+        isOptionalCoachTurnContext(message);
     case 'operation:error':
     case 'operation:discarded':
       return hasOperationId(message) && hasUserFacingError(message);
