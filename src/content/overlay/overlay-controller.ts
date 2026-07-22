@@ -715,7 +715,6 @@ export class OverlayController {
     this.headerSubtitleEl = null;
     this.inlineErrorEl = null;
     this.bodyEl = null;
-    this.disposeCoachView();
     this.currentView = null;
     this.lastFocusedReplyOpId = null;
   }

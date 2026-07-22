@@ -2739,9 +2739,13 @@ export class ChatGooseContentApp {
         this.tabState = message.state;
         // Coach UI settings snapshot (spec §7): a settings change may alter
         // coachHistoryLimit / coachAutoRecap while Coach is open — refresh the
-        // snapshot so the menu label and memory divider stay current. Guarded on
-        // an open session (a persona/account change above may have closed Coach).
-        if (message.type === 'settings:changed' && this.activeCoachSession) {
+        // snapshot so the menu label and memory divider stay current. BOTH
+        // events qualify (review P1): an ordinary settings write classifies as
+        // 'mapping:changed' (storage-change-policy — 'settings:changed' is the
+        // broad hub-context event only), and the generation guard makes an
+        // over-refresh harmless. Guarded on an open session (a persona/account
+        // change above may have closed Coach).
+        if (this.activeCoachSession) {
           // Review P1: stale values must not survive a settings change — drop
           // the snapshot (fallbacks render) and re-hydrate under a fresh
           // generation.

@@ -1356,6 +1356,11 @@ windows. Round 3: the send/cancel group right-aligns via its own auto margin
 left); route-change and disconnect chain teardowns re-arm the retry intent like
 every other pre-dispatch stop; a discarded coach view disposes its menu's
 document-level outside-click listener; the background producer lane
-(turnContext flooring/shape, epoch→reseed threading) is coordinator-tested. All coach-OWNED copy is now Russian; the shared
+(turnContext flooring/shape, epoch→reseed threading) is coordinator-tested.
+Round 4: the snapshot also refreshes on 'mapping:changed' — an ordinary
+settings write classifies as mapping:changed per storage-change-policy, and
+the settings:changed-only guard left an open Coach showing a stale «По
+настройке» label and divider; the test pins the classifier output and the
+handler together. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

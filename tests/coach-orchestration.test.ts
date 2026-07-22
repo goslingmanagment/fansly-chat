@@ -4,6 +4,7 @@
    closure-held state, and the app surface is intentionally not a public API. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { tabRefreshMessageForStorageChanges } from '../src/background/storage-change-policy.js';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import type { TabUiState } from '../src/shared/types.js';
 
@@ -1820,6 +1821,29 @@ describe('Coach orchestration', () => {
   });
 
   // ─── §7 settings snapshot ─────────────────────────────────────────────────
+
+  it('refreshes the snapshot on an ORDINARY settings write (mapping:changed per the classifier)', async () => {
+    // An Options-page write of coach settings classifies as 'mapping:changed'
+    // (review P1 — 'settings:changed' fires only for hub-context changes);
+    // pin the classifier and the handler together.
+    expect(
+      tabRefreshMessageForStorageChanges({ settings: { newValue: {} } } as never, 'local'),
+    ).toBe('mapping:changed');
+
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    app.handlePortMessage({ type: 'mapping:changed', state: readyState() });
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'short',
+    });
+  });
 
   it('hydrates the coach settings snapshot on open and refreshes it on settings:changed', async () => {
     const app = await makeReadyApp();

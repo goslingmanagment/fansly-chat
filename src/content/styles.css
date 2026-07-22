@@ -1045,8 +1045,7 @@
 }
 
 .chatgoose-coach-recap-lead,
-.chatgoose-coach-recap-label,
-.chatgoose-coach-recap-sep {
+.chatgoose-coach-recap-label {
   color: var(--chatgoose-ink-low);
 }
 
