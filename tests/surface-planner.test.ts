@@ -57,6 +57,7 @@ const coachModel: OverlayViewModel = {
     composerText: '',
     composerEnabled: true,
     autoRecapOverride: 'inherit',
+    draftAttachEnabled: true,
     draftIntent: false,
     groupId: 'group-1',
     sessionKey: 'account-1|group-1',

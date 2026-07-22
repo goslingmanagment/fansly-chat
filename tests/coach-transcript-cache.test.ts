@@ -431,4 +431,16 @@ describe('CoachTranscriptCache — LRU', () => {
     expect(cache.peek(key({ groupId: 'g1' }))).toBeDefined();
     expect(cache.peek(key({ groupId: 'g6' }))).toBeDefined();
   });
+
+  it('purges prior-epoch entries of the same logical session on store (review P2)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([20, 10])], true));
+    await cache.getOrSeed(key({ transcriptEpoch: 0 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 1 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 2 }), loadFull);
+    // Only the newest epoch survives — dead epochs must not occupy LRU slots
+    // and evict other sessions' windows.
+    expect(cache.size).toBe(1);
+  });
+
 });

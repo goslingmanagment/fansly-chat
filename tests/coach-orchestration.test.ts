@@ -10,6 +10,9 @@ import type { TabUiState } from '../src/shared/types.js';
 // The live Fansly draft the coach reads at dispatch (spec §5). A hoisted holder
 // so the module mock's factory can close over a per-test mutable value.
 const draftHolder = vi.hoisted(() => ({ value: '' }));
+// The draft-attach ship-gate (spec §10.2) is OFF in the shipped constant until
+// core#22 lands; this suite tests the ENABLED semantics, so flip it here.
+vi.mock('../src/shared/coach-draft-gate.js', () => ({ COACH_DRAFT_ATTACH_ENABLED: true }));
 vi.mock('../src/content/textarea.js', () => ({
   getActiveConversationDraftText: vi.fn(() => draftHolder.value),
   insertIntoFanslyTextarea: vi.fn(async () => undefined),
@@ -1610,6 +1613,66 @@ describe('Coach orchestration', () => {
     // The coach turn never dispatched → the re-read intent is preserved as the
     // stored session intent, so the manual resend still attaches the draft.
     expect(app.activeCoachSession.draftIntent).toBe(true);
+  });
+
+  it('consumes the intent BEFORE the pre-dispatch render — the streaming view is unarmed (review P1)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'attach me';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('go');
+    // Dispatched: both the stored intent and the RENDERED model are unarmed
+    // while the turn streams — no armed clickable checkbox of a sent attempt.
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+    expect(app.coachOverlayModel.sessionView.draftIntent).toBe(false);
+    expect(lastSent(app).draftText).toBe('attach me');
+  });
+
+  it('a settings-read failure during Retry re-arms the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(app.activeCoachSession.draftIntent).toBe(false);
+
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(async () => {
+      throw new Error('storage down');
+    });
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    (globalThis as any).browser.storage.local.get = storageGet;
+
+    // The retry never dispatched — its re-read intent is preserved as stored
+    // intent, so the manual Send still attaches the live draft.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('will fail');
+  });
+
+  it('a port drop during a force-only Retry re-arms the intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    app.port.send = vi.fn(() => false);
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.activeCoachSession.composerText).toBe('will fail');
   });
 
   it('reopen drops the settings snapshot until the fresh read lands (review P1)', async () => {

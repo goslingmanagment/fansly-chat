@@ -53,6 +53,7 @@ function createCoachModel(
       composerText: '',
       composerEnabled: true,
       autoRecapOverride: 'inherit',
+      draftAttachEnabled: true,
       draftIntent: false,
       groupId: 'example',
       sessionKey: 'acct|group',
@@ -1023,6 +1024,93 @@ describe('OverlayController — coach chat mode', () => {
     expect(after).toBe(divider); // same node, never rebuilt
     expect(after.previousSibling).toBe(before.prev);
     expect(after.nextSibling).toBe(before.next);
+  });
+
+  it('appends the fallback note to a failed-but-proceeded recap step', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            kind: 'recap-step',
+            mode: 'full',
+            origin: 'auto',
+            status: 'failed',
+            note: 'обновить Recap не удалось — использую рекап от 3 дн',
+          },
+        ],
+      }),
+    );
+    const step = requireElement<HTMLDivElement>('.chatgoose-coach-recap-step');
+    expect(step.textContent).toContain('обновить Recap не удалось — использую рекап от 3 дн');
+  });
+
+  it('«Новый диалог» disarms the confirm on blur / «Оставить» (outside-click abandon)', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ feedItems: [exchangeItem('x1', 'q1', 'a1')] }));
+
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
+    );
+    const newDialog = buttons.find((b) => b.textContent === 'Новый диалог')!;
+    const keep = buttons.find((b) => b.textContent === 'Оставить')!;
+
+    newDialog.click();
+    expect(newDialog.textContent).toBe('Точно сбросить?');
+
+    newDialog.dispatchEvent(new Event('blur'));
+    expect(newDialog.textContent).toBe('Новый диалог');
+    expect(keep.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+
+    newDialog.click();
+    keep.click();
+    expect(newDialog.textContent).toBe('Новый диалог');
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+  });
+
+  it('«Новый диалог» arms (does not reset) when only unsent composer text exists', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({ feedItems: [], composerText: '  draft question  ' }));
+
+    const newDialog = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-topbar-actions button'),
+    ).find((b) => b.textContent === 'Новый диалог')!;
+
+    newDialog.click();
+    expect(newDialog.textContent).toBe('Точно сбросить?');
+    expect(callbacks.onCoachNewDialog).not.toHaveBeenCalled();
+  });
+
+  it('reports composer edits through onCoachComposerInput', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    textarea.value = 'draft question';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(callbacks.onCoachComposerInput).toHaveBeenCalledWith('draft question');
+  });
+
+  it('ship-gate off: no draft-attach control is rendered at all (spec §10.2)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ draftAttachEnabled: false }));
+    expect(document.querySelector('.chatgoose-coach-draft-attach')).toBeNull();
+  });
+
+  it('locks the draft checkbox while a turn streams (review P1)', () => {
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('live draft');
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        operationId: 'op-1',
+        pendingQuestion: 'streaming q',
+        composerEnabled: false,
+      }),
+    );
+    const box = requireElement<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(box.disabled).toBe(true);
   });
 });
 

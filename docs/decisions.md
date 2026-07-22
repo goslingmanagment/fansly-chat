@@ -1340,6 +1340,17 @@ intent toggle rebuilds the model so no later render repaints a stale checkbox;
 the memory divider stays attached across renders (no per-frame detach/reinsert
 churn); the coach age formatter is one shared module; and the regression tests
 the UI rewrite had dropped (cross-fan insert guard, failed-insert inline
-error, IME suppression, recap-picker keyboard/unknown states) are restored. All coach-OWNED copy is now Russian; the shared
+error, IME suppression, recap-picker keyboard/unknown states, fallback-note
+render, «Новый диалог» blur/«Оставить» disarm and composer-text arming, the
+composer input path) are restored. Review round 2: the draft-attach control is
+built behind a SHIP-GATE constant (`COACH_DRAFT_ATTACH_ENABLED = false`,
+`src/shared/coach-draft-gate.ts`) — §10.2's fail-honest rule is now enforced in
+code, not just sequencing; the flip is one commit after core#22 merges. The
+dispatch consumes the intent BEFORE the pre-dispatch render (no armed checkbox
+on a streaming turn; restored on a failed send), the checkbox locks while the
+composer is locked, every pre-dispatch exit of submitCoachQuestion re-arms a
+Retry's re-read intent, and the transcript cache purges prior-epoch entries of
+the same logical session so «Обновить переписку» cannot evict other sessions'
+windows. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

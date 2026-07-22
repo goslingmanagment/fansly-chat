@@ -1,6 +1,7 @@
 import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
 import { formatCoachAgeMs } from '../shared/coach-format.js';
+import { COACH_DRAFT_ATTACH_ENABLED } from '../shared/coach-draft-gate.js';
 import {
   createCoachSessionStore,
   type CoachSession,
@@ -1935,6 +1936,10 @@ export class ChatGooseContentApp {
       // armed yet — settings are read first — so restore the question into the
       // composer so it is not silently lost, and tell the user to retry.
       restoreCoachComposerText(session, trimmed);
+      // A Retry that never dispatched keeps its re-read intent (spec §5).
+      if (opts?.forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
       if (this.activeCoachSession === session) {
         this.rebuildCoachModel();
         this.renderAll();
@@ -1947,12 +1952,18 @@ export class ChatGooseContentApp {
     // A route/persona change during the await tore the session/route down.
     if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
       restoreCoachComposerText(session, trimmed);
+      if (opts?.forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
       return;
     }
     // Defensive re-check: the in-flight guard blocked re-entrant submits, but a
     // terminal elsewhere could conceivably have armed an op during the await.
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       restoreCoachComposerText(session, trimmed);
+      if (opts?.forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
       this.rebuildCoachModel();
       this.renderAll();
       this.showUserErrorToast(getErrorMessage('another_operation'));
@@ -1995,10 +2006,16 @@ export class ChatGooseContentApp {
     // Live draft read (spec §5): once, right before dispatch. `getActive…` is
     // synchronous, so nothing can mutate the composer between this read and the
     // start below.
-    const attachDraft = session.draftIntent || forceDraftRead;
+    const attachDraft =
+      COACH_DRAFT_ATTACH_ENABLED && (session.draftIntent || forceDraftRead);
     const liveDraft = attachDraft ? getActiveConversationDraftText().trim() : '';
     const draftText = liveDraft.length > 0 ? liveDraft : undefined;
     const includedDraft = draftText !== undefined;
+    // Consume the intent BEFORE the pre-dispatch render (review P1: an armed,
+    // clickable checkbox must not survive into the streaming turn's view) —
+    // restored below if the start never reaches the background.
+    const priorIntent = session.draftIntent;
+    this.coachStore.setDraftIntent(session, false);
 
     const operationId = crypto.randomUUID();
     this.activeFeature = 'coach-chat';
@@ -2040,6 +2057,9 @@ export class ChatGooseContentApp {
       // failed-attempt), preserve the draft intent (never dispatched), and ask
       // the user to retry.
       this.coachStore.clearPending(session);
+      // Never dispatched (spec §5): the consumed intent — and a Retry's re-read
+      // intent — are restored for the manual resend (review P1).
+      this.coachStore.setDraftIntent(session, priorIntent || forceDraftRead);
       restoreCoachComposerText(session, trimmed);
       this.clearCoachOperationState();
       this.showUserErrorToast(getErrorMessage('extension_reloaded'));
@@ -2047,8 +2067,6 @@ export class ChatGooseContentApp {
       this.renderAll();
       return;
     }
-    // Dispatched (spec §5): consume the intent regardless of eventual outcome.
-    this.coachStore.setDraftIntent(session, false);
   }
 
   /** Retry a failed/cancelled turn: replays its question as a FRESH operation
@@ -2533,6 +2551,7 @@ export class ChatGooseContentApp {
         composerText: session.composerText,
         composerEnabled: !busy,
         autoRecapOverride: session.autoRecapOverride,
+        draftAttachEnabled: COACH_DRAFT_ATTACH_ENABLED,
         draftIntent: session.draftIntent,
         // §7 snapshot: absent (fallbacks) until the async read lands.
         ...(this.coachSettingsSnapshot !== null

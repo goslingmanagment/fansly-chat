@@ -1677,6 +1677,9 @@ export interface CoachOverlaySessionView {
   composerEnabled: boolean;
   /** Per-session auto-recap override (spec §5); drives the topbar radio group. */
   autoRecapOverride: CoachAutoRecapOverride;
+  /** Ship-gate mirror (spec §10.2): the renderer builds the draft-attach block
+   * only when true — core must consume draftText first (review P1). */
+  draftAttachEnabled: boolean;
   /** Draft-attach intent (spec §5): whether the chatter armed «Приложить мой
    * недописанный ответ». Persisted in the session (survives close/reopen; reset
    * by «Новый диалог»). The renderer force-unchecks + disables the box while the

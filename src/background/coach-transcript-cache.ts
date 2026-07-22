@@ -323,6 +323,21 @@ export class CoachTranscriptCache {
     window: CoachTranscriptWindow,
   ): CoachTranscriptWindow {
     const boundedWindow = trimWindow(window, parts.quickMessageCount);
+    // A bumped transcriptEpoch makes every PRIOR epoch of the same logical
+    // session unreachable — purge them, or repeated «Обновить переписку» would
+    // fill the LRU with dead windows and evict other sessions (review P2).
+    for (const [existingKey, entry] of this.entries) {
+      if (
+        existingKey !== key &&
+        entry.parts.tabId === parts.tabId &&
+        entry.parts.coachSessionId === parts.coachSessionId &&
+        entry.parts.accountId === parts.accountId &&
+        entry.parts.groupId === parts.groupId &&
+        entry.parts.quickMessageCount === parts.quickMessageCount
+      ) {
+        this.entries.delete(existingKey);
+      }
+    }
     this.entries.delete(key);
     this.entries.set(key, { parts, window: boundedWindow });
     while (this.entries.size > this.maxSessions) {

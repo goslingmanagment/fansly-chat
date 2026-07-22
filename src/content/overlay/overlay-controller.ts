@@ -167,9 +167,10 @@ interface CoachViewState {
   recapStatusSig: string;
   /** The «Рекап ▾» topbar menu (spec §3). */
   recapMenu: CoachRecapMenu;
-  /** The draft-attach checkbox + its helper line (spec §5). */
-  draftCheckbox: HTMLInputElement;
-  draftHelperText: Text;
+  /** The draft-attach checkbox + its helper line (spec §5). Absent while the
+   * ship-gate is off (spec §10.2 — core must consume draftText first). */
+  draftCheckbox?: HTMLInputElement;
+  draftHelperText?: Text;
   composerTextarea: HTMLTextAreaElement;
   sendButton: HTMLButtonElement;
   cancelButton: HTMLButtonElement;
@@ -1347,25 +1348,33 @@ export class OverlayController {
     });
 
     // Draft-attach block (spec §5/§2.1): checkbox + helper line stacked under
-    // the label, left of the send/cancel buttons.
-    const draftAttach = document.createElement('div');
-    draftAttach.className = 'chatgoose-coach-draft-attach';
-    const draftLabel = document.createElement('label');
-    draftLabel.className = 'chatgoose-coach-draft-attach-label';
-    const draftCheckbox = document.createElement('input');
-    draftCheckbox.type = 'checkbox';
-    draftCheckbox.className = 'chatgoose-coach-draft-attach-box';
-    const draftLabelText = document.createElement('span');
-    draftLabelText.textContent = 'Приложить мой недописанный ответ';
-    draftLabel.append(draftCheckbox, draftLabelText);
-    const draftHelper = document.createElement('div');
-    draftHelper.className = 'chatgoose-coach-draft-attach-help';
-    const draftHelperText = document.createTextNode('');
-    draftHelper.append(draftHelperText);
-    draftAttach.append(draftLabel, draftHelper);
-    draftCheckbox.addEventListener('change', () => {
-      this.callbacks.onCoachDraftIntentChange?.(draftCheckbox.checked);
-    });
+    // the label, left of the send/cancel buttons. Built ONLY behind the ship
+    // gate (spec §10.2, review P1): until core consumes draftText for coach,
+    // a rendered checkbox would silently do nothing — worse than none.
+    let draftAttach: HTMLDivElement | null = null;
+    let draftCheckbox: HTMLInputElement | undefined;
+    let draftHelperText: Text | undefined;
+    if (model.sessionView.draftAttachEnabled) {
+      draftAttach = document.createElement('div');
+      draftAttach.className = 'chatgoose-coach-draft-attach';
+      const draftLabel = document.createElement('label');
+      draftLabel.className = 'chatgoose-coach-draft-attach-label';
+      draftCheckbox = document.createElement('input');
+      draftCheckbox.type = 'checkbox';
+      draftCheckbox.className = 'chatgoose-coach-draft-attach-box';
+      const draftLabelText = document.createElement('span');
+      draftLabelText.textContent = 'Приложить мой недописанный ответ';
+      draftLabel.append(draftCheckbox, draftLabelText);
+      const draftHelper = document.createElement('div');
+      draftHelper.className = 'chatgoose-coach-draft-attach-help';
+      draftHelperText = document.createTextNode('');
+      draftHelper.append(draftHelperText);
+      draftAttach.append(draftLabel, draftHelper);
+      const box = draftCheckbox;
+      box.addEventListener('change', () => {
+        this.callbacks.onCoachDraftIntentChange?.(box.checked);
+      });
+    }
 
     const composerActions = document.createElement('div');
     composerActions.className = 'chatgoose-coach-composer-actions';
@@ -1380,7 +1389,10 @@ export class OverlayController {
     });
     cancel.classList.add('chatgoose-coach-cancel', 'chatgoose-hidden');
     buttons.append(send, cancel);
-    composerActions.append(draftAttach, buttons);
+    if (draftAttach) {
+      composerActions.append(draftAttach);
+    }
+    composerActions.append(buttons);
     composer.append(textarea, composerActions);
 
     root.append(topbar, feed, composer);
@@ -1394,8 +1406,8 @@ export class OverlayController {
       recapStatusEl: recap,
       recapStatusSig: '',
       recapMenu,
-      draftCheckbox,
-      draftHelperText,
+      ...(draftCheckbox !== undefined ? { draftCheckbox } : {}),
+      ...(draftHelperText !== undefined ? { draftHelperText } : {}),
       composerTextarea: textarea,
       sendButton: send,
       cancelButton: cancel,
@@ -1476,13 +1488,19 @@ export class OverlayController {
    * intent (spec §5/§2.1). Empty live draft → dimmed, force-unchecked, helper
    * «Поле ответа Fansly пустое»; never mutates the stored intent. */
   private reconcileCoachDraftAttach(view: CoachViewState, sv: CoachOverlaySessionView): void {
+    if (!view.draftCheckbox || !view.draftHelperText) {
+      return; // ship-gate off (spec §10.2) — no control was built
+    }
     const draftAvailable = getActiveConversationDraftText().trim() !== '';
     const checked = draftAvailable && sv.draftIntent;
+    // Busy turns lock the checkbox too (review P1): a dispatched attempt's
+    // composition can no longer be changed, so the control must not look live.
+    const disabled = !draftAvailable || !sv.composerEnabled;
     if (view.draftCheckbox.checked !== checked) {
       view.draftCheckbox.checked = checked;
     }
-    if (view.draftCheckbox.disabled !== !draftAvailable) {
-      view.draftCheckbox.disabled = !draftAvailable;
+    if (view.draftCheckbox.disabled !== disabled) {
+      view.draftCheckbox.disabled = disabled;
     }
     const helper = draftAvailable
       ? 'Коуч увидит текст, набранный в поле ответа Fansly.'
