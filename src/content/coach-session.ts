@@ -111,6 +111,11 @@ export interface CoachAttempt {
    * dispatch, so a terminal failure/cancel carries the honest «sent» flag onto
    * the failed-attempt feed item. */
   includedDraft: boolean;
+  /** Whether the question was COMPOSER-typed (review round 11): the dispatched-
+   * turn teardowns (route change, disconnect) restore the pending question into
+   * the composer only for composer-typed turns — a canned chip/Retry string
+   * must never be parked there. */
+  fromComposer: boolean;
 }
 
 export interface CoachSession {
@@ -172,6 +177,7 @@ export interface CoachSessionStore {
     question: string,
     operationId: string,
     includedDraft: boolean,
+    fromComposer: boolean,
   ): CoachAttempt;
   /** Drops the in-flight marker (cancel with nothing recorded, or supersession). */
   clearPending(session: CoachSession): void;
@@ -276,8 +282,14 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       return session;
     },
 
-    beginPending(session, question, operationId, includedDraft) {
-      const attempt: CoachAttempt = { operationId, question, startedAt: now(), includedDraft };
+    beginPending(session, question, operationId, includedDraft, fromComposer) {
+      const attempt: CoachAttempt = {
+        operationId,
+        question,
+        startedAt: now(),
+        includedDraft,
+        fromComposer,
+      };
       session.pending = attempt;
       return attempt;
     },

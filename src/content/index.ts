@@ -2086,7 +2086,7 @@ export class ChatGooseContentApp {
     this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
     this.activeFanDisplayName = getActiveConversationDisplayName() ?? 'fan';
     this.lastFeature = 'coach-chat';
-    this.coachStore.beginPending(session, trimmed, operationId, includedDraft);
+    this.coachStore.beginPending(session, trimmed, operationId, includedDraft, fromComposer);
     this.coachPendingAnswerText = '';
     this.rebuildCoachModel();
     this.renderAll();
@@ -2527,7 +2527,9 @@ export class ChatGooseContentApp {
     }
     const session = this.activeCoachSession;
     if (session) {
-      if (session.pending && !session.composerText) {
+      // Composer-typed pending questions only (review round 11): a dispatched
+      // chip/Retry turn torn down here must not park its canned string.
+      if (session.pending?.fromComposer && !session.composerText) {
         session.composerText = session.pending.question;
       }
       this.coachStore.clearPending(session);
@@ -2559,7 +2561,7 @@ export class ChatGooseContentApp {
     }
     const session = this.activeCoachSession;
     if (session?.pending) {
-      if (!session.composerText) {
+      if (session.pending.fromComposer && !session.composerText) {
         session.composerText = session.pending.question;
       }
       this.coachStore.clearPending(session);

@@ -1403,6 +1403,10 @@ the port was down had no event to carry it; the generation-guarded atomic swap
 makes an unchanged re-read a no-op); the chain STOP/teardown restores gate on
 the held question's origin too, so a chip-started chain STOP never parks
 canned text in the composer; the divider-skipping cursor walk is pinned for
-the append-new-exchange path. All coach-OWNED copy is now Russian; the shared
+the append-new-exchange path. Round 11: the question's origin rides the
+DISPATCHED attempt too (CoachAttempt.fromComposer), so the route-change and
+disconnect teardowns no longer park a canned chip/Retry string in the
+composer; the epoch purge's safety property — never evicting OTHER sessions —
+is pinned across all four identity conjuncts (other sessions stay cache-hits). All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

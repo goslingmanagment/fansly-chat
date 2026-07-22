@@ -1626,6 +1626,27 @@ describe('Coach orchestration', () => {
     });
   });
 
+  it('a dispatched CANNED turn torn down by route change / disconnect leaves the composer empty (round 11)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('Сделай короче', { fromComposer: false });
+    expect(app.activeCoachSession.pending?.fromComposer).toBe(false);
+
+    // Route change mid-stream: the canned string must not be parked.
+    const session = app.activeCoachSession;
+    app.handleRouteChange('group-2');
+    expect(session.composerText).toBe('');
+
+    // Disconnect variant, composer-typed control case.
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('мой вопрос');
+    expect(app.activeCoachSession.pending?.fromComposer).toBe(true);
+    app.recoverCoachOnDisconnect();
+    expect(app.activeCoachSession.composerText).toBe('мой вопрос');
+  });
+
   it('a chip-started chain STOP leaves the composer EMPTY (review round 10)', async () => {
     const app = await makeReadyApp();
     recapStatusResponse = { full: staleSlot(), short: null };

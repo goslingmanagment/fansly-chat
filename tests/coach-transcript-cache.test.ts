@@ -453,4 +453,27 @@ describe('CoachTranscriptCache — LRU', () => {
     expect(cache.size).toBe(1);
   });
 
+  it('an epoch bump never evicts OTHER sessions (review round 11 — the purge safety property)', async () => {
+    const cache = new CoachTranscriptCache();
+    const loadFull = vi.fn(fullWindow([makePage([20, 10])], true));
+    // Three distinct logical sessions: other group, other tab, other session id.
+    await cache.getOrSeed(key({ groupId: 'group-other' }), loadFull);
+    await cache.getOrSeed(key({ tabId: 2 }), loadFull);
+    await cache.getOrSeed(key({ coachSessionId: 'session-b' }), loadFull);
+
+    await cache.getOrSeed(key({ transcriptEpoch: 0 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 1 }), loadFull);
+    await cache.getOrSeed(key({ transcriptEpoch: 2 }), loadFull);
+
+    // The bumped session holds ONE entry; every other session survived — the
+    // purge predicate must match on the FULL logical identity (dropping any
+    // conjunct would wipe them and re-trigger full Fansly reseeds, DP 1-B).
+    expect(cache.size).toBe(4);
+    const loadsBefore = loadFull.mock.calls.length;
+    await cache.getOrSeed(key({ groupId: 'group-other' }), loadFull);
+    await cache.getOrSeed(key({ tabId: 2 }), loadFull);
+    await cache.getOrSeed(key({ coachSessionId: 'session-b' }), loadFull);
+    expect(loadFull.mock.calls.length).toBe(loadsBefore); // all three were HITS
+  });
+
 });

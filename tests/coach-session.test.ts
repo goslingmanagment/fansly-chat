@@ -126,7 +126,7 @@ describe('CoachSessionStore — commit discipline', () => {
   });
 
   it('records a failed attempt in the feed ONLY — question retained, partial text discarded', () => {
-    store.beginPending(session, 'question that failed', 'op-fail', false);
+    store.beginPending(session, 'question that failed', 'op-fail', false, true);
     const returned = store.recordFailedAttempt(
       session,
       'op-fail',
@@ -175,7 +175,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('begins and clears a pending attempt', () => {
-    const attempt = store.beginPending(session, 'draft question', 'op-9', false);
+    const attempt = store.beginPending(session, 'draft question', 'op-9', false, true);
     expect(session.pending).toBe(attempt);
     expect(attempt.operationId).toBe('op-9');
     expect(attempt.question).toBe('draft question');
@@ -186,7 +186,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('clears pending on a matching commit', () => {
-    store.beginPending(session, 'q', 'op-1', false);
+    store.beginPending(session, 'q', 'op-1', false, true);
     store.commitExchange(session, {
       operationId: 'op-1',
       generationRef: 'gen-1',
@@ -197,7 +197,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('clears pending on a failed attempt whose operationId matches', () => {
-    store.beginPending(session, 'q', 'op-1', false);
+    store.beginPending(session, 'q', 'op-1', false, true);
     const item = store.recordFailedAttempt(session, 'op-1', 'q', 'cancelled', true);
     expect(item).not.toBeNull();
     expect(session.pending).toBeUndefined();
@@ -205,9 +205,9 @@ describe('CoachSessionStore — pending lifecycle', () => {
 
   it('ignores a stale failure whose operationId no longer matches the live pending (cancel → retry race)', () => {
     // Attempt A is cancelled and retried as B; A's terminal failure lands LATE.
-    store.beginPending(session, 'the question', 'op-A', false);
+    store.beginPending(session, 'the question', 'op-A', false, true);
     store.clearPending(session); // cancel A
-    const attemptB = store.beginPending(session, 'the question', 'op-B', false); // retry as B
+    const attemptB = store.beginPending(session, 'the question', 'op-B', false, true); // retry as B
 
     const result = store.recordFailedAttempt(session, 'op-A', 'the question', 'cancelled', true);
 
@@ -225,7 +225,7 @@ describe('CoachSessionStore — pending lifecycle', () => {
   });
 
   it('never serializes a pending attempt to the wire', () => {
-    store.beginPending(session, 'unsent q', 'op-1', false);
+    store.beginPending(session, 'unsent q', 'op-1', false, true);
     expect(store.serializeForWire(session, 10)).toEqual([]);
   });
 });
@@ -280,11 +280,11 @@ describe('CoachSessionStore — reset semantics', () => {
     session.composerText = 'half-typed question';
     // Populate every structure the reset must clear: a committed exchange (feed +
     // wire), a recorded failure (feed), and a live pending marker.
-    store.beginPending(session, 'qc', 'op-commit', false);
+    store.beginPending(session, 'qc', 'op-commit', false, true);
     store.commitExchange(session, { operationId: 'op-commit', generationRef: 'g', question: 'qc', answerRaw: 'a' });
-    store.beginPending(session, 'qf', 'op-fail', false);
+    store.beginPending(session, 'qf', 'op-fail', false, true);
     store.recordFailedAttempt(session, 'op-fail', 'qf', 'e', true);
-    store.beginPending(session, 'qp', 'op-pending', false);
+    store.beginPending(session, 'qp', 'op-pending', false, true);
 
     store.resetSession(session);
 
@@ -344,7 +344,7 @@ describe('CoachSessionStore — draft intent + transcript epoch + turnContext', 
   it('records includedDraft from the pending attempt onto the failed-attempt item', () => {
     const store = makeStore();
     const session = store.getOrCreate('acc', 'grp');
-    store.beginPending(session, 'q', 'op-1', true);
+    store.beginPending(session, 'q', 'op-1', true, true);
 
     const item = store.recordFailedAttempt(session, 'op-1', 'q', 'cancelled', true);
     expect(item?.includedDraft).toBe(true);
@@ -353,7 +353,7 @@ describe('CoachSessionStore — draft intent + transcript epoch + turnContext', 
   it('commitExchange retains the turnContext (spec §8.2), and omits it when absent', () => {
     const store = makeStore();
     const session = store.getOrCreate('acc', 'grp');
-    store.beginPending(session, 'q', 'op-1', false);
+    store.beginPending(session, 'q', 'op-1', false, true);
     const exchange = store.commitExchange(session, {
       operationId: 'op-1',
       generationRef: 'gen-1',
@@ -371,7 +371,7 @@ describe('CoachSessionStore — draft intent + transcript epoch + turnContext', 
       attachedRecaps: { full: { ageMs: 1000 }, short: null },
     });
 
-    store.beginPending(session, 'q2', 'op-2', false);
+    store.beginPending(session, 'q2', 'op-2', false, true);
     const plain = store.commitExchange(session, {
       operationId: 'op-2',
       generationRef: 'gen-2',
