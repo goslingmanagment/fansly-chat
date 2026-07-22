@@ -2288,7 +2288,14 @@ export class ChatGooseContentApp {
       ...this.buildOperationStartPayload('fan-summary', operationId, domFanDisplayName, undefined, true),
       summaryMode: mode,
     };
-    const sent = this.port.send(payload);
+    // Belt-and-braces beside the PortClient-level mapping (round 14): a throw
+    // here must take the same STOP rollback as a false return.
+    let sent = false;
+    try {
+      sent = this.port.send(payload);
+    } catch {
+      sent = false;
+    }
     if (!sent) {
       // The start never reached the background — treat as a STOP: fail the step,
       // preserve an auto chain's question, and drop the op markers.

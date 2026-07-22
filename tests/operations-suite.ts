@@ -6654,6 +6654,36 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(['full-history', 'window']).toContain(turnContext!.transcriptCoverage);
   });
 
+  it('meta WITHOUT attachedRecaps yields a turnContext with the key ABSENT (round 12 honesty)', async () => {
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async (
+        _settings: unknown,
+        _request: Record<string, unknown>,
+        callbacks: {
+          onMeta?: (m: Record<string, unknown>) => void;
+          onText?: (t: string) => void;
+        },
+      ) => {
+        // No attachedRecaps field at all — «not reported», not «none».
+        callbacks.onMeta?.({ requestId: 'gen-nr', clientRequestId: 'coach-op', model: 'm' });
+        callbacks.onText?.('Advice');
+        return 'Advice';
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+    await coordinator.startOperation(1, coachStart());
+    const complete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete',
+    );
+    const turnContext = complete?.turnContext;
+    expect(turnContext).toBeDefined();
+    // The key is ABSENT — a regression to an unconditional {full:null,short:null}
+    // would render a confirmed «рекап: нет» for an unreporting kernel.
+    expect(Object.keys(turnContext!).sort()).toEqual(['sentMessageCount', 'transcriptCoverage']);
+  });
+
   it('a bumped transcriptEpoch forces a full quick-window reseed (review P2)', async () => {
     const { coordinator, fanslyClient } = await createCoordinatorHarness({
       anthropicRawText: 'Advice',

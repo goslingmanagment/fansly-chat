@@ -1804,6 +1804,24 @@ describe('Coach orchestration', () => {
     expect(after?.disabled).toBe(false);
   });
 
+  it('a THROWING send during the recap-chain start takes the clean STOP rollback (round 14)', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+    app.openCoach();
+    await flush();
+    app.port.send = vi.fn(() => {
+      throw new Error('disconnected port');
+    });
+
+    // Must not leak an exception out of the submit, must not leave the chain
+    // armed, and the question survives in the composer.
+    await app.submitCoachQuestion('вопрос через рекап');
+    expect(app.coachRecapChain).toBeNull();
+    expect(app.activeFeature).toBeNull();
+    expect(app.activeCoachSession.composerText).toBe('вопрос через рекап');
+  });
+
   it('a THROWING port send gets the same never-dispatched rollback (review round 6)', async () => {
     const app = await makeReadyApp();
     app.port.send = vi.fn(() => {

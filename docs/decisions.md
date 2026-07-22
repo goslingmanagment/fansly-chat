@@ -1416,6 +1416,12 @@ honest-empty-state rule this file already applies to the status line); the
 empty-state hint chips lock with the composer during the submit preflight.
 Round 13: Tab out of the open «Рекап ▾» menu dismisses it without stealing
 focus back (WAI-ARIA menu-button); the pre-dispatch abort (restore + re-arm +
-re-render) is one helper instead of ten hand-copies in three spellings. All coach-OWNED copy is now Russian; the shared
+re-render) is one helper instead of ten hand-copies in three spellings.
+Round 14: PortClient.send maps a throwing postMessage (dead port whose
+disconnect has not landed yet) to its documented false return AT THE SOURCE —
+every dispatch site, including the recap-chain start that used to leak the
+exception into a menu click handler, now takes its own never-dispatched
+rollback; the producer's «kernel did not report attachedRecaps» branch is
+coordinator-pinned. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.
