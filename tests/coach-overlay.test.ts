@@ -1120,6 +1120,39 @@ describe('OverlayController — coach chat mode', () => {
     expect(contentStyles).toMatch(/\.chatgoose-coach-composer-buttons\s*\{[^}]*margin-left:\s*auto/);
   });
 
+  it('the «Авто-рекап» radios live in a labelled role="group" (review P2 ARIA)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger').click();
+    const group = requireElement<HTMLDivElement>('.chatgoose-coach-recap-panel [role="group"]');
+    expect(group.querySelectorAll('[role="menuitemradio"]')).toHaveLength(4);
+    const labelId = group.getAttribute('aria-labelledby');
+    expect(labelId).toBeTruthy();
+    expect(document.getElementById(labelId!)?.textContent).toBe('Авто-рекап');
+  });
+
+  it('the turn-context expansion carries provenance the summary lacks (review P2)', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          {
+            ...exchangeItem('x-op', 'q', 'advice'),
+            turnContext: {
+              sentMessageCount: 100,
+              transcriptCoverage: 'window',
+              attachedRecaps: { full: { ageMs: 3 * 86_400_000 }, short: null },
+            },
+          } as CoachOverlayFeedItem,
+        ],
+      }),
+    );
+    const detail = requireElement<HTMLDivElement>('.chatgoose-coach-turncontext-detail');
+    expect(detail.textContent).toContain('до бюджета ядра');
+    expect(detail.textContent).toContain('подтверждено ядром');
+    expect(detail.textContent).toContain('ужать контекст');
+  });
+
   it('menu arrow keys cycle focus through the items (spec §3 a11y)', () => {
     const { controller } = makeController();
     controller.render(createCoachModel());

@@ -1093,8 +1093,13 @@
   padding: 7px 10px;
 }
 
-.chatgoose-coach-recap-item:hover {
+/* Ties the base .chatgoose-button:hover:not(:disabled) specificity and wins by
+ * order; border/color are re-neutralized or the borderless menu row would grow
+ * a clay chip frame on hover (review P2). */
+.chatgoose-coach-recap-item:hover:not(:disabled) {
   background: var(--chatgoose-bg2);
+  border-color: transparent;
+  color: var(--chatgoose-ink);
 }
 
 .chatgoose-coach-recap-item[role='menuitemradio'] {

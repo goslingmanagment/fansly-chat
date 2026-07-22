@@ -1375,6 +1375,15 @@ site is pinned by a source-text assertion beside the unmocked semantics pin,
 and the render gate remains the load-bearing layer; menu arrow-navigation and
 outside-click close are behaviour-tested; a THROWING port send gets the same
 never-dispatched rollback as a false return; multi-draft acceptance attributes
-the card's own index (nonzero-index pin restored). All coach-OWNED copy is now Russian; the shared
+the card's own index (nonzero-index pin restored). Round 7: the submit
+preflight projects as busy the moment it starts and a rejected Send restores
+the cleared composer text (the preflight window could silently eat typed
+text); typing in the Fansly composer re-renders an open coach surface so the
+draft checkbox tracks the live field; the «Рекап ▾» radios live in a labelled
+role="group" (a bare div inside role="menu" is invalid ARIA); the menu-item
+hover override matches the base button-hover specificity (the clay chip frame
+no longer appears on borderless rows); the turn-context expansion carries the
+provenance split (browser pre-budget vs kernel post-attach) instead of
+restating the summary. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

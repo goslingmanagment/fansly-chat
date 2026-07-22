@@ -1457,6 +1457,49 @@ describe('Coach orchestration', () => {
     expect(app.activeCoachSession.draftIntent).toBe(false);
   });
 
+  it('the submit preflight locks the composer and a rejected Send restores its text (review P1)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+
+    // Stall the settings read to hold the preflight window open.
+    let releaseStorage!: () => void;
+    const storageGet = (globalThis as any).browser.storage.local.get;
+    (globalThis as any).browser.storage.local.get = vi.fn(
+      () => new Promise((resolve) => {
+        releaseStorage = () => resolve({ ...mockStorageState });
+      }),
+    );
+
+    const first = app.submitCoachQuestion('chip question');
+    // The lock is projected IMMEDIATELY: the rendered model is busy.
+    expect(app.coachOverlayModel.sessionView.composerEnabled).toBe(false);
+
+    // A second Send in the window is rejected AND the typed text survives.
+    await app.submitCoachQuestion('typed while waiting');
+    expect(app.activeCoachSession.composerText).toBe('typed while waiting');
+
+    releaseStorage();
+    (globalThis as any).browser.storage.local.get = storageGet;
+    await first;
+    await flush();
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'chip question' });
+  });
+
+  it('typing into the Fansly composer re-renders the open coach surface (review P2)', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = '';
+    app.openCoach();
+    await flush();
+    const box = document.querySelector<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(box?.disabled).toBe(true);
+
+    draftHolder.value = 'now non-empty';
+    (app as any).handleDraftInput();
+    const after = document.querySelector<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
+    expect(after?.disabled).toBe(false);
+  });
+
   it('a THROWING port send gets the same never-dispatched rollback (review round 6)', async () => {
     const app = await makeReadyApp();
     app.port.send = vi.fn(() => {

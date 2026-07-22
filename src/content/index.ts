@@ -391,6 +391,12 @@ export class ChatGooseContentApp {
     }
     this.hasDraftText = nextHasDraftText;
     this.renderButtonBar();
+    // An open coach surface reflects the live Fansly draft in its checkbox
+    // (review P2): typing into / clearing the Fansly composer must update the
+    // disabled state immediately, not on the next unrelated render.
+    if (this.activeCoachSession && this.coachOverlayModel) {
+      this.renderSurfaces();
+    }
   };
 
   private readonly toast = new ToastController();
@@ -1905,6 +1911,16 @@ export class ChatGooseContentApp {
       this.coachRecapChain ||
       this.coachSubmitInFlight
     ) {
+      // The renderer clears the textarea BEFORE onCoachSubmit, so a rejected
+      // submit must put the question back or it is silently lost (review P1).
+      restoreCoachComposerText(session, trimmed);
+      if (opts?.forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
+      if (this.activeCoachSession === session) {
+        this.rebuildCoachModel();
+        this.renderAll();
+      }
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
@@ -1915,6 +1931,10 @@ export class ChatGooseContentApp {
     }
 
     this.coachSubmitInFlight = true;
+    // Project the lock immediately (review P1) — the await below opens a real
+    // interaction window on slow storage.
+    this.rebuildCoachModel();
+    this.renderAll();
     let settings;
     try {
       ({ settings } = await loadStorageState());
@@ -1948,6 +1968,10 @@ export class ChatGooseContentApp {
       return;
     } finally {
       this.coachSubmitInFlight = false;
+      if (this.activeCoachSession === session) {
+        this.rebuildCoachModel();
+        this.renderAll();
+      }
     }
     // A route/persona change during the await tore the session/route down.
     if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
@@ -2561,7 +2585,10 @@ export class ChatGooseContentApp {
     // composer locks and the whole chain is cancellable via the top-level op.
     const chainOpId =
       this.coachRecapChain?.session === session ? this.coachRecapChain.operationId : null;
-    const busy = streaming || chainOpId !== null;
+    // The submit preflight (settings/status await) counts as busy too (review
+    // P1): the composer, chips and topbar must lock the moment a chip fires,
+    // or a second Send in that window clears text the guard then rejects.
+    const busy = streaming || chainOpId !== null || this.coachSubmitInFlight;
     return {
       kind: 'coach',
       fanDisplayName: getActiveConversationDisplayName() ?? 'fan',

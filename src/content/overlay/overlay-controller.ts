@@ -1694,16 +1694,26 @@ export class OverlayController {
     addItem('Обновить переписку', 'menuitem', () => this.callbacks.onCoachRefreshTranscript?.());
     addSeparator();
 
+    // Valid menu ARIA (review P2): a bare div inside role="menu" is ignored or
+    // read unpredictably — the label is presentational and NAMES the radio
+    // group, and the four menuitemradio buttons live inside role="group".
     const groupLabel = document.createElement('div');
     groupLabel.className = 'chatgoose-coach-recap-menu-group';
     groupLabel.textContent = 'Авто-рекап';
+    groupLabel.id = `chatgoose-coach-autorecap-label-${crypto.randomUUID()}`;
+    groupLabel.setAttribute('role', 'presentation');
     panel.append(groupLabel);
+    const radioGroup = document.createElement('div');
+    radioGroup.setAttribute('role', 'group');
+    radioGroup.setAttribute('aria-labelledby', groupLabel.id);
+    panel.append(radioGroup);
 
     const radioItems = new Map<CoachAutoRecapOverride, HTMLButtonElement>();
     for (const override of COACH_AUTO_RECAP_OPTIONS) {
       const item = addItem(autoRecapItemLabel(override, null), 'menuitemradio', () =>
         this.callbacks.onCoachSetAutoRecap?.(override),
       );
+      radioGroup.append(item);
       item.setAttribute('aria-checked', 'false');
       radioItems.set(override, item);
     }
@@ -1963,14 +1973,21 @@ export class OverlayController {
       `Отправлено коучу: ${turnContext.sentMessageCount} сообщ. (${coverage}) · рекап: ${recapSummary}`;
     details.append(summary);
 
+    // The expansion carries what the summary does NOT (review P2 — it used to
+    // restate the same two values): the provenance split. Transcript figures
+    // are the browser's PRE-budget send; the recap line is the kernel's
+    // POST-attach confirmation; the kernel may shed further for prompt budget.
     const detail = document.createElement('div');
     detail.className = 'chatgoose-coach-turncontext-detail';
     const transcriptLine = document.createElement('div');
     transcriptLine.textContent =
-      `Переписка: ${turnContext.sentMessageCount} сообщ. · ${coverage}`;
+      `Переписка: ${turnContext.sentMessageCount} сообщ. (${coverage}) — отправлено браузером, до бюджета ядра`;
     const recapLine = document.createElement('div');
-    recapLine.textContent = `Рекап: ${recapSummary}`;
-    detail.append(transcriptLine, recapLine);
+    recapLine.textContent = `Рекап: ${recapSummary} — подтверждено ядром после сборки промпта`;
+    const caveatLine = document.createElement('div');
+    caveatLine.textContent =
+      'Ядро может дополнительно ужать контекст под бюджет промпта.';
+    detail.append(transcriptLine, recapLine, caveatLine);
     details.append(detail);
     return details;
   }
