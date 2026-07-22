@@ -1510,6 +1510,128 @@ describe('Coach orchestration', () => {
     expect(lastSent(app).draftText).toBeUndefined();
   });
 
+  it('Retry re-reads the live draft THROUGH a successful auto-recap chain (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail'); // auto-recap off → plain dispatch
+    const opId = pendingOpId(app);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: opId,
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(failed.includedDraft).toBe(true);
+
+    // The chatter arms auto-recap AFTER the failure; the stale recap forces a
+    // chain on the retry. The re-read intent must survive the chain.
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    draftHolder.value = 'retry draft';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    expect(app.coachRecapChain).not.toBeNull();
+    expect(app.coachRecapChain.forceDraftRead).toBe(true);
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'recap body', parts: [] },
+    });
+    await flush();
+
+    // The post-recap dispatch re-read the CURRENT live draft.
+    expect(lastSent(app)).toMatchObject({
+      feature: 'coach-chat',
+      chatterQuestion: 'will fail',
+      draftText: 'retry draft',
+    });
+  });
+
+  it('Retry PROCEED-chain failure still carries the re-read intent (review P1)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    draftHolder.value = 'retry draft';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: recapOpId,
+      error: { key: 'ai_output_unusable', code: 'CG-API-06', message: 'empty output' },
+    });
+    await flush();
+
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', draftText: 'retry draft' });
+  });
+
+  it('a STOP inside the retry chain re-arms the draft intent (never dispatched, spec §5)', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { full: staleSlot(), short: null };
+    draftHolder.value = 'first draft';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    await app.submitCoachQuestion('will fail');
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: pendingOpId(app),
+      error: { code: 'CG-AI-01', message: 'boom' },
+    });
+    const failed = app.activeCoachSession.feedItems.find((i: any) => i.kind === 'failed-attempt');
+    expect(app.activeCoachSession.draftIntent).toBe(false); // consumed by the dispatch
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    await app.handleCoachRetry(failed.question, failed.includedDraft);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId: app.coachRecapChain.operationId,
+      error: { key: 'session_expired', code: 'CG-FAN-02', message: 'expired' },
+    });
+    await flush();
+
+    // The coach turn never dispatched → the re-read intent is preserved as the
+    // stored session intent, so the manual resend still attaches the draft.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+  });
+
+  it('reopen drops the settings snapshot until the fresh read lands (review P1)', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'off',
+    });
+
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'short';
+    app.closeCoach();
+    app.openCoach();
+    // Invalidated BEFORE the first render — the stale 'off' snapshot must not
+    // survive into the reopened model (fallbacks render instead).
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toBeUndefined();
+    await flush();
+    expect(app.coachOverlayModel.sessionView.settingsSnapshot).toMatchObject({
+      coachAutoRecap: 'short',
+    });
+  });
+
   // ─── §8.4 transcript epoch ────────────────────────────────────────────────
 
   it('«Обновить переписку» bumps the transcript epoch carried on the next turn', async () => {

@@ -262,15 +262,25 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
  * an extra field or a wrong type is a producer bug on a DOM-adjacent projection
  * (E28), so validate exactly rather than pass through. */
 function isCoachTurnContext(value: unknown): boolean {
-  if (!isObjectRecord(value)) {
+  if (
+    !isObjectRecord(value) ||
+    !hasExactKeys(value, ['sentMessageCount', 'transcriptCoverage', 'attachedRecaps'])
+  ) {
     return false;
   }
-  const recaps = value.attachedRecaps;
+  // Exact keys + non-negative integers at EVERY level (review P1): this
+  // validator is the E28 declassification boundary — a slot smuggling an extra
+  // field (e.g. a raw body) must be rejected, not forwarded to the DOM side.
+  const countOk = (candidate: unknown): boolean =>
+    typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0;
   const slotOk = (slot: unknown): boolean =>
-    slot === null || (isObjectRecord(slot) && isNumber(slot.ageMs));
-  return isNumber(value.sentMessageCount) &&
+    slot === null ||
+    (isObjectRecord(slot) && hasExactKeys(slot, ['ageMs']) && countOk(slot.ageMs));
+  const recaps = value.attachedRecaps;
+  return countOk(value.sentMessageCount) &&
     (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
     isObjectRecord(recaps) &&
+    hasExactKeys(recaps, ['full', 'short']) &&
     slotOk(recaps.full) &&
     slotOk(recaps.short);
 }

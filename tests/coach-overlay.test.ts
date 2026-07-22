@@ -837,6 +837,193 @@ describe('OverlayController — coach chat mode', () => {
     expect(panel.classList.contains('chatgoose-overlay-coach')).toBe(true);
     expect(window.getComputedStyle(requireElement<HTMLDivElement>('.chatgoose-coach-feed')).overflowY).toBe('auto');
   });
+
+  // ─── Restored regression tests (review P2: the rewrite dropped coverage the
+  // redesign did not change; RU labels + structured status are the ONLY edits) ───
+
+  it('refuses draft Insert when the live URL has moved to another fan', async () => {
+    const { controller, callbacks } = makeController();
+    const mockInsert = vi.mocked(insertIntoFanslyTextarea);
+    controller.render(
+      createCoachModel({
+        groupId: 'example',
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Fan A draft', index: 0 }])],
+      }),
+    );
+    window.history.pushState({}, '', '/messages/other-fan');
+
+    const insert = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+    ).find((button) => /Вставить/.test(button.textContent ?? ''));
+    insert!.click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chatgoose-inline-error')?.classList.contains('chatgoose-hidden')).toBe(false);
+    });
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps the overlay open and surfaces an inline error when a draft insert fails', async () => {
+    const { controller, callbacks } = makeController();
+    vi.mocked(getActiveConversationDraftText).mockReturnValue('');
+    vi.mocked(insertIntoFanslyTextarea).mockRejectedValueOnce(
+      new DOMException('blocked', 'NotAllowedError'),
+    );
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Draft body', index: 0 }])],
+      }),
+    );
+
+    const insert = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+    ).find((button) => /Вставить/.test(button.textContent ?? ''));
+    insert!.click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chatgoose-inline-error')?.classList.contains('chatgoose-hidden')).toBe(false);
+    });
+    // A failed insert must NOT collapse and must NOT record acceptance.
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
+    expect(document.querySelector('.chatgoose-coach-feed')).not.toBeNull();
+  });
+
+  it('draft «Копировать» does NOT collapse the overlay', async () => {
+    const { controller, callbacks } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x-op', 'q', 'advice', [{ text: 'Hey love', index: 0 }])],
+      }),
+    );
+    const copy = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-draft .chatgoose-card-actions button'),
+    ).find((button) => button.textContent === 'Копировать');
+    copy!.click();
+
+    await vi.waitFor(() => {
+      expect(callbacks.onAcceptance).toHaveBeenCalledWith('x-op', 'copied', 0, undefined);
+    });
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
+  it('ignores Escape fired during an IME composition', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+
+    const composing = new KeyboardEvent('keydown', { key: 'Escape' });
+    Object.defineProperty(composing, 'isComposing', { value: true });
+    document.dispatchEvent(composing);
+
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(callbacks.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('the composer caps the question length at the kernel bound', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    expect(requireElement<HTMLTextAreaElement>('.chatgoose-coach-input').maxLength).toBe(2000);
+  });
+
+  it('does not submit on Shift+Enter or while composing (IME)', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    textarea.value = 'как продать?';
+
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
+    expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
+
+    const composing = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+    Object.defineProperty(composing, 'isComposing', { value: true });
+    textarea.dispatchEvent(composing);
+    expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
+  });
+
+  it('a non-retryable failed attempt renders no «Повторить»', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({ feedItems: [failedItem('fatal', 'CG-AUTH-01', false)] }),
+    );
+    const retry = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'),
+    ).find((button) => /Повторить/.test(button.textContent ?? ''));
+    expect(retry).toBeUndefined();
+  });
+
+  it('pins the feed to the bottom on a (re)open rebuild — JSDOM cannot measure scroll, so assert the call', () => {
+    const scrollSpy = vi.spyOn(
+      OverlayController.prototype as unknown as { scrollCoachFeedToBottom: () => void },
+      'scrollCoachFeedToBottom',
+    );
+    const { controller } = makeController();
+
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
+      }),
+    );
+    expect(scrollSpy).toHaveBeenCalled();
+
+    // A pure in-place update must NOT force-scroll — that is gated on the
+    // near-bottom heuristic, not the rebuild path.
+    scrollSpy.mockClear();
+    const feed = requireElement<HTMLDivElement>('.chatgoose-coach-feed');
+    Object.defineProperty(feed, 'clientHeight', { configurable: true, get: () => 100 });
+    Object.defineProperty(feed, 'scrollHeight', { configurable: true, get: () => 400 });
+    feed.scrollTop = 10;
+    controller.render(
+      createCoachModel({
+        feedItems: [exchangeItem('x1', 'q1', 'a1'), exchangeItem('x2', 'q2', 'a2')],
+        recapStatusLine: { state: 'ages', fullAge: '1 дн', shortAge: null },
+      }),
+    );
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps follow-up chips visible when a recap step follows the latest answer (review P1)', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          exchangeItem('x1', 'q1', 'advice'),
+          { kind: 'recap-step', mode: 'short', origin: 'explicit', status: 'done' },
+        ],
+      }),
+    );
+    const chip = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-followup-chip'),
+    ).find((button) => button.textContent === 'Другой вариант');
+    expect(chip).toBeDefined();
+    chip!.click();
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('Другой вариант');
+  });
+
+  it('keeps the memory divider node attached and identity-stable across an unchanged re-render (review P2)', () => {
+    const { controller } = makeController();
+    const exchanges = Array.from({ length: 4 }, (_, i) => exchangeItem(`x${i}`, `q${i}`, `a${i}`));
+    const model = createCoachModel({
+      feedItems: exchanges,
+      settingsSnapshot: { coachHistoryLimit: 2, coachAutoRecap: 'off' },
+    });
+    controller.render(model);
+    const divider = requireElement<HTMLElement>('.chatgoose-coach-memory-divider');
+    const before = { prev: divider.previousSibling, next: divider.nextSibling };
+
+    controller.render(
+      createCoachModel({
+        feedItems: exchanges,
+        settingsSnapshot: { coachHistoryLimit: 2, coachAutoRecap: 'off' },
+      }),
+    );
+    const after = requireElement<HTMLElement>('.chatgoose-coach-memory-divider');
+    expect(after).toBe(divider); // same node, never rebuilt
+    expect(after.previousSibling).toBe(before.prev);
+    expect(after.nextSibling).toBe(before.next);
+  });
 });
 
 describe('OverlayController — recap start dialog (spec §5)', () => {
@@ -888,5 +1075,26 @@ describe('OverlayController — recap start dialog (spec §5)', () => {
     const { controller } = makeController();
     controller.render(createRecapPickerModel({ full: null, short: null }));
     expect(requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last').disabled).toBe(true);
+  });
+
+  it('Enter (unmodified) picks Полный — ⌘⇧S+Enter muscle memory', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createRecapPickerModel());
+
+    const picker = requireElement<HTMLDivElement>('.chatgoose-recap-picker');
+    picker.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(callbacks.onRecapPick).toHaveBeenCalledWith('full');
+  });
+
+  it('keeps «Открыть последний» live while the status is still unknown', () => {
+    const { controller } = makeController();
+    controller.render(createRecapPickerModel(null));
+    expect(requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last').disabled).toBe(false);
+  });
+
+  it('keeps «Открыть последний» live when recap status is unavailable', () => {
+    const { controller } = makeController();
+    controller.render(createRecapPickerModel({ state: 'unavailable', full: null, short: null }));
+    expect(requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last').disabled).toBe(false);
   });
 });

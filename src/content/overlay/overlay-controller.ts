@@ -1,4 +1,5 @@
 import { COACH_QUESTION_MAX_CHARS } from '../../shared/constants.js';
+import { formatCoachAgeMs } from '../../shared/coach-format.js';
 import { ChatGooseError, toUserError } from '../../shared/errors.js';
 import type {
   CoachAutoRecapOverride,
@@ -246,20 +247,6 @@ function relativeTime(timestamp: number): string {
     return `${diffHours}h ago`;
   }
   return `${Math.round(diffHours / 24)}d ago`;
-}
-
-/** Coarse Russian age bucket for the coach turn-context line (spec §8.2),
- * matching the recap status line's «N мин / N ч / N дн» buckets. */
-function formatCoachAgeMs(ageMs: number): string {
-  const minutes = Math.max(0, Math.floor(ageMs / 60_000));
-  if (minutes < 60) {
-    return `${minutes} мин`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours} ч`;
-  }
-  return `${Math.floor(hours / 24)} дн`;
 }
 
 function ratingClass(rating: number): string {
@@ -1640,7 +1627,7 @@ export class OverlayController {
     const addItem = (label: string, role: 'menuitem' | 'menuitemradio', onSelect: () => void): HTMLButtonElement => {
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'chatgoose-coach-recap-item';
+      item.className = 'chatgoose-button chatgoose-coach-recap-item';
       item.setAttribute('role', role);
       item.textContent = label;
       item.addEventListener('click', () => {
@@ -1720,14 +1707,6 @@ export class OverlayController {
   }
 
   private reconcileCoachFeed(view: CoachViewState, sv: CoachOverlaySessionView): void {
-    // The memory divider (§8.1) lives interspersed in itemsEl; detach it so the
-    // positional ordering below sees ONLY keyed item nodes. reconcileCoachMemoryDivider
-    // (called right after) re-inserts it at the right place. The node reference
-    // is retained so it is reused, not rebuilt.
-    if (view.memoryDividerNode?.parentNode === view.itemsEl) {
-      view.itemsEl.removeChild(view.memoryDividerNode);
-    }
-
     const desiredKeys: string[] = [];
     const nodesByKey = new Map<string, HTMLElement>();
 
@@ -1766,13 +1745,22 @@ export class OverlayController {
     }
 
     // Order itemsEl to match desiredKeys — append-only in practice, so an
-    // unchanged feed performs no DOM moves at all.
-    desiredKeys.forEach((key, index) => {
-      const node = nodesByKey.get(key)!;
-      if (view.itemsEl.children[index] !== node) {
-        view.itemsEl.insertBefore(node, view.itemsEl.children[index] ?? null);
+    // unchanged feed performs no DOM moves at all. The memory divider (§8.1)
+    // stays ATTACHED and is skipped by the walk (review P2: the old
+    // detach/reinsert churned two DOM mutations per streaming frame);
+    // reconcileCoachMemoryDivider then moves it only when its target changed.
+    let cursor: ChildNode | null = view.itemsEl.firstChild;
+    for (const key of desiredKeys) {
+      while (cursor !== null && cursor === view.memoryDividerNode) {
+        cursor = cursor.nextSibling;
       }
-    });
+      const node = nodesByKey.get(key)!;
+      if (cursor === node) {
+        cursor = node.nextSibling;
+      } else {
+        view.itemsEl.insertBefore(node, cursor);
+      }
+    }
   }
 
   private reconcileCoachPending(
@@ -2117,16 +2105,25 @@ export class OverlayController {
     }
   }
 
-  /** Show the follow-up chips (spec §8.3) under the LATEST completed answer only:
-   * hidden while streaming or when the latest feed item is not a completed
-   * exchange (e.g. a failed attempt or recap step). */
+  /** Show the follow-up chips (spec §8.3) under the LATEST completed answer:
+   * recap steps after an answer must NOT hide them (review P1 — an explicit
+   * refresh used to bury the chips for good); only streaming or a NEWER failed
+   * attempt suppresses (a failed question is retried, not followed up). */
   private reconcileCoachFollowups(
     view: CoachViewState,
     model: Extract<OverlayViewModel, { kind: 'coach' }>,
   ): void {
     const sv = model.sessionView;
-    const last = sv.feedItems[sv.feedItems.length - 1];
-    const show = model.operationId === null && last?.kind === 'exchange';
+    let anchor: CoachOverlayFeedItem | undefined;
+    for (let i = sv.feedItems.length - 1; i >= 0; i -= 1) {
+      const item = sv.feedItems[i]!;
+      if (item.kind === 'recap-step') {
+        continue;
+      }
+      anchor = item;
+      break;
+    }
+    const show = model.operationId === null && anchor?.kind === 'exchange';
     if (!show) {
       if (view.followupsNode) {
         view.followupsNode.remove();

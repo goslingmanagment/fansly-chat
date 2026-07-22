@@ -1327,6 +1327,19 @@ on the existing `settings:changed` path (stale-session guarded), positioning the
 memory-window divider (§8.1, derived from feed exchange identities, not the
 50-capped `completedExchanges.length`) and labelling «По настройке (<x>)».
 Follow-up chips (§8.3) submit a canned question with normal semantics, leaving
-unsent composer text untouched. All coach-OWNED copy is now Russian; the shared
+unsent composer text untouched. Review round (2026-07-22, same PR): the
+retry's live-draft re-read intent is carried on the recap-chain state and a
+chain STOP re-arms the stored intent (a never-dispatched turn must not consume
+it); follow-up chips anchor to the latest EXCHANGE, scanning past recap steps;
+the settings snapshot hydrates under a monotonic generation, invalidated
+BEFORE the first render on open and on settings:changed (a session-reference
+guard cannot tell close/reopen apart); the `turnContext` validator enforces
+exact keys and non-negative-integer counts at every level (it IS the E28
+declassification boundary, and the background floors ages to match); the
+intent toggle rebuilds the model so no later render repaints a stale checkbox;
+the memory divider stays attached across renders (no per-frame detach/reinsert
+churn); the coach age formatter is one shared module; and the regression tests
+the UI rewrite had dropped (cross-fan insert guard, failed-insert inline
+error, IME suppression, recap-picker keyboard/unknown states) are restored. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

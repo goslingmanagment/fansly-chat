@@ -3172,8 +3172,14 @@ export class OperationCoordinator {
               sentMessageCount: keptMessageCount,
               transcriptCoverage: computedTranscriptCoverage,
               attachedRecaps: {
-                full: attachedRecaps?.full ? { ageMs: attachedRecaps.full.ageMs } : null,
-                short: attachedRecaps?.short ? { ageMs: attachedRecaps.short.ageMs } : null,
+                // Floored: the content-side validator requires non-negative
+                // INTEGER ages (exact-shape declassification, E28).
+                full: attachedRecaps?.full
+                  ? { ageMs: Math.max(0, Math.floor(attachedRecaps.full.ageMs)) }
+                  : null,
+                short: attachedRecaps?.short
+                  ? { ageMs: Math.max(0, Math.floor(attachedRecaps.short.ageMs)) }
+                  : null,
               },
             }
           : undefined;

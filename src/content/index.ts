@@ -1,5 +1,6 @@
 import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
+import { formatCoachAgeMs } from '../shared/coach-format.js';
 import {
   createCoachSessionStore,
   type CoachSession,
@@ -162,21 +163,6 @@ function getMessageLlmSpend(
   return message.llmSpend;
 }
 
-/** Coarse age label for the coach recap status line (spec §5 «Полный: 3 дн ·
- * Короткий: 10 мин»). A rough bucket is enough — the authoritative recap picker
- * lands in T11. */
-function formatCoachRecapAge(ageMs: number): string {
-  const minutes = Math.max(0, Math.floor(ageMs / 60_000));
-  if (minutes < 60) {
-    return `${minutes} мин`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours} ч`;
-  }
-  return `${Math.floor(hours / 24)} дн`;
-}
-
 /** The structured recap freshness line for the coach empty state (spec §2.1/§5),
  * or `{ state: 'hidden' }` when nothing is stored (the renderer draws nothing). */
 function formatCoachRecapStatusLine(status: RecapStatusResponse | null): CoachRecapStatusView {
@@ -189,8 +175,8 @@ function formatCoachRecapStatusLine(status: RecapStatusResponse | null): CoachRe
   if (status.state === 'unavailable') {
     return { state: 'unavailable' };
   }
-  const fullAge = status.full ? formatCoachRecapAge(status.full.ageMs) : null;
-  const shortAge = status.short ? formatCoachRecapAge(status.short.ageMs) : null;
+  const fullAge = status.full ? formatCoachAgeMs(status.full.ageMs) : null;
+  const shortAge = status.short ? formatCoachAgeMs(status.short.ageMs) : null;
   if (fullAge === null && shortAge === null) {
     return { state: 'hidden' };
   }
@@ -363,6 +349,10 @@ export class ChatGooseContentApp {
         step: CoachRecapStepFeedItem;
         origin: 'auto' | 'explicit';
         pendingQuestion: string | null;
+        /** Retry's live-draft re-read intent (spec §5): must survive the chain so
+         * the post-recap dispatch still re-reads the CURRENT Fansly draft
+         * (review P1 — it used to be dropped at both continuations). */
+        forceDraftRead: boolean;
       }
     | null = null;
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
@@ -387,6 +377,11 @@ export class ChatGooseContentApp {
   // hydrated on openCoach; refreshed on the settings:changed path. Fallbacks are
   // in buildCoachModel (menu label drops the value; divider not rendered).
   private coachSettingsSnapshot: CoachSettingsSnapshot | null = null;
+  // Monotonic guard for snapshot hydration (review P1): bumped on every open and
+  // settings change; a read that resolves under an older generation is discarded
+  // (a mere session-reference check cannot tell close/reopen apart — getOrCreate
+  // returns the same object).
+  private coachSettingsSnapshotGeneration = 0;
 
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
@@ -1856,6 +1851,11 @@ export class ChatGooseContentApp {
     const session = this.coachStore.getOrCreate(accountId, groupId);
     this.activeCoachSession = session;
     this.coachPendingAnswerText = '';
+    // Review P1: a snapshot from a prior open/settings state must never be
+    // rendered — drop it BEFORE the first rebuild (fallbacks apply until the
+    // fresh read lands under this open's generation).
+    this.coachSettingsSnapshot = null;
+    this.coachSettingsSnapshotGeneration += 1;
     this.rebuildCoachModel();
     this.renderAll();
     // Recap-status read (spec §5): async, best-effort — it must never block or
@@ -1864,7 +1864,7 @@ export class ChatGooseContentApp {
     this.coachRecapStatusRead = { session, promise };
     // Coach UI settings snapshot (spec §7): async, best-effort — a failure just
     // leaves the menu label without its value and the memory divider unrendered.
-    void this.refreshCoachSettingsSnapshot(session);
+    void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
   }
 
   /** Drop the coach overlay while RETAINING the store session for reopen (spec
@@ -1968,7 +1968,7 @@ export class ChatGooseContentApp {
     if (!session.autoRecapAttempted && effectiveMode !== 'off') {
       session.autoRecapAttempted = true;
       if (!hasFreshMatchingRecap(session.recapStatus, effectiveMode, settings.deepMessageCount)) {
-        this.startCoachRecapChain(session, effectiveMode, 'auto', trimmed);
+        this.startCoachRecapChain(session, effectiveMode, 'auto', trimmed, opts?.forceDraftRead ?? false);
         return;
       }
     }
@@ -2104,7 +2104,7 @@ export class ChatGooseContentApp {
     if (!session) {
       return;
     }
-    this.startCoachRecapChain(session, mode, 'explicit', null);
+    this.startCoachRecapChain(session, mode, 'explicit', null, false);
   }
 
   /** Set the per-session auto-recap override from the «Рекап ▾» menu radio group
@@ -2122,12 +2122,14 @@ export class ChatGooseContentApp {
     this.renderAll();
   }
 
-  /** Toggle the draft-attach intent (spec §5). No re-render: the checkbox owns
-   * its own checked state; the stored intent is read at the next dispatch and
-   * reflected on the next model rebuild. */
+  /** Toggle the draft-attach intent (spec §5). The model is rebuilt immediately
+   * (no render — the checkbox already shows the clicked state) so a LATER render
+   * from any path — e.g. the failed-insert inline error — cannot repaint the
+   * checkbox from a stale view (review P2). */
   private handleCoachDraftIntentChange(intent: boolean): void {
     if (this.activeCoachSession) {
       this.coachStore.setDraftIntent(this.activeCoachSession, intent);
+      this.rebuildCoachModel();
     }
   }
 
@@ -2160,6 +2162,7 @@ export class ChatGooseContentApp {
     mode: 'short' | 'full',
     origin: 'auto' | 'explicit',
     pendingQuestion: string | null,
+    forceDraftRead: boolean,
   ): void {
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
@@ -2168,6 +2171,10 @@ export class ChatGooseContentApp {
     // Prereqs unmet (no connection/mapping/persona): can't refresh. For an auto
     // chain this is a STOP — preserve the held question in the composer.
     if (!this.ensureFeatureCanStart('fan-summary')) {
+      // A never-dispatched retry keeps its live-draft re-read intent (spec §5).
+      if (forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
       if (origin === 'auto' && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
         this.rebuildCoachModel();
@@ -2180,7 +2187,7 @@ export class ChatGooseContentApp {
     const domFanDisplayName = getActiveConversationDisplayName();
     // Set the chain BEFORE initializeFeatureOperation so its renderSurfaces keeps
     // the coach overlay on top (the running step is already in the feed).
-    this.coachRecapChain = { operationId, session, step, origin, pendingQuestion };
+    this.coachRecapChain = { operationId, session, step, origin, pendingQuestion, forceDraftRead };
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
     this.rebuildCoachModel();
     // Recap refresh bypasses the summary/overlay caches (spec §5): forceRegenerate.
@@ -2193,6 +2200,9 @@ export class ChatGooseContentApp {
       // The start never reached the background — treat as a STOP: fail the step,
       // preserve an auto chain's question, and drop the op markers.
       step.status = 'failed';
+      if (forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
       if (origin === 'auto' && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
       }
@@ -2233,7 +2243,7 @@ export class ChatGooseContentApp {
     this.renderAll();
     if (chain.origin === 'auto' && chain.pendingQuestion && chain.session === this.activeCoachSession) {
       // autoRecapAttempted is already set, so this submit sends a plain turn.
-      void this.submitCoachQuestion(chain.pendingQuestion);
+      void this.submitCoachQuestion(chain.pendingQuestion, { forceDraftRead: chain.forceDraftRead });
     }
   }
 
@@ -2252,13 +2262,17 @@ export class ChatGooseContentApp {
     }
     const errorKey = message.error?.key ?? 'unknown_error';
     const classification = classifyRecapChainFailure(errorKey);
-    const { origin, pendingQuestion, session, step } = chain;
+    const { origin, pendingQuestion, session, step, forceDraftRead } = chain;
     step.status = 'failed';
     this.coachRecapChain = null;
     this.clearCoachOperationState();
 
     if (classification === 'stop') {
-      // Chain-stopping failure: preserve the held question for a manual resend.
+      // Chain-stopping failure: preserve the held question for a manual resend;
+      // a never-dispatched retry also keeps its re-read intent (spec §5).
+      if (forceDraftRead) {
+        this.coachStore.setDraftIntent(session, true);
+      }
       if (origin === 'auto' && pendingQuestion && session.composerText === '') {
         session.composerText = pendingQuestion;
       }
@@ -2275,7 +2289,7 @@ export class ChatGooseContentApp {
       this.rebuildCoachModel();
       this.renderAll();
       if (session === this.activeCoachSession) {
-        void this.submitCoachQuestion(pendingQuestion);
+        void this.submitCoachQuestion(pendingQuestion, { forceDraftRead });
       }
       return;
     }
@@ -2294,6 +2308,9 @@ export class ChatGooseContentApp {
     this.suppressTerminalOperation(chain.operationId);
     this.port.send({ type: 'operation:cancel', operationId: chain.operationId });
     chain.step.status = 'failed';
+    if (chain.forceDraftRead) {
+      this.coachStore.setDraftIntent(chain.session, true);
+    }
     if (chain.origin === 'auto' && chain.pendingQuestion && chain.session.composerText === '') {
       chain.session.composerText = chain.pendingQuestion;
     }
@@ -2310,7 +2327,7 @@ export class ChatGooseContentApp {
     if (ageMs === null) {
       return 'обновить Recap не удалось — отвечаю без него';
     }
-    return `обновить Recap не удалось — использую рекап от ${formatCoachRecapAge(ageMs)}`;
+    return `обновить Recap не удалось — использую рекап от ${formatCoachAgeMs(ageMs)}`;
   }
 
   /** Cancel a streaming coach turn (Esc / ⌘⇧X): the terminal that follows is
@@ -2572,7 +2589,7 @@ export class ChatGooseContentApp {
    * Best-effort: a read failure leaves the snapshot as-is (fallbacks apply).
    * Stale-session guard: only fold the result in while the SAME coach session is
    * still open, so a late read after close/switch never disturbs a new dialog. */
-  private async refreshCoachSettingsSnapshot(session: CoachSession): Promise<void> {
+  private async refreshCoachSettingsSnapshot(generation: number): Promise<void> {
     let snapshot: CoachSettingsSnapshot;
     try {
       const { settings } = await loadStorageState();
@@ -2581,9 +2598,11 @@ export class ChatGooseContentApp {
         coachAutoRecap: settings.coachAutoRecap,
       };
     } catch {
+      // Snapshot stays null under this generation → honest fallbacks (menu label
+      // without its value, divider unrendered) — never a stale prior value.
       return;
     }
-    if (this.activeCoachSession !== session) {
+    if (generation !== this.coachSettingsSnapshotGeneration || !this.activeCoachSession) {
       return;
     }
     this.coachSettingsSnapshot = snapshot;
@@ -2694,7 +2713,14 @@ export class ChatGooseContentApp {
         // snapshot so the menu label and memory divider stay current. Guarded on
         // an open session (a persona/account change above may have closed Coach).
         if (message.type === 'settings:changed' && this.activeCoachSession) {
-          void this.refreshCoachSettingsSnapshot(this.activeCoachSession);
+          // Review P1: stale values must not survive a settings change — drop
+          // the snapshot (fallbacks render) and re-hydrate under a fresh
+          // generation.
+          this.coachSettingsSnapshot = null;
+          this.coachSettingsSnapshotGeneration += 1;
+          this.rebuildCoachModel();
+          this.renderSurfaces();
+          void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
         }
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
         if (personaChanged) {

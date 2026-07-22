@@ -349,6 +349,60 @@ describe('protocol boundary guards', () => {
         },
       }),
     ).toBe(false);
+    // Review P1 — the validator IS the E28 declassification boundary: any extra
+    // key at any level (e.g. a smuggled raw body) must be rejected, and counts
+    // must be non-negative integers.
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: null, short: null },
+          extra: 'nope',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: null, short: null, third: null },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: { ageMs: 1000, rawBody: 'smuggled' }, short: null },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: -1,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: null, short: null },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundPortMessage({
+        ...base,
+        turnContext: {
+          sentMessageCount: 42,
+          transcriptCoverage: 'window',
+          attachedRecaps: { full: { ageMs: 10.5 }, short: null },
+        },
+      }),
+    ).toBe(false);
     // Non-numeric count.
     expect(
       isBackgroundPortMessage({
