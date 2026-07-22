@@ -266,6 +266,14 @@ function restoreCoachComposerText(session: CoachSession, question: string): void
   }
 }
 
+/** Options threaded through {@link ChatGooseContentApp.submitCoachQuestion}. */
+interface CoachSubmitOpts {
+  forceDraftRead?: boolean;
+  /** False for canned sources (chips, Retry, chain resubmits): a rejected
+   * canned submit must never be written into the composer (review round 8). */
+  fromComposer?: boolean;
+}
+
 export class ChatGooseContentApp {
   private routeNonce = 0;
   private boardContextGeneration = 0;
@@ -1904,15 +1912,32 @@ export class ChatGooseContentApp {
    * wire history need live settings (`coachAutoRecap`, `deepMessageCount`,
    * `coachHistoryLimit`); a synchronous same-session preflight guard blocks a
    * re-entrant submit across the await. */
+  /** The ONE pre-dispatch abort (review round 13 — it was hand-duplicated in
+   * three spellings): restore a composer-typed question, re-arm a Retry's
+   * re-read intent, optionally re-render. Canned questions are never written
+   * into the composer (round 8); the failed-attempt «Повторить» remains their
+   * recovery affordance. */
+  private abortCoachSubmit(
+    session: CoachSession,
+    question: string,
+    opts: CoachSubmitOpts | undefined,
+    options: { render?: boolean } = {},
+  ): void {
+    if (opts?.fromComposer !== false) {
+      restoreCoachComposerText(session, question);
+    }
+    if (opts?.forceDraftRead) {
+      this.coachStore.setDraftIntent(session, true);
+    }
+    if (options.render !== false && this.activeCoachSession === session) {
+      this.rebuildCoachModel();
+      this.renderAll();
+    }
+  }
+
   async submitCoachQuestion(
     question: string,
-    opts?: {
-      forceDraftRead?: boolean;
-      /** False for canned sources (chips, Retry, chain resubmits): a rejected
-       * canned submit must never be written into the composer (review round 8
-       * — a chip double-click used to inject its text into an empty field). */
-      fromComposer?: boolean;
-    },
+    opts?: CoachSubmitOpts,
   ): Promise<void> {
     const session = this.activeCoachSession;
     if (!session) {
@@ -1930,16 +1955,7 @@ export class ChatGooseContentApp {
     ) {
       // The renderer clears the textarea BEFORE onCoachSubmit, so a rejected
       // submit must put the question back or it is silently lost (review P1).
-      if (opts?.fromComposer !== false) {
-        restoreCoachComposerText(session, trimmed);
-      }
-      if (opts?.forceDraftRead) {
-        this.coachStore.setDraftIntent(session, true);
-      }
-      if (this.activeCoachSession === session) {
-        this.rebuildCoachModel();
-        this.renderAll();
-      }
+      this.abortCoachSubmit(session, trimmed, opts);
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }
@@ -1976,17 +1992,7 @@ export class ChatGooseContentApp {
       // (it emits onCoachComposerInput('') before onCoachSubmit). Nothing was
       // armed yet — settings are read first — so restore the question into the
       // composer so it is not silently lost, and tell the user to retry.
-      if (opts?.fromComposer !== false) {
-        restoreCoachComposerText(session, trimmed);
-      }
-      // A Retry that never dispatched keeps its re-read intent (spec §5).
-      if (opts?.forceDraftRead) {
-        this.coachStore.setDraftIntent(session, true);
-      }
-      if (this.activeCoachSession === session) {
-        this.rebuildCoachModel();
-        this.renderAll();
-      }
+      this.abortCoachSubmit(session, trimmed, opts);
       this.showUserErrorToast(getErrorMessage('settings_load_failed'));
       return;
     } finally {
@@ -2004,25 +2010,13 @@ export class ChatGooseContentApp {
     }
     // A route/persona change during the await tore the session/route down.
     if (this.activeCoachSession !== session || this.currentGroupId !== groupId) {
-      if (opts?.fromComposer !== false) {
-        restoreCoachComposerText(session, trimmed);
-      }
-      if (opts?.forceDraftRead) {
-        this.coachStore.setDraftIntent(session, true);
-      }
+      this.abortCoachSubmit(session, trimmed, opts, { render: false });
       return;
     }
     // Defensive re-check: the in-flight guard blocked re-entrant submits, but a
     // terminal elsewhere could conceivably have armed an op during the await.
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
-      if (opts?.fromComposer !== false) {
-        restoreCoachComposerText(session, trimmed);
-      }
-      if (opts?.forceDraftRead) {
-        this.coachStore.setDraftIntent(session, true);
-      }
-      this.rebuildCoachModel();
-      this.renderAll();
+      this.abortCoachSubmit(session, trimmed, opts);
       this.showUserErrorToast(getErrorMessage('another_operation'));
       return;
     }

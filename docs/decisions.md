@@ -1413,6 +1413,9 @@ completion order — each finally releases only its own token); `turnContext
 .attachedRecaps` is OPTIONAL end-to-end, so a kernel that did not report the
 attach renders «рекап: нет данных» instead of a confirmed «нет» (the E43
 honest-empty-state rule this file already applies to the status line); the
-empty-state hint chips lock with the composer during the submit preflight. All coach-OWNED copy is now Russian; the shared
+empty-state hint chips lock with the composer during the submit preflight.
+Round 13: Tab out of the open «Рекап ▾» menu dismisses it without stealing
+focus back (WAI-ARIA menu-button); the pre-dispatch abort (restore + re-arm +
+re-render) is one helper instead of ten hand-copies in three spellings. All coach-OWNED copy is now Russian; the shared
 `toUserError` map, toolbar label, Options, and popup are deliberately excluded
 until the extension-wide localization pass.

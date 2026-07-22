@@ -1245,6 +1245,21 @@ describe('OverlayController — coach chat mode', () => {
     expect(document.activeElement).toBe(items[0]);
   });
 
+  it('Tab out of the open menu dismisses it without stealing focus back (review round 13)', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    const trigger = requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger');
+    trigger.click();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    const panel = requireElement<HTMLDivElement>('.chatgoose-coach-recap-panel');
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(panel.classList.contains('chatgoose-hidden')).toBe(true);
+    // dispose(), not close(): focus is NOT yanked back to the trigger.
+    expect(document.activeElement).not.toBe(trigger);
+  });
+
   it('an outside mousedown actually CLOSES the menu (spec §3)', () => {
     const { controller } = makeController();
     controller.render(createCoachModel());

@@ -1666,6 +1666,11 @@ export class OverlayController {
       } else if (event.key === 'End') {
         event.preventDefault();
         items[items.length - 1]?.focus();
+      } else if (event.key === 'Tab') {
+        // WAI-ARIA menu-button pattern (spec §3, review round 13): tabbing out
+        // dismisses the menu. dispose(), not close() — focus is moving away by
+        // the user's own choice, so it must not be stolen back to the trigger.
+        dispose();
       }
     });
 
