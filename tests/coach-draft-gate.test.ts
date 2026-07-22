@@ -31,5 +31,12 @@ describe('coach draft-attach ship-gate (spec §10.2)', () => {
       'utf8',
     );
     expect(source).toMatch(/attachDraft = coachDraftAttachAllowed\(/);
+    // …and the render gate derives from the same constant (the load-bearing
+    // layer: no checkbox → no way to arm the intent at all).
+    expect(source).toMatch(/draftAttachEnabled: COACH_DRAFT_ATTACH_ENABLED/);
+    // A BEHAVIOURAL dispatch-site pin would need the orchestration harness
+    // without its file-scoped gate mock; extracting the harness is recorded in
+    // E53 as the follow-up that unlocks it. Until then: unmocked semantics
+    // (above) + both source sites + the render-gate behaviour test.
   });
 });

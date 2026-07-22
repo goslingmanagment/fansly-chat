@@ -1327,106 +1327,23 @@ on the existing `settings:changed` path (stale-session guarded), positioning the
 memory-window divider (§8.1, derived from feed exchange identities, not the
 50-capped `completedExchanges.length`) and labelling «По настройке (<x>)».
 Follow-up chips (§8.3) submit a canned question with normal semantics, leaving
-unsent composer text untouched. Review round (2026-07-22, same PR): the
-retry's live-draft re-read intent is carried on the recap-chain state and a
-chain STOP re-arms the stored intent (a never-dispatched turn must not consume
-it); follow-up chips anchor to the latest EXCHANGE, scanning past recap steps;
-the settings snapshot hydrates under a monotonic generation, invalidated
-BEFORE the first render on open and on settings:changed (a session-reference
-guard cannot tell close/reopen apart); the `turnContext` validator enforces
-exact keys and non-negative-integer counts at every level (it IS the E28
-declassification boundary, and the background floors ages to match); the
-intent toggle rebuilds the model so no later render repaints a stale checkbox;
-the memory divider stays attached across renders (no per-frame detach/reinsert
-churn); the coach age formatter is one shared module; and the regression tests
-the UI rewrite had dropped (cross-fan insert guard, failed-insert inline
-error, IME suppression, recap-picker keyboard/unknown states, fallback-note
-render, «Новый диалог» blur/«Оставить» disarm and composer-text arming, the
-composer input path) are restored. Review round 2: the draft-attach control is
-built behind a SHIP-GATE constant (`COACH_DRAFT_ATTACH_ENABLED = false`,
-`src/shared/coach-draft-gate.ts`) — §10.2's fail-honest rule is now enforced in
-code, not just sequencing; the flip is one commit after core#22 merges. The
-dispatch consumes the intent BEFORE the pre-dispatch render (no armed checkbox
-on a streaming turn; restored on a failed send), the checkbox locks while the
-composer is locked, every pre-dispatch exit of submitCoachQuestion re-arms a
-Retry's re-read intent, and the transcript cache purges prior-epoch entries of
-the same logical session so «Обновить переписку» cannot evict other sessions'
-windows. Round 3: the send/cancel group right-aligns via its own auto margin
-(space-between with the gated-off draft block's lone child parked «Отправить»
-left); route-change and disconnect chain teardowns re-arm the retry intent like
-every other pre-dispatch stop; a discarded coach view disposes its menu's
-document-level outside-click listener; the background producer lane
-(turnContext flooring/shape, epoch→reseed threading) is coordinator-tested.
-Round 4: the snapshot also refreshes on 'mapping:changed' — an ordinary
-settings write classifies as mapping:changed per storage-change-policy, and
-the settings:changed-only guard left an open Coach showing a stale «По
-настройке» label and divider; the test pins the classifier output and the
-handler together. Round 5: the dispatch conjunct lives in
-coachDraftAttachAllowed() so the UNMOCKED gate pin covers the dispatch site; a
-settings change no longer nulls the shown snapshot (the round-2 invalidation
-made the divider blink and shift scroll on every Options save — it now swaps
-atomically on resolve, generation-guarded, with null-on-open retained);
-«Обновить переписку» acknowledges the click with an info toast (state-only
-semantics unchanged); the epoch purge ignores quickMessageCount so a
-count-change between epochs cannot strand a dead LRU window. Round 6
-(correction): the round-5 claim that the unmocked gate pin covers the dispatch
-SITE was overstated — the orchestration suite mocks the module, so the dispatch
-site is pinned by a source-text assertion beside the unmocked semantics pin,
-and the render gate remains the load-bearing layer; menu arrow-navigation and
-outside-click close are behaviour-tested; a THROWING port send gets the same
-never-dispatched rollback as a false return; multi-draft acceptance attributes
-the card's own index (nonzero-index pin restored). Round 7: the submit
-preflight projects as busy the moment it starts and a rejected Send restores
-the cleared composer text (the preflight window could silently eat typed
-text); typing in the Fansly composer re-renders an open coach surface so the
-draft checkbox tracks the live field; the «Рекап ▾» radios live in a labelled
-role="group" (a bare div inside role="menu" is invalid ARIA); the menu-item
-hover override matches the base button-hover specificity (the clay chip frame
-no longer appears on borderless rows); the turn-context expansion carries the
-provenance split (browser pre-budget vs kernel post-attach) instead of
-restating the summary. Round 8: follow-up chips lock with the composer during
-the submit preflight, and a rejected CANNED submit (chip, Retry) is never
-written into the composer — the round-7 restore applies to composer-typed
-questions only (a chip double-click used to inject its canned text into an
-empty field). Round 9: the auto-recap chain CARRIES the question's origin, so
-a post-recap resubmit failure restores the chatter's own text (round 8 had
-mislabeled chain resubmits as canned — three rejection paths silently ate the
-typed question); the preflight admission guard is per-session like the busy
-projection (another fan's coach both looks usable AND is usable; the
-post-await re-check covers the cross-session dispatch race), and the lock is
-set inside the try whose finally resets it, so a throwing render cannot strand
-the coach rejecting every future question. Round 10: the finally clears only
-its OWN lock (an overlapping second-session preflight legitimately takes it —
-finishing A must not unlock a still-running B); the settings snapshot also
-rehydrates on 'tab:state' (a reconnect replay — a settings change made while
-the port was down had no event to carry it; the generation-guarded atomic swap
-makes an unchanged re-read a no-op); the chain STOP/teardown restores gate on
-the held question's origin too, so a chip-started chain STOP never parks
-canned text in the composer; the divider-skipping cursor walk is pinned for
-the append-new-exchange path. Round 11: the question's origin rides the
-DISPATCHED attempt too (CoachAttempt.fromComposer), so the route-change and
-disconnect teardowns no longer park a canned chip/Retry string in the
-composer; the epoch purge's safety property — never evicting OTHER sessions —
-is pinned across all four identity conjuncts (other sessions stay cache-hits). Round 12: the preflight lock is a Map of per-call
-tokens (a single pointer misbehaved under overlapping preflights in either
-completion order — each finally releases only its own token); `turnContext
-.attachedRecaps` is OPTIONAL end-to-end, so a kernel that did not report the
-attach renders «рекап: нет данных» instead of a confirmed «нет» (the E43
-honest-empty-state rule this file already applies to the status line); the
-empty-state hint chips lock with the composer during the submit preflight.
-Round 13: Tab out of the open «Рекап ▾» menu dismisses it without stealing
-focus back (WAI-ARIA menu-button); the pre-dispatch abort (restore + re-arm +
-re-render) is one helper instead of ten hand-copies in three spellings.
-Round 14: PortClient.send maps a throwing postMessage (dead port whose
-disconnect has not landed yet) to its documented false return AT THE SOURCE —
-every dispatch site, including the recap-chain start that used to leak the
-exception into a menu click handler, now takes its own never-dispatched
-rollback; the producer's «kernel did not report attachedRecaps» branch is
-coordinator-pinned. Round 15: «Новый диалог» is refused during the submit
-preflight AND the submit aborts on a rotated sessionId (a raced reset must
-never receive the discarded dialog's question); a model-side restore lands in
-an empty focused textarea (the caret guard only protects non-empty fields —
-after a rejected Send the restore was invisible until blur); the PortClient
-throw→false mapping is pinned at its own level. All coach-OWNED copy is now Russian; the shared
-`toUserError` map, toolbar label, Options, and popup are deliberately excluded
-until the extension-wide localization pass.
+unsent composer text untouched. Hardened through sixteen adversarial review rounds on PR #24 (claude +
+codex, blind, with per-finding verification); the round-by-round record —
+what each round found, what was fixed, and which findings were refuted —
+lives in the published review reports on the PR, not here. The durable
+rules that emerged: canned text (chips, Retry, chain resubmits) is never
+written into the composer and every never-dispatched path restores a
+composer-typed question and re-arms a Retry's re-read intent; the submit
+preflight is a busy state locking composer, chips, hints and menu, keyed
+per-session by token; «Новый диалог» is refused during a preflight and a
+rotated sessionId aborts the raced submit; the draft-attach control ships
+behind COACH_DRAFT_ATTACH_ENABLED (flip = one commit after core#22, with
+its pin test); turnContext follows E43/E28 honesty (exact-keyed validation,
+optional attachedRecaps, «нет данных» when the kernel did not report);
+PortClient maps a throwing postMessage to its false contract; the recap
+menu follows the WAI-ARIA menu-button pattern incl. Tab dismissal; the
+transcript-cache epoch purge never touches other sessions; and the settings
+snapshot swaps atomically under a generation guard on every settings-bearing
+event including reconnect replays. Follow-up recorded: extract the
+orchestration test harness so the ship-gate's dispatch site gains a
+behavioural (unmocked) pin.
