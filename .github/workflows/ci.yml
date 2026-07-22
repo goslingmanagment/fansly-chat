@@ -6,9 +6,16 @@ on:
     branches:
       - main
 
+# A superseded head has nothing left to prove — cancel its run instead of
+# letting it burn the minutes budget.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
