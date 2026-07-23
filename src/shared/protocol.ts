@@ -4,6 +4,10 @@ import {
   COACH_QUESTION_MAX_CHARS,
 } from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
+import {
+  isStoredVoiceAttemptRoute,
+  parseVoiceAttemptStoreSnapshot,
+} from './voice-attempt.js';
 import type {
   CoachTurnContext,
   AgencyHubConnectionTestRequest,
@@ -432,6 +436,20 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         isString(message.personaDefinitionId) &&
         message.personaDefinitionId.trim().length > 0
         ? 'getRecapStatus'
+        : null;
+    case 'voiceAttemptLoad':
+      return isStoredVoiceAttemptRoute(message.route)
+        ? 'voiceAttemptLoad'
+        : null;
+    case 'voiceAttemptSave':
+      return parseVoiceAttemptStoreSnapshot(message.snapshot) !== null
+        ? 'voiceAttemptSave'
+        : null;
+    case 'voiceAttemptRemove':
+      return isString(message.attemptId) &&
+        message.attemptId.trim().length > 0 &&
+        isStoredVoiceAttemptRoute(message.route)
+        ? 'voiceAttemptRemove'
         : null;
     default:
       return null;

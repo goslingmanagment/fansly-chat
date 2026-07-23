@@ -17,22 +17,16 @@ import {
 } from './storage-change-policy.js';
 import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
+import { VoiceAttemptRepository } from './voice-attempt-store.js';
 import { VoiceService } from './voice-service.js';
-import { enableVoiceSessionStorageForContent } from './voice-session-access.js';
 import { readStorageState } from '../shared/storage.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
 
-// Firefox's storage.session defaults to trusted extension contexts only.
-// Invoke the access-level change immediately at worker startup so the content
-// attempt controller can persist idempotency custody before any paid create.
-void enableVoiceSessionStorageForContent(browser.storage.session).catch((error) => {
-  console.error('[voice] failed to expose storage.session to content', error);
-});
-
 const sessionStore = new SessionStore();
 const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
+const voiceAttempts = new VoiceAttemptRepository();
 const fanslyClient = new FanslyClient(sessionStore);
 const spendersService = new SpendersService(
   fanslyClient,
@@ -71,6 +65,7 @@ const voiceService = new VoiceService({
   sessionStore,
   tabContexts,
   storageCoordinator,
+  voiceAttempts,
 });
 // A persistent content port can keep this MV3 worker alive for a whole shift.
 // Refresh while alive so an owner archive/revision does not stay stale until
@@ -122,6 +117,7 @@ registerRuntimeApi({
     await personaCatalog.refresh();
   },
   voiceService,
+  voiceAttempts,
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {

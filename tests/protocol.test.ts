@@ -14,6 +14,33 @@ function withoutKey(
   );
 }
 
+const VOICE_ROUTE = {
+  accountId: 'creator-1',
+  groupId: 'group-1',
+  routeNonce: 3,
+};
+
+const VOICE_SNAPSHOT = {
+  attempt: {
+    attemptId: '11111111-1111-4111-8111-111111111111',
+    phase: 'script',
+    draftText: 'Hello',
+    script: 'Hello',
+    canonicalScript: null,
+    generationRef: null,
+    sourceFingerprint: null,
+    pageLabel: null,
+    tone: 'none',
+    takes: [],
+    selectedTakeId: null,
+    stale: false,
+    boundRoute: VOICE_ROUTE,
+  },
+  conversationRef: '',
+  pendingCreate: null,
+  burnedClientRequestIds: [],
+};
+
 describe('protocol boundary guards', () => {
   it('recognizes known runtime requests and rejects malformed envelopes', () => {
     expect(getRuntimeRequestType({ type: 'ensureStorageReady' })).toBe('ensureStorageReady');
@@ -50,6 +77,19 @@ describe('protocol boundary guards', () => {
         buildId: 'board-build-1',
       }),
     ).toBe('getSpendersList');
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptLoad',
+      route: VOICE_ROUTE,
+    })).toBe('voiceAttemptLoad');
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptSave',
+      snapshot: VOICE_SNAPSHOT,
+    })).toBe('voiceAttemptSave');
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptRemove',
+      attemptId: VOICE_SNAPSHOT.attempt.attemptId,
+      route: VOICE_ROUTE,
+    })).toBe('voiceAttemptRemove');
     expect(
       getRuntimeRequestType({
         type: 'resolveFanChat',
@@ -68,6 +108,22 @@ describe('protocol boundary guards', () => {
     expect(
       getRuntimeRequestType({ type: 'getSpendersList', buildId: 42 }),
     ).toBeNull();
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptLoad',
+      route: { ...VOICE_ROUTE, groupId: '' },
+    })).toBeNull();
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptSave',
+      snapshot: {
+        ...VOICE_SNAPSHOT,
+        attempt: { ...VOICE_SNAPSHOT.attempt, boundRoute: null },
+      },
+    })).toBeNull();
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptRemove',
+      attemptId: '',
+      route: VOICE_ROUTE,
+    })).toBeNull();
     expect(
       getRuntimeRequestType({
         type: 'resolveFanChat',

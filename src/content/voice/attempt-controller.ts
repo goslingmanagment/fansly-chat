@@ -8,6 +8,7 @@ import type {
 import {
   VoiceAttemptStore,
   type StoredVoiceAttemptRoute,
+  type VoiceAttemptStoreContract,
   type VoiceAttemptStoreEntry,
   type VoiceAttemptStoreSnapshot,
   type VoiceTakeCreateSnapshot,
@@ -53,7 +54,7 @@ export type VoiceAttachGrant = Extract<BackgroundPortMessage, { type: 'voice:att
 interface VoiceAttemptControllerOptions {
   port: VoiceAttemptControllerPort;
   route: VoiceAttemptRoute;
-  store?: VoiceAttemptStore;
+  store?: VoiceAttemptStoreContract;
   randomUUID?: () => string;
   createBlobUrl?: (bytes: ArrayBuffer) => string;
   revokeBlobUrl?: (url: string) => void;
@@ -165,7 +166,7 @@ function isVoiceMessageForAttempt(
  */
 export class VoiceAttemptController {
   private readonly port: VoiceAttemptControllerPort;
-  private readonly store: VoiceAttemptStore;
+  private readonly store: VoiceAttemptStoreContract;
   private readonly route: VoiceAttemptRoute;
   private readonly randomUUID: () => string;
   private readonly createBlobUrl: (bytes: ArrayBuffer) => string;
@@ -822,8 +823,13 @@ export class VoiceAttemptController {
       // the tiny persist→post gap is conservative (same-request recovery), never a
       // possibly-billed snapshot deletion.
       snapshot.sentOnce = true;
-      await this.persist(record);
     }
+    // Re-acknowledge even an already-sent replay through the CURRENT runtime
+    // listener. This is intentionally a same-state write: if new content is
+    // paired with an old/invalid background after an extension update, the RPC
+    // fails closed before that older VoiceService can receive a paid port
+    // message without the new paid-boundary assertion.
+    await this.persist(record);
     const sent = this.post({
       type: 'voice:noteCreate',
       attemptId: record.attempt.attemptId,

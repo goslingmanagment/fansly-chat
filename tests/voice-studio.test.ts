@@ -2,10 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
 import { VoiceAttemptController } from '../src/content/voice/attempt-controller.js';
-import {
-  VoiceAttemptStore,
-  type VoiceAttemptStorageArea,
-} from '../src/content/voice/attempt-store.js';
 import type { VoiceComposerProbe, VoiceAttachOutcome } from '../src/content/voice/attach-adapter.js';
 import type {
   BackgroundPortMessage,
@@ -15,6 +11,7 @@ import type {
 } from '../src/shared/types.js';
 import { VoicePanel } from '../src/content/voice/voice-panel.js';
 import { VoiceStudio } from '../src/content/voice/voice-studio.js';
+import { MemoryVoiceAttemptStore } from './helpers/voice-attempt-store.js';
 
 function installDom(): InstanceType<typeof JSDOM> {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>');
@@ -30,35 +27,6 @@ function installDom(): InstanceType<typeof JSDOM> {
   vi.stubGlobal('Event', window.Event);
   vi.stubGlobal('KeyboardEvent', window.KeyboardEvent);
   return dom;
-}
-
-function memoryStorage(): VoiceAttemptStorageArea {
-  const map = new Map<string, unknown>();
-  return {
-    get: async (keys) => {
-      if (keys === null || keys === undefined) {
-        return Object.fromEntries(map) as Record<string, unknown>;
-      }
-      const list = Array.isArray(keys) ? keys : [keys];
-      const out: Record<string, unknown> = {};
-      for (const key of list) {
-        if (map.has(key)) {
-          out[key] = map.get(key);
-        }
-      }
-      return out;
-    },
-    set: async (items) => {
-      for (const [key, value] of Object.entries(items)) {
-        map.set(key, structuredClone(value));
-      }
-    },
-    remove: async (keys) => {
-      for (const key of Array.isArray(keys) ? keys : [keys]) {
-        map.delete(key);
-      }
-    },
-  };
 }
 
 interface Harness {
@@ -97,7 +65,7 @@ function setup(): Harness {
       },
     },
     route: { accountId: 'account-1', groupId: 'group-1', routeNonce: 1 },
-    store: new VoiceAttemptStore({ storage: memoryStorage(), now: () => 1_000 }),
+    store: new MemoryVoiceAttemptStore(() => 1_000),
     randomUUID: () => `id-${(uuidCounter += 1)}`,
     createBlobUrl: () => `blob:voice-${(blobCounter += 1)}`,
     revokeBlobUrl: (url) => revoked.push(url),
