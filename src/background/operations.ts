@@ -180,6 +180,14 @@ const NO_OP_PROFILER = createOperationProfiler(false);
 /** Stage 32: models are kernel config — the summary-cache model pin. */
 const KERNEL_MODEL_ID = 'kernel';
 const CAPTURE_IDENTITY_TIMEOUT_MS = 5_000;
+/** Invalidation strength of tab-state message types (see refreshTabState):
+ * 'settings:changed' carries board/source invalidation the state payload
+ * cannot express, 'mapping:changed' is the narrow persona/mapping signal. */
+const TAB_STATE_TYPE_PRIORITY: Record<TabStatePayload['type'], number> = {
+  'tab:state': 0,
+  'mapping:changed': 1,
+  'settings:changed': 2,
+};
 const CAPTURE_IDENTITY_RETRY_COOLDOWN_MS = 30_000;
 const DEEP_OPERATION_TIMEOUTS = {
   prep: DEEP_OPERATION_PREP_TIMEOUT_MS,
@@ -434,6 +442,12 @@ export class OperationCoordinator {
   private readonly portsByTabId = new Map<number, browser.runtime.Port>();
   /** Monotonic per-tab refresh generation — only the newest refresh posts. */
   private readonly tabStateGenerationByTabId = new Map<number, number>();
+  /** Strongest message type pending while refreshes coalesce. The TYPE carries
+   * invalidation semantics the state payload does not (review P1:
+   * 'settings:changed' is the only signal that invalidates the Spenders board
+   * on a Hub source switch — TabUiState has no source fingerprint), so a
+   * superseded refresh must escalate the survivor's type, never lose it. */
+  private readonly pendingTabStateTypeByTabId = new Map<number, TabStatePayload['type']>();
   private readonly lifecycle =
     new OperationRegistry<ActiveOperation, ActiveCompareOperation>();
   /** Hub-sync retry bookkeeping, keyed `groupId|generatedAt|baseUrl` — a new
@@ -551,15 +565,26 @@ export class OperationCoordinator {
     // Newest-wins: buildTabUiState awaits a capability probe that can take
     // seconds, so two overlapping refreshes could post out of order and let a
     // STALE snapshot (old accountId/persona) overwrite a newer one in the
-    // content script. Only the most recently started refresh may post.
+    // content script. Only the most recently started refresh may post — but
+    // the strongest pending message TYPE always survives the coalescing.
+    const pendingType = this.pendingTabStateTypeByTabId.get(tabId);
+    this.pendingTabStateTypeByTabId.set(
+      tabId,
+      pendingType && TAB_STATE_TYPE_PRIORITY[pendingType] > TAB_STATE_TYPE_PRIORITY[messageType]
+        ? pendingType
+        : messageType,
+    );
     const generation = (this.tabStateGenerationByTabId.get(tabId) ?? 0) + 1;
     this.tabStateGenerationByTabId.set(tabId, generation);
     const state = await this.buildTabUiState(tabId);
     if (this.tabStateGenerationByTabId.get(tabId) !== generation) {
+      // The pending type stays: the newer in-flight refresh posts it.
       return;
     }
+    const postType = this.pendingTabStateTypeByTabId.get(tabId) ?? messageType;
+    this.pendingTabStateTypeByTabId.delete(tabId);
     port.postMessage({
-      type: messageType,
+      type: postType,
       state,
     } satisfies TabStatePayload);
     if (state.hasAvailableSummary) {

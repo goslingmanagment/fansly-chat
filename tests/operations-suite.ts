@@ -1093,6 +1093,37 @@ describe(`OperationCoordinator (${part})`, () => {
     );
   });
 
+  it('escalates the message type when a settings:changed refresh is superseded', async () => {
+    const { coordinator, port } = await createCoordinatorHarness();
+    const resolvers: Array<(capable: boolean) => void> = [];
+    coordinator.setVoiceCapabilityResolver(
+      () => new Promise<boolean>((resolve) => {
+        resolvers.push(resolve);
+      }),
+    );
+
+    const before = postedMessages(port).length;
+    // The settings invalidation starts first, then an ordinary refresh
+    // supersedes it. The TYPE must survive: 'settings:changed' is the only
+    // signal that invalidates the Spenders board on a Hub source switch.
+    const settingsRefresh = coordinator.refreshTabState(1, 'settings:changed');
+    const ordinaryRefresh = coordinator.refreshTabState(1, 'tab:state');
+    await vi.waitFor(() => {
+      expect(resolvers).toHaveLength(2);
+    });
+
+    resolvers[1]!(false);
+    await ordinaryRefresh;
+    resolvers[0]!(false);
+    await settingsRefresh;
+
+    const states = postedMessages(port).slice(before);
+    expect(states).toHaveLength(1);
+    expect(states[0]).toEqual(
+      expect.objectContaining({ type: 'settings:changed' }),
+    );
+  });
+
   it('auto-recovers a mapped personality when a new legacy alias is captured for the same account', async () => {
     mockStorage = {
       ...mockStorage,
