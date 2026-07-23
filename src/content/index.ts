@@ -327,6 +327,7 @@ export class ChatGooseContentApp {
   private voicePanel: VoicePanel | null = null;
   private voiceStudio: VoiceStudio | null = null;
   private voiceReconnectPending = false;
+  private voiceNewStartInFlight = false;
 
   // ─── Coach (spec §3) ──────────────────────────────────────────────────────
   // The content script owns the coach dialog/feed/composer state; the store
@@ -1678,6 +1679,50 @@ export class ChatGooseContentApp {
       },
       onClose: () => this.closeVoicePanel(),
       onExpand: () => this.expandVoiceStudio(),
+      onAttachConfirmed: () => {
+        // Spec 2026-07-24 (E55): a confirmed attach completes the session —
+        // the Fansly thread is the source of truth now. Storage cleanup
+        // finishes in the background; a failure there is recovered by TTL.
+        const completing = this.voiceController;
+        void completing?.completeAttempt().catch(() => undefined);
+        this.teardownVoice();
+        // The old panel offered to clear the leftover source text; the panel
+        // now closes, so the affordance rides the toast — SCOPED to the
+        // conversation and draft it was minted for (review P1: the toast
+        // outlives route changes and later typing; never clear foreign or
+        // newer text).
+        const mintedGroupId = this.currentGroupId;
+        const mintedDraft = getActiveConversationDraftText();
+        this.toast.show('Войс прикреплён.', {
+          tone: 'info',
+          actionLabel: 'Очистить черновик',
+          onAction: () => {
+            if (
+              this.currentGroupId !== mintedGroupId ||
+              getActiveConversationDraftText() !== mintedDraft
+            ) {
+              return;
+            }
+            void insertIntoFanslyTextarea('').catch(() => undefined);
+          },
+        });
+      },
+      onStartNewFromDraft: (draft) => {
+        const controller = this.voiceController;
+        // Serialized (review P2): a double click before the async discard/
+        // persist settles could mint two attempts and orphan one custody row.
+        if (!controller || this.voiceNewStartInFlight) {
+          return;
+        }
+        this.voiceNewStartInFlight = true;
+        void controller.startScript(draft, 'none')
+          .catch((error) => {
+            this.handleVoiceFlowFailure(controller, error, 'start');
+          })
+          .finally(() => {
+            this.voiceNewStartInFlight = false;
+          });
+      },
       // Collapse the студия the moment the attach handoff begins so Fansly's
       // native Upload modal isn't stranded behind the studio scrim. No-op when
       // the студия is already folded (the лента attach path).

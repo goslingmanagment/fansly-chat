@@ -52,6 +52,12 @@ export interface VoicePanelDeps {
    * (or a no-op) when there is no студия to fold.
    */
   onAttachHandoff?: () => void;
+  /** Fired once on a CONFIRMED attach outcome. index.ts completes the session
+   * there (custody ends, panel closes) — the panel must not render after. */
+  onAttachConfirmed?: () => void;
+  /** «+ Новый войс из черновика»: index.ts starts a fresh attempt from the
+   * live composer draft (displacing this one via the existing discard path). */
+  onStartNewFromDraft?: (draft: string) => void;
 }
 
 // Тёплый/Игривый/Спокойный are product words; they map to the reply-tone the
@@ -142,6 +148,8 @@ export class VoicePanel {
   private readonly body: HTMLElement;
 
   private attachPhase: AttachPhase = 'idle';
+  private newVoiceConfirmOpen = false;
+  private newVoiceEmptyHint = false;
   private fanUsername: string | null = null;
   private leftoverDraft: string | null = null;
   private draftCleared = false;
@@ -353,6 +361,12 @@ export class VoicePanel {
     if (outcome === 'confirmed') {
       await this.deps.controller.markAttached(grant.voiceNoteId);
       this.attachPhase = 'confirmed';
+      if (this.deps.onAttachConfirmed) {
+        // Completion path (spec 2026-07-24): the owner tears this panel down —
+        // rendering a detached tree would be wasted work.
+        this.deps.onAttachConfirmed();
+        return;
+      }
     } else if (outcome === 'aborted') {
       this.attachPhase = 'aborted';
     } else {
@@ -566,7 +580,7 @@ export class VoicePanel {
 
   private renderTakes(attempt: VoiceAttempt): void {
     if (attempt.takes.length === 0) {
-      this.takesSlot.replaceChildren();
+      this.takesSlot.replaceChildren(this.buildNewVoiceRow());
       return;
     }
     const section = el('div', 'chatgoose-voice-takes');
@@ -602,8 +616,129 @@ export class VoicePanel {
     attempt.takes.forEach((take, index) => {
       section.append(this.renderTakeRow(attempt, take, index + 1));
     });
+    section.append(this.buildNewVoiceRow());
 
     this.takesSlot.replaceChildren(section);
+  }
+
+  /** «+ Новый войс из черновика» (spec 2026-07-24). Reads the LIVE composer
+   * draft; when this session still holds paid unattached (or generating)
+   * takes, the row expands into an inline confirm — the explicit human action
+   * family law requires before paid work leaves the screen. */
+  private buildNewVoiceRow(): HTMLElement {
+    const wrap = el('div', 'chatgoose-voice-newvoice');
+    // An attach handoff in flight binds the pending outcome to THIS attempt;
+    // displacing it mid-handoff would complete/tear down the wrong session
+    // (review P1). No new-session actions until the outcome is terminal.
+    if (this.attachPhase === 'awaiting-modal') {
+      return wrap;
+    }
+    if (!this.newVoiceConfirmOpen) {
+      const start = el('button', 'chatgoose-voice-newvoice-start', '+ Новый войс из черновика');
+      start.type = 'button';
+      start.addEventListener('click', () => {
+        const liveDraft = this.deps.getDraftText().trim();
+        if (!liveDraft) {
+          // Always-enabled + inline hint on click: a disabled button could
+          // never re-check the composer (no input observer reaches this
+          // panel — review P2), so emptiness is answered at click time.
+          this.newVoiceEmptyHint = true;
+          this.render();
+          return;
+        }
+        this.newVoiceEmptyHint = false;
+        if (this.newVoiceNeedsConfirm()) {
+          this.newVoiceConfirmOpen = true;
+          this.render();
+          return;
+        }
+        this.dispatchNewVoice(liveDraft);
+      });
+      wrap.append(start);
+      if (this.newVoiceEmptyHint) {
+        wrap.append(
+          el('span', 'chatgoose-voice-newvoice-hint', 'Напишите черновик в поле Fansly'),
+        );
+      }
+      return wrap;
+    }
+
+    wrap.classList.add('chatgoose-voice-newvoice-confirming');
+    wrap.append(el('span', 'chatgoose-voice-newvoice-warning', this.newVoiceConfirmText()));
+    const confirm = el('button', 'chatgoose-voice-newvoice-confirm', 'Начать новый');
+    confirm.type = 'button';
+    confirm.addEventListener('click', () => {
+      this.newVoiceConfirmOpen = false;
+      const liveDraft = this.deps.getDraftText().trim();
+      if (liveDraft) {
+        this.dispatchNewVoice(liveDraft);
+      } else {
+        this.newVoiceEmptyHint = true;
+        this.render();
+      }
+    });
+    const cancel = el('button', 'chatgoose-voice-newvoice-cancel', 'Отмена');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => {
+      this.newVoiceConfirmOpen = false;
+      this.render();
+    });
+    wrap.append(confirm, cancel);
+    return wrap;
+  }
+
+  /** Per-attempt view state must not leak into the NEW session (review P2):
+   * a stale error card or attach-recovery view rendering over a fresh attempt
+   * would misreport it. */
+  private dispatchNewVoice(draft: string): void {
+    this.lastError = null;
+    this.attachPhase = 'idle';
+    this.leftoverDraft = null;
+    this.newVoiceConfirmOpen = false;
+    this.newVoiceEmptyHint = false;
+    this.deps.onStartNewFromDraft?.(draft);
+  }
+
+  private newVoiceNeedsConfirm(): boolean {
+    // Paid work at stake = completed-unattached takes, generating takes,
+    // indeterminate takes (recoverable via the free status check), and a
+    // pending/needs-reconcile create that has no visible take yet (review
+    // P1: the in-flight paid create's custody record must never be discarded
+    // without the warning).
+    const attempt = this.deps.controller.getAttempt();
+    const takesAtStake = Boolean(attempt?.takes.some((take) =>
+      (take.view.state === 'completed' && !take.attached) ||
+      take.view.state === 'queued' ||
+      take.view.state === 'dispatched' ||
+      take.view.state === 'indeterminate'));
+    return takesAtStake ||
+      this.deps.controller.hasPendingCreate() ||
+      this.deps.controller.hasPendingCreateNeedsReconcile();
+  }
+
+  private newVoiceConfirmText(): string {
+    const attempt = this.deps.controller.getAttempt();
+    const unattached = attempt?.takes.filter(
+      (take) => take.view.state === 'completed' && !take.attached,
+    ).length ?? 0;
+    const generating = attempt?.takes.some(
+      (take) => take.view.state === 'queued' || take.view.state === 'dispatched',
+    ) ?? false;
+    const parts: string[] = [];
+    if (unattached > 0) {
+      parts.push(unattached === 1 ? 'вариант не прикреплён' : 'варианты не прикреплены');
+    }
+    if (generating) {
+      parts.push('вариант ещё генерируется');
+    }
+    const pendingPaid = this.deps.controller.hasPendingCreate() ||
+      this.deps.controller.hasPendingCreateNeedsReconcile() ||
+      (attempt?.takes.some((take) => take.view.state === 'indeterminate') ?? false);
+    if (pendingPaid && parts.length === 0) {
+      parts.push('оплаченная генерация не завершена');
+    }
+    const lead = parts.length > 0 ? parts.join(', ') : 'сессия будет закрыта';
+    return `${lead.charAt(0).toUpperCase()}${lead.slice(1)} — сессия будет закрыта. Начать новый войс?`;
   }
 
   private renderTakeRow(attempt: VoiceAttempt, take: VoiceTake, ordinal: number): HTMLElement {

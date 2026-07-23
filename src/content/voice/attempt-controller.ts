@@ -637,6 +637,26 @@ export class VoiceAttemptController {
     this.notifyChange();
   }
 
+  /** A confirmed attach completes THE ACTIVE attempt (spec 2026-07-24): the
+   * Fansly thread is the source of truth now, so its client custody ends —
+   * record cleared, storage removed, blobs revoked. Other recovered attempts
+   * (boot supports several) keep their custody untouched; server artifacts
+   * live until their own expiry — nothing money-bearing is destroyed. */
+  async completeAttempt(): Promise<void> {
+    if (this.destroyed || !this.activeAttemptId) {
+      return;
+    }
+    const attemptId = this.activeAttemptId;
+    const record = this.records.get(attemptId);
+    this.stopPolling();
+    if (record) {
+      this.revokeRecordBlobUrls(record);
+    }
+    this.records.delete(attemptId);
+    this.activeAttemptId = [...this.records.keys()].pop() ?? null;
+    await this.store.remove(attemptId);
+  }
+
   destroy(): void {
     if (this.destroyed) {
       return;
