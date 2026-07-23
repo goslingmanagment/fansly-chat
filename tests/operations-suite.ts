@@ -1018,6 +1018,81 @@ describe(`OperationCoordinator (${part})`, () => {
     });
   });
 
+  it('writes the canonical account id into the tab context on capture once the session resolved', async () => {
+    const { coordinator, sessionStore } = await createCoordinatorHarness();
+    sessionStore.registerCapture(1, { ...SESSION_CAPTURE, accountId: 'legacy-1' });
+    const session = sessionStore.getSessionByAccount('legacy-1');
+    if (session) {
+      session.resolvedAccountId = 'resolved-1';
+    }
+
+    await coordinator.handleCapture(1, 'legacy-1');
+
+    // Captures fire on every Fansly request; writing the raw legacy id here
+    // made the context oscillate against the canonical id carried by the UI
+    // state and voice bindings.
+    expect(coordinator.tabContexts.get(1)?.accountId).toBe('resolved-1');
+  });
+
+  it('returns the identity resolved during the voice-capability probe in the same state', async () => {
+    const { coordinator, sessionStore, port } = await createCoordinatorHarness();
+    sessionStore.registerCapture(1, { ...SESSION_CAPTURE, accountId: 'legacy-1' });
+    coordinator.setVoiceCapabilityResolver(async () => {
+      const session = sessionStore.getSessionByAccount('legacy-1');
+      if (session) {
+        session.resolvedAccountId = 'resolved-1';
+      }
+      return true;
+    });
+
+    await coordinator.refreshTabState(1);
+
+    const states = postedMessages(port).filter(
+      (message) => message.type === 'tab:state',
+    );
+    expect(states.at(-1)).toEqual(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          accountId: 'resolved-1',
+          voiceNotesCapable: true,
+        }),
+      }),
+    );
+  });
+
+  it('drops a stale tab-state refresh that finishes after a newer one', async () => {
+    const { coordinator, port } = await createCoordinatorHarness();
+    const resolvers: Array<(capable: boolean) => void> = [];
+    coordinator.setVoiceCapabilityResolver(
+      () => new Promise<boolean>((resolve) => {
+        resolvers.push(resolve);
+      }),
+    );
+
+    const before = postedMessages(port).length;
+    const first = coordinator.refreshTabState(1);
+    const second = coordinator.refreshTabState(1);
+    await vi.waitFor(() => {
+      expect(resolvers).toHaveLength(2);
+    });
+
+    // The NEWER build completes first; the older one must then be dropped.
+    resolvers[1]!(true);
+    await second;
+    resolvers[0]!(false);
+    await first;
+
+    const states = postedMessages(port)
+      .slice(before)
+      .filter((message) => message.type === 'tab:state');
+    expect(states).toHaveLength(1);
+    expect(states[0]).toEqual(
+      expect.objectContaining({
+        state: expect.objectContaining({ voiceNotesCapable: true }),
+      }),
+    );
+  });
+
   it('auto-recovers a mapped personality when a new legacy alias is captured for the same account', async () => {
     mockStorage = {
       ...mockStorage,

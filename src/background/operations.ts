@@ -432,6 +432,8 @@ function assertInsertableFeatureResult(
 
 export class OperationCoordinator {
   private readonly portsByTabId = new Map<number, browser.runtime.Port>();
+  /** Monotonic per-tab refresh generation — only the newest refresh posts. */
+  private readonly tabStateGenerationByTabId = new Map<number, number>();
   private readonly lifecycle =
     new OperationRegistry<ActiveOperation, ActiveCompareOperation>();
   /** Hub-sync retry bookkeeping, keyed `groupId|generatedAt|baseUrl` — a new
@@ -546,7 +548,16 @@ export class OperationCoordinator {
     if (!port) {
       return;
     }
+    // Newest-wins: buildTabUiState awaits a capability probe that can take
+    // seconds, so two overlapping refreshes could post out of order and let a
+    // STALE snapshot (old accountId/persona) overwrite a newer one in the
+    // content script. Only the most recently started refresh may post.
+    const generation = (this.tabStateGenerationByTabId.get(tabId) ?? 0) + 1;
+    this.tabStateGenerationByTabId.set(tabId, generation);
     const state = await this.buildTabUiState(tabId);
+    if (this.tabStateGenerationByTabId.get(tabId) !== generation) {
+      return;
+    }
     port.postMessage({
       type: messageType,
       state,
@@ -574,8 +585,12 @@ export class OperationCoordinator {
     accountId: string,
     material = true,
   ): Promise<void> {
-    this.tabContexts.setAccount(tabId, accountId);
     const session = this.sessionStore.getSessionByAccount(accountId);
+    // Canonical-preferred: captures fire on every Fansly request, and writing
+    // the raw legacy id here made TabContext.accountId oscillate against the
+    // canonical resolved id the UI state and voice bindings carry (false
+    // invalid_sender / route-mismatch rejections while traffic was flowing).
+    this.tabContexts.setAccount(tabId, session?.resolvedAccountId ?? accountId);
     let shouldResolveIdentity = false;
     if (session?.resolvedAccountId) {
       this.captureIdentityRetryAfterByLegacyAccountId.delete(accountId);
@@ -620,9 +635,13 @@ export class OperationCoordinator {
     switch (message.type) {
       case 'tab:init':
         this.tabContexts.setRoute(tabId, message.groupId, message.routeNonce);
+        // Canonical-preferred (falls back to the legacy capture id, then to
+        // the raw per-tab capture record) — same oscillation guard as
+        // handleCapture.
         this.tabContexts.setAccount(
           tabId,
-          this.sessionStore.getAccountIdForTab(tabId),
+          this.sessionStore.getDisplayAccountIdForTab(tabId) ??
+            this.sessionStore.getAccountIdForTab(tabId),
         );
         await this.refreshTabState(tabId, 'tab:state');
         break;
@@ -777,6 +796,11 @@ export class OperationCoordinator {
   private async buildTabUiState(tabId: number): Promise<TabUiState> {
     const storage = await this.storageCoordinator.getState();
     const context = this.tabContexts.getOrCreate(tabId);
+    // The capability probe runs FIRST: it may resolve the session's canonical
+    // identity as a side effect (resolvePageForTab → getAuthenticatedAccount),
+    // and reading the session before it meant the returned state could carry
+    // the legacy id even though the session had just learned the canonical one.
+    const voiceNotesCapable = await this.voiceCapabilityResolver?.(tabId) ?? false;
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId =
       this.sessionStore.getAccountIdForTab(tabId) ?? context.accountId;
@@ -801,7 +825,6 @@ export class OperationCoordinator {
       ? storage.personaCatalogSource
       : null;
     const compareDraftCount = getCompareDraftCount();
-    const voiceNotesCapable = await this.voiceCapabilityResolver?.(tabId) ?? false;
 
     return {
       tabId,
