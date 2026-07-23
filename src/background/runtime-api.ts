@@ -91,7 +91,12 @@ function voiceAttemptSender(
   tabContexts: TabContextStore,
 ): ValidVoiceAttemptSender | null {
   const tabId = sender?.tab?.id;
-  const rawUrl = sender?.url ?? sender?.tab?.url;
+  // tab.url FIRST: Firefox freezes sender.url at the document's LOAD URL and
+  // never updates it across history.pushState, while tab.url tracks the live
+  // SPA route (verified empirically, Firefox 152). Fansly opens conversations
+  // via pushState, so validating against sender.url rejected every SPA-opened
+  // conversation as invalid_sender.
+  const rawUrl = sender?.tab?.url ?? sender?.url;
   if (typeof tabId !== 'number' || typeof rawUrl !== 'string') {
     return null;
   }
@@ -110,18 +115,25 @@ function voiceAttemptSender(
   }
 
   const context = tabContexts.get(tabId);
-  if (
-    (context?.groupId !== null && context?.groupId !== undefined && context.groupId !== groupId) ||
-    (context?.accountId && context.accountId !== route.accountId)
-  ) {
+  if (context?.groupId !== null && context?.groupId !== undefined && context.groupId !== groupId) {
     return null;
   }
+  // The session's alias set is authoritative for the account check: the tab
+  // context's accountId oscillates between the legacy captured id and the
+  // canonical resolved id (handleCapture rewrites it on every Fansly request),
+  // so an exact context match produced false invalid_sender rejections while
+  // tab traffic was flowing. The context id is consulted only when no session
+  // is known for this tab.
   const session = sessionStore.getSessionForTab(tabId);
   const reliableAccounts = new Set(
     [session?.accountId, session?.resolvedAccountId]
       .filter((accountId): accountId is string => Boolean(accountId)),
   );
-  if (reliableAccounts.size > 0 && !reliableAccounts.has(route.accountId)) {
+  if (reliableAccounts.size > 0) {
+    if (!reliableAccounts.has(route.accountId)) {
+      return null;
+    }
+  } else if (context?.accountId && context.accountId !== route.accountId) {
     return null;
   }
   return { tabId, groupId };
