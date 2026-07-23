@@ -1390,3 +1390,23 @@ call. A missing or mismatched row is a local refusal. The former startup
 `setAccessLevel` shim is deleted, content has no direct `storage.session`
 reference, storage schema stays v15 (session-ephemeral metadata only), and
 recovery still intentionally ends with the complete Firefox session.
+
+**E55 (2026-07-24).** A CONFIRMED voice attach completes the session: the
+attached message in the Fansly thread is the source of truth, so client
+custody of the ACTIVE attempt ends (record + storage removed, blobs revoked;
+other boot-recovered attempts and all server artifacts untouched) and the
+panel closes with an info toast whose «Очистить черновик» action is scoped to
+the conversation AND exact draft it was minted for. While an unfinished
+session lives, 🎙 still opens it, and «+ Новый войс из черновика» (reading the
+LIVE composer text at click) is the explicit path to a fresh attempt; when the
+session holds paid-at-stake work — completed-unattached, generating,
+indeterminate takes, or a pending/needs-reconcile create with no visible take
+yet — the row expands into an inline confirm before the existing discard path
+displaces the session. New-session actions are unavailable during an attach
+handoff (the pending outcome is bound to the current attempt), starts are
+serialized against double clicks, and per-attempt view state (error, attach
+phase, leftover hint) resets before dispatch. This supersedes only the
+persistent post-attach panel behavior of the voice design (the leftover-draft
+clear affordance moves to the completion toast); an `uncertain` attach outcome
+still never completes a session. Spec:
+docs/superpowers/specs/2026-07-24-voice-new-attempt-ux.md.
