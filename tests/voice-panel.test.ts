@@ -45,7 +45,10 @@ interface Harness {
 
 let harness: Harness | null = null;
 
-function setup(): Harness {
+function setup(options?: {
+  onAttachConfirmed?: () => void;
+  onStartNewFromDraft?: (draft: string) => void;
+}): Harness {
   const sent: ContentPortMessage[] = [];
   let probe: VoiceComposerProbe = {
     ok: true,
@@ -93,6 +96,8 @@ function setup(): Harness {
       draft.value = text;
     },
     onClose: () => undefined,
+    ...(options?.onAttachConfirmed ? { onAttachConfirmed: options.onAttachConfirmed } : {}),
+    ...(options?.onStartNewFromDraft ? { onStartNewFromDraft: options.onStartNewFromDraft } : {}),
   });
   ref.panel = created;
 
@@ -726,6 +731,112 @@ describe('VoicePanel — лента', () => {
       expect(textOf(harness!.root)).toContain('Conversation context changed.');
     });
     expect(harness!.attachCalls).toHaveLength(1);
+  });
+
+  it('a confirmed attach fires completion when the owner wires it, without the post-attach view', async () => {
+    const onAttachConfirmed = vi.fn();
+    harness = setup({ onAttachConfirmed });
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.panel.setFanUsername('alice');
+    harness!.setAttachOutcome('confirmed');
+
+    await harness!.panel.handleAttachGrant({
+      type: 'voice:attachGrant',
+      attemptId,
+      voiceNoteId: 1,
+      token: 'tok-1',
+      fanUsername: 'alice',
+    });
+
+    expect(onAttachConfirmed).toHaveBeenCalledTimes(1);
+    // The owner tears the panel down on completion — the panel must not have
+    // swapped into its legacy post-attach success view.
+    expect(textOf(harness!.root)).not.toContain('Текст остался в поле');
+  });
+
+  it('completeAttempt ends client custody: records cleared and boot recovers nothing', async () => {
+    harness = setup();
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+
+    await harness!.controller.completeAttempt();
+
+    expect(harness!.controller.getAttempt()).toBeNull();
+    expect(await harness!.controller.boot()).toBeNull();
+  });
+
+  it('new-voice row: an empty composer answers the click with an inline hint', async () => {
+    harness = setup();
+    await toScriptPhase();
+    harness!.draft.value = '';
+    harness!.panel.render();
+
+    const start = harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-start');
+    expect(start).not.toBeNull();
+    // Always enabled: a disabled button could never re-check the composer
+    // (no input observer reaches this panel) — emptiness is checked at click.
+    expect(start!.disabled).toBe(false);
+    expect(textOf(harness!.root)).not.toContain('Напишите черновик в поле Fansly');
+    start!.click();
+    expect(textOf(harness!.root)).toContain('Напишите черновик в поле Fansly');
+
+    // Typing and clicking again proceeds without the stale hint.
+    harness!.draft.value = 'now there is text';
+    const onStart = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (harness!.panel as any).deps.onStartNewFromDraft = onStart;
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-start')!.click();
+    expect(onStart).toHaveBeenCalledWith('now there is text');
+  });
+
+  it('new-voice row: an in-flight paid create with no visible take still demands the confirm', async () => {
+    const onStartNewFromDraft = vi.fn();
+    harness = setup({ onStartNewFromDraft });
+    const attemptId = await toScriptPhase();
+    // Begin the paid create but deliver NO voice:noteView yet — takes stays
+    // empty while the pendingCreate custody record already exists.
+    await harness!.controller.generateTake();
+    void attemptId;
+    harness!.draft.value = 'new text';
+    harness!.panel.render();
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-start')!.click();
+    expect(onStartNewFromDraft).not.toHaveBeenCalled();
+    expect(textOf(harness!.root)).toContain('сессия будет закрыта');
+  });
+
+  it('new-voice row: starts immediately from the live draft when nothing paid is at stake', async () => {
+    const onStartNewFromDraft = vi.fn();
+    harness = setup({ onStartNewFromDraft });
+    await toScriptPhase();
+    harness!.draft.value = 'fresh composer text';
+    harness!.panel.render();
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-start')!.click();
+
+    expect(onStartNewFromDraft).toHaveBeenCalledWith('fresh composer text');
+  });
+
+  it('new-voice row: a paid unattached take demands the inline confirm; Отмена keeps the session', async () => {
+    const onStartNewFromDraft = vi.fn();
+    harness = setup({ onStartNewFromDraft });
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    harness!.draft.value = 'new text';
+    harness!.panel.render();
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-start')!.click();
+    expect(onStartNewFromDraft).not.toHaveBeenCalled();
+    expect(textOf(harness!.root)).toContain('сессия будет закрыта');
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-cancel')!.click();
+    expect(textOf(harness!.root)).not.toContain('сессия будет закрыта');
+    expect(harness!.attemptId()).toBe(attemptId);
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-start')!.click();
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-newvoice-confirm')!.click();
+    expect(onStartNewFromDraft).toHaveBeenCalledWith('new text');
   });
 
   it('offers the leftover-draft hint after a confirmed attach and clears the composer on request', async () => {
