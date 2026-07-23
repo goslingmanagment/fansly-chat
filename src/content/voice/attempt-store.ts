@@ -41,10 +41,22 @@ export class VoiceAttemptCustodyError extends Error {
   }
 }
 
+/** An orphaned content script (extension updated/reloaded under this document)
+ * can NEVER reach the new background — its runtime rejections are permanent,
+ * so they must carry the reload advice, not the retry advice (review P2). */
+function isInvalidatedContextFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /context invalidated|message manager disconnected|dead object/i.test(message);
+}
+
 function wrapTransportFailure(error: unknown): VoiceAttemptCustodyError {
-  return error instanceof VoiceAttemptCustodyError
-    ? error
-    : new VoiceAttemptCustodyError('unavailable', { cause: error });
+  if (error instanceof VoiceAttemptCustodyError) {
+    return error;
+  }
+  return new VoiceAttemptCustodyError(
+    isInvalidatedContextFailure(error) ? 'reload_required' : 'unavailable',
+    { cause: error },
+  );
 }
 
 /**

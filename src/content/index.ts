@@ -1752,12 +1752,16 @@ export class ChatGooseContentApp {
     if (error instanceof VoiceAttemptCustodyError) {
       // 'rejected' is a background validation refusal (historically a transient
       // identity race) — advising a tab reload here was actively harmful: the
-      // reload re-triggers the captures that recreated the race. Only a truly
-      // mixed-version protocol ('reload_required') earns the reload advice.
+      // reload re-triggers the captures that recreated the race. 'unavailable'
+      // is a transport failure (background gone/waking) — retry is the honest
+      // advice. Only a truly mixed-version protocol ('reload_required') earns
+      // the reload advice.
       this.toast.show(
         error.code === 'rejected'
           ? 'Не удалось подтвердить чат для войса — попробуйте ещё раз.'
-          : 'Хранилище войса недоступно. Перезагрузите вкладку Fansly после обновления расширения.',
+          : error.code === 'unavailable'
+            ? 'Фон расширения не ответил — попробуйте ещё раз через пару секунд.'
+            : 'Хранилище войса недоступно. Перезагрузите вкладку Fansly после обновления расширения.',
         { tone: 'warning' },
       );
       return;
