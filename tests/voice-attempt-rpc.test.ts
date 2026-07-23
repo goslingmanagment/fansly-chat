@@ -53,6 +53,26 @@ afterEach(() => {
 });
 
 describe('VoiceAttemptStore RPC facade', () => {
+  it('maps an invalidated-context transport failure to reload_required', async () => {
+    installRuntime(() => Promise.reject(new Error('Extension context invalidated.')));
+    const store = new VoiceAttemptStore();
+
+    await expect(store.load(ROUTE)).rejects.toMatchObject({
+      name: 'VoiceAttemptCustodyError',
+      code: 'reload_required',
+    });
+  });
+
+  it('maps an ordinary transport failure to unavailable (retryable)', async () => {
+    installRuntime(() => Promise.reject(new Error('Could not establish connection.')));
+    const store = new VoiceAttemptStore();
+
+    await expect(store.load(ROUTE)).rejects.toMatchObject({
+      name: 'VoiceAttemptCustodyError',
+      code: 'unavailable',
+    });
+  });
+
   it('requires versioned acknowledgements and preserves load/save/remove contract', async () => {
     const responses = [
       { version: 1, ok: true },
