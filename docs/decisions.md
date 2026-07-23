@@ -70,6 +70,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E51 | 2026-07-21 | Options waits for a durable MV3 storage-readiness barrier; custody-layout repair is independent of schemaVersion and failures render no settings writer |
 | E52 | 2026-07-21 | Voice hardening: fail-closed/bounded script SSE, V2 Hub-principal+page custody, bounded paid/free requests, single-flight monotonic status, explicit cancel; custom-name and cross-tab behavior remain intentional |
 | E53 | 2026-07-22 | Coach panel UI redesign (presentation-only, no migration): coach-scoped header/CSS polish, one «Рекап ▾» menu replacing three buttons, structured recap status line, grouped empty state, per-turn draft-attach intent (`draftText` sent only when the live Fansly draft is non-empty at dispatch), a content-owned `transcriptEpoch` reseed key, a coach settings snapshot, and `turnContext` plumbing (background stops discarding `attachedRecaps`); Russian copy for all coach-owned strings |
+| E54 | 2026-07-23 | Voice paid-attempt custody moves behind an acknowledged background `storage.session` RPC; supersedes E47's Firefox content-access premise |
 
 ## Entries
 
@@ -1352,3 +1353,40 @@ the whole paid operation:complete (the shape gate is isCoachTurnContext; E28
 holds by ignoring, not by discarding terminals). Follow-up recorded: extract
 the orchestration test harness so the ship-gate's dispatch site gains a
 behavioural (unmocked) pin.
+
+**E54 (2026-07-23).** Real Firefox 152.0.6 testing disproved E47's storage
+premise: `browser.storage.session` is undefined in content scripts, and
+`StorageArea.setAccessLevel()` is a Chrome-only member absent from Firefox
+(Mozilla Bug 1724754 remains open). Consequently every Voice open previously
+threw before the first usable state and the catch collapsed the cause into one
+generic toast. E47 is superseded ONLY on that process-access claim; its
+idempotency law, same-request recovery, exact-take/live-route attachment
+attestation, memory-only audio, and post-worker-restart download-only attach
+degradation remain binding.
+
+Voice-attempt V2 custody is now owned exclusively by one background repository
+over `browser.storage.session`, with no memory or `storage.local` fallback. It
+uses only `voiceAttemptV1:*`/`voiceAttemptV2:*` keys, serializes writes per
+attempt, scans with `get(null)`, adopts valid unexpired V2 records, lazily
+deletes invalid/expired voice records and source-less V1 records, and never
+clears unrelated session data. Snapshot types and validators are process
+neutral. The content controller keeps its existing state machine and
+`load`/`save`/`remove` contract through three versioned, acknowledged operations
+on the existing central runtime listener (`voiceAttemptLoad`,
+`voiceAttemptSave`, `voiceAttemptRemove`). The listener requires a Fansly
+message-tab sender on the matching group and checks the account when worker
+state can prove it. A write acknowledgement is returned only after
+`storage.session.set()` resolves. Unknown, invalid, rejected, or mixed-version
+responses fail closed and instruct the chatter to reload; they can never
+bypass custody.
+
+Immediately before the paid Voice create reaches Core, `VoiceService` now
+requires the repository to contain the exact pending `clientRequestId`,
+conversation pin, generation ref, script, Hub source fingerprint, page label,
+and account/group binding with `sentOnce=true`. Account+group recovery remains
+nonce-insensitive across a tab reload as established by E47, while the service's
+independent live route-nonce/fan/source/page checks remain strict for the actual
+call. A missing or mismatched row is a local refusal. The former startup
+`setAccessLevel` shim is deleted, content has no direct `storage.session`
+reference, storage schema stays v15 (session-ephemeral metadata only), and
+recovery still intentionally ends with the complete Firefox session.

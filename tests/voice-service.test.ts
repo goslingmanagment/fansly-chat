@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { VoiceService } from '../src/background/voice-service.js';
-import { enableVoiceSessionStorageForContent } from '../src/background/voice-session-access.js';
+import { VoiceAttemptCustodyMismatchError } from '../src/background/voice-attempt-store.js';
 import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
@@ -109,6 +109,7 @@ function createHarness(options: {
   getGroup?: FanslyClient['getGroup'];
   getAccountNames?: FanslyClient['getAccountNames'];
   getState?: () => Promise<PersistedState>;
+  assertPendingCreate?: () => Promise<void>;
   now?: () => number;
   randomUUID?: () => string;
 } = {}) {
@@ -210,6 +211,9 @@ function createHarness(options: {
       return currentContext;
     }),
   };
+  const assertPendingCreate = vi.fn(
+    options.assertPendingCreate ?? (async () => undefined),
+  );
   const service = new VoiceService({
     kernelGateway: { streamFeature },
     agencyHubClient: hub,
@@ -217,6 +221,7 @@ function createHarness(options: {
     sessionStore: { getSessionForTab: vi.fn(() => activeSession) },
     tabContexts,
     storageCoordinator: { getState: vi.fn(options.getState ?? (async () => storageState())) },
+    voiceAttempts: { assertPendingCreate },
     randomUUID: vi.fn(options.randomUUID ?? (() => `attach-token-${(attachTokenCounter += 1)}`)),
     now: options.now,
   });
@@ -227,6 +232,7 @@ function createHarness(options: {
     fanslyClient,
     streamFeature,
     currentContext,
+    assertPendingCreate,
     sent,
     emit: (message: BackgroundPortMessage) => sent.push(message),
   };
@@ -520,6 +526,39 @@ describe('VoiceService SDK transport', () => {
       attemptId: ATTEMPT_ID,
       view: statusView,
     }]);
+  });
+
+  it('refuses the paid boundary unless exact persisted pending custody exists', async () => {
+    const harness = createHarness({
+      assertPendingCreate: async () => {
+        throw new VoiceAttemptCustodyMismatchError();
+      },
+    });
+
+    await createAttempt(harness);
+
+    expect(harness.assertPendingCreate).toHaveBeenCalledWith({
+      attemptId: ATTEMPT_ID,
+      route: {
+        accountId: 'creator-1',
+        groupId: 'group-1',
+      },
+      clientRequestId: CLIENT_REQUEST_ID,
+      conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-1',
+      ...SOURCE_BINDING,
+      script: '[warmly] Hello Alice',
+      sentOnce: true,
+    });
+    expect(harness.hub.createVoiceNote).not.toHaveBeenCalled();
+    expect(harness.sent).toEqual([
+      expect.objectContaining({
+        type: 'voice:noteError',
+        source: 'create',
+        code: 'voice_source_invalid',
+      }),
+    ]);
   });
 
   it('recovers status after a worker restart only when the persisted source still matches', async () => {
@@ -1291,17 +1330,5 @@ describe('VoiceService capability', () => {
     await expect(harness.service.resolveCapability(TAB_ID)).resolves.toBe(true);
 
     expect(harness.hub.resolvePageForUsername).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('voice attempt session access', () => {
-  it('exposes storage.session to the content attempt controller at worker startup', async () => {
-    const setAccessLevel = vi.fn(async () => undefined);
-
-    await enableVoiceSessionStorageForContent({ setAccessLevel });
-
-    expect(setAccessLevel).toHaveBeenCalledWith({
-      accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
-    });
   });
 });

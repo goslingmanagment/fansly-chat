@@ -22,6 +22,10 @@ import type {
   RecapStatusResponse,
   SpendersBuildPayload,
 } from '../shared/types.js';
+import type {
+  StoredVoiceAttemptRoute,
+  VoiceAttemptStoreSnapshot,
+} from '../shared/voice-attempt.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -32,6 +36,7 @@ import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 import type { VoiceService } from './voice-service.js';
+import type { VoiceAttemptRepository } from './voice-attempt-store.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 
@@ -49,6 +54,8 @@ export interface RuntimeApiDeps {
   onAgencyHubReady?: () => void | Promise<void>;
   /** Fail-closed page capability resolver shared with tab:init state. */
   voiceService?: Pick<VoiceService, 'resolveCapability'>;
+  /** Background-owned session repository for acknowledged voice custody. */
+  voiceAttempts: Pick<VoiceAttemptRepository, 'load' | 'save' | 'remove'>;
 }
 
 /** E28. The prompt echo is readable by ONE caller: our own viewer page. The
@@ -72,6 +79,54 @@ function isDebugPromptViewer(sender: browser.runtime.MessageSender): boolean {
   }
 }
 
+interface ValidVoiceAttemptSender {
+  tabId: number;
+  groupId: string;
+}
+
+function voiceAttemptSender(
+  sender: browser.runtime.MessageSender | undefined,
+  route: StoredVoiceAttemptRoute,
+  sessionStore: SessionStore,
+  tabContexts: TabContextStore,
+): ValidVoiceAttemptSender | null {
+  const tabId = sender?.tab?.id;
+  const rawUrl = sender?.url ?? sender?.tab?.url;
+  if (typeof tabId !== 'number' || typeof rawUrl !== 'string') {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'fansly.com') {
+    return null;
+  }
+  const groupId = parseGroupIdFromUrl(url.href);
+  if (!groupId || groupId !== route.groupId) {
+    return null;
+  }
+
+  const context = tabContexts.get(tabId);
+  if (
+    (context?.groupId !== null && context?.groupId !== undefined && context.groupId !== groupId) ||
+    (context?.accountId && context.accountId !== route.accountId)
+  ) {
+    return null;
+  }
+  const session = sessionStore.getSessionForTab(tabId);
+  const reliableAccounts = new Set(
+    [session?.accountId, session?.resolvedAccountId]
+      .filter((accountId): accountId is string => Boolean(accountId)),
+  );
+  if (reliableAccounts.size > 0 && !reliableAccounts.has(route.accountId)) {
+    return null;
+  }
+  return { tabId, groupId };
+}
+
 export function registerRuntimeApi({
   agencyHubClient,
   fanslyClient,
@@ -83,12 +138,50 @@ export function registerRuntimeApi({
   emitToTab,
   onAgencyHubReady,
   voiceService,
+  voiceAttempts,
 }: RuntimeApiDeps): void {
   browser.runtime.onMessage.addListener(
     async (message: unknown, sender: browser.runtime.MessageSender) => {
       const requestType = getRuntimeRequestType(message);
       if (!requestType) {
         return undefined;
+      }
+
+      if (requestType === 'voiceAttemptLoad') {
+        const { route } = message as { route: StoredVoiceAttemptRoute };
+        if (!voiceAttemptSender(sender, route, sessionStore, tabContexts)) {
+          return { version: 1, ok: false, error: 'invalid_sender' } as const;
+        }
+        const entries = await voiceAttempts.load(route);
+        return { version: 1, ok: true, entries } as const;
+      }
+
+      if (requestType === 'voiceAttemptSave') {
+        const { snapshot } = message as { snapshot: VoiceAttemptStoreSnapshot };
+        if (
+          !voiceAttemptSender(
+            sender,
+            snapshot.attempt.boundRoute,
+            sessionStore,
+            tabContexts,
+          )
+        ) {
+          return { version: 1, ok: false, error: 'invalid_sender' } as const;
+        }
+        await voiceAttempts.save(snapshot);
+        return { version: 1, ok: true } as const;
+      }
+
+      if (requestType === 'voiceAttemptRemove') {
+        const { attemptId, route } = message as {
+          attemptId: string;
+          route: StoredVoiceAttemptRoute;
+        };
+        if (!voiceAttemptSender(sender, route, sessionStore, tabContexts)) {
+          return { version: 1, ok: false, error: 'invalid_sender' } as const;
+        }
+        await voiceAttempts.remove(attemptId, route);
+        return { version: 1, ok: true } as const;
       }
 
       if (requestType === 'ensureStorageReady') {

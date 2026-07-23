@@ -21,6 +21,7 @@ import {
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
 import { VoiceAttemptController } from './voice/attempt-controller.js';
+import { VoiceAttemptCustodyError } from './voice/attempt-store.js';
 import { VoiceAttachAdapter } from './voice/attach-adapter.js';
 import { VoicePanel } from './voice/voice-panel.js';
 import { VoiceStudio } from './voice/voice-studio.js';
@@ -1702,34 +1703,70 @@ export class ChatGooseContentApp {
     if (!controller) {
       return;
     }
+    let recovered;
     try {
-      const recovered = await controller.boot();
-      if (this.voiceController !== controller) {
-        return;
-      }
-      if (!recovered) {
-        if (!draft) {
-          this.toast.show('Напишите черновик в поле — из него сделаем войс.', {
-            tone: 'warning',
-          });
-          this.teardownVoice();
-          return;
-        }
-        await controller.startScript(draft, 'none');
-      }
-      if (this.voiceController !== controller || !this.voicePanel) {
-        return;
-      }
-      this.voicePanel.setFanUsername(getActiveConversationDisplayName());
-      this.voicePanel.open();
-    } catch {
-      if (this.voiceController === controller) {
-        this.teardownVoice();
-        this.toast.show('Не удалось открыть сохранённый войс — попробуйте ещё раз.', {
+      recovered = await controller.boot();
+    } catch (error) {
+      this.handleVoiceFlowFailure(controller, error, 'recovery');
+      return;
+    }
+    if (this.voiceController !== controller) {
+      return;
+    }
+    if (!recovered) {
+      if (!draft) {
+        this.toast.show('Напишите черновик в поле — из него сделаем войс.', {
           tone: 'warning',
         });
+        this.teardownVoice();
+        return;
+      }
+      try {
+        await controller.startScript(draft, 'none');
+      } catch (error) {
+        this.handleVoiceFlowFailure(controller, error, 'start');
+        return;
       }
     }
+    if (this.voiceController !== controller || !this.voicePanel) {
+      return;
+    }
+    try {
+      this.voicePanel.setFanUsername(getActiveConversationDisplayName());
+      this.voicePanel.open();
+    } catch (error) {
+      this.handleVoiceFlowFailure(controller, error, 'start');
+    }
+  }
+
+  private handleVoiceFlowFailure(
+    controller: VoiceAttemptController,
+    error: unknown,
+    stage: 'recovery' | 'start',
+  ): void {
+    console.error(`[ChatGoose][voice] ${stage} failed`, error);
+    if (this.voiceController !== controller) {
+      return;
+    }
+    this.teardownVoice();
+    if (error instanceof VoiceAttemptCustodyError) {
+      this.toast.show(
+        'Хранилище войса недоступно. Перезагрузите вкладку Fansly после обновления расширения.',
+        { tone: 'warning' },
+      );
+      return;
+    }
+    if (stage === 'recovery') {
+      this.toast.show(
+        'Не удалось восстановить сохранённый войс. Перезагрузите вкладку и попробуйте ещё раз.',
+        { tone: 'warning' },
+      );
+      return;
+    }
+    this.toast.show(
+      'Не удалось начать войс. Проверьте подключение и попробуйте ещё раз.',
+      { tone: 'warning' },
+    );
   }
 
   private closeVoicePanel(): void {
