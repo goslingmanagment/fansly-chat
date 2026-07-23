@@ -37,6 +37,10 @@ import type { KernelFeatureGateway } from './kernel-feature-gateway.js';
 import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
+import {
+  VoiceAttemptCustodyMismatchError,
+} from './voice-attempt-store.js';
+import type { VoiceAttemptRepository } from './voice-attempt-store.js';
 
 type VoiceContentMessage = Extract<ContentPortMessage, { type: `voice:${string}` }>;
 type VoiceBackgroundMessage = Extract<BackgroundPortMessage, { type: `voice:${string}` }>;
@@ -129,6 +133,7 @@ export interface VoiceServiceDependencies {
   sessionStore: Pick<SessionStore, 'getSessionForTab'>;
   tabContexts: Pick<TabContextStore, 'get' | 'getOrCreate' | 'setFan'>;
   storageCoordinator: Pick<StorageCoordinator, 'getState'>;
+  voiceAttempts: Pick<VoiceAttemptRepository, 'assertPendingCreate'>;
   randomUUID?: () => string;
   now?: () => number;
 }
@@ -835,6 +840,35 @@ export class VoiceService {
         );
         return;
       }
+      if (!binding.accountId || !binding.groupId) {
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'create' },
+          'voice_source_invalid',
+          emit,
+        );
+        return;
+      }
+      // Paid boundary: Core is unreachable until the background repository
+      // proves it still owns the exact acknowledged request. The repository
+      // compares account+group but deliberately ignores the persisted nonce so
+      // a tab reload can replay the same id; the live nonce/fan checks above
+      // remain stricter and independent.
+      await this.deps.voiceAttempts.assertPendingCreate({
+        attemptId: message.attemptId,
+        route: {
+          accountId: binding.accountId,
+          groupId: binding.groupId,
+        },
+        clientRequestId: message.clientRequestId,
+        conversationRef: message.conversationRef,
+        pinnedConversationRef: message.pinnedConversationRef,
+        sourceGenerationRef: message.sourceGenerationRef,
+        sourceFingerprint: message.sourceFingerprint,
+        pageLabel: message.pageLabel,
+        script: message.script,
+        sentOnce: true,
+      });
       const view = await this.deps.agencyHubClient.createVoiceNote(
         state.settings,
         page.pageLabel,
@@ -860,6 +894,15 @@ export class VoiceService {
         view,
       });
     } catch (error) {
+      if (error instanceof VoiceAttemptCustodyMismatchError) {
+        this.emitLocalNoteError(
+          message.attemptId,
+          { source: 'create' },
+          'voice_source_invalid',
+          emit,
+        );
+        return;
+      }
       this.emitNoteError(
         message.attemptId,
         { source: 'create' },

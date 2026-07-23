@@ -11,8 +11,18 @@ declare module '*.css' {
 }
 
 declare module 'node:fs' {
+  interface Dirent {
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }
+
   export function readFileSync(
     path: string | URL,
     encoding: string,
   ): string;
+  export function readdirSync(
+    path: string | URL,
+    options: { withFileTypes: true },
+  ): Dirent[];
 }

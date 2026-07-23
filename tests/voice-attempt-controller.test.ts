@@ -4,19 +4,15 @@ import {
   type VoiceAttemptControllerPort,
   type VoiceAttemptRoute,
 } from '../src/content/voice/attempt-controller.js';
-import { VoiceAttemptStore } from '../src/content/voice/attempt-store.js';
-import {
-  VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX,
-  VOICE_ATTEMPT_SESSION_KEY_PREFIX,
-  VOICE_ATTEMPT_TTL_MS,
-  VOICE_STATUS_POLL_MS,
-} from '../src/shared/constants.js';
+import { VOICE_STATUS_POLL_MS } from '../src/shared/constants.js';
 import type {
   BackgroundPortMessage,
   ContentPortMessage,
   ReplyTone,
   VoiceNoteStatusView,
 } from '../src/shared/types.js';
+import type { VoiceAttemptStoreSnapshot } from '../src/shared/voice-attempt.js';
+import { MemoryVoiceAttemptStore } from './helpers/voice-attempt-store.js';
 
 const ROUTE: VoiceAttemptRoute = {
   accountId: 'creator-1',
@@ -32,13 +28,6 @@ const TAKE_ID_3 = '44444444-4444-4444-8444-444444444444';
 const SOURCE_FINGERPRINT = 'https://hub.test|credential-hash';
 const PAGE_LABEL = 'creator-fs';
 
-interface FakeSessionStorage {
-  readonly data: Record<string, unknown>;
-  readonly get: ReturnType<typeof vi.fn>;
-  readonly set: ReturnType<typeof vi.fn>;
-  readonly remove: ReturnType<typeof vi.fn>;
-}
-
 interface FakePort extends VoiceAttemptControllerPort {
   connected: boolean;
   readonly sent: ContentPortMessage[];
@@ -46,32 +35,6 @@ interface FakePort extends VoiceAttemptControllerPort {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
-}
-
-function createSessionStorage(): FakeSessionStorage {
-  const data: Record<string, unknown> = {};
-  const get = vi.fn(async (keys?: string | string[] | null) => {
-    if (keys == null) {
-      return clone(data);
-    }
-    const requested = Array.isArray(keys) ? keys : [keys];
-    return Object.fromEntries(
-      requested
-        .filter((key) => Object.hasOwn(data, key))
-        .map((key) => [key, clone(data[key])]),
-    );
-  });
-  const set = vi.fn(async (items: Record<string, unknown>) => {
-    for (const [key, value] of Object.entries(items)) {
-      data[key] = clone(value);
-    }
-  });
-  const remove = vi.fn(async (keys: string | string[]) => {
-    for (const key of Array.isArray(keys) ? keys : [keys]) {
-      delete data[key];
-    }
-  });
-  return { data, get, set, remove };
 }
 
 function createPort(): FakePort {
@@ -147,14 +110,13 @@ function createUuidFactory(values: string[]): () => string {
 }
 
 describe('VoiceAttemptController', () => {
-  let session: FakeSessionStorage;
+  let attemptStore: MemoryVoiceAttemptStore;
   const controllers: VoiceAttemptController[] = [];
 
   function createController(options: {
     port?: FakePort;
     route?: VoiceAttemptRoute;
     uuids?: string[];
-    now?: () => number;
     createBlobUrl?: (bytes: ArrayBuffer) => string;
     revokeBlobUrl?: (url: string) => void;
     onError?: (message: Extract<BackgroundPortMessage, {
@@ -165,7 +127,7 @@ describe('VoiceAttemptController', () => {
     }>) => void;
   } = {}) {
     const port = options.port ?? createPort();
-    const store = new VoiceAttemptStore({ now: options.now });
+    const store = attemptStore;
     const controller = new VoiceAttemptController({
       port,
       store,
@@ -183,23 +145,13 @@ describe('VoiceAttemptController', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-19T12:00:00.000Z'));
-    session = createSessionStorage();
-    (globalThis as Record<string, unknown>).browser = {
-      storage: {
-        session: {
-          get: session.get,
-          set: session.set,
-          remove: session.remove,
-        },
-      },
-    };
+    attemptStore = new MemoryVoiceAttemptStore(() => Date.now());
   });
 
   afterEach(() => {
     for (const controller of controllers.splice(0)) {
       controller.destroy();
     }
-    delete (globalThis as Record<string, unknown>).browser;
     vi.useRealTimers();
   });
 
@@ -468,7 +420,124 @@ describe('VoiceAttemptController', () => {
     expect(second.controller.getAttempt()?.canonicalScript).toBe('voice\nscript');
   });
 
+  it('sends zero paid messages when sentOnce custody is not acknowledged', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script');
+    const persist = attemptStore.save.bind(attemptStore);
+    vi.spyOn(attemptStore, 'save').mockImplementation(async (next) => {
+      if (next.pendingCreate?.sentOnce) {
+        throw new Error('storage acknowledgement failed');
+      }
+      await persist(next);
+    });
+
+    await expect(first.controller.generateTake()).rejects.toThrow(
+      'storage acknowledgement failed',
+    );
+
+    expect(messagesOfType(first.port, 'voice:noteCreate')).toHaveLength(0);
+    expect(attemptStore.snapshot(ATTEMPT_ID)?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      sentOnce: false,
+    });
+  });
+
+  it('recovers the identical id after storage committed but its acknowledgement was lost', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script', 'generation-original');
+    const persist = attemptStore.save.bind(attemptStore);
+    let loseAcknowledgement = true;
+    const saveSpy = vi.spyOn(attemptStore, 'save').mockImplementation(async (next) => {
+      await persist(next);
+      if (next.pendingCreate?.sentOnce && loseAcknowledgement) {
+        loseAcknowledgement = false;
+        throw new Error('runtime response lost');
+      }
+    });
+
+    await expect(first.controller.generateTake()).rejects.toThrow('runtime response lost');
+    expect(messagesOfType(first.port, 'voice:noteCreate')).toHaveLength(0);
+    expect(attemptStore.snapshot(ATTEMPT_ID)?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      sentOnce: true,
+    });
+    first.controller.destroy();
+    saveSpy.mockRestore();
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await resumed.controller.boot();
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toEqual([{
+      type: 'voice:noteCreate',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      conversationRef: 'fan-1',
+      pinnedConversationRef: 'fan-1',
+      sourceGenerationRef: 'generation-original',
+      sourceFingerprint: SOURCE_FINGERPRINT,
+      pageLabel: PAGE_LABEL,
+      script: 'Voice script',
+    }]);
+  });
+
+  it('re-acknowledges a replay and never posts it to an incompatible background', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script');
+    await first.controller.generateTake();
+    first.controller.destroy();
+
+    const persist = attemptStore.save.bind(attemptStore);
+    const saveSpy = vi.spyOn(attemptStore, 'save').mockImplementation(async (next) => {
+      if (next.pendingCreate?.sentOnce) {
+        throw new Error('mixed-version custody RPC unavailable');
+      }
+      await persist(next);
+    });
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+
+    await expect(resumed.controller.boot()).rejects.toThrow(
+      'mixed-version custody RPC unavailable',
+    );
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toHaveLength(0);
+    saveSpy.mockRestore();
+  });
+
+  it('replays the same request when result cleanup fails after Core answered', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Draft', 'none');
+    await finishScript(first.controller, 'Voice script', 'generation-original');
+    await first.controller.generateTake();
+    const originalCreate = messagesOfType(first.port, 'voice:noteCreate')[0];
+    const persist = attemptStore.save.bind(attemptStore);
+    const saveSpy = vi.spyOn(attemptStore, 'save').mockImplementation(async (next) => {
+      if (next.pendingCreate === null && next.attempt.takes.length > 0) {
+        throw new Error('final cleanup failed');
+      }
+      await persist(next);
+    });
+
+    await expect(first.controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: voiceView(42, 'completed'),
+    })).rejects.toThrow('final cleanup failed');
+    expect(attemptStore.snapshot(ATTEMPT_ID)?.pendingCreate).toMatchObject({
+      clientRequestId: TAKE_ID_1,
+      sentOnce: true,
+    });
+    first.controller.destroy();
+    saveSpy.mockRestore();
+
+    const resumed = createController({ uuids: [TAKE_ID_3] });
+    await resumed.controller.boot();
+    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toEqual([originalCreate]);
+  });
+
   it('persists the script-derived conversation pin before the first paid send', async () => {
+    const saveSpy = vi.spyOn(attemptStore, 'save');
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('Draft', 'none');
     await finishScript(
@@ -480,11 +549,9 @@ describe('VoiceAttemptController', () => {
     first.port.connected = false;
     await first.controller.generateTake();
 
-    const firstPendingWrite = session.set.mock.calls
-      .map(([items]) => Object.values(items as Record<string, unknown>)[0] as {
-        pendingCreate?: Record<string, unknown> | null;
-      })
-      .find((entry) => entry.pendingCreate)?.pendingCreate;
+    const firstPendingWrite = saveSpy.mock.calls
+      .map(([snapshot]) => snapshot.pendingCreate)
+      .find((pendingCreate) => pendingCreate?.sentOnce === false);
     expect(firstPendingWrite).toMatchObject({
       conversationRef: 'fan-derived-by-script',
       pinnedConversationRef: 'fan-derived-by-script',
@@ -677,64 +744,6 @@ describe('VoiceAttemptController', () => {
     expect(controller.hasPendingCreateNeedsReconcile()).toBe(false);
   });
 
-  it('drops a malformed V2 create snapshot instead of guessing paid-request custody', async () => {
-    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
-    await first.controller.startScript('Draft', 'none');
-    await finishScript(first.controller, 'Voice script');
-    await first.controller.generateTake();
-    first.controller.destroy();
-
-    const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
-    const envelope = session.data[key] as {
-      pendingCreate: Record<string, unknown>;
-    };
-    delete envelope.pendingCreate.sentOnce;
-    delete envelope.pendingCreate.pinnedConversationRef;
-
-    const resumed = createController({ uuids: [TAKE_ID_3] });
-    await resumed.controller.boot();
-    expect(messagesOfType(resumed.port, 'voice:noteCreate')).toHaveLength(0);
-    expect(await resumed.store.load(ROUTE)).toEqual([]);
-    expect(session.data[key]).toBeUndefined();
-  });
-
-  it('removes source-less V1 session snapshots instead of recovering them', async () => {
-    const key = `${VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
-    session.data[key] = { version: 1, attempt: { attemptId: ATTEMPT_ID } };
-
-    const resumed = createController({ uuids: [TAKE_ID_3] });
-    await expect(resumed.controller.boot()).resolves.toBeNull();
-
-    expect(session.data[key]).toBeUndefined();
-    expect(session.remove).toHaveBeenCalledWith([key]);
-  });
-
-  it('loads legacy stored takes while upgrading phase-attached custody per take', async () => {
-    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
-    await toAttachableTake(first.controller);
-    expect(first.controller.requestAttach()).toBe(true);
-    first.controller.reportAttachOutcome('confirmed');
-    await first.controller.markAttached(42);
-    first.controller.destroy();
-
-    const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
-    const envelope = session.data[key] as {
-      attempt: { takes: Array<Record<string, unknown>> };
-    };
-    delete envelope.attempt.takes[0]!.attached;
-    // Old snapshots may carry this now-unused field; additive parsing must not
-    // invalidate the recoverable paid take.
-    envelope.attempt.takes[0]!.pinnedConversationRef = 'legacy-fan-pin';
-
-    const resumed = createController({ uuids: [TAKE_ID_3] });
-    await resumed.controller.boot();
-
-    expect(resumed.controller.getAttempt()?.takes[0]).toMatchObject({
-      voiceNoteId: 42,
-      attached: true,
-    });
-  });
-
   it('re-arms every live matching attempt rather than only the active UI attempt', async () => {
     const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
     await first.controller.startScript('First draft', 'none');
@@ -818,7 +827,7 @@ describe('VoiceAttemptController', () => {
 
     expect(first.controller.getAttempt()?.takes.map((take) => take.voiceNoteId)).toEqual([10, 20]);
     expect(first.controller.getAttempt()?.takes[0]?.blobUrl).toBe('blob:first-controller');
-    const rawSnapshot = JSON.stringify(session.data);
+    const rawSnapshot = JSON.stringify(attemptStore.allSnapshots());
     expect(rawSnapshot).not.toContain('blobUrl');
     expect(rawSnapshot).not.toContain('"audio"');
     first.controller.destroy();
@@ -889,21 +898,6 @@ describe('VoiceAttemptController', () => {
     expect(stored[0]?.attempt.phase).toBe('script');
   });
 
-  it('drops TTL-expired snapshots during boot', async () => {
-    let now = 1_000;
-    const expired = createController({
-      uuids: [ATTEMPT_ID],
-      now: () => now,
-    });
-    await expired.controller.startScript('Old draft', 'none');
-    expired.controller.destroy();
-    now += VOICE_ATTEMPT_TTL_MS;
-
-    const expiredReader = createController({ uuids: [TAKE_ID_1], now: () => now });
-    expect(await expiredReader.controller.boot()).toBeNull();
-    expect(Object.keys(session.data)).toHaveLength(0);
-  });
-
   it('resumes the same account and group after reload changes routeNonce', async () => {
     const beforeReload = createController({
       route: { ...ROUTE, routeNonce: 9 },
@@ -944,21 +938,21 @@ describe('VoiceAttemptController', () => {
     });
     await foreign.controller.startScript('Foreign draft', 'none');
     foreign.controller.destroy();
-    const foreignKey = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
 
     const current = createController({ uuids: [TAKE_ID_3] });
     expect(await current.controller.boot()).toBeNull();
-    expect(session.data[foreignKey]).toBeDefined();
+    expect(attemptStore.snapshot(ATTEMPT_ID)).not.toBeNull();
     expect(await current.store.load(foreignRoute)).toHaveLength(1);
   });
 
   it('persists after each state transition and always before paid create dispatch', async () => {
     const events: string[] = [];
-    session.set.mockImplementation(async (items: Record<string, unknown>) => {
+    const persist = attemptStore.save.bind(attemptStore);
+    const saveSpy = vi.spyOn(attemptStore, 'save').mockImplementation(async (
+      snapshot: VoiceAttemptStoreSnapshot,
+    ) => {
       events.push('persist');
-      for (const [key, value] of Object.entries(items)) {
-        session.data[key] = clone(value);
-      }
+      await persist(snapshot);
     });
     const port = createPort();
     const originalSend = port.send.bind(port);
@@ -972,22 +966,22 @@ describe('VoiceAttemptController', () => {
     });
 
     await controller.startScript('Draft', 'casual');
-    expect(session.set).toHaveBeenCalledTimes(1);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
     await controller.handleMessage({
       type: 'voice:scriptDelta',
       attemptId: ATTEMPT_ID,
       text: 'delta',
     });
-    expect(session.set).toHaveBeenCalledTimes(2);
+    expect(saveSpy).toHaveBeenCalledTimes(2);
     await finishScript(controller, 'Final');
-    expect(session.set).toHaveBeenCalledTimes(3);
+    expect(saveSpy).toHaveBeenCalledTimes(3);
     await controller.editScript('Edited');
-    expect(session.set).toHaveBeenCalledTimes(4);
+    expect(saveSpy).toHaveBeenCalledTimes(4);
 
     events.length = 0;
     await controller.generateTake();
     expect(events).toEqual(['persist', 'persist', 'voice:noteCreate']);
-    expect(session.set).toHaveBeenCalledTimes(6);
+    expect(saveSpy).toHaveBeenCalledTimes(6);
 
     await controller.handleMessage({
       type: 'voice:noteView',
@@ -998,18 +992,17 @@ describe('VoiceAttemptController', () => {
         audioBytesLen: 2,
       }),
     });
-    expect(session.set).toHaveBeenCalledTimes(7);
+    expect(saveSpy).toHaveBeenCalledTimes(7);
     await controller.handleMessage({
       type: 'voice:audioBytes',
       attemptId: ATTEMPT_ID,
       voiceNoteId: 42,
       bytes: new Uint8Array([1, 2]).buffer,
     });
-    expect(session.set).toHaveBeenCalledTimes(8);
+    expect(saveSpy).toHaveBeenCalledTimes(8);
 
-    const key = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}${ATTEMPT_ID}`;
-    expect(session.data[key]).toBeDefined();
-    expect(JSON.stringify(session.data[key])).not.toMatch(/blobUrl|"audio"/);
+    expect(attemptStore.snapshot(ATTEMPT_ID)).not.toBeNull();
+    expect(JSON.stringify(attemptStore.snapshot(ATTEMPT_ID))).not.toMatch(/blobUrl|"audio"/);
   });
 
   it('compares canonical script text when marking takes stale', async () => {

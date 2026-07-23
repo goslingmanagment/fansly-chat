@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
-import type { SessionTemplate, SpendersBuildPayload } from '../src/shared/types.js';
+import type {
+  SessionTemplate,
+  SpendersBuildPayload,
+} from '../src/shared/types.js';
+import type {
+  StoredVoiceAttemptRoute,
+  VoiceAttemptStoreSnapshot,
+} from '../src/shared/voice-attempt.js';
 import type { TabContextStore as TabContextStoreClass } from '../src/background/tab-context.js';
 
 type MessageSenderLike = { tab?: { id?: number }; url?: string };
@@ -38,6 +45,31 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function voiceSnapshot(
+  route: StoredVoiceAttemptRoute,
+): VoiceAttemptStoreSnapshot {
+  return {
+    attempt: {
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      phase: 'script',
+      draftText: 'Hello',
+      script: 'Hello',
+      canonicalScript: null,
+      generationRef: null,
+      sourceFingerprint: null,
+      pageLabel: null,
+      tone: 'none',
+      takes: [],
+      selectedTakeId: null,
+      stale: false,
+      boundRoute: { ...route },
+    },
+    conversationRef: '',
+    pendingCreate: null,
+    burnedClientRequestIds: [],
+  };
+}
+
 async function installRuntimeApiHarness(fanslyClient: {
   getAuthenticatedAccount: (session: SessionTemplate, signal: AbortSignal) => Promise<unknown>;
 }, options?: {
@@ -59,6 +91,11 @@ async function installRuntimeApiHarness(fanslyClient: {
   onAgencyHubReady?: () => void;
   voiceService?: {
     resolveCapability: (tabId: number) => Promise<boolean>;
+  };
+  voiceAttempts?: {
+    load: (route: StoredVoiceAttemptRoute) => Promise<unknown[]>;
+    save: (snapshot: VoiceAttemptStoreSnapshot) => Promise<void>;
+    remove: (attemptId: string, route?: StoredVoiceAttemptRoute) => Promise<void>;
   };
   tabContexts?: TabContextStoreClass;
   storageCoordinator?: {
@@ -146,6 +183,11 @@ async function installRuntimeApiHarness(fanslyClient: {
     clear: vi.fn(),
   };
   const tabContexts = options?.tabContexts ?? new TabContextStore();
+  const voiceAttempts = options?.voiceAttempts ?? {
+    load: vi.fn(async () => []),
+    save: vi.fn(async () => undefined),
+    remove: vi.fn(async () => undefined),
+  };
   registerRuntimeApi({
     agencyHubClient: agencyHubClient as never,
     fanslyClient: fanslyClient as never,
@@ -157,6 +199,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     emitToTab: options?.emitToTab,
     onAgencyHubReady: options?.onAgencyHubReady,
     voiceService: options?.voiceService,
+    voiceAttempts: voiceAttempts as never,
   });
 
   if (!onMessageListener) {
@@ -172,6 +215,7 @@ async function installRuntimeApiHarness(fanslyClient: {
     agencyHubClient,
     spendersService,
     debugPrompts,
+    voiceAttempts,
     send: (message: unknown, sender?: MessageSenderLike) => onMessageListener!(message, sender),
   };
 }
@@ -321,6 +365,164 @@ describe('runtime-api boundary guard', () => {
     expect(tabsGet).not.toHaveBeenCalled();
     expect(tabsQuery).not.toHaveBeenCalled();
     expect(fanslyClient.getAuthenticatedAccount).not.toHaveBeenCalled();
+  });
+});
+
+describe('runtime-api voice-attempt custody RPC', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('acknowledges save only after the background repository commits', async () => {
+    let release!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const voiceAttempts = {
+      load: vi.fn(async () => []),
+      save: vi.fn(async () => committed),
+      remove: vi.fn(async () => undefined),
+    };
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      { voiceAttempts },
+    );
+    harness.sessionStore.registerCapture(5, makeCapture('creator-1'));
+    harness.tabContexts.setRoute(5, 'group-1', 3);
+    harness.tabContexts.setAccount(5, 'creator-1');
+    const route = {
+      accountId: 'creator-1',
+      groupId: 'group-1',
+      routeNonce: 3,
+    };
+
+    let settled = false;
+    const pending = harness.send(
+      { type: 'voiceAttemptSave', snapshot: voiceSnapshot(route) },
+      { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' },
+    ).finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+
+    await expect(pending).resolves.toEqual({ version: 1, ok: true });
+    expect(voiceAttempts.save).toHaveBeenCalledWith(voiceSnapshot(route));
+  });
+
+  it('routes load/save/remove through the one central listener', async () => {
+    const route = {
+      accountId: 'creator-1',
+      groupId: 'group-1',
+      routeNonce: 3,
+    };
+    const entry = { savedAt: 1_000, ...voiceSnapshot(route) };
+    const voiceAttempts = {
+      load: vi.fn(async () => [entry]),
+      save: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    };
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      { voiceAttempts },
+    );
+    harness.sessionStore.registerCapture(5, makeCapture('creator-1'));
+    harness.tabContexts.setRoute(5, 'group-1', 3);
+    const sender = { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' };
+
+    await expect(harness.send(
+      { type: 'voiceAttemptLoad', route },
+      sender,
+    )).resolves.toEqual({ version: 1, ok: true, entries: [entry] });
+    await expect(harness.send(
+      {
+        type: 'voiceAttemptRemove',
+        attemptId: entry.attempt.attemptId,
+        route: { ...route, routeNonce: 99 },
+      },
+      sender,
+    )).resolves.toEqual({ version: 1, ok: true });
+
+    expect(voiceAttempts.load).toHaveBeenCalledWith(route);
+    expect(voiceAttempts.remove).toHaveBeenCalledWith(
+      entry.attempt.attemptId,
+      { ...route, routeNonce: 99 },
+    );
+  });
+
+  it.each([
+    {
+      label: 'no tab',
+      sender: { url: 'https://fansly.com/messages/group-1' },
+      route: { accountId: 'creator-1', groupId: 'group-1', routeNonce: 3 },
+    },
+    {
+      label: 'extension page',
+      sender: { tab: { id: 5 }, url: 'moz-extension://uuid/options.html' },
+      route: { accountId: 'creator-1', groupId: 'group-1', routeNonce: 3 },
+    },
+    {
+      label: 'wrong Fansly group',
+      sender: { tab: { id: 5 }, url: 'https://fansly.com/messages/group-2' },
+      route: { accountId: 'creator-1', groupId: 'group-1', routeNonce: 3 },
+    },
+    {
+      label: 'wrong known account',
+      sender: { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' },
+      route: { accountId: 'creator-2', groupId: 'group-1', routeNonce: 3 },
+    },
+  ])('rejects an invalid content sender: $label', async ({ sender, route }) => {
+    const voiceAttempts = {
+      load: vi.fn(async () => []),
+      save: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    };
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      { voiceAttempts },
+    );
+    harness.sessionStore.registerCapture(5, makeCapture('creator-1'));
+    harness.tabContexts.setRoute(5, 'group-1', 3);
+    harness.tabContexts.setAccount(5, 'creator-1');
+
+    await expect(harness.send(
+      { type: 'voiceAttemptLoad', route },
+      sender,
+    )).resolves.toEqual({
+      version: 1,
+      ok: false,
+      error: 'invalid_sender',
+    });
+    expect(voiceAttempts.load).not.toHaveBeenCalled();
+  });
+
+  it('propagates repository failure instead of inventing an acknowledgement', async () => {
+    const route = {
+      accountId: 'creator-1',
+      groupId: 'group-1',
+      routeNonce: 3,
+    };
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      {
+        voiceAttempts: {
+          load: vi.fn(async () => []),
+          save: vi.fn(async () => {
+            throw new Error('session storage rejected');
+          }),
+          remove: vi.fn(async () => undefined),
+        },
+      },
+    );
+    harness.sessionStore.registerCapture(5, makeCapture('creator-1'));
+    harness.tabContexts.setRoute(5, 'group-1', 3);
+
+    await expect(harness.send(
+      { type: 'voiceAttemptSave', snapshot: voiceSnapshot(route) },
+      { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' },
+    )).rejects.toThrow('session storage rejected');
   });
 });
 

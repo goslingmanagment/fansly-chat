@@ -1,3 +1,9 @@
+import type {
+  StoredVoiceAttemptRoute,
+  VoiceAttemptStoreEntry,
+  VoiceAttemptStoreSnapshot,
+} from './voice-attempt.js';
+
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
 export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat' | 'voice-script';
@@ -832,6 +838,9 @@ export interface RuntimeRequestMap {
   getRecapStatus: RecapStatusRequest;
   openDebugPrompt: DebugPromptTokenRequest;
   getDebugPromptSnapshot: DebugPromptTokenRequest;
+  voiceAttemptLoad: VoiceAttemptLoadRequest;
+  voiceAttemptSave: VoiceAttemptSaveRequest;
+  voiceAttemptRemove: VoiceAttemptRemoveRequest;
 }
 
 export interface RuntimeResponseMap {
@@ -845,7 +854,44 @@ export interface RuntimeResponseMap {
   getRecapStatus: RecapStatusResponse;
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
+  voiceAttemptLoad: VoiceAttemptLoadResponse;
+  voiceAttemptSave: VoiceAttemptMutationResponse;
+  voiceAttemptRemove: VoiceAttemptMutationResponse;
 }
+
+export interface VoiceAttemptLoadRequest {
+  route: StoredVoiceAttemptRoute;
+}
+
+export interface VoiceAttemptSaveRequest {
+  snapshot: VoiceAttemptStoreSnapshot;
+}
+
+export interface VoiceAttemptRemoveRequest {
+  attemptId: string;
+  route: StoredVoiceAttemptRoute;
+}
+
+export type VoiceAttemptRpcFailure = {
+  version: 1;
+  ok: false;
+  error: 'invalid_sender';
+};
+
+export type VoiceAttemptLoadResponse =
+  | {
+      version: 1;
+      ok: true;
+      entries: VoiceAttemptStoreEntry[];
+    }
+  | VoiceAttemptRpcFailure;
+
+export type VoiceAttemptMutationResponse =
+  | {
+      version: 1;
+      ok: true;
+    }
+  | VoiceAttemptRpcFailure;
 
 /** Coach recap-status metadata read (spec §3/§5): the freshest usable full +
  * short fan-summary recap for one conversation — metadata only, NO generation
