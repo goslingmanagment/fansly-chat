@@ -3080,9 +3080,104 @@ body.chatgoose-voice-studio-lock {
   border-color: var(--chatgoose-clay-line);
 }
 
+/* ── Take player (custom; the native controls strip is browser chrome and
+   cannot match the panel). The <audio> engine is headless; clay fill on the
+   seek track echoes the attach button — sound and action share the accent. */
 .chatgoose-voice-audio {
-  width: 100%;
-  height: 32px;
+  display: none;
+}
+
+.chatgoose-voice-player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+}
+
+.chatgoose-voice-player-toggle {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 999px;
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-ink);
+  padding: 0;
+  cursor: pointer;
+}
+
+.chatgoose-voice-player-toggle::before {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 11px;
+  margin-left: 2px;
+  background: currentColor;
+  clip-path: polygon(12% 0, 100% 50%, 12% 100%);
+}
+
+.chatgoose-voice-player-toggle.chatgoose-voice-player-playing::before {
+  margin-left: 0;
+  clip-path: none;
+  background: linear-gradient(
+    90deg,
+    currentColor 0 34%,
+    transparent 34% 66%,
+    currentColor 66% 100%
+  );
+}
+
+.chatgoose-voice-player-toggle:hover {
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-voice-player-toggle:focus-visible,
+.chatgoose-voice-player-seek:focus-visible {
+  outline: 2px solid var(--chatgoose-clay-ink);
+  outline-offset: 2px;
+}
+
+.chatgoose-voice-player-seek {
+  flex: 1 1 auto;
+  appearance: none;
+  height: 4px;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--chatgoose-clay-ink) var(--chatgoose-played, 0%),
+    var(--chatgoose-line) var(--chatgoose-played, 0%)
+  );
+  cursor: pointer;
+}
+
+.chatgoose-voice-player-seek::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+
+.chatgoose-voice-player-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--chatgoose-clay-ink);
+  border-radius: 999px;
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-voice-player-time {
+  flex: 0 0 auto;
+  min-width: 78px;
+  text-align: right;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-voice-attach-region {

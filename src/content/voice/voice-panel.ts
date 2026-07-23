@@ -638,11 +638,7 @@ export class VoicePanel {
     row.append(headline);
 
     if (state === 'completed' && take.blobUrl) {
-      const audio = el('audio', 'chatgoose-voice-audio');
-      audio.controls = true;
-      audio.preload = 'none';
-      audio.src = take.blobUrl;
-      row.append(audio);
+      row.append(this.buildTakePlayer(take.blobUrl));
     } else if (state === 'queued' || state === 'dispatched') {
       row.append(this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`));
     }
@@ -652,6 +648,101 @@ export class VoicePanel {
       row.append(recovery);
     }
     return row;
+  }
+
+  /** Custom take player in the family tokens — the native `controls` strip is
+   * browser chrome and cannot match the panel. The <audio> element stays as
+   * the headless engine; the blob URL is local bytes, so preloading metadata
+   * (for the duration label) costs nothing. Volume is deliberately absent —
+   * system volume owns that job. */
+  private buildTakePlayer(blobUrl: string): HTMLElement {
+    const player = el('div', 'chatgoose-voice-player');
+    const audio = el('audio', 'chatgoose-voice-audio');
+    audio.preload = 'metadata';
+    audio.src = blobUrl;
+
+    const toggle = el('button', 'chatgoose-voice-player-toggle');
+    toggle.type = 'button';
+
+    // The range is modelled in SECONDS (max = clip duration once metadata
+    // lands), so an arrow press seeks one second — a 0..1000 share scale made
+    // keyboard seeking move by 0.1% of the clip (review P2).
+    const seek = el('input', 'chatgoose-voice-player-seek');
+    seek.type = 'range';
+    seek.min = '0';
+    seek.max = '1';
+    seek.step = '1';
+    seek.value = '0';
+    seek.setAttribute('aria-label', 'Позиция воспроизведения, секунды');
+
+    const time = el('span', 'chatgoose-voice-player-time', '0:00 / 0:00');
+
+    const formatClock = (seconds: number): string => {
+      const whole = Math.max(0, Math.floor(seconds));
+      const minutes = Math.floor(whole / 60);
+      const rest = whole % 60;
+      return `${minutes}:${String(rest).padStart(2, '0')}`;
+    };
+    // Focus is the wrong signal for "user is dragging": Firefox keeps the
+    // range focused after any click until focus moves elsewhere, which froze
+    // the thumb forever after the first scrub (review P2). Only an active
+    // pointer drag suppresses engine-driven thumb updates.
+    let scrubbing = false;
+    const render = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      const playedShare = duration > 0 ? audio.currentTime / duration : 0;
+      if (duration > 0 && seek.max !== String(duration)) {
+        seek.max = String(duration);
+      }
+      if (!scrubbing) {
+        seek.value = String(audio.currentTime);
+      }
+      seek.style.setProperty('--chatgoose-played', `${playedShare * 100}%`);
+      time.textContent = `${formatClock(audio.currentTime)} / ${formatClock(duration)}`;
+      const playing = !audio.paused && !audio.ended;
+      toggle.classList.toggle('chatgoose-voice-player-playing', playing);
+      const label = playing ? 'Пауза' : 'Слушать';
+      toggle.title = label;
+      toggle.setAttribute('aria-label', label);
+    };
+    seek.addEventListener('pointerdown', () => {
+      scrubbing = true;
+    });
+    seek.addEventListener('pointerup', () => {
+      scrubbing = false;
+      render();
+    });
+    seek.addEventListener('change', () => {
+      scrubbing = false;
+      render();
+    });
+    for (const event of ['timeupdate', 'durationchange', 'loadedmetadata', 'play', 'pause', 'ended']) {
+      audio.addEventListener(event, render);
+    }
+    toggle.addEventListener('click', () => {
+      if (audio.paused || audio.ended) {
+        // jsdom's HTMLMediaElement.play throws not-implemented; real Firefox
+        // returns a promise whose rejection (autoplay policy) we swallow —
+        // the user gesture is the click, so it does not fire in practice.
+        try {
+          void audio.play()?.catch?.(() => undefined);
+        } catch {
+          // non-media environment
+        }
+      } else {
+        audio.pause();
+      }
+    });
+    seek.addEventListener('input', () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      if (duration > 0) {
+        audio.currentTime = Math.min(Number(seek.value), duration);
+      }
+    });
+    render();
+
+    player.append(audio, toggle, seek, time);
+    return player;
   }
 
   private takeTitle(state: VoiceTake['view']['state'], ordinal: number, scriptChars: number): string {
