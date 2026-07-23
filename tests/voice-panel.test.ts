@@ -429,7 +429,39 @@ describe('VoicePanel — лента', () => {
     // No autoplay: the chatter presses play when convenient.
     expect(audio!.hasAttribute('autoplay')).toBe(false);
     expect(audio!.getAttribute('src')).toBe('blob:voice-1');
-    expect(audio!.hasAttribute('controls')).toBe(true);
+    // The native controls strip is browser chrome — the custom player owns the UI.
+    expect(audio!.hasAttribute('controls')).toBe(false);
+
+    const player = take!.querySelector<HTMLElement>('.chatgoose-voice-player');
+    expect(player).not.toBeNull();
+    const toggle = player!.querySelector<HTMLButtonElement>('.chatgoose-voice-player-toggle');
+    expect(toggle?.getAttribute('aria-label')).toBe('Слушать');
+    expect(player!.querySelector('.chatgoose-voice-player-seek')).not.toBeNull();
+    expect(player!.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:00 / 0:00');
+
+    // Play/pause rides the headless <audio> engine.
+    const playSpy = vi.fn(async () => undefined);
+    audio!.play = playSpy as unknown as HTMLAudioElement['play'];
+    toggle!.click();
+    expect(playSpy).toHaveBeenCalledTimes(1);
+
+    // A running take renders the pause state and live clock from the engine.
+    Object.defineProperty(audio!, 'duration', { configurable: true, value: 6 });
+    Object.defineProperty(audio!, 'paused', { configurable: true, value: false });
+    audio!.currentTime = 3;
+    audio!.dispatchEvent(new Event('timeupdate'));
+    expect(toggle?.getAttribute('aria-label')).toBe('Пауза');
+    expect(player!.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:03 / 0:06');
+
+    // The seek range is modelled in seconds: max tracks the clip duration so
+    // one arrow press moves one second, and the thumb follows the engine.
+    const seek = player!.querySelector<HTMLInputElement>('.chatgoose-voice-player-seek');
+    expect(seek?.max).toBe('6');
+    expect(seek?.step).toBe('1');
+    expect(seek?.value).toBe('3');
+    seek!.value = '5';
+    seek!.dispatchEvent(new Event('input'));
+    expect(audio!.currentTime).toBe(5);
 
     expect(take!.querySelector('.chatgoose-voice-take-download')).not.toBeNull();
     const radio = take!.querySelector<HTMLInputElement>('input[type="radio"].chatgoose-voice-take-select');
