@@ -452,7 +452,84 @@ describe('runtime-api voice-attempt custody RPC', () => {
     );
   });
 
+  it('accepts the canonical route id while the tab context holds the legacy alias', async () => {
+    const route = {
+      accountId: 'creator-1',
+      groupId: 'group-1',
+      routeNonce: 3,
+    };
+    const entry = { savedAt: 1_000, ...voiceSnapshot(route) };
+    const voiceAttempts = {
+      load: vi.fn(async () => [entry]),
+      save: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    };
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      { voiceAttempts },
+    );
+    // handleCapture rewrites TabContext.accountId with the LEGACY captured id
+    // on every Fansly request, while the content route carries the canonical
+    // resolved id. The session alias set must win over the oscillating
+    // context value.
+    harness.sessionStore.registerCapture(5, makeCapture('legacy-1'));
+    const session = harness.sessionStore.getSessionForTab(5);
+    if (session) {
+      session.resolvedAccountId = 'creator-1';
+    }
+    harness.tabContexts.setRoute(5, 'group-1', 3);
+    harness.tabContexts.setAccount(5, 'legacy-1');
+    const sender = { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' };
+
+    await expect(harness.send(
+      { type: 'voiceAttemptLoad', route },
+      sender,
+    )).resolves.toEqual({ version: 1, ok: true, entries: [entry] });
+    expect(voiceAttempts.load).toHaveBeenCalledWith(route);
+  });
+
+  it('accepts a sender whose frozen sender.url predates the SPA navigation (Firefox pushState)', async () => {
+    const route = {
+      accountId: 'creator-1',
+      groupId: 'group-1',
+      routeNonce: 3,
+    };
+    const entry = { savedAt: 1_000, ...voiceSnapshot(route) };
+    const voiceAttempts = {
+      load: vi.fn(async () => [entry]),
+      save: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    };
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => null) },
+      { voiceAttempts },
+    );
+    harness.sessionStore.registerCapture(5, makeCapture('creator-1'));
+    harness.tabContexts.setRoute(5, 'group-1', 3);
+    // Firefox freezes sender.url at the document's LOAD URL; only tab.url
+    // follows history.pushState. A conversation opened via SPA navigation
+    // must validate against the live tab.url.
+    const sender = {
+      tab: { id: 5, url: 'https://fansly.com/messages/group-1' },
+      url: 'https://fansly.com/home',
+    };
+
+    await expect(harness.send(
+      { type: 'voiceAttemptLoad', route },
+      sender,
+    )).resolves.toEqual({ version: 1, ok: true, entries: [entry] });
+    expect(voiceAttempts.load).toHaveBeenCalledWith(route);
+  });
+
   it.each([
+    {
+      label: 'live tab.url on a different conversation wins over a stale sender.url',
+      sender: {
+        tab: { id: 5, url: 'https://fansly.com/messages/group-2' },
+        url: 'https://fansly.com/messages/group-1',
+      },
+      route: { accountId: 'creator-1', groupId: 'group-1', routeNonce: 3 },
+    },
     {
       label: 'no tab',
       sender: { url: 'https://fansly.com/messages/group-1' },
