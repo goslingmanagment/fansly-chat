@@ -16,6 +16,9 @@ export default tseslint.config(
       'vendor/**',
       'coverage/**',
       'docs/**',
+      // Claude Code worktrees are full repo copies; their vendor/dist trees
+      // otherwise leak past the top-level ignores above.
+      '.claude/**',
     ],
   },
   js.configs.recommended,
