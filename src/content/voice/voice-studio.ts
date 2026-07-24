@@ -85,19 +85,22 @@ export class VoiceStudio {
     header.append(collapse);
 
     const notice = el('div', 'chatgoose-voice-studio-notice');
-    notice.append(...this.deps.panel.noticeSectionNodes());
-
     const columns = el('div', 'chatgoose-voice-studio-columns');
     const scriptCol = el('div', 'chatgoose-voice-studio-col chatgoose-voice-studio-script');
-    scriptCol.append(...this.deps.panel.scriptSectionNodes());
     const takesCol = el('div', 'chatgoose-voice-studio-col chatgoose-voice-studio-takes');
-    takesCol.append(...this.deps.panel.takesSectionNodes());
     columns.append(scriptCol, takesCol);
 
     panel.append(header, notice, columns);
     shell.append(backdrop, panel);
     this.root.replaceChildren(shell);
     this.root.style.pointerEvents = 'auto';
+
+    // Reparent only after the destination is connected. Moving a live <audio>
+    // through a detached fragment makes Firefox pause it even though the exact
+    // node is later reinserted.
+    notice.append(...this.deps.panel.noticeSectionNodes());
+    scriptCol.append(...this.deps.panel.scriptSectionNodes());
+    takesCol.append(...this.deps.panel.takesSectionNodes());
 
     // Hide the (now emptied) compact лента behind the scrim, mark the panel so
     // its лента-only script collapse stays dormant, then refresh in place.

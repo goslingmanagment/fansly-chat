@@ -3019,6 +3019,11 @@ body.chatgoose-voice-studio-lock {
   flex-wrap: wrap;
 }
 
+.chatgoose-voice-takes-rows {
+  display: grid;
+  gap: 8px;
+}
+
 .chatgoose-voice-another {
   border: none;
   background: none;
@@ -3055,6 +3060,13 @@ body.chatgoose-voice-studio-lock {
   gap: 8px;
 }
 
+.chatgoose-voice-take-radio-slot:empty,
+.chatgoose-voice-take-download-slot:empty,
+.chatgoose-voice-take-media:empty,
+.chatgoose-voice-take-recovery-slot:empty {
+  display: none;
+}
+
 .chatgoose-voice-take-title {
   flex: 1;
   min-width: 0;
@@ -3088,6 +3100,11 @@ body.chatgoose-voice-studio-lock {
 }
 
 .chatgoose-voice-player {
+  display: grid;
+  gap: 5px;
+}
+
+.chatgoose-voice-player-controls {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3136,6 +3153,11 @@ body.chatgoose-voice-studio-lock {
   color: var(--chatgoose-clay-ink);
 }
 
+.chatgoose-voice-player-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .chatgoose-voice-player-toggle:focus-visible,
 .chatgoose-voice-player-seek:focus-visible {
   outline: 2px solid var(--chatgoose-clay-ink);
@@ -3145,21 +3167,25 @@ body.chatgoose-voice-studio-lock {
 .chatgoose-voice-player-seek {
   flex: 1 1 auto;
   appearance: none;
-  height: 4px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 12px 0;
   margin: 0;
   border: 0;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    var(--chatgoose-clay-ink) var(--chatgoose-played, 0%),
-    var(--chatgoose-line) var(--chatgoose-played, 0%)
-  );
+  background: transparent;
   cursor: pointer;
 }
 
 .chatgoose-voice-player-seek::-moz-range-track {
   height: 4px;
-  background: transparent;
+  border-radius: 999px;
+  background: var(--chatgoose-line);
+}
+
+.chatgoose-voice-player-seek::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--chatgoose-clay-ink);
 }
 
 .chatgoose-voice-player-seek::-moz-range-thumb {
@@ -3170,6 +3196,11 @@ body.chatgoose-voice-studio-lock {
   background: var(--chatgoose-bg1);
 }
 
+.chatgoose-voice-player-seek:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .chatgoose-voice-player-time {
   flex: 0 0 auto;
   min-width: 78px;
@@ -3178,6 +3209,12 @@ body.chatgoose-voice-studio-lock {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-voice-player-error {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--chatgoose-warn);
 }
 
 /* «+ Новый войс из черновика» + inline confirm (spec 2026-07-24). */

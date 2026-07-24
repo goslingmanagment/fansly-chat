@@ -260,13 +260,14 @@ describe('ChatGooseContentApp', () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const boot = vi.fn(async () => ({ attemptId: 'recovered-attempt' }));
+    const resumeBlobUrls = vi.fn();
     const open = vi.fn();
     const setFanUsername = vi.fn();
 
     app.tabState = readyState({ voiceNotesCapable: true });
     app.currentGroupId = 'group-1';
     app.createVoiceController = vi.fn(() => {
-      app.voiceController = { boot };
+      app.voiceController = { boot, resumeBlobUrls };
       app.voicePanel = { open, setFanUsername };
     });
 
@@ -274,10 +275,29 @@ describe('ChatGooseContentApp', () => {
 
     await vi.waitFor(() => expect(boot).toHaveBeenCalledTimes(1));
     expect(app.createVoiceController).toHaveBeenCalledTimes(1);
+    expect(resumeBlobUrls).toHaveBeenCalledTimes(1);
     expect(open).toHaveBeenCalledTimes(1);
     expect(setFanUsername).toHaveBeenCalledWith('alice');
     expect(document.querySelector('.chatgoose-toast')?.textContent ?? '')
       .not.toContain('Напишите черновик');
+  });
+
+  it('unloads voice media before hiding and revoking URLs on panel close', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const calls: string[] = [];
+    app.voiceStudio = { isOpen: () => false };
+    app.voicePanel = {
+      suspendPlayers: () => calls.push('unload'),
+      hide: () => calls.push('hide'),
+    };
+    app.voiceController = {
+      suspendBlobUrls: () => calls.push('revoke'),
+    };
+
+    app.closeVoicePanel();
+
+    expect(calls).toEqual(['unload', 'hide', 'revoke']);
   });
 
   it('shows a one-part Split warning on the default inline surface (E49)', async () => {

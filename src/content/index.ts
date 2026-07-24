@@ -1646,6 +1646,9 @@ export class ChatGooseContentApp {
         groupId,
         routeNonce: this.routeNonce,
       },
+      // The panel is constructed hidden while boot/recovery runs. Late audio
+      // may arrive in that window, so object URLs are minted only at open.
+      blobUrlsInitiallySuspended: true,
       onChange: () => this.voicePanel?.render(),
       onError: (message) => this.voicePanel?.handleError(message),
       onAttachGrant: (message) => {
@@ -1777,6 +1780,7 @@ export class ChatGooseContentApp {
       return;
     }
     try {
+      controller.resumeBlobUrls();
       this.voicePanel.setFanUsername(getActiveConversationDisplayName());
       this.voicePanel.open();
     } catch (error) {
@@ -1831,6 +1835,8 @@ export class ChatGooseContentApp {
     if (this.voiceStudio?.isOpen()) {
       this.voiceStudio.collapse();
     }
+    // Release the media engines before revoking their backing object URLs.
+    this.voicePanel?.suspendPlayers();
     this.voicePanel?.hide();
     // Drop the take object URLs while the panel is hidden (the audio bytes stay
     // in memory); reopen re-mints them.
@@ -1838,10 +1844,12 @@ export class ChatGooseContentApp {
   }
 
   private teardownVoice(): void {
-    this.voiceController?.destroy();
-    this.voiceController = null;
     this.voiceStudio?.destroy();
     this.voiceStudio = null;
+    // Clear <audio src> + load() before the controller revokes blob URLs.
+    this.voicePanel?.dispose();
+    this.voiceController?.destroy();
+    this.voiceController = null;
     this.voicePanel?.root.remove();
     this.voicePanel = null;
     this.voiceReconnectPending = false;

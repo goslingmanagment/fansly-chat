@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  decodeVoiceAudioDuration,
   VoiceAttemptController,
   type VoiceAttemptControllerPort,
   type VoiceAttemptRoute,
@@ -119,6 +120,8 @@ describe('VoiceAttemptController', () => {
     uuids?: string[];
     createBlobUrl?: (bytes: ArrayBuffer) => string;
     revokeBlobUrl?: (url: string) => void;
+    decodeAudioDuration?: (bytes: ArrayBuffer) => Promise<number | null>;
+    blobUrlsInitiallySuspended?: boolean;
     onError?: (message: Extract<BackgroundPortMessage, {
       type: 'voice:scriptError' | 'voice:noteError' | 'voice:attachRefuse';
     }>) => void;
@@ -135,6 +138,8 @@ describe('VoiceAttemptController', () => {
       randomUUID: createUuidFactory(options.uuids ?? [ATTEMPT_ID, TAKE_ID_1, TAKE_ID_2]),
       createBlobUrl: options.createBlobUrl ?? (() => 'blob:voice-1'),
       revokeBlobUrl: options.revokeBlobUrl ?? vi.fn(),
+      decodeAudioDuration: options.decodeAudioDuration ?? (async () => 2),
+      blobUrlsInitiallySuspended: options.blobUrlsInitiallySuspended,
       onError: options.onError,
       onAttachGrant: options.onAttachGrant,
     });
@@ -152,7 +157,29 @@ describe('VoiceAttemptController', () => {
     for (const controller of controllers.splice(0)) {
       controller.destroy();
     }
+    vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it('derives authoritative duration by decoding a clone of the complete buffer', async () => {
+    const decodedInputs: ArrayBuffer[] = [];
+    const close = vi.fn(async () => undefined);
+    class FakeAudioContext {
+      decodeAudioData = vi.fn(async (input: ArrayBuffer) => {
+        decodedInputs.push(input);
+        return { duration: 3.85 } as AudioBuffer;
+      });
+      close = close;
+    }
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+    const bytes = new Uint8Array([1, 2, 3, 4]).buffer;
+
+    await expect(decodeVoiceAudioDuration(bytes)).resolves.toBe(3.85);
+    expect(decodedInputs).toHaveLength(1);
+    expect(decodedInputs[0]).not.toBe(bytes);
+    expect(Array.from(new Uint8Array(decodedInputs[0]!))).toEqual([1, 2, 3, 4]);
+    expect(bytes.byteLength).toBe(4);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('freezes one canonical payload per take and burns quota-denied request ids', async () => {
@@ -1364,6 +1391,7 @@ describe('VoiceAttemptController', () => {
       bytes: new Uint8Array([1, 2]).buffer,
     });
     expect(controller.getAttempt()?.takes[0]?.blobUrl).toBe('blob:take-open');
+    expect(controller.getAttempt()?.takes[0]?.durationSeconds).toBe(2);
     expect(controller.canAttachSelectedTake()).toBe(true);
 
     // Close: revoke the object URL but keep the decoded audio bytes.
@@ -1380,6 +1408,43 @@ describe('VoiceAttemptController', () => {
     // A second reopen without a close is a no-op (no duplicate URL minting).
     controller.resumeBlobUrls();
     expect(createBlobUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps close-then-late audio in memory without minting a hidden blob URL', async () => {
+    const createBlobUrl = vi.fn(() => 'blob:late-audio');
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+      createBlobUrl,
+      decodeAudioDuration: async () => 3.85,
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: voiceView(42, 'completed', { audioSha256: 'hash', audioBytesLen: 2 }),
+    });
+
+    controller.suspendBlobUrls();
+    await controller.handleMessage({
+      type: 'voice:audioBytes',
+      attemptId: ATTEMPT_ID,
+      voiceNoteId: 42,
+      bytes: new Uint8Array([1, 2]).buffer,
+    });
+
+    expect(createBlobUrl).not.toHaveBeenCalled();
+    expect(controller.getAttempt()?.takes[0]).toMatchObject({
+      blobUrl: null,
+      durationSeconds: 3.85,
+    });
+    expect(controller.getAttempt()?.takes[0]?.audio).toBeInstanceOf(ArrayBuffer);
+
+    controller.resumeBlobUrls();
+    expect(createBlobUrl).toHaveBeenCalledTimes(1);
+    expect(controller.getAttempt()?.takes[0]?.blobUrl).toBe('blob:late-audio');
   });
 
   async function toAttachableTake(controller: VoiceAttemptController): Promise<void> {
