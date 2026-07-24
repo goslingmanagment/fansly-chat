@@ -1130,7 +1130,7 @@ describe('SpendersBoardController', () => {
     resolveRefresh({ ok: false, error: createUserError('hub_request_failed') });
     await vi.waitFor(() => {
       expect(document.querySelector('.chatgoose-board-state')?.textContent).toContain(
-        'Agency Hub request failed',
+        'Ошибка запроса к Agency Hub',
       );
     });
     expect(internals.progressLabel).toBeNull();
@@ -1139,12 +1139,43 @@ describe('SpendersBoardController', () => {
 
   it('renders an error state when the request fails', async () => {
     const board = new SpendersBoardController(
-      makeDeps({ fetchList: async () => ({ ok: false, error: createUserError('not_connected') }) }),
+      makeDeps({
+        fetchList: async () => ({
+          ok: false,
+          error: createUserError('hub_request_failed', {
+            httpStatus: 503,
+            serverDetail: 'upstream unavailable',
+          }),
+        }),
+      }),
     );
     await board.show();
 
     expect(rows()).toHaveLength(0);
     const state = document.querySelector('.chatgoose-board-state');
     expect(state).not.toBeNull();
+    expect(state?.querySelector('.chatgoose-error-primary')?.textContent)
+      .toBe('CG-HUB-07: Ошибка запроса к Agency Hub.');
+    expect(state?.querySelector('.chatgoose-error-secondary')?.textContent)
+      .toBe('Hub вернул ошибку или недоступен.');
+    expect(state?.querySelector('.chatgoose-error-detail')?.textContent)
+      .toBe('HTTP 503 • upstream unavailable');
+    expect(state?.querySelector('.chatgoose-board-action')?.textContent).toBe('Повторить');
+  });
+
+  it('routes thrown implementation errors through the unknown registry card', async () => {
+    const board = new SpendersBoardController(
+      makeDeps({
+        fetchList: async () => {
+          throw new Error('raw secret implementation failure');
+        },
+      }),
+    );
+    await board.show();
+
+    const text = document.querySelector('.chatgoose-board-state')?.textContent ?? '';
+    expect(text).toContain('CG-APP-01: Что-то пошло не так.');
+    expect(text).toContain('Если ошибка не исчезнет, сообщите её код.');
+    expect(text).not.toContain('raw secret implementation failure');
   });
 });

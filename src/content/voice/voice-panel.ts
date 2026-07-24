@@ -2,7 +2,11 @@ import {
   VOICE_CHARS_PER_SECOND,
   VOICE_SCRIPT_MAX_CHARS_ADVISORY,
 } from '../../shared/constants.js';
-import { getErrorMessage, isUserErrorKey } from '../../shared/errors.js';
+import {
+  createUserError,
+  getErrorMessage,
+  isLiveUserErrorKey,
+} from '../../shared/errors.js';
 import type {
   BackgroundPortMessage,
   ReplyTone,
@@ -17,6 +21,7 @@ import {
   type VoiceTake,
 } from './attempt-controller.js';
 import type { VoiceComposerProbe, VoiceAttachOutcome } from './attach-adapter.js';
+import { createUserErrorBlock } from '../ui/view-helpers.js';
 
 /** The controller callbacks the panel consumes (script/note/attach failures). */
 export type VoicePanelErrorMessage = Extract<
@@ -133,15 +138,44 @@ function prefersReducedMotion(): boolean {
   }
 }
 
-function resolveVoiceError(code: string, fallbackMessage: string): UserFacingError {
-  if (isUserErrorKey(code)) {
-    return getErrorMessage(code);
-  }
-  return {
-    key: 'unknown_error',
-    code: 'CG-VOICE',
-    message: fallbackMessage || getErrorMessage('unknown_error').message,
-  };
+function resolveVoiceError(code: string, httpStatus = 0): UserFacingError {
+  // These are open-string kernel responses, so each supported Voice code gets
+  // an explicit local producer. Unknown server wording never becomes UI copy.
+  const definition = (() => {
+    switch (code) {
+      case 'voice_disabled':
+        return getErrorMessage('voice_disabled');
+      case 'voice_not_allowlisted':
+        return getErrorMessage('voice_not_allowlisted');
+      case 'voice_no_profile':
+        return getErrorMessage('voice_no_profile');
+      case 'voice_script_invalid':
+        return getErrorMessage('voice_script_invalid');
+      case 'voice_source_invalid':
+        return getErrorMessage('voice_source_invalid');
+      case 'voice_quota_denied':
+        return getErrorMessage('voice_quota_denied');
+      case 'idempotency_mismatch':
+        return getErrorMessage('idempotency_mismatch');
+      case 'artifact_expired':
+        return getErrorMessage('artifact_expired');
+      case 'voice_retrieval_disabled':
+        return getErrorMessage('voice_retrieval_disabled');
+      case 'voice_provider_unavailable':
+        return getErrorMessage('voice_provider_unavailable');
+      case 'voice_artifact_corrupt':
+        return getErrorMessage('voice_artifact_corrupt');
+      case 'gate_voice_disabled':
+        return getErrorMessage('gate_voice_disabled');
+      default:
+        return isLiveUserErrorKey(code)
+          ? getErrorMessage(code)
+          : getErrorMessage('unknown_error');
+    }
+  })();
+  return httpStatus > 0
+    ? createUserError(definition.key, { httpStatus })
+    : definition;
 }
 
 const ATTACH_REFUSAL_KEY: Record<string, UserErrorKey> = {
@@ -149,11 +183,9 @@ const ATTACH_REFUSAL_KEY: Record<string, UserErrorKey> = {
   fan_mismatch: 'chat_changed',
 };
 
-const UNKNOWN_ATTACH_REFUSAL: UserFacingError = {
-  key: 'unknown_error',
-  code: 'CG-VOICE',
+const UNKNOWN_ATTACH_REFUSAL: UserFacingError = createUserError('unknown_error', {
   message: 'Не удалось выдать разрешение — попробуйте ещё раз',
-};
+});
 
 interface TakePlayerHandle {
   readonly root: HTMLElement;
@@ -359,7 +391,7 @@ export class VoicePanel {
 
   handleError(message: VoicePanelErrorMessage): void {
     if (message.type === 'voice:scriptError') {
-      this.lastError = resolveVoiceError(message.code, message.message);
+      this.lastError = resolveVoiceError(message.code);
       this.render();
       return;
     }
@@ -382,12 +414,12 @@ export class VoicePanel {
         this.lastError = null;
       } else {
         this.pendingReconcile = false;
-        this.lastError = resolveVoiceError(message.code, message.message);
+        this.lastError = resolveVoiceError(message.code, message.status);
       }
     } else {
       // status/audio: the failing take is already server-owned; surface the
       // money-honest string (e.g. corrupt audio will not be attached).
-      this.lastError = resolveVoiceError(message.code, message.message);
+      this.lastError = resolveVoiceError(message.code, message.status);
     }
     this.render();
   }
@@ -513,11 +545,15 @@ export class VoicePanel {
       this.errorSlot.replaceChildren();
       return;
     }
-    const notice = el('div', 'chatgoose-voice-error');
-    notice.append(el('div', 'chatgoose-voice-error-title', this.lastError.message));
-    if (this.lastError.description) {
-      notice.append(el('div', 'chatgoose-voice-error-detail', this.lastError.description));
-    }
+    const notice = createUserErrorBlock(this.lastError, {
+      classNames: {
+        container: 'chatgoose-voice-error',
+        primary: 'chatgoose-voice-error-title',
+        secondary: 'chatgoose-voice-error-detail',
+        retry: 'chatgoose-voice-error-detail chatgoose-voice-error-retry',
+        technical: 'chatgoose-voice-error-detail chatgoose-voice-error-technical',
+      },
+    });
     this.errorSlot.replaceChildren(notice);
   }
 

@@ -404,15 +404,22 @@ export class FanslyClient {
 
         if (!response.ok) {
           const snippet = await readResponseSnippet(response);
-          throw new ChatGooseError(optional ? 'unknown_error' : 'fansly_server_error', undefined, {
+          const details = {
             status: response.status,
             responseSnippet: snippet,
-          });
+          };
+          if (optional) {
+            throw new ChatGooseError('unknown_error', undefined, details);
+          }
+          throw new ChatGooseError('fansly_server_error', undefined, details);
         }
 
         const data = (await response.json()) as { success: boolean; response?: T; error?: string };
         if (!data.success || data.response === undefined) {
-          throw new ChatGooseError(optional ? 'unknown_error' : 'fansly_server_error');
+          if (optional) {
+            throw new ChatGooseError('unknown_error');
+          }
+          throw new ChatGooseError('fansly_server_error');
         }
 
         return data.response;

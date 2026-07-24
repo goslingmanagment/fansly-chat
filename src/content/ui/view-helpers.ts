@@ -2,6 +2,7 @@ import {
   formatUserErrorTechnicalDetail,
   formatUserFacingError,
   getUserErrorDescription,
+  resolveUserErrorRetryAtMs,
 } from '../../shared/errors.js';
 import type {
   OperationProgressPayload,
@@ -51,17 +52,11 @@ export function formatLoadingStatus(
   return progress?.message ?? 'Generating\u2026';
 }
 
-export function createUserErrorRetryCountdown(
+function createUserErrorRetryCountdown(
   error: UserFacingError,
   className: string,
 ): HTMLDivElement | null {
-  const retryAtMs = typeof error.retryAtMs === 'number' && Number.isFinite(error.retryAtMs)
-    ? error.retryAtMs
-    : typeof error.retryAfterMs === 'number' &&
-        Number.isFinite(error.retryAfterMs) &&
-        error.retryAfterMs >= 0
-      ? Date.now() + error.retryAfterMs
-      : null;
+  const retryAtMs = resolveUserErrorRetryAtMs(error);
   if (retryAtMs === null) {
     return null;
   }
@@ -100,26 +95,60 @@ export function createUserErrorRetryCountdown(
   return line;
 }
 
-export function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
+export interface UserErrorBlockClassNames {
+  container: string;
+  primary: string;
+  secondary: string;
+  retry: string;
+  technical: string;
+}
+
+export interface UserErrorBlockOptions {
+  classNames?: Partial<UserErrorBlockClassNames>;
+  /** `undefined` uses the registry description; `null` deliberately omits it. */
+  description?: string | null;
+}
+
+const DEFAULT_USER_ERROR_CLASS_NAMES: UserErrorBlockClassNames = {
+  container: 'chatgoose-inline-error',
+  primary: 'chatgoose-error-primary',
+  secondary: 'chatgoose-error-secondary',
+  retry: 'chatgoose-error-secondary chatgoose-error-retry',
+  technical: 'chatgoose-error-detail',
+};
+
+/** The single DOM renderer for UserFacingError cards, toasts, Voice, and
+ * board states. Per-surface classes remain configurable; content and order do
+ * not, so code/message/description/retry/technical detail cannot drift. */
+export function createUserErrorBlock(
+  error: UserFacingError,
+  options: UserErrorBlockOptions = {},
+): HTMLDivElement {
+  const classNames = {
+    ...DEFAULT_USER_ERROR_CLASS_NAMES,
+    ...options.classNames,
+  };
   const block = document.createElement('div');
-  block.className = 'chatgoose-inline-error';
+  block.className = classNames.container;
 
   const primary = document.createElement('div');
-  primary.className = 'chatgoose-error-primary';
+  primary.className = classNames.primary;
   primary.textContent = formatUserFacingError(error);
   block.append(primary);
 
-  const description = getUserErrorDescription(error);
+  const description = options.description === undefined
+    ? getUserErrorDescription(error)
+    : options.description;
   if (description) {
     const secondary = document.createElement('div');
-    secondary.className = 'chatgoose-error-secondary';
+    secondary.className = classNames.secondary;
     secondary.textContent = description;
     block.append(secondary);
   }
 
   const retryCountdown = createUserErrorRetryCountdown(
     error,
-    'chatgoose-error-secondary chatgoose-error-retry',
+    classNames.retry,
   );
   if (retryCountdown) {
     block.append(retryCountdown);
@@ -128,7 +157,7 @@ export function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
   const technicalDetail = formatUserErrorTechnicalDetail(error);
   if (technicalDetail) {
     const detail = document.createElement('div');
-    detail.className = 'chatgoose-error-detail';
+    detail.className = classNames.technical;
     detail.textContent = technicalDetail;
     block.append(detail);
   }

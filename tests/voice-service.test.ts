@@ -872,7 +872,7 @@ describe('VoiceService SDK transport', () => {
         attemptId: ATTEMPT_ID,
         source: 'create',
         code: 'hub_invalid_api_key',
-        message: 'Agency Hub rejected the credential.',
+        message: 'Agency Hub отклонил учётные данные.',
         status: 401,
     }]);
   });
@@ -917,7 +917,7 @@ describe('VoiceService SDK transport', () => {
       attemptId: ATTEMPT_ID,
       source: 'create',
       code: 'hub_request_failed',
-      message: 'Agency Hub request failed.',
+      message: 'Ошибка запроса к Agency Hub.',
       status: 503,
     });
     expect(JSON.stringify(harness.sent)).not.toContain('SECRET UPSTREAM DETAIL');
@@ -976,7 +976,7 @@ describe('VoiceService SDK transport', () => {
       source: 'audio',
       voiceNoteId: 42,
       code: 'hub_invalid_api_key',
-      message: 'Agency Hub rejected the credential.',
+      message: 'Agency Hub отклонил учётные данные.',
       status: 403,
     }]);
   });

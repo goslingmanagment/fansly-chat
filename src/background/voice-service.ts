@@ -9,7 +9,7 @@ import {
 import {
   ChatGooseError,
   createUserError,
-  isUserErrorKey,
+  isLiveUserErrorKey,
 } from '../shared/errors.js';
 import { resolveFeatureMessageCount } from '../shared/features.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
@@ -175,7 +175,7 @@ function structuredBodyErrorCode(value: unknown): string | null {
   // Only the shared registry is a stable wire-code allowlist. Reject HTTP
   // reason phrases such as "Internal Server Error" (and unknown ad-hoc
   // strings) so they cannot masquerade as machine-readable protocol codes.
-  return isUserErrorKey(code) ? code : null;
+  return isLiveUserErrorKey(code) ? code : null;
 }
 
 function structuredErrorCode(error: unknown, fallback: string): string {
@@ -190,7 +190,7 @@ function structuredErrorCode(error: unknown, fallback: string): string {
   }
   if (isRecord(error) && typeof error.code === 'string') {
     const errorCode = error.code.trim();
-    if (isUserErrorKey(errorCode)) {
+    if (isLiveUserErrorKey(errorCode)) {
       return errorCode;
     }
   }
@@ -198,7 +198,7 @@ function structuredErrorCode(error: unknown, fallback: string): string {
 }
 
 function safeMessageForCode(code: string, fallback: Parameters<typeof createUserError>[0]): string {
-  return createUserError(isUserErrorKey(code) ? code : fallback).message;
+  return createUserError(isLiveUserErrorKey(code) ? code : fallback).message;
 }
 
 function noteFailure(error: unknown): { code: string; message: string; status: number } {

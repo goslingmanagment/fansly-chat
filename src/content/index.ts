@@ -690,7 +690,7 @@ export class ChatGooseContentApp {
       durationMs: options?.durationMs,
       ...(userError.settingsLink
         ? {
-            actionLabel: 'Settings',
+            actionLabel: 'Настройки',
             onAction: () => { void browser.runtime.openOptionsPage(); },
           }
         : {}),
@@ -3039,7 +3039,7 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('hub_sync_failed'), {
         dedupeKey: `hub-sync-failed:${message.groupId}:${message.generatedAt}`,
         description: message.syncStatus.error
-          ? `Latest Hub error: ${formatUserFacingError(message.syncStatus.error)}`
+          ? `Последняя ошибка Hub: ${formatUserFacingError(message.syncStatus.error)}`
           : undefined,
         tone: 'warning',
         durationMs: 6500,
