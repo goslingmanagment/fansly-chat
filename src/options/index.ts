@@ -21,10 +21,8 @@ import {
   setStatusPill,
 } from './dom.js';
 import {
-  buildConnectionRows,
   buildSessionLookup,
   formatAccountHeading,
-  formatAccountMeta,
   shortenAccountId,
 } from './sessions.js';
 import {
@@ -81,6 +79,49 @@ let renderCleanup: (() => Promise<void>) | null = null;
 let agencyHubPermissionFeedback: AgencyHubPermissionFeedback | null = null;
 let agencyHubConnectionFeedback: AgencyHubConnectionFeedback = { kind: 'idle' };
 let uiThemeInstalled = false;
+
+const COPY_FEEDBACK_MS = 1400;
+
+function formatRelativeTime(iso: string): string | null {
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+  const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+/** The account-id meta line doubles as a copy button (popup discipline). */
+function createCopyableId(fullId: string): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'chatgoose-copy-id';
+  button.title = `Copy ${fullId}`;
+  const idText = `Account ID: ${fullId}`;
+  button.textContent = idText;
+  let restoreTimer: ReturnType<typeof setTimeout> | undefined;
+  button.addEventListener('click', () => {
+    void navigator.clipboard
+      ?.writeText(fullId)
+      .then(() => {
+        button.classList.add('chatgoose-copy-id-done');
+        button.textContent = 'Copied ✓';
+        if (restoreTimer !== undefined) {
+          clearTimeout(restoreTimer);
+        }
+        restoreTimer = setTimeout(() => {
+          button.classList.remove('chatgoose-copy-id-done');
+          button.textContent = idText;
+        }, COPY_FEEDBACK_MS);
+      })
+      .catch(() => {});
+  });
+  return button;
+}
 
 function createLegacyPersonaExportControls(): DocumentFragment {
   const fragment = document.createDocumentFragment();
@@ -281,7 +322,20 @@ async function render(): Promise<void> {
   const subtitle = document.createElement('div');
   subtitle.textContent = 'Configure generation, Agency Hub, persona mappings, and live Fansly connections.';
   subtitle.style.color = 'var(--chatgoose-ink-mid)';
-  hero.append(createVersionTag(extensionVersion), title, subtitle);
+  // Health strip: the install's whole state in one glance — each pill is
+  // owned by the renderer that learns the fact.
+  const heroStrip = document.createElement('div');
+  heroStrip.className = 'chatgoose-hero-strip';
+  const hubPill = document.createElement('span');
+  setStatusPill(hubPill, 'neutral', 'Hub: checking…');
+  const accountsPill = document.createElement('span');
+  setStatusPill(accountsPill, 'neutral', 'Loading accounts…');
+  const catalogPill = document.createElement('span');
+  catalogPill.hidden = true;
+  const quotaPill = document.createElement('span');
+  quotaPill.hidden = true;
+  heroStrip.append(hubPill, accountsPill, catalogPill, quotaPill);
+  hero.append(createVersionTag(extensionVersion), title, subtitle, heroStrip);
   root.append(hero);
 
   // ─── Appearance ─────────────────────────────────────────────
@@ -289,21 +343,38 @@ async function render(): Promise<void> {
     'Appearance',
     'One family look, light and dark. System follows your OS.',
   );
-  const themeSelect = document.createElement('select');
-  themeSelect.className = 'chatgoose-select';
   const themeChoices: Array<{ value: UiThemeSetting; label: string }> = [
     { value: 'system', label: 'System' },
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' },
   ];
+  const themeControl = document.createElement('div');
+  themeControl.className = 'chatgoose-segmented';
+  const themeRadios: HTMLInputElement[] = [];
   for (const choice of themeChoices) {
-    const option = document.createElement('option');
-    option.value = choice.value;
-    option.textContent = choice.label;
-    themeSelect.append(option);
+    const segment = document.createElement('label');
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'chatgoose-ui-theme';
+    radio.value = choice.value;
+    radio.checked = state.settings.uiTheme === choice.value;
+    const text = document.createElement('span');
+    text.textContent = choice.label;
+    segment.append(radio, text);
+    themeControl.append(segment);
+    themeRadios.push(radio);
   }
-  themeSelect.value = state.settings.uiTheme;
-  appearanceSection.append(inlineField('Theme', themeSelect));
+  const getSelectedTheme = (): UiThemeSetting =>
+    (themeRadios.find((radio) => radio.checked)?.value ?? 'system') as UiThemeSetting;
+  // Not inlineField: that wraps in a <label>, and a label around the radio
+  // group would nest labels and misroute clicks to the first radio.
+  const themeRow = document.createElement('div');
+  themeRow.className = 'chatgoose-row';
+  const themeRowLabel = document.createElement('span');
+  themeRowLabel.className = 'chatgoose-row-label';
+  themeRowLabel.textContent = 'Theme';
+  themeRow.append(themeRowLabel, themeControl);
+  appearanceSection.append(themeRow);
 
   // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
   const apiSection = createSection('Generation');
@@ -399,14 +470,47 @@ async function render(): Promise<void> {
   coachRecapRow.style.flexWrap = 'wrap';
   coachRecapRow.append(coachRecapWarning);
 
+  // Count rows carry their allowed range beside the input; the same hint
+  // flashes amber when a save clamps an out-of-range entry.
+  const countHints = new Map<HTMLInputElement, HTMLSpanElement>();
+  const numberRow = (labelText: string, input: HTMLInputElement): HTMLElement => {
+    const hint = document.createElement('span');
+    hint.className = 'chatgoose-row-hint';
+    hint.textContent = `${input.min}–${input.max}`;
+    countHints.set(input, hint);
+    const control = document.createElement('span');
+    control.className = 'chatgoose-row-control';
+    control.append(hint, input);
+    // A wheel over a focused number input silently changes the value while
+    // the chatter is just scrolling the page — blur keeps the scroll a scroll.
+    input.addEventListener('wheel', () => {
+      if (document.activeElement === input) {
+        input.blur();
+      }
+    }, { passive: true });
+    return inlineField(labelText, control);
+  };
+  const flashClampHint = (input: HTMLInputElement, value: number): void => {
+    const hint = countHints.get(input);
+    if (!hint) {
+      return;
+    }
+    hint.textContent = `saved as ${value}`;
+    hint.classList.add('chatgoose-row-hint-clamped');
+    window.setTimeout(() => {
+      hint.textContent = `${input.min}–${input.max}`;
+      hint.classList.remove('chatgoose-row-hint-clamped');
+    }, 2600);
+  };
+
   const generationRows = document.createElement('div');
   generationRows.className = 'chatgoose-rows';
   generationRows.append(
-    inlineField('Reply + Help message count', quickInput),
-    inlineField('Ping message count', pingInput),
-    inlineField('Fix message count', improveInput),
-    inlineField('Deep feature message count', deepInput),
-    inlineField('Coach dialog memory (exchanges)', coachHistoryInput),
+    numberRow('Reply + Help message count', quickInput),
+    numberRow('Ping message count', pingInput),
+    numberRow('Fix message count', improveInput),
+    numberRow('Deep feature message count', deepInput),
+    numberRow('Coach dialog memory (exchanges)', coachHistoryInput),
     coachRecapRow,
     inlineField('Enable debug mode', debugInput),
   );
@@ -474,24 +578,29 @@ async function render(): Promise<void> {
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
         setStatusPill(agencyHubConnectionStatus, 'neutral', 'Not tested yet.');
+        setStatusPill(hubPill, 'warn', 'Hub not set up');
         agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
         return;
       case 'pending':
         setStatusPill(agencyHubConnectionStatus, 'neutral', 'Connection status updating…');
+        setStatusPill(hubPill, 'neutral', 'Hub: checking…');
         agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
         return;
       case 'testing':
         setStatusPill(agencyHubConnectionStatus, 'neutral', 'Testing connection…');
+        setStatusPill(hubPill, 'neutral', 'Hub: checking…');
         agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
         return;
       case 'connected':
         setStatusPill(agencyHubConnectionStatus, 'ok', 'Connected ✓');
+        setStatusPill(hubPill, 'ok', 'Hub connected ✓');
         agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
         setStatusPill(agencyHubConnectionStatus, 'bad', `Connection failed: ${failedError.code}`);
+        setStatusPill(hubPill, 'bad', `Hub: ${failedError.code}`);
         const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -795,6 +904,9 @@ async function render(): Promise<void> {
   const hubSignInMeta = document.createElement('div');
   hubSignInMeta.className = 'chatgoose-meta';
 
+  let hubSignInFormExpanded = false;
+  const hubReissueButton = createButton('Re-issue device token', true);
+
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
     setStatusPill(
@@ -807,7 +919,19 @@ async function render(): Promise<void> {
         ? 'Hub requests use the device token; the legacy API key is the fallback.'
         : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
     }
+    // With a live token the credential form reads as unfinished business —
+    // fold it away; "Re-issue device token" brings it back for rotation.
+    // The inline grid display would override [hidden] — set both.
+    hubSignInRow.hidden = hasToken && !hubSignInFormExpanded;
+    hubSignInRow.style.display = hubSignInRow.hidden ? 'none' : 'grid';
+    hubReissueButton.hidden = !hasToken || hubSignInFormExpanded;
   };
+
+  hubReissueButton.addEventListener('click', () => {
+    hubSignInFormExpanded = true;
+    renderHubSignInState();
+    hubSignInUserInput.focus();
+  });
 
   hubSignInButton.addEventListener('click', () => {
     void (async () => {
@@ -835,6 +959,7 @@ async function render(): Promise<void> {
           // the bearer by the connection test (1.7.0 audit finding).
           state.settings = (await loadStorageState()).settings;
           hubSignInPasswordInput.value = '';
+          hubSignInFormExpanded = false;
           hubSignInMeta.textContent =
             `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
         } else {
@@ -846,8 +971,6 @@ async function render(): Promise<void> {
       }
     })();
   });
-  renderHubSignInState();
-
   const hubSignInFields = document.createElement('div');
   hubSignInFields.className = 'chatgoose-signin-grid';
   hubSignInFields.append(hubSignInUserInput, hubSignInPasswordInput);
@@ -856,6 +979,12 @@ async function render(): Promise<void> {
   hubSignInRow.style.gap = '8px';
   hubSignInButton.style.justifySelf = 'start';
   hubSignInRow.append(hubSignInFields, hubSignInButton);
+  const hubSignInWrap = document.createElement('div');
+  hubSignInWrap.style.display = 'grid';
+  hubSignInWrap.style.gap = '8px';
+  hubReissueButton.style.justifySelf = 'start';
+  hubSignInWrap.append(hubSignInRow, hubReissueButton);
+  renderHubSignInState();
 
   const agencyHubStatusDivider = document.createElement('div');
   agencyHubStatusDivider.className = 'chatgoose-card-divider';
@@ -869,20 +998,55 @@ async function render(): Promise<void> {
     agencyHubConnectionMeta,
     agencyHubActionRow,
   );
+  // The device token is the main path (E9d) — the legacy key stays reachable
+  // but folded, open only when one is actually stored.
+  const legacyKeyDetails = document.createElement('details');
+  legacyKeyDetails.className = 'chatgoose-details';
+  legacyKeyDetails.open = Boolean(state.settings.agencyHubApiKey.trim());
+  const legacyKeySummary = document.createElement('summary');
+  legacyKeySummary.textContent = 'Legacy API key';
+  legacyKeyDetails.append(
+    legacyKeySummary,
+    labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
+  );
+
   agencyHubSection.append(
     labeledField('Agency Hub base URL', agencyHubUrlInput),
-    labeledField('Sign in (device token)', hubSignInRow),
+    labeledField('Sign in (device token)', hubSignInWrap),
     hubSignInStatus,
     hubSignInMeta,
-    labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
+    legacyKeyDetails,
     agencyHubStatusCard,
   );
 
   // ─── AI Models ───────────────────────────────────────────
 
+  const saveToast = document.createElement('div');
+  saveToast.className = 'chatgoose-save-toast';
+  saveToast.setAttribute('role', 'status');
+  saveToast.setAttribute('aria-live', 'polite');
+  saveToast.textContent = 'Saved ✓';
+  document.body.append(saveToast);
+  let saveToastTimer: number | undefined;
+  const showSaveToast = (): void => {
+    saveToast.classList.add('chatgoose-save-toast-visible');
+    if (saveToastTimer !== undefined) {
+      window.clearTimeout(saveToastTimer);
+    }
+    saveToastTimer = window.setTimeout(() => {
+      saveToast.classList.remove('chatgoose-save-toast-visible');
+    }, 1600);
+  };
+  cleanupTasks.push(() => {
+    if (saveToastTimer !== undefined) {
+      window.clearTimeout(saveToastTimer);
+    }
+    saveToast.remove();
+  });
+
   let agencyHubApiKeyDirty = false;
   const settingsFormSignature = (): string => JSON.stringify([
-    themeSelect.value,
+    getSelectedTheme(),
     agencyHubUrlInput.value,
     agencyHubKeyInput.value,
     quickInput.value,
@@ -895,7 +1059,7 @@ async function render(): Promise<void> {
   ]);
   const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
     const patch: Partial<Settings> = {
-      uiTheme: themeSelect.value as UiThemeSetting,
+      uiTheme: getSelectedTheme(),
       agencyHubBaseUrl: agencyHubUrlInput.value,
       quickMessageCount: Number(quickInput.value),
       pingMessageCount: Number(pingInput.value),
@@ -984,6 +1148,7 @@ async function render(): Promise<void> {
       if (disposed) {
         return;
       }
+      showSaveToast();
 
       agencyHubUrlInput.value = mergedSettings.agencyHubBaseUrl;
       if (!agencyHubApiKeyDirty && document.activeElement !== agencyHubKeyInput) {
@@ -995,7 +1160,13 @@ async function render(): Promise<void> {
       // from what was stored. Skip a field the user is still editing.
       const writeCount = (input: HTMLInputElement, value: number): void => {
         if (document.activeElement !== input) {
+          const previous = input.value;
           input.value = String(value);
+          // The store clamped/normalized what was typed — say so instead of
+          // silently rewriting the field.
+          if (previous !== '' && previous !== String(value)) {
+            flashClampHint(input, value);
+          }
         }
       };
       writeCount(quickInput, mergedSettings.quickMessageCount);
@@ -1083,7 +1254,7 @@ async function render(): Promise<void> {
   deepInput.addEventListener('input', updateCoachRecapWarning);
 
   [
-    themeSelect,
+    ...themeRadios,
     agencyHubUrlInput,
     agencyHubKeyInput,
     quickInput,
@@ -1148,9 +1319,6 @@ async function render(): Promise<void> {
       browser.permissions.onRemoved.removeListener(handlePermissionChanged);
     });
   }
-  root.append(appearanceSection);
-  root.append(apiSection);
-  root.append(agencyHubSection);
 
   // ─── Persona catalog (server-owned, metadata only) ─────────
   const personalitiesSection = createSection(
@@ -1163,6 +1331,21 @@ async function render(): Promise<void> {
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
   const renderPersonaCatalog = (): void => {
+    if (state.personaCatalog.length === 0) {
+      setStatusPill(catalogPill, 'warn', 'No personas');
+    } else {
+      const fetchedAgo = state.personaCatalogFetchedAt
+        ? formatRelativeTime(state.personaCatalogFetchedAt)
+        : null;
+      setStatusPill(
+        catalogPill,
+        'neutral',
+        fetchedAgo
+          ? `Personas updated ${fetchedAgo}`
+          : `Personas: ${state.personaCatalog.length}`,
+      );
+    }
+    catalogPill.hidden = false;
     personalitiesList.replaceChildren();
     if (state.personaCatalog.length === 0) {
       const empty = document.createElement('div');
@@ -1250,7 +1433,6 @@ async function render(): Promise<void> {
     preservationNote,
     createLegacyPersonaExportControls(),
   );
-  root.append(personalitiesSection);
 
   // ─── Account Mappings ──────────────────────────────────────
   const mappingsSection = createSection('Account Mappings');
@@ -1263,20 +1445,17 @@ async function render(): Promise<void> {
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
-  root.append(mappingsSection);
+  // Reading order = setup order: the hub everything depends on, then the
+  // personas it serves, then the accounts they map to; rarely-touched
+  // generation counts and appearance close the page.
+  root.append(
+    agencyHubSection,
+    personalitiesSection,
+    mappingsSection,
+    apiSection,
+    appearanceSection,
+  );
 
-  // ─── Connection Status ─────────────────────────────────────
-  const connectionsSection = createSection('Connection Status');
-  connectionsSection.dataset.sessionHydration = 'loading';
-  const sessionsGrid = document.createElement('div');
-  sessionsGrid.style.display = 'grid';
-  sessionsGrid.style.gap = '10px';
-  const connectionsLoading = document.createElement('div');
-  connectionsLoading.textContent = 'Loading live connection status…';
-  connectionsLoading.style.color = 'var(--chatgoose-ink-mid)';
-  sessionsGrid.append(connectionsLoading);
-  connectionsSection.append(sessionsGrid);
-  root.append(connectionsSection);
 
   cleanupTasks.push(() => {
     disposed = true;
@@ -1460,6 +1639,21 @@ async function render(): Promise<void> {
     const sessionsByAccountId = buildSessionLookup(sessions);
     const personalityViews = buildPersonalityMappingViews();
 
+    if (hydrationFailed) {
+      setStatusPill(accountsPill, 'warn', 'Accounts: live refresh failed');
+    } else if (state.knownAccounts.length === 0) {
+      setStatusPill(accountsPill, 'neutral', 'No accounts yet');
+    } else {
+      const liveCount = state.knownAccounts.filter(
+        (accountId) => sessionsByAccountId.get(accountId)?.connected,
+      ).length;
+      setStatusPill(
+        accountsPill,
+        liveCount > 0 ? 'ok' : 'neutral',
+        `${liveCount} of ${state.knownAccounts.length} accounts live`,
+      );
+    }
+
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
 
@@ -1497,13 +1691,10 @@ async function render(): Promise<void> {
         labelTitle.style.fontWeight = '500';
       }
 
-      const labelMeta = document.createElement('div');
-      labelMeta.textContent = formatAccountMeta(accountId, session);
-      labelMeta.className = 'chatgoose-mono';
-      labelMeta.style.fontSize = '11px';
-      labelMeta.style.color = 'var(--chatgoose-ink-low)';
-
-      label.append(labelTitle, labelMeta);
+      label.append(
+        labelTitle,
+        createCopyableId(session?.resolvedAccountId ?? accountId),
+      );
 
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
@@ -1563,58 +1754,6 @@ async function render(): Promise<void> {
     }
   };
 
-  const renderConnections = (
-    sessions: SessionSnapshotEntry[],
-    hydrationFailed: boolean,
-  ): void => {
-    sessionsGrid.replaceChildren();
-    connectionsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
-
-    if (hydrationFailed) {
-      const error = document.createElement('div');
-      error.textContent = 'Could not load live connection status. Reload Settings to try again.';
-      error.style.color = 'var(--chatgoose-bad)';
-      sessionsGrid.append(error);
-      return;
-    }
-
-    const connectionRows = buildConnectionRows(sessions);
-    connectionRows
-      .sort((left, right) => formatAccountHeading(left.accountId, left.session).localeCompare(formatAccountHeading(right.accountId, right.session)))
-      .forEach(({ accountId, session }) => {
-        const card = document.createElement('div');
-        card.className = 'chatgoose-card';
-        card.style.display = 'grid';
-        card.style.gap = '6px';
-        const heading = document.createElement('div');
-        heading.style.display = 'flex';
-        heading.style.justifyContent = 'space-between';
-        heading.style.alignItems = 'center';
-        const left = document.createElement('div');
-        left.textContent = formatAccountHeading(accountId, session);
-        left.style.fontWeight = '600';
-        const right = createStatusPill(
-          session.connected ? 'ok' : 'bad',
-          session.connected ? 'Connected' : 'Disconnected',
-        );
-        heading.append(left, right);
-        const meta = document.createElement('div');
-        meta.textContent = formatAccountMeta(accountId, session);
-        meta.className = 'chatgoose-mono';
-        meta.style.fontSize = '11px';
-        meta.style.color = 'var(--chatgoose-ink-low)';
-        card.append(heading, meta);
-        sessionsGrid.append(card);
-      });
-
-    if (connectionRows.length === 0) {
-      const empty = document.createElement('div');
-      empty.textContent = 'No active sessions captured yet.';
-      empty.style.color = 'var(--chatgoose-ink-mid)';
-      sessionsGrid.append(empty);
-    }
-  };
-
   const hydrateAccountSections = async (): Promise<void> => {
     const result = await sessionsResultPromise;
     if (disposed) {
@@ -1624,7 +1763,6 @@ async function render(): Promise<void> {
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       renderAccountMappings([], true);
-      renderConnections([], true);
       return;
     }
 
@@ -1640,17 +1778,37 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
-      renderConnections(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);
       if (!disposed) {
         renderAccountMappings([], true);
-        renderConnections([], true);
       }
     }
   };
 
   void hydrateAccountSections();
+
+  // Same quota discipline as the popup: render only a same-UTC-day
+  // observation; with none, the pill simply stays hidden.
+  void sendRuntimeRequest('getAiQuotaStatus')
+    .then((quota) => {
+      if (disposed || !quota) {
+        return;
+      }
+      if (quota.exhausted === true) {
+        setStatusPill(quotaPill, 'bad', 'AI quota used up — resets 00:00 UTC');
+      } else if (typeof quota.remainingRequestsToday === 'number') {
+        setStatusPill(
+          quotaPill,
+          quota.remainingRequestsToday <= 20 ? 'warn' : 'neutral',
+          `AI quota: ${quota.remainingRequestsToday} left today`,
+        );
+      } else {
+        return;
+      }
+      quotaPill.hidden = false;
+    })
+    .catch(() => {});
 
   renderCleanup = async () => {
     const pendingEdits = flushPendingEdits();

@@ -603,6 +603,20 @@ describe('runtime-api voice-attempt custody RPC', () => {
   });
 });
 
+describe('runtime-api getAiQuotaStatus', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('returns null when no same-day quota observation exists', async () => {
+    await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => null),
+    });
+    await expect(onMessageListener?.({ type: 'getAiQuotaStatus' })).resolves.toBeNull();
+  });
+});
+
 describe('runtime-api getPopupStatus', () => {
   beforeEach(() => {
     mockStorage = {};

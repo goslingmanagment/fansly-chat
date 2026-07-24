@@ -309,6 +309,12 @@ export function registerRuntimeApi({
         } satisfies PopupStatus;
       }
 
+      if (requestType === 'getAiQuotaStatus') {
+        // Settings-page mirror of the popup's quota row: freshest same-day
+        // observation or null — never a stale or made-up number.
+        return await getLatestQuotaSnapshot();
+      }
+
       if (requestType === 'getSessionsSnapshot') {
         const unresolvedSessions = sessionStore
           .getSessions()
