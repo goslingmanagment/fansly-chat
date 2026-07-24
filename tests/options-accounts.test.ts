@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { COPY } from '../src/options/copy.js';
 import {
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
@@ -99,6 +100,12 @@ function installDom() {
   vi.stubGlobal('HTMLSelectElement', window.HTMLSelectElement);
   vi.stubGlobal('Node', window.Node);
   vi.stubGlobal('Event', window.Event);
+}
+
+/** The account-id meta line, pinned through the dictionary rather than a
+ * duplicated literal — the copy is Russian and owned by `src/options/copy.ts`. */
+function accountIdText(accountId: string): string {
+  return `${COPY.accounts.idPrefix}${accountId}`;
 }
 
 function getSectionByTitle(title: string): HTMLElement {
@@ -306,8 +313,8 @@ describe('Options page account sections', () => {
     const mappingsSection = getSectionByTitle('Account Mappings');
 
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
-    expect(mappingsSection.textContent).toContain('Account ID: active-resolved');
-    expect(mappingsSection.textContent).toContain('Account ID: mappedOffline');
+    expect(mappingsSection.textContent).toContain(accountIdText('active-resolved'));
+    expect(mappingsSection.textContent).toContain(accountIdText('mappedOffline'));
     expect(mappingsSection.textContent).not.toContain('stale');
     const activeRow = mappingsSection
       .querySelector<HTMLElement>('[data-account-mapping-row="active-resolved"]')!;
@@ -354,7 +361,7 @@ describe('Options page account sections', () => {
 
     await vi.waitFor(() => {
       expect(mappingsSection.dataset.sessionHydration).toBe('ready');
-      expect(mappingsSection.textContent).toContain('Account ID: canonical');
+      expect(mappingsSection.textContent).toContain(accountIdText('canonical'));
     });
 
     // Session hydration must not rebuild unrelated catalog UI.
@@ -406,8 +413,8 @@ describe('Options page account sections', () => {
     expect(currentState.accountMappings).toEqual({ canonical: 'p1' });
     expect(currentState.accountAliases).toEqual({ legacy: 'canonical' });
     expect(currentState.knownAccounts).toEqual(['canonical']);
-    expect(getSectionByTitle('Account Mappings').textContent).toContain('Account ID: canonical');
-    expect(getSectionByTitle('Account Mappings').textContent).not.toContain('Account ID: legacy');
+    expect(getSectionByTitle('Account Mappings').textContent).toContain(accountIdText('canonical'));
+    expect(getSectionByTitle('Account Mappings').textContent).not.toContain(accountIdText('legacy'));
   });
 
   it('keeps local settings usable and marks only account sections failed when session loading rejects', async () => {
@@ -427,7 +434,7 @@ describe('Options page account sections', () => {
       expect(getSectionByTitle('Account Mappings').dataset.sessionHydration).toBe('failed');
     });
 
-    expect(getSectionByTitle('Account Mappings').textContent).toContain('Account ID: offline-account');
+    expect(getSectionByTitle('Account Mappings').textContent).toContain(accountIdText('offline-account'));
     expect(getSectionByTitle('Account Mappings').textContent).toContain('Live account refresh failed');
     expect(document.body.contains(quickInput)).toBe(true);
 
@@ -465,7 +472,7 @@ describe('Options page account sections', () => {
 
     expect(mappingsSection.textContent).toContain('Newer');
     expect(mappingsSection.textContent).not.toContain('Older');
-    expect(mappingsSection.textContent).toContain('Account ID: resolved');
+    expect(mappingsSection.textContent).toContain(accountIdText('resolved'));
   });
 
   it('summarizes install health in the hero strip', async () => {
@@ -508,13 +515,18 @@ describe('Options page account sections', () => {
     const signInUser = document.querySelector<HTMLInputElement>(
       'input[autocomplete="username"]',
     )!;
-    expect(signInUser.closest('[hidden]')).not.toBeNull();
+    // Only the FORM's own fold counts here. The cabinet pane wrapping the Hub
+    // section also carries `hidden` whenever another pane is on screen, and
+    // that one is owned by the shell router, not by this credential form.
+    const foldedAncestor = (element: HTMLElement): HTMLElement | null =>
+      element.closest<HTMLElement>('[hidden]:not(.chatgoose-cabinet-pane)');
+    expect(foldedAncestor(signInUser)).not.toBeNull();
     const reissue = Array.from(document.querySelectorAll('button'))
       .find((button) => button.textContent === 'Re-issue device token')!;
     expect(reissue.hidden).toBe(false);
 
     reissue.click();
-    expect(signInUser.closest('[hidden]')).toBeNull();
+    expect(foldedAncestor(signInUser)).toBeNull();
   });
 });
 
@@ -768,6 +780,14 @@ describe('Options page settings and read-only personas', () => {
     const barrier = document.querySelector<HTMLElement>('[data-future-schema-barrier="true"]');
     expect(barrier?.getAttribute('role')).toBe('alert');
     expect(quickInput.disabled).toBe(true);
+
+    // The barrier freezes editors, not navigation: rail items stay clickable
+    // so the read-only page still lets the chatter inspect every pane.
+    const railItems = document.querySelectorAll<HTMLButtonElement>('.chatgoose-cabinet-item');
+    expect(railItems.length).toBeGreaterThan(0);
+    for (const item of railItems) {
+      expect(item.disabled).toBe(false);
+    }
 
     releaseFirstStorageSet?.();
     await flushMicrotasks();

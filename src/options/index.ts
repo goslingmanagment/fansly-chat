@@ -20,11 +20,14 @@ import {
   labeledField,
   setStatusPill,
 } from './dom.js';
+import { COPY } from './copy.js';
 import {
   buildSessionLookup,
   formatAccountHeading,
   shortenAccountId,
 } from './sessions.js';
+import { OPTIONS_PANES } from '../shared/options-routes.js';
+import { createShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
@@ -100,8 +103,8 @@ function createCopyableId(fullId: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'chatgoose-copy-id';
-  button.title = `Copy ${fullId}`;
-  const idText = `Account ID: ${fullId}`;
+  button.title = COPY.accounts.idCopyTitle.replace('{id}', fullId);
+  const idText = `${COPY.accounts.idPrefix}${fullId}`;
   button.textContent = idText;
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
   button.addEventListener('click', () => {
@@ -109,7 +112,7 @@ function createCopyableId(fullId: string): HTMLButtonElement {
       ?.writeText(fullId)
       .then(() => {
         button.classList.add('chatgoose-copy-id-done');
-        button.textContent = 'Copied ✓';
+        button.textContent = COPY.accounts.idCopied;
         if (restoreTimer !== undefined) {
           clearTimeout(restoreTimer);
         }
@@ -310,6 +313,18 @@ async function render(): Promise<void> {
   root.replaceChildren();
   root.style.paddingBottom = '24px';
 
+  // ─── Cabinet frame ─────────────────────────────────────────
+  // Panes are built once and shown/hidden; sections below are appended into
+  // their pane instead of into the page root. The recovery gates above return
+  // before this point — they are deliberately outside the shell.
+  // «Хоткеи» enables with its pane content (plan task 12); until then the rail
+  // hides the item and a #hotkeys deep link falls back to «Статус».
+  const shell = createShell(
+    root,
+    OPTIONS_PANES.filter((pane) => pane !== 'hotkeys'),
+  );
+  cleanupTasks.push(() => shell.dispose());
+
   // ─── Hero ──────────────────────────────────────────────────
   const hero = document.createElement('div');
   hero.style.padding = '28px 20px 4px';
@@ -336,7 +351,9 @@ async function render(): Promise<void> {
   quotaPill.hidden = true;
   heroStrip.append(hubPill, accountsPill, catalogPill, quotaPill);
   hero.append(createVersionTag(extensionVersion), title, subtitle, heroStrip);
-  root.append(hero);
+  // The hero + health strip move into «Статус» as-is; task 7 dismantles the
+  // strip and re-points its producers at the status model.
+  shell.panes.status.append(hero);
 
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
@@ -1455,16 +1472,14 @@ async function render(): Promise<void> {
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
-  // Reading order = setup order: the hub everything depends on, then the
-  // personas it serves, then the accounts they map to; rarely-touched
-  // generation counts and appearance close the page.
-  root.append(
-    agencyHubSection,
-    personalitiesSection,
-    mappingsSection,
-    apiSection,
-    appearanceSection,
-  );
+  // One section per pane — the rail carries the reading order now (setup
+  // order: the hub everything depends on, then the personas it serves, then
+  // the accounts they map to, then the local-only settings).
+  shell.panes.hub.append(agencyHubSection);
+  shell.panes.personas.append(personalitiesSection);
+  shell.panes.accounts.append(mappingsSection);
+  shell.panes.generation.append(apiSection);
+  shell.panes.appearance.append(appearanceSection);
 
 
   cleanupTasks.push(() => {
@@ -1583,9 +1598,11 @@ async function render(): Promise<void> {
       settingsSnapshotVersion += 1;
       agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
       saveSettingsDebounced.cancel();
+      // The barrier freezes editors, not navigation: the read-only emergency
+      // mode must keep every pane reachable through the rail.
       for (const control of root.querySelectorAll<
         HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement
-      >('input, select, button, textarea')) {
+      >('input, select, textarea, button:not(.chatgoose-cabinet-item)')) {
         control.disabled = true;
       }
       const warning = document.createElement('div');

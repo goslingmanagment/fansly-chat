@@ -21,6 +21,9 @@ declare module 'node:fs' {
     path: string | URL,
     encoding: string,
   ): string;
+  // Byte read — the local-fonts test checks the WOFF2 magic of each bundled
+  // file without decoding it as text.
+  export function readFileSync(path: string | URL): Uint8Array;
   export function readdirSync(
     path: string | URL,
     options: { withFileTypes: true },
