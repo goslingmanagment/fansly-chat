@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ChatGooseError,
+  ERROR_REGISTRY,
   formatUserErrorTechnicalDetail,
   getErrorMessage,
   toUserError,
@@ -98,6 +99,49 @@ describe('formatUserErrorTechnicalDetail', () => {
 });
 
 describe('getErrorMessage', () => {
+  it.each([
+    [
+      'hub_provider_billing',
+      'CG-HUB-12',
+      'Кончились AI-кредиты Agency Hub.',
+      'Попросите менеджера пополнить баланс AI-провайдера. Повтор не поможет — символы и лимиты не потрачены.',
+    ],
+    [
+      'hub_provider_auth',
+      'CG-HUB-13',
+      'AI-провайдер отклонил доступ Agency Hub.',
+      'Это не ваш ключ Agency Hub: провайдер отклонил серверный ключ или права Hub. Сообщите менеджеру — повтор не поможет.',
+    ],
+    [
+      'hub_provider_rate_limited',
+      'CG-HUB-14',
+      'AI-провайдер достиг лимита запросов.',
+      'Дождитесь окончания паузы и повторите вручную. Если таймер не показан, попробуйте позже.',
+    ],
+    [
+      'hub_provider_unavailable',
+      'CG-HUB-15',
+      'AI-провайдер временно недоступен.',
+      'Провайдер перегружен или вернул серверную ошибку. Повторите вручную позже.',
+    ],
+    [
+      'hub_stream_truncated',
+      'CG-HUB-16',
+      'Генерация оборвалась, результат не показан.',
+      'ChatGoose не получил подтверждённое окончание потока. Запустите генерацию заново вручную.',
+    ],
+  ] as const)(
+    'registers %s as %s with stable Russian chatter copy',
+    (key, code, message, description) => {
+      expect(ERROR_REGISTRY[key]).toEqual({
+        key,
+        code,
+        message,
+        description,
+      });
+    },
+  );
+
   it('returns error for ping_blocked', () => {
     const result = getErrorMessage('ping_blocked');
     expect(result.message).toContain('still active');

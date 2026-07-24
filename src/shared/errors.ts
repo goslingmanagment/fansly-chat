@@ -216,6 +216,36 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Agency Hub could not reach its AI provider.',
     description: 'The Hub-side AI connection for this page is down (proxy or provider). Tell a manager — retrying will not help until it is repaired.',
   },
+  hub_provider_billing: {
+    key: 'hub_provider_billing',
+    code: 'CG-HUB-12',
+    message: 'Кончились AI-кредиты Agency Hub.',
+    description: 'Попросите менеджера пополнить баланс AI-провайдера. Повтор не поможет — символы и лимиты не потрачены.',
+  },
+  hub_provider_auth: {
+    key: 'hub_provider_auth',
+    code: 'CG-HUB-13',
+    message: 'AI-провайдер отклонил доступ Agency Hub.',
+    description: 'Это не ваш ключ Agency Hub: провайдер отклонил серверный ключ или права Hub. Сообщите менеджеру — повтор не поможет.',
+  },
+  hub_provider_rate_limited: {
+    key: 'hub_provider_rate_limited',
+    code: 'CG-HUB-14',
+    message: 'AI-провайдер достиг лимита запросов.',
+    description: 'Дождитесь окончания паузы и повторите вручную. Если таймер не показан, попробуйте позже.',
+  },
+  hub_provider_unavailable: {
+    key: 'hub_provider_unavailable',
+    code: 'CG-HUB-15',
+    message: 'AI-провайдер временно недоступен.',
+    description: 'Провайдер перегружен или вернул серверную ошибку. Повторите вручную позже.',
+  },
+  hub_stream_truncated: {
+    key: 'hub_stream_truncated',
+    code: 'CG-HUB-16',
+    message: 'Генерация оборвалась, результат не показан.',
+    description: 'ChatGoose не получил подтверждённое окончание потока. Запустите генерацию заново вручную.',
+  },
   voice_disabled: {
     key: 'voice_disabled',
     code: 'CG-VOICE-01',

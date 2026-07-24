@@ -51,6 +51,55 @@ export function formatLoadingStatus(
   return progress?.message ?? 'Generating\u2026';
 }
 
+export function createUserErrorRetryCountdown(
+  error: UserFacingError,
+  className: string,
+): HTMLDivElement | null {
+  const retryAtMs = typeof error.retryAtMs === 'number' && Number.isFinite(error.retryAtMs)
+    ? error.retryAtMs
+    : typeof error.retryAfterMs === 'number' &&
+        Number.isFinite(error.retryAfterMs) &&
+        error.retryAfterMs >= 0
+      ? Date.now() + error.retryAfterMs
+      : null;
+  if (retryAtMs === null) {
+    return null;
+  }
+
+  const line = document.createElement('div');
+  line.className = className;
+  let wasConnected = false;
+  let timer: number | null = null;
+
+  const update = (): void => {
+    const remainingMs = retryAtMs - Date.now();
+    line.textContent = remainingMs > 0
+      ? `Повторить вручную можно через ${Math.ceil(remainingMs / 1000)} с.`
+      : 'Можно повторить вручную.';
+    if (remainingMs <= 0 && timer !== null) {
+      window.clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  update();
+  if (retryAtMs > Date.now()) {
+    timer = window.setInterval(() => {
+      wasConnected ||= line.isConnected;
+      if (wasConnected && !line.isConnected) {
+        if (timer !== null) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+        return;
+      }
+      update();
+    }, 250);
+  }
+
+  return line;
+}
+
 export function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
   const block = document.createElement('div');
   block.className = 'chatgoose-inline-error';
@@ -66,6 +115,14 @@ export function createUserErrorBlock(error: UserFacingError): HTMLDivElement {
     secondary.className = 'chatgoose-error-secondary';
     secondary.textContent = description;
     block.append(secondary);
+  }
+
+  const retryCountdown = createUserErrorRetryCountdown(
+    error,
+    'chatgoose-error-secondary chatgoose-error-retry',
+  );
+  if (retryCountdown) {
+    block.append(retryCountdown);
   }
 
   const technicalDetail = formatUserErrorTechnicalDetail(error);

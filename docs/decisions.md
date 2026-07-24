@@ -73,6 +73,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E54 | 2026-07-23 | Voice paid-attempt custody moves behind an acknowledged background `storage.session` RPC; supersedes E47's Firefox content-access premise |
 | E55 | 2026-07-24 | Confirmed Voice attach completes the active session; explicit new-from-draft flow protects paid work |
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
+| E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 
 ## Entries
 
@@ -1433,3 +1434,24 @@ controller-level suspended flag keeps late audio bytes in memory without
 minting a hidden `blob:` URL until reopen. Paid-attempt idempotency, background
 session custody, exact-take/live-route attach attestation, E47/E54 persistence
 boundaries, and E55 completion semantics are unchanged.
+
+**E57 (2026-07-24).** The extension adopts the family provider-error
+classification emitted by the Agency Hub feature lane without changing the
+open-string wire contract or vendored SDK. Known `provider_billing`,
+`provider_auth`, `provider_rate_limited`, and `provider_unavailable` error
+frames exact-match dedicated Russian chatter cards. The auth card explicitly
+names the Hub's server-side provider credential, not the chatter's Agency Hub
+credential. `provider_proxy_unreachable` and `provider_stream_failed` retain
+E38's CG-HUB-10 infrastructure card, and any unknown future `provider*` code
+keeps the same prefix fallback for rollback-safe degradation. A provider 429
+threads its `retryAfterMs` into one absolute UI deadline and shows a manual-
+retry countdown; it never triggers an automatic retry.
+
+EOF without a `done` frame remains fail closed but now reports the dedicated
+CG-HUB-16 truncation card (“generation stopped; result not shown”) instead of
+CG-HUB-07. The content preflight now trusts the existing `TabUiState.hasApiKey`
+semantics—normalized Hub URL plus either Hub credential—despite that field's
+legacy name; obsolete per-provider key hints can no longer revive Claude or
+OpenRouter setup copy. Device-token-shaped log fields and inline
+`agency_hub_device_…` values are redacted. No storage schema, SDK, retry policy,
+automatic send, or Fansly egress changes.

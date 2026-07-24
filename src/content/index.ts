@@ -64,7 +64,6 @@ import {
   featureSupportsReplyMode,
   featureSupportsReplyTone,
   getFeaturePolicy,
-  resolveFeatureModelFeature,
   usesInlineFeatureSurface,
   usesOverlayFeatureSurface,
 } from '../shared/features.js';
@@ -1221,8 +1220,8 @@ export class ChatGooseContentApp {
       return false;
     }
 
-    if (!this.isApiKeyReadyForFeature(feature)) {
-      this.showUserErrorToast(this.getMissingApiKeyError(feature));
+    if (!this.isHubTransportConfigured()) {
+      this.showUserErrorToast(getErrorMessage('hub_missing_api_key'));
       return false;
     }
     if (!this.tabState.hasPersonalities) {
@@ -1248,36 +1247,11 @@ export class ChatGooseContentApp {
     return true;
   }
 
-  private isApiKeyReadyForFeature(feature: FeatureType): boolean {
-    const modelFeature = resolveFeatureModelFeature(feature);
-    return this.tabState?.apiKeyReadyByFeature?.[modelFeature] ??
-      this.tabState?.hasApiKey ??
-      false;
-  }
-
-  private getMissingApiKeyError(feature: FeatureType): ReturnType<typeof getErrorMessage> {
-    const modelFeature = resolveFeatureModelFeature(feature);
-    const provider = this.tabState?.modelProviderByFeature?.[modelFeature];
-    if (provider === 'openrouter') {
-      return toUserError({
-        key: 'missing_api_key',
-        details: { provider },
-      });
-    }
-
-    return getErrorMessage('missing_api_key');
-  }
-
-  private getCompareMissingApiKeyError(): ReturnType<typeof getErrorMessage> {
-    const provider = this.tabState?.modelProviderByFeature?.['fast-reply'];
-    if (provider === 'openrouter') {
-      return toUserError({
-        key: 'missing_api_key',
-        details: { provider },
-      });
-    }
-
-    return getErrorMessage('missing_api_key');
+  private isHubTransportConfigured(): boolean {
+    // Despite its legacy name, hasApiKey is produced from the normalized Hub
+    // URL plus either Hub credential. Provider-specific key hints are dead
+    // pre-kernel state and must not override that transport truth.
+    return this.tabState?.hasApiKey ?? false;
   }
 
   private buildOperationStartPayload(
@@ -1519,8 +1493,8 @@ export class ChatGooseContentApp {
     if (!this.tabState) {
       return;
     }
-    if (!this.isApiKeyReadyForFeature('fast-reply')) {
-      this.showUserErrorToast(this.getCompareMissingApiKeyError());
+    if (!this.isHubTransportConfigured()) {
+      this.showUserErrorToast(getErrorMessage('hub_missing_api_key'));
       return;
     }
     if (!this.tabState.connected) {
