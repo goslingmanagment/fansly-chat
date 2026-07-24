@@ -95,11 +95,42 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function formatDuration(scriptChars: number): string {
-  const total = Math.max(0, Math.round(scriptChars / VOICE_CHARS_PER_SECOND));
+// One rounding rule for the whole clock (review): elapsed, total, and the
+// a11y seconds all FLOOR, so a fractional clip's counting-up elapsed actually
+// reaches its displayed total (ceil-total + floor-elapsed never met — e.g.
+// «0:03 / 0:04» at the true end of a 3.25s take, while a11y said «3 из 3»).
+function formatClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
   const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  const rest = total % 60;
+  return `${minutes}:${String(rest).padStart(2, '0')}`;
+}
+
+function formatDuration(durationSeconds: number | null): string {
+  return durationSeconds === null ? '–:–' : formatClock(durationSeconds);
+}
+
+function formatSecondsForA11y(value: number): string {
+  const seconds = Math.max(0, Math.floor(value));
+  const mod100 = seconds % 100;
+  const mod10 = seconds % 10;
+  const unit = mod100 >= 11 && mod100 <= 14
+    ? 'секунд'
+    : mod10 === 1
+      ? 'секунда'
+      : mod10 >= 2 && mod10 <= 4
+        ? 'секунды'
+        : 'секунд';
+  return `${seconds} ${unit}`;
+}
+
+function prefersReducedMotion(): boolean {
+  try {
+    return typeof globalThis.matchMedia === 'function' &&
+      globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
 }
 
 function resolveVoiceError(code: string, fallbackMessage: string): UserFacingError {
@@ -124,6 +155,41 @@ const UNKNOWN_ATTACH_REFUSAL: UserFacingError = {
   message: 'Не удалось выдать разрешение — попробуйте ещё раз',
 };
 
+interface TakePlayerHandle {
+  readonly root: HTMLElement;
+  readonly audio: HTMLAudioElement;
+  readonly toggle: HTMLButtonElement;
+  readonly seek: HTMLInputElement;
+  readonly time: HTMLElement;
+  readonly error: HTMLElement;
+  readonly blobUrl: string;
+  voiceNoteId: number;
+  ordinal: number;
+  durationSeconds: number | null;
+  scrubbing: boolean;
+  failed: boolean;
+  disposed: boolean;
+  animationFrame: number | null;
+  playRequest: number;
+  render: () => void;
+  startAnimation: () => void;
+  dispose: () => void;
+}
+
+interface TakeRowHandle {
+  readonly voiceNoteId: number;
+  readonly row: HTMLElement;
+  readonly headline: HTMLElement;
+  readonly radioSlot: HTMLElement;
+  readonly title: HTMLElement;
+  readonly downloadSlot: HTMLElement;
+  readonly mediaSlot: HTMLElement;
+  readonly recoverySlot: HTMLElement;
+  radio: HTMLInputElement | null;
+  download: HTMLButtonElement | null;
+  player: TakePlayerHandle | null;
+}
+
 /**
  * The default "лента" voice surface. It renders the shared components (script
  * editor + meta, tone chips, takes list, attach/download actions) from ONE
@@ -146,6 +212,13 @@ export class VoicePanel {
   private readonly attachSlot = el('div', 'chatgoose-voice-slot');
   private readonly editorWrap: HTMLElement;
   private readonly body: HTMLElement;
+  private readonly takeRows = new Map<number, TakeRowHandle>();
+  private renderedAttemptId: string | null = null;
+  private takesSection: HTMLElement | null = null;
+  private takesHeader: HTMLElement | null = null;
+  private takesRows: HTMLElement | null = null;
+  private takesNewVoice: HTMLElement | null = null;
+  private activePlayer: TakePlayerHandle | null = null;
 
   private attachPhase: AttachPhase = 'idle';
   private newVoiceConfirmOpen = false;
@@ -206,6 +279,20 @@ export class VoicePanel {
 
   hide(): void {
     this.root.classList.add('chatgoose-hidden');
+  }
+
+  /**
+   * Release every live media engine before its controller revokes object URLs.
+   * Removing src followed by load() is intentional: a merely hidden or
+   * URL-revoked <audio> may keep playing or retain decoded media resources.
+   */
+  suspendPlayers(): void {
+    this.resetTakesView();
+  }
+
+  /** Full route/session teardown uses the same media-release boundary. */
+  dispose(): void {
+    this.suspendPlayers();
   }
 
   isOpen(): boolean {
@@ -391,7 +478,7 @@ export class VoicePanel {
       this.generateSlot.replaceChildren();
       this.busySlot.replaceChildren();
       this.reconcileSlot.replaceChildren();
-      this.takesSlot.replaceChildren();
+      this.resetTakesView();
       this.attachSlot.replaceChildren();
       return;
     }
@@ -579,18 +666,22 @@ export class VoicePanel {
   }
 
   private renderTakes(attempt: VoiceAttempt): void {
+    if (this.renderedAttemptId !== attempt.attemptId) {
+      this.resetTakesView();
+      this.renderedAttemptId = attempt.attemptId;
+    }
     if (attempt.takes.length === 0) {
+      this.resetTakesView();
+      this.renderedAttemptId = attempt.attemptId;
       this.takesSlot.replaceChildren(this.buildNewVoiceRow());
       return;
     }
-    const section = el('div', 'chatgoose-voice-takes');
-
-    const header = el('div', 'chatgoose-voice-takes-header');
+    this.ensureTakesView();
+    const header = this.takesHeader!;
     const cost = this.costChars(attempt);
     const pendingCreate = this.deps.controller.hasPendingCreate();
     if (attempt.stale) {
       const badge = el('span', 'chatgoose-voice-stale', 'устарело — текст изменён');
-      header.append(badge);
       const regen = el(
         'button',
         'chatgoose-voice-another',
@@ -601,7 +692,7 @@ export class VoicePanel {
       regen.addEventListener('click', () => {
         this.beginPaidCreate(() => this.deps.controller.generateAgain());
       });
-      header.append(regen);
+      header.replaceChildren(badge, regen);
     } else {
       const another = el('button', 'chatgoose-voice-another', `+ Ещё вариант · ~${cost} симв.`);
       another.type = 'button';
@@ -609,16 +700,55 @@ export class VoicePanel {
       another.addEventListener('click', () => {
         this.beginPaidCreate(() => this.deps.controller.generateAnotherTake());
       });
-      header.append(another);
+      header.replaceChildren(another);
     }
-    section.append(header);
 
+    const desiredIds = new Set(attempt.takes.map((take) => take.voiceNoteId));
+    for (const [voiceNoteId, handle] of this.takeRows) {
+      if (!desiredIds.has(voiceNoteId)) {
+        this.disposeTakeRow(handle);
+        this.takeRows.delete(voiceNoteId);
+      }
+    }
     attempt.takes.forEach((take, index) => {
-      section.append(this.renderTakeRow(attempt, take, index + 1));
+      let handle = this.takeRows.get(take.voiceNoteId);
+      if (!handle) {
+        handle = this.createTakeRow(take.voiceNoteId);
+        this.takeRows.set(take.voiceNoteId, handle);
+      }
+      this.updateTakeRow(handle, attempt, take, index + 1);
+      const nodeAtIndex = this.takesRows!.children.item(index);
+      if (nodeAtIndex !== handle.row) {
+        this.takesRows!.insertBefore(handle.row, nodeAtIndex);
+      }
     });
-    section.append(this.buildNewVoiceRow());
+    this.takesNewVoice!.replaceChildren(this.buildNewVoiceRow());
+  }
 
-    this.takesSlot.replaceChildren(section);
+  private ensureTakesView(): void {
+    if (this.takesSection) {
+      return;
+    }
+    this.takesSection = el('div', 'chatgoose-voice-takes');
+    this.takesHeader = el('div', 'chatgoose-voice-takes-header');
+    this.takesRows = el('div', 'chatgoose-voice-takes-rows');
+    this.takesNewVoice = el('div', 'chatgoose-voice-takes-newvoice');
+    this.takesSection.append(this.takesHeader, this.takesRows, this.takesNewVoice);
+    this.takesSlot.replaceChildren(this.takesSection);
+  }
+
+  private resetTakesView(): void {
+    for (const handle of this.takeRows.values()) {
+      this.disposeTakeRow(handle);
+    }
+    this.takeRows.clear();
+    this.activePlayer = null;
+    this.renderedAttemptId = null;
+    this.takesSection = null;
+    this.takesHeader = null;
+    this.takesRows = null;
+    this.takesNewVoice = null;
+    this.takesSlot.replaceChildren();
   }
 
   /** «+ Новый войс из черновика» (spec 2026-07-24). Reads the LIVE composer
@@ -741,149 +871,466 @@ export class VoicePanel {
     return `${lead.charAt(0).toUpperCase()}${lead.slice(1)} — сессия будет закрыта. Начать новый войс?`;
   }
 
-  private renderTakeRow(attempt: VoiceAttempt, take: VoiceTake, ordinal: number): HTMLElement {
+  private createTakeRow(voiceNoteId: number): TakeRowHandle {
     const row = el('div', 'chatgoose-voice-take');
-    row.dataset.voiceNoteId = String(take.voiceNoteId);
-    const state = take.view.state;
-
+    row.dataset.voiceNoteId = String(voiceNoteId);
+    row.setAttribute('role', 'group');
     const headline = el('div', 'chatgoose-voice-take-head');
+    const radioSlot = el('span', 'chatgoose-voice-take-radio-slot');
+    const title = el('span', 'chatgoose-voice-take-title');
+    const downloadSlot = el('span', 'chatgoose-voice-take-download-slot');
+    headline.append(radioSlot, title, downloadSlot);
+    const mediaSlot = el('div', 'chatgoose-voice-take-media');
+    const recoverySlot = el('div', 'chatgoose-voice-take-recovery-slot');
+    row.append(headline, mediaSlot, recoverySlot);
+    return {
+      voiceNoteId,
+      row,
+      headline,
+      radioSlot,
+      title,
+      downloadSlot,
+      mediaSlot,
+      recoverySlot,
+      radio: null,
+      download: null,
+      player: null,
+    };
+  }
 
-    if (state === 'completed' && take.blobUrl) {
-      const radio = el('input', 'chatgoose-voice-take-select');
-      radio.type = 'radio';
-      radio.name = `chatgoose-voice-take-${attempt.attemptId}`;
-      radio.checked = attempt.selectedTakeId === take.voiceNoteId;
-      radio.addEventListener('change', () => {
-        void this.deps.controller.selectTake(take.voiceNoteId);
-      });
-      headline.append(radio);
+  private updateTakeRow(
+    handle: TakeRowHandle,
+    attempt: VoiceAttempt,
+    take: VoiceTake,
+    ordinal: number,
+  ): void {
+    const state = take.view.state;
+    const titleId = `chatgoose-voice-take-${attempt.attemptId}-${take.voiceNoteId}-title`;
+    handle.title.id = titleId;
+    handle.title.textContent = this.takeTitle(state, ordinal, take.durationSeconds);
+    handle.row.setAttribute('aria-labelledby', titleId);
+
+    const playable = state === 'completed' && Boolean(take.blobUrl);
+    if (playable) {
+      if (!handle.radio) {
+        const voiceNoteId = take.voiceNoteId;
+        const radio = el('input', 'chatgoose-voice-take-select');
+        radio.type = 'radio';
+        radio.addEventListener('change', () => {
+          void this.deps.controller.selectTake(voiceNoteId);
+        });
+        handle.radio = radio;
+        handle.radioSlot.replaceChildren(radio);
+      }
+      handle.radio.name = `chatgoose-voice-take-${attempt.attemptId}`;
+      handle.radio.checked = attempt.selectedTakeId === take.voiceNoteId;
+      handle.radio.setAttribute('aria-labelledby', titleId);
+    } else if (handle.radio) {
+      handle.radio.remove();
+      handle.radio = null;
     }
 
-    headline.append(
-      el('span', 'chatgoose-voice-take-title', this.takeTitle(state, ordinal, take.view.scriptChars)),
-    );
-
-    if (state === 'completed' && take.blobUrl) {
-      const download = el('button', 'chatgoose-voice-take-download', '⬇');
-      download.type = 'button';
-      download.title = 'Скачать MP3';
-      download.addEventListener('click', () => this.downloadTake(take));
-      headline.append(download);
+    if (playable) {
+      if (!handle.download) {
+        const voiceNoteId = take.voiceNoteId;
+        const download = el('button', 'chatgoose-voice-take-download', '⬇');
+        download.type = 'button';
+        download.addEventListener('click', () => {
+          const current = this.deps.controller.getAttempt()?.takes.find(
+            (candidate) => candidate.voiceNoteId === voiceNoteId,
+          );
+          if (current) {
+            this.downloadTake(current);
+          }
+        });
+        handle.download = download;
+        handle.downloadSlot.replaceChildren(download);
+      }
+      const downloadLabel = `Скачать вариант ${ordinal} в MP3`;
+      handle.download.title = downloadLabel;
+      handle.download.setAttribute('aria-label', downloadLabel);
+    } else if (handle.download) {
+      handle.download.remove();
+      handle.download = null;
     }
-    row.append(headline);
 
-    if (state === 'completed' && take.blobUrl) {
-      row.append(this.buildTakePlayer(take.blobUrl));
-    } else if (state === 'queued' || state === 'dispatched') {
-      row.append(this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`));
+    if (playable && take.blobUrl) {
+      if (!handle.player || handle.player.blobUrl !== take.blobUrl) {
+        handle.player?.dispose();
+        handle.player = this.buildTakePlayer(take, ordinal);
+        handle.mediaSlot.replaceChildren(handle.player.root);
+      } else {
+        this.updateTakePlayer(handle.player, take, ordinal);
+      }
+    } else {
+      handle.player?.dispose();
+      handle.player = null;
+      if (state === 'queued' || state === 'dispatched') {
+        handle.mediaSlot.replaceChildren(
+          this.busyRow(`Вариант ${ordinal} генерируется… можно продолжать работать`),
+        );
+      } else {
+        handle.mediaSlot.replaceChildren();
+      }
     }
 
     const recovery = this.renderTakeRecovery(take);
-    if (recovery) {
-      row.append(recovery);
-    }
-    return row;
+    handle.recoverySlot.replaceChildren(...(recovery ? [recovery] : []));
+  }
+
+  private disposeTakeRow(handle: TakeRowHandle): void {
+    handle.player?.dispose();
+    handle.player = null;
+    handle.row.remove();
   }
 
   /** Custom take player in the family tokens — the native `controls` strip is
-   * browser chrome and cannot match the panel. The <audio> element stays as
-   * the headless engine; the blob URL is local bytes, so preloading metadata
-   * (for the duration label) costs nothing. Volume is deliberately absent —
-   * system volume owns that job. */
-  private buildTakePlayer(blobUrl: string): HTMLElement {
+   * browser chrome and cannot match the panel. Duration is decoded from the
+   * complete ArrayBuffer before this node exists; HTMLMediaElement.duration is
+   * intentionally ignored because Firefox may expose a provisional MP3 value. */
+  private buildTakePlayer(take: VoiceTake, ordinal: number): TakePlayerHandle {
+    if (!take.blobUrl) {
+      throw new Error('voice player requires a blob URL');
+    }
     const player = el('div', 'chatgoose-voice-player');
+    const controls = el('div', 'chatgoose-voice-player-controls');
     const audio = el('audio', 'chatgoose-voice-audio');
-    audio.preload = 'metadata';
-    audio.src = blobUrl;
+    audio.preload = 'auto';
+    audio.src = take.blobUrl;
 
     const toggle = el('button', 'chatgoose-voice-player-toggle');
     toggle.type = 'button';
 
-    // The range is modelled in SECONDS (max = clip duration once metadata
-    // lands), so an arrow press seeks one second — a 0..1000 share scale made
-    // keyboard seeking move by 0.1% of the clip (review P2).
     const seek = el('input', 'chatgoose-voice-player-seek');
     seek.type = 'range';
     seek.min = '0';
-    seek.max = '1';
-    seek.step = '1';
+    seek.max = '0';
+    seek.step = 'any';
     seek.value = '0';
-    seek.setAttribute('aria-label', 'Позиция воспроизведения, секунды');
+    const time = el('span', 'chatgoose-voice-player-time', '0:00 / –:–');
+    const error = el('div', 'chatgoose-voice-player-error');
+    error.setAttribute('aria-live', 'polite');
+    error.hidden = true;
 
-    const time = el('span', 'chatgoose-voice-player-time', '0:00 / 0:00');
+    const listeners: Array<{
+      target: EventTarget;
+      type: string;
+      listener: EventListener;
+    }> = [];
+    const listen = (
+      target: EventTarget,
+      type: string,
+      listener: EventListener,
+    ): void => {
+      target.addEventListener(type, listener);
+      listeners.push({ target, type, listener });
+    };
 
-    const formatClock = (seconds: number): string => {
-      const whole = Math.max(0, Math.floor(seconds));
-      const minutes = Math.floor(whole / 60);
-      const rest = whole % 60;
-      return `${minutes}:${String(rest).padStart(2, '0')}`;
+    const handle: TakePlayerHandle = {
+      root: player,
+      audio,
+      toggle,
+      seek,
+      time,
+      error,
+      blobUrl: take.blobUrl,
+      voiceNoteId: take.voiceNoteId,
+      ordinal,
+      durationSeconds: take.durationSeconds,
+      scrubbing: false,
+      failed: false,
+      disposed: false,
+      animationFrame: null,
+      playRequest: 0,
+      render: () => undefined,
+      startAnimation: () => undefined,
+      dispose: () => undefined,
     };
-    // Focus is the wrong signal for "user is dragging": Firefox keeps the
-    // range focused after any click until focus moves elsewhere, which froze
-    // the thumb forever after the first scrub (review P2). Only an active
-    // pointer drag suppresses engine-driven thumb updates.
-    let scrubbing = false;
-    const render = () => {
-      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      const playedShare = duration > 0 ? audio.currentTime / duration : 0;
-      if (duration > 0 && seek.max !== String(duration)) {
-        seek.max = String(duration);
+
+    const stopAnimation = (): void => {
+      if (handle.animationFrame === null) {
+        return;
       }
-      if (!scrubbing) {
-        seek.value = String(audio.currentTime);
+      if (typeof globalThis.cancelAnimationFrame === 'function') {
+        globalThis.cancelAnimationFrame(handle.animationFrame);
       }
-      seek.style.setProperty('--chatgoose-played', `${playedShare * 100}%`);
-      time.textContent = `${formatClock(audio.currentTime)} / ${formatClock(duration)}`;
-      const playing = !audio.paused && !audio.ended;
-      toggle.classList.toggle('chatgoose-voice-player-playing', playing);
-      const label = playing ? 'Пауза' : 'Слушать';
-      toggle.title = label;
-      toggle.setAttribute('aria-label', label);
+      handle.animationFrame = null;
     };
-    seek.addEventListener('pointerdown', () => {
-      scrubbing = true;
-    });
-    seek.addEventListener('pointerup', () => {
-      scrubbing = false;
-      render();
-    });
-    seek.addEventListener('change', () => {
-      scrubbing = false;
-      render();
-    });
-    for (const event of ['timeupdate', 'durationchange', 'loadedmetadata', 'play', 'pause', 'ended']) {
-      audio.addEventListener(event, render);
-    }
-    toggle.addEventListener('click', () => {
-      if (audio.paused || audio.ended) {
-        // jsdom's HTMLMediaElement.play throws not-implemented; real Firefox
-        // returns a promise whose rejection (autoplay policy) we swallow —
-        // the user gesture is the click, so it does not fire in practice.
-        try {
-          void audio.play()?.catch?.(() => undefined);
-        } catch {
-          // non-media environment
+
+    handle.startAnimation = (): void => {
+      if (
+        handle.disposed ||
+        handle.animationFrame !== null ||
+        handle.audio.paused ||
+        handle.audio.ended ||
+        prefersReducedMotion() ||
+        typeof globalThis.requestAnimationFrame !== 'function'
+      ) {
+        return;
+      }
+      handle.animationFrame = globalThis.requestAnimationFrame(() => {
+        handle.animationFrame = null;
+        if (
+          handle.disposed ||
+          !handle.audio.isConnected ||
+          handle.audio.paused ||
+          handle.audio.ended
+        ) {
+          return;
         }
-      } else {
-        audio.pause();
-      }
-    });
-    seek.addEventListener('input', () => {
-      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      if (duration > 0) {
-        audio.currentTime = Math.min(Number(seek.value), duration);
-      }
-    });
-    render();
+        handle.render();
+        handle.startAnimation();
+      });
+    };
 
-    player.append(audio, toggle, seek, time);
-    return player;
+    handle.render = (): void => {
+      if (handle.disposed) {
+        return;
+      }
+      const duration = handle.durationSeconds;
+      const engineTime = Number.isFinite(audio.currentTime)
+        ? Math.max(0, audio.currentTime)
+        : 0;
+      // Elapsed follows the engine even when the total is unknown (review): a
+      // decode failure only makes the TOTAL and seeking unknown, it must not
+      // freeze the clip's counting-up clock at 0:00 for its whole run.
+      const currentTime = duration === null ? engineTime : Math.min(engineTime, duration);
+      seek.max = duration === null ? '0' : String(duration);
+      seek.disabled = handle.failed || duration === null;
+      if (!handle.scrubbing && duration !== null) {
+        seek.value = String(currentTime);
+      }
+      time.textContent = `${formatClock(currentTime)} / ${formatDuration(duration)}`;
+      seek.setAttribute(
+        'aria-valuetext',
+        duration === null
+          ? '0 секунд, длительность неизвестна'
+          : `${formatSecondsForA11y(currentTime)} из ${formatSecondsForA11y(duration)}`,
+      );
+      const playing = !handle.failed && !audio.paused && !audio.ended;
+      toggle.classList.toggle('chatgoose-voice-player-playing', playing);
+      toggle.disabled = handle.failed;
+      const toggleLabel = playing
+        ? `Пауза, вариант ${handle.ordinal}`
+        : `Слушать вариант ${handle.ordinal}`;
+      toggle.title = toggleLabel;
+      toggle.setAttribute('aria-label', toggleLabel);
+      seek.setAttribute(
+        'aria-label',
+        `Позиция воспроизведения, вариант ${handle.ordinal}`,
+      );
+      if (handle.failed) {
+        error.textContent =
+          `Не удалось воспроизвести вариант ${handle.ordinal}. Скачайте MP3.`;
+      }
+      if (playing) {
+        handle.startAnimation();
+      } else {
+        stopAnimation();
+      }
+    };
+
+    const finishScrubbing = (event?: PointerEvent): void => {
+      handle.scrubbing = false;
+      if (
+        event &&
+        typeof seek.hasPointerCapture === 'function' &&
+        seek.hasPointerCapture(event.pointerId)
+      ) {
+        try {
+          seek.releasePointerCapture(event.pointerId);
+        } catch {
+          // Capture may already have been released by Firefox.
+        }
+      }
+      handle.render();
+    };
+
+    listen(seek, 'pointerdown', ((event: PointerEvent) => {
+      handle.scrubbing = true;
+      if (typeof seek.setPointerCapture === 'function') {
+        try {
+          seek.setPointerCapture(event.pointerId);
+        } catch {
+          // A synthetic/non-primary pointer may not be capturable.
+        }
+      }
+    }) as EventListener);
+    listen(seek, 'pointerup', ((event: PointerEvent) => {
+      finishScrubbing(event);
+    }) as EventListener);
+    listen(seek, 'pointercancel', ((event: PointerEvent) => {
+      finishScrubbing(event);
+    }) as EventListener);
+    listen(seek, 'lostpointercapture', (() => {
+      finishScrubbing();
+    }) as EventListener);
+    listen(seek, 'change', (() => {
+      finishScrubbing();
+    }) as EventListener);
+    listen(seek, 'input', (() => {
+      const duration = handle.durationSeconds;
+      if (duration !== null) {
+        const requested = Number(seek.value);
+        if (Number.isFinite(requested)) {
+          audio.currentTime = Math.min(Math.max(0, requested), duration);
+        }
+      }
+      handle.render();
+    }) as EventListener);
+    listen(toggle, 'click', (() => {
+      if (handle.failed) {
+        return;
+      }
+      if (audio.paused || audio.ended) {
+        if (audio.ended) {
+          audio.currentTime = 0;
+        }
+        this.playPlayer(handle);
+      } else {
+        this.pausePlayer(handle);
+      }
+    }) as EventListener);
+    listen(audio, 'play', (() => {
+      this.activatePlayer(handle);
+      handle.render();
+    }) as EventListener);
+    listen(audio, 'pause', (() => {
+      handle.playRequest += 1;
+      if (this.activePlayer === handle) {
+        this.activePlayer = null;
+      }
+      stopAnimation();
+      handle.render();
+    }) as EventListener);
+    listen(audio, 'ended', (() => {
+      handle.playRequest += 1;
+      if (this.activePlayer === handle) {
+        this.activePlayer = null;
+      }
+      stopAnimation();
+      handle.render();
+    }) as EventListener);
+    listen(audio, 'timeupdate', (() => {
+      handle.render();
+    }) as EventListener);
+    listen(audio, 'error', (() => {
+      this.failPlayer(handle);
+    }) as EventListener);
+
+    handle.dispose = (): void => {
+      if (handle.disposed) {
+        return;
+      }
+      handle.disposed = true;
+      handle.playRequest += 1;
+      stopAnimation();
+      if (this.activePlayer === handle) {
+        this.activePlayer = null;
+      }
+      for (const registration of listeners) {
+        registration.target.removeEventListener(registration.type, registration.listener);
+      }
+      try {
+        audio.pause();
+      } catch {
+        // A media engine already being torn down needs no further pause.
+      }
+      audio.removeAttribute('src');
+      try {
+        audio.load();
+      } catch {
+        // load() is best-effort in non-media test environments.
+      }
+      player.remove();
+    };
+
+    controls.append(audio, toggle, seek, time);
+    player.append(controls, error);
+    handle.render();
+    return handle;
   }
 
-  private takeTitle(state: VoiceTake['view']['state'], ordinal: number, scriptChars: number): string {
+  private updateTakePlayer(
+    handle: TakePlayerHandle,
+    take: VoiceTake,
+    ordinal: number,
+  ): void {
+    handle.voiceNoteId = take.voiceNoteId;
+    handle.ordinal = ordinal;
+    handle.durationSeconds = take.durationSeconds;
+    handle.render();
+  }
+
+  private activatePlayer(handle: TakePlayerHandle): void {
+    if (this.activePlayer && this.activePlayer !== handle) {
+      this.pausePlayer(this.activePlayer);
+    }
+    this.activePlayer = handle;
+  }
+
+  private playPlayer(handle: TakePlayerHandle): void {
+    this.activatePlayer(handle);
+    const playRequest = handle.playRequest + 1;
+    handle.playRequest = playRequest;
+    try {
+      const playback = handle.audio.play();
+      if (playback) {
+        void playback.catch(() => {
+          if (
+            !handle.disposed &&
+            !handle.failed &&
+            handle.playRequest === playRequest
+          ) {
+            this.failPlayer(handle);
+          }
+        });
+      }
+    } catch {
+      this.failPlayer(handle);
+    }
+    handle.render();
+  }
+
+  private pausePlayer(handle: TakePlayerHandle): void {
+    handle.playRequest += 1;
+    try {
+      handle.audio.pause();
+    } catch {
+      // The next render still clears this panel's active-player ownership.
+    }
+    if (this.activePlayer === handle) {
+      this.activePlayer = null;
+    }
+    handle.render();
+  }
+
+  private failPlayer(handle: TakePlayerHandle): void {
+    if (handle.disposed || handle.failed) {
+      return;
+    }
+    handle.failed = true;
+    handle.playRequest += 1;
+    if (this.activePlayer === handle) {
+      this.activePlayer = null;
+    }
+    try {
+      handle.audio.pause();
+    } catch {
+      // A rejected/corrupt engine may not accept pause().
+    }
+    handle.error.hidden = false;
+    handle.render();
+  }
+
+  private takeTitle(
+    state: VoiceTake['view']['state'],
+    ordinal: number,
+    durationSeconds: number | null,
+  ): string {
     switch (state) {
       case 'completed':
-        return `Вариант ${ordinal} · ${formatDuration(scriptChars)}`;
+        return `Вариант ${ordinal} · ${formatDuration(durationSeconds)}`;
       case 'queued':
       case 'dispatched':
         return `Вариант ${ordinal} генерируется… можно продолжать работать`;

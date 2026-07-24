@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { readFileSync } from 'node:fs';
 
 import { VoiceAttemptController } from '../src/content/voice/attempt-controller.js';
 import { VoiceService } from '../src/background/voice-service.js';
@@ -15,6 +16,11 @@ import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import { VoicePanel, type VoicePanelAttachParams } from '../src/content/voice/voice-panel.js';
 import { MemoryVoiceAttemptStore } from './helpers/voice-attempt-store.js';
 
+const contentStyles = readFileSync(
+  new URL('../src/content/styles.css', import.meta.url),
+  'utf8',
+);
+
 function installDom(): InstanceType<typeof JSDOM> {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>');
   const { window } = dom;
@@ -27,6 +33,8 @@ function installDom(): InstanceType<typeof JSDOM> {
   vi.stubGlobal('HTMLTextAreaElement', window.HTMLTextAreaElement);
   vi.stubGlobal('HTMLAudioElement', window.HTMLAudioElement);
   vi.stubGlobal('Event', window.Event);
+  window.HTMLMediaElement.prototype.pause = vi.fn();
+  window.HTMLMediaElement.prototype.load = vi.fn();
   return dom;
 }
 
@@ -48,6 +56,7 @@ let harness: Harness | null = null;
 function setup(options?: {
   onAttachConfirmed?: () => void;
   onStartNewFromDraft?: (draft: string) => void;
+  decodeAudioDuration?: (bytes: ArrayBuffer) => Promise<number | null>;
 }): Harness {
   const sent: ContentPortMessage[] = [];
   let probe: VoiceComposerProbe = {
@@ -77,6 +86,7 @@ function setup(options?: {
     randomUUID: () => `id-${(uuidCounter += 1)}`,
     createBlobUrl: () => `blob:voice-${(blobCounter += 1)}`,
     revokeBlobUrl: () => undefined,
+    decodeAudioDuration: options?.decodeAudioDuration ?? (async () => 3.85),
     onChange: () => ref.panel?.render(),
     onError: (message) => ref.panel?.handleError(message),
     onAttachGrant: (message) => {
@@ -298,6 +308,16 @@ function buttonByText(root: HTMLElement, needle: string): HTMLButtonElement | un
   );
 }
 
+function cssRule(selector: string): string {
+  const start = contentStyles.indexOf(`${selector} {`);
+  if (start === -1) {
+    throw new Error(`missing CSS selector: ${selector}`);
+  }
+  const open = contentStyles.indexOf('{', start);
+  const close = contentStyles.indexOf('}', open);
+  return contentStyles.slice(open, close);
+}
+
 describe('VoicePanel — лента', () => {
   beforeEach(() => {
     installDom();
@@ -305,10 +325,21 @@ describe('VoicePanel — лента', () => {
   });
 
   afterEach(() => {
+    harness?.panel.dispose();
     harness?.controller.destroy();
     harness = null;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('uses a tall range hit target and Firefox thumb-aligned progress fill', () => {
+    const seekRule = cssRule('.chatgoose-voice-player-seek');
+    expect(seekRule).toContain('height: 28px');
+    expect(seekRule).not.toContain('linear-gradient');
+    expect(cssRule('.chatgoose-voice-player-seek::-moz-range-track'))
+      .toContain('background: var(--chatgoose-line)');
+    expect(cssRule('.chatgoose-voice-player-seek::-moz-range-progress'))
+      .toContain('background: var(--chatgoose-clay-ink)');
   });
 
   it('script phase renders the adapted script, source row, meta, tone chips and the money-honest generate button', async () => {
@@ -427,7 +458,12 @@ describe('VoicePanel — лента', () => {
     const { root } = harness!;
 
     const take = root.querySelector<HTMLElement>('.chatgoose-voice-take');
-    expect(textOf(take!)).toContain('Вариант 1 · 0:06');
+    // The complete ArrayBuffer decoder is the single duration authority.
+    expect(textOf(take!)).toContain('Вариант 1 · 0:03');
+    expect(take?.getAttribute('role')).toBe('group');
+    expect(take?.getAttribute('aria-labelledby')).toBe(
+      take?.querySelector('.chatgoose-voice-take-title')?.id,
+    );
 
     const audio = take!.querySelector<HTMLAudioElement>('audio.chatgoose-voice-audio');
     expect(audio).not.toBeNull();
@@ -440,9 +476,9 @@ describe('VoicePanel — лента', () => {
     const player = take!.querySelector<HTMLElement>('.chatgoose-voice-player');
     expect(player).not.toBeNull();
     const toggle = player!.querySelector<HTMLButtonElement>('.chatgoose-voice-player-toggle');
-    expect(toggle?.getAttribute('aria-label')).toBe('Слушать');
+    expect(toggle?.getAttribute('aria-label')).toBe('Слушать вариант 1');
     expect(player!.querySelector('.chatgoose-voice-player-seek')).not.toBeNull();
-    expect(player!.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:00 / 0:00');
+    expect(player!.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:00 / 0:03');
 
     // Play/pause rides the headless <audio> engine.
     const playSpy = vi.fn(async () => undefined);
@@ -451,31 +487,262 @@ describe('VoicePanel — лента', () => {
     expect(playSpy).toHaveBeenCalledTimes(1);
 
     // A running take renders the pause state and live clock from the engine.
-    Object.defineProperty(audio!, 'duration', { configurable: true, value: 6 });
+    // A bogus Firefox media estimate must never move max/title/clock.
+    Object.defineProperty(audio!, 'duration', { configurable: true, value: 1 });
     Object.defineProperty(audio!, 'paused', { configurable: true, value: false });
-    audio!.currentTime = 3;
+    audio!.currentTime = 2.25;
     audio!.dispatchEvent(new Event('timeupdate'));
-    expect(toggle?.getAttribute('aria-label')).toBe('Пауза');
-    expect(player!.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:03 / 0:06');
+    expect(toggle?.getAttribute('aria-label')).toBe('Пауза, вариант 1');
+    expect(player!.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:02 / 0:03');
 
     // The seek range is modelled in seconds: max tracks the clip duration so
     // one arrow press moves one second, and the thumb follows the engine.
     const seek = player!.querySelector<HTMLInputElement>('.chatgoose-voice-player-seek');
-    expect(seek?.max).toBe('6');
-    expect(seek?.step).toBe('1');
-    expect(seek?.value).toBe('3');
-    seek!.value = '5';
+    expect(seek?.max).toBe('3.85');
+    expect(seek?.step).toBe('any');
+    expect(seek?.value).toBe('2.25');
+    seek!.value = '3.7';
     seek!.dispatchEvent(new Event('input'));
-    expect(audio!.currentTime).toBe(5);
+    expect(audio!.currentTime).toBe(3.7);
+    expect(seek!.getAttribute('aria-valuetext')).toContain('из 3 секунды');
 
     expect(take!.querySelector('.chatgoose-voice-take-download')).not.toBeNull();
+    expect(take!.querySelector('.chatgoose-voice-take-download')?.getAttribute('aria-label'))
+      .toBe('Скачать вариант 1 в MP3');
     const radio = take!.querySelector<HTMLInputElement>('input[type="radio"].chatgoose-voice-take-select');
     expect(radio?.checked).toBe(true);
+    expect(radio?.getAttribute('aria-labelledby')).toBe(
+      take!.querySelector('.chatgoose-voice-take-title')?.id,
+    );
 
     expect(textOf(root)).toContain('+ Ещё вариант');
     const attach = root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach');
     expect(attach?.textContent).toContain('Прикрепить для @alice');
     expect(attach?.disabled).toBe(false);
+  });
+
+  it('keeps duration unknown and seeking disabled when complete-buffer decode fails', async () => {
+    harness?.panel.dispose();
+    harness?.controller.destroy();
+    harness = setup({ decodeAudioDuration: async () => null });
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+
+    const take = harness.root.querySelector<HTMLElement>('.chatgoose-voice-take')!;
+    const audio = take.querySelector<HTMLAudioElement>('audio')!;
+    const seek = take.querySelector<HTMLInputElement>('.chatgoose-voice-player-seek')!;
+    expect(textOf(take)).toContain('Вариант 1 · –:–');
+    expect(take.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:00 / –:–');
+    expect(seek.disabled).toBe(true);
+    expect(seek.max).toBe('0');
+
+    // Even a later authoritative-looking media metadata event is ignored.
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 99 });
+    audio.dispatchEvent(new Event('durationchange'));
+    audio.dispatchEvent(new Event('timeupdate'));
+    expect(take.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:00 / –:–');
+    expect(seek.max).toBe('0');
+
+    // The elapsed clock still follows the engine while the total is unknown —
+    // a decode failure must not freeze a playable clip at 0:00 for its run.
+    Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+    audio.currentTime = 2.4;
+    audio.dispatchEvent(new Event('timeupdate'));
+    expect(take.querySelector('.chatgoose-voice-player-time')?.textContent).toBe('0:02 / –:–');
+    expect(seek.disabled).toBe(true);
+  });
+
+  it('preserves the keyed row, audio, position and focused radio across routine renders', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const row = harness!.root.querySelector<HTMLElement>('.chatgoose-voice-take')!;
+    const audio = row.querySelector<HTMLAudioElement>('audio')!;
+    const radio = row.querySelector<HTMLInputElement>('input[type="radio"]')!;
+    audio.currentTime = 1.75;
+    radio.focus();
+
+    harness!.panel.setFanUsername('alice');
+    await harness!.controller.editScript(`${SCRIPT} changed by chatter`);
+
+    expect(harness!.root.querySelector('.chatgoose-voice-take')).toBe(row);
+    expect(harness!.root.querySelector('audio')).toBe(audio);
+    expect(audio.currentTime).toBe(1.75);
+    expect(harness!.root.querySelector('input[type="radio"]')).toBe(radio);
+    expect(document.activeElement).toBe(radio);
+  });
+
+  it('clears interrupted pointer scrubs and accepts a fractional final-second seek', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const audio = harness!.root.querySelector<HTMLAudioElement>('audio')!;
+    const seek = harness!.root.querySelector<HTMLInputElement>('.chatgoose-voice-player-seek')!;
+
+    seek.dispatchEvent(new Event('pointerdown'));
+    audio.currentTime = 1.25;
+    audio.dispatchEvent(new Event('timeupdate'));
+    expect(seek.value).toBe('0');
+    seek.dispatchEvent(new Event('pointercancel'));
+    expect(seek.value).toBe('1.25');
+
+    seek.dispatchEvent(new Event('pointerdown'));
+    audio.currentTime = 2.5;
+    seek.dispatchEvent(new Event('lostpointercapture'));
+    expect(seek.value).toBe('2.5');
+
+    seek.value = '3.84';
+    seek.dispatchEvent(new Event('input'));
+    expect(audio.currentTime).toBe(3.84);
+  });
+
+  it('arbitrates one active take and exposes media failures without removing download', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    await harness!.controller.generateAnotherTake();
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-3',
+      view: view({
+        voiceNoteId: 2,
+        state: 'completed',
+        audioSha256: 'b'.repeat(64),
+        audioBytesLen: 3,
+        createdAt: '2026-01-01T00:00:01.000Z',
+      }),
+    });
+    await feed({
+      type: 'voice:audioBytes',
+      attemptId,
+      voiceNoteId: 2,
+      bytes: new ArrayBuffer(3),
+    });
+
+    const rows = Array.from(harness!.root.querySelectorAll<HTMLElement>('.chatgoose-voice-take'));
+    const firstAudio = rows[0]!.querySelector<HTMLAudioElement>('audio')!;
+    const secondAudio = rows[1]!.querySelector<HTMLAudioElement>('audio')!;
+    expect(rows.map((row) =>
+      row.querySelector('.chatgoose-voice-player-toggle')?.getAttribute('aria-label')))
+      .toEqual(['Слушать вариант 1', 'Слушать вариант 2']);
+    expect(rows.map((row) =>
+      row.querySelector('.chatgoose-voice-player-seek')?.getAttribute('aria-label')))
+      .toEqual([
+        'Позиция воспроизведения, вариант 1',
+        'Позиция воспроизведения, вариант 2',
+      ]);
+    let firstPaused = true;
+    let secondPaused = true;
+    Object.defineProperty(firstAudio, 'paused', { configurable: true, get: () => firstPaused });
+    Object.defineProperty(secondAudio, 'paused', { configurable: true, get: () => secondPaused });
+    const firstPause = vi.fn(() => {
+      firstPaused = true;
+      firstAudio.dispatchEvent(new Event('pause'));
+    });
+    const secondPause = vi.fn(() => {
+      secondPaused = true;
+      secondAudio.dispatchEvent(new Event('pause'));
+    });
+    firstAudio.pause = firstPause;
+    secondAudio.pause = secondPause;
+    firstAudio.play = vi.fn(async () => {
+      firstPaused = false;
+      firstAudio.dispatchEvent(new Event('play'));
+    });
+    secondAudio.play = vi.fn(async () => {
+      secondPaused = false;
+      secondAudio.dispatchEvent(new Event('play'));
+    });
+
+    rows[0]!.querySelector<HTMLButtonElement>('.chatgoose-voice-player-toggle')!.click();
+    rows[1]!.querySelector<HTMLButtonElement>('.chatgoose-voice-player-toggle')!.click();
+    expect(firstPause).toHaveBeenCalledTimes(1);
+    expect(secondPaused).toBe(false);
+
+    secondAudio.dispatchEvent(new Event('error'));
+    const error = rows[1]!.querySelector<HTMLElement>('.chatgoose-voice-player-error')!;
+    expect(error.getAttribute('aria-live')).toBe('polite');
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toContain('Не удалось воспроизвести вариант 2');
+    expect(rows[1]!.querySelector<HTMLButtonElement>('.chatgoose-voice-player-toggle')?.disabled)
+      .toBe(true);
+    expect(rows[1]!.querySelector<HTMLInputElement>('.chatgoose-voice-player-seek')?.disabled)
+      .toBe(true);
+    expect(rows[1]!.querySelector<HTMLButtonElement>('.chatgoose-voice-take-download')?.disabled)
+      .toBe(false);
+  });
+
+  it('surfaces a rejected play promise as the same polite row-local error', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const audio = harness!.root.querySelector<HTMLAudioElement>('audio')!;
+    audio.play = vi.fn(() => Promise.reject(new Error('decoder refused')));
+
+    harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-player-toggle')!.click();
+    await flush();
+
+    const error = harness!.root.querySelector<HTMLElement>('.chatgoose-voice-player-error')!;
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toContain('Скачайте MP3');
+  });
+
+  it('updates the thumb between timeupdate events with rAF and cancels on pause', async () => {
+    let frameCallback: FrameRequestCallback | null = null;
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frameCallback = callback;
+      return 17;
+    });
+    const cancelFrame = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', requestFrame);
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const audio = harness!.root.querySelector<HTMLAudioElement>('audio')!;
+    const seek = harness!.root.querySelector<HTMLInputElement>('.chatgoose-voice-player-seek')!;
+    let paused = false;
+    Object.defineProperty(audio, 'paused', { configurable: true, get: () => paused });
+
+    audio.dispatchEvent(new Event('play'));
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    audio.currentTime = 1.4;
+    const tick = frameCallback as FrameRequestCallback | null;
+    expect(tick).not.toBeNull();
+    tick!(16);
+    expect(seek.value).toBe('1.4');
+
+    paused = true;
+    audio.dispatchEvent(new Event('pause'));
+    expect(cancelFrame).toHaveBeenCalledWith(17);
+  });
+
+  it('skips rAF interpolation when reduced motion is requested', async () => {
+    const requestFrame = vi.fn(() => 1);
+    vi.stubGlobal('requestAnimationFrame', requestFrame);
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const audio = harness!.root.querySelector<HTMLAudioElement>('audio')!;
+    Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+    audio.dispatchEvent(new Event('play'));
+
+    expect(requestFrame).not.toHaveBeenCalled();
+  });
+
+  it('pauses and unloads media engines when the panel is suspended', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const audio = harness!.root.querySelector<HTMLAudioElement>('audio')!;
+    const pause = vi.fn();
+    const load = vi.fn();
+    audio.pause = pause;
+    audio.load = load;
+
+    harness!.panel.suspendPlayers();
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(audio.hasAttribute('src')).toBe(false);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(harness!.root.querySelector('audio')).toBeNull();
   });
 
   it('«+ Ещё вариант» synthesises the same script under a fresh request', async () => {
