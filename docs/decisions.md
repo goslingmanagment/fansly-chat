@@ -1586,11 +1586,27 @@ proved, and the last Fan Summary push that actually landed. Its day boundary is
 a previous day reads as an empty day rather than yesterday's number. The
 generation hook sits where the coordinator ACCEPTS a result, not in the gateway:
 the gateway request carries no model account, and a stream can still fail
-validation after the kernel has finished. `chatgoose:deviceTokenMeta` records
-only which token is stored here (its prefix) and when it was issued — never the
-token. Its `expiresAt` is kept for support but never rendered: hub expiry slides
-on every use, so a displayed date would be wrong within minutes. A token issued
-before this version has no record, and the pane says so instead of guessing.
+validation after the kernel has finished.
+
+«Last accepted generation» means EVERY feature-lane generation the chatter
+received, not only the single-result operations: a delivered Compare card
+(`compare-operations`) and a delivered voice script (`voice-service`) each burn
+the same quota and each record one generation, so «Активность» can never claim a
+quiet day while the quota visibly drains. The same rule binds the error counter:
+a compare card's terminal failure, the compare run's own terminal failure and a
+voice-script terminal failure all go through `recordHubError`, whose `CG-HUB-`
+filter keeps a Fansly/flow/AI code from inflating a counter labelled «Hub».
+
+`chatgoose:deviceTokenMeta` records only which token is stored here (its prefix),
+when it was issued, and WHICH hub issued it (`issuedFrom`, the normalized base
+URL) — never the token. Sign-out revokes against `issuedFrom`: revoking against
+whatever address the settings show now would, after a hub change, hit the wrong
+hub, read its 401/403 as `already-invalid`, and report a clean sign-out while the
+bearer stayed alive on the issuing hub. Its `expiresAt` is kept for support but
+never rendered: hub expiry slides on every use, so a displayed date would be
+wrong within minutes. A token issued before this version has no record, and the
+pane says so instead of guessing; a record predating `issuedFrom` falls back to
+the current address.
 
 Every device-token custody mutation — sign-in, re-issue and sign-out — runs
 inside ONE background FIFO. Without it a sign-in landing mid-sign-out could
@@ -1603,8 +1619,22 @@ touches the settings blob, then best-effort revokes with the captured token. Its
 four outcomes are reported honestly — `revoked`, `already-invalid`,
 `unreachable` (wiped locally, the hub could not confirm) and the loud
 `wipe-failed`; a rejected sign-out REQUEST is reported as `wipe-failed`, because
-the background may have wiped nothing. The post-sign-in status refresh introduced
-in 1.9.x is preserved and now also repaints the «Статус» rows.
+the background may have wiped nothing. The wipe happens TWICE: the page's
+debounced settings chain writes `agencyHubApiKey` outside the auth FIFO, so a
+delayed autosave (or a second options tab) could restore a usable legacy key
+during the up-to-5s revoke. The page therefore cancels its pending write and
+joins any running one before asking for the sign-out, and the background re-wipes
+both custody keys once the revoke settles, whatever the outcome. A failed re-wipe
+downgrades the answer to `wipe-failed` — local custody outranks server truth. The
+post-sign-in status refresh introduced in 1.9.x is preserved and now also
+repaints the «Статус» rows.
+
+A LOCAL read that rejected is its own state, never an empty one: `[]` from
+`getAiQuotaByPage` and `null` from `getSpendersStatus`/`getOpsDaily` are exactly
+what a quiet install looks like, so falling back to them after a transport
+failure would make the pane assert «сегодня генераций не было» and «доска ещё не
+открывалась» about data nobody could read. Each of the three carries its own
+failure flag into both the row and the support report.
 
 Neither the AI quota nor the popup's `getAiQuotaStatus` operation changes: the
 popup keeps its freshest-single read; the cabinet uses the new per-page map.

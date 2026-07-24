@@ -5,6 +5,7 @@ import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { FanslyClient } from '../src/background/fansly-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
 import { createMockRuntimePort, postedMessages } from './helpers/port.js';
+import { getOpsDaily, resetOpsDailyMemory } from '../src/background/ops-daily.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
@@ -484,6 +485,75 @@ describe('VoiceService script runner', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A voice script is a feature-lane generation like any other: it burns the
+  // same quota, so «Активность» must see it and the Hub error counter must see
+  // its hub-lane failures (E59 amendment). No storage area is installed in this
+  // suite, so ops-daily serves its in-memory day — reset it per case.
+  describe('ops-daily instrumentation', () => {
+    it('records a delivered script as an accepted generation', async () => {
+      resetOpsDailyMemory();
+      const harness = createHarness();
+
+      await harness.service.handleMessage(TAB_ID, {
+        type: 'voice:scriptStart',
+        attemptId: ATTEMPT_ID,
+        draftText: 'Tell Alice about tonight',
+        replyTone: 'flirty',
+      }, harness.emit);
+
+      await vi.waitFor(async () => {
+        expect(await getOpsDaily()).toMatchObject({
+          lastGeneration: {
+            feature: 'voice-script',
+            accountId: 'creator-1',
+            accountLabel: 'creator',
+            pageLabel: 'creator-fs',
+          },
+          pageByAccount: { 'creator-1': 'creator-fs' },
+        });
+      });
+    });
+
+    it('counts a hub-lane script failure and ignores a non-hub one', async () => {
+      resetOpsDailyMemory();
+      const hubHarness = createHarness({
+        streamFeature: vi.fn(async () => {
+          throw new ChatGooseError('hub_request_failed');
+        }),
+      });
+      await hubHarness.service.handleMessage(TAB_ID, {
+        type: 'voice:scriptStart',
+        attemptId: ATTEMPT_ID,
+        draftText: 'Tell Alice about tonight',
+        replyTone: 'flirty',
+      }, hubHarness.emit);
+
+      await vi.waitFor(async () => {
+        expect(await getOpsDaily()).toMatchObject({
+          hubErrorsTotal: 1,
+          hubErrors: [{ code: 'CG-HUB-07' }],
+          lastGeneration: null,
+        });
+      });
+
+      // CG-API-05 is not a Hub failure; the counter carries the Hub's name and
+      // must not be inflated by an AI-side one.
+      const apiHarness = createHarness({
+        streamFeature: vi.fn(async () => {
+          throw new ChatGooseError('service_unavailable');
+        }),
+      });
+      await apiHarness.service.handleMessage(TAB_ID, {
+        type: 'voice:scriptStart',
+        attemptId: CLIENT_REQUEST_ID_2,
+        draftText: 'Tell Alice about tonight',
+        replyTone: 'flirty',
+      }, apiHarness.emit);
+
+      expect(await getOpsDaily()).toMatchObject({ hubErrorsTotal: 1 });
+    });
   });
 });
 

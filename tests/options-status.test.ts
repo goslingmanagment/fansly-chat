@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COPY } from '../src/options/copy.js';
 import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
-import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
+import { emptyOpsDaily, mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
 import type {
   AgencyHubHealthResponse,
@@ -173,6 +173,44 @@ describe('options «Статус» pane', () => {
     expect(row(page, 'spenders').textContent).not.toContain('FLAG OFF');
   });
 
+  it('reports a failed LOCAL read as unavailable, never as an empty day', async () => {
+    // `[]` and `null` are exactly what these three sources look like on a quiet
+    // install, so reusing them after a rejected read would have the pane assert
+    // «сегодня генераций не было» about state nobody could read.
+    const dead = () => Promise.reject(new Error('runtime channel closed'));
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        quotaByPage: dead,
+        spenders: dead,
+        opsDaily: dead,
+      },
+    });
+
+    expect(row(page, 'ai').textContent).toContain(COPY.status.aiUnavailable);
+    expect(row(page, 'ai').textContent).not.toContain(COPY.status.aiEmpty);
+    expect(row(page, 'activity').textContent).toContain(COPY.status.activityUnavailable);
+    expect(row(page, 'spenders').textContent).toContain(COPY.status.spendersUnavailable);
+    expect(row(page, 'spenders').textContent).not.toContain(COPY.status.spendersEmpty);
+    // Still observations, not blockers: the readiness verdict is unchanged.
+    expect(hero(page).dataset.heroState).toBe('ready');
+
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(page.window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    const report = writeText.mock.calls[0]?.[0] as unknown as string;
+    // The support snapshot repeats the row, not the empty-state claim.
+    expect(report).toContain(COPY.status.aiUnavailable);
+    expect(report).toContain(COPY.status.activityUnavailable);
+    expect(report).toContain(COPY.status.spendersUnavailable);
+    expect(report).not.toContain(COPY.status.activityEmpty);
+  });
+
   it('keeps no_permission a distinct amber verdict with a grant action, not a dead core', async () => {
     const page = await mountOptionsPage({
       settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'tok' },
@@ -207,6 +245,203 @@ describe('options «Статус» pane', () => {
     // …and never strands its sibling as a skeleton.
     expect(row(page, 'access').dataset.status).toBe('ready');
     expect(row(page, 'access').textContent).toContain('lora-chatter');
+  });
+
+  // ── P2 guard suite (ported from 9399fd4:tests/options-status.test.ts onto the
+  // cabinet selectors and COPY). The invariants are unchanged; only the
+  // selectors and the «Войти заново» destination moved (a rail route instead of
+  // a scrollIntoView).
+  describe('hydration guards', () => {
+    it('paints 401 with a «Войти заново» action that routes to the Hub pane', async () => {
+      const page = await mountOptionsPage({
+        settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'stale' },
+        runtime: { identity: { ok: false, reason: 'unauthorized' } },
+      });
+
+      const access = row(page, 'access');
+      expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('401');
+      expect(access.dataset.tone).toBe('bad');
+      expect(access.textContent).toContain(COPY.status.accessRejected);
+
+      const button = access.querySelector('button');
+      expect(button?.textContent).toBe(COPY.status.reLogin);
+      button!.click();
+      await page.flushAsync();
+      // The rail route is the single source of truth for which pane is visible.
+      expect(page.window.location.hash).toBe('#hub');
+      expect(page.document.querySelector<HTMLElement>('[data-pane="hub"]')?.hidden).toBe(false);
+    });
+
+    it('in-flight variant: a hub-A run started before the field became hub B drops its paint', async () => {
+      // Hydration STARTS under hub A (mount fires it, both reads issued via
+      // allSettled); the chatter re-types the URL to hub B while A's health is
+      // still awaited; A's reply then lands → the pre-paint re-check (live sig is
+      // now hub B ≠ the expected hub-A snapshot) drops the paint.
+      let releaseHealth!: (value: AgencyHubHealthResponse) => void;
+      const deferredHealthA = new Promise<AgencyHubHealthResponse>((resolve) => {
+        releaseHealth = resolve;
+      });
+      const page = await mountOptionsPage({
+        settings: { agencyHubBaseUrl: 'https://hub-a.example', agencyHubDeviceToken: 'tok' },
+        runtime: { health: () => deferredHealthA },
+      });
+
+      const urlInput = page.document.querySelector<HTMLInputElement>(
+        '[data-pane="hub"] input[type="url"]',
+      );
+      urlInput!.value = 'https://hub-b.example'; // typed while A's health is in flight
+      releaseHealth(HEALTH_UP);
+      await page.flushAsync();
+
+      expect(row(page, 'hub').querySelector('.chatgoose-badge-mono')?.textContent).not.toBe('UP');
+    });
+
+    it('delayed-START variant: a persisted-B run never issues once the field already shows hub C', async () => {
+      // Hold the post-persist connection test open so the field can be re-typed
+      // DURING the gap before that persist's hydration reaches its first line.
+      // Guard step 1 (live sig ≠ expected) must return before any request.
+      vi.useFakeTimers(); // the 350 ms autosave debounce is drained by flushAsync
+      try {
+        let healthCalls = 0;
+        let releaseConnTest!: () => void;
+        const conn = new Promise<void>((resolve) => { releaseConnTest = resolve; });
+        const page = await mountOptionsPage({
+          settings: { agencyHubBaseUrl: 'https://hub-a.example', agencyHubDeviceToken: 'tok' },
+          runtime: {
+            health: () => { healthCalls += 1; return HEALTH_UP; },
+          },
+        });
+        expect(healthCalls).toBe(1); // the mount hydration for hub A
+
+        // Re-point sendMessage post-mount so the connection test the post-persist
+        // block awaits hangs, holding the gap open.
+        const browserRef = (page.window as unknown as {
+          browser: { runtime: { sendMessage: (message: unknown) => Promise<unknown> } };
+        }).browser;
+        browserRef.runtime.sendMessage = vi.fn(async (message: unknown) => {
+          switch ((message as { type?: string }).type) {
+            case 'ensureStorageReady': return { ready: true };
+            case 'getAgencyHubHealth': healthCalls += 1; return HEALTH_UP;
+            case 'getAgencyHubIdentity': return IDENTITY_AUTH;
+            case 'testAgencyHubConnection': await conn; return { ok: true };
+            case 'getSessionsSnapshot': return [];
+            case 'getAiQuotaByPage': return {};
+            case 'getSpendersStatus': return null;
+            case 'getOpsDaily': return emptyOpsDaily();
+            default: return undefined;
+          }
+        });
+
+        const urlInput = page.document.querySelector<HTMLInputElement>(
+          '[data-pane="hub"] input[type="url"]',
+        );
+        urlInput!.value = 'https://hub-b.example';
+        urlInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+        await page.flushAsync(); // persist B; its post-persist IIFE parks on the hung test
+
+        urlInput!.value = 'https://hub-c.example'; // typed during the gap (not persisted)
+        releaseConnTest();
+        await page.flushAsync(); // hydrate(sig B) sees live = hub C and bails before any read
+
+        expect(healthCalls).toBe(1); // the stale persisted-B run issued no hub read
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('drops an out-of-order same-signature hydration run (run counter)', async () => {
+      // Two hydrations share the stored signature: run1 from mount, run2 from a
+      // permission grant. run2 (newest) resolves FIRST and paints; run1 resolves
+      // LATE and must be dropped by the run counter, never repaint.
+      const healthResolvers: Array<(value: AgencyHubHealthResponse) => void> = [];
+      const nextHealth = (): Promise<AgencyHubHealthResponse> =>
+        new Promise<AgencyHubHealthResponse>((resolve) => { healthResolvers.push(resolve); });
+      const page = await mountOptionsPage({
+        settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'tok' },
+        permissionGranted: true,
+        runtime: { health: () => nextHealth(), identity: IDENTITY_AUTH },
+      });
+      expect(healthResolvers).toHaveLength(1); // run1 (mount) is parked
+
+      const browserRef = (page.window as unknown as {
+        browser: { permissions: { onAdded: { addListener: ReturnType<typeof vi.fn> } } };
+      }).browser;
+      const onAdded = browserRef.permissions.onAdded.addListener.mock.calls[0]?.[0] as () => void;
+      onAdded(); // permission grant → run2 (same signature)
+      await page.flushAsync();
+      expect(healthResolvers).toHaveLength(2);
+
+      // run2 resolves first → paints UP (it is the current run).
+      healthResolvers[1]!(HEALTH_UP);
+      await page.flushAsync();
+      expect(row(page, 'hub').querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
+
+      // run1 resolves LATE with a different verdict → its paint must be dropped.
+      healthResolvers[0]!({ ...HEALTH_UP, status: 'degraded', dbLatencyMs: 9 });
+      await page.flushAsync();
+      expect(row(page, 'hub').querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
+    });
+
+    it('re-polls sessions on visibilitychange and closes the Fansly step in place', async () => {
+      // A chatter who connects a model in another tab and returns must see the
+      // Fansly row close without a reload — the SAME snapshot+paint flow.
+      vi.useFakeTimers();
+      try {
+        let sessions: SessionSnapshotEntry[] = [];
+        const page = await readyMount({ sessions: () => sessions });
+        expect(hero(page).dataset.heroState).toBe('route');
+        expect(row(page, 'fansly').textContent).toContain(COPY.status.fanslyEmpty);
+
+        sessions = [LIVE_SESSION]; // the model is now connected in another tab
+
+        vi.advanceTimersByTime(6_000); // past the re-poll throttle
+        Object.defineProperty(page.document, 'visibilityState', {
+          value: 'visible',
+          configurable: true,
+        });
+        page.document.dispatchEvent(new page.window.Event('visibilitychange'));
+        await page.flushAsync();
+
+        expect(row(page, 'fansly').dataset.tone).toBe('green');
+        expect(hero(page).dataset.heroState).toBe('ready');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('never rebuilds the mappings table under a focused control on a re-poll', async () => {
+      // `renderAccountMappings` calls replaceChildren: rebuilding while a persona
+      // <select> has focus destroys the element the chatter is using (and closes
+      // its open dropdown). A background re-poll must leave it alone.
+      vi.useFakeTimers();
+      try {
+        const page = await readyMount({ sessions: () => [LIVE_SESSION] });
+        page.window.location.hash = '#accounts';
+        page.window.dispatchEvent(new page.window.Event('hashchange'));
+        await page.flushAsync();
+
+        const select = page.document.querySelector<HTMLSelectElement>(
+          '[data-account-mapping-row="acc-1"] select',
+        );
+        expect(select).not.toBeNull();
+        select!.focus();
+        expect(page.document.activeElement).toBe(select);
+
+        vi.advanceTimersByTime(6_000);
+        Object.defineProperty(page.document, 'visibilityState', {
+          value: 'visible',
+          configurable: true,
+        });
+        page.document.dispatchEvent(new page.window.Event('visibilitychange'));
+        await page.flushAsync();
+
+        // Same element, still focused — not a fresh one built over the chatter.
+        expect(select!.isConnected).toBe(true);
+        expect(page.document.activeElement).toBe(select);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('hides the Контракт row unless debug mode is on', async () => {

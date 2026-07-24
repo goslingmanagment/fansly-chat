@@ -178,6 +178,12 @@ interface StatusReportModel {
   quotaByPage: AiQuotaStatus[];
   spenders: SpendersObservation | null;
   opsDaily: OpsDailySnapshot | null;
+  /** Which LOCAL reads REJECTED. An empty `quotaByPage` and a null `spenders`
+   * are ambiguous on their own — they are equally the honest-empty state and
+   * the failed-read state — so the failure is carried explicitly. Without it
+   * both the rows and the report would print «сегодня генераций не было» about
+   * a source nobody managed to read. */
+  unavailable: { quota: boolean; opsDaily: boolean; spenders: boolean };
   readiness: Array<{ key: string; label: string; done: boolean }>;
 }
 
@@ -219,20 +225,24 @@ export function buildStatusReport(model: StatusReportModel): string {
   }`);
 
   lines.push(`${COPY.status.aiLabel}: ${
-    model.quotaByPage.length === 0
-      ? COPY.status.aiEmpty
-      : model.quotaByPage
-          .map((entry) => `${entry.pageLabel}=${entry.remainingRequestsToday ?? unknown}`)
-          .join(', ')
+    model.unavailable.quota
+      ? COPY.status.aiUnavailable
+      : model.quotaByPage.length === 0
+        ? COPY.status.aiEmpty
+        : model.quotaByPage
+            .map((entry) => `${entry.pageLabel}=${entry.remainingRequestsToday ?? unknown}`)
+            .join(', ')
   }`);
 
   const ops = model.opsDaily;
   lines.push(`${COPY.status.activityLabel}: ${
-    !ops || !ops.lastGeneration
-      ? COPY.status.activityEmpty
-      : `${ops.lastGeneration.feature} · ${ops.lastGeneration.pageLabel} · ${
-          new Date(ops.lastGeneration.at).toISOString()
-        }`
+    model.unavailable.opsDaily
+      ? COPY.status.activityUnavailable
+      : !ops || !ops.lastGeneration
+        ? COPY.status.activityEmpty
+        : `${ops.lastGeneration.feature} · ${ops.lastGeneration.pageLabel} · ${
+            new Date(ops.lastGeneration.at).toISOString()
+          }`
   }`);
   if (ops) {
     lines.push(`${COPY.hub.errorsLabel}: ${ops.hubErrorsTotal}`);
@@ -242,9 +252,11 @@ export function buildStatusReport(model: StatusReportModel): string {
   }
 
   lines.push(`${COPY.status.spendersLabel}: ${
-    model.spenders === null
-      ? COPY.status.spendersEmpty
-      : `${model.spenders.outcome} · ${model.spenders.streamState ?? unknown}`
+    model.unavailable.spenders
+      ? COPY.status.spendersUnavailable
+      : model.spenders === null
+        ? COPY.status.spendersEmpty
+        : `${model.spenders.outcome} · ${model.spenders.streamState ?? unknown}`
   }`);
 
   lines.push(`${COPY.status.contractLabel}: ${
@@ -820,6 +832,12 @@ async function render(): Promise<void> {
   // theme/count edit through a second read-modify-write path.
   let persistAgencyHubSettings: () => Promise<void> = async () => undefined;
 
+  // Also assigned below: the pre-sign-out quiesce of that same writer. «Выйти»
+  // destroys credentials background-side, and this page's debounced chain writes
+  // `agencyHubApiKey` OUTSIDE the auth FIFO — a save that lands during the
+  // (up-to-5s) revoke would restore a usable legacy key after the wipe.
+  let quiesceSettingsBeforeSignOut: () => Promise<void> = async () => undefined;
+
   const runAgencyHubConnectionTest = async (options?: {
     force?: boolean;
     saveFirst?: boolean;
@@ -1289,6 +1307,14 @@ async function render(): Promise<void> {
       hubSignOutConfirmButton.disabled = true;
       hubSignOutCancelButton.disabled = true;
       hubSignOutStatus.textContent = COPY.hub.signOutRunning;
+      // Quiesce this page's settings writer FIRST. A debounced snapshot still
+      // pending here carries `agencyHubApiKey`, and letting it land during the
+      // background's revoke window would resurrect a usable key after the wipe
+      // — the handler would then honestly report `revoked` about a credential
+      // that is back on disk. Cancel the pending write and join any already-
+      // running one before the wipe begins.
+      await quiesceSettingsBeforeSignOut();
+      if (disposed) return;
       // The background owns the whole sequence — capture, wipe, revoke — so a
       // pagehide mid-revoke can never leave the credentials on disk. The token
       // never crosses this boundary; only the outcome does.
@@ -1494,6 +1520,7 @@ async function render(): Promise<void> {
     quotaByPage: [],
     spenders: null,
     opsDaily: null,
+    unavailable: { quota: false, opsDaily: false, spenders: false },
     readiness: [],
   };
   // The account ids that currently have a CAPTURED session. The persona step
@@ -1896,6 +1923,19 @@ async function render(): Promise<void> {
       sendRuntimeRequest('getOpsDaily'),
     ]);
     if (disposed) return;
+    // A rejected read is NOT an empty one. `[]` and `null` are what these
+    // sources honestly look like on a quiet day, so falling back to them after a
+    // transport failure would have the pane assert «сегодня генераций не было»
+    // and «доска ещё не открывалась» about state nobody could read. Each read
+    // carries its own failure flag into the row AND into the support report.
+    const quotaUnavailable = quotaResult.status === 'rejected';
+    const spendersUnavailable = spendersResult.status === 'rejected';
+    const opsUnavailable = opsResult.status === 'rejected';
+    statusModel.unavailable = {
+      quota: quotaUnavailable,
+      opsDaily: opsUnavailable,
+      spenders: spendersUnavailable,
+    };
     const spenders = spendersResult.status === 'fulfilled'
       ? asSpendersObservation(spendersResult.value)
       : null;
@@ -1915,7 +1955,11 @@ async function render(): Promise<void> {
         (right.remainingRequestsToday ?? Number.POSITIVE_INFINITY),
     );
     statusModel.quotaByPage = worstFirst;
-    if (worstFirst.length === 0) {
+    if (quotaUnavailable) {
+      // `set` also clears any detail lines a previous successful read painted —
+      // per-page numbers under an «недоступно» fact would be stale.
+      statusRows.ai.set({ badge: '—', tone: 'neutral', fact: COPY.status.aiUnavailable });
+    } else if (worstFirst.length === 0) {
       statusRows.ai.set({ badge: '—', tone: 'neutral', fact: COPY.status.aiEmpty });
     } else {
       const remaining = worstFirst[0]?.remainingRequestsToday ?? null;
@@ -1924,8 +1968,11 @@ async function render(): Promise<void> {
       if (remaining === null) {
         // No numeric cap reported for the worst page — a green badge would claim
         // headroom nobody observed. Stay neutral and say the limit is unknown.
+        // Its own COPY key, never `aiNoLimit` with the page prefix cut off: the
+        // row's subject is already the page, and string surgery on a template
+        // breaks silently the first time the phrasing changes.
         tone = 'neutral';
-        fact = COPY.status.aiNoLimit.replace('{page} · ', '');
+        fact = COPY.status.aiNoLimitPageless;
       } else if (remaining === 0) {
         tone = 'bad';
         fact = COPY.status.aiExhausted;
@@ -1947,7 +1994,15 @@ async function render(): Promise<void> {
     // counters. No generation today is an OBSERVATION, not a fault.
     statusModel.opsDaily = opsDaily;
     const lastGeneration = opsDaily?.lastGeneration ?? null;
-    if (!lastGeneration) {
+    if (opsUnavailable) {
+      // «Сегодня генераций не было» is a claim about the day; a failed read
+      // cannot make it. Say the row could not be read instead.
+      statusRows.activity.set({
+        badge: '—',
+        tone: 'neutral',
+        fact: COPY.status.activityUnavailable,
+      });
+    } else if (!lastGeneration) {
       statusRows.activity.set({ badge: '—', tone: 'neutral', fact: COPY.status.activityEmpty });
       statusRows.activity.setDetailLines(
         opsDaily && opsDaily.hubErrorsTotal > 0
@@ -1973,7 +2028,15 @@ async function render(): Promise<void> {
     // observed», NOT «flag off»: inventing FLAG OFF would claim the projection
     // is disabled when nobody has ever looked.
     statusModel.spenders = spenders;
-    if (!spenders) {
+    if (spendersUnavailable) {
+      // Not «доска ещё не открывалась» — that would blame the chatter for a
+      // read this page failed to make.
+      statusRows.spenders.set({
+        badge: '—',
+        tone: 'neutral',
+        fact: COPY.status.spendersUnavailable,
+      });
+    } else if (!spenders) {
       statusRows.spenders.set({ badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty });
     } else if (spenders.outcome === 'fail') {
       statusRows.spenders.set({ badge: 'FAIL', tone: 'bad', fact: COPY.status.spendersFail });
@@ -2285,6 +2348,20 @@ async function render(): Promise<void> {
     // when the current form differs from the active queued snapshot.
     saveSettingsDebounced.cancel();
     return queueSettingsSave(true);
+  };
+
+  quiesceSettingsBeforeSignOut = async (): Promise<void> => {
+    // DROP the pending snapshot rather than flushing it: it may carry the very
+    // legacy key the sign-out is about to destroy, and writing it seconds before
+    // the wipe only widens the resurrection window. Clearing the dirty flags
+    // also stops a queued blur from re-scheduling the same snapshot.
+    saveSettingsDebounced.cancel();
+    settingsDirty = false;
+    agencyHubApiKeyDirty = false;
+    // An already-running write is past cancellation — join it so the wipe
+    // strictly follows it. `settingsSaveChain` never rejects (queueSettingsSave
+    // attaches its own catch), so this cannot fail the sign-out.
+    await (settingsSaveChain ?? Promise.resolve());
   };
 
   // Toggle the cost warning the moment the picker changes, ahead of any save,
@@ -2772,18 +2849,42 @@ async function render(): Promise<void> {
     }
   };
 
+  // True while the chatter is inside the mappings table — a persona <select> has
+  // focus (possibly with its dropdown open). `replaceChildren` there destroys
+  // the focused element, closing the popup and dropping the keyboard position.
+  const mappingsTableHasFocus = (): boolean => {
+    const active = document.activeElement;
+    return active instanceof Node &&
+      active !== document.body &&
+      mappingsTable.contains(active);
+  };
+
   // Paint the account section + the Fansly status row from ONE sessions result.
   // Shared by the mount hydration and the focus/visibility re-poll so the
   // identity-rekey read path (loadStorageState after the snapshot resolves) is
   // never duplicated: the snapshot request owns rekey background-side, and this
   // reads the reconciled state exactly once afterward.
-  const applySessionsResult = async (result: SessionsResult): Promise<void> => {
+  //
+  // `repoll` marks the background refresh (focus/visibility), which the chatter
+  // did not ask for and must not feel: it never rebuilds a table the chatter is
+  // working inside, and a transient failure leaves the healthy table standing
+  // instead of painting «refresh failed» over live data.
+  const applySessionsResult = async (
+    result: SessionsResult,
+    options: { repoll?: boolean } = {},
+  ): Promise<void> => {
     if (disposed) {
       return;
     }
+    const repoll = options.repoll === true;
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
-      renderAccountMappings([], true);
+      // On the mount path the failure state IS the honest first paint. On a
+      // re-poll the table already shows a successfully loaded snapshot, and a
+      // transient snapshot failure is no reason to replace it with a warning.
+      if (!repoll) {
+        renderAccountMappings([], true);
+      }
       paintFanslyStatusRow([], true);
       return;
     }
@@ -2799,12 +2900,22 @@ async function render(): Promise<void> {
       state.accountMappings = refreshedState.accountMappings;
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
-      renderAccountMappings(result.sessions, false);
+      // A background re-poll must never yank the control under the chatter's
+      // hands: `renderAccountMappings` calls `replaceChildren`, which would
+      // destroy a focused persona <select> (and its open dropdown) mid-choice.
+      // The status row still repaints — it holds no focusable state — and the
+      // next re-poll (or any explicit action) rebuilds the table once focus
+      // has left it.
+      if (!repoll || !mappingsTableHasFocus()) {
+        renderAccountMappings(result.sessions, false);
+      }
       paintFanslyStatusRow(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);
       if (!disposed) {
-        renderAccountMappings([], true);
+        if (!repoll) {
+          renderAccountMappings([], true);
+        }
         paintFanslyStatusRow([], true);
       }
     }
@@ -2830,7 +2941,7 @@ async function render(): Promise<void> {
     }
     sessionsRepollInFlight = true;
     try {
-      await applySessionsResult(await loadSessionsResult());
+      await applySessionsResult(await loadSessionsResult(), { repoll: true });
     } finally {
       sessionsRepollInFlight = false;
     }

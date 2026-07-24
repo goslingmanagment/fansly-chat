@@ -156,6 +156,11 @@ export const COPY = {
     aiByPageNote: 'по страницам · худшая первой',
     aiRemaining: '{page} · осталось {n}',
     aiNoLimit: '{page} · лимит не сообщён',
+    /** The pageless variant of `aiNoLimit` — the worst page's own fact line,
+     * where the label is already the row's subject. A dedicated key, not
+     * `aiNoLimit` with the `{page} · ` prefix stripped: that surgery breaks
+     * silently the moment the phrasing changes. */
+    aiNoLimitPageless: 'лимит не сообщён',
     aiExhausted: 'осталось 0 · сброс 00:00 UTC',
     activityEmpty: 'сегодня генераций не было',
     activityHubErrors: 'ошибки Hub за сегодня: {n}',
@@ -165,6 +170,12 @@ export const COPY = {
     spendersFlagOff: 'проекция выключена',
     spendersNotAllowlisted: 'страница не в allowlist',
     spendersUnsupported: 'платформа не поддерживается',
+    /** A LOCAL read that REJECTED. Distinct from the honest-empty states above:
+     * «сегодня генераций не было» and «доска ещё не открывалась» are claims
+     * about the install, and a failed read has no right to make them. */
+    aiUnavailable: 'состояние квоты недоступно — перепроверь',
+    activityUnavailable: 'состояние активности недоступно — перепроверь',
+    spendersUnavailable: 'состояние доски недоступно — перепроверь',
     contractMatches: 'совпадает с ядром',
     contractDrift: 'контракт разошёлся с SDK',
     contractUnknown: 'контракт неизвестен',

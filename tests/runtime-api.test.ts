@@ -943,6 +943,87 @@ describe('runtime-api signOutAgencyHub', () => {
     expect(passedSettings.agencyHubDeviceToken).toBe('agency_hub_device_abc');
   });
 
+  it('revokes against the ISSUING hub after the base URL moved, not the current one', async () => {
+    // The token was minted on hub A; the chatter later re-pointed the extension
+    // at hub B. Revoking against B gets a 401/403 that maps to
+    // `already-invalid`, so the UI would report a clean sign-out while the
+    // bearer stayed alive on A. `issuedFrom` is the only record of who minted it.
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
+        version: 1,
+        keyPrefix: 'abc',
+        issuedAt: 1,
+        expiresAt: '2026-08-01T00:00:00.000Z',
+        issuedFrom: 'https://hub-a.example',
+      },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b.example' },
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(
+        async (
+          _settings: { agencyHubBaseUrl: string; agencyHubDeviceToken: string },
+          _signal: AbortSignal,
+        ) => 'revoked' as const,
+      ),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'revoked' });
+    const [passedSettings] = agencyHubClient.revokeDeviceToken.mock.calls[0]!;
+    expect(passedSettings.agencyHubBaseUrl).toBe('https://hub-a.example');
+  });
+
+  it('falls back to the current base URL for a token issued before issuedFrom existed', async () => {
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      // A v1 record written by an older build: no issuing address recorded.
+      [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
+        version: 1, keyPrefix: 'abc', issuedAt: 1, expiresAt: '2026-08-01T00:00:00.000Z',
+      },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b.example' },
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(
+        async (
+          _settings: { agencyHubBaseUrl: string; agencyHubDeviceToken: string },
+          _signal: AbortSignal,
+        ) => 'revoked' as const,
+      ),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    await send({ type: 'signOutAgencyHub' });
+    const [passedSettings] = agencyHubClient.revokeDeviceToken.mock.calls[0]!;
+    expect(passedSettings.agencyHubBaseUrl).toBe('https://hub-b.example');
+  });
+
+  it('re-wipes after the revoke: a legacy key restored mid-revoke does not survive', async () => {
+    // The options page's debounced settings chain writes `agencyHubApiKey`
+    // OUTSIDE the auth FIFO. A delayed autosave (or a second options tab)
+    // landing during the up-to-5s revoke would put a usable key back on disk
+    // AFTER the wipe, while this handler still answered `revoked`.
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => {
+        // The wipe already landed…
+        expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+        // …and now a stale page write resurrects the key mid-revoke.
+        mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY] = 'legacy-key-resurrected';
+        return 'revoked' as const;
+      }),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'revoked' });
+    // EMPTY string, never removal (E19) — and never the resurrected value.
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+  });
+
   it('wipes BEFORE the revoke resolves: a deferred revoke still leaves storage wiped', async () => {
     // Background durability: the wipe must land even if the page closes mid-revoke.
     mockStorage = createStorage({

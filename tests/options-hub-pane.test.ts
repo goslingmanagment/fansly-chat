@@ -226,5 +226,45 @@ describe('options «Agency Hub» pane', () => {
       expect((raw.settings as Record<string, unknown>).uiTheme).toBe(themeBefore);
       expect(raw.settings).not.toHaveProperty('agencyHubDeviceToken');
     });
+
+    it('drops a pending legacy-key write instead of letting it land during the revoke', async () => {
+      // The page's debounced settings chain writes `agencyHubApiKey` OUTSIDE
+      // the background's auth FIFO. A snapshot still armed when «Выйти» is
+      // confirmed would fire during the (up-to-5s) revoke and put a usable key
+      // back on disk while the handler honestly reported `revoked`. Real timers
+      // here on purpose: the point is that the 350 ms debounce genuinely
+      // elapses while the sign-out is in flight.
+      let releaseSignOut!: () => void;
+      const held = new Promise<void>((resolve) => { releaseSignOut = resolve; });
+      const page = await signedInMount({
+        runtime: {
+          signOut: async () => {
+            await held;
+            return { outcome: 'revoked' } as const;
+          },
+        },
+      });
+      const keyInput = page.document.querySelector<HTMLInputElement>(
+        'input[type="password"][autocomplete="off"]',
+      );
+      expect(keyInput).not.toBeNull();
+
+      keyInput!.value = 'legacy-typed-SECRET';
+      keyInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+
+      hubButton(page, COPY.hub.signOut).click();
+      hubButton(page, COPY.hub.signOut.replace('…', '')).click();
+
+      // The sign-out is parked in the background; more than the debounce window
+      // passes. The armed snapshot must never have been written.
+      await new Promise((resolve) => { setTimeout(resolve, 500); });
+      expect(page.getRawStorage()[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+
+      releaseSignOut();
+      await page.flushAsync();
+      expect(page.getRawStorage()[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+      // The field mirrors what is actually stored — an empty custody key.
+      expect(keyInput!.value).toBe('');
+    });
   });
 });

@@ -139,8 +139,12 @@ async function write(snapshot: OpsDailySnapshot): Promise<void> {
   try {
     await area.set({ [STORAGE_KEY]: snapshot });
   } catch {
-    // Counters are best-effort telemetry for a settings pane; the memory copy
-    // above still serves this worker's lifetime.
+    // Counters are best-effort telemetry for a settings pane — a failed write is
+    // never allowed to break the operation that recorded it. The memory copy
+    // above does NOT rescue this update: `read` prefers the storage area
+    // whenever `get` works, so an area that reads but fails to write keeps
+    // serving the stale disk record and this increment is simply lost. The
+    // memory copy only covers an area that is absent or failing on read too.
   }
 }
 

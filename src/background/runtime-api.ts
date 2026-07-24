@@ -24,6 +24,7 @@ import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
   AgencyHubDeviceTokenMeta,
+  AgencyHubSignOutResponse,
   PopupStatus,
   RecapStatusResponse,
   SpendersBuildPayload,
@@ -109,6 +110,12 @@ async function readDeviceTokenMeta(): Promise<AgencyHubDeviceTokenMeta | null> {
       keyPrefix: value.keyPrefix,
       issuedAt: value.issuedAt,
       expiresAt: value.expiresAt,
+      // Optional: records written before the issuing-hub fix have no address.
+      // A non-string is dropped rather than trusted — sign-out then falls back
+      // to the current base URL instead of revoking against garbage.
+      ...(typeof value.issuedFrom === 'string' && value.issuedFrom
+        ? { issuedFrom: value.issuedFrom }
+        : {}),
     };
   } catch {
     return null;
@@ -618,6 +625,10 @@ export function registerRuntimeApi({
               keyPrefix: issued.keyPrefix,
               issuedAt: Date.now(),
               expiresAt: issued.expiresAt,
+              // WHICH hub minted this token. Sign-out revokes against this
+              // address, so a later base-URL change cannot leave a live bearer
+              // orphaned on the issuing hub. Never the token itself.
+              issuedFrom: baseUrl,
             });
             return {
               ok: true,
@@ -649,7 +660,14 @@ export function registerRuntimeApi({
           // rekey/reconcile with a pre-rekey snapshot.
           const before = await readStorageState();
           const capturedToken = before.settings.agencyHubDeviceToken.trim();
-          const capturedBaseUrl = before.settings.agencyHubBaseUrl;
+          // Revoke against the hub that ISSUED the token, not the address the
+          // settings show now. If the base URL moved from hub A to hub B after
+          // the token was issued, a revoke aimed at B returns 401/403, which
+          // maps to `already-invalid` — the UI would report a clean sign-out
+          // while the bearer stayed alive on A. Pre-`issuedFrom` records (and a
+          // dropped/foreign metadata write) fall back to the captured address.
+          const capturedMeta = await readDeviceTokenMeta();
+          const capturedBaseUrl = capturedMeta?.issuedFrom || before.settings.agencyHubBaseUrl;
 
           // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable
           // step. Write ONLY the two top-level custody storage keys, never the
@@ -676,10 +694,43 @@ export function registerRuntimeApi({
           // The metadata describes a token that no longer exists here.
           await writeDeviceTokenMeta(null);
 
+          // (d) The SECOND, idempotent wipe. The revoke below can take up to 5s,
+          // and the options page's debounced settings chain writes
+          // `agencyHubApiKey` outside this lock: a delayed autosave (or a second
+          // options tab) landing in that window would restore a usable legacy key
+          // AFTER the wipe while this handler still reported `revoked`. Re-wiping
+          // once the revoke has settled closes that window. EMPTY strings again,
+          // never key removal (E19), and never the settings blob.
+          const rewipeCustody = async (): Promise<string | null> => {
+            try {
+              await browser.storage.local.set({
+                [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+                [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+              });
+              return null;
+            } catch (error) {
+              return error instanceof Error ? error.message.slice(0, 200) : String(error);
+            }
+          };
+          // A failed re-wipe is the loud case for the same reason the first wipe
+          // is: a credential restored mid-revoke may still be on disk, and only
+          // `wipe-failed` tells the chatter to look. It overrides the revoke's
+          // own verdict on purpose — local custody outranks server truth here.
+          const settle = async (
+            outcome: AgencyHubSignOutResponse,
+          ): Promise<AgencyHubSignOutResponse> => {
+            const rewipeError = await rewipeCustody();
+            if (rewipeError === null) {
+              return outcome;
+            }
+            logWarn('Sign-out custody re-wipe failed', { error: rewipeError });
+            return { outcome: 'wipe-failed', error: rewipeError };
+          };
+
           // (c) Best-effort revoke AFTER the wipe, with the CAPTURED token as the
           // bearer (the stored copy is already ''). Nothing to revoke without one.
           if (!capturedToken) {
-            return { outcome: 'already-invalid' };
+            return settle({ outcome: 'already-invalid' });
           }
           const controller = new AbortController();
           const timeout = globalThis.setTimeout(
@@ -691,14 +742,14 @@ export function registerRuntimeApi({
               { agencyHubBaseUrl: capturedBaseUrl, agencyHubDeviceToken: capturedToken },
               controller.signal,
             );
-            return { outcome };
+            return await settle({ outcome });
           } catch (error) {
             // Abort/network/5xx/missing-base-URL — server truth unknown. Already
             // wiped locally; the token dies by sliding-expiry.
             logWarn('Device token revoke unreachable', {
               error: error instanceof Error ? error.message.slice(0, 200) : String(error),
             });
-            return { outcome: 'unreachable' };
+            return await settle({ outcome: 'unreachable' });
           } finally {
             globalThis.clearTimeout(timeout);
           }

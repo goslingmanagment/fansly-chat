@@ -1015,12 +1015,20 @@ export type AgencyHubDeviceTokenResponse =
  * before this version — the pane says so instead of guessing.
  *
  * `expiresAt` is recorded for support, never rendered: hub expiry slides on
- * every use, so a displayed date would be wrong within minutes. */
+ * every use, so a displayed date would be wrong within minutes.
+ *
+ * `issuedFrom` is the NORMALIZED hub base URL the token was issued by. Sign-out
+ * revokes against it rather than against whatever address the settings happen to
+ * show now: if the base URL moved from hub A to hub B after the token was
+ * issued, a revoke aimed at B gets a 401/403 (mapped to `already-invalid`) while
+ * the bearer stays alive on A. Absent for tokens issued before this version —
+ * those fall back to the current address. */
 export interface AgencyHubDeviceTokenMeta {
   version: 1;
   keyPrefix: string;
   issuedAt: number;
   expiresAt: string;
+  issuedFrom?: string;
 }
 
 /** «Выйти» sign-out outcome. Neither the token nor the wipe cross the runtime

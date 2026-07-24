@@ -587,10 +587,18 @@ input[type='checkbox'] {
   background: var(--chatgoose-bg2);
 }
 
+/* The `[hidden]` rule below MUST stay next to this one: an author `display`
+   rule beats the UA `[hidden] { display: none }` (origin precedes specificity).
+   Without it the two-step sign-out CONFIRM row would render permanently —
+   destroying the device token and the legacy key in a single click. */
 .chatgoose-card-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.chatgoose-card-actions[hidden] {
+  display: none;
 }
 
 .chatgoose-version-tag {
@@ -749,7 +757,11 @@ input[type='checkbox'] {
 }
 
 /* ── Readiness headline above the status rows ── */
+/* `position: relative` is load-bearing: this card carries the absolutely
+   positioned version tag, and without a containing block here the tag would
+   anchor to the viewport and drift across a wide window. */
 .chatgoose-readiness {
+  position: relative;
   margin: 20px 20px 0;
   padding: 16px 20px;
   border-radius: var(--chatgoose-radius-menu);
@@ -776,6 +788,8 @@ input[type='checkbox'] {
   font-size: 13px;
 }
 
+/* Same origin trap as the pane and the card actions: the list is `hidden` while
+   nothing is open, and only an author-origin `[hidden]` rule actually hides it. */
 .chatgoose-readiness-open {
   display: flex;
   gap: 6px;
@@ -783,6 +797,10 @@ input[type='checkbox'] {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.chatgoose-readiness-open[hidden] {
+  display: none;
 }
 
 .chatgoose-readiness-open li {
