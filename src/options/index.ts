@@ -26,6 +26,7 @@ import {
   formatAccountHeading,
   shortenAccountId,
 } from './sessions.js';
+import { OPTIONS_PANES } from '../shared/options-routes.js';
 import { createShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
@@ -316,7 +317,12 @@ async function render(): Promise<void> {
   // Panes are built once and shown/hidden; sections below are appended into
   // their pane instead of into the page root. The recovery gates above return
   // before this point — they are deliberately outside the shell.
-  const shell = createShell(root);
+  // «Хоткеи» enables with its pane content (plan task 12); until then the rail
+  // hides the item and a #hotkeys deep link falls back to «Статус».
+  const shell = createShell(
+    root,
+    OPTIONS_PANES.filter((pane) => pane !== 'hotkeys'),
+  );
   cleanupTasks.push(() => shell.dispose());
 
   // ─── Hero ──────────────────────────────────────────────────
@@ -1592,9 +1598,11 @@ async function render(): Promise<void> {
       settingsSnapshotVersion += 1;
       agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
       saveSettingsDebounced.cancel();
+      // The barrier freezes editors, not navigation: the read-only emergency
+      // mode must keep every pane reachable through the rail.
       for (const control of root.querySelectorAll<
         HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement
-      >('input, select, button, textarea')) {
+      >('input, select, textarea, button:not(.chatgoose-cabinet-item)')) {
         control.disabled = true;
       }
       const warning = document.createElement('div');

@@ -82,6 +82,28 @@ describe('options cabinet shell', () => {
     shell.dispose();
   });
 
+  it('hides disabled panes from the rail and falls back on their deep links', async () => {
+    dom.window.location.hash = '#hotkeys';
+    const { createShell } = await import('../src/options/shell.js');
+    const root = mountRoot();
+    const enabled = OPTIONS_PANES.filter((pane) => pane !== 'hotkeys');
+    const shell = createShell(root, enabled);
+
+    // No rail item for the disabled pane, but its pane element still exists so
+    // a later wave can enable it without re-mounting anything.
+    expect(root.querySelectorAll('.chatgoose-cabinet-item')).toHaveLength(enabled.length);
+    expect(root.querySelector('[data-pane-micro="hotkeys"]')).toBeNull();
+
+    // The #hotkeys deep link lands on the default pane, never a blank screen.
+    expect(shell.panes.status.hidden).toBe(false);
+    expect(shell.panes.hotkeys.hidden).toBe(true);
+
+    // Micro updates for a disabled pane are a no-op rather than a crash.
+    shell.setMicro('hotkeys', dom.window.document.createTextNode('x'));
+
+    shell.dispose();
+  });
+
   it('opens on «Статус» when there is no hash', async () => {
     const { createShell } = await import('../src/options/shell.js');
     const root = mountRoot();

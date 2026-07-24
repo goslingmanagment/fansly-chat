@@ -70,7 +70,6 @@ export const COPY = {
     generation: 'Генерация',
     hotkeys: 'Хоткеи',
     appearance: 'Вид',
-    version: 'Версия',
   },
 
   sections: {
@@ -85,12 +84,11 @@ export const COPY = {
     generationHint: 'Сколько сообщений диалога уходит в контекст каждой фичи.',
     appearanceTitle: 'Вид',
     appearanceHint: 'Один семейный стиль, светлый и тёмный.',
-    versionTitle: 'Версия',
-    versionHint: 'Firefox обновляет расширение сам; форсировать — about:addons.',
   },
 
-  version: {
-    changelogButton: 'Changelog',
+  hubSettings: {
+    portScopeNote:
+      'Firefox выдаёт доступ к хосту целиком, а не по портам, поэтому {origin} покрывает указанный URL {url}.',
   },
 
   hero: {

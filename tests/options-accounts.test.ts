@@ -781,6 +781,14 @@ describe('Options page settings and read-only personas', () => {
     expect(barrier?.getAttribute('role')).toBe('alert');
     expect(quickInput.disabled).toBe(true);
 
+    // The barrier freezes editors, not navigation: rail items stay clickable
+    // so the read-only page still lets the chatter inspect every pane.
+    const railItems = document.querySelectorAll<HTMLButtonElement>('.chatgoose-cabinet-item');
+    expect(railItems.length).toBeGreaterThan(0);
+    for (const item of railItems) {
+      expect(item.disabled).toBe(false);
+    }
+
     releaseFirstStorageSet?.();
     await flushMicrotasks();
     expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);

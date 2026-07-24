@@ -3,6 +3,7 @@ import {
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
 import type { UserFacingError } from '../shared/types.js';
+import { COPY } from './copy.js';
 
 export interface AgencyHubPermissionCheckResult {
   granted: boolean;
@@ -52,7 +53,9 @@ export function buildAgencyHubPermissionScopeNote(
     return null;
   }
 
-  return `Firefox выдаёт доступ к хосту целиком, а не по портам, поэтому ${originPattern} покрывает указанный URL ${normalized}.`;
+  return COPY.hubSettings.portScopeNote
+    .replace('{origin}', originPattern)
+    .replace('{url}', normalized);
 }
 
 export function buildAgencyHubConnectionSignature(

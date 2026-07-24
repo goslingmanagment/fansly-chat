@@ -11,6 +11,7 @@
 
 import { COPY } from './copy.js';
 import {
+  DEFAULT_OPTIONS_ROUTE,
   formatOptionsHash,
   OPTIONS_PANES,
   parseOptionsHash,
@@ -57,8 +58,17 @@ export function navigateTo(pane: PaneKey, code?: string): void {
   view().location.hash = formatOptionsHash({ pane, code: code ?? null });
 }
 
-export function createShell(root: HTMLElement): ShellHandles {
+/**
+ * `enabledPanes` — the rail shows only these; a deep link to a pane outside
+ * the list falls back to the default route. Panes themselves are built for
+ * every key so a later wave can enable a rail item without re-mounting.
+ */
+export function createShell(
+  root: HTMLElement,
+  enabledPanes: readonly PaneKey[] = OPTIONS_PANES,
+): ShellHandles {
   const doc = root.ownerDocument;
+  const enabled = new Set<PaneKey>(enabledPanes);
 
   const layout = doc.createElement('div');
   layout.className = 'chatgoose-cabinet';
@@ -81,11 +91,24 @@ export function createShell(root: HTMLElement): ShellHandles {
   const main = doc.createElement('div');
   main.className = 'chatgoose-cabinet-main';
 
-  const items = {} as Record<PaneKey, HTMLButtonElement>;
-  const micros = {} as Record<PaneKey, HTMLElement>;
+  const items: Partial<Record<PaneKey, HTMLButtonElement>> = {};
+  const micros: Partial<Record<PaneKey, HTMLElement>> = {};
   const panes = {} as Record<PaneKey, HTMLElement>;
 
   for (const pane of OPTIONS_PANES) {
+    const paneElement = doc.createElement('div');
+    paneElement.className = 'chatgoose-cabinet-pane';
+    paneElement.dataset.pane = pane;
+    paneElement.setAttribute('role', 'region');
+    paneElement.setAttribute('aria-label', RAIL_LABELS[pane]);
+    paneElement.hidden = true;
+    main.append(paneElement);
+    panes[pane] = paneElement;
+
+    if (!enabled.has(pane)) {
+      continue;
+    }
+
     const item = doc.createElement('button');
     item.type = 'button';
     item.className = 'chatgoose-cabinet-item';
@@ -103,17 +126,8 @@ export function createShell(root: HTMLElement): ShellHandles {
     item.addEventListener('click', () => navigateTo(pane));
     rail.append(item);
 
-    const paneElement = doc.createElement('div');
-    paneElement.className = 'chatgoose-cabinet-pane';
-    paneElement.dataset.pane = pane;
-    paneElement.setAttribute('role', 'region');
-    paneElement.setAttribute('aria-label', RAIL_LABELS[pane]);
-    paneElement.hidden = true;
-    main.append(paneElement);
-
     items[pane] = item;
     micros[pane] = micro;
-    panes[pane] = paneElement;
   }
 
   const railFootSlot = doc.createElement('div');
@@ -124,16 +138,21 @@ export function createShell(root: HTMLElement): ShellHandles {
   root.append(layout);
 
   const setActive = (pane: PaneKey): void => {
+    const target = enabled.has(pane) ? pane : DEFAULT_OPTIONS_ROUTE.pane;
     for (const key of OPTIONS_PANES) {
-      const active = key === pane;
+      const active = key === target;
       // `hidden` alone is not enough: an author display rule beats the UA
       // `[hidden]` rule, so styles.css carries the matching guard.
       panes[key].hidden = !active;
-      items[key].classList.toggle('chatgoose-cabinet-item-active', active);
+      const item = items[key];
+      if (!item) {
+        continue;
+      }
+      item.classList.toggle('chatgoose-cabinet-item-active', active);
       if (active) {
-        items[key].setAttribute('aria-current', 'page');
+        item.setAttribute('aria-current', 'page');
       } else {
-        items[key].removeAttribute('aria-current');
+        item.removeAttribute('aria-current');
       }
     }
   };
@@ -152,10 +171,14 @@ export function createShell(root: HTMLElement): ShellHandles {
     panes,
     setActive,
     setMicro: (pane, node) => {
+      const micro = micros[pane];
+      if (!micro) {
+        return;
+      }
       if (node) {
-        micros[pane].replaceChildren(node);
+        micro.replaceChildren(node);
       } else {
-        micros[pane].replaceChildren();
+        micro.replaceChildren();
       }
     },
     railFootSlot,
