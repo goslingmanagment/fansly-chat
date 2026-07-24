@@ -220,11 +220,11 @@ async function loadOptionsPage(options: {
     return;
   }
   await vi.waitFor(() => {
-    getSectionByTitle('Connection Status');
+    getSectionByTitle('Account Mappings');
   }, { timeout: 2000 });
   if (options.waitForHydration !== false) {
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Connection Status').dataset.sessionHydration).toBe('ready');
+      expect(getSectionByTitle('Account Mappings').dataset.sessionHydration).toBe('ready');
     }, { timeout: 2000 });
   }
 }
@@ -304,15 +304,17 @@ describe('Options page account sections', () => {
     });
 
     const mappingsSection = getSectionByTitle('Account Mappings');
-    const connectionSection = getSectionByTitle('Connection Status');
 
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
     expect(mappingsSection.textContent).toContain('Account ID: active-resolved');
     expect(mappingsSection.textContent).toContain('Account ID: mappedOffline');
     expect(mappingsSection.textContent).not.toContain('stale');
-    expect(connectionSection.textContent).toContain('Account ID: active-resolved');
-    expect(connectionSection.textContent).not.toContain('mappedOffline');
-    expect(connectionSection.textContent).not.toContain('stale');
+    const activeRow = mappingsSection
+      .querySelector<HTMLElement>('[data-account-mapping-row="active-resolved"]')!;
+    expect(activeRow.textContent).toContain('Connected');
+    const offlineRow = mappingsSection
+      .querySelector<HTMLElement>('[data-account-mapping-row="mappedOffline"]')!;
+    expect(offlineRow.textContent).toContain('Disconnected');
   });
 
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
@@ -328,13 +330,11 @@ describe('Options page account sections', () => {
 
     const personalityCard = getSectionByTitle('Model Personalities')
       .querySelector<HTMLElement>('[data-persona-key="p1"]')!;
-    const connectionSection = getSectionByTitle('Connection Status');
     const mappingsSection = getSectionByTitle('Account Mappings');
 
     expect(personalityCard.textContent).toContain('Closer');
-    expect(connectionSection.dataset.sessionHydration).toBe('loading');
-    expect(connectionSection.textContent).toContain('Loading live connection status');
     expect(mappingsSection.dataset.sessionHydration).toBe('loading');
+    expect(mappingsSection.textContent).toContain('Loading Fansly accounts');
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
 
     // getSessionsSnapshot owns identity rekey/reconciliation in the real
@@ -353,7 +353,7 @@ describe('Options page account sections', () => {
     }]);
 
     await vi.waitFor(() => {
-      expect(connectionSection.dataset.sessionHydration).toBe('ready');
+      expect(mappingsSection.dataset.sessionHydration).toBe('ready');
       expect(mappingsSection.textContent).toContain('Account ID: canonical');
     });
 
@@ -424,12 +424,11 @@ describe('Options page account sections', () => {
 
     snapshot.reject(new Error('Fansly identity timed out'));
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Connection Status').dataset.sessionHydration).toBe('failed');
       expect(getSectionByTitle('Account Mappings').dataset.sessionHydration).toBe('failed');
     });
 
     expect(getSectionByTitle('Account Mappings').textContent).toContain('Account ID: offline-account');
-    expect(getSectionByTitle('Connection Status').textContent).toContain('Could not load live connection status');
+    expect(getSectionByTitle('Account Mappings').textContent).toContain('Live account refresh failed');
     expect(document.body.contains(quickInput)).toBe(true);
 
     quickInput.value = '40';
@@ -439,9 +438,9 @@ describe('Options page account sections', () => {
     }, { timeout: 2000 });
   });
 
-  it('dedupes connection status rows by canonical account id using the newest snapshot entry', async () => {
+  it('shows the newest snapshot entry when sessions collide on a canonical account', async () => {
     await loadOptionsPage({
-      state: makeState(),
+      state: makeState({ knownAccounts: ['resolved'] }),
       sessions: [
         {
           legacyAccountId: 'legacy-1',
@@ -462,13 +461,60 @@ describe('Options page account sections', () => {
       ],
     });
 
-    const connectionSection = getSectionByTitle('Connection Status');
-    const cards = connectionSection.querySelectorAll('.chatgoose-card');
+    const mappingsSection = getSectionByTitle('Account Mappings');
 
-    expect(cards).toHaveLength(1);
-    expect(connectionSection.textContent).toContain('Newer');
-    expect(connectionSection.textContent).not.toContain('Older');
-    expect(connectionSection.textContent).toContain('Account ID: resolved');
+    expect(mappingsSection.textContent).toContain('Newer');
+    expect(mappingsSection.textContent).not.toContain('Older');
+    expect(mappingsSection.textContent).toContain('Account ID: resolved');
+  });
+
+  it('summarizes install health in the hero strip', async () => {
+    await loadOptionsPage({
+      state: makeState({ knownAccounts: ['resolved'] }),
+      sessions: [{
+        legacyAccountId: 'legacy',
+        resolvedAccountId: 'resolved',
+        username: 'creator',
+        displayName: 'Creator',
+        connected: true,
+        lastSeenAt: 5,
+      }],
+    });
+
+    const strip = document.querySelector<HTMLElement>('.chatgoose-hero-strip')!;
+    expect(strip.textContent).toContain('1 of 1 accounts live');
+    expect(strip.textContent).toContain('Personas: 1');
+  });
+
+  it('saves the theme picked in the segmented control', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const darkRadio = document.querySelector<HTMLInputElement>(
+      'input[name="chatgoose-ui-theme"][value="dark"]',
+    )!;
+    darkRadio.checked = true;
+    darkRadio.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(currentState.settings.uiTheme).toBe('dark');
+    }, { timeout: 2000 });
+  });
+
+  it('folds the sign-in form once a device token is active', async () => {
+    const state = makeState();
+    state.settings.agencyHubDeviceToken = 'device-x';
+    await loadOptionsPage({ state, sessions: [] });
+
+    const signInUser = document.querySelector<HTMLInputElement>(
+      'input[autocomplete="username"]',
+    )!;
+    expect(signInUser.closest('[hidden]')).not.toBeNull();
+    const reissue = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Re-issue device token')!;
+    expect(reissue.hidden).toBe(false);
+
+    reissue.click();
+    expect(signInUser.closest('[hidden]')).toBeNull();
   });
 });
 
@@ -1083,7 +1129,7 @@ describe('Options page coach settings', () => {
 
   const getRecapWarning = (): HTMLElement | null =>
     Array.from(
-      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-section-desc'),
+      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-meta'),
     ).find((node) => node.textContent?.includes('Full Recap loads up to')) ?? null;
 
   it('renders coach memory + auto-recap fields with stored defaults and a hidden warning', async () => {

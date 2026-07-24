@@ -5,6 +5,14 @@ function getNormalizedUsername(username: string | null | undefined): string | nu
   return normalized || null;
 }
 
+/** 18-digit Fansly ids don't read as headings; show enough to tell accounts
+ * apart. The full id stays available in the "Account ID:" meta line. */
+export function shortenAccountId(accountId: string): string {
+  return accountId.length > 12
+    ? `${accountId.slice(0, 4)}…${accountId.slice(-4)}`
+    : accountId;
+}
+
 export function formatAccountHeading(
   accountId: string,
   session: SessionSnapshotEntry | null | undefined,
@@ -21,47 +29,28 @@ export function formatAccountHeading(
   if (displayName) {
     return displayName;
   }
-  return session?.resolvedAccountId ?? accountId;
-}
-
-export function formatAccountMeta(
-  accountId: string,
-  session: SessionSnapshotEntry | null | undefined,
-): string {
-  const resolvedAccountId = session?.resolvedAccountId ?? accountId;
-  return `Account ID: ${resolvedAccountId}`;
+  return shortenAccountId(session?.resolvedAccountId ?? accountId);
 }
 
 export function buildSessionLookup(
   sessions: SessionSnapshotEntry[],
 ): Map<string, SessionSnapshotEntry> {
   const lookup = new Map<string, SessionSnapshotEntry>();
+  // Newest wins on key collisions — two captures of the same canonical
+  // account must not let a stale name shadow the live one.
+  const put = (key: string, session: SessionSnapshotEntry): void => {
+    const existing = lookup.get(key);
+    if (!existing || session.lastSeenAt > existing.lastSeenAt) {
+      lookup.set(key, session);
+    }
+  };
 
   sessions.forEach((session) => {
-    lookup.set(session.legacyAccountId, session);
+    put(session.legacyAccountId, session);
     if (session.resolvedAccountId) {
-      lookup.set(session.resolvedAccountId, session);
+      put(session.resolvedAccountId, session);
     }
   });
 
   return lookup;
-}
-
-export function buildConnectionRows(
-  sessions: SessionSnapshotEntry[],
-): Array<{ accountId: string; session: SessionSnapshotEntry }> {
-  const deduped = new Map<string, SessionSnapshotEntry>();
-
-  sessions.forEach((session) => {
-    const canonicalAccountId = session.resolvedAccountId ?? session.legacyAccountId;
-    const existing = deduped.get(canonicalAccountId);
-    if (!existing || session.lastSeenAt > existing.lastSeenAt) {
-      deduped.set(canonicalAccountId, session);
-    }
-  });
-
-  return Array.from(deduped.entries()).map(([accountId, session]) => ({
-    accountId,
-    session,
-  }));
 }
