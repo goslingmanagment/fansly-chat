@@ -75,6 +75,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
+| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page |
 
 ## Entries
 
@@ -1493,3 +1494,46 @@ keeps its layout and uses the shared technical-detail formatter. One
 deadline semantics, preferring `retryAtMs` and deriving it from
 `retryAfterMs` only when needed. No automatic retry, send behavior, fail-closed
 truncation rule, SDK pin, vendor code, or storage schema changes.
+
+**E59 (2026-07-25).** The settings page becomes a «Кабинет»: a left rail of
+sections with one pane visible at a time, «Статус» first. The frame is a
+single-pass render — every pane is built ONCE and then shown or hidden, never
+re-mounted. Re-mounting would hand a second writer to the serialized settings
+chain and re-create custody inputs mid-flight (E19/E37/E51); showing/hiding
+keeps element identity, so an in-progress edit survives navigation. `hidden`
+alone does not hide a pane: an author `display` rule beats the UA
+`[hidden] { display: none }` rule (origin precedes specificity), so
+`.chatgoose-cabinet-pane[hidden] { display: none }` is a required companion of
+any pane display rule and is pinned by a test.
+
+The route lives in the URL hash and nowhere else: `#<pane>` or
+`#<pane>:<code>`, parsed by the DOM-free `src/shared/options-routes.ts` so the
+background and content script can deep-link into a pane (and later highlight an
+E58 error code) without importing page modules. Unparseable input falls back to
+«Статус» — a rotted link must never render a blank settings page. A rail click
+only writes the hash; the `hashchange` listener paints it, so links and clicks
+take the identical path, and `dispose()` (registered in the page's existing
+render cleanup) drops that listener.
+
+Copy is Russian and lives in one dictionary, `src/options/copy.ts`; panes never
+inline a literal. Technical terms stay Latin (Agency Hub, device token, Fansly,
+Spenders, Fan Summary). The dictionary does NOT carry error texts: the E58
+registry in `src/shared/errors.ts` remains the single canonical source for every
+error code, message and description, and string pins in tests import COPY rather
+than duplicating it. Hotkey names are typed as a total `Record<HotkeyAction,
+string>`, so a new shortcut fails typecheck until it is named.
+
+The three extension pages stop reaching for the Google Fonts CDN: the family
+faces ship from `assets/fonts`, copied to `dist/fonts` by the build, declared
+with `@font-face url('fonts/…')` in the options and popup stylesheets, and
+pinned by `tests/local-fonts.test.ts` (WOFF2 magic per file, no external font
+host on any page, the build copy step). The pages are `lang="ru"`.
+
+Two boundaries hold for the whole 2.0 effort. First, storage: everything the
+cabinet learns about the install (daily operations, account presence, local
+account labels, device-token metadata, last-seen version) belongs in its OWN
+`storage.local` operational key with its own `version: 1` and a FIFO mutation
+queue — the settings blob and its schema stay at v15, and hub credential
+custody (E19) is untouched. Second, the changelog stays a WEB page next to the
+update feed; the extension only links to it. Zero changelog content ships in
+the XPI.

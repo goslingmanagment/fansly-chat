@@ -20,6 +20,7 @@ import {
   labeledField,
   setStatusPill,
 } from './dom.js';
+import { COPY } from './copy.js';
 import {
   buildSessionLookup,
   formatAccountHeading,
@@ -101,8 +102,8 @@ function createCopyableId(fullId: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'chatgoose-copy-id';
-  button.title = `Copy ${fullId}`;
-  const idText = `Account ID: ${fullId}`;
+  button.title = COPY.accounts.idCopyTitle.replace('{id}', fullId);
+  const idText = `${COPY.accounts.idPrefix}${fullId}`;
   button.textContent = idText;
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
   button.addEventListener('click', () => {
@@ -110,7 +111,7 @@ function createCopyableId(fullId: string): HTMLButtonElement {
       ?.writeText(fullId)
       .then(() => {
         button.classList.add('chatgoose-copy-id-done');
-        button.textContent = 'Copied ✓';
+        button.textContent = COPY.accounts.idCopied;
         if (restoreTimer !== undefined) {
           clearTimeout(restoreTimer);
         }
