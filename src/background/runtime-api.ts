@@ -79,6 +79,22 @@ function isDebugPromptViewer(sender: browser.runtime.MessageSender): boolean {
   }
 }
 
+/** Options' formatAccountHeading ladder minus its id fallback — the popup
+ * renders ids itself when no human name has resolved yet. */
+function formatSessionAccountName(
+  session: { resolvedUsername: string | null; resolvedDisplayName: string | null } | null,
+): string | null {
+  const displayName = session?.resolvedDisplayName?.trim() || null;
+  const username = session?.resolvedUsername?.trim().replace(/^@+/, '') || null;
+  if (displayName && username && displayName.replace(/^@+/, '') !== username) {
+    return `${displayName} (@${username})`;
+  }
+  if (username) {
+    return `@${username}`;
+  }
+  return displayName;
+}
+
 interface ValidVoiceAttemptSender {
   tabId: number;
   groupId: string;
@@ -239,6 +255,8 @@ export function registerRuntimeApi({
             compareCardCount: 0,
             compareDraftCount: 0,
             accountLabel: 'Not connected',
+            accountName: null,
+            fanName: null,
             aiQuota: null,
           } satisfies PopupStatus;
         }
@@ -302,6 +320,13 @@ export function registerRuntimeApi({
           accountLabel:
             mappedPersonalityName ??
             (accountId ? 'Unmapped account' : 'Not connected'),
+          accountName: formatSessionAccountName(session),
+          // 'fan' is the operations-side placeholder when no real name
+          // resolved — a placeholder is not a name.
+          fanName:
+            context.fanDisplayName && context.fanDisplayName !== 'fan'
+              ? context.fanDisplayName
+              : null,
           // Freshest same-day observation across pages: chatters run one
           // page per browser session, and resolving the exact label would
           // cost a hub round-trip the popup can't afford.

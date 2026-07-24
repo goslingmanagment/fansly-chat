@@ -14,11 +14,16 @@ function installDom() {
 }
 
 function makeStatus(overrides: Partial<PopupStatus> = {}): PopupStatus {
-  // The popup only reads accountLabel/accountId/groupId/connected.
+  // The popup reads accountLabel/accountId/accountName/groupId/fanName/
+  // connected/hasApiKey/aiQuota.
   return {
     accountId: 'acc-1',
     groupId: 'group-1',
     connected: true,
+    hasApiKey: true,
+    accountName: null,
+    fanName: null,
+    aiQuota: null,
     accountLabel: 'Closer',
     ...overrides,
   } as unknown as PopupStatus;
@@ -62,6 +67,116 @@ describe('Popup', () => {
     await vi.waitFor(() => {
       expect(rootText()).toContain("Couldn't reach ChatGoose");
       expect(rootText()).toContain('Open Settings');
+    });
+  });
+
+  it('shows the Fansly connection state as a pill', async () => {
+    await loadPopup(async () => makeStatus({ connected: false }));
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Fansly not connected');
+    });
+
+    await loadPopup(async () => makeStatus({ connected: true }));
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Fansly connected');
+      expect(rootText()).not.toContain('Fansly not connected');
+    });
+  });
+
+  it('flags a missing Agency Hub configuration and stays quiet otherwise', async () => {
+    await loadPopup(async () => makeStatus({ hasApiKey: false }));
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Agency Hub not set up');
+    });
+
+    await loadPopup(async () => makeStatus({ hasApiKey: true }));
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Fansly connected');
+    });
+    expect(rootText()).not.toContain('Agency Hub not set up');
+  });
+
+  it('shortens long ids and copies the full value on click', async () => {
+    const writeText = vi.fn(async () => undefined);
+    await loadPopup(async () =>
+      makeStatus({ accountId: '737077689877278720', groupId: null }),
+    );
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('7370…8720');
+    });
+    expect(rootText()).toContain('No active chat');
+
+    const button = document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy');
+    expect(button?.title).toBe('Copy 737077689877278720');
+    button?.click();
+
+    expect(writeText).toHaveBeenCalledWith('737077689877278720');
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Copied');
+    });
+  });
+
+  it('prefers human names over ids and still copies the id', async () => {
+    const writeText = vi.fn(async () => undefined);
+    await loadPopup(async () =>
+      makeStatus({
+        accountId: '737077689877278720',
+        accountName: 'Lora Belle (@lorabelle)',
+        groupId: '766790514371469312',
+        fanName: 'BigTipper92',
+      }),
+    );
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Lora Belle (@lorabelle)');
+      expect(rootText()).toContain('BigTipper92');
+    });
+    expect(rootText()).not.toContain('7370…8720');
+
+    const button = document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy');
+    expect(button?.title).toBe('Copy 737077689877278720');
+    button?.click();
+
+    expect(writeText).toHaveBeenCalledWith('737077689877278720');
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Copied');
+    });
+  });
+
+  it('renders the remaining AI quota', async () => {
+    await loadPopup(async () =>
+      makeStatus({
+        aiQuota: {
+          pageLabel: 'lora-1',
+          remainingRequestsToday: 494,
+          exhausted: false,
+          observedAt: 1,
+        },
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('AI quota');
+      expect(rootText()).toContain('494');
+      expect(rootText()).toContain('left today');
+    });
+  });
+
+  it('renders quota exhaustion with the reset time', async () => {
+    await loadPopup(async () =>
+      makeStatus({
+        aiQuota: {
+          pageLabel: 'lora-1',
+          remainingRequestsToday: 0,
+          exhausted: true,
+          observedAt: 1,
+        },
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('resets at 00:00 UTC');
     });
   });
 });

@@ -816,6 +816,12 @@ export interface AiQuotaStatus {
 
 export interface PopupStatus extends TabUiState {
   accountLabel: string;
+  /** Human name of the tab's Fansly account — "Display Name (@username)"
+   * ladder — once account/me has resolved the session; null until then. */
+  accountName: string | null;
+  /** Fan display name for the live conversation once an operation resolved
+   * it (cleared on route change); null until then. */
+  fanName: string | null;
   /** null until a generation this UTC day produced a quota observation. */
   aiQuota: AiQuotaStatus | null;
 }
