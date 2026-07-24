@@ -1,6 +1,11 @@
 import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_MS,
+  SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_RESOLVE_TIMEOUT_MS,
 } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
@@ -13,11 +18,13 @@ import {
 import { hasAvailableFanSummary } from '../shared/summary-cache.js';
 import { logWarn } from '../shared/log.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
-import { saveSettings } from '../shared/storage.js';
+import { readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
+  AgencyHubDeviceTokenMeta,
+  AgencyHubSignOutResponse,
   PopupStatus,
   RecapStatusResponse,
   SpendersBuildPayload,
@@ -26,11 +33,13 @@ import type {
   StoredVoiceAttemptRoute,
   VoiceAttemptStoreSnapshot,
 } from '../shared/voice-attempt.js';
-import type { AgencyHubClient } from './agency-hub-client.js';
+import { resolveHubBearer, type AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
-import { getLatestQuotaSnapshot } from './quota-tracker.js';
+import { getOpsDaily } from './ops-daily.js';
+import { getLatestQuotaSnapshot, getQuotaSnapshotsByPage } from './quota-tracker.js';
+import { getLatestSpendersObservation } from './spenders-status-tracker.js';
 import type { SessionStore } from './session-store.js';
 import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
@@ -39,6 +48,79 @@ import type { VoiceService } from './voice-service.js';
 import type { VoiceAttemptRepository } from './voice-attempt-store.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
+
+// Serialize every device-token custody mutation — sign-in / re-issue (issue +
+// store) and sign-out (capture + wipe + revoke) — through ONE FIFO promise
+// queue. Without it, a sign-in landing mid-sign-out could interleave so a
+// freshly issued token is stored locally, then the sign-out's wipe erases it
+// while its revoke kills a DIFFERENT (captured) token — leaving a live,
+// un-revocable token orphaned on the hub. Under the lock each critical section
+// (which captures the token to revoke only INSIDE the section, right before the
+// wipe) runs to completion before the next begins, so the two never observe
+// each other's half-written state. Re-issue rides the same `issue` path, so it
+// is covered by the same lock.
+let agencyHubCustodyQueue: Promise<unknown> = Promise.resolve();
+function withAgencyHubCustodyLock<T>(critical: () => Promise<T>): Promise<T> {
+  // Chain onto the tail regardless of how the previous holder settled, so one
+  // rejection never poisons the queue for the next waiter.
+  const run = agencyHubCustodyQueue.then(critical, critical);
+  agencyHubCustodyQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** Operational metadata about the stored device token — its own storage.local
+ * key with its own `version`, never the settings blob (schema stays v15) and
+ * never a custody key. Written inside the auth critical section, so it is
+ * already serialized against every other token mutation. */
+async function writeDeviceTokenMeta(meta: AgencyHubDeviceTokenMeta | null): Promise<void> {
+  try {
+    if (meta === null) {
+      await browser.storage.local.remove(AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY);
+      return;
+    }
+    await browser.storage.local.set({ [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: meta });
+  } catch (error) {
+    // Metadata is a display convenience: never fail a sign-in or a sign-out
+    // over it. The pane falls back to its honest "no data yet" line.
+    logWarn('Device token metadata write failed', {
+      error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+    });
+  }
+}
+
+async function readDeviceTokenMeta(): Promise<AgencyHubDeviceTokenMeta | null> {
+  try {
+    const raw = await browser.storage.local.get(AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY);
+    const value = raw[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
+    if (
+      !isObjectRecord(value) ||
+      value.version !== 1 ||
+      typeof value.keyPrefix !== 'string' ||
+      typeof value.issuedAt !== 'number' ||
+      typeof value.expiresAt !== 'string'
+    ) {
+      // Absent or foreign-version: honest null, never a half-trusted record.
+      return null;
+    }
+    return {
+      version: 1,
+      keyPrefix: value.keyPrefix,
+      issuedAt: value.issuedAt,
+      expiresAt: value.expiresAt,
+      // Optional: records written before the issuing-hub fix have no address.
+      // A non-string is dropped rather than trusted — sign-out then falls back
+      // to the current base URL instead of revoking against garbage.
+      ...(typeof value.issuedFrom === 'string' && value.issuedFrom
+        ? { issuedFrom: value.issuedFrom }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
@@ -340,6 +422,50 @@ export function registerRuntimeApi({
         return await getLatestQuotaSnapshot();
       }
 
+      if (requestType === 'getOpsDaily') {
+        // Today's operational counters for the cabinet. Local read only — no
+        // hub round-trip, no Fansly traffic.
+        return await getOpsDaily();
+      }
+
+      if (requestType === 'getAgencyHubHealth' || requestType === 'getAgencyHubIdentity') {
+        // Read a FRESH non-mutating snapshot, not the coordinator cache: a just-
+        // saved hub can still be lagging behind storage.onChanged in the cache,
+        // so a status read fired right after a save would otherwise probe the
+        // PREVIOUS hub. readStorageState re-reads storage without writing back
+        // (session discovery may own a concurrent identity rekey).
+        const { settings } = await readStorageState();
+        const controller = new AbortController();
+        const timeout = globalThis.setTimeout(
+          () => controller.abort(),
+          AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+        );
+        try {
+          return requestType === 'getAgencyHubHealth'
+            ? await agencyHubClient.checkHealth(settings, controller.signal)
+            : await agencyHubClient.checkIdentity(settings, controller.signal);
+        } finally {
+          globalThis.clearTimeout(timeout);
+        }
+      }
+
+      if (requestType === 'getAiQuotaByPage') {
+        return await getQuotaSnapshotsByPage();
+      }
+
+      if (requestType === 'getSpendersStatus') {
+        // Scope the read to the CURRENT hub AND credential: a board observation
+        // recorded under a previous hub/principal must not survive a hub change
+        // OR a same-URL credential swap and paint a stale RAMPED/FLAG OFF row for
+        // a principal the chatter is no longer signed in as. Fresh read so a
+        // just-saved credential is not still lagging in the coordinator cache.
+        const { settings } = await readStorageState();
+        return await getLatestSpendersObservation(
+          normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl),
+          resolveHubBearer(settings),
+        );
+      }
+
       if (requestType === 'getSessionsSnapshot') {
         const unresolvedSessions = sessionStore
           .getSessions()
@@ -460,41 +586,174 @@ export function registerRuntimeApi({
         }
       }
 
+      if (requestType === 'getAgencyHubDeviceTokenMeta') {
+        // Read-only companion to the custody key: which token is live and when
+        // it was issued. Never the token itself.
+        return await readDeviceTokenMeta();
+      }
+
       if (requestType === 'issueAgencyHubDeviceToken') {
-        const input = isObjectRecord(message) &&
-          typeof message.baseUrl === 'string' &&
-          typeof message.username === 'string' &&
-          typeof message.password === 'string'
-          ? { baseUrl: message.baseUrl, username: message.username, password: message.password }
-          : null;
-        const baseUrl = input ? normalizeAgencyHubBaseUrl(input.baseUrl) : null;
-        if (!input || !baseUrl || !input.username.trim() || !input.password) {
-          return { ok: false, error: createUserError('hub_request_failed') };
-        }
-        try {
-          const issued = await issueAgencyHubDeviceToken({
-            baseUrl,
-            username: input.username,
-            password: input.password,
-            label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
-          });
-          // The token never crosses the runtime-message boundary — it lands
-          // straight in settings storage (same custody class as the key).
-          await saveSettings({ agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token });
-          return {
-            ok: true,
-            keyPrefix: issued.keyPrefix,
-            label: issued.label,
-            expiresAt: issued.expiresAt,
+        // Serialized against signOutAgencyHub so a concurrent sign-out cannot wipe
+        // the token this handler is about to store, nor revoke a token this one
+        // just replaced.
+        return withAgencyHubCustodyLock(async () => {
+          const input = isObjectRecord(message) &&
+            typeof message.baseUrl === 'string' &&
+            typeof message.username === 'string' &&
+            typeof message.password === 'string'
+            ? { baseUrl: message.baseUrl, username: message.username, password: message.password }
+            : null;
+          const baseUrl = input ? normalizeAgencyHubBaseUrl(input.baseUrl) : null;
+          if (!input || !baseUrl || !input.username.trim() || !input.password) {
+            return { ok: false, error: createUserError('hub_request_failed') };
+          }
+          try {
+            const issued = await issueAgencyHubDeviceToken({
+              baseUrl,
+              username: input.username,
+              password: input.password,
+              label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
+            });
+            // The token never crosses the runtime-message boundary — it lands
+            // straight in settings storage (same custody class as the key).
+            await saveSettings({ agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token });
+            // Operational metadata about the token we just stored. Written
+            // inside the lock, so a concurrent sign-out cannot leave the meta
+            // describing a token that is already wiped.
+            await writeDeviceTokenMeta({
+              version: 1,
+              keyPrefix: issued.keyPrefix,
+              issuedAt: Date.now(),
+              expiresAt: issued.expiresAt,
+              // WHICH hub minted this token. Sign-out revokes against this
+              // address, so a later base-URL change cannot leave a live bearer
+              // orphaned on the issuing hub. Never the token itself.
+              issuedFrom: baseUrl,
+            });
+            return {
+              ok: true,
+              keyPrefix: issued.keyPrefix,
+              label: issued.label,
+              expiresAt: issued.expiresAt,
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              error: error instanceof ChatGooseError
+                ? toUserError(error)
+                : createUserError('hub_request_failed'),
+            };
+          }
+        });
+      }
+
+      if (requestType === 'signOutAgencyHub') {
+        // Serialized against issueAgencyHubDeviceToken: the token is captured
+        // INSIDE this critical section, immediately before the wipe, so a
+        // concurrent sign-in can neither slip a fresh token past the wipe nor
+        // have its token revoked here by mistake.
+        return withAgencyHubCustodyLock(async () => {
+          // (a) Capture the current token + base URL BEFORE the wipe. The token
+          // never crosses the runtime boundary; the page only sees the outcome.
+          // readStorageState, not loadStorageState: this is a pure read, and the
+          // repair-write in loadStorageState could clobber a concurrent
+          // rekey/reconcile with a pre-rekey snapshot.
+          const before = await readStorageState();
+          const capturedToken = before.settings.agencyHubDeviceToken.trim();
+          // Revoke against the hub that ISSUED the token, not the address the
+          // settings show now. If the base URL moved from hub A to hub B after
+          // the token was issued, a revoke aimed at B returns 401/403, which
+          // maps to `already-invalid` — the UI would report a clean sign-out
+          // while the bearer stayed alive on A. Pre-`issuedFrom` records (and a
+          // dropped/foreign metadata write) fall back to the captured address.
+          const capturedMeta = await readDeviceTokenMeta();
+          const capturedBaseUrl = capturedMeta?.issuedFrom || before.settings.agencyHubBaseUrl;
+
+          // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable
+          // step. Write ONLY the two top-level custody storage keys, never the
+          // settings blob: a blob rewrite from the read snapshot above would
+          // clobber a parallel tab's uiTheme/URL save that landed between the read
+          // and this set (RMW race). The background outlives the options page, so
+          // doing the wipe here (not on the page) means a pagehide during the 5s
+          // revoke below can never leave the credentials on disk. EMPTY strings,
+          // never key removal (removal would reopen the pre-v13 blob fallback —
+          // E19).
+          try {
+            await browser.storage.local.set({
+              [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+              [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+            });
+          } catch (error) {
+            // The loud case: credentials may still be on disk. Do NOT proceed to
+            // revoke, and leave the metadata alone — it still describes what is
+            // stored.
+            const detail = error instanceof Error ? error.message.slice(0, 200) : String(error);
+            logWarn('Sign-out custody wipe failed', { error: detail });
+            return { outcome: 'wipe-failed', error: detail };
+          }
+          // The metadata describes a token that no longer exists here.
+          await writeDeviceTokenMeta(null);
+
+          // (d) The SECOND, idempotent wipe. The revoke below can take up to 5s,
+          // and the options page's debounced settings chain writes
+          // `agencyHubApiKey` outside this lock: a delayed autosave (or a second
+          // options tab) landing in that window would restore a usable legacy key
+          // AFTER the wipe while this handler still reported `revoked`. Re-wiping
+          // once the revoke has settled closes that window. EMPTY strings again,
+          // never key removal (E19), and never the settings blob.
+          const rewipeCustody = async (): Promise<string | null> => {
+            try {
+              await browser.storage.local.set({
+                [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+                [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+              });
+              return null;
+            } catch (error) {
+              return error instanceof Error ? error.message.slice(0, 200) : String(error);
+            }
           };
-        } catch (error) {
-          return {
-            ok: false,
-            error: error instanceof ChatGooseError
-              ? toUserError(error)
-              : createUserError('hub_request_failed'),
+          // A failed re-wipe is the loud case for the same reason the first wipe
+          // is: a credential restored mid-revoke may still be on disk, and only
+          // `wipe-failed` tells the chatter to look. It overrides the revoke's
+          // own verdict on purpose — local custody outranks server truth here.
+          const settle = async (
+            outcome: AgencyHubSignOutResponse,
+          ): Promise<AgencyHubSignOutResponse> => {
+            const rewipeError = await rewipeCustody();
+            if (rewipeError === null) {
+              return outcome;
+            }
+            logWarn('Sign-out custody re-wipe failed', { error: rewipeError });
+            return { outcome: 'wipe-failed', error: rewipeError };
           };
-        }
+
+          // (c) Best-effort revoke AFTER the wipe, with the CAPTURED token as the
+          // bearer (the stored copy is already ''). Nothing to revoke without one.
+          if (!capturedToken) {
+            return settle({ outcome: 'already-invalid' });
+          }
+          const controller = new AbortController();
+          const timeout = globalThis.setTimeout(
+            () => controller.abort(),
+            AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
+          );
+          try {
+            const outcome = await agencyHubClient.revokeDeviceToken(
+              { agencyHubBaseUrl: capturedBaseUrl, agencyHubDeviceToken: capturedToken },
+              controller.signal,
+            );
+            return await settle({ outcome });
+          } catch (error) {
+            // Abort/network/5xx/missing-base-URL — server truth unknown. Already
+            // wiped locally; the token dies by sliding-expiry.
+            logWarn('Device token revoke unreachable', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return await settle({ outcome: 'unreachable' });
+          } finally {
+            globalThis.clearTimeout(timeout);
+          }
+        });
       }
 
       if (requestType === 'resolveFanChat') {
@@ -650,8 +909,13 @@ export function registerRuntimeApi({
           ? message.buildId
           : undefined;
         const controller = new AbortController();
+        // Stamp the abort with a real AbortError DOMException carrying the reason
+        // so the getList wrapper can record a build timeout as a FAIL (not silently
+        // skip it like a user-cancel / superseded build) AND so an aborted fetch
+        // rejects with an AbortError — a bare string reason makes fetch reject with
+        // that string, defeating the `instanceof DOMException` timeout classifier.
         const timeout = globalThis.setTimeout(
-          () => controller.abort(),
+          () => controller.abort(new DOMException(SPENDERS_BUILD_TIMEOUT_REASON, 'AbortError')),
           SPENDERS_BUILD_TIMEOUT_MS,
         );
         try {
@@ -672,7 +936,14 @@ export function registerRuntimeApi({
           });
           return { ok: true, result };
         } catch (error) {
-          const timedOut = error instanceof DOMException && error.name === 'AbortError';
+          // A build timeout: the caught error is an AbortError AND this handler's
+          // own controller was aborted with the build-timeout reason. Reading the
+          // reason off the controller (not the caught error) is robust — some
+          // inner abort points rethrow a bare 'Aborted' DOMException that no
+          // longer carries the reason.
+          const reason: unknown = controller.signal.reason;
+          const timedOut = error instanceof DOMException && error.name === 'AbortError' &&
+            reason instanceof DOMException && reason.message === SPENDERS_BUILD_TIMEOUT_REASON;
           return {
             ok: false,
             error: timedOut ? createUserError('timed_out') : toUserError(error),

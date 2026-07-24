@@ -34,6 +34,7 @@ import { resolveHubBearer } from './agency-hub-client.js';
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 import type { FanslyClient } from './fansly-client.js';
 import type { KernelFeatureGateway } from './kernel-feature-gateway.js';
+import { recordGeneration, recordHubError } from './ops-daily.js';
 import type { SessionStore } from './session-store.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
@@ -710,6 +711,19 @@ export class VoiceService {
         sourceFingerprint,
         pageLabel: page.pageLabel,
       });
+
+      // The script survived the output/route fences and reached the chatter —
+      // one ACCEPTED feature-lane generation, same as a fast-reply. All four
+      // facts are in scope here (the authenticated Fansly account and the
+      // resolved kernel page); best-effort so a counter never breaks a take.
+      void recordGeneration({
+        feature: 'voice-script',
+        accountId: account.id,
+        accountLabel: account.username?.trim() ||
+          session.resolvedUsername?.trim() ||
+          '',
+        pageLabel: page.pageLabel,
+      }).catch(() => undefined);
     } catch (error) {
       if (!this.isActiveScript(tabId, message.attemptId)) {
         return;
@@ -725,6 +739,14 @@ export class VoiceService {
         code,
         message: safeMessageForCode(code, 'hub_request_failed'),
       });
+      // Terminal failure of a voice-script run. `code` is a registry KEY here,
+      // so it is mapped to its `CG-…` code first; recordHubError then keeps only
+      // the `CG-HUB-` family (a Fansly/flow failure must not inflate the Hub
+      // counter). The account facts are declared inside the try above and are
+      // deliberately not reached for: the counter needs the code alone.
+      void recordHubError(
+        createUserError(isLiveUserErrorKey(code) ? code : 'hub_request_failed').code,
+      ).catch(() => undefined);
     } finally {
       deadline.clear();
       if (this.isActiveScript(tabId, message.attemptId)) {

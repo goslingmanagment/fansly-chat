@@ -127,6 +127,11 @@ import {
 } from './compare-operations.js';
 import { loadMediaPurchaseEvidence } from './conversation-context-loader.js';
 import {
+  recordGeneration,
+  recordHubError,
+  recordSummaryPush,
+} from './ops-daily.js';
+import {
   CoachTranscriptCache,
   type CoachTranscriptCacheKeyParts,
   type CoachTranscriptWindow,
@@ -1500,6 +1505,14 @@ export class OperationCoordinator {
         pageLabel: result.pageLabel,
         error: result.error,
       });
+      // «Fan Summary — последний пуш» means a push that LANDED. A skip (no hub
+      // configured) or a failure is not a push, and 'already-synced' wrote
+      // nothing new this time — none of them may set the timestamp.
+      if (result.status === 'pushed') {
+        // An unresolved creator username records as '' — the pane then omits
+        // the account, rather than inventing one.
+        void recordSummaryPush(pageUsername ?? '').catch(() => undefined);
+      }
       syncStatus = resolveSummarySyncStatusFromResult(result, task.generatedAt);
     } catch (error) {
       logDebug(task.debugEnabled, 'agency hub summary sync failed', toDebugErrorPayload(error));
@@ -3245,6 +3258,21 @@ export class OperationCoordinator {
         ...(turnContext !== undefined ? { turnContext } : {}),
       }, completedSpend, profiler);
 
+      // The coordinator has ACCEPTED this result — that, not the gateway's
+      // request, is the honest moment a generation happened (a stream can still
+      // fail validation after the kernel finished). Recorded here because this
+      // is the only scope holding all four facts: the feature, the resolved
+      // account, its human label, and the kernel page label. Best-effort: a
+      // counter must never break a delivered generation.
+      void recordGeneration({
+        feature: payload.feature,
+        accountId: resolvedAccountId,
+        // Empty when no human name resolved — the pane falls back to the id
+        // instead of showing a fabricated label.
+        accountLabel: pageUsername ?? '',
+        pageLabel,
+      }).catch(() => undefined);
+
       this.clearCompletedOperation(tabId);
       if (payload.feature === 'fan-summary' && result.summaryMeta && summarySyncTask) {
         if (result.summaryMeta.syncStatus?.state === 'saving') {
@@ -3279,6 +3307,7 @@ export class OperationCoordinator {
           active?.llmSpend ?? createZeroLlmSpendSummary(),
           active?.profiler ?? NO_OP_PROFILER,
         );
+        void recordHubError(errorPayload.error.code).catch(() => undefined);
       } else {
         const errorPayload: ErrorPayload = {
           type: 'operation:error',
@@ -3291,6 +3320,10 @@ export class OperationCoordinator {
           active?.llmSpend ?? createZeroLlmSpendSummary(),
           active?.profiler ?? NO_OP_PROFILER,
         );
+        // Terminal failure of a feature run. recordHubError itself keeps only
+        // the `CG-HUB-` family, so a Fansly/flow code passed here is dropped —
+        // the pane's «Ошибки генераций (Hub)» counter stays what it claims.
+        void recordHubError(errorPayload.error.code).catch(() => undefined);
       }
 
       logDebug(debugEnabled, 'operation error', error);

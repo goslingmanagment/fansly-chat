@@ -440,14 +440,6 @@ input[type='checkbox'] {
   border-top: 1px solid var(--chatgoose-line);
 }
 
-/* Hero health strip: the whole install's state in one glance, no scrolling. */
-.chatgoose-hero-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-
 /* Quiet range hint beside a numeric input; doubles as the clamp notice. */
 .chatgoose-row-hint {
   font-family: var(--chatgoose-font-mono);
@@ -595,10 +587,18 @@ input[type='checkbox'] {
   background: var(--chatgoose-bg2);
 }
 
+/* The `[hidden]` rule below MUST stay next to this one: an author `display`
+   rule beats the UA `[hidden] { display: none }` (origin precedes specificity).
+   Without it the two-step sign-out CONFIRM row would render permanently —
+   destroying the device token and the legacy key in a single click. */
 .chatgoose-card-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.chatgoose-card-actions[hidden] {
+  display: none;
 }
 
 .chatgoose-version-tag {
@@ -629,3 +629,188 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Badge: the compact mono token a status row leads with ── */
+.chatgoose-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.chatgoose-badge-mono {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.chatgoose-badge-green {
+  border-color: var(--chatgoose-green-line);
+  background: var(--chatgoose-green-bg);
+  color: var(--chatgoose-green);
+}
+
+.chatgoose-badge-amber {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+}
+
+.chatgoose-badge-bad {
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-badge-clay {
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+/* ── «Статус»: read-only state rows ── */
+.chatgoose-status-row {
+  display: grid;
+  grid-template-columns: 10px auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+/* Author `display: grid` beats the UA `[hidden] { display: none }` rule
+   (origin precedes specificity), so the debug-only Контракт row would stay
+   visible with only the IDL `hidden` set. Restore hiding at author origin. */
+.chatgoose-status-row[hidden] {
+  display: none;
+}
+
+.chatgoose-status-row:last-of-type {
+  border-bottom: 0;
+}
+
+.chatgoose-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chatgoose-ink-low);
+}
+
+.chatgoose-status-row[data-tone='green'] .chatgoose-status-dot { background: var(--chatgoose-green); }
+.chatgoose-status-row[data-tone='amber'] .chatgoose-status-dot { background: var(--chatgoose-amber); }
+.chatgoose-status-row[data-tone='bad'] .chatgoose-status-dot { background: var(--chatgoose-bad); }
+.chatgoose-status-row[data-status='loading'] .chatgoose-status-dot { background: var(--chatgoose-line-strong); }
+.chatgoose-status-row[data-status='loading'] .chatgoose-status-fact::after { content: '…'; }
+
+.chatgoose-status-body {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.chatgoose-status-label {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.chatgoose-status-fact {
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatgoose-status-action {
+  justify-self: end;
+}
+
+.chatgoose-status-detail {
+  grid-column: 3 / 5;
+  display: grid;
+  gap: 2px;
+}
+
+.chatgoose-status-detail-line {
+  font: 11.5px/1.4 var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-status-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.chatgoose-status-hint {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+}
+
+/* ── Readiness headline above the status rows ── */
+/* `position: relative` is load-bearing: this card carries the absolutely
+   positioned version tag, and without a containing block here the tag would
+   anchor to the viewport and drift across a wide window. */
+.chatgoose-readiness {
+  position: relative;
+  margin: 20px 20px 0;
+  padding: 16px 20px;
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow);
+  display: grid;
+  gap: 6px;
+}
+
+.chatgoose-readiness-heading {
+  margin: 0;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.chatgoose-readiness[data-hero-state='ready'] .chatgoose-readiness-heading {
+  color: var(--chatgoose-green);
+}
+
+.chatgoose-readiness-sub {
+  color: var(--chatgoose-ink-mid);
+  font-size: 13px;
+}
+
+/* Same origin trap as the pane and the card actions: the list is `hidden` while
+   nothing is open, and only an author-origin `[hidden]` rule actually hides it. */
+.chatgoose-readiness-open {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chatgoose-readiness-open[hidden] {
+  display: none;
+}
+
+.chatgoose-readiness-open li {
+  padding: 2px 8px;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+  font-size: 12px;
+}
+
+.chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
+.chatgoose-cabinet-micro-setup { color: var(--chatgoose-amber); }

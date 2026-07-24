@@ -1,4 +1,18 @@
+import { COPY } from './copy.js';
 import type { SessionSnapshotEntry } from '../shared/types.js';
+
+/** Age of the captured Fansly session — the honest thing the settings page can
+ * say about a live account. It is NOT «the chatter is on the tab»: this page has
+ * no tab attribution, only the moment the background last saw traffic. */
+export function formatCaptureStatus(session: SessionSnapshotEntry | undefined): string {
+  if (!session?.connected) return COPY.status.captureNone;
+  const seenAt = session.lastSeenAt;
+  if (!Number.isFinite(seenAt)) return COPY.status.captureJustNow;
+  const minutes = Math.max(0, Math.round((Date.now() - seenAt) / 60_000));
+  if (minutes === 0) return COPY.status.captureJustNow;
+  if (minutes < 60) return COPY.status.captureMinutes.replace('{n}', String(minutes));
+  return COPY.status.captureHours.replace('{n}', String(Math.round(minutes / 60)));
+}
 
 function getNormalizedUsername(username: string | null | undefined): string | null {
   const normalized = username?.trim().replace(/^@+/, '') ?? '';

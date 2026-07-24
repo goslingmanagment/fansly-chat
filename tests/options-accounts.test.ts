@@ -475,7 +475,7 @@ describe('Options page account sections', () => {
     expect(mappingsSection.textContent).toContain(accountIdText('resolved'));
   });
 
-  it('summarizes install health in the hero strip', async () => {
+  it('summarizes the live Fansly account on the «Статус» row', async () => {
     await loadOptionsPage({
       state: makeState({ knownAccounts: ['resolved'] }),
       sessions: [{
@@ -488,9 +488,13 @@ describe('Options page account sections', () => {
       }],
     });
 
-    const strip = document.querySelector<HTMLElement>('.chatgoose-hero-strip')!;
-    expect(strip.textContent).toContain('1 of 1 accounts live');
-    expect(strip.textContent).toContain('Personas: 1');
+    // The hero health strip is gone: the Статус rows own install state now.
+    expect(document.querySelector('.chatgoose-hero-strip')).toBeNull();
+    const fanslyRow = document.querySelector<HTMLElement>('[data-status-row="fansly"]')!;
+    expect(fanslyRow.dataset.status).toBe('ready');
+    expect(fanslyRow.dataset.tone).toBe('green');
+    expect(fanslyRow.textContent).toContain(COPY.status.fanslyWorking);
+    expect(fanslyRow.textContent).toContain('Creator (@creator)');
   });
 
   it('saves the theme picked in the segmented control', async () => {
@@ -522,7 +526,7 @@ describe('Options page account sections', () => {
       element.closest<HTMLElement>('[hidden]:not(.chatgoose-cabinet-pane)');
     expect(foldedAncestor(signInUser)).not.toBeNull();
     const reissue = Array.from(document.querySelectorAll('button'))
-      .find((button) => button.textContent === 'Re-issue device token')!;
+      .find((button) => button.textContent === COPY.hub.reissueToken)!;
     expect(reissue.hidden).toBe(false);
 
     reissue.click();
@@ -820,7 +824,7 @@ describe('Options page settings and read-only personas', () => {
 
     expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
     const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Test Connection')!;
+      .find((button) => button.textContent === COPY.hub.testConnection)!;
     testButton.click();
     await flushMicrotasks();
 
@@ -901,7 +905,7 @@ describe('Options page settings and read-only personas', () => {
     await flushMicrotasks();
 
     const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Test Connection')!;
+      .find((button) => button.textContent === COPY.hub.testConnection)!;
     await vi.waitFor(() => expect(testButton.disabled).toBe(false));
     testButton.click();
     await vi.waitFor(() => {
