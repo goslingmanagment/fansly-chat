@@ -561,7 +561,9 @@ describe('Options page - Agency Hub section', () => {
       expect(section.textContent).toContain('HTTP 401 • {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
-    expect(runtimeSendMessage).toHaveBeenLastCalledWith({
+    // Not `toHaveBeenLastCalledWith`: the same post-persist path also refreshes
+    // the Статус rows, so the hub reads land after the test-connection request.
+    expect(runtimeSendMessage).toHaveBeenCalledWith({
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',

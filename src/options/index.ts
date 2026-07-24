@@ -13,21 +13,24 @@ import {
   createButton,
   createSection,
   createStatusPill,
+  createStatusRow,
   createVersionTag,
   debounce,
   injectStyles,
   inlineField,
   labeledField,
   setStatusPill,
+  type BadgeTone,
 } from './dom.js';
 import { COPY } from './copy.js';
 import {
   buildSessionLookup,
   formatAccountHeading,
+  formatCaptureStatus,
   shortenAccountId,
 } from './sessions.js';
 import { OPTIONS_PANES } from '../shared/options-routes.js';
-import { createShell } from './shell.js';
+import { createShell, navigateTo } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
@@ -63,9 +66,15 @@ import {
 } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  AgencyHubHealthResponse,
+  AgencyHubIdentityResponse,
+  AiQuotaStatus,
+  OpsDailySnapshot,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
   Settings,
+  SpendersObservation,
+  SpendersStreamState,
   UiThemeSetting,
 } from '../shared/types.js';
 
@@ -85,17 +94,128 @@ let uiThemeInstalled = false;
 
 const COPY_FEEDBACK_MS = 1400;
 
-function formatRelativeTime(iso: string): string | null {
-  const timestamp = Date.parse(iso);
-  if (!Number.isFinite(timestamp)) {
-    return null;
+// The settings tab has no live session port, so the Fansly row can otherwise
+// only close on a full reload. A focus/visibility re-poll closes it in place;
+// throttle it so rapid tab-switching cannot storm getSessionsSnapshot.
+const SESSIONS_REPOLL_MIN_INTERVAL_MS = 5_000;
+// «Проверить всё» re-runs the hub + local reads. It deliberately does NOT touch
+// getSessionsSnapshot (whose handler resolves identities against Fansly /me);
+// the throttle keeps a jammed button from storming the hub either.
+const CHECK_ALL_THROTTLE_MS = 10_000;
+/** Below this the quota badge turns amber; at 0 it turns red. */
+const AI_QUOTA_LOW_THRESHOLD = 20;
+
+type SessionsResult =
+  | { ok: true; sessions: SessionSnapshotEntry[] }
+  | { ok: false; error: unknown };
+
+function formatClockTime(at: number): string {
+  const date = new Date(at);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Everything «Скопировать отчёт» is allowed to know.
+ *
+ * There is no credential field in this shape and no way to reach one from it:
+ * the report is secret-free BY CONSTRUCTION, not by redaction. `hubBaseUrl` is
+ * the address the chatter typed (not a secret) and materially helps support;
+ * `identity.username` is the Hub login the pane already displays.
+ */
+interface StatusReportModel {
+  version: string;
+  schemaVersion: number;
+  generatedAt: number;
+  hubBaseUrl: string;
+  fansly: { accounts: number; handles: string[]; capture: string | null };
+  health: AgencyHubHealthResponse | null;
+  identity: AgencyHubIdentityResponse | null;
+  quotaByPage: AiQuotaStatus[];
+  spenders: SpendersObservation | null;
+  opsDaily: OpsDailySnapshot | null;
+  readiness: Array<{ key: string; label: string; done: boolean }>;
+}
+
+/** A plain-text snapshot of this page for a support message. «Неизвестно» is
+ * printed as «неизвестно» — the report never upgrades an unknown into a claim. */
+export function buildStatusReport(model: StatusReportModel): string {
+  const unknown = COPY.common.unknown;
+  const lines: string[] = [
+    `ChatGoose ${model.version} · storage v${model.schemaVersion}`,
+    `${new Date(model.generatedAt).toISOString()}`,
+    `Hub URL: ${model.hubBaseUrl || unknown}`,
+    '',
+  ];
+
+  lines.push(`${COPY.status.fanslyLabel}: ${
+    model.fansly.accounts === 0
+      ? COPY.status.fanslyEmpty
+      : `${model.fansly.accounts} — ${model.fansly.handles.join(', ')}${
+          model.fansly.capture ? ` (${model.fansly.capture})` : ''
+        }`
+  }`);
+
+  const health = model.health;
+  lines.push(`${COPY.status.hubLabel}: ${
+    health === null
+      ? unknown
+      : health.ok
+        ? `${health.status}${health.dbLatencyMs === null ? '' : ` · db ${health.dbLatencyMs}ms`}`
+        : health.reason
+  }`);
+
+  const identity = model.identity;
+  lines.push(`${COPY.status.accessLabel}: ${
+    identity === null
+      ? unknown
+      : identity.ok
+        ? `${identity.username} · ${identity.role} · pages ${identity.pages.length}`
+        : identity.reason
+  }`);
+
+  lines.push(`${COPY.status.aiLabel}: ${
+    model.quotaByPage.length === 0
+      ? COPY.status.aiEmpty
+      : model.quotaByPage
+          .map((entry) => `${entry.pageLabel}=${entry.remainingRequestsToday ?? unknown}`)
+          .join(', ')
+  }`);
+
+  const ops = model.opsDaily;
+  lines.push(`${COPY.status.activityLabel}: ${
+    !ops || !ops.lastGeneration
+      ? COPY.status.activityEmpty
+      : `${ops.lastGeneration.feature} · ${ops.lastGeneration.pageLabel} · ${
+          new Date(ops.lastGeneration.at).toISOString()
+        }`
+  }`);
+  if (ops) {
+    lines.push(`${COPY.hub.errorsLabel}: ${ops.hubErrorsTotal}`);
+    for (const entry of ops.hubErrors) {
+      lines.push(`  ${new Date(entry.at).toISOString()} ${entry.code}`);
+    }
   }
-  const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
+
+  lines.push(`${COPY.status.spendersLabel}: ${
+    model.spenders === null
+      ? COPY.status.spendersEmpty
+      : `${model.spenders.outcome} · ${model.spenders.streamState ?? unknown}`
+  }`);
+
+  lines.push(`${COPY.status.contractLabel}: ${
+    health === null || !health.ok
+      ? unknown
+      : `${health.contractHash === health.sdkContractHash ? 'match' : 'drift'} · core ${
+          health.sdkSourceCommit ?? unknown
+        }`
+  }`);
+
+  lines.push('');
+  for (const step of model.readiness) {
+    lines.push(`[${step.done ? 'x' : ' '}] ${step.label}`);
+  }
+
+  return lines.join('\n');
 }
 
 /** The account-id meta line doubles as a copy button (popup discipline). */
@@ -229,6 +349,9 @@ async function render(): Promise<void> {
   let disposed = false;
   let futureSchemaObserved: number | null = null;
   let applyFutureSchemaBarrierToUi: ((storedVersion: number) => void) | null = null;
+  // Wall-clock of the last getSessionsSnapshot dispatch (mount or re-poll); the
+  // focus/visibility re-poll reads it to enforce the throttle window.
+  let lastSessionsPollAt = 0;
   try {
     // Recovery must be decided before session discovery or a Hub connection
     // test can trigger network traffic. The malformed value remains untouched.
@@ -289,15 +412,17 @@ async function render(): Promise<void> {
   // to five seconds resolving a Fansly identity. It also owns identity
   // rekey/reconcile, so account controls stay in a loading state until it has
   // finished and we have re-read the resulting storage state.
-  const sessionsResultPromise = sendRuntimeRequest('getSessionsSnapshot')
-    .then((sessions):
-      | { ok: true; sessions: SessionSnapshotEntry[] }
-      | { ok: false; error: unknown } => (
-      Array.isArray(sessions)
-        ? { ok: true, sessions }
-        : { ok: false, error: new Error('Invalid sessions snapshot response') }
-    ))
-    .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error }));
+  const loadSessionsResult = (): Promise<SessionsResult> => {
+    lastSessionsPollAt = Date.now();
+    return sendRuntimeRequest('getSessionsSnapshot')
+      .then((sessions): SessionsResult => (
+        Array.isArray(sessions)
+          ? { ok: true, sessions }
+          : { ok: false, error: new Error('Invalid sessions snapshot response') }
+      ))
+      .catch((error: unknown): SessionsResult => ({ ok: false, error }));
+  };
+  const sessionsResultPromise = loadSessionsResult();
   // This first read must stay non-mutating. Session discovery owns account
   // identity reconciliation and runs concurrently; a full-state migration
   // write from an older snapshot could otherwise restore pre-rekey mappings.
@@ -325,35 +450,30 @@ async function render(): Promise<void> {
   );
   cleanupTasks.push(() => shell.dispose());
 
-  // ─── Hero ──────────────────────────────────────────────────
-  const hero = document.createElement('div');
-  hero.style.padding = '28px 20px 4px';
-  hero.style.display = 'grid';
-  hero.style.gap = '8px';
-  hero.style.position = 'relative';
-  const title = document.createElement('h1');
-  title.textContent = 'ChatGoose Settings';
-  title.style.margin = '0';
-  const subtitle = document.createElement('div');
-  subtitle.textContent = 'Configure generation, Agency Hub, persona mappings, and live Fansly connections.';
-  subtitle.style.color = 'var(--chatgoose-ink-mid)';
-  // Health strip: the install's whole state in one glance — each pill is
-  // owned by the renderer that learns the fact.
-  const heroStrip = document.createElement('div');
-  heroStrip.className = 'chatgoose-hero-strip';
-  const hubPill = document.createElement('span');
-  setStatusPill(hubPill, 'neutral', 'Hub: checking…');
-  const accountsPill = document.createElement('span');
-  setStatusPill(accountsPill, 'neutral', 'Loading accounts…');
-  const catalogPill = document.createElement('span');
-  catalogPill.hidden = true;
-  const quotaPill = document.createElement('span');
-  quotaPill.hidden = true;
-  heroStrip.append(hubPill, accountsPill, catalogPill, quotaPill);
-  hero.append(createVersionTag(extensionVersion), title, subtitle, heroStrip);
-  // The hero + health strip move into «Статус» as-is; task 7 dismantles the
-  // strip and re-points its producers at the status model.
-  shell.panes.status.append(hero);
+  // ─── Readiness headline ────────────────────────────────────
+  // The install's verdict in one line. It derives entirely from the SAME
+  // `statusModel` the Статус rows paint from — zero extra requests — and counts
+  // ONLY the actionable prerequisites (E41): an unknown quota or an unopened
+  // Spenders board is an observation, not a broken install.
+  const readinessHero = document.createElement('section');
+  readinessHero.className = 'chatgoose-readiness';
+  readinessHero.dataset.readinessHero = 'true';
+  const readinessHeading = document.createElement('h1');
+  readinessHeading.className = 'chatgoose-readiness-heading';
+  readinessHeading.textContent = COPY.status.checkingTitle;
+  const readinessSub = document.createElement('div');
+  readinessSub.className = 'chatgoose-readiness-sub';
+  readinessSub.textContent = COPY.status.checkingSubtitle;
+  const readinessOpen = document.createElement('ul');
+  readinessOpen.className = 'chatgoose-readiness-open';
+  readinessOpen.hidden = true;
+  readinessHero.append(
+    createVersionTag(extensionVersion),
+    readinessHeading,
+    readinessSub,
+    readinessOpen,
+  );
+  shell.panes.status.append(readinessHero);
 
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
@@ -595,29 +715,24 @@ async function render(): Promise<void> {
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
         setStatusPill(agencyHubConnectionStatus, 'neutral', 'Not tested yet.');
-        setStatusPill(hubPill, 'warn', 'Hub not set up');
         agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
         return;
       case 'pending':
         setStatusPill(agencyHubConnectionStatus, 'neutral', 'Connection status updating…');
-        setStatusPill(hubPill, 'neutral', 'Hub: checking…');
         agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
         return;
       case 'testing':
         setStatusPill(agencyHubConnectionStatus, 'neutral', 'Testing connection…');
-        setStatusPill(hubPill, 'neutral', 'Hub: checking…');
         agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
         return;
       case 'connected':
         setStatusPill(agencyHubConnectionStatus, 'ok', 'Connected ✓');
-        setStatusPill(hubPill, 'ok', 'Hub connected ✓');
         agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
         setStatusPill(agencyHubConnectionStatus, 'bad', `Connection failed: ${failedError.code}`);
-        setStatusPill(hubPill, 'bad', `Hub: ${failedError.code}`);
         const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -719,6 +834,8 @@ async function render(): Promise<void> {
   };
 
   let agencyHubPermissionRefreshVersion = 0;
+  /** null = not checked yet (no origin to check). Feeds the «Доступ» step. */
+  let hubPermissionGranted: boolean | null = null;
   const refreshAgencyHubPermissionState = async (): Promise<void> => {
     const refreshVersion = ++agencyHubPermissionRefreshVersion;
     // Every early-return branch below is a "Sync disabled" state — amber by
@@ -734,6 +851,12 @@ async function render(): Promise<void> {
     if (refreshVersion !== agencyHubPermissionRefreshVersion) {
       return;
     }
+
+    // The «Доступ» readiness step reads this local check — the only place that
+    // knows whether Firefox granted the hub origin. Forward reference: the
+    // status view is defined below and this function only ever runs later.
+    hubPermissionGranted = originPattern ? permissionGranted : null;
+    refreshStatusView();
 
     if (permissionGranted) {
       agencyHubPermissionFeedback = null;
@@ -986,6 +1109,9 @@ async function render(): Promise<void> {
           void (async () => {
             await refreshAgencyHubPermissionState();
             await runAgencyHubConnectionTest({ force: true });
+            // The freshly-issued device token makes checkIdentity return AUTH,
+            // so the Доступ row (and the headline) flip in place — no reload.
+            await hydrateHubStatusRows(storedHubSignature());
           })().catch((error: unknown) => {
             console.error('Failed to refresh Agency Hub status after sign-in', error);
           });
@@ -1045,6 +1171,514 @@ async function render(): Promise<void> {
     legacyKeyDetails,
     agencyHubStatusCard,
   );
+
+  // ─── «Статус»: read-only state rows ────────────────────────
+  const statusSection = createSection(COPY.sections.statusTitle, COPY.sections.statusHint);
+  const statusRows = {
+    fansly: createStatusRow(COPY.status.fanslyLabel, 'fansly'),
+    hub: createStatusRow(COPY.status.hubLabel, 'hub'),
+    access: createStatusRow(COPY.status.accessLabel, 'access'),
+    ai: createStatusRow(COPY.status.aiLabel, 'ai'),
+    activity: createStatusRow(COPY.status.activityLabel, 'activity'),
+    spenders: createStatusRow(COPY.status.spendersLabel, 'spenders'),
+    contract: createStatusRow(COPY.status.contractLabel, 'contract'),
+  };
+  for (const row of Object.values(statusRows)) row.skeleton();
+  // The Контракт row is debug-only here (the Hub pane shows it unconditionally
+  // — E59 amendment). It still hydrates, so toggling debug and reloading shows
+  // a live value rather than a stale one.
+  if (!state.settings.debugMode) statusRows.contract.root.hidden = true;
+
+  const checkAllButton = createButton(COPY.status.checkAll, true);
+  const copyReportButton = createButton(COPY.status.copyReport, true);
+  const statusActions = document.createElement('div');
+  statusActions.className = 'chatgoose-status-actions';
+  statusActions.append(checkAllButton, copyReportButton);
+  const statusActionNote = document.createElement('div');
+  statusActionNote.className = 'chatgoose-status-hint';
+  statusActionNote.setAttribute('role', 'status');
+  statusActionNote.setAttribute('aria-live', 'polite');
+  const statusReportHint = document.createElement('div');
+  statusReportHint.className = 'chatgoose-status-hint';
+  statusReportHint.textContent = COPY.status.reportHint;
+
+  statusSection.append(
+    statusRows.fansly.root,
+    statusRows.hub.root,
+    statusRows.access.root,
+    statusRows.ai.root,
+    statusRows.activity.root,
+    statusRows.spenders.root,
+    statusRows.contract.root,
+    statusActions,
+    statusActionNote,
+    statusReportHint,
+  );
+  shell.panes.status.append(statusSection);
+
+  // The single read-only model the rows, the readiness headline and the support
+  // report all paint from. Nothing here is a credential: the report is
+  // secret-free BY CONSTRUCTION, not by filtering.
+  const statusModel: StatusReportModel = {
+    version: extensionVersion,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    generatedAt: 0,
+    hubBaseUrl: normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl),
+    fansly: { accounts: 0, handles: [], capture: null },
+    health: null,
+    identity: null,
+    quotaByPage: [],
+    spenders: null,
+    opsDaily: null,
+    readiness: [],
+  };
+  // The account ids that currently have a CAPTURED session. The persona step
+  // reads only this set, never every knownAccount: an offline historical
+  // account with an archived mapping must not block «Готово к смене».
+  let capturedAccountIds: string[] = [];
+  // Until the first real datum lands — a hub identity read OR the Fansly row
+  // painting — the headline stays «Проверяем…» instead of inventing a verdict.
+  let fanslyRowPainted = false;
+
+  const isAccountPersonaMapped = (accountId: string): boolean => {
+    const mappedKey = state.accountMappings[accountId] ?? '';
+    return Boolean(mappedKey) && state.personaCatalog.some(
+      (persona) => persona.key === mappedKey && persona.status === 'active',
+    );
+  };
+
+  const pluralizeActions = (count: number): string => {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return COPY.status.actionWordOne;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return COPY.status.actionWordFew;
+    return COPY.status.actionWordMany;
+  };
+
+  /**
+   * Readiness aggregate — ACTIONABLE prerequisites only (E41). An unknown AI
+   * quota, an unopened Spenders board and a quiet day are OBSERVATIONS: they
+   * describe the install, they do not block a shift, and they must never turn
+   * the headline red.
+   */
+  const buildReadiness = (): StatusReportModel['readiness'] => [
+    { key: 'hub', label: COPY.status.stepHub, done: statusModel.identity?.ok === true },
+    {
+      key: 'access',
+      label: COPY.status.stepAccess,
+      // Only a definite `false` is an open step; `null` means «not checked yet»
+      // (no hub address entered), which the hub step already covers.
+      done: hubPermissionGranted !== false,
+    },
+    { key: 'fansly', label: COPY.status.stepFansly, done: capturedAccountIds.length > 0 },
+    {
+      key: 'persona',
+      label: COPY.status.stepPersona,
+      done: capturedAccountIds.length > 0 &&
+        capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId)),
+    },
+  ];
+
+  const refreshStatusView = (): void => {
+    if (disposed) return;
+    // No datum at all yet: keep the honest loading line — never a fabricated
+    // «Нужно N действий» over an install nobody has looked at.
+    if (statusModel.identity === null && !fanslyRowPainted) {
+      readinessHero.dataset.heroState = 'loading';
+      readinessHeading.textContent = COPY.status.checkingTitle;
+      readinessSub.textContent = COPY.status.checkingSubtitle;
+      readinessOpen.replaceChildren();
+      readinessOpen.hidden = true;
+      shell.setMicro('status', null);
+      return;
+    }
+
+    const readiness = buildReadiness();
+    statusModel.readiness = readiness;
+    const open = readiness.filter((step) => !step.done);
+
+    if (open.length === 0) {
+      readinessHero.dataset.heroState = 'ready';
+      readinessHeading.textContent = COPY.status.readyTitle;
+      readinessSub.textContent = COPY.status.readySubtitle;
+      readinessOpen.replaceChildren();
+      readinessOpen.hidden = true;
+    } else {
+      readinessHero.dataset.heroState = 'route';
+      readinessHeading.textContent = open.length === 1
+        ? COPY.status.actionNeededTitle
+        : COPY.status.actionsNeededTitle
+            .replace('{n}', String(open.length))
+            .replace('{word}', pluralizeActions(open.length));
+      readinessSub.textContent = COPY.sections.statusHint;
+      readinessOpen.replaceChildren(
+        ...open.map((step) => {
+          const item = document.createElement('li');
+          item.dataset.readinessStep = step.key;
+          item.textContent = step.label;
+          return item;
+        }),
+      );
+      readinessOpen.hidden = false;
+    }
+
+    const micro = document.createElement('span');
+    micro.className = open.length === 0
+      ? 'chatgoose-cabinet-micro-ok'
+      : 'chatgoose-cabinet-micro-setup';
+    micro.textContent = open.length === 0 ? COPY.rail.microOk : COPY.rail.microSetup;
+    shell.setMicro('status', micro);
+  };
+
+  const paintFanslyStatusRow = (
+    sessions: SessionSnapshotEntry[],
+    failed: boolean,
+  ): void => {
+    // Either branch paints a real Fansly state — enough to lift the headline out
+    // of its loading line even before the hub identity read lands.
+    fanslyRowPainted = true;
+    if (failed) {
+      capturedAccountIds = [];
+      statusModel.fansly = { accounts: 0, handles: [], capture: null };
+      statusRows.fansly.set({
+        badge: '—',
+        tone: 'neutral',
+        fact: COPY.status.fanslyUnavailable,
+      });
+      refreshStatusView();
+      return;
+    }
+    const lookup = buildSessionLookup(sessions);
+    capturedAccountIds = state.knownAccounts.filter(
+      (accountId) => lookup.get(accountId)?.connected === true,
+    );
+    const captured = capturedAccountIds
+      .map((accountId) => lookup.get(accountId))
+      .filter((session): session is SessionSnapshotEntry => Boolean(session));
+    const freshest = [...captured].sort((left, right) => right.lastSeenAt - left.lastSeenAt)[0];
+    const handles = capturedAccountIds.map(
+      (accountId) => formatAccountHeading(accountId, lookup.get(accountId)),
+    );
+    statusModel.fansly = {
+      accounts: capturedAccountIds.length,
+      handles,
+      capture: freshest ? formatCaptureStatus(freshest) : null,
+    };
+
+    if (capturedAccountIds.length === 0) {
+      statusRows.fansly.set({ badge: '0', tone: 'amber', fact: COPY.status.fanslyEmpty });
+    } else {
+      statusRows.fansly.set({
+        badge: String(capturedAccountIds.length),
+        tone: 'green',
+        fact: `${COPY.status.fanslyWorking} ${handles.join(', ')}`,
+        detail: formatCaptureStatus(freshest),
+      });
+    }
+    refreshStatusView();
+  };
+
+  // The live connection signature the hub fields currently show. The guard binds
+  // to the PERSISTED snapshot: the caller passes the signature of what it just
+  // persisted, and this run is valid only while the live form still equals it.
+  const currentHubSignature = (): string =>
+    buildAgencyHubConnectionSignature(
+      agencyHubUrlInput.value,
+      agencyHubKeyInput.value,
+      state.settings.agencyHubDeviceToken,
+    );
+  // The signature of the SAVED settings — what mount, the sign-in success path,
+  // the permission grant and «Проверить всё» pass as their expected snapshot (no
+  // unsaved edit is in play at those moments; the form equals stored). The
+  // post-persist caller instead passes its own freshly-computed signature.
+  const storedHubSignature = (): string =>
+    buildAgencyHubConnectionSignature(
+      state.settings.agencyHubBaseUrl,
+      state.settings.agencyHubApiKey,
+      state.settings.agencyHubDeviceToken,
+    );
+  // Monotonic run id: a newer run bumps it, so an older same-signature run that
+  // resolves out of order drops its paint.
+  let agencyHubHydrationRun = 0;
+
+  const hydrateHubStatusRows = async (expectedSignature: string): Promise<void> => {
+    const run = ++agencyHubHydrationRun;
+    // (1) Delayed-START guard — BEFORE issuing any request. If the live form has
+    // already moved on from the snapshot this run was fired for, skip entirely:
+    // the user is mid-edit and a newer persist will re-trigger with its own
+    // signature. Firing a doomed pair of hub requests here is the storm we avoid.
+    if (disposed || currentHubSignature() !== expectedSignature) return;
+    for (const row of [statusRows.hub, statusRows.access]) row.skeleton();
+    // Independent sources: a rejected transport on ONE read must not leave the
+    // OTHER row a skeleton nor surface as an unhandled rejection. allSettled
+    // lets each row render its own honest state.
+    const [healthResult, identityResult] = await Promise.allSettled([
+      sendRuntimeRequest('getAgencyHubHealth'),
+      sendRuntimeRequest('getAgencyHubIdentity'),
+    ]);
+    // (2) In-flight guard — re-check before PAINTING. The reads pull SAVED
+    // settings background-side, so a paint is only valid while the live form
+    // still equals the persisted snapshot this run fired for; a mid-flight edit
+    // drops the result (that edit's own persist re-runs hydration). The run id
+    // additionally drops a same-signature run a newer run has superseded.
+    if (disposed || run !== agencyHubHydrationRun || currentHubSignature() !== expectedSignature) {
+      return;
+    }
+    // A fulfilled read still has to be a well-formed response — a transport that
+    // resolves `undefined` (a harness with no handler, a truncated frame) is a
+    // failure, never invented into a verdict: fall to honest «unreachable».
+    const isOkResponse = (value: unknown): value is { ok: boolean } =>
+      typeof value === 'object' && value !== null && 'ok' in value;
+    const health: AgencyHubHealthResponse =
+      healthResult.status === 'fulfilled' && isOkResponse(healthResult.value)
+        ? healthResult.value
+        : { ok: false, reason: 'unreachable' };
+    const identity: AgencyHubIdentityResponse =
+      identityResult.status === 'fulfilled' && isOkResponse(identityResult.value)
+        ? identityResult.value
+        : { ok: false, reason: 'unreachable' };
+    statusModel.health = health;
+    statusModel.identity = identity;
+
+    // Hub
+    statusRows.hub.setAction(null);
+    if (health.ok) {
+      statusRows.hub.set({
+        badge: health.status === 'degraded' ? 'DEGRADED' : 'UP',
+        tone: health.status === 'degraded' ? 'amber' : 'green',
+        fact: health.status === 'degraded' ? COPY.status.hubDegraded : COPY.status.hubUp,
+        detail: health.dbLatencyMs === null
+          ? undefined
+          : COPY.status.hubDbLatency.replace('{n}', String(health.dbLatencyMs)),
+      });
+    } else if (health.reason === 'no_base_url') {
+      statusRows.hub.set({ badge: '—', tone: 'neutral', fact: COPY.status.hubEmpty });
+    } else if (health.reason === 'no_permission') {
+      // A fresh install has no host permission (permissions.contains defaults
+      // false) — that is NOT a down core. Distinct amber badge + a grant action
+      // routed to the Hub pane, so the renderer never falls through to a false
+      // red «ядро недоступно».
+      statusRows.hub.set({
+        badge: 'НЕТ ДОСТУПА',
+        tone: 'amber',
+        fact: COPY.status.hubNoPermission,
+      });
+      const grant = createButton(COPY.status.grantAccess, true);
+      grant.addEventListener('click', () => navigateTo('hub'));
+      statusRows.hub.setAction(grant);
+    } else {
+      statusRows.hub.set({ badge: 'DOWN', tone: 'bad', fact: COPY.status.hubDown });
+    }
+
+    // Доступ — CREDENTIAL validity only, never a hub-health verdict.
+    statusRows.access.setAction(null);
+    if (identity.ok) {
+      statusRows.access.set({
+        badge: 'AUTH',
+        tone: 'green',
+        fact: `${identity.username} · ${identity.role}`,
+        detail: COPY.hub.pagesCount.replace('{n}', String(identity.pages.length)),
+      });
+    } else if (identity.reason === 'unauthorized') {
+      statusRows.access.set({ badge: '401', tone: 'bad', fact: COPY.status.accessRejected });
+      const reLogin = createButton(COPY.status.reLogin, true);
+      reLogin.addEventListener('click', () => navigateTo('hub'));
+      statusRows.access.setAction(reLogin);
+    } else if (identity.reason === 'no_credential') {
+      statusRows.access.set({ badge: '—', tone: 'neutral', fact: COPY.status.accessEmpty });
+    } else if (identity.reason === 'no_base_url') {
+      // A credential is present but the hub address is blank — nothing is wrong
+      // with the credential, so the badge stays neutral and the fact names the
+      // real gap (the missing address), not a false «нет credential».
+      statusRows.access.set({ badge: '—', tone: 'neutral', fact: COPY.status.hubEmpty });
+    } else {
+      // no_permission and unreachable are HUB-health conditions, not credential
+      // verdicts — the Доступ badge stays neutral (the blocker is surfaced on
+      // the Hub row), never a red «нет credential».
+      statusRows.access.set({ badge: '—', tone: 'neutral', fact: COPY.status.accessUnknown });
+    }
+
+    // Контракт (debug-only here; derived from the same health response)
+    if (health.ok) {
+      const match = health.contractHash === health.sdkContractHash;
+      statusRows.contract.set({
+        badge: match ? 'MATCH' : 'DRIFT',
+        tone: match ? 'green' : 'bad',
+        fact: match ? COPY.status.contractMatches : COPY.status.contractDrift,
+        detail: health.sdkSourceCommit
+          ? COPY.status.contractSourceCommit.replace('{commit}', health.sdkSourceCommit.slice(0, 12))
+          : undefined,
+      });
+    } else {
+      statusRows.contract.set({ badge: '—', tone: 'neutral', fact: COPY.status.contractUnknown });
+    }
+
+    refreshStatusView();
+  };
+
+  const hydrateLocalStatusRows = async (): Promise<void> => {
+    // Independent sources again: one rejected local read must not strand a
+    // sibling row as a skeleton or raise an unhandled rejection.
+    const [quotaResult, spendersResult, opsResult] = await Promise.allSettled([
+      sendRuntimeRequest('getAiQuotaByPage'),
+      sendRuntimeRequest('getSpendersStatus'),
+      sendRuntimeRequest('getOpsDaily'),
+    ]);
+    if (disposed) return;
+    const quotaByPage = quotaResult.status === 'fulfilled' ? quotaResult.value : {};
+    const spenders = spendersResult.status === 'fulfilled' ? spendersResult.value : null;
+    const opsDaily = opsResult.status === 'fulfilled' ? opsResult.value : null;
+
+    // Квота AI — requests per page only; NEVER a micro-USD figure (E14). An
+    // empty map is «no observation today», not «no quota».
+    const quotaEntries = quotaByPage && typeof quotaByPage === 'object'
+      ? Object.values(quotaByPage)
+      : [];
+    // Worst first: a page at 0 is what the chatter needs to see, not an average.
+    const worstFirst = [...quotaEntries].sort(
+      (left, right) =>
+        (left.remainingRequestsToday ?? Number.POSITIVE_INFINITY) -
+        (right.remainingRequestsToday ?? Number.POSITIVE_INFINITY),
+    );
+    statusModel.quotaByPage = worstFirst;
+    if (worstFirst.length === 0) {
+      statusRows.ai.set({ badge: '—', tone: 'neutral', fact: COPY.status.aiEmpty });
+    } else {
+      const remaining = worstFirst[0]?.remainingRequestsToday ?? null;
+      let tone: BadgeTone;
+      let fact: string;
+      if (remaining === null) {
+        // No numeric cap reported for the worst page — a green badge would claim
+        // headroom nobody observed. Stay neutral and say the limit is unknown.
+        tone = 'neutral';
+        fact = COPY.status.aiNoLimit.replace('{page} · ', '');
+      } else if (remaining === 0) {
+        tone = 'bad';
+        fact = COPY.status.aiExhausted;
+      } else {
+        tone = remaining <= AI_QUOTA_LOW_THRESHOLD ? 'amber' : 'green';
+        fact = COPY.status.aiByPageNote;
+      }
+      statusRows.ai.set({ badge: remaining === null ? '—' : String(remaining), tone, fact });
+      statusRows.ai.setDetailLines(worstFirst.map((entry) => (
+        entry.remainingRequestsToday === null
+          ? COPY.status.aiNoLimit.replace('{page}', entry.pageLabel)
+          : COPY.status.aiRemaining
+              .replace('{page}', entry.pageLabel)
+              .replace('{n}', String(entry.remainingRequestsToday))
+      )));
+    }
+
+    // Активность — today's accepted generations, straight from the ops-daily
+    // counters. No generation today is an OBSERVATION, not a fault.
+    statusModel.opsDaily = opsDaily ?? null;
+    const lastGeneration = opsDaily?.lastGeneration ?? null;
+    if (!lastGeneration) {
+      statusRows.activity.set({ badge: '—', tone: 'neutral', fact: COPY.status.activityEmpty });
+      statusRows.activity.setDetailLines(
+        opsDaily && opsDaily.hubErrorsTotal > 0
+          ? [COPY.status.activityHubErrors.replace('{n}', String(opsDaily.hubErrorsTotal))]
+          : [],
+      );
+    } else {
+      const label = lastGeneration.accountLabel || shortenAccountId(lastGeneration.accountId);
+      statusRows.activity.set({
+        badge: formatClockTime(lastGeneration.at),
+        tone: 'neutral',
+        fact: `${lastGeneration.feature} · ${label}`,
+      });
+      statusRows.activity.setDetailLines([
+        COPY.accounts.corePage.replace('{page}', lastGeneration.pageLabel),
+        ...(opsDaily && opsDaily.hubErrorsTotal > 0
+          ? [COPY.status.activityHubErrors.replace('{n}', String(opsDaily.hubErrorsTotal))]
+          : []),
+      ]);
+    }
+
+    // Spenders — freshest board observation. A null observation is «not yet
+    // observed», NOT «flag off»: inventing FLAG OFF would claim the projection
+    // is disabled when nobody has ever looked.
+    statusModel.spenders = spenders ?? null;
+    if (!spenders) {
+      statusRows.spenders.set({ badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty });
+    } else if (spenders.outcome === 'fail') {
+      statusRows.spenders.set({ badge: 'FAIL', tone: 'bad', fact: COPY.status.spendersFail });
+    } else {
+      const byState: Record<SpendersStreamState, { badge: string; tone: BadgeTone; fact: string }> = {
+        ramped: { badge: 'RAMPED', tone: 'green', fact: COPY.status.spendersRamped },
+        flag_off: { badge: 'FLAG OFF', tone: 'neutral', fact: COPY.status.spendersFlagOff },
+        not_allowlisted: {
+          badge: 'NOT ALLOWLISTED',
+          tone: 'amber',
+          fact: COPY.status.spendersNotAllowlisted,
+        },
+        unsupported_platform: {
+          badge: 'FLAG OFF',
+          tone: 'neutral',
+          fact: COPY.status.spendersUnsupported,
+        },
+      };
+      // FLAG OFF only from a real flag_off observation; a null streamState on a
+      // successful outcome is «not yet observed», so keep the neutral em-dash.
+      statusRows.spenders.set(
+        spenders.streamState
+          ? byState[spenders.streamState]
+          : { badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty },
+      );
+    }
+
+    refreshStatusView();
+  };
+
+  // «Проверить всё» re-runs the hub reads and the local reads — and NOTHING
+  // else. getSessionsSnapshot stays out of it on purpose: its handler resolves
+  // unknown identities against Fansly's own /me, and a settings button must
+  // never become an out-of-band Fansly request (DP 1-B / egress rule).
+  let lastCheckAllAt = 0;
+  checkAllButton.addEventListener('click', () => {
+    const now = Date.now();
+    if (now - lastCheckAllAt < CHECK_ALL_THROTTLE_MS) {
+      statusActionNote.textContent = COPY.status.checkAllThrottled;
+      return;
+    }
+    lastCheckAllAt = now;
+    checkAllButton.disabled = true;
+    checkAllButton.textContent = COPY.status.checkAllRunning;
+    statusActionNote.textContent = '';
+    void (async () => {
+      try {
+        await Promise.all([
+          hydrateHubStatusRows(storedHubSignature()),
+          hydrateLocalStatusRows(),
+        ]);
+      } finally {
+        if (!disposed) {
+          checkAllButton.disabled = false;
+          checkAllButton.textContent = COPY.status.checkAll;
+        }
+      }
+    })();
+  });
+
+  copyReportButton.addEventListener('click', () => {
+    statusModel.generatedAt = Date.now();
+    statusModel.hubBaseUrl = normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl);
+    statusModel.readiness = buildReadiness();
+    const report = buildStatusReport(statusModel);
+    void navigator.clipboard
+      ?.writeText(report)
+      .then(() => {
+        statusActionNote.textContent = COPY.status.copyReportDone;
+      })
+      .catch(() => {
+        statusActionNote.textContent = COPY.status.copyReportFailed;
+      });
+    if (!navigator.clipboard) {
+      statusActionNote.textContent = COPY.status.copyReportFailed;
+    }
+  });
+
+  refreshStatusView(); // initial paint: the loading line until the first datum
 
   // ─── AI Models ───────────────────────────────────────────
 
@@ -1222,6 +1856,10 @@ async function render(): Promise<void> {
           if (!disposed) {
             await runAgencyHubConnectionTest({ force: true });
           }
+          // Repaint Статус against the snapshot THIS persist wrote. The guard
+          // inside binds to `hubSignature`, so a run this persist fired against
+          // hub B silently drops if the live field has since moved to hub C.
+          await hydrateHubStatusRows(hubSignature);
         })().catch((error: unknown) => {
           console.error('Failed to refresh Agency Hub status after Settings save', error);
         });
@@ -1336,6 +1974,10 @@ async function render(): Promise<void> {
       void (async () => {
         await refreshAgencyHubPermissionState();
         await runAgencyHubConnectionTest({ force: true });
+        // A granted origin flips a `no_permission` Hub/Доступ verdict to live
+        // without a reload. No unsaved edit is in play at a permission event,
+        // so the stored-settings signature is the expected snapshot.
+        await hydrateHubStatusRows(storedHubSignature());
       })();
     };
 
@@ -1358,21 +2000,9 @@ async function render(): Promise<void> {
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
   const renderPersonaCatalog = (): void => {
-    if (state.personaCatalog.length === 0) {
-      setStatusPill(catalogPill, 'warn', 'No personas');
-    } else {
-      const fetchedAgo = state.personaCatalogFetchedAt
-        ? formatRelativeTime(state.personaCatalogFetchedAt)
-        : null;
-      setStatusPill(
-        catalogPill,
-        'neutral',
-        fetchedAgo
-          ? `Personas updated ${fetchedAgo}`
-          : `Personas: ${state.personaCatalog.length}`,
-      );
-    }
-    catalogPill.hidden = false;
+    // A repopulated catalog can flip the «персона назначена» step: a mapping
+    // migrateState hid may now resolve to an active persona.
+    refreshStatusView();
     personalitiesList.replaceChildren();
     if (state.personaCatalog.length === 0) {
       const empty = document.createElement('div');
@@ -1666,21 +2296,6 @@ async function render(): Promise<void> {
     const sessionsByAccountId = buildSessionLookup(sessions);
     const personalityViews = buildPersonalityMappingViews();
 
-    if (hydrationFailed) {
-      setStatusPill(accountsPill, 'warn', 'Accounts: live refresh failed');
-    } else if (state.knownAccounts.length === 0) {
-      setStatusPill(accountsPill, 'neutral', 'No accounts yet');
-    } else {
-      const liveCount = state.knownAccounts.filter(
-        (accountId) => sessionsByAccountId.get(accountId)?.connected,
-      ).length;
-      setStatusPill(
-        accountsPill,
-        liveCount > 0 ? 'ok' : 'neutral',
-        `${liveCount} of ${state.knownAccounts.length} accounts live`,
-      );
-    }
-
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
 
@@ -1750,6 +2365,8 @@ async function render(): Promise<void> {
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
             renderAccountMappings(sessions, hydrationFailed);
+            // A fresh mapping can flip the «персона назначена» step.
+            refreshStatusView();
           } catch (error) {
             console.error('Failed to save account mapping', error);
             if (!disposed) {
@@ -1781,15 +2398,19 @@ async function render(): Promise<void> {
     }
   };
 
-  const hydrateAccountSections = async (): Promise<void> => {
-    const result = await sessionsResultPromise;
+  // Paint the account section + the Fansly status row from ONE sessions result.
+  // Shared by the mount hydration and the focus/visibility re-poll so the
+  // identity-rekey read path (loadStorageState after the snapshot resolves) is
+  // never duplicated: the snapshot request owns rekey background-side, and this
+  // reads the reconciled state exactly once afterward.
+  const applySessionsResult = async (result: SessionsResult): Promise<void> => {
     if (disposed) {
       return;
     }
-
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       renderAccountMappings([], true);
+      paintFanslyStatusRow([], true);
       return;
     }
 
@@ -1805,37 +2426,62 @@ async function render(): Promise<void> {
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
       renderAccountMappings(result.sessions, false);
+      paintFanslyStatusRow(result.sessions, false);
     } catch (error) {
       console.error('Failed to refresh account state for Settings', error);
       if (!disposed) {
         renderAccountMappings([], true);
+        paintFanslyStatusRow([], true);
       }
     }
   };
 
-  void hydrateAccountSections();
+  const hydrateAccountSections = async (): Promise<void> => {
+    await applySessionsResult(await sessionsResultPromise);
+  };
 
-  // Same quota discipline as the popup: render only a same-UTC-day
-  // observation; with none, the pill simply stays hidden.
-  void sendRuntimeRequest('getAiQuotaStatus')
-    .then((quota) => {
-      if (disposed || !quota) {
-        return;
-      }
-      if (quota.exhausted === true) {
-        setStatusPill(quotaPill, 'bad', 'AI quota used up — resets 00:00 UTC');
-      } else if (typeof quota.remainingRequestsToday === 'number') {
-        setStatusPill(
-          quotaPill,
-          quota.remainingRequestsToday <= 20 ? 'warn' : 'neutral',
-          `AI quota: ${quota.remainingRequestsToday} left today`,
-        );
-      } else {
-        return;
-      }
-      quotaPill.hidden = false;
-    })
-    .catch(() => {});
+  // Re-poll sessions when the tab regains focus/visibility, throttled so it only
+  // fires once per window. A chatter who connects a model in another tab and
+  // returns here should see the Fansly row close without a reload — but the
+  // re-poll rides the SAME snapshot+paint flow above (rekey stays
+  // background-side), so no live-read logic is duplicated. The in-flight guard
+  // collapses a paired focus + visibilitychange into a single poll.
+  let sessionsRepollInFlight = false;
+  const repollSessions = async (): Promise<void> => {
+    if (disposed || sessionsRepollInFlight) {
+      return;
+    }
+    if (Date.now() - lastSessionsPollAt < SESSIONS_REPOLL_MIN_INTERVAL_MS) {
+      return;
+    }
+    sessionsRepollInFlight = true;
+    try {
+      await applySessionsResult(await loadSessionsResult());
+    } finally {
+      sessionsRepollInFlight = false;
+    }
+  };
+  const handleVisibilityRepoll = (): void => {
+    if (document.visibilityState === 'visible') {
+      void repollSessions();
+    }
+  };
+  const handleFocusRepoll = (): void => {
+    void repollSessions();
+  };
+  document.addEventListener('visibilitychange', handleVisibilityRepoll);
+  window.addEventListener('focus', handleFocusRepoll);
+  cleanupTasks.push(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityRepoll);
+    window.removeEventListener('focus', handleFocusRepoll);
+  });
+
+  void hydrateAccountSections();
+  // The stored-snapshot signature is what mount fires against: the form fields
+  // were initialized from `state.settings`, so live == stored right now.
+  void hydrateHubStatusRows(storedHubSignature());
+  // Local reads — no hub round-trip, no signature guard.
+  void hydrateLocalStatusRows();
 
   renderCleanup = async () => {
     const pendingEdits = flushPendingEdits();
