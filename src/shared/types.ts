@@ -840,6 +840,7 @@ export interface SessionSnapshotEntry {
 export interface RuntimeRequestMap {
   ensureStorageReady: undefined;
   getPopupStatus: GetPopupStatusRequest | undefined;
+  getAiQuotaStatus: undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
@@ -856,6 +857,7 @@ export interface RuntimeRequestMap {
 export interface RuntimeResponseMap {
   ensureStorageReady: { ready: true };
   getPopupStatus: PopupStatus;
+  getAiQuotaStatus: AiQuotaStatus | null;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;

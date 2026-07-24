@@ -191,6 +191,272 @@ input[type='checkbox'] {
   line-height: 1.6;
 }
 
+/* Inline setting rows: label left, compact control right, hairline between. */
+.chatgoose-rows {
+  display: grid;
+}
+
+.chatgoose-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-rows .chatgoose-row:first-child {
+  padding-top: 0;
+}
+
+/* A row that closes its container (or stands alone) needs no hairline. */
+.chatgoose-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.chatgoose-row-label {
+  font-weight: 600;
+}
+
+.chatgoose-row .chatgoose-input,
+.chatgoose-row .chatgoose-select {
+  width: auto;
+}
+
+.chatgoose-row .chatgoose-select {
+  min-width: 160px;
+}
+
+/* Counts are numbers — numbers are mono and right-aligned. */
+.chatgoose-input-num {
+  width: 110px;
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Status pill: one connection/credential state at a glance. Green = good,
+   neutral = off/idle, amber = attention wanted, red = failed. */
+.chatgoose-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  padding: 3px 10px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.chatgoose-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.chatgoose-pill-ok {
+  color: var(--chatgoose-green);
+  background: var(--chatgoose-green-bg);
+  border-color: var(--chatgoose-green-line);
+}
+
+.chatgoose-pill-neutral {
+  color: var(--chatgoose-ink-mid);
+  background: var(--chatgoose-bg3);
+  border-color: var(--chatgoose-line-strong);
+}
+
+.chatgoose-pill-warn {
+  color: var(--chatgoose-amber);
+  background: var(--chatgoose-amber-bg);
+  border-color: var(--chatgoose-amber-line);
+}
+
+.chatgoose-pill-bad {
+  color: var(--chatgoose-bad);
+  background: color-mix(in srgb, var(--chatgoose-bad) 9%, transparent);
+  border-color: color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+}
+
+/* Quiet explanatory line under a status or field. */
+.chatgoose-meta {
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-mono {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hub sign-in: the credential pair sits side by side where there is room. */
+.chatgoose-signin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .chatgoose-signin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chatgoose-card-divider {
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+/* Hero health strip: the whole install's state in one glance, no scrolling. */
+.chatgoose-hero-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Quiet range hint beside a numeric input; doubles as the clamp notice. */
+.chatgoose-row-hint {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+  white-space: nowrap;
+}
+
+.chatgoose-row-hint-clamped {
+  color: var(--chatgoose-amber);
+}
+
+.chatgoose-row-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Theme picker: three states visible at once, one click to switch. */
+.chatgoose-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-field);
+}
+
+.chatgoose-segmented input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.chatgoose-segmented span {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--chatgoose-ink-mid);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.chatgoose-segmented span:hover {
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-segmented input:checked + span {
+  background: var(--chatgoose-clay);
+  color: #ffffff;
+}
+
+.chatgoose-segmented input:focus-visible + span {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+/* Legacy access: present but folded — the device token is the main path. */
+.chatgoose-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+  width: fit-content;
+}
+
+.chatgoose-details summary:hover {
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-details[open] summary {
+  margin-bottom: 10px;
+}
+
+/* Save whisper: confirms the debounced write without demanding attention. */
+.chatgoose-save-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  padding: 6px 12px;
+  border: 1px solid var(--chatgoose-green-line);
+  border-radius: 999px;
+  background: var(--chatgoose-green-bg);
+  color: var(--chatgoose-green);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatgoose-save-toast {
+    transition: none;
+  }
+}
+
+.chatgoose-save-toast-visible {
+  opacity: 1;
+}
+
+/* Account-id line doubles as its own copy button. */
+.chatgoose-copy-id {
+  border: 0;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: var(--chatgoose-radius-chip);
+  background: none;
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+  text-align: left;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.chatgoose-copy-id:hover {
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-copy-id:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+.chatgoose-copy-id-done {
+  color: var(--chatgoose-green);
+}
+
 /* Inner card: a quiet wash inside a section (personality/connection cards). */
 .chatgoose-card {
   display: grid;
