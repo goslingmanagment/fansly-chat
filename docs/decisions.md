@@ -71,6 +71,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E52 | 2026-07-21 | Voice hardening: fail-closed/bounded script SSE, V2 Hub-principal+page custody, bounded paid/free requests, single-flight monotonic status, explicit cancel; custom-name and cross-tab behavior remain intentional |
 | E53 | 2026-07-22 | Coach panel UI redesign (presentation-only, no migration): coach-scoped header/CSS polish, one «Рекап ▾» menu replacing three buttons, structured recap status line, grouped empty state, per-turn draft-attach intent (`draftText` sent only when the live Fansly draft is non-empty at dispatch), a content-owned `transcriptEpoch` reseed key, a coach settings snapshot, and `turnContext` plumbing (background stops discarding `attachedRecaps`); Russian copy for all coach-owned strings |
 | E54 | 2026-07-23 | Voice paid-attempt custody moves behind an acknowledged background `storage.session` RPC; supersedes E47's Firefox content-access premise |
+| E55 | 2026-07-24 | Confirmed Voice attach completes the active session; explicit new-from-draft flow protects paid work |
+| E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 
 ## Entries
 
@@ -1410,3 +1412,24 @@ persistent post-attach panel behavior of the voice design (the leftover-draft
 clear affordance moves to the completion toast); an `uncertain` attach outcome
 still never completes a session. Spec:
 docs/superpowers/specs/2026-07-24-voice-new-attempt-ux.md.
+
+**E56 (2026-07-24).** Voice preview duration is content-owned evidence derived
+from the complete in-memory MP3 `ArrayBuffer` with `decodeAudioData`, never from
+Firefox's provisional `HTMLMediaElement.duration`. The exact decoded seconds
+drive take title, clock, seek maximum, and accessibility value text. A decode
+failure fails safe to unknown duration (`–:–`) with seeking disabled; playback
+and explicit MP3 download remain available, and a real media/play failure
+produces a row-local polite error instead of inventing a duration or silently
+failing. This is an in-memory read of already-retrieved bytes: no new Fansly or
+kernel egress, wire field, persistent snapshot field, or storage migration.
+
+Take rows are reconciled by `voiceNoteId`; their player/audio nodes survive
+routine panel renders and connected лента↔студия reparenting while the blob URL
+is unchanged. The panel arbitrates one active player, uses animation-frame
+updates only while playing (disabled for reduced motion), and delegates Firefox
+fill geometry to `::-moz-range-progress`. Closing or tearing down first pauses
+and unloads every media element, then the controller revokes URLs. A
+controller-level suspended flag keeps late audio bytes in memory without
+minting a hidden `blob:` URL until reopen. Paid-attempt idempotency, background
+session custody, exact-take/live-route attach attestation, E47/E54 persistence
+boundaries, and E55 completion semantics are unchanged.

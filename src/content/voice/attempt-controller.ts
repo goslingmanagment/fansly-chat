@@ -23,6 +23,9 @@ export interface VoiceTake {
   view: VoiceNoteStatusView;
   audio: ArrayBuffer | null;
   blobUrl: string | null;
+  /** Authoritative decoded duration for these exact in-memory bytes. Browser
+   * media metadata is deliberately never used for clocks or seeking. */
+  durationSeconds: number | null;
 }
 
 export interface VoiceAttempt {
@@ -58,6 +61,10 @@ interface VoiceAttemptControllerOptions {
   randomUUID?: () => string;
   createBlobUrl?: (bytes: ArrayBuffer) => string;
   revokeBlobUrl?: (url: string) => void;
+  decodeAudioDuration?: (bytes: ArrayBuffer) => Promise<number | null>;
+  /** The live composition root uses this while its panel is still hidden
+   * during recovery. resumeBlobUrls() is the explicit visibility boundary. */
+  blobUrlsInitiallySuspended?: boolean;
   onChange?: (attempt: VoiceAttempt | null) => void;
   onError?: (message: VoiceControllerErrorMessage) => void;
   onAttachGrant?: (message: VoiceAttachGrant) => void;
@@ -109,6 +116,37 @@ function isCanonicalScriptStale(attempt: VoiceAttempt): boolean {
 
 function defaultCreateBlobUrl(bytes: ArrayBuffer): string {
   return URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+}
+
+/**
+ * Decode the complete MP3 bytes to PCM metadata. Firefox's HTMLMediaElement
+ * duration can be a provisional MP3 estimate; decodeAudioData consumes the
+ * whole local buffer and correctly accounts for VBR/Xing streams. The clone is
+ * required because implementations may detach the buffer passed to the
+ * decoder, while Voice keeps the original bytes for attach/download.
+ */
+export async function decodeVoiceAudioDuration(bytes: ArrayBuffer): Promise<number | null> {
+  if (typeof AudioContext === 'undefined') {
+    return null;
+  }
+  let context: AudioContext | null = null;
+  try {
+    context = new AudioContext();
+    const decoded = await context.decodeAudioData(bytes.slice(0));
+    return Number.isFinite(decoded.duration) && decoded.duration > 0
+      ? decoded.duration
+      : null;
+  } catch {
+    return null;
+  } finally {
+    if (context) {
+      try {
+        await context.close();
+      } catch {
+        // Duration failure already degrades to unknown; closing is best-effort.
+      }
+    }
+  }
 }
 
 function compareTakeCreatedAt(left: VoiceTake, right: VoiceTake): number {
@@ -171,6 +209,7 @@ export class VoiceAttemptController {
   private readonly randomUUID: () => string;
   private readonly createBlobUrl: (bytes: ArrayBuffer) => string;
   private readonly revokeBlobUrl: (url: string) => void;
+  private readonly decodeAudioDuration: (bytes: ArrayBuffer) => Promise<number | null>;
   private readonly onChange?: (attempt: VoiceAttempt | null) => void;
   private readonly onError?: (message: VoiceControllerErrorMessage) => void;
   private readonly onAttachGrant?: (message: VoiceAttachGrant) => void;
@@ -184,6 +223,7 @@ export class VoiceAttemptController {
   private pollTimer: number | null = null;
   private connected = true;
   private destroyed = false;
+  private blobUrlsSuspended: boolean;
 
   constructor(options: VoiceAttemptControllerOptions) {
     this.port = options.port;
@@ -192,6 +232,8 @@ export class VoiceAttemptController {
     this.randomUUID = options.randomUUID ?? (() => crypto.randomUUID());
     this.createBlobUrl = options.createBlobUrl ?? defaultCreateBlobUrl;
     this.revokeBlobUrl = options.revokeBlobUrl ?? ((url) => URL.revokeObjectURL(url));
+    this.decodeAudioDuration = options.decodeAudioDuration ?? decodeVoiceAudioDuration;
+    this.blobUrlsSuspended = options.blobUrlsInitiallySuspended ?? false;
     this.onChange = options.onChange;
     this.onError = options.onError;
     this.onAttachGrant = options.onAttachGrant;
@@ -674,6 +716,7 @@ export class VoiceAttemptController {
    */
   suspendBlobUrls(): void {
     this.assertUsable();
+    this.blobUrlsSuspended = true;
     for (const record of this.records.values()) {
       for (const take of record.attempt.takes) {
         this.revokeTakeBlobUrl(take);
@@ -687,6 +730,7 @@ export class VoiceAttemptController {
    */
   resumeBlobUrls(): void {
     this.assertUsable();
+    this.blobUrlsSuspended = false;
     let changed = false;
     for (const record of this.records.values()) {
       for (const take of record.attempt.takes) {
@@ -721,6 +765,7 @@ export class VoiceAttemptController {
           view: { ...take.view },
           audio: null,
           blobUrl: null,
+          durationSeconds: null,
         })).sort(compareTakeCreatedAt),
       },
       conversationRef: entry.conversationRef,
@@ -886,6 +931,7 @@ export class VoiceAttemptController {
       if (view.state !== 'completed') {
         this.revokeTakeBlobUrl(take);
         take.audio = null;
+        take.durationSeconds = null;
       }
     } else if (
       record.pendingCreate &&
@@ -898,6 +944,7 @@ export class VoiceAttemptController {
         view: { ...view },
         audio: null,
         blobUrl: null,
+        durationSeconds: null,
       };
       record.attempt.takes.push(take);
       record.pendingCreate = null;
@@ -1002,13 +1049,25 @@ export class VoiceAttemptController {
     bytes: ArrayBuffer,
   ): Promise<void> {
     this.audioFetchesInFlight.delete(takeRequestKey(record.attempt.attemptId, voiceNoteId));
-    const take = record.attempt.takes.find((candidate) => candidate.voiceNoteId === voiceNoteId);
+    let take = record.attempt.takes.find((candidate) => candidate.voiceNoteId === voiceNoteId);
+    if (!take || take.view.state !== 'completed') {
+      return;
+    }
+    const durationSeconds = await this.decodeAudioDuration(bytes);
+    if (
+      this.destroyed ||
+      this.records.get(record.attempt.attemptId) !== record
+    ) {
+      return;
+    }
+    take = record.attempt.takes.find((candidate) => candidate.voiceNoteId === voiceNoteId);
     if (!take || take.view.state !== 'completed') {
       return;
     }
     this.revokeTakeBlobUrl(take);
     take.audio = bytes;
-    take.blobUrl = this.createBlobUrl(bytes);
+    take.durationSeconds = durationSeconds;
+    take.blobUrl = this.blobUrlsSuspended ? null : this.createBlobUrl(bytes);
     await this.persist(record);
     this.notifyChange();
   }
@@ -1206,6 +1265,7 @@ export class VoiceAttemptController {
     for (const take of record.attempt.takes) {
       this.revokeTakeBlobUrl(take);
       take.audio = null;
+      take.durationSeconds = null;
     }
   }
 

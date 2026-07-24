@@ -26,6 +26,8 @@ function installDom(): InstanceType<typeof JSDOM> {
   vi.stubGlobal('HTMLAudioElement', window.HTMLAudioElement);
   vi.stubGlobal('Event', window.Event);
   vi.stubGlobal('KeyboardEvent', window.KeyboardEvent);
+  window.HTMLMediaElement.prototype.pause = vi.fn();
+  window.HTMLMediaElement.prototype.load = vi.fn();
   return dom;
 }
 
@@ -69,6 +71,7 @@ function setup(): Harness {
     randomUUID: () => `id-${(uuidCounter += 1)}`,
     createBlobUrl: () => `blob:voice-${(blobCounter += 1)}`,
     revokeBlobUrl: (url) => revoked.push(url),
+    decodeAudioDuration: async () => 6,
     onChange: () => ref.panel?.render(),
     onError: (message) => ref.panel?.handleError(message),
     onAttachGrant: (message) => {
@@ -204,6 +207,7 @@ describe('VoiceStudio — студия overlay on shared components', () => {
 
   afterEach(() => {
     harness?.studio.destroy();
+    harness?.panel.dispose();
     harness?.controller.destroy();
     harness = null;
     vi.unstubAllGlobals();
@@ -234,6 +238,9 @@ describe('VoiceStudio — студия overlay on shared components', () => {
   it('renders the SAME state (script text, takes list, selection) inside the студия columns', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);
+    const audioBefore = harness!.panel.root.querySelector<HTMLAudioElement>(
+      'audio.chatgoose-voice-audio',
+    );
     harness!.studio.expand();
 
     const studioRoot = harness!.studio.root;
@@ -252,8 +259,9 @@ describe('VoiceStudio — студия overlay on shared components', () => {
     const radio = take!.querySelector<HTMLInputElement>('input[type="radio"].chatgoose-voice-take-select');
     expect(radio?.checked).toBe(true);
     // The blob player survived the move — same node, same src.
-    expect(take!.querySelector<HTMLAudioElement>('audio.chatgoose-voice-audio')?.getAttribute('src'))
-      .toBe('blob:voice-1');
+    const audioAfter = take!.querySelector<HTMLAudioElement>('audio.chatgoose-voice-audio');
+    expect(audioAfter).toBe(audioBefore);
+    expect(audioAfter?.getAttribute('src')).toBe('blob:voice-1');
 
     // While the студия is open the compact лента is hidden (mini ↔ full).
     expect(harness!.panel.root.classList.contains('chatgoose-hidden')).toBe(true);
