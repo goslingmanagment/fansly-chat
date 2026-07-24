@@ -962,6 +962,16 @@ async function render(): Promise<void> {
           hubSignInFormExpanded = false;
           hubSignInMeta.textContent =
             `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
+          // The fresh token arrived OUTSIDE the save-hook path (direct
+          // storage re-read), so the signature-change refresh never fires on
+          // its own — without this the diagnostics card and the hero pill
+          // keep claiming "not set up" next to an active token.
+          void (async () => {
+            await refreshAgencyHubPermissionState();
+            await runAgencyHubConnectionTest({ force: true });
+          })().catch((error: unknown) => {
+            console.error('Failed to refresh Agency Hub status after sign-in', error);
+          });
         } else {
           hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
         }
