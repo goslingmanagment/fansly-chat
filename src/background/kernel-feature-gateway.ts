@@ -11,7 +11,7 @@
 import { KernelApiError, streamAiFeature, type AiFeatureStreamFrame } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
 import { clientVersionHeaders } from '../shared/client-version.js';
-import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
+import type { FeatureType, PingSegment, Settings, UserErrorKey } from '../shared/types.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { resolveHubBearer } from './agency-hub-client.js';
 import { recordQuotaDenied, recordQuotaSnapshot } from './quota-tracker.js';
@@ -132,6 +132,39 @@ const KERNEL_GATE_KEYS: Record<string, 'not_enough_history' | 'hi_too_many_messa
   gate_draft_required: 'unknown_error',
   gate_voice_disabled: 'gate_voice_disabled',
 };
+
+/** Known kernel provider failures are exact-matched before the family-safe
+ * `provider*` fallback. Provider/proxy stream failures keep E38's CG-HUB-10
+ * card; newly classified causes get their own chatter-facing cards. */
+const KERNEL_PROVIDER_ERROR_KEYS = {
+  provider_billing: 'hub_provider_billing',
+  provider_auth: 'hub_provider_auth',
+  provider_rate_limited: 'hub_provider_rate_limited',
+  provider_unavailable: 'hub_provider_unavailable',
+  provider_proxy_unreachable: 'hub_provider_failed',
+  provider_stream_failed: 'hub_provider_failed',
+} as const satisfies Record<string, UserErrorKey>;
+
+function mapKernelErrorFrameCode(code: string): UserErrorKey {
+  // Completed-but-empty output belongs to the existing output guard, not the
+  // provider-infrastructure family.
+  if (code === 'provider_output_empty') {
+    return 'ai_output_unusable';
+  }
+
+  const knownProviderKey = KERNEL_PROVIDER_ERROR_KEYS[
+    code as keyof typeof KERNEL_PROVIDER_ERROR_KEYS
+  ];
+  if (knownProviderKey !== undefined) {
+    return knownProviderKey;
+  }
+
+  // Open-string rollback safety: future provider codes remain actionable as
+  // the established generic provider card until this client learns them.
+  return code.startsWith('provider')
+    ? 'hub_provider_failed'
+    : 'hub_request_failed';
+}
 
 /** Kernel product-gate denials → the extension's CG error keys. Mapped
  * BEFORE the generic HTTP mapping so gate messages stay user-meaningful
@@ -272,21 +305,19 @@ export function createKernelFeatureGateway(
         // chat_changed, and before EOF collapses it into the generic
         // "ended without completing" truncation error.
         if (frame.type === 'error') {
-          // Empty/whitespace provider output is a completed-but-unusable model
-          // result, not a provider outage. Preserve that distinction so an
-          // auto-recap may take its explicit PROCEED branch, while genuine
-          // provider/proxy stream failures remain STOP errors.
-          const errorKey = frame.code === 'provider_output_empty'
-            ? 'ai_output_unusable'
-            : frame.code.startsWith('provider')
-              ? 'hub_provider_failed'
-              : 'hub_request_failed';
+          const errorKey = mapKernelErrorFrameCode(frame.code);
+          const retryAfterMs = typeof frame.retryAfterMs === 'number'
+            ? frame.retryAfterMs
+            : undefined;
           throw new ChatGooseError(
             errorKey,
             {
               details: { status: 0, responseSnippet: `${frame.code}: ${frame.message}` },
-              ...(typeof frame.retryAfterMs === 'number'
-                ? { retryAfterMs: frame.retryAfterMs }
+              ...(retryAfterMs !== undefined
+                ? {
+                    retryAfterMs,
+                    retryAtMs: Date.now() + retryAfterMs,
+                  }
                 : {}),
             },
           );
@@ -436,7 +467,7 @@ export function createKernelFeatureGateway(
       if (!done) {
         // Stream ended without the terminal frame — fail closed, never
         // present a possibly-truncated generation as complete.
-        throw new ChatGooseError('hub_request_failed', {
+        throw new ChatGooseError('hub_stream_truncated', {
           message: 'AI stream ended without completing.',
         });
       }

@@ -606,16 +606,16 @@ describe('ChatGooseContentApp', () => {
     })).toBeNull();
   });
 
-  it('shows an OpenRouter missing-key toast when the selected feature model uses OpenRouter', async () => {
+  it('shows Hub configuration truth when legacy provider hints disagree', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
     app.tabState = readyState({
-      hasApiKey: true,
+      hasApiKey: false,
       modelProviderByFeature: { 'fast-reply': 'openrouter' },
-      apiKeyReadyByFeature: { 'fast-reply': false },
+      apiKeyReadyByFeature: { 'fast-reply': true },
     });
     app.currentGroupId = 'group-1';
 
@@ -623,8 +623,10 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'OpenRouter API key not configured.',
+      'CG-HUB-02: Agency Hub credential is missing.',
     );
+    expect(document.querySelector('.chatgoose-toast')?.textContent)
+      .not.toContain('OpenRouter');
   });
 
   it('clears the cached result before rerunning Chat Review from the overlay', async () => {
@@ -1445,16 +1447,16 @@ describe('ChatGooseContentApp', () => {
     expect(app.nextReplyTone).toBe('none');
   });
 
-  it('blocks compare when the fast-reply model provider key is missing', async () => {
+  it('blocks compare on missing Hub transport without reviving provider-key copy', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
     const sendSpy = vi.fn();
 
     app.port.send = sendSpy;
     app.tabState = readyState({
-      hasApiKey: true,
+      hasApiKey: false,
       modelProviderByFeature: { 'fast-reply': 'openrouter' },
-      apiKeyReadyByFeature: { 'fast-reply': false },
+      apiKeyReadyByFeature: { 'fast-reply': true },
     });
     app.currentGroupId = 'group-1';
 
@@ -1462,8 +1464,10 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'OpenRouter API key not configured.',
+      'CG-HUB-02: Agency Hub credential is missing.',
     );
+    expect(document.querySelector('.chatgoose-toast')?.textContent)
+      .not.toContain('OpenRouter');
   });
 
   it('reopens an active compare session when the panel was closed', async () => {

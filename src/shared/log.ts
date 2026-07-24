@@ -5,10 +5,12 @@ const SENSITIVE_KEY_PATTERNS = [
   'claudeapikey',
   'openrouterapikey',
   'agencyhubapikey',
+  'agencyhubdevicetoken',
   'fanslyclient',
   'fanslysession',
 ];
-const API_KEY_REGEX = /(sk-ant-[a-zA-Z0-9_-]+|sk-or-v1-[a-zA-Z0-9_-]+)/g;
+const SENSITIVE_TOKEN_REGEX =
+  /(sk-ant-[a-zA-Z0-9_-]+|sk-or-v1-[a-zA-Z0-9_-]+|agency_hub_device_[a-zA-Z0-9_-]+)/g;
 
 function serializeError(error: Error): Record<string, unknown> {
   const serialized: Record<string, unknown> = {
@@ -29,7 +31,7 @@ function serializeError(error: Error): Record<string, unknown> {
 
 function redactValue(value: unknown): unknown {
   if (typeof value === 'string') {
-    return value.replace(API_KEY_REGEX, '[REDACTED]');
+    return value.replace(SENSITIVE_TOKEN_REGEX, '[REDACTED]');
   }
 
   if (value instanceof Error) {

@@ -82,6 +82,26 @@ describe('content view helpers', () => {
     expect(block.querySelector('.chatgoose-error-detail')).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it('renders retryAfterMs as a manual-retry countdown on an error card', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-24T12:00:00.000Z'));
+    const dom = installDom();
+    const block = createUserErrorBlock({
+      ...getErrorMessage('hub_provider_rate_limited'),
+      retryAfterMs: 30_000,
+    });
+    dom.window.document.body.append(block);
+
+    const retry = block.querySelector('.chatgoose-error-retry');
+    expect(retry?.textContent).toBe('Повторить вручную можно через 30 с.');
+
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(retry?.textContent).toBe('Повторить вручную можно через 29 с.');
+
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('getSplitContractNote (E49)', () => {
