@@ -703,6 +703,38 @@ describe('runtime-api getPopupStatus', () => {
     expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false }));
   });
 
+  it('carries resolved human names and drops the fan placeholder', async () => {
+    mockStorage = createStorage();
+    const { sessionStore, tabContexts, tabsQuery } = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    });
+    sessionStore.registerCapture(1, makeCapture('active'));
+    const session = sessionStore.getSessionByAccount('active');
+    if (!session) {
+      throw new Error('session missing');
+    }
+    session.resolvedDisplayName = 'Lora Belle';
+    session.resolvedUsername = 'lorabelle';
+    tabContexts.setRoute(1, 'active-group', 1);
+    tabContexts.setFan(1, 'active-group', 'fan-1', 'BigTipper92');
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
+
+    const named = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(named).toEqual(
+      expect.objectContaining({
+        accountName: 'Lora Belle (@lorabelle)',
+        fanName: 'BigTipper92',
+      }),
+    );
+
+    // The operations-side 'fan' placeholder must not surface as a name.
+    tabContexts.setFan(1, 'active-group', 'fan-1', 'fan');
+    const placeholder = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(placeholder).toEqual(expect.objectContaining({ fanName: null }));
+  });
+
   it('surfaces the fail-closed voice-notes capability for the selected tab', async () => {
     mockStorage = createStorage();
     const voiceService = {
