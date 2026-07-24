@@ -870,6 +870,10 @@ export interface RuntimeRequestMap {
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
+  getAgencyHubHealth: undefined;
+  getAgencyHubIdentity: undefined;
+  getAiQuotaByPage: undefined;
+  getSpendersStatus: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -888,6 +892,10 @@ export interface RuntimeResponseMap {
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
+  getAgencyHubHealth: AgencyHubHealthResponse;
+  getAgencyHubIdentity: AgencyHubIdentityResponse;
+  getAiQuotaByPage: Record<string, AiQuotaStatus>;
+  getSpendersStatus: SpendersObservation | null;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;
@@ -1050,6 +1058,16 @@ export interface SpendersSourceStatus {
   consecutiveFailures: number | null;
 }
 
+/** The last board result seen for a source (creator|hub identity). `streamState`
+ * is the kernel source state on success; `outcome:'fail'` records a board that
+ * errored (streamState null). Session-scale — never persisted, never schema. */
+export interface SpendersObservation {
+  sourceIdentity: string;
+  streamState: SpendersStreamState | null;
+  outcome: 'ok' | 'fail';
+  observedAt: number;
+}
+
 export interface SpendersListResult {
   entries: SpenderListEntry[];
   /** Newest observation across this page/window projection (epoch ms). It is
@@ -1094,6 +1112,29 @@ export interface AgencyHubConnectionTestResponse {
   ok: boolean;
   error?: UserFacingError;
 }
+
+/** Public /health, read for the «Hub» status row. `sdkContractHash` is stamped
+ * background-side (KERNEL_CONTRACT_HASH) so the options bundle imports no SDK
+ * to render the Контракт row (MATCH/DRIFT) — E41. */
+export type AgencyHubHealthResponse =
+  | {
+      ok: true;
+      status: 'ok' | 'degraded';
+      dbLatencyMs: number | null;
+      contractHash: string;
+      sdkContractHash: string;
+      /** Core commit the vendored SDK was cut from, read from the vendor
+       * manifest background-side. There is no `sdkVersion` to show. */
+      sdkSourceCommit: string | null;
+    }
+  | { ok: false; reason: 'no_base_url' | 'no_permission' | 'unreachable' };
+
+/** Authenticated identity, read for the «Доступ» status row. `no_permission`
+ * is propagated distinctly (never folded into `unreachable`) so the renderer
+ * can keep the credential badge neutral and surface the grant on the Hub row. */
+export type AgencyHubIdentityResponse =
+  | { ok: true; username: string; role: string; pages: string[] }
+  | { ok: false; reason: 'no_credential' | 'no_base_url' | 'no_permission' | 'unauthorized' | 'unreachable' };
 
 export interface AgencyHubAiUsageEvent {
   clientEventId: string;
