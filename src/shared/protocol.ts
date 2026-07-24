@@ -423,6 +423,10 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getAiQuotaByPage';
     case 'issueAgencyHubDeviceToken':
       return 'issueAgencyHubDeviceToken';
+    case 'signOutAgencyHub':
+      return 'signOutAgencyHub';
+    case 'getAgencyHubDeviceTokenMeta':
+      return 'getAgencyHubDeviceTokenMeta';
     case 'getSpendersStatus':
       return 'getSpendersStatus';
     case 'getSpendersList':

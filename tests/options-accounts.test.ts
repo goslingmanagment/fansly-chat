@@ -526,7 +526,7 @@ describe('Options page account sections', () => {
       element.closest<HTMLElement>('[hidden]:not(.chatgoose-cabinet-pane)');
     expect(foldedAncestor(signInUser)).not.toBeNull();
     const reissue = Array.from(document.querySelectorAll('button'))
-      .find((button) => button.textContent === 'Re-issue device token')!;
+      .find((button) => button.textContent === COPY.hub.reissueToken)!;
     expect(reissue.hidden).toBe(false);
 
     reissue.click();
@@ -824,7 +824,7 @@ describe('Options page settings and read-only personas', () => {
 
     expect(storageSet).toHaveBeenCalledTimes(callsBeforeEdit + 1);
     const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Test Connection')!;
+      .find((button) => button.textContent === COPY.hub.testConnection)!;
     testButton.click();
     await flushMicrotasks();
 
@@ -905,7 +905,7 @@ describe('Options page settings and read-only personas', () => {
     await flushMicrotasks();
 
     const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Test Connection')!;
+      .find((button) => button.textContent === COPY.hub.testConnection)!;
     await vi.waitFor(() => expect(testButton.disabled).toBe(false));
     testButton.click();
     await vi.waitFor(() => {

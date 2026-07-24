@@ -652,6 +652,50 @@ export class AgencyHubClient {
     }
   }
 
+  /** «Выйти» sign-out revoke. The DELETE op is device-token-only — it rejects an
+   * API-key bearer — so the bearer is the device token itself, never
+   * resolveHubBearer (which prefers the token but could fall back to the legacy
+   * key). Resolves 'revoked' (200) or 'already-invalid' (401/403, or NO token to
+   * revoke). Abort/network/5xx THROW — and so does a MISSING base URL while a
+   * token is still present (the server token stays live, so revocation is
+   * unconfirmed): the caller reports "unreachable" and wipes locally regardless,
+   * so revocation is best-effort, never a blocker. Crucially, a cleared base URL
+   * is NOT 'already-invalid' — that outcome is reserved for a token the hub
+   * actually rejected (or the absence of any token). */
+  async revokeDeviceToken(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<'revoked' | 'already-invalid'> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const deviceToken = (settings.agencyHubDeviceToken ?? '').trim();
+    if (!deviceToken) {
+      // No token to revoke — an honest already-invalid, and nothing to send.
+      return 'already-invalid';
+    }
+    if (!baseUrl) {
+      // A token IS present but there is no address to reach the hub: the server
+      // token stays LIVE, so revocation is UNCONFIRMED — never 'already-invalid'
+      // (that would falsely claim a 401 the hub never sent). Throw so the handler
+      // maps it to 'unreachable' and the token dies by sliding-expiry.
+      throw new Error('Agency Hub base URL missing — device token revoke unreachable');
+    }
+    try {
+      await this.sdkFor(baseUrl, deviceToken, signal).authRevokeCurrentDeviceToken();
+      return 'revoked';
+    } catch (error) {
+      if (error instanceof KernelApiError && (error.status === 401 || error.status === 403)) {
+        // Already dead server-side — an honest sign-out, not a failure.
+        return 'already-invalid';
+      }
+      // Abort/network/other-status: revocation is UNCONFIRMED. Surface it; the
+      // handler maps every throw to 'unreachable'.
+      logWarn('Agency Hub device token revoke failed', {
+        status: error instanceof KernelApiError ? error.status ?? 0 : 0,
+      });
+      throw error;
+    }
+  }
+
   /** Public /health for the status row. DEGRADED is a declared 503 whose body
    * the TYPED client throws before parsing — so read the raw Response (200 AND
    * 503 both carry the body) and validate with the vendored 200 schema, whose

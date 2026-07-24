@@ -10,6 +10,7 @@ import {
   type AgencyHubPermissionFeedback,
 } from './agency-hub-settings.js';
 import {
+  createBadge,
   createButton,
   createSection,
   createStatusPill,
@@ -66,8 +67,10 @@ import {
 } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  AgencyHubDeviceTokenMeta,
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
+  AgencyHubSignOutResponse,
   AiQuotaStatus,
   OpsDailySnapshot,
   PersonaCatalogEntry,
@@ -108,6 +111,48 @@ const AI_QUOTA_LOW_THRESHOLD = 20;
 type SessionsResult =
   | { ok: true; sessions: SessionSnapshotEntry[] }
   | { ok: false; error: unknown };
+
+/** A runtime reply is only as trustworthy as its shape. A stale background, a
+ * truncated frame or a harness with no handler resolves to something that is
+ * NOT the declared type; painting it would fabricate a verdict, so every
+ * optional read passes through a guard and falls back to honest-unknown. */
+function asOpsDailySnapshot(value: unknown): OpsDailySnapshot | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  return record.version === 1 &&
+    Array.isArray(record.hubErrors) &&
+    typeof record.hubErrorsTotal === 'number'
+    ? (value as OpsDailySnapshot)
+    : null;
+}
+
+function asDeviceTokenMeta(value: unknown): AgencyHubDeviceTokenMeta | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  return record.version === 1 &&
+    typeof record.keyPrefix === 'string' &&
+    typeof record.issuedAt === 'number'
+    ? (value as AgencyHubDeviceTokenMeta)
+    : null;
+}
+
+function asQuotaEntries(value: unknown): AiQuotaStatus[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
+  return Object.values(value as Record<string, unknown>).filter(
+    (entry): entry is AiQuotaStatus =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as AiQuotaStatus).pageLabel === 'string',
+  );
+}
+
+function asSpendersObservation(value: unknown): SpendersObservation | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  return record.outcome === 'ok' || record.outcome === 'fail'
+    ? (value as SpendersObservation)
+    : null;
+}
 
 function formatClockTime(at: number): string {
   const date = new Date(at);
@@ -689,13 +734,13 @@ async function render(): Promise<void> {
   const agencyHubPermissionMeta = document.createElement('div');
   agencyHubPermissionMeta.className = 'chatgoose-meta';
 
-  const agencyHubPermissionButton = createButton('Grant Access', true);
+  const agencyHubPermissionButton = createButton(COPY.status.grantAccess, true);
   const agencyHubConnectionStatus = document.createElement('div');
 
   const agencyHubConnectionMeta = document.createElement('div');
   agencyHubConnectionMeta.className = 'chatgoose-meta';
 
-  const agencyHubConnectionButton = createButton('Test Connection', true);
+  const agencyHubConnectionButton = createButton(COPY.hub.testConnection, true);
   const agencyHubActionRow = document.createElement('div');
   agencyHubActionRow.style.display = 'flex';
   agencyHubActionRow.style.gap = '8px';
@@ -704,6 +749,20 @@ async function render(): Promise<void> {
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
+  /** Assigned by the «Статус» block below; every earlier producer calls it
+   * through this hook so nothing depends on declaration order. */
+  let renderHubDiagnostics: () => void = () => undefined;
+  /** Last live connection test: when, outcome, how long, and WHICH credential
+   * carried it. The bearer kind is a LOCAL mirror of the same preference the
+   * background applies (device token first, legacy key as fallback) — the
+   * connection-test response is deliberately not extended to report it. */
+  let lastConnectionCheck: {
+    at: number;
+    ok: boolean;
+    durationMs: number;
+    viaDeviceToken: boolean;
+    code?: string;
+  } | null = null;
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
@@ -792,6 +851,10 @@ async function render(): Promise<void> {
         await persistAgencyHubSettings();
       }
 
+      // Time only the round trip the hub actually answers — not the local save
+      // above, which would inflate the reported latency.
+      const startedAt = performance.now();
+      const viaDeviceToken = Boolean(state.settings.agencyHubDeviceToken.trim());
       const response = await sendRuntimeRequest('testAgencyHubConnection', {
         settings: {
           agencyHubBaseUrl: agencyHubUrlInput.value,
@@ -799,6 +862,7 @@ async function render(): Promise<void> {
           agencyHubDeviceToken: state.settings.agencyHubDeviceToken,
         },
       });
+      const durationMs = Math.round(performance.now() - startedAt);
 
       if (version !== agencyHubConnectionVersion) {
         return;
@@ -811,6 +875,13 @@ async function render(): Promise<void> {
             kind: 'failed',
             error: response.error ?? createUserError('hub_request_failed'),
           };
+      lastConnectionCheck = {
+        at: Date.now(),
+        ok: response.ok,
+        durationMs,
+        viaDeviceToken,
+        ...(response.ok ? {} : { code: (response.error ?? createUserError('hub_request_failed')).code }),
+      };
       lastAgencyHubConnectionSignature = buildAgencyHubConnectionSignature(
         agencyHubUrlInput.value,
         agencyHubKeyInput.value,
@@ -831,6 +902,7 @@ async function render(): Promise<void> {
     }
 
     renderAgencyHubConnectionState();
+    renderHubDiagnostics();
   };
 
   let agencyHubPermissionRefreshVersion = 0;
@@ -857,12 +929,15 @@ async function render(): Promise<void> {
     // status view is defined below and this function only ever runs later.
     hubPermissionGranted = originPattern ? permissionGranted : null;
     refreshStatusView();
+    renderHubDiagnostics();
 
     if (permissionGranted) {
       agencyHubPermissionFeedback = null;
     }
 
-    agencyHubPermissionButton.textContent = permissionGranted ? 'Reconnect' : 'Grant Access';
+    agencyHubPermissionButton.textContent = permissionGranted
+      ? COPY.hub.reconnectAccess
+      : COPY.status.grantAccess;
     agencyHubPermissionButton.disabled = !originPattern;
 
     if (!agencyHubUrlInput.value.trim()) {
@@ -1045,7 +1120,42 @@ async function render(): Promise<void> {
   hubSignInMeta.className = 'chatgoose-meta';
 
   let hubSignInFormExpanded = false;
-  const hubReissueButton = createButton('Re-issue device token', true);
+  const hubReissueButton = createButton(COPY.hub.reissueToken, true);
+  const hubSignOutButton = createButton(COPY.hub.signOut, true);
+  const hubSignOutConfirmButton = createButton(COPY.hub.signOut.replace('…', ''), false, true);
+  const hubSignOutCancelButton = createButton(COPY.hub.signOutCancel, true);
+  const hubSignOutConfirmRow = document.createElement('div');
+  hubSignOutConfirmRow.className = 'chatgoose-card-actions';
+  const hubSignOutConfirmLabel = document.createElement('span');
+  hubSignOutConfirmLabel.textContent = COPY.hub.signOutConfirm;
+  hubSignOutConfirmRow.append(
+    hubSignOutConfirmLabel,
+    hubSignOutConfirmButton,
+    hubSignOutCancelButton,
+  );
+  hubSignOutConfirmRow.hidden = true;
+  const hubSignOutStatus = document.createElement('div');
+  hubSignOutStatus.className = 'chatgoose-meta';
+  hubSignOutStatus.setAttribute('role', 'status');
+  hubSignOutStatus.setAttribute('aria-live', 'polite');
+  const hubSignOutHint = document.createElement('div');
+  hubSignOutHint.className = 'chatgoose-meta';
+  hubSignOutHint.textContent = COPY.hub.signOutHint;
+
+  // «Device token» line: pill + which token (its prefix) + when it was issued.
+  // The expiry date is deliberately NOT shown — hub expiry slides on every use.
+  const hubTokenRow = document.createElement('div');
+  hubTokenRow.className = 'chatgoose-status-body';
+  hubTokenRow.dataset.hubDetail = 'device-token';
+  const hubTokenLabel = document.createElement('span');
+  hubTokenLabel.className = 'chatgoose-status-label';
+  hubTokenLabel.textContent = COPY.hub.deviceTokenLabel;
+  const hubTokenPill = document.createElement('span');
+  const hubTokenMeta = document.createElement('span');
+  hubTokenMeta.className = 'chatgoose-status-fact';
+  hubTokenRow.append(hubTokenLabel, hubTokenPill, hubTokenMeta);
+
+  let deviceTokenMeta: AgencyHubDeviceTokenMeta | null = null;
 
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
@@ -1060,11 +1170,37 @@ async function render(): Promise<void> {
         : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
     }
     // With a live token the credential form reads as unfinished business —
-    // fold it away; "Re-issue device token" brings it back for rotation.
+    // fold it away; «Перевыпустить токен» brings it back for rotation.
     // The inline grid display would override [hidden] — set both.
     hubSignInRow.hidden = hasToken && !hubSignInFormExpanded;
     hubSignInRow.style.display = hubSignInRow.hidden ? 'none' : 'grid';
     hubReissueButton.hidden = !hasToken || hubSignInFormExpanded;
+    hubSignOutButton.hidden = !hasToken && !state.settings.agencyHubApiKey.trim();
+    if (hubSignOutButton.hidden) {
+      hubSignOutConfirmRow.hidden = true;
+    }
+
+    setStatusPill(
+      hubTokenPill,
+      hasToken ? 'ok' : 'neutral',
+      hasToken ? COPY.hub.deviceTokenActive : COPY.hub.deviceTokenMissing,
+    );
+    if (!hasToken) {
+      hubTokenMeta.textContent = '';
+    } else if (deviceTokenMeta) {
+      hubTokenMeta.textContent = [
+        `${deviceTokenMeta.keyPrefix}…`,
+        COPY.hub.deviceTokenIssued.replace(
+          '{date}',
+          new Date(deviceTokenMeta.issuedAt).toLocaleDateString(),
+        ),
+        COPY.hub.deviceTokenRenews,
+      ].join(' · ');
+    } else {
+      // A token issued before this version has no recorded metadata. Say that
+      // instead of inventing a date.
+      hubTokenMeta.textContent = `${COPY.hub.deviceTokenUnknown} · ${COPY.hub.deviceTokenRenews}`;
+    }
   };
 
   hubReissueButton.addEventListener('click', () => {
@@ -1098,6 +1234,12 @@ async function render(): Promise<void> {
           // returns only metadata; a placeholder here would later be SENT as
           // the bearer by the connection test (1.7.0 audit finding).
           state.settings = (await loadStorageState()).settings;
+          // The background wrote the token's operational metadata inside the
+          // same auth critical section; pull it so the pane can name WHICH
+          // token is live without ever reading the token.
+          deviceTokenMeta = asDeviceTokenMeta(
+            await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
+          );
           hubSignInPasswordInput.value = '';
           hubSignInFormExpanded = false;
           hubSignInMeta.textContent =
@@ -1132,11 +1274,89 @@ async function render(): Promise<void> {
   hubSignInRow.style.gap = '8px';
   hubSignInButton.style.justifySelf = 'start';
   hubSignInRow.append(hubSignInFields, hubSignInButton);
+  // «Выйти…» is two-step on purpose: it destroys credentials on this device.
+  hubSignOutButton.addEventListener('click', () => {
+    hubSignOutConfirmRow.hidden = false;
+    hubSignOutButton.hidden = true;
+    hubSignOutStatus.textContent = '';
+  });
+  hubSignOutCancelButton.addEventListener('click', () => {
+    hubSignOutConfirmRow.hidden = true;
+    renderHubSignInState();
+  });
+  hubSignOutConfirmButton.addEventListener('click', () => {
+    void (async () => {
+      hubSignOutConfirmButton.disabled = true;
+      hubSignOutCancelButton.disabled = true;
+      hubSignOutStatus.textContent = COPY.hub.signOutRunning;
+      // The background owns the whole sequence — capture, wipe, revoke — so a
+      // pagehide mid-revoke can never leave the credentials on disk. The token
+      // never crosses this boundary; only the outcome does.
+      let outcome: AgencyHubSignOutResponse;
+      try {
+        outcome = await sendRuntimeRequest('signOutAgencyHub');
+      } catch (error) {
+        // A rejected request means the background may have wiped NOTHING.
+        // Report the loud case, never a comforting «стёрт локально».
+        console.error('Agency Hub sign-out request failed', error);
+        outcome = { outcome: 'wipe-failed' };
+      }
+      if (disposed) return;
+
+      // Re-read storage as the source of truth about what is actually stored
+      // now — including the wipe-failed case, where the fields must show what
+      // really survived rather than an optimistic blank.
+      try {
+        state.settings = (await loadStorageState()).settings;
+      } catch (error) {
+        console.error('Failed to re-read settings after sign-out', error);
+      }
+      deviceTokenMeta = asDeviceTokenMeta(
+        await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
+      );
+      agencyHubApiKeyDirty = false;
+      agencyHubKeyInput.value = state.settings.agencyHubApiKey;
+
+      hubSignOutStatus.textContent = {
+        revoked: COPY.hub.signOutRevoked,
+        'already-invalid': COPY.hub.signOutAlreadyInvalid,
+        unreachable: COPY.hub.signOutUnreachable,
+        'wipe-failed': COPY.hub.signOutWipeFailed,
+      }[outcome.outcome];
+      hubSignOutStatus.dataset.signOutOutcome = outcome.outcome;
+
+      hubSignOutConfirmButton.disabled = false;
+      hubSignOutCancelButton.disabled = false;
+      hubSignOutConfirmRow.hidden = true;
+      hubSignInMeta.textContent = '';
+      renderHubSignInState();
+      // The credential is gone: repaint the hub-facing diagnosis rather than
+      // leaving an AUTH row next to an empty token field.
+      void (async () => {
+        await refreshAgencyHubPermissionState();
+        await runAgencyHubConnectionTest({ force: true });
+        await hydrateHubStatusRows(storedHubSignature());
+      })().catch((error: unknown) => {
+        console.error('Failed to refresh Agency Hub status after sign-out', error);
+      });
+    })();
+  });
+
   const hubSignInWrap = document.createElement('div');
   hubSignInWrap.style.display = 'grid';
   hubSignInWrap.style.gap = '8px';
   hubReissueButton.style.justifySelf = 'start';
-  hubSignInWrap.append(hubSignInRow, hubReissueButton);
+  const hubTokenActions = document.createElement('div');
+  hubTokenActions.className = 'chatgoose-card-actions';
+  hubTokenActions.append(hubReissueButton, hubSignOutButton);
+  hubSignInWrap.append(
+    hubSignInRow,
+    hubTokenRow,
+    hubTokenActions,
+    hubSignOutConfirmRow,
+    hubSignOutStatus,
+    hubSignOutHint,
+  );
   renderHubSignInState();
 
   const agencyHubStatusDivider = document.createElement('div');
@@ -1157,10 +1377,53 @@ async function render(): Promise<void> {
   legacyKeyDetails.className = 'chatgoose-details';
   legacyKeyDetails.open = Boolean(state.settings.agencyHubApiKey.trim());
   const legacyKeySummary = document.createElement('summary');
-  legacyKeySummary.textContent = 'Legacy API key';
+  legacyKeySummary.textContent = COPY.hub.legacyKeyFold;
   legacyKeyDetails.append(
     legacyKeySummary,
     labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
+  );
+
+  // ── Hub diagnostics: dense, always-visible facts about THIS connection ──
+  // Unlike the «Статус» pane's Контракт row (debug-only), every line here is
+  // shown unconditionally: this card exists to be pasted into a support thread.
+  const hubDetailRow = (label: string, key: string): { root: HTMLElement; value: HTMLElement } => {
+    const root = document.createElement('div');
+    root.className = 'chatgoose-status-body';
+    root.dataset.hubDetail = key;
+    const labelNode = document.createElement('span');
+    labelNode.className = 'chatgoose-status-label';
+    labelNode.textContent = label;
+    const value = document.createElement('span');
+    value.className = 'chatgoose-status-fact';
+    value.textContent = COPY.common.unknown;
+    root.append(labelNode, value);
+    return { root, value };
+  };
+
+  const hubIdentityRow = hubDetailRow(COPY.hub.identityLabel, 'identity');
+  const hubPagesRow = hubDetailRow(COPY.hub.pagesLabel, 'pages');
+  const hubPagesChips = document.createElement('span');
+  hubPagesChips.className = 'chatgoose-hub-chips';
+  hubPagesRow.root.append(hubPagesChips);
+  const hubConnectionCard = document.createElement('div');
+  hubConnectionCard.className = 'chatgoose-card';
+  hubConnectionCard.append(hubIdentityRow.root, hubPagesRow.root);
+
+  const hubCheckRow = hubDetailRow(COPY.hub.checkLabel, 'check');
+  const hubHostAccessRow = hubDetailRow(COPY.hub.hostAccessLabel, 'host-access');
+  const hubContractRow = hubDetailRow(COPY.hub.contractLabel, 'contract');
+  const hubErrorsRow = hubDetailRow(COPY.hub.errorsLabel, 'errors');
+  const hubFanSummaryRow = hubDetailRow(COPY.hub.fanSummaryLabel, 'fan-summary');
+  const hubDiagnosticsCard = document.createElement('div');
+  hubDiagnosticsCard.className = 'chatgoose-card';
+  hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
+  hubDiagnosticsCard.append(
+    hubCheckRow.root,
+    hubHostAccessRow.root,
+    hubContractRow.root,
+    hubErrorsRow.root,
+    hubFanSummaryRow.root,
+    legacyKeyDetails,
   );
 
   agencyHubSection.append(
@@ -1168,8 +1431,9 @@ async function render(): Promise<void> {
     labeledField('Sign in (device token)', hubSignInWrap),
     hubSignInStatus,
     hubSignInMeta,
-    legacyKeyDetails,
+    hubConnectionCard,
     agencyHubStatusCard,
+    hubDiagnosticsCard,
   );
 
   // ─── «Статус»: read-only state rows ────────────────────────
@@ -1279,8 +1543,115 @@ async function render(): Promise<void> {
     },
   ];
 
+  // The Hub pane's dense diagnostics. Everything it shows comes from the SAME
+  // statusModel the Статус rows use plus the local connection/permission
+  // mirrors — no extra requests, and no line invented when its source is
+  // unknown.
+  renderHubDiagnostics = (): void => {
+    if (disposed) return;
+
+    // Аккаунт + Страницы ядра (identity)
+    const identity = statusModel.identity;
+    if (identity?.ok) {
+      hubIdentityRow.value.textContent = `${identity.username} · ${identity.role}`;
+      hubPagesRow.value.textContent = COPY.hub.pagesCount.replace(
+        '{n}',
+        String(identity.pages.length),
+      );
+      // Four chips, then an honest «и ещё N» — a chatter on twelve pages must
+      // not get a wall of chips.
+      const shown = identity.pages.slice(0, 4);
+      const chips = shown.map((page) => createBadge(page, 'neutral', true));
+      if (identity.pages.length > shown.length) {
+        chips.push(
+          createBadge(
+            COPY.hub.pagesMore.replace('{n}', String(identity.pages.length - shown.length)),
+            'neutral',
+          ),
+        );
+      }
+      hubPagesChips.replaceChildren(...chips);
+    } else {
+      hubIdentityRow.value.textContent = identity === null
+        ? COPY.common.unknown
+        : COPY.status.accessEmpty;
+      hubPagesRow.value.textContent = COPY.common.unknown;
+      hubPagesChips.replaceChildren();
+    }
+
+    // Проверка — when, outcome, how long, and which credential carried it.
+    if (!lastConnectionCheck) {
+      hubCheckRow.value.textContent = COPY.hub.checkNever;
+    } else {
+      hubCheckRow.value.textContent = [
+        formatClockTime(lastConnectionCheck.at),
+        lastConnectionCheck.ok
+          ? COPY.hub.checkSuccess
+          : `${COPY.hub.checkFailure}${lastConnectionCheck.code ? ` ${lastConnectionCheck.code}` : ''}`,
+        `${lastConnectionCheck.durationMs} ms`,
+        lastConnectionCheck.viaDeviceToken
+          ? COPY.hub.checkViaDeviceToken
+          : COPY.hub.checkViaLegacyKey,
+      ].join(' · ');
+    }
+
+    // Доступ к хосту
+    const originPattern = buildAgencyHubOriginPattern(
+      normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
+    );
+    hubHostAccessRow.value.textContent = hubPermissionGranted === null || !originPattern
+      ? COPY.common.unknown
+      : hubPermissionGranted
+        ? `${COPY.hub.hostAccessGrantedFor} ${originPattern}`
+        : COPY.status.hubNoPermission;
+
+    // Контракт SDK — ALWAYS visible here (the Статус row stays debug-only).
+    const health = statusModel.health;
+    if (health?.ok) {
+      const match = health.contractHash === health.sdkContractHash;
+      hubContractRow.value.textContent = [
+        match ? COPY.hub.contractMatches : COPY.hub.contractMismatch,
+        health.contractHash.slice(0, 12),
+        ...(health.sdkSourceCommit
+          ? [COPY.status.contractSourceCommit.replace('{commit}', health.sdkSourceCommit.slice(0, 12))]
+          : []),
+      ].join(' · ');
+    } else {
+      hubContractRow.value.textContent = COPY.status.contractUnknown;
+    }
+
+    // Ошибки генераций (Hub) — today's exact count; the list is capped at 20,
+    // so say so rather than let «за сегодня: 37» look like 37 listed rows.
+    const ops = statusModel.opsDaily;
+    if (!ops) {
+      hubErrorsRow.value.textContent = COPY.common.unknown;
+    } else {
+      const last = ops.hubErrors[ops.hubErrors.length - 1];
+      hubErrorsRow.value.textContent = [
+        COPY.hub.errorsToday.replace('{n}', String(ops.hubErrorsTotal)),
+        ...(last
+          ? [COPY.hub.errorsLast
+              .replace('{code}', last.code)
+              .replace('{time}', formatClockTime(last.at))]
+          : []),
+        ...(ops.hubErrorsTotal > ops.hubErrors.length ? [COPY.hub.errorsCapped] : []),
+      ].join(' · ');
+    }
+
+    // Fan Summary — the last push that LANDED, honest-empty otherwise.
+    const push = ops?.lastSummaryPush ?? null;
+    hubFanSummaryRow.value.textContent = !ops
+      ? COPY.common.unknown
+      : push
+        ? COPY.hub.fanSummaryLast
+            .replace('{when}', formatClockTime(push.at))
+            .replace('{account}', push.accountLabel || COPY.common.unknown)
+        : COPY.hub.fanSummaryEmpty;
+  };
+
   const refreshStatusView = (): void => {
     if (disposed) return;
+    renderHubDiagnostics();
     // No datum at all yet: keep the honest loading line — never a fabricated
     // «Нужно N действий» over an install nobody has looked at.
     if (statusModel.identity === null && !fanslyRowPainted) {
@@ -1525,14 +1896,17 @@ async function render(): Promise<void> {
       sendRuntimeRequest('getOpsDaily'),
     ]);
     if (disposed) return;
-    const quotaByPage = quotaResult.status === 'fulfilled' ? quotaResult.value : {};
-    const spenders = spendersResult.status === 'fulfilled' ? spendersResult.value : null;
-    const opsDaily = opsResult.status === 'fulfilled' ? opsResult.value : null;
+    const spenders = spendersResult.status === 'fulfilled'
+      ? asSpendersObservation(spendersResult.value)
+      : null;
+    const opsDaily = opsResult.status === 'fulfilled'
+      ? asOpsDailySnapshot(opsResult.value)
+      : null;
 
     // Квота AI — requests per page only; NEVER a micro-USD figure (E14). An
     // empty map is «no observation today», not «no quota».
-    const quotaEntries = quotaByPage && typeof quotaByPage === 'object'
-      ? Object.values(quotaByPage)
+    const quotaEntries = quotaResult.status === 'fulfilled'
+      ? asQuotaEntries(quotaResult.value)
       : [];
     // Worst first: a page at 0 is what the chatter needs to see, not an average.
     const worstFirst = [...quotaEntries].sort(
@@ -1571,7 +1945,7 @@ async function render(): Promise<void> {
 
     // Активность — today's accepted generations, straight from the ops-daily
     // counters. No generation today is an OBSERVATION, not a fault.
-    statusModel.opsDaily = opsDaily ?? null;
+    statusModel.opsDaily = opsDaily;
     const lastGeneration = opsDaily?.lastGeneration ?? null;
     if (!lastGeneration) {
       statusRows.activity.set({ badge: '—', tone: 'neutral', fact: COPY.status.activityEmpty });
@@ -1598,7 +1972,7 @@ async function render(): Promise<void> {
     // Spenders — freshest board observation. A null observation is «not yet
     // observed», NOT «flag off»: inventing FLAG OFF would claim the projection
     // is disabled when nobody has ever looked.
-    statusModel.spenders = spenders ?? null;
+    statusModel.spenders = spenders;
     if (!spenders) {
       statusRows.spenders.set({ badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty });
     } else if (spenders.outcome === 'fail') {
@@ -2482,6 +2856,15 @@ async function render(): Promise<void> {
   void hydrateHubStatusRows(storedHubSignature());
   // Local reads — no hub round-trip, no signature guard.
   void hydrateLocalStatusRows();
+  // Which device token is stored here. Absent for tokens issued before this
+  // version — the pane says so instead of guessing a date.
+  void sendRuntimeRequest('getAgencyHubDeviceTokenMeta')
+    .then((meta) => {
+      if (disposed) return;
+      deviceTokenMeta = asDeviceTokenMeta(meta);
+      renderHubSignInState();
+    })
+    .catch(() => undefined);
 
   renderCleanup = async () => {
     const pendingEdits = flushPendingEdits();

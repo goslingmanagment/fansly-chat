@@ -870,6 +870,8 @@ export interface RuntimeRequestMap {
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
+  signOutAgencyHub: undefined;
+  getAgencyHubDeviceTokenMeta: undefined;
   getAgencyHubHealth: undefined;
   getAgencyHubIdentity: undefined;
   getAiQuotaByPage: undefined;
@@ -892,6 +894,8 @@ export interface RuntimeResponseMap {
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
+  signOutAgencyHub: AgencyHubSignOutResponse;
+  getAgencyHubDeviceTokenMeta: AgencyHubDeviceTokenMeta | null;
   getAgencyHubHealth: AgencyHubHealthResponse;
   getAgencyHubIdentity: AgencyHubIdentityResponse;
   getAiQuotaByPage: Record<string, AiQuotaStatus>;
@@ -1004,6 +1008,33 @@ export interface AgencyHubDeviceTokenRequest {
 export type AgencyHubDeviceTokenResponse =
   | { ok: true; keyPrefix: string; label: string; expiresAt: string }
   | { ok: false; error: UserFacingError };
+
+/** Operational metadata about the device token stored on THIS device. It is
+ * deliberately not the token: only its prefix (enough to tell two tokens apart
+ * in the owner's admin list) and when it was issued. Absent for tokens issued
+ * before this version — the pane says so instead of guessing.
+ *
+ * `expiresAt` is recorded for support, never rendered: hub expiry slides on
+ * every use, so a displayed date would be wrong within minutes. */
+export interface AgencyHubDeviceTokenMeta {
+  version: 1;
+  keyPrefix: string;
+  issuedAt: number;
+  expiresAt: string;
+}
+
+/** «Выйти» sign-out outcome. Neither the token nor the wipe cross the runtime
+ * boundary as data — the BACKGROUND reads the token from storage, wipes both
+ * custody keys locally FIRST, then best-effort revokes; this response carries
+ * only the discriminant. 'unreachable' = the hub could not confirm revocation
+ * (network/timeout/5xx/missing base URL) — the local wipe already happened and
+ * the token dies by sliding-expiry. 'wipe-failed' = the durable local wipe threw
+ * (credentials may still be on disk — the loud case); `error` carries its
+ * message. */
+export interface AgencyHubSignOutResponse {
+  outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed';
+  error?: string;
+}
 
 export interface GetPopupStatusRequest {
   tabId?: number;

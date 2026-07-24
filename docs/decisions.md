@@ -75,7 +75,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
-| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page |
+| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO |
 
 ## Entries
 
@@ -1537,3 +1537,74 @@ queue — the settings blob and its schema stay at v15, and hub credential
 custody (E19) is untouched. Second, the changelog stays a WEB page next to the
 update feed; the extension only links to it. Zero changelog content ships in
 the XPI.
+
+**E59 amendment — wave B «Статус и фон» (2026-07-25).** The hero health strip
+(`heroStrip` and its four pills) is DELETED, not moved: its producers now write
+into the «Статус» rows and the rail's micro-status, so every install fact has
+exactly one owner. The rows are Fansly, Hub, Доступ, Квота AI, Активность,
+Spenders and Контракт, each hydrated from its own source under
+`Promise.allSettled` — a rejected read paints its own honest state and never
+strands a sibling as a skeleton. Hub and Доступ additionally ride a
+connection-signature guard checked twice (before issuing AND before painting)
+plus a monotonic run id, so a slow hub A can never paint over hub B.
+
+Readiness is an aggregate of ACTIONABLE prerequisites only: a working hub
+credential, the host permission, at least one captured Fansly session, and an
+active persona on every captured account. Observational rows — an unknown AI
+quota, a board nobody has opened, a quiet day — describe the install and must
+never turn the verdict red (the E41 model). The rail's «Статус» micro-status is
+the same aggregate, not a second opinion.
+
+«Проверить всё» re-runs the hub reads and the local reads and NOTHING else. It
+must never call `getSessionsSnapshot`: that handler resolves unknown identities
+against Fansly's own `/me`, and a settings button may not become out-of-band
+Fansly egress (DP 1-B). It is throttled; the session rows instead refresh on a
+throttled focus/visibility re-poll that rides the same snapshot+paint path.
+
+«Скопировать отчёт» builds its text from an explicit report model that has no
+credential field at all — the report is secret-free BY CONSTRUCTION rather than
+by redaction, and a test greps the produced text for `agency_hub_`, `Bearer`
+and the stored custody values. Version and schema come from
+`browser.runtime.getManifest().version` and `STORAGE_SCHEMA_VERSION`; quota is
+listed per `pageLabel`.
+
+The Контракт line has two homes with two rules: in «Статус» it stays behind
+debug mode (it is developer diagnostics, not shift information), while the Hub
+pane's diagnostics card shows it unconditionally — that card exists to be pasted
+into a support thread. Both read the SAME background-stamped health response:
+the hub's `contractHash`, the vendored `KERNEL_CONTRACT_HASH`, and the vendor
+manifest's `sourceCommit`. The options bundle still imports no SDK (E41). The
+exported `KERNEL_SDK_VERSION` is deliberately not shown — it is the SDK package
+version, not the core build, and would read as provenance it does not carry.
+
+Two background stores land in this wave, both operational keys with their own
+`version: 1` and a module-level FIFO mutation queue. `chatgoose:opsDaily` holds
+one UTC day of facts — hub-lane failures (only `CG-HUB-` codes, an exact total
+plus the last 20), the last ACCEPTED generation with the account→page binding it
+proved, and the last Fan Summary push that actually landed. Its day boundary is
+00:00 UTC, the same boundary the kernel's AI quota resets at, and a record from
+a previous day reads as an empty day rather than yesterday's number. The
+generation hook sits where the coordinator ACCEPTS a result, not in the gateway:
+the gateway request carries no model account, and a stream can still fail
+validation after the kernel has finished. `chatgoose:deviceTokenMeta` records
+only which token is stored here (its prefix) and when it was issued — never the
+token. Its `expiresAt` is kept for support but never rendered: hub expiry slides
+on every use, so a displayed date would be wrong within minutes. A token issued
+before this version has no record, and the pane says so instead of guessing.
+
+Every device-token custody mutation — sign-in, re-issue and sign-out — runs
+inside ONE background FIFO. Without it a sign-in landing mid-sign-out could
+store a fresh token that the sign-out's wipe then erases while its revoke kills a
+different, captured token, orphaning a live and now un-revocable token on the
+hub. `signOutAgencyHub` is wipe-first and background-owned: it captures the
+token INSIDE the critical section, writes both custody keys to EMPTY strings
+(never key removal — that would reopen the pre-v13 blob fallback, E19) and never
+touches the settings blob, then best-effort revokes with the captured token. Its
+four outcomes are reported honestly — `revoked`, `already-invalid`,
+`unreachable` (wiped locally, the hub could not confirm) and the loud
+`wipe-failed`; a rejected sign-out REQUEST is reported as `wipe-failed`, because
+the background may have wiped nothing. The post-sign-in status refresh introduced
+in 1.9.x is preserved and now also repaints the «Статус» rows.
+
+Neither the AI quota nor the popup's `getAiQuotaStatus` operation changes: the
+popup keeps its freshest-single read; the cabinet uses the new per-page map.

@@ -1,14 +1,21 @@
 import { vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { STORAGE_SCHEMA_VERSION } from '../../src/shared/constants.js';
+import {
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  STORAGE_SCHEMA_VERSION,
+} from '../../src/shared/constants.js';
 import {
   createDefaultSettings,
   migrateState,
   serializePersistedState,
 } from '../../src/shared/migrations.js';
 import type {
+  AgencyHubDeviceTokenMeta,
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
+  AgencyHubSignOutResponse,
   AiQuotaStatus,
   OpsDailySnapshot,
   PersistedState,
@@ -35,6 +42,9 @@ export interface MountOverrides {
   /** Granted host permission for the hub origin (defaults to false — a fresh
    * install). */
   permissionGranted?: boolean;
+  /** Extra raw storage.local keys, merged over the serialized state. Operational
+   * keys (`chatgoose:*`) live outside PersistedState and are seeded here. */
+  storage?: Record<string, unknown>;
   /** Deterministic replies for the status/hero runtime reads. Each field may be
    * a value OR a factory — a factory lets a test return a deferred promise
    * (signature-guard A→B race) or a rejecting promise (independent-source
@@ -45,6 +55,11 @@ export interface MountOverrides {
     quotaByPage?: Record<string, AiQuotaStatus> | (() => Record<string, AiQuotaStatus> | Promise<Record<string, AiQuotaStatus>>);
     spenders?: SpendersObservation | null | (() => SpendersObservation | null | Promise<SpendersObservation | null>);
     opsDaily?: OpsDailySnapshot | (() => OpsDailySnapshot | Promise<OpsDailySnapshot>);
+    /** «Выйти» outcome. The default 'revoked' also performs the background's
+     * durable wipe on the harness record, so a test sees what the real
+     * background would have left behind. A factory may reject. */
+    signOut?: AgencyHubSignOutResponse | (() => AgencyHubSignOutResponse | Promise<AgencyHubSignOutResponse>);
+    deviceTokenMeta?: AgencyHubDeviceTokenMeta | null;
     /** Reply for the mount-tail (and any post-mount) testAgencyHubConnection.
      * Defaults to a passing test so a fully-configured page reaches the hero's
      * all-green state — the hub step requires a `connected` feedback. A factory
@@ -117,7 +132,10 @@ export async function mountOptionsPage(
   // the `settings` blob is stripped of them. serializePersistedState is the
   // app's own writer, so the record the mocked storage hands back matches
   // production exactly; migrateState reconstructs it the way the page reads it.
-  let stored: Record<string, unknown> = serializePersistedState(state);
+  let stored: Record<string, unknown> = {
+    ...serializePersistedState(state),
+    ...overrides.storage,
+  };
 
   dom = new JSDOM(
     '<!doctype html><html><head></head><body><div id="chatgoose-options-root"></div></body></html>',
@@ -225,6 +243,30 @@ export async function mountOptionsPage(
             return runtimeReply<OpsDailySnapshot>(runtime.opsDaily, emptyOpsDaily());
           case 'getSpendersStatus':
             return runtimeReply<SpendersObservation | null>(runtime.spenders, null);
+          case 'getAgencyHubDeviceTokenMeta': {
+            if (runtime.deviceTokenMeta !== undefined) return runtime.deviceTokenMeta;
+            const meta = stored[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
+            return meta ?? null;
+          }
+          case 'signOutAgencyHub': {
+            const reply = await runtimeReply<AgencyHubSignOutResponse>(
+              runtime.signOut,
+              { outcome: 'revoked' },
+            );
+            // The real background wipes BOTH custody keys (to empty strings —
+            // never removal, E19) and the token metadata before it answers
+            // anything but wipe-failed. Model that so the page under test sees
+            // the same storage it would in production.
+            if (reply.outcome !== 'wipe-failed') {
+              stored = {
+                ...stored,
+                [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
+                [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
+              };
+              delete stored[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
+            }
+            return reply;
+          }
           default:
             return undefined;
         }

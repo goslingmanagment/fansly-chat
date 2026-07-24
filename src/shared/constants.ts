@@ -27,6 +27,13 @@ export const PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY = 'personaCatalogFetchedAt';
 // (hydrated at load); only the PERSISTED layout changed.
 export const AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY = 'agencyHubDeviceToken';
 export const AGENCY_HUB_API_KEY_STORAGE_KEY = 'agencyHubApiKey';
+/** Operational (NOT custody, NOT settings-blob) metadata about the stored
+ * device token — its prefix and when it was issued, so the Hub pane can say
+ * WHICH token is live without ever reading the token itself. Own key, own
+ * `version`; schema v15 is untouched. */
+export const AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY = 'chatgoose:deviceTokenMeta';
+/** «Выйти» best-effort hub revoke budget. */
+export const AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS = 5_000;
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,

@@ -233,10 +233,21 @@ export const COPY = {
     signInHint:
       'Адрес и логин выдаёт владелец агентства. Вход выпустит device token — пароль на устройстве не хранится.',
     testConnection: 'Проверить связь',
+    reconnectAccess: 'Переподключить',
     reissueToken: 'Перевыпустить токен',
     signOut: 'Выйти…',
     signOutConfirm: 'Точно выйти?',
     signOutCancel: 'Отмена',
+    signOutRunning: 'Выходим…',
+    /** The four honest outcomes of a sign-out. «Стёрт локально» is never said
+     * about a wipe that failed, and «отозван» never about a revoke the hub did
+     * not confirm. */
+    signOutRevoked: 'Вышли: креды стёрты, токен отозван на хабе.',
+    signOutAlreadyInvalid: 'Вышли: креды стёрты, токен уже был недействителен.',
+    signOutUnreachable:
+      'Креды стёрты на этом устройстве. Хаб не подтвердил отзыв — токен истечёт сам.',
+    signOutWipeFailed:
+      'Не удалось стереть креды на этом устройстве — они могли остаться. Перезагрузи Настройки и повтори.',
     signOutHint:
       '«Выйти» стирает device token и legacy-ключ на этом устройстве; настройки и маппинги остаются.',
     /** Diagnostics card. */
