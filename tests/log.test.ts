@@ -46,6 +46,24 @@ describe('logDebug', () => {
     spy.mockRestore();
   });
 
+  it('redacts agencyHubDeviceToken by payload key', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    logDebug(true, 'test', { agencyHubDeviceToken: 'agency_hub_device_secret' });
+    expect(spy).toHaveBeenCalledWith('[ChatGoose] test', {
+      agencyHubDeviceToken: '[REDACTED]',
+    });
+    spy.mockRestore();
+  });
+
+  it('redacts an Agency Hub device token embedded in a string value', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    logDebug(true, 'test', { note: 'bearer agency_hub_device_secret rejected' });
+    expect(spy).toHaveBeenCalledWith('[ChatGoose] test', {
+      note: 'bearer [REDACTED] rejected',
+    });
+    spy.mockRestore();
+  });
+
   it('redacts sk-ant-* patterns in string values', () => {
     const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     logDebug(true, 'test', { note: 'key is sk-ant-abc123_XYZ ok' });

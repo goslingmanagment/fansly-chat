@@ -16,6 +16,7 @@ function installDom() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -43,5 +44,22 @@ describe('toast technical diagnostics', () => {
     // The primary line still renders as usual.
     expect(dom.window.document.querySelector('.chatgoose-toast-primary')?.textContent)
       .toBe('CG-HUB-07: Agency Hub request failed.');
+  });
+
+  it('renders a provider rate-limit countdown without retrying', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-24T12:00:00.000Z'));
+    const dom = installDom();
+    const toasts = new ToastController();
+    toasts.show({
+      ...getErrorMessage('hub_provider_rate_limited'),
+      retryAtMs: Date.now() + 15_000,
+    }, { tone: 'error', durationMs: 30_000 });
+
+    const retry = dom.window.document.querySelector('.chatgoose-toast-retry');
+    expect(retry?.textContent).toBe('Повторить вручную можно через 15 с.');
+
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(retry?.textContent).toBe('Повторить вручную можно через 14 с.');
   });
 });

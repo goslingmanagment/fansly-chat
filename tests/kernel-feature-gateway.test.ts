@@ -317,7 +317,7 @@ describe('kernel feature gateway', () => {
     expect((await gateByCode('gate_draft_required')).key).toBe('unknown_error');
   });
 
-  it('maps quota/provider/auth failures and fails closed on a truncated stream', async () => {
+  it('maps quota/auth failures and fails closed with a dedicated truncated-stream card', async () => {
     const failWith = async (response: Response): Promise<ChatGooseError> => {
       const gateway = createKernelFeatureGateway(
         vi.fn(async () => response) as unknown as typeof fetch,
@@ -345,18 +345,71 @@ describe('kernel feature gateway', () => {
 
     // Missing terminal frame = truncated generation → never presented as done.
     const truncated = await failWith(sseResponse([META, { type: 'content_delta', text: 'partial' }]));
-    expect(truncated.key).toBe('hub_request_failed');
+    expect(truncated.key).toBe('hub_stream_truncated');
+    expect(truncated.code).toBe('CG-HUB-16');
     expect(truncated.message).toContain('without completing');
   });
 
-  it('surfaces a provider error frame as hub_provider_failed with the technical detail', async () => {
+  it.each([
+    ['provider_billing', 'hub_provider_billing', 'CG-HUB-12', null],
+    ['provider_auth', 'hub_provider_auth', 'CG-HUB-13', null],
+    ['provider_rate_limited', 'hub_provider_rate_limited', 'CG-HUB-14', 45_000],
+    ['provider_unavailable', 'hub_provider_unavailable', 'CG-HUB-15', null],
+    ['provider_proxy_unreachable', 'hub_provider_failed', 'CG-HUB-10', null],
+    ['provider_stream_failed', 'hub_provider_failed', 'CG-HUB-10', null],
+  ] as const)(
+    'exact-matches %s before the provider-prefix fallback',
+    async (frameCode, expectedKey, expectedCardCode, retryAfterMs) => {
+      const before = Date.now();
+      const gateway = createKernelFeatureGateway(vi.fn(async () => sseResponse([
+        META,
+        { type: 'content_delta', text: 'partial ' },
+        {
+          type: 'error',
+          code: frameCode,
+          message: 'Static kernel provider failure',
+          retryAfterMs,
+        },
+      ])) as unknown as typeof fetch);
+
+      let caught: unknown;
+      try {
+        await gateway.streamFeature(
+          settings(),
+          request(),
+          { onText: () => {} },
+          new AbortController().signal,
+        );
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(ChatGooseError);
+      const error = caught as ChatGooseError;
+      expect(error.key).toBe(expectedKey);
+      expect(error.code).toBe(expectedCardCode);
+      expect(error.message).not.toContain('without completing');
+      expect(error.details?.responseSnippet).toBe(
+        `${frameCode}: Static kernel provider failure`,
+      );
+      if (retryAfterMs === null) {
+        expect(error.retryAfterMs).toBeUndefined();
+        expect(error.retryAtMs).toBeUndefined();
+      } else {
+        expect(error.retryAfterMs).toBe(retryAfterMs);
+        expect(error.retryAtMs).toBeGreaterThanOrEqual(before + retryAfterMs);
+        expect(error.retryAtMs).toBeLessThanOrEqual(Date.now() + retryAfterMs);
+      }
+    },
+  );
+
+  it('keeps an unknown future provider code on the CG-HUB-10 prefix fallback', async () => {
     const gateway = createKernelFeatureGateway(vi.fn(async () => sseResponse([
       META,
-      { type: 'content_delta', text: 'partial ' },
       {
         type: 'error',
-        code: 'provider_stream_failed',
-        message: 'AI gateway provider stream failed',
+        code: 'provider_future_transport_failure',
+        message: 'Future static provider failure',
         retryAfterMs: null,
       },
     ])) as unknown as typeof fetch);
@@ -372,9 +425,10 @@ describe('kernel feature gateway', () => {
     const error = caught as ChatGooseError;
     // The frame's cause must survive — never the generic truncation wording.
     expect(error.key).toBe('hub_provider_failed');
+    expect(error.code).toBe('CG-HUB-10');
     expect(error.message).not.toContain('without completing');
     expect(error.details?.responseSnippet).toBe(
-      'provider_stream_failed: AI gateway provider stream failed',
+      'provider_future_transport_failure: Future static provider failure',
     );
   });
 

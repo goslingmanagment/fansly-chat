@@ -681,6 +681,11 @@ export type UserErrorKey =
   | 'hub_sync_failed'
   | 'hub_quota_exceeded'
   | 'hub_provider_failed'
+  | 'hub_provider_billing'
+  | 'hub_provider_auth'
+  | 'hub_provider_rate_limited'
+  | 'hub_provider_unavailable'
+  | 'hub_stream_truncated'
   | 'voice_disabled'
   | 'voice_not_allowlisted'
   | 'voice_no_profile'
@@ -785,6 +790,7 @@ export interface TabUiState {
   groupId: string | null;
   hasAvailableSummary: boolean;
   connected: boolean;
+  /** Legacy field name; true means the Agency Hub AI transport is configured. */
   hasApiKey: boolean;
   /** Fail-closed hint from the assigned Agency Hub page. */
   voiceNotesCapable: boolean;

@@ -6,6 +6,7 @@ import {
 } from '../shared/errors.js';
 import type { UserFacingError } from '../shared/types.js';
 import { ensureToastRoot } from './dom-anchor.js';
+import { createUserErrorRetryCountdown } from './ui/view-helpers.js';
 
 interface ToastOptions {
   actionLabel?: string;
@@ -50,6 +51,16 @@ export class ToastController {
       secondary.className = 'chatgoose-toast-secondary';
       secondary.textContent = description;
       toast.append(secondary);
+    }
+
+    const retryCountdown = isUserFacingError(message)
+      ? createUserErrorRetryCountdown(
+          message,
+          'chatgoose-toast-secondary chatgoose-toast-retry',
+        )
+      : null;
+    if (retryCountdown) {
+      toast.append(retryCountdown);
     }
 
     const technicalDetail = isUserFacingError(message)
