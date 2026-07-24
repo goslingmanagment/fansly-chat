@@ -995,7 +995,7 @@ describe('VoicePanel — лента', () => {
     harness!.root.querySelector<HTMLButtonElement>('.chatgoose-voice-attach')!.click();
 
     await vi.waitFor(() => {
-      expect(textOf(harness!.root)).toContain('Conversation context changed.');
+      expect(textOf(harness!.root)).toContain('Контекст переписки изменился.');
     });
     expect(harness!.attachCalls).toHaveLength(1);
   });
@@ -1143,6 +1143,25 @@ describe('VoicePanel — лента', () => {
     });
 
     expect(textOf(harness!.root)).toContain('Лимит символов для войсов исчерпан.');
+    expect(
+      harness!.root.querySelector('.chatgoose-voice-error-title')?.textContent,
+    ).toBe('CG-VOICE-06: Лимит символов для войсов исчерпан.');
+  });
+
+  it('does not revive a retired provider-key card from an open Voice error code', async () => {
+    const attemptId = await toScriptPhase();
+    harness!.panel.handleError({
+      type: 'voice:scriptError',
+      attemptId,
+      code: 'missing_api_key',
+      message: 'legacy raw message',
+    });
+
+    expect(
+      harness!.root.querySelector('.chatgoose-voice-error-title')?.textContent,
+    ).toBe('CG-APP-01: Что-то пошло не так.');
+    expect(textOf(harness!.root)).not.toContain('legacy raw message');
+    expect(textOf(harness!.root)).not.toContain('CG-AUTH-01');
   });
 
   it('maps an unknown attach refusal to an honest retryable permission error', async () => {
@@ -1156,7 +1175,7 @@ describe('VoicePanel — лента', () => {
     expect(textOf(harness!.root)).toContain(
       'Не удалось выдать разрешение — попробуйте ещё раз',
     );
-    expect(textOf(harness!.root)).not.toContain('Conversation context changed.');
+    expect(textOf(harness!.root)).toContain('CG-APP-01');
   });
 
   it('surfaces an indeterminate take as free status check plus an explicit paid regenerate', async () => {
@@ -1201,6 +1220,12 @@ describe('VoicePanel — лента', () => {
     });
 
     expect(textOf(harness!.root)).toContain('Проверить статус — бесплатно');
+    expect(
+      harness!.root.querySelector('.chatgoose-voice-error-title')?.textContent,
+    ).toBe('CG-VOICE-09: Получение войсов сейчас отключено.');
+    expect(
+      harness!.root.querySelector('.chatgoose-voice-error-technical')?.textContent,
+    ).toBe('HTTP 403');
     harness!.sent.length = 0;
     buttonByText(harness!.root, 'Проверить статус — бесплатно')!.click();
     expect(harness!.sent).toContainEqual(

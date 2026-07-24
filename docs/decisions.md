@@ -74,6 +74,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E55 | 2026-07-24 | Confirmed Voice attach completes the active session; explicit new-from-draft flow protects paid work |
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
+| E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
 
 ## Entries
 
@@ -1455,3 +1456,40 @@ legacy name; obsolete per-provider key hints can no longer revive Claude or
 OpenRouter setup copy. Device-token-shaped log fields and inline
 `agency_hub_device_…` values are redacted. No storage schema, SDK, retry policy,
 automatic send, or Fansly egress changes.
+
+**E58 (2026-07-24).** The error registry is now producer-checked and
+chatter-facing copy follows owner ruling Р1: Russian on every registry card.
+The shared `rate_limited` card no longer promises a universal automatic retry:
+it says that a Fansly request may continue after a short pause, while an Agency
+Hub generation must be repeated manually. Options-only diagnostics may retain
+their English shell copy.
+
+The live definitions for `missing_api_key`/`invalid_api_key` (CG-AUTH-01/02)
+and `insufficient_balance`/`model_unavailable`/`context_too_long`
+(CG-API-02/03/04) are retired after the kernel cutover and E57 Hub preflight
+fix. Their provider-specific OpenRouter override path is deleted. The five
+codes remain permanently reserved as minimal read-only tombstones because a
+persisted `SummaryCacheEntry.agencyHubSync.error` can outlive the producer and
+be replayed after restart. Persisted errors are rebuilt from current registry
+copy so stale vendor/English wording cannot return; live wire mapping excludes
+the tombstones. Settings contain no registry key, completed operation UI caches
+are memory-only, and a Voice attempt snapshot's open `errorCode` only pauses
+polling—it does not restore an error card. This is a storage-read compatibility
+boundary, not a schema change.
+
+A static test walks `src/` for literal `ChatGooseError`, `toUserError`,
+`getErrorMessage`, and `createUserError` producers and requires every
+non-tombstone registry key to have at least one. The five replay tombstones are
+the only explicit allowlist, and the test also requires them to have no live
+literal producer.
+
+`createUserErrorBlock` is the single DOM renderer for inline/overlay cards,
+toasts, Voice, and the Spenders board while accepting per-surface class names.
+Voice now shows the stable code and one technical-detail line; Spenders keeps
+the full description/diagnostic and maps thrown implementation errors to the
+registry's `unknown_error` instead of exposing raw `Error.message`. Options
+keeps its layout and uses the shared technical-detail formatter. One
+`resolveUserErrorRetryAtMs` helper gives cards and toasts the same absolute
+deadline semantics, preferring `retryAtMs` and deriving it from
+`retryAfterMs` only when needed. No automatic retry, send behavior, fail-closed
+truncation rule, SDK pin, vendor code, or storage schema changes.

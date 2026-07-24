@@ -434,8 +434,8 @@ describe('Options page - Agency Hub section', () => {
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
       expect(section.textContent).toContain('Connection failed: CG-HUB-07');
-      expect(section.textContent).toContain('Agency Hub request failed.');
-      expect(section.textContent).toContain('The Hub returned an error or could not be reached.');
+      expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
+      expect(section.textContent).toContain('Hub вернул ошибку или недоступен.');
     }, { timeout: 2000 });
   });
 
@@ -497,7 +497,7 @@ describe('Options page - Agency Hub section', () => {
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
       expect(section.textContent).toContain('Connection failed: CG-HUB-07');
-      expect(section.textContent).toContain('Agency Hub request failed.');
+      expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
       expect(section.textContent).toContain('The connection test could not be completed.');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
@@ -558,7 +558,7 @@ describe('Options page - Agency Hub section', () => {
       expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
       expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
-      expect(section.textContent).toContain('Hub responded 401: {"message":"Unauthorized"}');
+      expect(section.textContent).toContain('HTTP 401 • {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
     expect(runtimeSendMessage).toHaveBeenLastCalledWith({

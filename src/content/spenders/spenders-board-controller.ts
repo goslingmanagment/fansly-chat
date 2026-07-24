@@ -28,8 +28,13 @@ import type {
   SpendersListResult,
   SpendersProgressPayload,
   SpendersSnapshotPayload,
+  UserFacingError,
 } from '../../shared/types.js';
-import { formatUserFacingError } from '../../shared/errors.js';
+import {
+  formatUserErrorPlainText,
+  toUserError,
+} from '../../shared/errors.js';
+import { createUserErrorBlock } from '../ui/view-helpers.js';
 import { makeKbd } from '../ui/kbd.js';
 
 export interface SpendersBoardDeps {
@@ -268,7 +273,7 @@ export class SpendersBoardController {
         }
       } else {
         this.hasPreliminaryResult = false;
-        this.renderError(formatUserFacingError(response.error));
+        this.renderError(response.error);
       }
     } catch (error) {
       if (!this.open || generation !== this.loadGeneration) return;
@@ -277,7 +282,7 @@ export class SpendersBoardController {
       this.buildProgress = null;
       this.hasPreliminaryResult = false;
       this.releaseProgressReferences();
-      this.renderError(error instanceof Error ? error.message : 'Could not load spenders.');
+      this.renderError(toUserError(error));
     } finally {
       if (request !== null && this.pendingListRequest === request) {
         this.pendingListRequest = null;
@@ -461,22 +466,21 @@ export class SpendersBoardController {
     bar.style.width = `${Math.round((done / total) * 100)}%`;
   }
 
-  private renderError(message: string): void {
+  private renderError(error: UserFacingError): void {
     const body = document.createElement('div');
     body.className = 'chatgoose-board-state';
 
-    const text = document.createElement('div');
-    text.textContent = message;
+    const errorBlock = createUserErrorBlock(error);
 
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.className = 'chatgoose-board-action';
-    retry.textContent = 'Try again';
+    retry.textContent = 'Повторить';
     retry.addEventListener('click', () => {
       void this.load(false);
     });
 
-    body.append(text, retry);
+    body.append(errorBlock, retry);
     this.shell(body);
   }
 
@@ -960,12 +964,16 @@ export class SpendersBoardController {
           'not found',
           response.ok
             ? 'The inbox search found no conversation with this fan.'
-            : formatUserFacingError(response.error),
+            : formatUserErrorPlainText(response.error),
         );
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!this.open || generation !== this.resolveGeneration) return;
-        this.setChatState(entry.fanAccountId, 'not found', 'Could not search the inbox.');
+        this.setChatState(
+          entry.fanAccountId,
+          'not found',
+          formatUserErrorPlainText(toUserError(error)),
+        );
       })
       .finally(() => {
         if (generation === this.resolveGeneration) {

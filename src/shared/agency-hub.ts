@@ -3,6 +3,7 @@ import type {
   FanSummarySyncStatus,
   FanSummarySyncState,
 } from './types.js';
+import { canonicalizePersistedUserError } from './errors.js';
 
 export const AGENCY_HUB_PROFILE_MAX_BYTES = 50_000;
 
@@ -65,7 +66,9 @@ export function normalizeAgencyHubSummarySyncMetadata(
     ...(metadata.pageLabel ? { pageLabel: metadata.pageLabel } : {}),
     ...(typeof metadata.syncedAt === 'number' ? { syncedAt: metadata.syncedAt } : {}),
     ...(typeof metadata.updatedAt === 'number' ? { updatedAt: metadata.updatedAt } : {}),
-    ...('error' in metadata && metadata.error ? { error: metadata.error } : {}),
+    ...('error' in metadata && metadata.error
+      ? { error: canonicalizePersistedUserError(metadata.error) }
+      : {}),
   };
 }
 

@@ -646,8 +646,6 @@ export interface ChatGooseErrorDetails {
   responseSnippet?: string;
   retryAfterMs?: number;
   retryAtMs?: number;
-  providerMessage?: string;
-  provider?: string;
 }
 
 export type UserErrorKey =
