@@ -890,6 +890,58 @@ describe('Options page settings and read-only personas', () => {
     expect(document.body.textContent).toContain('Device token active');
   });
 
+  it('re-tests the hub connection automatically after a successful sign-in', async () => {
+    const connectionTokens: string[] = [];
+    await loadOptionsPage({
+      state: makeState({
+        settings: {
+          ...makeState().settings,
+          agencyHubBaseUrl: 'https://hub.example.test',
+        },
+      }),
+      sessions: [],
+      onRuntimeRequest: async (message) => {
+        const request = message as {
+          type?: string;
+          settings?: { agencyHubDeviceToken?: string };
+        };
+        if (request.type === 'issueAgencyHubDeviceToken') {
+          (currentState as unknown as Record<string, unknown>).agencyHubDeviceToken =
+            'device-token-auto';
+          return {
+            ok: true,
+            keyPrefix: 'device-auto',
+            label: 'Firefox',
+            expiresAt: Date.now() + 86_400_000,
+          };
+        }
+        if (request.type === 'testAgencyHubConnection') {
+          connectionTokens.push(request.settings?.agencyHubDeviceToken ?? '');
+          return { ok: true };
+        }
+        return undefined;
+      },
+    });
+
+    const username = document.querySelector<HTMLInputElement>('input[autocomplete="username"]')!;
+    const password = document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!;
+    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Sign in & issue device token')!;
+    username.value = 'owner';
+    password.value = 'secret';
+    signIn.click();
+
+    // No manual "Test Connection" click: the sign-in success path must rerun
+    // the live test itself with the fresh custody token, so the diagnostics
+    // card and the hero pill stop claiming "not set up" next to a live token.
+    await vi.waitFor(() => {
+      expect(connectionTokens).toContain('device-token-auto');
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Connected ✓');
+    });
+  });
+
   it('does not rewrite a rotated API-key custody value from an unrelated count edit', async () => {
     await loadOptionsPage({
       state: makeState({
