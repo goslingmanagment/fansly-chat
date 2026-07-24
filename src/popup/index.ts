@@ -86,6 +86,7 @@ function createIdRow(
   label: string,
   id: string | null,
   emptyText: string,
+  name: string | null = null,
 ): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'chatgoose-popup-kv';
@@ -99,13 +100,16 @@ function createIdRow(
     return row;
   }
 
+  // Human name when one has resolved; the raw id only as a fallback. Either
+  // way the click copies the id — that is the value support asks for.
+  const shownText = name ?? shortenId(id);
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.className = 'chatgoose-popup-copy';
   copy.title = `Copy ${id}`;
   const value = document.createElement('span');
-  value.className = 'chatgoose-popup-kv-value';
-  value.textContent = shortenId(id);
+  value.className = name ? 'chatgoose-popup-kv-name' : 'chatgoose-popup-kv-value';
+  value.textContent = shownText;
   copy.append(value, createCopyGlyph());
 
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
@@ -120,7 +124,7 @@ function createIdRow(
         }
         restoreTimer = setTimeout(() => {
           copy.classList.remove('chatgoose-popup-copy-done');
-          value.textContent = shortenId(id);
+          value.textContent = shownText;
         }, COPY_FEEDBACK_MS);
       })
       .catch(() => {});
@@ -188,8 +192,8 @@ async function render(): Promise<void> {
   const panel = document.createElement('div');
   panel.className = 'chatgoose-popup-panel';
   panel.append(
-    createIdRow('Account', status.accountId, 'No account'),
-    createIdRow('Conversation', status.groupId, 'No active chat'),
+    createIdRow('Account', status.accountId, 'No account', status.accountName),
+    createIdRow('Conversation', status.groupId, 'No active chat', status.fanName),
   );
 
   // Quota row: only when this UTC day produced an observation (a generation's

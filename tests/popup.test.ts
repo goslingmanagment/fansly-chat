@@ -14,12 +14,15 @@ function installDom() {
 }
 
 function makeStatus(overrides: Partial<PopupStatus> = {}): PopupStatus {
-  // The popup reads accountLabel/accountId/groupId/connected/hasApiKey/aiQuota.
+  // The popup reads accountLabel/accountId/accountName/groupId/fanName/
+  // connected/hasApiKey/aiQuota.
   return {
     accountId: 'acc-1',
     groupId: 'group-1',
     connected: true,
     hasApiKey: true,
+    accountName: null,
+    fanName: null,
     aiQuota: null,
     accountLabel: 'Closer',
     ...overrides,
@@ -104,6 +107,34 @@ describe('Popup', () => {
       expect(rootText()).toContain('7370…8720');
     });
     expect(rootText()).toContain('No active chat');
+
+    const button = document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy');
+    expect(button?.title).toBe('Copy 737077689877278720');
+    button?.click();
+
+    expect(writeText).toHaveBeenCalledWith('737077689877278720');
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Copied');
+    });
+  });
+
+  it('prefers human names over ids and still copies the id', async () => {
+    const writeText = vi.fn(async () => undefined);
+    await loadPopup(async () =>
+      makeStatus({
+        accountId: '737077689877278720',
+        accountName: 'Lora Belle (@lorabelle)',
+        groupId: '766790514371469312',
+        fanName: 'BigTipper92',
+      }),
+    );
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Lora Belle (@lorabelle)');
+      expect(rootText()).toContain('BigTipper92');
+    });
+    expect(rootText()).not.toContain('7370…8720');
 
     const button = document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy');
     expect(button?.title).toBe('Copy 737077689877278720');
