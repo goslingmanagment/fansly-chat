@@ -12,6 +12,7 @@ import {
   summaryCacheKey,
   SummaryCacheStore,
 } from '../src/shared/summary-cache.js';
+import { getErrorMessage } from '../src/shared/errors.js';
 import type { PersistedState, SummaryCacheEntry } from '../src/shared/types.js';
 
 describe('summary cache model matching', () => {
@@ -152,6 +153,38 @@ describe('summary cache boundaries', () => {
       transcriptCoverage: 'unknown',
       keptCount: -1,
     })).toEqual(validEntry);
+  });
+
+  it('canonicalizes a persisted retired sync error through its registry tombstone', () => {
+    const normalized = normalizeSummaryCacheEntry({
+      ...validEntry,
+      agencyHubSync: {
+        state: 'failed',
+        generatedAt: validEntry.generatedAt,
+        error: {
+          key: 'missing_api_key',
+          code: 'CG-AUTH-01',
+          message: 'Claude API key not configured.',
+          description: 'Open Settings and add a valid Claude API key.',
+          httpStatus: 401,
+          serverDetail: 'legacy detail',
+        },
+      },
+    });
+
+    expect(normalized?.agencyHubSync).toMatchObject({
+      state: 'failed',
+      error: {
+        ...getErrorMessage('missing_api_key'),
+        httpStatus: 401,
+        serverDetail: 'legacy detail',
+      },
+    });
+    const sync = normalized?.agencyHubSync;
+    if (sync?.state !== 'failed') {
+      throw new Error('Expected a normalized failed sync status');
+    }
+    expect(sync.error?.message).not.toContain('Claude');
   });
 
   it('lists corrupt raw entries separately from normalized cache entries', () => {

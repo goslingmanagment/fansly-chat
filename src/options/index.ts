@@ -29,6 +29,7 @@ import {
 } from '../shared/agency-hub.js';
 import {
   createUserError,
+  formatUserErrorTechnicalDetail,
   getUserErrorDescription,
 } from '../shared/errors.js';
 import {
@@ -495,13 +496,11 @@ async function render(): Promise<void> {
         const description = getUserErrorDescription(failedError);
         agencyHubConnectionStatus.textContent = `Connection failed: ${failedError.code}`;
         agencyHubConnectionStatus.style.color = 'var(--chatgoose-bad)';
-        const serverEcho = typeof failedError.httpStatus === 'number'
-          ? `Hub responded ${failedError.httpStatus}${failedError.serverDetail ? `: ${failedError.serverDetail}` : ''}`
-          : null;
+        const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
           description,
-          serverEcho,
+          technicalDetail,
         ].filter(Boolean).join(' ');
         return;
       }

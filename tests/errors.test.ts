@@ -4,6 +4,9 @@ import {
   ERROR_REGISTRY,
   formatUserErrorTechnicalDetail,
   getErrorMessage,
+  isLiveUserErrorKey,
+  isUserErrorKey,
+  resolveUserErrorRetryAtMs,
   toUserError,
 } from '../src/shared/errors.js';
 
@@ -38,13 +41,13 @@ describe('ChatGooseError', () => {
 });
 
 describe('toUserError', () => {
-  it('maps ChatGooseError to user-facing message', () => {
+  it('maps a retired ChatGooseError through its read-only tombstone', () => {
     const err = new ChatGooseError('missing_api_key');
     const result = toUserError(err);
     expect(result.key).toBe('missing_api_key');
     expect(result.code).toBe('CG-AUTH-01');
-    expect(result.settingsLink).toBe(true);
-    expect(result.message).toContain('API key');
+    expect(result.settingsLink).toBeUndefined();
+    expect(result.message).toBe('Сохранённая ошибка относится к старой версии ChatGoose.');
   });
 
   it('returns unknown_error for non-ChatGooseError', () => {
@@ -74,6 +77,28 @@ describe('toUserError', () => {
     const result = toUserError(err);
     expect(result.httpStatus).toBeUndefined();
     expect(result.serverDetail).toBeUndefined();
+  });
+});
+
+describe('retired error-key boundary', () => {
+  it('recognizes tombstones for persistence but excludes them from live wire mapping', () => {
+    expect(isUserErrorKey('missing_api_key')).toBe(true);
+    expect(isLiveUserErrorKey('missing_api_key')).toBe(false);
+    expect(isLiveUserErrorKey('hub_missing_api_key')).toBe(true);
+  });
+});
+
+describe('resolveUserErrorRetryAtMs', () => {
+  it('uses one absolute display deadline when both timing shapes are present', () => {
+    expect(resolveUserErrorRetryAtMs({
+      retryAtMs: 12_000,
+      retryAfterMs: 99_000,
+    }, 1_000)).toBe(12_000);
+  });
+
+  it('anchors a valid relative delay and rejects invalid timing', () => {
+    expect(resolveUserErrorRetryAtMs({ retryAfterMs: 3_000 }, 1_000)).toBe(4_000);
+    expect(resolveUserErrorRetryAtMs({ retryAfterMs: -1 }, 1_000)).toBeNull();
   });
 });
 
@@ -144,7 +169,7 @@ describe('getErrorMessage', () => {
 
   it('returns error for ping_blocked', () => {
     const result = getErrorMessage('ping_blocked');
-    expect(result.message).toContain('still active');
+    expect(result.message).toContain('ещё активен');
   });
 
   it('returns settingsLink for no_mapping', () => {
@@ -153,8 +178,24 @@ describe('getErrorMessage', () => {
 
   it('explains every persona-identity cause for a discarded result', () => {
     const result = getErrorMessage('chat_changed');
-    expect(result.message).toContain('context changed');
-    expect(result.description).toContain('mapped personality');
-    expect(result.description).toContain('Hub source');
+    expect(result.message).toContain('Контекст переписки изменился');
+    expect(result.description).toContain('назначенная персона');
+    expect(result.description).toContain('источник Agency Hub');
+  });
+
+  it('uses Russian copy on every chatter-facing registry card', () => {
+    for (const entry of Object.values(ERROR_REGISTRY)) {
+      expect(entry.message, `${entry.key} message`).toMatch(/[А-Яа-яЁё]/);
+      if (entry.description) {
+        expect(entry.description, `${entry.key} description`).toMatch(/[А-Яа-яЁё]/);
+      }
+    }
+  });
+
+  it('states the shared rate-limit behavior honestly for both transport lanes', () => {
+    const result = getErrorMessage('rate_limited');
+    expect(result.description).toContain('Fansly');
+    expect(result.description).toContain('могут продолжиться сами');
+    expect(result.description).toContain('Agency Hub повторите вручную');
   });
 });

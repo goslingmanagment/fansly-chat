@@ -11,7 +11,7 @@
 import { KernelApiError, streamAiFeature, type AiFeatureStreamFrame } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
 import { clientVersionHeaders } from '../shared/client-version.js';
-import type { FeatureType, PingSegment, Settings, UserErrorKey } from '../shared/types.js';
+import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { resolveHubBearer } from './agency-hub-client.js';
 import { recordQuotaDenied, recordQuotaSnapshot } from './quota-tracker.js';
@@ -123,47 +123,55 @@ export interface KernelFeatureCallbacks {
   onDebugInput?: (input: KernelFeatureDebugInput) => void;
 }
 
-/** Kernel product-gate structured codes (#120) → the extension's CG error
- * keys — matched on the error body's machine code, no message parsing. */
-const KERNEL_GATE_KEYS: Record<string, 'not_enough_history' | 'hi_too_many_messages' | 'ping_blocked' | 'gate_voice_disabled' | 'unknown_error'> = {
-  gate_min_messages: 'not_enough_history',
-  gate_hi_greeting_limit: 'hi_too_many_messages',
-  gate_ping_active: 'ping_blocked',
-  gate_draft_required: 'unknown_error',
-  gate_voice_disabled: 'gate_voice_disabled',
-};
-
 /** Known kernel provider failures are exact-matched before the family-safe
  * `provider*` fallback. Provider/proxy stream failures keep E38's CG-HUB-10
  * card; newly classified causes get their own chatter-facing cards. */
-const KERNEL_PROVIDER_ERROR_KEYS = {
-  provider_billing: 'hub_provider_billing',
-  provider_auth: 'hub_provider_auth',
-  provider_rate_limited: 'hub_provider_rate_limited',
-  provider_unavailable: 'hub_provider_unavailable',
-  provider_proxy_unreachable: 'hub_provider_failed',
-  provider_stream_failed: 'hub_provider_failed',
-} as const satisfies Record<string, UserErrorKey>;
+function kernelErrorFrameOptions(
+  frame: Extract<AiFeatureStreamFrame, { type: 'error' }>,
+) {
+  const retryAfterMs = typeof frame.retryAfterMs === 'number'
+    ? frame.retryAfterMs
+    : undefined;
+  return {
+    details: { status: 0, responseSnippet: `${frame.code}: ${frame.message}` },
+    ...(retryAfterMs !== undefined
+      ? {
+          retryAfterMs,
+          retryAtMs: Date.now() + retryAfterMs,
+        }
+      : {}),
+  };
+}
 
-function mapKernelErrorFrameCode(code: string): UserErrorKey {
+function createKernelErrorFrameError(
+  frame: Extract<AiFeatureStreamFrame, { type: 'error' }>,
+): ChatGooseError {
   // Completed-but-empty output belongs to the existing output guard, not the
   // provider-infrastructure family.
-  if (code === 'provider_output_empty') {
-    return 'ai_output_unusable';
+  if (frame.code === 'provider_output_empty') {
+    return new ChatGooseError('ai_output_unusable', kernelErrorFrameOptions(frame));
   }
 
-  const knownProviderKey = KERNEL_PROVIDER_ERROR_KEYS[
-    code as keyof typeof KERNEL_PROVIDER_ERROR_KEYS
-  ];
-  if (knownProviderKey !== undefined) {
-    return knownProviderKey;
+  switch (frame.code) {
+    case 'provider_billing':
+      return new ChatGooseError('hub_provider_billing', kernelErrorFrameOptions(frame));
+    case 'provider_auth':
+      return new ChatGooseError('hub_provider_auth', kernelErrorFrameOptions(frame));
+    case 'provider_rate_limited':
+      return new ChatGooseError('hub_provider_rate_limited', kernelErrorFrameOptions(frame));
+    case 'provider_unavailable':
+      return new ChatGooseError('hub_provider_unavailable', kernelErrorFrameOptions(frame));
+    case 'provider_proxy_unreachable':
+    case 'provider_stream_failed':
+      return new ChatGooseError('hub_provider_failed', kernelErrorFrameOptions(frame));
   }
 
   // Open-string rollback safety: future provider codes remain actionable as
   // the established generic provider card until this client learns them.
-  return code.startsWith('provider')
-    ? 'hub_provider_failed'
-    : 'hub_request_failed';
+  if (frame.code.startsWith('provider')) {
+    return new ChatGooseError('hub_provider_failed', kernelErrorFrameOptions(frame));
+  }
+  return new ChatGooseError('hub_request_failed', kernelErrorFrameOptions(frame));
 }
 
 /** Kernel product-gate denials → the extension's CG error keys. Mapped
@@ -176,9 +184,17 @@ function mapKernelGateError(error: KernelApiError): ChatGooseError | null {
   }
   const message = error.message;
   if (error.code !== null) {
-    const key = KERNEL_GATE_KEYS[error.code];
-    if (key !== undefined) {
-      return new ChatGooseError(key, { message });
+    switch (error.code) {
+      case 'gate_min_messages':
+        return new ChatGooseError('not_enough_history', { message });
+      case 'gate_hi_greeting_limit':
+        return new ChatGooseError('hi_too_many_messages', { message });
+      case 'gate_ping_active':
+        return new ChatGooseError('ping_blocked', { message });
+      case 'gate_draft_required':
+        return new ChatGooseError('unknown_error', { message });
+      case 'gate_voice_disabled':
+        return new ChatGooseError('gate_voice_disabled', { message });
     }
   }
   if (message.includes('requires at least')) {
@@ -305,22 +321,7 @@ export function createKernelFeatureGateway(
         // chat_changed, and before EOF collapses it into the generic
         // "ended without completing" truncation error.
         if (frame.type === 'error') {
-          const errorKey = mapKernelErrorFrameCode(frame.code);
-          const retryAfterMs = typeof frame.retryAfterMs === 'number'
-            ? frame.retryAfterMs
-            : undefined;
-          throw new ChatGooseError(
-            errorKey,
-            {
-              details: { status: 0, responseSnippet: `${frame.code}: ${frame.message}` },
-              ...(retryAfterMs !== undefined
-                ? {
-                    retryAfterMs,
-                    retryAtMs: Date.now() + retryAfterMs,
-                  }
-                : {}),
-            },
-          );
+          throw createKernelErrorFrameError(frame);
         }
         // The meta echo is the provenance barrier for the whole stream, not
         // only visible content. Debug/reasoning/usage/done callbacks can all

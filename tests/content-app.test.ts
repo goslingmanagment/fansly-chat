@@ -623,7 +623,7 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'CG-HUB-02: Agency Hub credential is missing.',
+      'CG-HUB-02: Нет учётных данных Agency Hub.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent)
       .not.toContain('OpenRouter');
@@ -1387,17 +1387,17 @@ describe('ChatGooseContentApp', () => {
         error: {
           key: 'hub_request_failed',
           code: 'CG-HUB-07',
-          message: 'Agency Hub request failed.',
+          message: 'Ошибка запроса к Agency Hub.',
         },
       },
     });
 
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-HUB-08');
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'Hub sync failed, summary remains available locally.',
+      'Не удалось синхронизировать рекап с Hub.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'Latest Hub error: CG-HUB-07: Agency Hub request failed.',
+      'Последняя ошибка Hub: CG-HUB-07: Ошибка запроса к Agency Hub.',
     );
   });
 
@@ -1464,7 +1464,7 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'CG-HUB-02: Agency Hub credential is missing.',
+      'CG-HUB-02: Нет учётных данных Agency Hub.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent)
       .not.toContain('OpenRouter');
