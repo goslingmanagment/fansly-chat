@@ -30,6 +30,7 @@ import type { AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
+import { getOpsDaily } from './ops-daily.js';
 import { getLatestQuotaSnapshot } from './quota-tracker.js';
 import type { SessionStore } from './session-store.js';
 import type { SpendersService } from './spenders-service.js';
@@ -338,6 +339,12 @@ export function registerRuntimeApi({
         // Settings-page mirror of the popup's quota row: freshest same-day
         // observation or null — never a stale or made-up number.
         return await getLatestQuotaSnapshot();
+      }
+
+      if (requestType === 'getOpsDaily') {
+        // Today's operational counters for the cabinet. Local read only — no
+        // hub round-trip, no Fansly traffic.
+        return await getOpsDaily();
       }
 
       if (requestType === 'getSessionsSnapshot') {

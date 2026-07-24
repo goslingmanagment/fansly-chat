@@ -835,12 +835,38 @@ export interface SessionSnapshotEntry {
   lastSeenAt: number;
 }
 
+/** One UTC day of operational facts the cabinet's «Статус»/«Agency Hub» panes
+ * read. Operational storage (`chatgoose:opsDaily`), NOT the settings blob —
+ * it carries its own `version` and resets on the kernel's UTC-day boundary,
+ * the same day the AI quota resets at. */
+export interface OpsDailySnapshot {
+  version: 1;
+  /** 'YYYY-MM-DD' in UTC — the kernel's quota day. */
+  dateUtc: string;
+  /** The last 20 hub-lane failures of the day, newest last. */
+  hubErrors: Array<{ code: string; at: number }>;
+  /** Exact count for the day — never capped, so the pane's «за сегодня: N»
+   * stays honest while the list above shows only the tail. */
+  hubErrorsTotal: number;
+  lastGeneration: {
+    at: number;
+    feature: string;
+    accountId: string;
+    accountLabel: string;
+    pageLabel: string;
+  } | null;
+  /** accountId → the kernel page label a generation was observed against. */
+  pageByAccount: Record<string, string>;
+  lastSummaryPush: { at: number; accountLabel: string } | null;
+}
+
 // ─── Runtime API ─────────────────────────────────────────────────────────
 
 export interface RuntimeRequestMap {
   ensureStorageReady: undefined;
   getPopupStatus: GetPopupStatusRequest | undefined;
   getAiQuotaStatus: undefined;
+  getOpsDaily: undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
@@ -858,6 +884,7 @@ export interface RuntimeResponseMap {
   ensureStorageReady: { ready: true };
   getPopupStatus: PopupStatus;
   getAiQuotaStatus: AiQuotaStatus | null;
+  getOpsDaily: OpsDailySnapshot;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;

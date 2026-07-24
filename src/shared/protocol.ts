@@ -409,6 +409,8 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return isString(message.viewerToken) ? 'getDebugPromptSnapshot' : null;
     case 'getAiQuotaStatus':
       return 'getAiQuotaStatus';
+    case 'getOpsDaily':
+      return 'getOpsDaily';
     case 'getSessionsSnapshot':
       return 'getSessionsSnapshot';
     case 'testAgencyHubConnection':

@@ -46,6 +46,7 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'ensureStorageReady' })).toBe('ensureStorageReady');
     expect(getRuntimeRequestType({ type: 'getPopupStatus' })).toBe('getPopupStatus');
     expect(getRuntimeRequestType({ type: 'getAiQuotaStatus' })).toBe('getAiQuotaStatus');
+    expect(getRuntimeRequestType({ type: 'getOpsDaily' })).toBe('getOpsDaily');
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: 12 })).toBe('getPopupStatus');
     expect(getRuntimeRequestType({ type: 'getSessionsSnapshot' })).toBe('getSessionsSnapshot');
     expect(getRuntimeRequestType({ type: 'testAgencyHubConnection' })).toBe('testAgencyHubConnection');
