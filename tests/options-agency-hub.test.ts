@@ -5,6 +5,7 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
+import { COPY } from '../src/options/copy.js';
 import { stripSecretSettings } from '../src/shared/migrations.js';
 import { createBundledPersonalities } from '../src/shared/personalities.js';
 import type { AgencyHubConnectionTestRequest, PersistedState } from '../src/shared/types.js';
@@ -131,7 +132,7 @@ function getSectionByTitle(title: string): HTMLElement {
 
 function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
   const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) => candidate.textContent?.includes('Grant Access'),
+    (candidate) => candidate.textContent === COPY.status.grantAccess,
   );
   if (!button) {
     throw new Error('Missing Agency Hub access button');
@@ -141,7 +142,7 @@ function getGrantAccessButton(section: HTMLElement): HTMLButtonElement {
 
 function getTestConnectionButton(section: HTMLElement): HTMLButtonElement {
   const button = Array.from(section.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) => candidate.textContent?.includes('Test Connection'),
+    (candidate) => candidate.textContent === COPY.hub.testConnection,
   );
   if (!button) {
     throw new Error('Missing Agency Hub test connection button');
@@ -561,7 +562,9 @@ describe('Options page - Agency Hub section', () => {
       expect(section.textContent).toContain('HTTP 401 • {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
-    expect(runtimeSendMessage).toHaveBeenLastCalledWith({
+    // Not `toHaveBeenLastCalledWith`: the same post-persist path also refreshes
+    // the Статус rows, so the hub reads land after the test-connection request.
+    expect(runtimeSendMessage).toHaveBeenCalledWith({
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',

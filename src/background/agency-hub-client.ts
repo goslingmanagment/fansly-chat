@@ -1,9 +1,15 @@
 import {
+  KERNEL_CONTRACT_HASH,
   KernelApiError,
   createClient,
   fetchVoiceNoteAudio as fetchVoiceNoteAudioResponse,
+  routeSchemas,
   type KernelClientOptions,
 } from '@kernel/sdk';
+// The vendor pin's provenance. `sourceCommit` is the ONLY SDK identity the
+// cabinet shows next to the contract hash; the exported KERNEL_SDK_VERSION is
+// the SDK package version, not the core build, so it is deliberately not shown.
+import kernelSdkVendorManifest from '../../vendor/kernel-sdk/kernel-sdk.vendor.json';
 import { clientVersionHeaders } from '../shared/client-version.js';
 import {
   AGENCY_HUB_PROFILE_MAX_BYTES,
@@ -29,6 +35,8 @@ import type {
   AgencyHubAiUsageBatchResponse,
   AgencyHubAiUsageEvent,
   AgencyHubConnectionTestResponse,
+  AgencyHubHealthResponse,
+  AgencyHubIdentityResponse,
   AgencyHubSummarySyncMetadata,
   RecapStatusResponse,
   Settings,
@@ -641,6 +649,116 @@ export class AgencyHubClient {
       return response.personas;
     } catch (error) {
       throw this.toHubError(error, 'persona catalog');
+    }
+  }
+
+  /** «Выйти» sign-out revoke. The DELETE op is device-token-only — it rejects an
+   * API-key bearer — so the bearer is the device token itself, never
+   * resolveHubBearer (which prefers the token but could fall back to the legacy
+   * key). Resolves 'revoked' (200) or 'already-invalid' (401/403, or NO token to
+   * revoke). Abort/network/5xx THROW — and so does a MISSING base URL while a
+   * token is still present (the server token stays live, so revocation is
+   * unconfirmed): the caller reports "unreachable" and wipes locally regardless,
+   * so revocation is best-effort, never a blocker. Crucially, a cleared base URL
+   * is NOT 'already-invalid' — that outcome is reserved for a token the hub
+   * actually rejected (or the absence of any token). */
+  async revokeDeviceToken(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<'revoked' | 'already-invalid'> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const deviceToken = (settings.agencyHubDeviceToken ?? '').trim();
+    if (!deviceToken) {
+      // No token to revoke — an honest already-invalid, and nothing to send.
+      return 'already-invalid';
+    }
+    if (!baseUrl) {
+      // A token IS present but there is no address to reach the hub: the server
+      // token stays LIVE, so revocation is UNCONFIRMED — never 'already-invalid'
+      // (that would falsely claim a 401 the hub never sent). Throw so the handler
+      // maps it to 'unreachable' and the token dies by sliding-expiry.
+      throw new Error('Agency Hub base URL missing — device token revoke unreachable');
+    }
+    try {
+      await this.sdkFor(baseUrl, deviceToken, signal).authRevokeCurrentDeviceToken();
+      return 'revoked';
+    } catch (error) {
+      if (error instanceof KernelApiError && (error.status === 401 || error.status === 403)) {
+        // Already dead server-side — an honest sign-out, not a failure.
+        return 'already-invalid';
+      }
+      // Abort/network/other-status: revocation is UNCONFIRMED. Surface it; the
+      // handler maps every throw to 'unreachable'.
+      logWarn('Agency Hub device token revoke failed', {
+        status: error instanceof KernelApiError ? error.status ?? 0 : 0,
+      });
+      throw error;
+    }
+  }
+
+  /** Public /health for the status row. DEGRADED is a declared 503 whose body
+   * the TYPED client throws before parsing — so read the raw Response (200 AND
+   * 503 both carry the body) and validate with the vendored 200 schema, whose
+   * status enum already covers 'degraded'. Health needs no bearer; it still
+   * needs the base URL and host permission (the extension can only reach the
+   * hub origin with the granted permission). */
+  async checkHealth(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<AgencyHubHealthResponse> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    if (!baseUrl) return { ok: false, reason: 'no_base_url' };
+    if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'no_permission' };
+    try {
+      const response = await this.sdkFor(baseUrl, resolveHubBearer(settings), signal).raw('health');
+      const json: unknown = await response.json().catch(() => null);
+      const parsed = routeSchemas.health.response[200].safeParse(json);
+      if (!parsed.success) return { ok: false, reason: 'unreachable' };
+      return {
+        ok: true,
+        status: parsed.data.status,
+        dbLatencyMs: parsed.data.checks.database.latencyMs,
+        contractHash: parsed.data.contractHash,
+        // Stamped background-side so the options bundle imports no SDK (E41).
+        sdkContractHash: KERNEL_CONTRACT_HASH,
+        sdkSourceCommit: kernelSdkVendorManifest.sourceCommit ?? null,
+      };
+    } catch {
+      return { ok: false, reason: 'unreachable' };
+    }
+  }
+
+  /** Authenticated identity for the «Доступ» row. A 401/403 is the credential
+   * being rejected (distinct from a DOWN hub); no bearer means nothing to send.
+   * A missing host permission is its OWN reason — NOT unreachable — so the
+   * renderer keeps the credential badge neutral and lets the Hub row own the
+   * grant prompt (health ≠ credential). */
+  async checkIdentity(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<AgencyHubIdentityResponse> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    // A missing credential and a missing base URL are DIFFERENT verdicts: with a
+    // bearer present but no address, there is nothing wrong with the credential —
+    // the hub is simply unaddressed. Conflating them into `no_credential` paints
+    // the Доступ row a false red «нет credential».
+    if (!bearer) return { ok: false, reason: 'no_credential' };
+    if (!baseUrl) return { ok: false, reason: 'no_base_url' };
+    if (!await this.hasHostPermission(baseUrl)) return { ok: false, reason: 'no_permission' };
+    try {
+      const me = await this.sdkFor(baseUrl, bearer, signal).me();
+      return {
+        ok: true,
+        username: me.user.username,
+        role: me.user.role,
+        pages: me.user.assignedPages.map((page) => page.label),
+      };
+    } catch (error) {
+      if (error instanceof KernelApiError && (error.status === 401 || error.status === 403)) {
+        return { ok: false, reason: 'unauthorized' };
+      }
+      return { ok: false, reason: 'unreachable' };
     }
   }
 

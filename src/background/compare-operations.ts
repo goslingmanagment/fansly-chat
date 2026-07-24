@@ -58,6 +58,7 @@ import {
 } from './operation-profiling.js';
 import { clearFlushTimer, clearFlushTimers } from './operation-cleanup.js';
 import { OperationTimeoutController } from './operation-timeouts.js';
+import { recordGeneration, recordHubError } from './ops-daily.js';
 import type { CompareOperationLifecycle } from './operation-registry.js';
 import {
   describeMessageLoadProgress,
@@ -206,6 +207,12 @@ function sendCompareCardError(
     ...buildLlmSpendPayload(payload.llmSpend),
     ...(profiling ? { profiling } : {}),
   });
+  // A compare card IS a feature-lane generation, so its terminal failure belongs
+  // in the same day counter as a fast-reply's — otherwise «Активность» reports
+  // zero Hub errors while the compare grid is red. recordHubError keeps only the
+  // `CG-HUB-` family, so a flow/AI code (`compare_cards_unavailable`,
+  // `ai_output_unusable`) passing through here is dropped, not counted.
+  void recordHubError(payload.error.code).catch(() => undefined);
 }
 
 function sendCompareError(
@@ -219,6 +226,8 @@ function sendCompareError(
     ...payload,
     ...(profiling ? { profiling } : {}),
   });
+  // Terminal failure of the whole compare run. Same `CG-HUB-` filter as above.
+  void recordHubError(payload.error.code).catch(() => undefined);
 }
 
 function sendCompareComplete(
@@ -1282,6 +1291,20 @@ export async function executeCompare(
         profiler,
         buildCompareCardProfilingSnapshot(profiler, cardUsage),
       );
+
+      // A delivered compare card is an ACCEPTED generation — it burned the same
+      // feature-lane quota as a fast-reply and passed the same output/persona
+      // fences. Recorded here (not in the send helper) because this is the scope
+      // holding all four facts. Best-effort: a counter must never break a
+      // delivered card.
+      void recordGeneration({
+        feature: 'fast-reply',
+        accountId: resolvedAccountId,
+        // Empty when no human name resolved — the pane falls back to the id
+        // rather than showing a fabricated label.
+        accountLabel: creatorUsername ?? '',
+        pageLabel,
+      }).catch(() => undefined);
     };
 
     await Promise.all(compareCards.map((card) => runCard(card)));

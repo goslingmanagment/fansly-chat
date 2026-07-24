@@ -835,15 +835,47 @@ export interface SessionSnapshotEntry {
   lastSeenAt: number;
 }
 
+/** One UTC day of operational facts the cabinet's «Статус»/«Agency Hub» panes
+ * read. Operational storage (`chatgoose:opsDaily`), NOT the settings blob —
+ * it carries its own `version` and resets on the kernel's UTC-day boundary,
+ * the same day the AI quota resets at. */
+export interface OpsDailySnapshot {
+  version: 1;
+  /** 'YYYY-MM-DD' in UTC — the kernel's quota day. */
+  dateUtc: string;
+  /** The last 20 hub-lane failures of the day, newest last. */
+  hubErrors: Array<{ code: string; at: number }>;
+  /** Exact count for the day — never capped, so the pane's «за сегодня: N»
+   * stays honest while the list above shows only the tail. */
+  hubErrorsTotal: number;
+  lastGeneration: {
+    at: number;
+    feature: string;
+    accountId: string;
+    accountLabel: string;
+    pageLabel: string;
+  } | null;
+  /** accountId → the kernel page label a generation was observed against. */
+  pageByAccount: Record<string, string>;
+  lastSummaryPush: { at: number; accountLabel: string } | null;
+}
+
 // ─── Runtime API ─────────────────────────────────────────────────────────
 
 export interface RuntimeRequestMap {
   ensureStorageReady: undefined;
   getPopupStatus: GetPopupStatusRequest | undefined;
   getAiQuotaStatus: undefined;
+  getOpsDaily: undefined;
   getSessionsSnapshot: undefined;
   testAgencyHubConnection: AgencyHubConnectionTestRequest;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenRequest;
+  signOutAgencyHub: undefined;
+  getAgencyHubDeviceTokenMeta: undefined;
+  getAgencyHubHealth: undefined;
+  getAgencyHubIdentity: undefined;
+  getAiQuotaByPage: undefined;
+  getSpendersStatus: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -858,9 +890,16 @@ export interface RuntimeResponseMap {
   ensureStorageReady: { ready: true };
   getPopupStatus: PopupStatus;
   getAiQuotaStatus: AiQuotaStatus | null;
+  getOpsDaily: OpsDailySnapshot;
   getSessionsSnapshot: SessionSnapshotEntry[];
   testAgencyHubConnection: AgencyHubConnectionTestResponse;
   issueAgencyHubDeviceToken: AgencyHubDeviceTokenResponse;
+  signOutAgencyHub: AgencyHubSignOutResponse;
+  getAgencyHubDeviceTokenMeta: AgencyHubDeviceTokenMeta | null;
+  getAgencyHubHealth: AgencyHubHealthResponse;
+  getAgencyHubIdentity: AgencyHubIdentityResponse;
+  getAiQuotaByPage: Record<string, AiQuotaStatus>;
+  getSpendersStatus: SpendersObservation | null;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;
@@ -970,6 +1009,41 @@ export type AgencyHubDeviceTokenResponse =
   | { ok: true; keyPrefix: string; label: string; expiresAt: string }
   | { ok: false; error: UserFacingError };
 
+/** Operational metadata about the device token stored on THIS device. It is
+ * deliberately not the token: only its prefix (enough to tell two tokens apart
+ * in the owner's admin list) and when it was issued. Absent for tokens issued
+ * before this version — the pane says so instead of guessing.
+ *
+ * `expiresAt` is recorded for support, never rendered: hub expiry slides on
+ * every use, so a displayed date would be wrong within minutes.
+ *
+ * `issuedFrom` is the NORMALIZED hub base URL the token was issued by. Sign-out
+ * revokes against it rather than against whatever address the settings happen to
+ * show now: if the base URL moved from hub A to hub B after the token was
+ * issued, a revoke aimed at B gets a 401/403 (mapped to `already-invalid`) while
+ * the bearer stays alive on A. Absent for tokens issued before this version —
+ * those fall back to the current address. */
+export interface AgencyHubDeviceTokenMeta {
+  version: 1;
+  keyPrefix: string;
+  issuedAt: number;
+  expiresAt: string;
+  issuedFrom?: string;
+}
+
+/** «Выйти» sign-out outcome. Neither the token nor the wipe cross the runtime
+ * boundary as data — the BACKGROUND reads the token from storage, wipes both
+ * custody keys locally FIRST, then best-effort revokes; this response carries
+ * only the discriminant. 'unreachable' = the hub could not confirm revocation
+ * (network/timeout/5xx/missing base URL) — the local wipe already happened and
+ * the token dies by sliding-expiry. 'wipe-failed' = the durable local wipe threw
+ * (credentials may still be on disk — the loud case); `error` carries its
+ * message. */
+export interface AgencyHubSignOutResponse {
+  outcome: 'revoked' | 'already-invalid' | 'unreachable' | 'wipe-failed';
+  error?: string;
+}
+
 export interface GetPopupStatusRequest {
   tabId?: number;
 }
@@ -1023,6 +1097,16 @@ export interface SpendersSourceStatus {
   consecutiveFailures: number | null;
 }
 
+/** The last board result seen for a source (creator|hub identity). `streamState`
+ * is the kernel source state on success; `outcome:'fail'` records a board that
+ * errored (streamState null). Session-scale — never persisted, never schema. */
+export interface SpendersObservation {
+  sourceIdentity: string;
+  streamState: SpendersStreamState | null;
+  outcome: 'ok' | 'fail';
+  observedAt: number;
+}
+
 export interface SpendersListResult {
   entries: SpenderListEntry[];
   /** Newest observation across this page/window projection (epoch ms). It is
@@ -1067,6 +1151,29 @@ export interface AgencyHubConnectionTestResponse {
   ok: boolean;
   error?: UserFacingError;
 }
+
+/** Public /health, read for the «Hub» status row. `sdkContractHash` is stamped
+ * background-side (KERNEL_CONTRACT_HASH) so the options bundle imports no SDK
+ * to render the Контракт row (MATCH/DRIFT) — E41. */
+export type AgencyHubHealthResponse =
+  | {
+      ok: true;
+      status: 'ok' | 'degraded';
+      dbLatencyMs: number | null;
+      contractHash: string;
+      sdkContractHash: string;
+      /** Core commit the vendored SDK was cut from, read from the vendor
+       * manifest background-side. There is no `sdkVersion` to show. */
+      sdkSourceCommit: string | null;
+    }
+  | { ok: false; reason: 'no_base_url' | 'no_permission' | 'unreachable' };
+
+/** Authenticated identity, read for the «Доступ» status row. `no_permission`
+ * is propagated distinctly (never folded into `unreachable`) so the renderer
+ * can keep the credential badge neutral and surface the grant on the Hub row. */
+export type AgencyHubIdentityResponse =
+  | { ok: true; username: string; role: string; pages: string[] }
+  | { ok: false; reason: 'no_credential' | 'no_base_url' | 'no_permission' | 'unauthorized' | 'unreachable' };
 
 export interface AgencyHubAiUsageEvent {
   clientEventId: string;

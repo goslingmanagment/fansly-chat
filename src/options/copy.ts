@@ -108,9 +108,22 @@ export const COPY = {
   status: {
     /** Pane headline + subline. */
     readyTitle: 'Готово к смене.',
+    readySubtitle: 'Hub на связи, аккаунт в работе, персона назначена.',
     actionNeededTitle: 'Нужно одно действие.',
+    /** `{n}` + a pluralized `{word}` from the three forms below. */
+    actionsNeededTitle: 'Нужно {n} {word}.',
+    actionWordOne: 'действие',
+    actionWordFew: 'действия',
+    actionWordMany: 'действий',
     checkingTitle: 'Проверяем…',
     checkingSubtitle: 'Собираем состояние Hub, аккаунтов и квоты.',
+    /** Names of the ACTIONABLE prerequisites the readiness aggregate counts.
+     * Observational rows (quota, Spenders, activity) are deliberately absent —
+     * an unknown quota is not a broken install. */
+    stepHub: 'подключить Agency Hub',
+    stepAccess: 'разрешить доступ к хабу',
+    stepFansly: 'открыть Fansly под аккаунтом модели',
+    stepPersona: 'назначить персону аккаунту',
     /** Row labels. */
     fanslyLabel: 'Fansly',
     hubLabel: 'Hub',
@@ -122,20 +135,58 @@ export const COPY = {
     /** Honest-empty and unknown states. */
     fanslyEmpty: 'аккаунты не обнаружены — открой Fansly',
     fanslyWorking: 'в работе:',
+    fanslyUnavailable: 'живой статус недоступен',
+    /** Capture age — what the settings page can honestly say about a session.
+     * NOT «the chatter is on the tab»: tab attribution arrives in a later wave. */
+    captureNone: 'нет сессии',
+    captureJustNow: 'захвачена только что',
+    captureMinutes: 'захвачена {n} мин назад',
+    captureHours: 'захвачена {n} ч назад',
     hubEmpty: 'адрес хаба не задан',
     hubNoPermission: 'нет разрешения на хаб',
+    hubUp: 'ядро отвечает',
+    hubDegraded: 'ядро деградировано',
+    hubDown: 'ядро недоступно',
+    hubDbLatency: 'DB latency {n} мс',
     accessEmpty: 'войди или добавь ключ',
     accessUnknown: 'состояние хаба неизвестно',
+    accessRejected: 'credential отклонён хабом',
     accessGrantedFor: 'выдан для',
     aiEmpty: 'сегодня генераций не было — квота неизвестна',
     aiByPageNote: 'по страницам · худшая первой',
+    aiRemaining: '{page} · осталось {n}',
+    aiNoLimit: '{page} · лимит не сообщён',
+    /** The pageless variant of `aiNoLimit` — the worst page's own fact line,
+     * where the label is already the row's subject. A dedicated key, not
+     * `aiNoLimit` with the `{page} · ` prefix stripped: that surgery breaks
+     * silently the moment the phrasing changes. */
+    aiNoLimitPageless: 'лимит не сообщён',
+    aiExhausted: 'осталось 0 · сброс 00:00 UTC',
     activityEmpty: 'сегодня генераций не было',
+    activityHubErrors: 'ошибки Hub за сегодня: {n}',
     spendersEmpty: 'доска ещё не открывалась — статус неизвестен',
+    spendersFail: 'последняя сборка доски не удалась',
+    spendersRamped: 'данные идут',
+    spendersFlagOff: 'проекция выключена',
+    spendersNotAllowlisted: 'страница не в allowlist',
+    spendersUnsupported: 'платформа не поддерживается',
+    /** A LOCAL read that REJECTED. Distinct from the honest-empty states above:
+     * «сегодня генераций не было» and «доска ещё не открывалась» are claims
+     * about the install, and a failed read has no right to make them. */
+    aiUnavailable: 'состояние квоты недоступно — перепроверь',
+    activityUnavailable: 'состояние активности недоступно — перепроверь',
+    spendersUnavailable: 'состояние доски недоступно — перепроверь',
     contractMatches: 'совпадает с ядром',
+    contractDrift: 'контракт разошёлся с SDK',
+    contractUnknown: 'контракт неизвестен',
+    contractSourceCommit: 'core {commit}',
     /** Actions. */
     checkAll: 'Проверить всё',
+    checkAllRunning: 'Проверяем…',
+    checkAllThrottled: 'Только что проверяли — подожди немного.',
     copyReport: 'Скопировать отчёт',
     copyReportDone: 'Отчёт скопирован ✓',
+    copyReportFailed: 'Буфер обмена недоступен — скопируй вручную.',
     reLogin: 'Войти заново',
     grantAccess: 'Разрешить доступ',
     reissue: 'Перевыпустить',
@@ -193,10 +244,21 @@ export const COPY = {
     signInHint:
       'Адрес и логин выдаёт владелец агентства. Вход выпустит device token — пароль на устройстве не хранится.',
     testConnection: 'Проверить связь',
+    reconnectAccess: 'Переподключить',
     reissueToken: 'Перевыпустить токен',
     signOut: 'Выйти…',
     signOutConfirm: 'Точно выйти?',
     signOutCancel: 'Отмена',
+    signOutRunning: 'Выходим…',
+    /** The four honest outcomes of a sign-out. «Стёрт локально» is never said
+     * about a wipe that failed, and «отозван» never about a revoke the hub did
+     * not confirm. */
+    signOutRevoked: 'Вышли: креды стёрты, токен отозван на хабе.',
+    signOutAlreadyInvalid: 'Вышли: креды стёрты, токен уже был недействителен.',
+    signOutUnreachable:
+      'Креды стёрты на этом устройстве. Хаб не подтвердил отзыв — токен истечёт сам.',
+    signOutWipeFailed:
+      'Не удалось стереть креды на этом устройстве — они могли остаться. Перезагрузи Настройки и повтори.',
     signOutHint:
       '«Выйти» стирает device token и legacy-ключ на этом устройстве; настройки и маппинги остаются.',
     /** Diagnostics card. */

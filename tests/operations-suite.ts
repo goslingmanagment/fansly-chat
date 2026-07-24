@@ -1795,6 +1795,75 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(errorMessages.map((message) => message.cardId)).toEqual(['draft-1']);
     expect(errorMessages[0]?.error.key).toBe('compare_cards_unavailable');
     expect(messages.some((message) => message.type === 'compare:complete')).toBe(true);
+
+    // A delivered compare card IS an accepted feature-lane generation — it
+    // burned the same quota as a fast-reply, so «Активность» must see it (E59
+    // amendment). The draft card's `compare_cards_unavailable` is CG-FLOW-08:
+    // outside the `CG-HUB-` family, so it must NOT inflate the Hub counter.
+    await vi.waitFor(() => {
+      expect(mockStorage['chatgoose:opsDaily']).toBeDefined();
+    });
+    expect(mockStorage['chatgoose:opsDaily']).toMatchObject({
+      lastGeneration: {
+        feature: 'fast-reply',
+        accountId: 'account-1',
+        accountLabel: 'creator',
+        pageLabel: 'creator-fs',
+      },
+      pageByAccount: { 'account-1': 'creator-fs' },
+      hubErrorsTotal: 0,
+    });
+  });
+
+  it('counts a CG-HUB compare-card failure in the day counter, and nothing else', async () => {
+    delete mockStorage['summary:group-1'];
+    await mockCompareCards([
+      {
+        id: 'current:personality-1',
+        label: 'Closer (current)',
+        content: 'Current baseline personality',
+        source: 'current',
+      },
+      {
+        id: 'draft-1',
+        label: 'draft-1',
+        content: 'Draft personality variant',
+        source: 'draft',
+      },
+    ]);
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async () => {
+        throw new ChatGooseError('hub_request_failed');
+      }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ kernelGateway });
+
+    await coordinator.startCompare(1, {
+      type: 'compare:start',
+      operationId: 'compare-op',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'preferSplit',
+    });
+
+    const errorMessages = postedMessages(port).filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'compare:cardError' }> =>
+        message.type === 'compare:cardError',
+    );
+    // Both cards fail — the kernel one with CG-HUB-07, the draft one with the
+    // flow-level CG-FLOW-08 — and only the hub-lane failure is counted.
+    expect(errorMessages).toHaveLength(2);
+    await vi.waitFor(() => {
+      expect((mockStorage['chatgoose:opsDaily'] as { hubErrorsTotal?: number })?.hubErrorsTotal)
+        .toBe(1);
+    });
+    expect(mockStorage['chatgoose:opsDaily']).toMatchObject({
+      hubErrors: [{ code: 'CG-HUB-07' }],
+      lastGeneration: null,
+    });
   });
 
   it('discards Compare when the captured persona source/revision changes before card completion', async () => {

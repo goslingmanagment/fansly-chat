@@ -203,15 +203,25 @@ describe('options cabinet shell', () => {
     expect(shell.panes.personas.hidden).toBe(true);
   });
 
-  it('styles.css hides a pane by attribute (author rule beats the UA rule)', () => {
+  it('styles.css pairs every author display rule with an author [hidden] guard', () => {
     // `hidden` sets an IDL flag; the UA `[hidden] { display: none }` rule loses
     // to ANY author display rule on the same element (origin precedes
-    // specificity). Without this guard a pane would stay visible while the
-    // shell believed it was hidden.
+    // specificity). Without these guards an element the page believes is hidden
+    // renders anyway — for `.chatgoose-card-actions` that means the two-step
+    // sign-out CONFIRM row is permanently visible (one-click credential wipe).
     const styles = readFileSync(
       new URL('../src/options/styles.css', import.meta.url),
       'utf8',
     );
-    expect(styles).toMatch(/\.chatgoose-cabinet-pane\[hidden\]\s*\{[^}]*display:\s*none/);
+    for (const selector of [
+      'chatgoose-cabinet-pane',
+      'chatgoose-status-row',
+      'chatgoose-card-actions',
+      'chatgoose-readiness-open',
+    ]) {
+      expect(styles).toMatch(
+        new RegExp(`\\.${selector}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`),
+      );
+    }
   });
 });
