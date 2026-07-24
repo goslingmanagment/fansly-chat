@@ -6,7 +6,7 @@ function getNormalizedUsername(username: string | null | undefined): string | nu
 }
 
 /** 18-digit Fansly ids don't read as headings; show enough to tell accounts
- * apart. The full id stays available in the "Account ID:" meta line. */
+ * apart. The full id stays available in the «ID аккаунта:» meta line. */
 export function shortenAccountId(accountId: string): string {
   return accountId.length > 12
     ? `${accountId.slice(0, 4)}…${accountId.slice(-4)}`
