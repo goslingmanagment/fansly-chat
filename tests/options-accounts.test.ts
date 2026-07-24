@@ -1083,7 +1083,7 @@ describe('Options page coach settings', () => {
 
   const getRecapWarning = (): HTMLElement | null =>
     Array.from(
-      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-section-desc'),
+      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-meta'),
     ).find((node) => node.textContent?.includes('Full Recap loads up to')) ?? null;
 
   it('renders coach memory + auto-recap fields with stored defaults and a hidden warning', async () => {

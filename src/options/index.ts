@@ -12,16 +12,20 @@ import {
 import {
   createButton,
   createSection,
+  createStatusPill,
   createVersionTag,
   debounce,
   injectStyles,
+  inlineField,
   labeledField,
+  setStatusPill,
 } from './dom.js';
 import {
   buildConnectionRows,
   buildSessionLookup,
   formatAccountHeading,
   formatAccountMeta,
+  shortenAccountId,
 } from './sessions.js';
 import {
   buildAgencyHubOriginPattern,
@@ -299,42 +303,42 @@ async function render(): Promise<void> {
     themeSelect.append(option);
   }
   themeSelect.value = state.settings.uiTheme;
-  appearanceSection.append(labeledField('Theme', themeSelect));
+  appearanceSection.append(inlineField('Theme', themeSelect));
 
   // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
   const apiSection = createSection('Generation');
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
-  quickInput.className = 'chatgoose-input';
+  quickInput.className = 'chatgoose-input chatgoose-input-num';
   quickInput.min = '5';
   quickInput.max = '200';
   quickInput.value = String(state.settings.quickMessageCount);
 
   const pingInput = document.createElement('input');
   pingInput.type = 'number';
-  pingInput.className = 'chatgoose-input';
+  pingInput.className = 'chatgoose-input chatgoose-input-num';
   pingInput.min = '5';
   pingInput.max = '200';
   pingInput.value = String(state.settings.pingMessageCount);
 
   const improveInput = document.createElement('input');
   improveInput.type = 'number';
-  improveInput.className = 'chatgoose-input';
+  improveInput.className = 'chatgoose-input chatgoose-input-num';
   improveInput.min = '5';
   improveInput.max = '200';
   improveInput.value = String(state.settings.improveMessageCount);
 
   const deepInput = document.createElement('input');
   deepInput.type = 'number';
-  deepInput.className = 'chatgoose-input';
+  deepInput.className = 'chatgoose-input chatgoose-input-num';
   deepInput.min = '100';
   deepInput.max = '3000';
   deepInput.value = String(state.settings.deepMessageCount);
 
   const coachHistoryInput = document.createElement('input');
   coachHistoryInput.type = 'number';
-  coachHistoryInput.className = 'chatgoose-input';
+  coachHistoryInput.className = 'chatgoose-input chatgoose-input-num';
   coachHistoryInput.min = String(COACH_HISTORY_LIMIT_MIN);
   coachHistoryInput.max = String(COACH_HISTORY_LIMIT_MAX);
   // Turn count is an integer — step=1 keeps the browser's number spinner and
@@ -360,7 +364,8 @@ async function render(): Promise<void> {
   // Full Recap replays the whole deep window before coaching — surface the cost
   // so it's a deliberate choice, not a surprise on the bill.
   const coachRecapWarning = document.createElement('div');
-  coachRecapWarning.className = 'chatgoose-section-desc';
+  coachRecapWarning.className = 'chatgoose-meta';
+  coachRecapWarning.style.flexBasis = '100%';
   // Text is built from the LIVE deep-window value, never a hardcoded 3000, so it
   // stays truthful when the chatter changes "Deep feature message count" (or the
   // stored value is clamped on save). Falls back to the loaded setting while the
@@ -389,23 +394,23 @@ async function render(): Promise<void> {
   debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
 
-  const debugLabel = document.createElement('label');
-  debugLabel.style.display = 'flex';
-  debugLabel.style.gap = '10px';
-  debugLabel.style.alignItems = 'center';
-  debugLabel.style.fontWeight = '600';
-  debugLabel.append(debugInput, document.createTextNode('Enable debug mode'));
+  // The cost warning belongs to the recap row: full-width second line inside it.
+  const coachRecapRow = inlineField('Auto-Recap before coaching', coachRecapSelect);
+  coachRecapRow.style.flexWrap = 'wrap';
+  coachRecapRow.append(coachRecapWarning);
 
-  apiSection.append(
-    labeledField('Reply + Help message count', quickInput),
-    labeledField('Ping message count', pingInput),
-    labeledField('Fix message count', improveInput),
-    labeledField('Deep feature message count', deepInput),
-    labeledField('Coach dialog memory (exchanges)', coachHistoryInput),
-    labeledField('Auto-Recap before coaching', coachRecapSelect),
-    coachRecapWarning,
-    debugLabel,
+  const generationRows = document.createElement('div');
+  generationRows.className = 'chatgoose-rows';
+  generationRows.append(
+    inlineField('Reply + Help message count', quickInput),
+    inlineField('Ping message count', pingInput),
+    inlineField('Fix message count', improveInput),
+    inlineField('Deep feature message count', deepInput),
+    inlineField('Coach dialog memory (exchanges)', coachHistoryInput),
+    coachRecapRow,
+    inlineField('Enable debug mode', debugInput),
   );
+  apiSection.append(generationRows);
 
   // ─── Agency Hub ───────────────────────────────────────────
   const agencyHubSection = createSection(
@@ -441,17 +446,13 @@ async function render(): Promise<void> {
   agencyHubPermissionStatus.style.fontSize = '14px';
 
   const agencyHubPermissionMeta = document.createElement('div');
-  agencyHubPermissionMeta.style.color = 'var(--chatgoose-ink-mid)';
-  agencyHubPermissionMeta.style.fontSize = '13px';
+  agencyHubPermissionMeta.className = 'chatgoose-meta';
 
   const agencyHubPermissionButton = createButton('Grant Access', true);
   const agencyHubConnectionStatus = document.createElement('div');
-  agencyHubConnectionStatus.style.fontWeight = '600';
-  agencyHubConnectionStatus.style.fontSize = '14px';
 
   const agencyHubConnectionMeta = document.createElement('div');
-  agencyHubConnectionMeta.style.color = 'var(--chatgoose-ink-mid)';
-  agencyHubConnectionMeta.style.fontSize = '13px';
+  agencyHubConnectionMeta.className = 'chatgoose-meta';
 
   const agencyHubConnectionButton = createButton('Test Connection', true);
   const agencyHubActionRow = document.createElement('div');
@@ -472,30 +473,25 @@ async function render(): Promise<void> {
 
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
-        agencyHubConnectionStatus.textContent = 'Not tested yet.';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
+        setStatusPill(agencyHubConnectionStatus, 'neutral', 'Not tested yet.');
         agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
         return;
       case 'pending':
-        agencyHubConnectionStatus.textContent = 'Connection status updating…';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
+        setStatusPill(agencyHubConnectionStatus, 'neutral', 'Connection status updating…');
         agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
         return;
       case 'testing':
-        agencyHubConnectionStatus.textContent = 'Testing connection…';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-ink)';
+        setStatusPill(agencyHubConnectionStatus, 'neutral', 'Testing connection…');
         agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
         return;
       case 'connected':
-        agencyHubConnectionStatus.textContent = 'Connected ✓';
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-green)';
+        setStatusPill(agencyHubConnectionStatus, 'ok', 'Connected ✓');
         agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
-        agencyHubConnectionStatus.textContent = `Connection failed: ${failedError.code}`;
-        agencyHubConnectionStatus.style.color = 'var(--chatgoose-bad)';
+        setStatusPill(agencyHubConnectionStatus, 'bad', `Connection failed: ${failedError.code}`);
         const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -599,6 +595,9 @@ async function render(): Promise<void> {
   let agencyHubPermissionRefreshVersion = 0;
   const refreshAgencyHubPermissionState = async (): Promise<void> => {
     const refreshVersion = ++agencyHubPermissionRefreshVersion;
+    // Every early-return branch below is a "Sync disabled" state — amber by
+    // default; only the final granted state overrides to green.
+    agencyHubPermissionStatus.style.color = 'var(--chatgoose-amber)';
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
     const originPattern = buildAgencyHubOriginPattern(normalizedBaseUrl);
     const permissionScopeNote = buildAgencyHubPermissionScopeNote(normalizedBaseUrl);
@@ -698,6 +697,7 @@ async function render(): Promise<void> {
 
     // Never claim readiness here: this is a local check (permission + a
     // non-empty credential) — only the live connection test below proves sync.
+    agencyHubPermissionStatus.style.color = 'var(--chatgoose-green)';
     agencyHubPermissionStatus.textContent = 'Host access granted.';
     agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
       `ChatGoose can reach ${originPattern}. Sync goes live once the connection test below passes.`,
@@ -792,20 +792,16 @@ async function render(): Promise<void> {
 
   const hubSignInButton = createButton('Sign in & issue device token', true);
   const hubSignInStatus = document.createElement('div');
-  hubSignInStatus.style.fontWeight = '600';
-  hubSignInStatus.style.fontSize = '14px';
   const hubSignInMeta = document.createElement('div');
-  hubSignInMeta.style.color = 'var(--chatgoose-ink-mid)';
-  hubSignInMeta.style.fontSize = '13px';
+  hubSignInMeta.className = 'chatgoose-meta';
 
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
-    hubSignInStatus.textContent = hasToken
-      ? 'Device token active ✓'
-      : 'No device token yet.';
-    hubSignInStatus.style.color = hasToken
-      ? 'var(--chatgoose-green)'
-      : 'var(--chatgoose-ink)';
+    setStatusPill(
+      hubSignInStatus,
+      hasToken ? 'ok' : 'neutral',
+      hasToken ? 'Device token active ✓' : 'No device token yet.',
+    );
     if (!hubSignInMeta.textContent) {
       hubSignInMeta.textContent = hasToken
         ? 'Hub requests use the device token; the legacy API key is the fallback.'
@@ -852,23 +848,34 @@ async function render(): Promise<void> {
   });
   renderHubSignInState();
 
+  const hubSignInFields = document.createElement('div');
+  hubSignInFields.className = 'chatgoose-signin-grid';
+  hubSignInFields.append(hubSignInUserInput, hubSignInPasswordInput);
   const hubSignInRow = document.createElement('div');
-  hubSignInRow.style.display = 'flex';
+  hubSignInRow.style.display = 'grid';
   hubSignInRow.style.gap = '8px';
-  hubSignInRow.style.flexWrap = 'wrap';
-  hubSignInRow.append(hubSignInUserInput, hubSignInPasswordInput, hubSignInButton);
+  hubSignInButton.style.justifySelf = 'start';
+  hubSignInRow.append(hubSignInFields, hubSignInButton);
 
+  const agencyHubStatusDivider = document.createElement('div');
+  agencyHubStatusDivider.className = 'chatgoose-card-divider';
+  const agencyHubStatusCard = document.createElement('div');
+  agencyHubStatusCard.className = 'chatgoose-card';
+  agencyHubStatusCard.append(
+    agencyHubPermissionStatus,
+    agencyHubPermissionMeta,
+    agencyHubStatusDivider,
+    agencyHubConnectionStatus,
+    agencyHubConnectionMeta,
+    agencyHubActionRow,
+  );
   agencyHubSection.append(
     labeledField('Agency Hub base URL', agencyHubUrlInput),
     labeledField('Sign in (device token)', hubSignInRow),
     hubSignInStatus,
     hubSignInMeta,
     labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
-    agencyHubPermissionStatus,
-    agencyHubPermissionMeta,
-    agencyHubConnectionStatus,
-    agencyHubConnectionMeta,
-    agencyHubActionRow,
+    agencyHubStatusCard,
   );
 
   // ─── AI Models ───────────────────────────────────────────
@@ -1299,6 +1306,23 @@ async function render(): Promise<void> {
       };
     });
   };
+  // The mapped persona's name already lives in the select — the info cell
+  // carries only what the select can't: connection state and a dead mapping.
+  const renderMappingInfo = (
+    info: HTMLElement,
+    view: { label: string; usable: boolean } | null,
+    connected: boolean,
+  ): void => {
+    info.replaceChildren(
+      createStatusPill(
+        connected ? 'ok' : 'neutral',
+        connected ? 'Connected' : 'Disconnected',
+      ),
+    );
+    if (view && !view.usable) {
+      info.append(createStatusPill('warn', 'Persona unavailable'));
+    }
+  };
   const populateMappingSelect = (
     select: HTMLSelectElement,
     selectedPersonalityId: string,
@@ -1352,7 +1376,7 @@ async function render(): Promise<void> {
       const info = select.closest<HTMLElement>('[data-account-mapping-row]')
         ?.querySelector<HTMLElement>('[data-role="mapping-info"]');
       if (info) {
-        info.textContent = `${selectedView?.label ?? 'Unmapped'}${selectedView && !selectedView.usable ? ' · unavailable' : ''} • ${select.dataset.connected === 'true' ? 'Connected' : 'Disconnected'}`;
+        renderMappingInfo(info, selectedView, select.dataset.connected === 'true');
       }
     }
   };
@@ -1463,14 +1487,21 @@ async function render(): Promise<void> {
       label.style.display = 'grid';
       label.style.gap = '4px';
 
+      const headingText = formatAccountHeading(accountId, session);
       const labelTitle = document.createElement('div');
-      labelTitle.textContent = formatAccountHeading(accountId, session);
+      labelTitle.textContent = headingText;
       labelTitle.style.fontWeight = '600';
+      if (headingText === shortenAccountId(session?.resolvedAccountId ?? accountId)) {
+        // No resolved name yet — the heading IS the id, so render it as data.
+        labelTitle.classList.add('chatgoose-mono');
+        labelTitle.style.fontWeight = '500';
+      }
 
       const labelMeta = document.createElement('div');
       labelMeta.textContent = formatAccountMeta(accountId, session);
-      labelMeta.style.fontSize = '12px';
-      labelMeta.style.color = 'var(--chatgoose-ink-mid)';
+      labelMeta.className = 'chatgoose-mono';
+      labelMeta.style.fontSize = '11px';
+      labelMeta.style.color = 'var(--chatgoose-ink-low)';
 
       label.append(labelTitle, labelMeta);
 
@@ -1514,9 +1545,11 @@ async function render(): Promise<void> {
 
       const info = document.createElement('div');
       info.dataset.role = 'mapping-info';
-      info.style.fontSize = '12px';
-      info.style.color = 'var(--chatgoose-ink-mid)';
-      info.textContent = `${mappedView?.label ?? 'Unmapped'}${mappedView && !mappedView.usable ? ' · unavailable' : ''} \u2022 ${session?.connected ? 'Connected' : 'Disconnected'}`;
+      info.style.display = 'flex';
+      info.style.flexDirection = 'column';
+      info.style.alignItems = 'flex-end';
+      info.style.gap = '4px';
+      renderMappingInfo(info, mappedView, Boolean(session?.connected));
 
       row.append(label, select, info);
       mappingsTable.append(row);
@@ -1560,14 +1593,16 @@ async function render(): Promise<void> {
         const left = document.createElement('div');
         left.textContent = formatAccountHeading(accountId, session);
         left.style.fontWeight = '600';
-        const right = document.createElement('div');
-        right.textContent = session.connected ? 'Connected' : 'Disconnected';
-        right.style.color = session.connected ? 'var(--chatgoose-green)' : 'var(--chatgoose-bad)';
+        const right = createStatusPill(
+          session.connected ? 'ok' : 'bad',
+          session.connected ? 'Connected' : 'Disconnected',
+        );
         heading.append(left, right);
         const meta = document.createElement('div');
         meta.textContent = formatAccountMeta(accountId, session);
-        meta.style.fontSize = '12px';
-        meta.style.color = 'var(--chatgoose-ink-mid)';
+        meta.className = 'chatgoose-mono';
+        meta.style.fontSize = '11px';
+        meta.style.color = 'var(--chatgoose-ink-low)';
         card.append(heading, meta);
         sessionsGrid.append(card);
       });

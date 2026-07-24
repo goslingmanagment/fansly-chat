@@ -5,6 +5,14 @@ function getNormalizedUsername(username: string | null | undefined): string | nu
   return normalized || null;
 }
 
+/** 18-digit Fansly ids don't read as headings; show enough to tell accounts
+ * apart. The full id stays available in the "Account ID:" meta line. */
+export function shortenAccountId(accountId: string): string {
+  return accountId.length > 12
+    ? `${accountId.slice(0, 4)}…${accountId.slice(-4)}`
+    : accountId;
+}
+
 export function formatAccountHeading(
   accountId: string,
   session: SessionSnapshotEntry | null | undefined,
@@ -21,7 +29,7 @@ export function formatAccountHeading(
   if (displayName) {
     return displayName;
   }
-  return session?.resolvedAccountId ?? accountId;
+  return shortenAccountId(session?.resolvedAccountId ?? accountId);
 }
 
 export function formatAccountMeta(

@@ -191,6 +191,127 @@ input[type='checkbox'] {
   line-height: 1.6;
 }
 
+/* Inline setting rows: label left, compact control right, hairline between. */
+.chatgoose-rows {
+  display: grid;
+}
+
+.chatgoose-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-rows .chatgoose-row:first-child {
+  padding-top: 0;
+}
+
+/* A row that closes its container (or stands alone) needs no hairline. */
+.chatgoose-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.chatgoose-row-label {
+  font-weight: 600;
+}
+
+.chatgoose-row .chatgoose-input,
+.chatgoose-row .chatgoose-select {
+  width: auto;
+}
+
+.chatgoose-row .chatgoose-select {
+  min-width: 160px;
+}
+
+/* Counts are numbers — numbers are mono and right-aligned. */
+.chatgoose-input-num {
+  width: 110px;
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Status pill: one connection/credential state at a glance. Green = good,
+   neutral = off/idle, amber = attention wanted, red = failed. */
+.chatgoose-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  padding: 3px 10px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.chatgoose-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.chatgoose-pill-ok {
+  color: var(--chatgoose-green);
+  background: var(--chatgoose-green-bg);
+  border-color: var(--chatgoose-green-line);
+}
+
+.chatgoose-pill-neutral {
+  color: var(--chatgoose-ink-mid);
+  background: var(--chatgoose-bg3);
+  border-color: var(--chatgoose-line-strong);
+}
+
+.chatgoose-pill-warn {
+  color: var(--chatgoose-amber);
+  background: var(--chatgoose-amber-bg);
+  border-color: var(--chatgoose-amber-line);
+}
+
+.chatgoose-pill-bad {
+  color: var(--chatgoose-bad);
+  background: color-mix(in srgb, var(--chatgoose-bad) 9%, transparent);
+  border-color: color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+}
+
+/* Quiet explanatory line under a status or field. */
+.chatgoose-meta {
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-mono {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hub sign-in: the credential pair sits side by side where there is room. */
+.chatgoose-signin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .chatgoose-signin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chatgoose-card-divider {
+  border-top: 1px solid var(--chatgoose-line);
+}
+
 /* Inner card: a quiet wash inside a section (personality/connection cards). */
 .chatgoose-card {
   display: grid;

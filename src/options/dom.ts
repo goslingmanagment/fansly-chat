@@ -39,6 +39,39 @@ export function labeledField(labelText: string, input: HTMLElement): HTMLElement
   return wrapper;
 }
 
+/** One setting per line: label left, compact control right. For the short
+ * numeric/select settings where a full-width control reads as a form field. */
+export function inlineField(labelText: string, control: HTMLElement): HTMLElement {
+  const row = document.createElement('label');
+  row.className = 'chatgoose-row';
+  const label = document.createElement('span');
+  label.className = 'chatgoose-row-label';
+  label.textContent = labelText;
+  row.append(label, control);
+  return row;
+}
+
+export type StatusPillKind = 'ok' | 'warn' | 'bad' | 'neutral';
+
+/** Swap a status element into the pill for `kind` — the single way any
+ * options status renders, so states can't drift apart visually. */
+export function setStatusPill(
+  element: HTMLElement,
+  kind: StatusPillKind,
+  text: string,
+): void {
+  element.className = `chatgoose-pill chatgoose-pill-${kind}`;
+  const dot = document.createElement('span');
+  dot.className = 'chatgoose-pill-dot';
+  element.replaceChildren(dot, text);
+}
+
+export function createStatusPill(kind: StatusPillKind, text: string): HTMLSpanElement {
+  const pill = document.createElement('span');
+  setStatusPill(pill, kind, text);
+  return pill;
+}
+
 export function createButton(
   label: string,
   secondary = false,
