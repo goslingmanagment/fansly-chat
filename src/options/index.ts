@@ -25,6 +25,7 @@ import {
   formatAccountHeading,
   shortenAccountId,
 } from './sessions.js';
+import { createShell } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
@@ -310,6 +311,13 @@ async function render(): Promise<void> {
   root.replaceChildren();
   root.style.paddingBottom = '24px';
 
+  // ─── Cabinet frame ─────────────────────────────────────────
+  // Panes are built once and shown/hidden; sections below are appended into
+  // their pane instead of into the page root. The recovery gates above return
+  // before this point — they are deliberately outside the shell.
+  const shell = createShell(root);
+  cleanupTasks.push(() => shell.dispose());
+
   // ─── Hero ──────────────────────────────────────────────────
   const hero = document.createElement('div');
   hero.style.padding = '28px 20px 4px';
@@ -336,7 +344,9 @@ async function render(): Promise<void> {
   quotaPill.hidden = true;
   heroStrip.append(hubPill, accountsPill, catalogPill, quotaPill);
   hero.append(createVersionTag(extensionVersion), title, subtitle, heroStrip);
-  root.append(hero);
+  // The hero + health strip move into «Статус» as-is; task 7 dismantles the
+  // strip and re-points its producers at the status model.
+  shell.panes.status.append(hero);
 
   // ─── Appearance ─────────────────────────────────────────────
   const appearanceSection = createSection(
@@ -1455,16 +1465,14 @@ async function render(): Promise<void> {
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
   mappingsSection.append(mappingsTable);
-  // Reading order = setup order: the hub everything depends on, then the
-  // personas it serves, then the accounts they map to; rarely-touched
-  // generation counts and appearance close the page.
-  root.append(
-    agencyHubSection,
-    personalitiesSection,
-    mappingsSection,
-    apiSection,
-    appearanceSection,
-  );
+  // One section per pane — the rail carries the reading order now (setup
+  // order: the hub everything depends on, then the personas it serves, then
+  // the accounts they map to, then the local-only settings).
+  shell.panes.hub.append(agencyHubSection);
+  shell.panes.personas.append(personalitiesSection);
+  shell.panes.accounts.append(mappingsSection);
+  shell.panes.generation.append(apiSection);
+  shell.panes.appearance.append(appearanceSection);
 
 
   cleanupTasks.push(() => {

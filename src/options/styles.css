@@ -92,6 +92,119 @@ input[type='checkbox'] {
   accent-color: var(--chatgoose-clay);
 }
 
+/* ─── Cabinet shell: rail on the left, one pane at a time on the right ─── */
+.chatgoose-cabinet {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.chatgoose-cabinet-rail {
+  width: 216px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 22px 12px 16px;
+  border-right: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-cabinet-brand {
+  padding: 0 10px 14px;
+}
+
+.chatgoose-cabinet-brand-name {
+  font-family: var(--chatgoose-font-serif);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.chatgoose-cabinet-brand-sub {
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-cabinet-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--chatgoose-ink-mid);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chatgoose-cabinet-item:hover {
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-cabinet-item-active {
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-cabinet-item:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: -2px;
+}
+
+/* Micro-status: the one fact a section wants to say from the rail. */
+.chatgoose-cabinet-micro {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-cabinet-item-active .chatgoose-cabinet-micro {
+  color: inherit;
+}
+
+.chatgoose-cabinet-railfoot {
+  margin-top: auto;
+  display: grid;
+  gap: 5px;
+  padding: 12px 10px 0;
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-cabinet-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* One pane at a time. The `[hidden]` rule below MUST stay next to this one:
+   an author display rule beats the UA `[hidden] { display: none }` (origin
+   precedes specificity), so the attribute alone would not hide the pane. */
+.chatgoose-cabinet-pane {
+  display: block;
+}
+
+.chatgoose-cabinet-pane[hidden] {
+  display: none;
+}
+
+/* Inside a pane the rail owns the left gutter, so a section card only keeps
+   its outer breathing room. */
+.chatgoose-cabinet-pane .chatgoose-section {
+  margin: 20px 20px 0;
+}
+
 /* Section card: ivory panel on the cream canvas. */
 .chatgoose-section {
   display: grid;

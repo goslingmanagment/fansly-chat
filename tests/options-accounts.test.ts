@@ -508,13 +508,18 @@ describe('Options page account sections', () => {
     const signInUser = document.querySelector<HTMLInputElement>(
       'input[autocomplete="username"]',
     )!;
-    expect(signInUser.closest('[hidden]')).not.toBeNull();
+    // Only the FORM's own fold counts here. The cabinet pane wrapping the Hub
+    // section also carries `hidden` whenever another pane is on screen, and
+    // that one is owned by the shell router, not by this credential form.
+    const foldedAncestor = (element: HTMLElement): HTMLElement | null =>
+      element.closest<HTMLElement>('[hidden]:not(.chatgoose-cabinet-pane)');
+    expect(foldedAncestor(signInUser)).not.toBeNull();
     const reissue = Array.from(document.querySelectorAll('button'))
       .find((button) => button.textContent === 'Re-issue device token')!;
     expect(reissue.hidden).toBe(false);
 
     reissue.click();
-    expect(signInUser.closest('[hidden]')).toBeNull();
+    expect(foldedAncestor(signInUser)).toBeNull();
   });
 });
 
