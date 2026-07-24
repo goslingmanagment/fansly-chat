@@ -13,6 +13,8 @@ if (!(rootElement instanceof HTMLElement)) {
 
 const root = rootElement;
 
+const COPY_FEEDBACK_MS = 1400;
+
 function injectStyles(): void {
   const style = document.createElement('style');
   style.textContent = popupStyles;
@@ -32,6 +34,100 @@ function createVersionTag(): HTMLDivElement {
   tag.className = 'chatgoose-version-tag';
   tag.textContent = `v ${extensionVersion}`;
   return tag;
+}
+
+function createStatusPill(
+  kind: 'ok' | 'off' | 'warn',
+  label: string,
+): HTMLSpanElement {
+  const pill = document.createElement('span');
+  pill.className = `chatgoose-popup-pill chatgoose-popup-pill-${kind}`;
+  const dot = document.createElement('span');
+  dot.className = 'chatgoose-popup-pill-dot';
+  pill.append(dot, label);
+  return pill;
+}
+
+function createKvLabel(text: string): HTMLSpanElement {
+  const label = document.createElement('span');
+  label.className = 'chatgoose-popup-kv-label';
+  label.textContent = text;
+  return label;
+}
+
+/** Fansly ids run 18 digits — show enough to tell accounts apart, copy the rest. */
+function shortenId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;
+}
+
+function createCopyGlyph(): SVGSVGElement {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('chatgoose-popup-copy-glyph');
+  const back = document.createElementNS(svgNS, 'rect');
+  back.setAttribute('x', '1.5');
+  back.setAttribute('y', '1.5');
+  back.setAttribute('width', '6');
+  back.setAttribute('height', '6');
+  back.setAttribute('rx', '1.5');
+  const front = document.createElementNS(svgNS, 'rect');
+  front.setAttribute('x', '4.5');
+  front.setAttribute('y', '4.5');
+  front.setAttribute('width', '6');
+  front.setAttribute('height', '6');
+  front.setAttribute('rx', '1.5');
+  svg.append(back, front);
+  return svg;
+}
+
+function createIdRow(
+  label: string,
+  id: string | null,
+  emptyText: string,
+): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'chatgoose-popup-kv';
+  row.append(createKvLabel(label));
+
+  if (!id) {
+    const empty = document.createElement('span');
+    empty.className = 'chatgoose-popup-kv-empty';
+    empty.textContent = emptyText;
+    row.append(empty);
+    return row;
+  }
+
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'chatgoose-popup-copy';
+  copy.title = `Copy ${id}`;
+  const value = document.createElement('span');
+  value.className = 'chatgoose-popup-kv-value';
+  value.textContent = shortenId(id);
+  copy.append(value, createCopyGlyph());
+
+  let restoreTimer: ReturnType<typeof setTimeout> | undefined;
+  copy.addEventListener('click', () => {
+    void navigator.clipboard
+      ?.writeText(id)
+      .then(() => {
+        copy.classList.add('chatgoose-popup-copy-done');
+        value.textContent = 'Copied';
+        if (restoreTimer !== undefined) {
+          clearTimeout(restoreTimer);
+        }
+        restoreTimer = setTimeout(() => {
+          copy.classList.remove('chatgoose-popup-copy-done');
+          value.textContent = shortenId(id);
+        }, COPY_FEEDBACK_MS);
+      })
+      .catch(() => {});
+  });
+
+  row.append(copy);
+  return row;
 }
 
 function renderUnavailable(): void {
@@ -74,38 +170,50 @@ async function render(): Promise<void> {
   const name = document.createElement('div');
   name.textContent = status.accountLabel;
   name.className = 'chatgoose-popup-name';
-  const sub = document.createElement('div');
-  sub.textContent = status.connected ? 'Fansly session connected' : 'Connection not established';
-  sub.className = 'chatgoose-popup-sub';
-  title.append(eyebrow, name, sub);
+
+  const pills = document.createElement('div');
+  pills.className = 'chatgoose-popup-pills';
+  pills.append(
+    status.connected
+      ? createStatusPill('ok', 'Fansly connected')
+      : createStatusPill('off', 'Fansly not connected'),
+  );
+  // The hub lane earns a pill only when it needs attention — a quiet popup
+  // means everything is wired up.
+  if (!status.hasApiKey) {
+    pills.append(createStatusPill('warn', 'Agency Hub not set up'));
+  }
+  title.append(eyebrow, name, pills);
 
   const panel = document.createElement('div');
   panel.className = 'chatgoose-popup-panel';
-
-  const row1 = document.createElement('div');
-  row1.textContent = `Account: ${status.accountId ?? 'Not connected'}`;
-  const row2 = document.createElement('div');
-  row2.textContent = `Conversation: ${status.groupId ?? 'No active chat'}`;
-  row2.className = 'chatgoose-popup-meta';
-  panel.append(row1, row2);
+  panel.append(
+    createIdRow('Account', status.accountId, 'No account'),
+    createIdRow('Conversation', status.groupId, 'No active chat'),
+  );
 
   // Quota row: only when this UTC day produced an observation (a generation's
   // meta frame or a denial) — no row beats a stale or made-up number.
   const quota = status.aiQuota;
   if (quota && (quota.exhausted || quota.remainingRequestsToday !== null)) {
     const quotaRow = document.createElement('div');
-    quotaRow.className = 'chatgoose-popup-quota';
+    quotaRow.className = 'chatgoose-popup-kv chatgoose-popup-quota';
+    quotaRow.append(createKvLabel('AI quota'));
     if (quota.exhausted) {
       quotaRow.classList.add('chatgoose-popup-quota-exhausted');
-      quotaRow.textContent = 'AI quota used up for today — resets at 00:00 UTC';
+      const value = document.createElement('span');
+      value.textContent = 'Used up — resets at 00:00 UTC';
+      quotaRow.append(value);
     } else {
+      const value = document.createElement('span');
       const count = document.createElement('span');
       count.className = 'chatgoose-popup-quota-num';
       count.textContent = String(quota.remainingRequestsToday);
-      quotaRow.append('AI quota: ', count, ' requests left today');
+      value.append(count, ' left today');
       if ((quota.remainingRequestsToday ?? 0) <= 20) {
         quotaRow.classList.add('chatgoose-popup-quota-low');
       }
+      quotaRow.append(value);
     }
     panel.append(quotaRow);
   }
