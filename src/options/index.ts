@@ -21,6 +21,7 @@ import {
   labeledField,
   setStatusPill,
   type BadgeTone,
+  type StatusPillKind,
 } from './dom.js';
 import { COPY } from './copy.js';
 import { renderHotkeysPane } from './hotkeys-pane.js';
@@ -1050,14 +1051,11 @@ async function render(): Promise<void> {
   );
 
   // ─── Agency Hub ───────────────────────────────────────────
-  const agencyHubSection = createSection(
-    'Agency Hub',
-    'Push Fan Summary results to Agency Hub for durable storage and version history.',
-  );
+  const agencyHubSection = createSection(COPY.hub.title, COPY.hub.subtitle);
   const agencyHubUrlInput = document.createElement('input');
   agencyHubUrlInput.type = 'url';
   agencyHubUrlInput.className = 'chatgoose-input';
-  agencyHubUrlInput.placeholder = 'http://localhost:3000';
+  agencyHubUrlInput.placeholder = COPY.hub.baseUrlPlaceholder;
   agencyHubUrlInput.value = state.settings.agencyHubBaseUrl;
 
   const agencyHubKeyInput = document.createElement('input');
@@ -1066,10 +1064,12 @@ async function render(): Promise<void> {
   agencyHubKeyInput.className = 'chatgoose-input';
   agencyHubKeyInput.value = state.settings.agencyHubApiKey;
 
-  const agencyHubToggle = createButton('Show', true);
+  const agencyHubToggle = createButton(COPY.hub.legacyKeyShow, true);
   agencyHubToggle.addEventListener('click', () => {
     agencyHubKeyInput.type = agencyHubKeyInput.type === 'password' ? 'text' : 'password';
-    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password' ? 'Show' : 'Hide';
+    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password'
+      ? COPY.hub.legacyKeyShow
+      : COPY.hub.legacyKeyHide;
   });
 
   const agencyHubKeyRow = document.createElement('div');
@@ -1078,25 +1078,46 @@ async function render(): Promise<void> {
   agencyHubKeyRow.style.gap = '8px';
   agencyHubKeyRow.append(agencyHubKeyInput, agencyHubToggle);
 
-  const agencyHubPermissionStatus = document.createElement('div');
-  agencyHubPermissionStatus.style.fontWeight = '600';
-  agencyHubPermissionStatus.style.fontSize = '14px';
+  // «Доступ к хосту» / «Связь» — the two status rows of the Подключение zone:
+  // label · pill · mono meta at the right edge. The pill element keeps the old
+  // variable names — every state renderer below writes through them.
+  const hubStatusRow = (
+    label: string,
+  ): { root: HTMLElement; pill: HTMLElement; mono: HTMLElement } => {
+    const root = document.createElement('div');
+    root.className = 'chatgoose-hub-srow';
+    const labelNode = document.createElement('span');
+    labelNode.className = 'chatgoose-hub-srow-label';
+    labelNode.textContent = label;
+    const pill = document.createElement('span');
+    const mono = document.createElement('span');
+    mono.className = 'chatgoose-hub-srow-meta';
+    root.append(labelNode, pill, mono);
+    return { root, pill, mono };
+  };
+
+  const agencyHubPermissionRow = hubStatusRow(COPY.hub.permLabel);
+  const agencyHubPermissionStatus = agencyHubPermissionRow.pill;
+  const agencyHubPermissionMono = agencyHubPermissionRow.mono;
 
   const agencyHubPermissionMeta = document.createElement('div');
   agencyHubPermissionMeta.className = 'chatgoose-meta';
 
   const agencyHubPermissionButton = createButton(COPY.status.grantAccess, true);
-  const agencyHubConnectionStatus = document.createElement('div');
+  const agencyHubConnectionRow = hubStatusRow(COPY.hub.connLabel);
+  const agencyHubConnectionStatus = agencyHubConnectionRow.pill;
+  const agencyHubConnectionMono = agencyHubConnectionRow.mono;
 
   const agencyHubConnectionMeta = document.createElement('div');
   agencyHubConnectionMeta.className = 'chatgoose-meta';
 
-  const agencyHubConnectionButton = createButton(COPY.hub.testConnection, true);
+  // «Проверить связь» is THE action of the zone — the only primary on the pane.
+  const agencyHubConnectionButton = createButton(COPY.hub.testConnection);
   const agencyHubActionRow = document.createElement('div');
   agencyHubActionRow.style.display = 'flex';
   agencyHubActionRow.style.gap = '8px';
   agencyHubActionRow.style.flexWrap = 'wrap';
-  agencyHubActionRow.append(agencyHubPermissionButton, agencyHubConnectionButton);
+  agencyHubActionRow.append(agencyHubConnectionButton, agencyHubPermissionButton);
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
@@ -1131,25 +1152,40 @@ async function render(): Promise<void> {
 
     switch (agencyHubConnectionFeedback.kind) {
       case 'idle':
-        setStatusPill(agencyHubConnectionStatus, 'neutral', 'Not tested yet.');
-        agencyHubConnectionMeta.textContent = 'Save a Hub URL and API key to run a live connection test.';
+        setStatusPill(agencyHubConnectionStatus, 'neutral', COPY.hub.connPillIdle);
+        agencyHubConnectionMono.textContent = '';
+        agencyHubConnectionMeta.textContent = COPY.hub.connIdleMeta;
         return;
       case 'pending':
-        setStatusPill(agencyHubConnectionStatus, 'neutral', 'Connection status updating…');
-        agencyHubConnectionMeta.textContent = 'Saving Agency Hub changes before the next live test.';
+        setStatusPill(agencyHubConnectionStatus, 'neutral', COPY.hub.connPillPending);
+        agencyHubConnectionMono.textContent = '';
+        agencyHubConnectionMeta.textContent = COPY.hub.connPendingMeta;
         return;
       case 'testing':
-        setStatusPill(agencyHubConnectionStatus, 'neutral', 'Testing connection…');
-        agencyHubConnectionMeta.textContent = 'Checking Hub reachability, permissions, and API key.';
+        setStatusPill(agencyHubConnectionStatus, 'neutral', COPY.hub.connPillTesting);
+        agencyHubConnectionMono.textContent = '';
+        agencyHubConnectionMeta.textContent = COPY.hub.connTestingMeta;
         return;
       case 'connected':
-        setStatusPill(agencyHubConnectionStatus, 'ok', 'Connected ✓');
-        agencyHubConnectionMeta.textContent = `Live connection test succeeded for ${agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || 'Agency Hub'}.`;
+        setStatusPill(agencyHubConnectionStatus, 'ok', COPY.hub.connPillOk);
+        // The mono meta carries the receipt (when · how long · which
+        // credential); a sentence would only restate the pill.
+        agencyHubConnectionMono.textContent = lastConnectionCheck
+          ? [
+              formatClockTime(lastConnectionCheck.at),
+              COPY.hub.checkDuration.replace('{n}', String(lastConnectionCheck.durationMs)),
+              lastConnectionCheck.viaDeviceToken
+                ? COPY.hub.checkViaDeviceToken
+                : COPY.hub.checkViaLegacyKey,
+            ].join(' · ')
+          : (agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || '');
+        agencyHubConnectionMeta.textContent = '';
         return;
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
-        setStatusPill(agencyHubConnectionStatus, 'bad', `Connection failed: ${failedError.code}`);
+        setStatusPill(agencyHubConnectionStatus, 'bad', failedError.code);
+        agencyHubConnectionMono.textContent = '';
         const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -1259,7 +1295,7 @@ async function render(): Promise<void> {
       agencyHubConnectionFeedback = {
         kind: 'failed',
         error: createUserError('hub_request_failed', {
-          description: 'The connection test could not be completed.',
+          description: 'Проверка связи не завершилась.',
         }),
       };
       lastAgencyHubConnectionSignature = null;
@@ -1279,9 +1315,6 @@ async function render(): Promise<void> {
   let hubPermissionChecked = false;
   const refreshAgencyHubPermissionState = async (): Promise<void> => {
     const refreshVersion = ++agencyHubPermissionRefreshVersion;
-    // Every early-return branch below is a "Sync disabled" state — amber by
-    // default; only the final granted state overrides to green.
-    agencyHubPermissionStatus.style.color = 'var(--chatgoose-amber)';
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
     const originPattern = buildAgencyHubOriginPattern(normalizedBaseUrl);
     const permissionScopeNote = buildAgencyHubPermissionScopeNote(normalizedBaseUrl);
@@ -1310,15 +1343,27 @@ async function render(): Promise<void> {
       : COPY.status.grantAccess;
     agencyHubPermissionButton.disabled = !originPattern;
 
+    // Every branch writes the same three slots: the pill word, the mono meta at
+    // the right edge (origin — only when granted), and the sentence line below
+    // (empty when granted: the row already says everything).
+    const setPermissionState = (
+      kind: StatusPillKind,
+      pillText: string,
+      metaText: string,
+      monoText = '',
+    ): void => {
+      setStatusPill(agencyHubPermissionStatus, kind, pillText);
+      agencyHubPermissionMono.textContent = monoText;
+      agencyHubPermissionMeta.textContent = metaText;
+    };
+
     if (!agencyHubUrlInput.value.trim()) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: add an Agency Hub URL.';
-      agencyHubPermissionMeta.textContent = 'Enter the Hub base URL, then grant host access for that origin.';
+      setPermissionState('neutral', COPY.hub.permPillNoUrl, COPY.hub.permNoUrl);
       return;
     }
 
     if (!normalizedBaseUrl) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: invalid Agency Hub URL.';
-      agencyHubPermissionMeta.textContent = 'Use a full http:// or https:// base URL.';
+      setPermissionState('warn', COPY.hub.permPillInvalidUrl, COPY.hub.permInvalidUrl);
       return;
     }
 
@@ -1329,73 +1374,70 @@ async function render(): Promise<void> {
           : null;
 
       if (permissionCheck.errorMessage) {
-        agencyHubPermissionStatus.textContent = 'Sync disabled: host access could not be verified.';
-        agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-          `Firefox returned an error while checking ${originPattern}: ${permissionCheck.errorMessage}.`,
+        setPermissionState('warn', COPY.hub.permPillCheckFailed, appendAgencyHubMeta(
+          COPY.hub.permCheckError
+            .replace('{origin}', originPattern ?? '')
+            .replace('{message}', permissionCheck.errorMessage),
           permissionScopeNote,
-        );
+        ));
         return;
       }
 
       if (permissionFeedback) {
         switch (permissionFeedback.kind) {
           case 'denied':
-            agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
-            agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              `Firefox did not grant access for ${originPattern}. Click Grant Access to try again.`,
+            setPermissionState('warn', COPY.hub.permPillMissing, appendAgencyHubMeta(
+              COPY.hub.permDenied.replace('{origin}', originPattern ?? ''),
               permissionScopeNote,
-            );
+            ));
             return;
           case 'request_error':
-            agencyHubPermissionStatus.textContent = 'Sync disabled: failed to request host access.';
-            agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              `Firefox returned an error while requesting ${originPattern}: ${permissionFeedback.errorMessage}.`,
+            setPermissionState('warn', COPY.hub.permPillMissing, appendAgencyHubMeta(
+              COPY.hub.permRequestError
+                .replace('{origin}', originPattern ?? '')
+                .replace('{message}', permissionFeedback.errorMessage),
               permissionScopeNote,
-            );
+            ));
             return;
           case 'unsupported':
-            agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
-            agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-              'This browser build does not expose browser.permissions.request for Agency Hub access.',
+            setPermissionState('warn', COPY.hub.permPillUnsupported, appendAgencyHubMeta(
+              COPY.hub.permUnsupported,
               permissionScopeNote,
-            );
+            ));
             return;
         }
       }
 
       if (typeof browser.permissions?.request !== 'function') {
-        agencyHubPermissionStatus.textContent = 'Sync disabled: host permission requests unavailable.';
-        agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-          'This browser build does not expose browser.permissions.request for Agency Hub access.',
+        setPermissionState('warn', COPY.hub.permPillUnsupported, appendAgencyHubMeta(
+          COPY.hub.permUnsupported,
           permissionScopeNote,
-        );
+        ));
         return;
       }
 
-      agencyHubPermissionStatus.textContent = 'Sync disabled: host access not granted.';
-      agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Grant access for ${originPattern} before ChatGoose can push summaries.`,
+      setPermissionState('warn', COPY.hub.permPillMissing, appendAgencyHubMeta(
+        COPY.hub.permAsk.replace('{origin}', originPattern ?? ''),
         permissionScopeNote,
-      );
+      ));
       return;
     }
 
     if (!hasApiKey) {
-      agencyHubPermissionStatus.textContent = 'Sync disabled: Agency Hub credential missing.';
-      agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-        `Host access is granted for ${originPattern}, but ChatGoose still needs a credential — sign in or add the hub key.`,
+      setPermissionState('warn', COPY.hub.permPillNeedsCredential, appendAgencyHubMeta(
+        COPY.hub.permNoCredential.replace('{origin}', originPattern ?? ''),
         permissionScopeNote,
-      );
+      ));
       return;
     }
 
     // Never claim readiness here: this is a local check (permission + a
     // non-empty credential) — only the live connection test below proves sync.
-    agencyHubPermissionStatus.style.color = 'var(--chatgoose-green)';
-    agencyHubPermissionStatus.textContent = 'Host access granted.';
-    agencyHubPermissionMeta.textContent = appendAgencyHubMeta(
-      `ChatGoose can reach ${originPattern}. Sync goes live once the connection test below passes.`,
-      permissionScopeNote,
+    setPermissionState(
+      'ok',
+      COPY.hub.permPillGranted,
+      appendAgencyHubMeta('', permissionScopeNote).trim(),
+      originPattern ?? '',
     );
   };
 
@@ -1476,16 +1518,15 @@ async function render(): Promise<void> {
   hubSignInUserInput.type = 'text';
   hubSignInUserInput.autocomplete = 'username';
   hubSignInUserInput.className = 'chatgoose-input';
-  hubSignInUserInput.placeholder = 'Hub username';
+  hubSignInUserInput.placeholder = COPY.hub.signInLoginPlaceholder;
 
   const hubSignInPasswordInput = document.createElement('input');
   hubSignInPasswordInput.type = 'password';
   hubSignInPasswordInput.autocomplete = 'current-password';
   hubSignInPasswordInput.className = 'chatgoose-input';
-  hubSignInPasswordInput.placeholder = 'Hub password';
+  hubSignInPasswordInput.placeholder = COPY.hub.signInPasswordPlaceholder;
 
-  const hubSignInButton = createButton('Sign in & issue device token', true);
-  const hubSignInStatus = document.createElement('div');
+  const hubSignInButton = createButton(COPY.hub.signIn, true);
   const hubSignInMeta = document.createElement('div');
   hubSignInMeta.className = 'chatgoose-meta';
   // Tagged so a test can pin WHICH line this is: it is the one line that survives
@@ -1495,7 +1536,8 @@ async function render(): Promise<void> {
 
   let hubSignInFormExpanded = false;
   const hubReissueButton = createButton(COPY.hub.reissueToken, true);
-  const hubSignOutButton = createButton(COPY.hub.signOut, true);
+  // Destructive: wears the danger outline and lives in the bottom danger zone.
+  const hubSignOutButton = createButton(COPY.hub.signOut, false, true);
   const hubSignOutConfirmButton = createButton(COPY.hub.signOut.replace('…', ''), false, true);
   const hubSignOutCancelButton = createButton(COPY.hub.signOutCancel, true);
   const hubSignOutConfirmRow = document.createElement('div');
@@ -1533,17 +1575,13 @@ async function render(): Promise<void> {
 
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
-    setStatusPill(
-      hubSignInStatus,
-      hasToken ? 'ok' : 'neutral',
-      hasToken ? 'Device token active ✓' : 'No device token yet.',
-    );
-    if (!hubSignInMeta.textContent) {
+    // The truth about the token lives in ONE place — the Device token row below.
+    // (The duplicate «Device token active ✓» pill died with the М2 re-layout;
+    // the static fallback note covers the signed-in copy.)
+    if (!hubSignInMeta.textContent && !hasToken) {
       // With no token the line IS the first-sign-in card's copy: who hands out
       // the credentials, and that the password is never stored on this device.
-      hubSignInMeta.textContent = hasToken
-        ? 'Hub requests use the device token; the legacy API key is the fallback.'
-        : COPY.hub.signInHint;
+      hubSignInMeta.textContent = COPY.hub.signInHint;
     }
     // With a live token the credential form reads as unfinished business —
     // fold it away; «Перевыпустить токен» brings it back for rotation.
@@ -1577,6 +1615,12 @@ async function render(): Promise<void> {
       // instead of inventing a date.
       hubTokenMeta.textContent = `${COPY.hub.deviceTokenUnknown} · ${COPY.hub.deviceTokenRenews}`;
     }
+
+    // The danger zone exists only while it has something to say: a sign-out to
+    // offer, a confirm in progress, or an outcome line still on screen.
+    hubDangerZone.hidden = hubSignOutButton.hidden
+      && hubSignOutConfirmRow.hidden
+      && !hubSignOutStatus.textContent;
   };
 
   hubReissueButton.addEventListener('click', () => {
@@ -1590,11 +1634,11 @@ async function render(): Promise<void> {
       const username = hubSignInUserInput.value.trim();
       const password = hubSignInPasswordInput.value;
       if (!username || !password || !agencyHubUrlInput.value.trim()) {
-        hubSignInMeta.textContent = 'Enter the Hub base URL, username, and password first.';
+        hubSignInMeta.textContent = COPY.hub.signInMissingFields;
         return;
       }
       hubSignInButton.disabled = true;
-      hubSignInMeta.textContent = 'Signing in…';
+      hubSignInMeta.textContent = COPY.hub.signingIn;
       // THIS tab is about to make the background write custody. The storage event
       // for that write lands in the cross-tab fence below; the claim is held until
       // the refresh chain this path owns has run, so the fence never doubles it.
@@ -1625,8 +1669,9 @@ async function render(): Promise<void> {
           );
           hubSignInPasswordInput.value = '';
           hubSignInFormExpanded = false;
-          hubSignInMeta.textContent =
-            `Device token ${response.keyPrefix}… issued (expires ${new Date(response.expiresAt).toLocaleDateString()}).`;
+          hubSignInMeta.textContent = COPY.hub.signInIssued
+            .replace('{prefix}', response.keyPrefix)
+            .replace('{date}', new Date(response.expiresAt).toLocaleDateString());
           // The fresh token arrived OUTSIDE the save-hook path (direct
           // storage re-read), so the signature-change refresh never fires on
           // its own — without this the diagnostics card and the hero pill
@@ -1646,7 +1691,7 @@ async function render(): Promise<void> {
             console.error('Failed to refresh Agency Hub status after sign-in', error);
           });
         } else {
-          hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
+          hubSignInMeta.textContent = COPY.hub.signInFailed.replace('{message}', response.error.message);
         }
       } finally {
         if (!ownRefreshStarted) {
@@ -1758,35 +1803,31 @@ async function render(): Promise<void> {
     })();
   });
 
+  // ── «Вход» zone card: token row, folded credential form, reissue ──
+  // «Выйти» does NOT live here — destructive actions sit in their own zone at
+  // the very bottom of the pane.
   const hubSignInWrap = document.createElement('div');
-  hubSignInWrap.style.display = 'grid';
-  hubSignInWrap.style.gap = '8px';
+  hubSignInWrap.className = 'chatgoose-card';
   hubReissueButton.style.justifySelf = 'start';
   const hubTokenActions = document.createElement('div');
   hubTokenActions.className = 'chatgoose-card-actions';
-  hubTokenActions.append(hubReissueButton, hubSignOutButton);
+  hubTokenActions.append(hubReissueButton);
+  const hubTokenFallbackNote = document.createElement('div');
+  hubTokenFallbackNote.className = 'chatgoose-status-hint';
+  hubTokenFallbackNote.textContent = COPY.hub.tokenFallbackNote;
   hubSignInWrap.append(
-    hubSignInRow,
     hubTokenRow,
+    hubSignInRow,
+    hubSignInMeta,
+    hubTokenFallbackNote,
     hubTokenActions,
-    hubSignOutConfirmRow,
-    hubSignOutStatus,
-    hubSignOutHint,
   );
-  renderHubSignInState();
 
-  const agencyHubStatusDivider = document.createElement('div');
-  agencyHubStatusDivider.className = 'chatgoose-card-divider';
-  const agencyHubStatusCard = document.createElement('div');
-  agencyHubStatusCard.className = 'chatgoose-card';
-  agencyHubStatusCard.append(
-    agencyHubPermissionStatus,
-    agencyHubPermissionMeta,
-    agencyHubStatusDivider,
-    agencyHubConnectionStatus,
-    agencyHubConnectionMeta,
-    agencyHubActionRow,
-  );
+  // The connect-zone card is assembled in the pane layout below — the base-URL
+  // field it opens with is created there.
+  const agencyHubConnectCard = document.createElement('div');
+  agencyHubConnectCard.className = 'chatgoose-card';
+
   // The device token is the main path (E9d) — the legacy key stays reachable
   // but folded, open only when one is actually stored.
   const legacyKeyDetails = document.createElement('details');
@@ -1796,8 +1837,18 @@ async function render(): Promise<void> {
   legacyKeySummary.textContent = COPY.hub.legacyKeyFold;
   legacyKeyDetails.append(
     legacyKeySummary,
-    labeledField('Agency Hub API key (legacy fallback)', agencyHubKeyRow),
+    labeledField(COPY.hub.legacyKeyFieldLabel, agencyHubKeyRow),
   );
+  hubSignInWrap.append(legacyKeyDetails);
+
+  // ── Danger zone: sign-out and its two-step confirm, fenced off at the bottom ──
+  const hubDangerRow = document.createElement('div');
+  hubDangerRow.className = 'chatgoose-hub-danger-row';
+  hubDangerRow.append(hubSignOutButton, hubSignOutHint);
+  const hubDangerZone = document.createElement('div');
+  hubDangerZone.className = 'chatgoose-hub-danger';
+  hubDangerZone.append(hubDangerRow, hubSignOutConfirmRow, hubSignOutStatus);
+  renderHubSignInState();
 
   // ── Hub diagnostics: dense, always-visible facts about THIS connection ──
   // Unlike the «Статус» pane's Контракт row (debug-only), every line here is
@@ -1852,16 +1903,53 @@ async function render(): Promise<void> {
   hubConnectionCard.className = 'chatgoose-card';
   hubConnectionCard.append(hubIdentityRow.root, hubPagesRow.root);
 
+  // ── Diagnostics rows: the «Статус»-pane anatomy — token · label · fact ·
+  // mono detail at the right edge, one line per row. `set()` mirrors
+  // StatusRow.set so the two vocabularies cannot drift apart. ──
+  const hubDiagRow = (
+    label: string,
+    key: string,
+    hydration: 'async' | 'sync' = 'sync',
+  ): {
+    root: HTMLElement;
+    set: (view: { badge: string; tone: BadgeTone; fact: string; detail?: string }) => void;
+  } => {
+    const root = document.createElement('div');
+    root.className = 'chatgoose-hub-drow';
+    root.dataset.hubDetail = key;
+    if (hydration === 'async') {
+      root.dataset.deeplinkReady = 'false';
+    }
+    const badge = createBadge('…', 'neutral', true);
+    const labelNode = document.createElement('span');
+    labelNode.className = 'chatgoose-hub-drow-label';
+    labelNode.textContent = label;
+    const fact = document.createElement('span');
+    fact.className = 'chatgoose-hub-drow-fact';
+    const detail = document.createElement('div');
+    detail.className = 'chatgoose-hub-drow-det';
+    root.append(badge, labelNode, fact, detail);
+    return {
+      root,
+      set: (view) => {
+        badge.textContent = view.badge;
+        badge.className = `chatgoose-badge chatgoose-badge-${view.tone} chatgoose-badge-mono`;
+        fact.textContent = view.fact;
+        detail.textContent = view.detail ?? '';
+      },
+    };
+  };
+
   // «Проверка» is deliberately SYNC: its value is complete from in-page state on
   // the very first paint — either the last live test or the honest «проверка не
   // выполнялась» — so it is never a placeholder waiting on a read.
-  const hubCheckRow = hubDetailRow(COPY.hub.checkLabel, 'check');
-  const hubHostAccessRow = hubDetailRow(COPY.hub.hostAccessLabel, 'host-access', 'async');
-  const hubContractRow = hubDetailRow(COPY.hub.contractLabel, 'contract', 'async');
-  const hubErrorsRow = hubDetailRow(COPY.hub.errorsLabel, 'errors', 'async');
-  const hubFanSummaryRow = hubDetailRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
+  const hubCheckRow = hubDiagRow(COPY.hub.checkLabel, 'check');
+  const hubHostAccessRow = hubDiagRow(COPY.hub.hostAccessLabel, 'host-access', 'async');
+  const hubContractRow = hubDiagRow(COPY.hub.contractLabel, 'contract', 'async');
+  const hubErrorsRow = hubDiagRow(COPY.hub.errorsLabel, 'errors', 'async');
+  const hubFanSummaryRow = hubDiagRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
   const hubDiagnosticsCard = document.createElement('div');
-  hubDiagnosticsCard.className = 'chatgoose-card';
+  hubDiagnosticsCard.className = 'chatgoose-hub-diag';
   hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
   hubDiagnosticsCard.append(
     hubCheckRow.root,
@@ -1869,22 +1957,40 @@ async function render(): Promise<void> {
     hubContractRow.root,
     hubErrorsRow.root,
     hubFanSummaryRow.root,
-    legacyKeyDetails,
   );
 
   // Tagged so a `CG-HUB-01` (invalid URL) deep link can highlight the field the
   // code is actually about.
-  const hubBaseUrlField = labeledField('Agency Hub base URL', agencyHubUrlInput);
+  const hubBaseUrlField = labeledField(COPY.hub.baseUrlLabel, agencyHubUrlInput);
   hubBaseUrlField.dataset.hubField = 'base-url';
 
-  agencyHubSection.append(
+  // Address, host access and the live test share one fate — one card.
+  agencyHubConnectCard.append(
     hubBaseUrlField,
-    labeledField('Sign in (device token)', hubSignInWrap),
-    hubSignInStatus,
-    hubSignInMeta,
-    hubConnectionCard,
-    agencyHubStatusCard,
-    hubDiagnosticsCard,
+    agencyHubPermissionRow.root,
+    agencyHubPermissionMeta,
+    agencyHubConnectionRow.root,
+    agencyHubConnectionMeta,
+    agencyHubActionRow,
+  );
+
+  // ── Pane layout: four zones in the working order, danger fenced at the end ──
+  const hubZone = (cap: string, ...children: HTMLElement[]): HTMLElement => {
+    const zone = document.createElement('div');
+    zone.className = 'chatgoose-group';
+    const capNode = document.createElement('div');
+    capNode.className = 'chatgoose-group-cap';
+    capNode.textContent = cap;
+    zone.append(capNode, ...children);
+    return zone;
+  };
+
+  agencyHubSection.append(
+    hubZone(COPY.hub.zoneConnection, agencyHubConnectCard),
+    hubZone(COPY.hub.zoneSignIn, hubSignInWrap),
+    hubZone(COPY.hub.zoneAccount, hubConnectionCard),
+    hubZone(COPY.hub.zoneDiagnostics, hubDiagnosticsCard),
+    hubDangerZone,
   );
 
   // ─── «Статус»: read-only state rows ────────────────────────
@@ -2110,59 +2216,74 @@ async function render(): Promise<void> {
 
     // Проверка — when, outcome, how long, and which credential carried it.
     if (!lastConnectionCheck) {
-      hubCheckRow.value.textContent = COPY.hub.checkNever;
+      hubCheckRow.set({ badge: '—', tone: 'neutral', fact: COPY.hub.checkNever });
     } else {
-      hubCheckRow.value.textContent = [
-        formatClockTime(lastConnectionCheck.at),
-        lastConnectionCheck.ok
-          ? COPY.hub.checkSuccess
-          : `${COPY.hub.checkFailure}${lastConnectionCheck.code ? ` ${lastConnectionCheck.code}` : ''}`,
-        `${lastConnectionCheck.durationMs} ms`,
-        lastConnectionCheck.viaDeviceToken
-          ? COPY.hub.checkViaDeviceToken
-          : COPY.hub.checkViaLegacyKey,
-      ].join(' · ');
+      const via = lastConnectionCheck.viaDeviceToken
+        ? COPY.hub.checkViaDeviceToken
+        : COPY.hub.checkViaLegacyKey;
+      hubCheckRow.set({
+        badge: lastConnectionCheck.ok ? 'OK' : 'FAIL',
+        tone: lastConnectionCheck.ok ? 'green' : 'bad',
+        fact: lastConnectionCheck.ok
+          ? `${COPY.hub.checkSuccess} · ${via}`
+          : `${COPY.hub.checkFailure}${lastConnectionCheck.code ? ` ${lastConnectionCheck.code}` : ''} · ${via}`,
+        detail: [
+          formatClockTime(lastConnectionCheck.at),
+          COPY.hub.checkDuration.replace('{n}', String(lastConnectionCheck.durationMs)),
+        ].join(' · '),
+      });
     }
 
     // Доступ к хосту
     const originPattern = buildAgencyHubOriginPattern(
       normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
     );
-    hubHostAccessRow.value.textContent = hubPermissionGranted === null || !originPattern
-      ? COPY.common.unknown
-      : hubPermissionGranted
-        ? `${COPY.hub.hostAccessGrantedFor} ${originPattern}`
-        : COPY.status.hubNoPermission;
+    if (hubPermissionGranted === null || !originPattern) {
+      hubHostAccessRow.set({ badge: '—', tone: 'neutral', fact: COPY.common.unknown });
+    } else if (hubPermissionGranted) {
+      hubHostAccessRow.set({
+        badge: 'OK',
+        tone: 'green',
+        fact: COPY.hub.hostAccessGranted,
+        detail: originPattern,
+      });
+    } else {
+      hubHostAccessRow.set({ badge: 'НЕТ', tone: 'amber', fact: COPY.status.hubNoPermission });
+    }
     // Settled once Firefox has answered `permissions.contains` — including the
     // «no origin to check» case, where «неизвестно» IS the final answer for the
     // address currently in the field.
     markHubRowHydrated(hubHostAccessRow, hubPermissionChecked);
 
-    // Контракт SDK — ALWAYS visible here (the Статус row stays debug-only).
+    // Контракт SDK — ALWAYS visible here (the Статус row stays debug-only), and
+    // it wears the same MATCH/DRIFT badge as the «Статус» pane's row.
     const health = statusModel.health;
     if (health?.ok) {
       const match = health.contractHash === health.sdkContractHash;
-      hubContractRow.value.textContent = [
-        match ? COPY.hub.contractMatches : COPY.hub.contractMismatch,
-        health.contractHash.slice(0, 12),
-        ...(health.sdkSourceCommit
-          ? [COPY.status.contractSourceCommit.replace('{commit}', health.sdkSourceCommit.slice(0, 12))]
-          : []),
-      ].join(' · ');
+      hubContractRow.set({
+        badge: match ? 'MATCH' : 'DRIFT',
+        tone: match ? 'green' : 'bad',
+        fact: match ? COPY.hub.contractMatches : COPY.hub.contractMismatch,
+        detail: [
+          health.contractHash.slice(0, 12),
+          ...(health.sdkSourceCommit
+            ? [COPY.status.contractSourceCommit.replace('{commit}', health.sdkSourceCommit.slice(0, 12))]
+            : []),
+        ].join(' · '),
+      });
     } else {
-      hubContractRow.value.textContent = COPY.status.contractUnknown;
+      hubContractRow.set({ badge: '—', tone: 'neutral', fact: COPY.status.contractUnknown });
     }
     markHubRowHydrated(hubContractRow, health !== null);
 
-    // Ошибки генераций (Hub) — today's exact count; the list is capped at 20,
+    // Ошибки Hub — today's exact count in the badge; the list is capped at 20,
     // so say so rather than let «за сегодня: 37» look like 37 listed rows.
     const ops = statusModel.opsDaily;
     if (!ops) {
-      hubErrorsRow.value.textContent = COPY.common.unknown;
+      hubErrorsRow.set({ badge: '—', tone: 'neutral', fact: COPY.common.unknown });
     } else {
       const last = ops.hubErrors[ops.hubErrors.length - 1];
-      hubErrorsRow.value.textContent = [
-        COPY.hub.errorsToday.replace('{n}', String(ops.hubErrorsTotal)),
+      const detail = [
         ...(last
           ? [COPY.hub.errorsLast
               .replace('{code}', last.code)
@@ -2170,17 +2291,29 @@ async function render(): Promise<void> {
           : []),
         ...(ops.hubErrorsTotal > ops.hubErrors.length ? [COPY.hub.errorsCapped] : []),
       ].join(' · ');
+      hubErrorsRow.set({
+        badge: String(ops.hubErrorsTotal),
+        tone: ops.hubErrorsTotal > 0 ? 'amber' : 'green',
+        fact: COPY.hub.errorsToday.replace('{n}', String(ops.hubErrorsTotal)),
+        ...(detail ? { detail } : {}),
+      });
     }
 
     // Fan Summary — the last push that LANDED, honest-empty otherwise.
     const push = ops?.lastSummaryPush ?? null;
-    hubFanSummaryRow.value.textContent = !ops
-      ? COPY.common.unknown
-      : push
-        ? COPY.hub.fanSummaryLast
-            .replace('{when}', formatClockTime(push.at))
-            .replace('{account}', push.accountLabel || COPY.common.unknown)
-        : COPY.hub.fanSummaryEmpty;
+    if (!ops) {
+      hubFanSummaryRow.set({ badge: '—', tone: 'neutral', fact: COPY.common.unknown });
+    } else if (push) {
+      hubFanSummaryRow.set({
+        badge: 'OK',
+        tone: 'green',
+        fact: COPY.hub.fanSummaryLast
+          .replace('{when}', formatClockTime(push.at))
+          .replace('{account}', push.accountLabel || COPY.common.unknown),
+      });
+    } else {
+      hubFanSummaryRow.set({ badge: '—', tone: 'neutral', fact: COPY.hub.fanSummaryEmpty });
+    }
     // Both ops-daily rows settle together: a parsed snapshot, or a read that
     // answered but could not be used (`unavailable.opsDaily`) — «неизвестно» is
     // then the final answer, not a placeholder.

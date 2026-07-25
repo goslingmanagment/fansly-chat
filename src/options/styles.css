@@ -547,6 +547,92 @@ input[type='checkbox'] {
   border-top: 1px solid var(--chatgoose-line);
 }
 
+/* ── Agency Hub zones (М2 layout) ── */
+/* «Доступ к хосту» / «Связь»: label · pill · mono receipt at the right edge. */
+.chatgoose-hub-srow {
+  display: grid;
+  grid-template-columns: 128px auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.chatgoose-hub-srow-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.chatgoose-hub-srow-meta {
+  justify-self: end;
+  text-align: right;
+  font: 11.5px/1.4 var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-ink-low);
+}
+
+/* Diagnostics rows: the «Статус»-pane anatomy — token slot, label, fact, mono
+   detail at the right edge. Naked rows on the section card, no inner wash. */
+.chatgoose-hub-diag {
+  display: grid;
+}
+
+.chatgoose-hub-drow {
+  display: grid;
+  grid-template-columns: 52px 118px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.chatgoose-hub-drow + .chatgoose-hub-drow {
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-hub-drow > .chatgoose-badge {
+  justify-self: start;
+}
+
+.chatgoose-hub-drow-label {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.chatgoose-hub-drow-fact {
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatgoose-hub-drow-det {
+  justify-self: end;
+  text-align: right;
+  font: 11.5px/1.4 var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-ink-low);
+}
+
+/* Danger zone: sign-out fenced at the bottom of the pane. The `[hidden]` rule
+   MUST stay next to the display rule: an author `display: grid` beats the UA
+   `[hidden] { display: none }` (origin precedes specificity) — without it a
+   fully signed-out pane would still show the fence. */
+.chatgoose-hub-danger {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-hub-danger[hidden] {
+  display: none;
+}
+
+.chatgoose-hub-danger-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 /* Quiet range hint beside a numeric input; doubles as the clamp notice. */
 .chatgoose-row-hint {
   font-family: var(--chatgoose-font-mono);
