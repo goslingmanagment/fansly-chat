@@ -442,6 +442,10 @@ export const COPY = {
     debugTitle: 'Режим отладки',
     debugHint: 'подробные логи фоновой страницы',
     savedAs: 'сохранено как {n}',
+    /** aria-labels of the −/+ stepper buttons (pointer affordance; the field
+     * itself keeps typing and arrow keys). */
+    stepDown: 'Уменьшить',
+    stepUp: 'Увеличить',
   },
 
   hotkeys: {

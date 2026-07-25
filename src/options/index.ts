@@ -886,8 +886,13 @@ async function render(): Promise<void> {
   coachHistoryInput.step = '1';
   coachHistoryInput.value = String(state.settings.coachHistoryLimit);
 
+  // The hidden <select> stays the SINGLE value carrier for auto-recap: the
+  // debounced save array, the cross-tab merge and the cost-warning listener all
+  // speak to it exactly as when it was visible. The segment below is only the
+  // visible layer — its buttons write the select and dispatch its change event.
   const coachRecapSelect = document.createElement('select');
   coachRecapSelect.className = 'chatgoose-select';
+  coachRecapSelect.hidden = true;
   const coachRecapChoices: Array<{ value: Settings['coachAutoRecap']; label: string }> = [
     { value: 'off', label: COPY.generation.coachRecapOff },
     { value: 'short', label: COPY.generation.coachRecapShort },
@@ -900,6 +905,42 @@ async function render(): Promise<void> {
     coachRecapSelect.append(option);
   }
   coachRecapSelect.value = state.settings.coachAutoRecap;
+
+  // Three aria-pressed buttons, not role=radio: radio semantics promise
+  // arrow-key movement this group does not implement, while pressed/unpressed
+  // buttons in the tab order describe exactly what the control does.
+  const coachRecapSegment = document.createElement('span');
+  coachRecapSegment.className = 'chatgoose-segment';
+  coachRecapSegment.setAttribute('role', 'group');
+  coachRecapSegment.setAttribute('aria-label', COPY.generation.coachRecapTitle);
+  const coachRecapButtons = coachRecapChoices.map((choice) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chatgoose-segment-btn';
+    button.dataset.recapChoice = choice.value;
+    button.textContent = choice.label;
+    button.addEventListener('click', () => {
+      if (coachRecapSelect.value === choice.value) {
+        return;
+      }
+      coachRecapSelect.value = choice.value;
+      coachRecapSelect.dispatchEvent(new Event('change'));
+    });
+    return button;
+  });
+  /** Repaint the segment from the select — the one source of truth. */
+  const updateCoachRecapSegment = (): void => {
+    for (const button of coachRecapButtons) {
+      const selected = button.dataset.recapChoice === coachRecapSelect.value;
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      button.dataset.selected = selected ? 'true' : 'false';
+    }
+  };
+  coachRecapSegment.append(...coachRecapButtons);
+  updateCoachRecapSegment();
+  const coachRecapControl = document.createElement('span');
+  coachRecapControl.className = 'chatgoose-row-control';
+  coachRecapControl.append(coachRecapSegment, coachRecapSelect);
 
   // Full Recap replays the whole deep window before coaching — surface the cost
   // so it's a deliberate choice, not a surprise on the bill.
@@ -932,17 +973,30 @@ async function render(): Promise<void> {
   };
   updateCoachRecapWarning();
 
+  // Family switch instead of a bare checkbox: the checkbox stays the control
+  // (checked/focus semantics untouched); the track is presentation only.
   const debugInput = document.createElement('input');
   debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
+  const debugSwitch = document.createElement('span');
+  debugSwitch.className = 'chatgoose-switch';
+  const debugSwitchTrack = document.createElement('span');
+  debugSwitchTrack.className = 'chatgoose-switch-track';
+  debugSwitch.append(debugInput, debugSwitchTrack);
 
   /**
    * One setting per line: a two-line label (what it is, then what it does) with
-   * the control on the right. `inlineField` carries only a single label, and a
-   * pane of bare counts is unreadable without the sublabel.
+   * the control on the right. A DIV by default — a <label> would forward a
+   * row click to its FIRST labelable descendant, which for a stepper row is
+   * the «−» button; only the single-checkbox row keeps the label affordance.
    */
-  const settingRow = (title: string, hint: string, control: HTMLElement): HTMLElement => {
-    const row = document.createElement('label');
+  const settingRow = (
+    title: string,
+    hint: string,
+    control: HTMLElement,
+    opts?: { asLabel?: boolean },
+  ): HTMLElement => {
+    const row = document.createElement(opts?.asLabel ? 'label' : 'div');
     row.className = 'chatgoose-row';
     const labels = document.createElement('span');
     labels.className = 'chatgoose-row-labels';
@@ -961,13 +1015,15 @@ async function render(): Promise<void> {
   const coachRecapRow = settingRow(
     COPY.generation.coachRecapTitle,
     COPY.generation.coachRecapHint,
-    coachRecapSelect,
+    coachRecapControl,
   );
   coachRecapRow.style.flexWrap = 'wrap';
   coachRecapRow.append(coachRecapWarning);
 
   // Count rows carry their allowed range beside the input; the same hint
-  // flashes amber when a save clamps an out-of-range entry.
+  // flashes amber when a save clamps an out-of-range entry. The input rides
+  // inside a −/+ stepper: big pointer targets instead of the OS spinners; the
+  // field itself still takes typing and arrow keys exactly as before.
   const countHints = new Map<HTMLInputElement, HTMLSpanElement>();
   const numberRow = (
     title: string,
@@ -978,9 +1034,46 @@ async function render(): Promise<void> {
     hint.className = 'chatgoose-row-hint';
     hint.textContent = `${input.min}–${input.max}`;
     countHints.set(input, hint);
+    // Rows are DIVs now (see settingRow) — the field names itself.
+    input.setAttribute('aria-label', title);
+    const stepButton = (direction: -1 | 1): HTMLButtonElement => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chatgoose-stepper-btn';
+      button.textContent = direction === 1 ? '+' : '−';
+      button.setAttribute(
+        'aria-label',
+        direction === 1 ? COPY.generation.stepUp : COPY.generation.stepDown,
+      );
+      // Pointer affordance only: keyboard users step the focused field with
+      // arrow keys, so the buttons stay out of the tab order.
+      button.tabIndex = -1;
+      button.addEventListener('click', () => {
+        try {
+          if (direction === 1) {
+            input.stepUp();
+          } else {
+            input.stepDown();
+          }
+        } catch {
+          // A blank/non-numeric mid-edit value is not steppable — start over
+          // from the low bound rather than silently doing nothing.
+          input.value = input.min;
+        }
+        // A stepper click is both an edit and a commit: input schedules the
+        // debounced save, change flushes it (the same pair a native spinner
+        // interaction produces by blur time).
+        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new Event('change'));
+      });
+      return button;
+    };
+    const stepper = document.createElement('span');
+    stepper.className = 'chatgoose-stepper';
+    stepper.append(stepButton(-1), input, stepButton(1));
     const control = document.createElement('span');
     control.className = 'chatgoose-row-control';
-    control.append(hint, input);
+    control.append(hint, stepper);
     // A wheel over a focused number input silently changes the value while
     // the chatter is just scrolling the page — blur keeps the scroll a scroll.
     input.addEventListener('wheel', () => {
@@ -1035,7 +1128,9 @@ async function render(): Promise<void> {
       coachRecapRow,
     ]),
     settingGroup(COPY.generation.groupService, [
-      settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugInput),
+      settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugSwitch, {
+        asLabel: true,
+      }),
     ]),
   );
 
@@ -2950,6 +3045,7 @@ async function render(): Promise<void> {
       writeCount(coachHistoryInput, mergedSettings.coachHistoryLimit);
       if (document.activeElement !== coachRecapSelect) {
         coachRecapSelect.value = mergedSettings.coachAutoRecap;
+        updateCoachRecapSegment();
         updateCoachRecapWarning();
       }
 
@@ -3040,7 +3136,10 @@ async function render(): Promise<void> {
 
   // Toggle the cost warning the moment the picker changes, ahead of any save,
   // and keep its message tracking the deep-window field as the chatter types.
+  // The segment repaints from the same event — the hidden select stays the one
+  // source of truth for every writer (buttons, tests, cross-tab merge).
   coachRecapSelect.addEventListener('change', updateCoachRecapWarning);
+  coachRecapSelect.addEventListener('change', updateCoachRecapSegment);
   deepInput.addEventListener('input', updateCoachRecapWarning);
 
   [

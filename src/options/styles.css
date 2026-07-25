@@ -464,12 +464,168 @@ input[type='checkbox'] {
   min-width: 160px;
 }
 
-/* Counts are numbers — numbers are mono and right-aligned. */
+/* Counts are numbers — numbers are mono, centred inside their stepper. */
 .chatgoose-input-num {
-  width: 110px;
+  width: 62px;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 6px;
   font-family: var(--chatgoose-font-mono);
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.chatgoose-input-num::-webkit-inner-spin-button,
+.chatgoose-input-num::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.chatgoose-input-num:focus {
+  outline: none;
+}
+
+/* ── «Генерация»: семейные контролы (М2) ── */
+/* Stepper: −/+ pointer targets around the mono field. The wrapper carries the
+   border so the focused state can ring the whole control. */
+.chatgoose-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-field);
+  overflow: hidden;
+}
+
+.chatgoose-stepper:focus-within {
+  border-color: var(--chatgoose-clay);
+}
+
+.chatgoose-stepper-btn {
+  width: 30px;
+  border: 0;
+  cursor: pointer;
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.chatgoose-stepper-btn:first-child {
+  border-right: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-stepper-btn:last-child {
+  border-left: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-stepper-btn:hover {
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+/* Segment: every value visible at once; the pressed one sits on the field
+   white. Plain aria-pressed buttons in the tab order — no radio semantics. */
+.chatgoose-segment {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-bg2);
+  overflow: hidden;
+}
+
+.chatgoose-segment-btn {
+  border: 0;
+  cursor: pointer;
+  padding: 7px 13px;
+  background: none;
+  color: var(--chatgoose-ink-mid);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.chatgoose-segment-btn + .chatgoose-segment-btn {
+  border-left: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-segment-btn[data-selected='true'] {
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-segment-btn:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: -2px;
+}
+
+/* Switch: the checkbox stays the control (its checked/focus drive the track);
+   the track is presentation only and never intercepts the click. */
+.chatgoose-switch {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  flex: none;
+}
+
+.chatgoose-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.chatgoose-switch-track {
+  pointer-events: none;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--chatgoose-line-strong);
+  transition: background 150ms ease;
+}
+
+.chatgoose-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(31, 30, 29, 0.25);
+  transition: transform 150ms ease;
+}
+
+.chatgoose-switch input:checked + .chatgoose-switch-track {
+  background: var(--chatgoose-clay);
+}
+
+.chatgoose-switch input:checked + .chatgoose-switch-track::after {
+  transform: translateX(14px);
+}
+
+.chatgoose-switch input:focus-visible + .chatgoose-switch-track {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatgoose-switch-track,
+  .chatgoose-switch-track::after {
+    transition: none;
+  }
 }
 
 /* Status pill: one connection/credential state at a glance. Green = good,
