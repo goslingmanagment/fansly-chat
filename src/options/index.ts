@@ -2984,10 +2984,20 @@ async function render(): Promise<void> {
   personalitiesList.className = 'chatgoose-persona-rows';
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
-  // Catalog footer: when it last CHANGED, plus the only refresh path there is.
-  const personaCatalogLine = document.createElement('div');
-  personaCatalogLine.dataset.role = 'persona-catalog';
-  personaCatalogLine.className = 'chatgoose-persona-catalog';
+  // Catalog status row (М2 anatomy): label · fact · mono staleness at the
+  // right edge, then the refresh action with its hint inline.
+  const personaCatalogRow = document.createElement('div');
+  personaCatalogRow.dataset.role = 'persona-catalog';
+  personaCatalogRow.className = 'chatgoose-persona-catrow';
+  const personaCatalogLabel = document.createElement('span');
+  personaCatalogLabel.className = 'chatgoose-persona-catlabel';
+  personaCatalogLabel.textContent = COPY.personas.catalogLabel;
+  const personaCatalogFact = document.createElement('span');
+  personaCatalogFact.className = 'chatgoose-persona-catfact';
+  const personaCatalogAge = document.createElement('span');
+  personaCatalogAge.className = 'chatgoose-persona-catage';
+  personaCatalogAge.hidden = true;
+  personaCatalogRow.append(personaCatalogLabel, personaCatalogFact, personaCatalogAge);
   // There is no standalone «refetch the catalog» operation, and inventing one is
   // out of scope: the background re-reads the catalog after a SUCCESSFUL
   // connection test, so the button says exactly what it does.
@@ -3006,12 +3016,12 @@ async function render(): Promise<void> {
       }
     })();
   });
-  const personaRefreshHint = document.createElement('div');
+  const personaRefreshHint = document.createElement('span');
   personaRefreshHint.className = 'chatgoose-status-hint';
   personaRefreshHint.textContent = COPY.personas.catalogRefreshHint;
-  const personaFooter = document.createElement('div');
-  personaFooter.className = 'chatgoose-persona-footer';
-  personaFooter.append(personaCatalogLine, personaRefreshButton);
+  const personaActions = document.createElement('div');
+  personaActions.className = 'chatgoose-status-actions';
+  personaActions.append(personaRefreshButton, personaRefreshHint);
 
   const renderPersonaCatalog = (): void => {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
@@ -3028,11 +3038,22 @@ async function render(): Promise<void> {
       : String(activePersonas);
     shell.setMicro('personas', personasMicro);
     const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
-    personaCatalogLine.textContent = `${COPY.personas.catalogLabel}: ${
-      changedDate
-        ? COPY.personas.catalogUpdated.replace('{date}', changedDate)
-        : COPY.personas.catalogNever
-    }`;
+    personaCatalogFact.textContent = changedDate
+      ? COPY.personas.catalogUpdated.replace('{date}', changedDate)
+      : COPY.personas.catalogNever;
+    // Staleness marker: only once the catalog is older than 48h — a fresh date
+    // needs no age, and «0 дн назад» would be noise (the reverted #46 rule).
+    const changedAt = state.personaCatalogFetchedAt === null
+      ? Number.NaN
+      : Date.parse(state.personaCatalogFetchedAt);
+    const ageMs = Number.isFinite(changedAt) ? Date.now() - changedAt : Number.NaN;
+    const staleDays = Number.isFinite(ageMs) && ageMs >= 48 * 3_600_000
+      ? Math.floor(ageMs / 86_400_000)
+      : null;
+    personaCatalogAge.textContent = staleDays === null
+      ? ''
+      : COPY.personas.catalogAge.replace('{n}', String(staleDays));
+    personaCatalogAge.hidden = staleDays === null;
     personalitiesList.replaceChildren();
     const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
     if (rows.length === 0) {
@@ -3071,19 +3092,23 @@ async function render(): Promise<void> {
       head.append(
         createBadge(`${COPY.personas.versionPrefix}${view.version}`, 'neutral', true),
       );
+      // Right cluster (М2 anatomy): the mono count, and for an archived-but-
+      // still-mapped persona the one useful instruction next to it.
+      const side = document.createElement('span');
+      side.className = 'chatgoose-persona-side';
       const count = document.createElement('span');
       count.className = 'chatgoose-persona-count';
       count.textContent = COPY.personas.accountsCount.replace(
         '{n}',
         String(view.accountCount),
       );
-      head.append(count);
+      side.append(count);
       if (view.archived) {
         // Only reachable while a mapping still points at it — amber, because the
         // one useful instruction is «pick a replacement».
-        head.append(createBadge(COPY.personas.archivedMapped, 'amber'));
+        side.append(createBadge(COPY.personas.archivedMapped, 'amber'));
       }
-      row.append(head);
+      row.append(head, side);
       personalitiesList.append(row);
     }
     flashPendingDeepLink();
@@ -3160,8 +3185,8 @@ async function render(): Promise<void> {
 
   personalitiesSection.append(
     personalitiesList,
-    personaFooter,
-    personaRefreshHint,
+    personaCatalogRow,
+    personaActions,
     preservationFold,
   );
 
