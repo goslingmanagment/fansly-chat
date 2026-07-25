@@ -40,8 +40,11 @@ function detail(page: MountedOptionsPage, key: string): HTMLElement {
 }
 
 function hubButton(page: MountedOptionsPage, label: string): HTMLButtonElement {
-  const button = Array.from(page.document.querySelectorAll<HTMLButtonElement>('button'))
-    .find((candidate) => candidate.textContent === label);
+  // Scoped to the hub pane: «Войти» also labels the onboarding checklist's CTA
+  // in the status pane, and a document-wide first-match would click that one.
+  const button = Array.from(
+    page.document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'),
+  ).find((candidate) => candidate.textContent === label);
   if (!button) {
     throw new Error(`Missing hub button: ${label}`);
   }
@@ -137,7 +140,7 @@ describe('options «Agency Hub» pane', () => {
     expect(detail(page, 'host-access').textContent).toContain('hub.example');
     // The check line carries outcome, duration and WHICH credential carried it.
     expect(detail(page, 'check').textContent).toContain(COPY.hub.checkSuccess);
-    expect(detail(page, 'check').textContent).toContain('ms');
+    expect(detail(page, 'check').textContent).toContain('мс');
     expect(detail(page, 'check').textContent).toContain(COPY.hub.checkViaDeviceToken);
     // 37 errors today with only 20 listed — say that the list is capped.
     expect(detail(page, 'errors').textContent).toContain(COPY.hub.errorsToday.replace('{n}', '37'));
@@ -185,7 +188,7 @@ describe('options «Agency Hub» pane', () => {
     const password = inputs.find((input) => input.autocomplete === 'current-password');
     username!.value = 'lora-chatter';
     password!.value = 'pw';
-    hubButton(page, 'Sign in & issue device token').click();
+    hubButton(page, COPY.hub.signIn).click();
     await page.flushAsync();
 
     // The background already committed the token; its storage event lands while the
@@ -319,7 +322,7 @@ describe('options «Agency Hub» pane', () => {
       expect(keyInput?.value).toBe('');
       // …so there is nothing left to sign out of, and the sign-in form is back.
       expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
-      expect(page.document.body.textContent).toContain('No device token yet.');
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
       // The sign-in meta line is RE-RENDERED: it normally survives a repaint on
       // its own, which would leave a «Hub requests use the device token» line (or,
       // after a sign-in in this session, «Device token abc… issued») next to a
