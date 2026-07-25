@@ -70,15 +70,15 @@ describe('Options malformed persona snapshot recovery', () => {
     await import('../src/options/index.js');
     await vi.waitFor(() => {
       expect(document.querySelector('h1')?.textContent)
-        .toBe('ChatGoose Persona Recovery');
+        .toBe(COPY.recovery.personaTitle);
     });
 
-    expect(document.body.textContent).toContain('Legacy Persona Recovery');
+    expect(document.body.textContent).toContain(COPY.recovery.personaSectionTitle);
     expect(document.body.textContent).toContain(COPY.personas.legacyDownload);
     expect(document.body.textContent).toContain(COPY.personas.legacyCopy);
     const sectionTitles = Array.from(document.querySelectorAll('h2'))
       .map((heading) => heading.textContent);
-    expect(sectionTitles).toEqual(['Legacy Persona Recovery']);
+    expect(sectionTitles).toEqual([COPY.recovery.personaSectionTitle]);
     expect(sendMessage).not.toHaveBeenCalled();
     expect(storageSet).not.toHaveBeenCalled();
 

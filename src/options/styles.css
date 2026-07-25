@@ -82,7 +82,7 @@ body {
   color: var(--chatgoose-ink);
   font-family: var(--chatgoose-font);
   font-size: 14px;
-  max-width: 900px;
+  max-width: 1280px;
   margin: 0 auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -114,9 +114,18 @@ input[type='checkbox'] {
   min-height: 100vh;
 }
 
+/* Sticky: the rail is exactly viewport-tall and travels with the scroll, so
+   its border-right always covers the visible column. `align-self: flex-start`
+   is load-bearing — a stretched flex child cannot stick. */
 .chatgoose-cabinet-rail {
   width: 216px;
   flex: none;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  box-sizing: border-box;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -198,6 +207,42 @@ input[type='checkbox'] {
   border-top: 1px solid var(--chatgoose-line);
 }
 
+/* Narrow windows: the rail folds into a top bar, the main column takes full
+   width — no more 160px account cards squeezed beside a fixed rail. */
+@media (max-width: 640px) {
+  .chatgoose-cabinet {
+    flex-direction: column;
+  }
+
+  .chatgoose-cabinet-rail {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 12px 12px 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--chatgoose-line);
+  }
+
+  .chatgoose-cabinet-brand {
+    flex: 1 1 100%;
+    padding: 0 10px 10px;
+  }
+
+  .chatgoose-cabinet-item {
+    width: auto;
+  }
+
+  .chatgoose-cabinet-railfoot {
+    flex: 1 1 100%;
+    margin-top: 6px;
+    padding: 8px 10px 0;
+  }
+}
+
 .chatgoose-cabinet-version {
   font-family: var(--chatgoose-font-mono);
   font-size: 10.5px;
@@ -252,6 +297,9 @@ input[type='checkbox'] {
    precedes specificity), so the attribute alone would not hide the pane. */
 .chatgoose-cabinet-pane {
   display: block;
+  /* Breathing room under the last section — INSIDE the 100vh flex child, so a
+     short pane never produces a permanent bottom scrollbar. */
+  padding-bottom: 24px;
 }
 
 .chatgoose-cabinet-pane[hidden] {
@@ -626,6 +674,7 @@ input[type='checkbox'] {
   color: var(--chatgoose-ink-low);
   text-align: left;
   width: fit-content;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -757,6 +806,14 @@ input[type='checkbox'] {
   align-items: center;
   padding: 9px 0;
   border-bottom: 1px solid var(--chatgoose-line);
+}
+
+/* Equal-width badge column: the everyday tokens (1, UP, AUTH, —, DRIFT, MATCH)
+   all fit 56px, so labels and mono details align across rows instead of
+   staircasing; a rare long badge (DEGRADED, НЕТ ДОСТУПА) widens only its row. */
+.chatgoose-status-row > .chatgoose-badge {
+  min-width: 56px;
+  justify-content: center;
 }
 
 /* Author `display: grid` beats the UA `[hidden] { display: none }` rule
@@ -1238,8 +1295,20 @@ input[type='checkbox'] {
   flex-wrap: wrap;
 }
 
+/* Name + ✎ live in one non-wrapping cluster: the pencil must never orphan onto
+   its own line under a long handle — the name ellipsizes instead. */
+.chatgoose-account-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
 .chatgoose-account-label {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chatgoose-account-rename {
