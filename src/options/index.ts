@@ -18,12 +18,19 @@ import {
   createVersionTag,
   debounce,
   injectStyles,
-  inlineField,
   labeledField,
   setStatusPill,
   type BadgeTone,
 } from './dom.js';
 import { COPY } from './copy.js';
+import { renderHotkeysPane } from './hotkeys-pane.js';
+import { detectLabelPlatform } from '../shared/hotkeys.js';
+import {
+  buildPersonaRowViews,
+  classifyPersonaEmptyState,
+  formatCatalogChangedDate,
+  type PersonaEmptyState,
+} from './personas.js';
 import {
   buildSessionLookup,
   formatAccountHeading,
@@ -36,6 +43,7 @@ import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
+import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
   formatUserErrorTechnicalDetail,
@@ -67,6 +75,8 @@ import {
 } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  AccountsView,
+  AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
@@ -154,9 +164,49 @@ function asSpendersObservation(value: unknown): SpendersObservation | null {
     : null;
 }
 
+function asAccountsView(value: unknown): AccountsView | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.accounts) || typeof record.unattributedFanslyTabs !== 'number') {
+    return null;
+  }
+  const accounts = record.accounts.filter((entry): entry is AccountsViewEntry => {
+    if (typeof entry !== 'object' || entry === null) return false;
+    const candidate = entry as Record<string, unknown>;
+    return typeof candidate.accountId === 'string' &&
+      Boolean(candidate.accountId) &&
+      typeof candidate.label === 'string' &&
+      (candidate.state === 'live' || candidate.state === 'seen' || candidate.state === 'never');
+  });
+  return { accounts, unattributedFanslyTabs: record.unattributedFanslyTabs };
+}
+
 function formatClockTime(at: number): string {
   const date = new Date(at);
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate();
+}
+
+/** «была {when}» for an account this browser is not currently holding a session
+ * for. A bare «21:40» three days later would read as today, so anything older
+ * than yesterday carries its date. */
+function formatSeenWhen(at: number): string {
+  const seenAt = new Date(at);
+  const now = new Date();
+  const time = formatClockTime(at);
+  if (isSameLocalDay(seenAt, now)) {
+    return COPY.accounts.whenToday.replace('{time}', time);
+  }
+  if (isSameLocalDay(seenAt, new Date(now.getTime() - 24 * 60 * 60 * 1000))) {
+    return COPY.accounts.whenYesterday.replace('{time}', time);
+  }
+  const date = `${String(seenAt.getDate()).padStart(2, '0')}.${String(seenAt.getMonth() + 1).padStart(2, '0')}`;
+  return COPY.accounts.whenDate.replace('{date}', date).replace('{time}', time);
 }
 
 /**
@@ -276,6 +326,15 @@ export function buildStatusReport(model: StatusReportModel): string {
 }
 
 /** The account-id meta line doubles as a copy button (popup discipline). */
+/** Why the persona section is empty, said honestly. «Каталог пуст» is a claim
+ * about the SERVER's answer and may only be made when the server actually
+ * answered for these credentials. */
+const PERSONA_EMPTY_COPY: Record<PersonaEmptyState, string> = {
+  'no-credentials': COPY.personas.emptyFresh,
+  'awaiting-refresh': COPY.personas.emptyUnknown,
+  'empty-catalog': COPY.personas.emptyConfirmed,
+};
+
 function createCopyableId(fullId: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
@@ -315,7 +374,7 @@ function createLegacyPersonaExportControls(): DocumentFragment {
     null,
     2,
   );
-  const downloadExport = createButton('Download legacy persona JSON', true);
+  const downloadExport = createButton(COPY.personas.legacyDownload, true);
   downloadExport.addEventListener('click', () => {
     downloadExport.disabled = true;
     void exportJson().then((json) => {
@@ -325,23 +384,23 @@ function createLegacyPersonaExportControls(): DocumentFragment {
       link.download = `chatgoose-legacy-personas-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      exportStatus.textContent = 'Legacy persona JSON downloaded.';
+      exportStatus.textContent = COPY.personas.legacyDownloaded;
     }).catch((error: unknown) => {
       console.error('Failed to export legacy persona data', error);
-      exportStatus.textContent = 'Export failed. Reload Settings and try again.';
+      exportStatus.textContent = COPY.personas.legacyDownloadFailed;
     }).finally(() => {
       downloadExport.disabled = false;
     });
   });
-  const copyExport = createButton('Copy legacy persona JSON', true);
+  const copyExport = createButton(COPY.personas.legacyCopy, true);
   copyExport.addEventListener('click', () => {
     copyExport.disabled = true;
     void exportJson().then(async (json) => {
       await navigator.clipboard.writeText(json);
-      exportStatus.textContent = 'Legacy persona JSON copied.';
+      exportStatus.textContent = COPY.personas.legacyCopied;
     }).catch((error: unknown) => {
       console.error('Failed to copy legacy persona data', error);
-      exportStatus.textContent = 'Copy failed. Use Download instead.';
+      exportStatus.textContent = COPY.personas.legacyCopyFailed;
     }).finally(() => {
       copyExport.disabled = false;
     });
@@ -499,12 +558,8 @@ async function render(): Promise<void> {
   // Panes are built once and shown/hidden; sections below are appended into
   // their pane instead of into the page root. The recovery gates above return
   // before this point — they are deliberately outside the shell.
-  // «Хоткеи» enables with its pane content (plan task 12); until then the rail
-  // hides the item and a #hotkeys deep link falls back to «Статус».
-  const shell = createShell(
-    root,
-    OPTIONS_PANES.filter((pane) => pane !== 'hotkeys'),
-  );
+  // Every pane now has content, so the rail carries the full route list.
+  const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
 
   // ─── Readiness headline ────────────────────────────────────
@@ -532,46 +587,66 @@ async function render(): Promise<void> {
   );
   shell.panes.status.append(readinessHero);
 
-  // ─── Appearance ─────────────────────────────────────────────
+  // ─── «Вид» ──────────────────────────────────────────────────
+  // Three clickable preview cards. Each one still wraps the SAME radio the
+  // settings writer already reads, so picking a theme rides the existing
+  // debounced save path — no second writer, no new storage field.
   const appearanceSection = createSection(
-    'Appearance',
-    'One family look, light and dark. System follows your OS.',
+    COPY.appearance.title,
+    COPY.appearance.subtitle,
   );
-  const themeChoices: Array<{ value: UiThemeSetting; label: string }> = [
-    { value: 'system', label: 'System' },
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
+  const themeChoices: Array<{ value: UiThemeSetting; title: string; hint: string }> = [
+    { value: 'system', title: COPY.appearance.systemTitle, hint: COPY.appearance.systemHint },
+    { value: 'light', title: COPY.appearance.lightTitle, hint: COPY.appearance.lightHint },
+    { value: 'dark', title: COPY.appearance.darkTitle, hint: COPY.appearance.darkHint },
   ];
-  const themeControl = document.createElement('div');
-  themeControl.className = 'chatgoose-segmented';
+  const themeCards = document.createElement('div');
+  themeCards.className = 'chatgoose-theme-cards';
   const themeRadios: HTMLInputElement[] = [];
   for (const choice of themeChoices) {
-    const segment = document.createElement('label');
+    const card = document.createElement('label');
+    card.className = 'chatgoose-theme-card';
+    card.dataset.themeCard = choice.value;
     const radio = document.createElement('input');
     radio.type = 'radio';
     radio.name = 'chatgoose-ui-theme';
     radio.value = choice.value;
     radio.checked = state.settings.uiTheme === choice.value;
-    const text = document.createElement('span');
-    text.textContent = choice.label;
-    segment.append(radio, text);
-    themeControl.append(segment);
+    // Visually hidden, NOT display:none — the radio must keep its place in the
+    // tab order and in the group's arrow-key navigation.
+    radio.className = 'chatgoose-theme-radio';
+    // A miniature of the cabinet in that theme: a rail and two content bars.
+    // Pure CSS with FIXED colours (never the theme variables) — a preview of the
+    // light theme has to look light while the page itself is dark.
+    const preview = document.createElement('span');
+    preview.className = `chatgoose-theme-preview chatgoose-theme-preview-${choice.value}`;
+    preview.setAttribute('aria-hidden', 'true');
+    const previewRail = document.createElement('span');
+    previewRail.className = 'chatgoose-theme-preview-rail';
+    const previewBody = document.createElement('span');
+    previewBody.className = 'chatgoose-theme-preview-body';
+    const previewBar = document.createElement('span');
+    previewBar.className = 'chatgoose-theme-preview-bar';
+    const previewBarShort = document.createElement('span');
+    previewBarShort.className = 'chatgoose-theme-preview-bar chatgoose-theme-preview-bar-short';
+    previewBody.append(previewBar, previewBarShort);
+    preview.append(previewRail, previewBody);
+    const title = document.createElement('span');
+    title.className = 'chatgoose-theme-title';
+    title.textContent = choice.title;
+    const hint = document.createElement('span');
+    hint.className = 'chatgoose-theme-hint';
+    hint.textContent = choice.hint;
+    card.append(radio, preview, title, hint);
+    themeCards.append(card);
     themeRadios.push(radio);
   }
   const getSelectedTheme = (): UiThemeSetting =>
     (themeRadios.find((radio) => radio.checked)?.value ?? 'system') as UiThemeSetting;
-  // Not inlineField: that wraps in a <label>, and a label around the radio
-  // group would nest labels and misroute clicks to the first radio.
-  const themeRow = document.createElement('div');
-  themeRow.className = 'chatgoose-row';
-  const themeRowLabel = document.createElement('span');
-  themeRowLabel.className = 'chatgoose-row-label';
-  themeRowLabel.textContent = 'Theme';
-  themeRow.append(themeRowLabel, themeControl);
-  appearanceSection.append(themeRow);
+  appearanceSection.append(themeCards);
 
-  // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
-  const apiSection = createSection('Generation');
+  // ─── «Генерация» (Stage 32: keys/models are kernel-side) ────
+  const apiSection = createSection(COPY.generation.title, COPY.generation.subtitle);
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -614,9 +689,9 @@ async function render(): Promise<void> {
   const coachRecapSelect = document.createElement('select');
   coachRecapSelect.className = 'chatgoose-select';
   const coachRecapChoices: Array<{ value: Settings['coachAutoRecap']; label: string }> = [
-    { value: 'off', label: 'Off' },
-    { value: 'short', label: 'Short' },
-    { value: 'full', label: 'Full' },
+    { value: 'off', label: COPY.generation.coachRecapOff },
+    { value: 'short', label: COPY.generation.coachRecapShort },
+    { value: 'full', label: COPY.generation.coachRecapFull },
   ];
   for (const choice of coachRecapChoices) {
     const option = document.createElement('option');
@@ -649,8 +724,10 @@ async function render(): Promise<void> {
       DEEP_MAX_MESSAGE_COUNT,
       Math.max(DEEP_MIN_MESSAGE_COUNT, parsedDeep),
     );
-    coachRecapWarning.textContent =
-      `Full Recap loads up to ${shownDeep} messages — slow and expensive.`;
+    coachRecapWarning.textContent = COPY.generation.coachRecapWarning.replace(
+      '{n}',
+      String(shownDeep),
+    );
     coachRecapWarning.hidden = coachRecapSelect.value !== 'full';
   };
   updateCoachRecapWarning();
@@ -659,15 +736,44 @@ async function render(): Promise<void> {
   debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
 
+  /**
+   * One setting per line: a two-line label (what it is, then what it does) with
+   * the control on the right. `inlineField` carries only a single label, and a
+   * pane of bare counts is unreadable without the sublabel.
+   */
+  const settingRow = (title: string, hint: string, control: HTMLElement): HTMLElement => {
+    const row = document.createElement('label');
+    row.className = 'chatgoose-row';
+    const labels = document.createElement('span');
+    labels.className = 'chatgoose-row-labels';
+    const label = document.createElement('span');
+    label.className = 'chatgoose-row-label';
+    label.textContent = title;
+    const sub = document.createElement('span');
+    sub.className = 'chatgoose-row-sub';
+    sub.textContent = hint;
+    labels.append(label, sub);
+    row.append(labels, control);
+    return row;
+  };
+
   // The cost warning belongs to the recap row: full-width second line inside it.
-  const coachRecapRow = inlineField('Auto-Recap before coaching', coachRecapSelect);
+  const coachRecapRow = settingRow(
+    COPY.generation.coachRecapTitle,
+    COPY.generation.coachRecapHint,
+    coachRecapSelect,
+  );
   coachRecapRow.style.flexWrap = 'wrap';
   coachRecapRow.append(coachRecapWarning);
 
   // Count rows carry their allowed range beside the input; the same hint
   // flashes amber when a save clamps an out-of-range entry.
   const countHints = new Map<HTMLInputElement, HTMLSpanElement>();
-  const numberRow = (labelText: string, input: HTMLInputElement): HTMLElement => {
+  const numberRow = (
+    title: string,
+    hintText: string,
+    input: HTMLInputElement,
+  ): HTMLElement => {
     const hint = document.createElement('span');
     hint.className = 'chatgoose-row-hint';
     hint.textContent = `${input.min}–${input.max}`;
@@ -682,14 +788,14 @@ async function render(): Promise<void> {
         input.blur();
       }
     }, { passive: true });
-    return inlineField(labelText, control);
+    return settingRow(title, hintText, control);
   };
   const flashClampHint = (input: HTMLInputElement, value: number): void => {
     const hint = countHints.get(input);
     if (!hint) {
       return;
     }
-    hint.textContent = `saved as ${value}`;
+    hint.textContent = COPY.generation.savedAs.replace('{n}', String(value));
     hint.classList.add('chatgoose-row-hint-clamped');
     window.setTimeout(() => {
       hint.textContent = `${input.min}–${input.max}`;
@@ -697,18 +803,54 @@ async function render(): Promise<void> {
     }, 2600);
   };
 
-  const generationRows = document.createElement('div');
-  generationRows.className = 'chatgoose-rows';
-  generationRows.append(
-    numberRow('Reply + Help message count', quickInput),
-    numberRow('Ping message count', pingInput),
-    numberRow('Fix message count', improveInput),
-    numberRow('Deep feature message count', deepInput),
-    numberRow('Coach dialog memory (exchanges)', coachHistoryInput),
-    coachRecapRow,
-    inlineField('Enable debug mode', debugInput),
+  /** A captioned subgroup of setting rows. Three of them carry the pane: what
+   * goes into a prompt, what the coach does, and the service switch. */
+  const settingGroup = (caption: string, rows: HTMLElement[]): HTMLElement => {
+    const group = document.createElement('div');
+    group.className = 'chatgoose-group';
+    group.dataset.settingGroup = caption;
+    const cap = document.createElement('div');
+    cap.className = 'chatgoose-group-cap';
+    cap.textContent = caption;
+    const list = document.createElement('div');
+    list.className = 'chatgoose-rows';
+    list.append(...rows);
+    group.append(cap, list);
+    return group;
+  };
+
+  apiSection.append(
+    settingGroup(COPY.generation.groupWindows, [
+      numberRow(COPY.generation.quickTitle, COPY.generation.quickHint, quickInput),
+      numberRow(COPY.generation.pingTitle, COPY.generation.pingHint, pingInput),
+      numberRow(COPY.generation.improveTitle, COPY.generation.improveHint, improveInput),
+      numberRow(COPY.generation.deepTitle, COPY.generation.deepHint, deepInput),
+    ]),
+    settingGroup(COPY.generation.groupCoach, [
+      numberRow(
+        COPY.generation.coachHistoryTitle,
+        COPY.generation.coachHistoryHint,
+        coachHistoryInput,
+      ),
+      coachRecapRow,
+    ]),
+    settingGroup(COPY.generation.groupService, [
+      settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugInput),
+    ]),
   );
-  apiSection.append(generationRows);
+
+  // ─── «Хоткеи» (read-only reference) ─────────────────────────
+  // Derived from the live binding table, so the pane cannot drift from what the
+  // keymap dispatches. The platform is detected at render time: the same install
+  // shows ⌘⇧ on macOS and Alt+Shift elsewhere.
+  const hotkeysSection = createSection(COPY.hotkeys.title, COPY.hotkeys.subtitle);
+  const hotkeysHint = document.createElement('div');
+  hotkeysHint.className = 'chatgoose-status-hint';
+  hotkeysHint.textContent = COPY.hotkeys.hint;
+  hotkeysSection.append(
+    renderHotkeysPane(document, detectLabelPlatform()),
+    hotkeysHint,
+  );
 
   // ─── Agency Hub ───────────────────────────────────────────
   const agencyHubSection = createSection(
@@ -2440,51 +2582,126 @@ async function render(): Promise<void> {
     });
   }
 
-  // ─── Persona catalog (server-owned, metadata only) ─────────
+  // ─── «Персоны» (server-owned catalog, metadata only) ────────
   const personalitiesSection = createSection(
-    'Model Personalities',
-    'Global personalities are managed by Agency Hub admins. This extension only reads the catalog and stores account mappings.',
+    COPY.personas.title,
+    COPY.personas.subtitle,
   );
   const personalitiesList = document.createElement('div');
-  personalitiesList.style.display = 'grid';
-  personalitiesList.style.gap = '10px';
+  personalitiesList.className = 'chatgoose-persona-rows';
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
+
+  // Catalog footer: when it last CHANGED, plus the only refresh path there is.
+  const personaCatalogLine = document.createElement('div');
+  personaCatalogLine.dataset.role = 'persona-catalog';
+  personaCatalogLine.className = 'chatgoose-persona-catalog';
+  // There is no standalone «refetch the catalog» operation, and inventing one is
+  // out of scope: the background re-reads the catalog after a SUCCESSFUL
+  // connection test, so the button says exactly what it does.
+  const personaRefreshButton = createButton(COPY.personas.catalogRefresh, true);
+  personaRefreshButton.dataset.role = 'persona-catalog-refresh';
+  personaRefreshButton.addEventListener('click', () => {
+    personaRefreshButton.disabled = true;
+    void (async () => {
+      try {
+        await refreshAgencyHubPermissionState();
+        if (!disposed) {
+          await runAgencyHubConnectionTest({ force: true, saveFirst: true });
+        }
+      } finally {
+        if (!disposed) personaRefreshButton.disabled = false;
+      }
+    })();
+  });
+  const personaRefreshHint = document.createElement('div');
+  personaRefreshHint.className = 'chatgoose-status-hint';
+  personaRefreshHint.textContent = COPY.personas.catalogRefreshHint;
+  const personaFooter = document.createElement('div');
+  personaFooter.className = 'chatgoose-persona-footer';
+  personaFooter.append(personaCatalogLine, personaRefreshButton);
 
   const renderPersonaCatalog = (): void => {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
     // migrateState hid may now resolve to an active persona.
     refreshStatusView();
+    const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
+    personaCatalogLine.textContent = `${COPY.personas.catalogLabel}: ${
+      changedDate
+        ? COPY.personas.catalogUpdated.replace('{date}', changedDate)
+        : COPY.personas.catalogNever
+    }`;
     personalitiesList.replaceChildren();
-    if (state.personaCatalog.length === 0) {
+    const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
+    if (rows.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.';
+      empty.dataset.role = 'persona-empty';
       empty.style.color = 'var(--chatgoose-ink-mid)';
+      // A non-empty raw catalog with zero rows means every persona is archived AND
+      // unreferenced — a real catalog, so «каталог пуст» would be false. Only a
+      // genuinely empty raw catalog defers to the credential/fetch classifier.
+      empty.textContent = state.personaCatalog.length > 0
+        ? COPY.personas.emptyAllArchived
+        : PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
+            currentSource: personaCatalogSource(state.settings),
+            storedSource: state.personaCatalogSource,
+            fetchedAt: state.personaCatalogFetchedAt,
+          })];
       personalitiesList.append(empty);
       return;
     }
-    for (const persona of state.personaCatalog) {
-      const card = document.createElement('div');
-      card.className = 'chatgoose-card';
-      card.dataset.personaKey = persona.key;
-      const heading = document.createElement('div');
-      heading.textContent = persona.displayName;
-      heading.style.fontWeight = '700';
-      const meta = document.createElement('div');
-      meta.textContent = `${persona.key} • version ${persona.version} • ${persona.status}`;
-      meta.style.fontSize = '12px';
-      meta.style.color = persona.status === 'active'
-        ? 'var(--chatgoose-ink-mid)'
-        : 'var(--chatgoose-bad)';
-      card.append(heading, meta);
-      personalitiesList.append(card);
+    for (const view of rows) {
+      const row = document.createElement('div');
+      row.className = view.archived
+        ? 'chatgoose-persona-row chatgoose-persona-row-archived'
+        : 'chatgoose-persona-row';
+      row.dataset.personaKey = view.key;
+      const head = document.createElement('div');
+      head.className = 'chatgoose-persona-head';
+      const name = document.createElement('span');
+      name.className = 'chatgoose-persona-name';
+      name.textContent = view.displayName;
+      head.append(name);
+      if (view.builtin) {
+        head.append(createBadge(COPY.personas.builtInBadge, 'neutral'));
+      }
+      head.append(
+        createBadge(`${COPY.personas.versionPrefix}${view.version}`, 'neutral', true),
+      );
+      const count = document.createElement('span');
+      count.className = 'chatgoose-persona-count';
+      count.textContent = COPY.personas.accountsCount.replace(
+        '{n}',
+        String(view.accountCount),
+      );
+      head.append(count);
+      if (view.archived) {
+        // Only reachable while a mapping still points at it — amber, because the
+        // one useful instruction is «pick a replacement».
+        head.append(createBadge(COPY.personas.archivedMapped, 'amber'));
+      }
+      row.append(head);
+      personalitiesList.append(row);
     }
   };
-  renderPersonaCatalog();
 
   const preservationNote = document.createElement('div');
-  preservationNote.textContent = 'Legacy local persona text is preserved unchanged on this device. Export it before removing the extension or clearing browser data.';
+  preservationNote.textContent = COPY.personas.legacyNote;
   preservationNote.style.color = 'var(--chatgoose-ink-mid)';
   preservationNote.style.fontSize = '13px';
+  // The legacy archive is a rarely-needed escape hatch — folded away so it does
+  // not compete with the live catalog above it.
+  const preservationFold = document.createElement('details');
+  preservationFold.className = 'chatgoose-details';
+  preservationFold.dataset.role = 'persona-legacy-fold';
+  const preservationSummary = document.createElement('summary');
+  preservationSummary.textContent = COPY.personas.legacyFold;
+  preservationFold.append(
+    preservationSummary,
+    preservationNote,
+    createLegacyPersonaExportControls(),
+  );
+
+  renderPersonaCatalog();
 
   const flushPendingEdits = (): Promise<void> => {
     void flushSettingsSave();
@@ -2538,21 +2755,35 @@ async function render(): Promise<void> {
 
   personalitiesSection.append(
     personalitiesList,
-    preservationNote,
-    createLegacyPersonaExportControls(),
+    personaFooter,
+    personaRefreshHint,
+    preservationFold,
   );
 
-  // ─── Account Mappings ──────────────────────────────────────
-  const mappingsSection = createSection('Account Mappings');
+  // ─── «Аккаунты» ────────────────────────────────────────────
+  const mappingsSection = createSection(COPY.accounts.title);
   mappingsSection.dataset.sessionHydration = 'loading';
+  // Own node rather than createSection's description: the subtitle counts live
+  // accounts, so it has to be repaintable.
+  const accountsSubtitle = document.createElement('div');
+  accountsSubtitle.className = 'chatgoose-section-desc';
+  accountsSubtitle.dataset.role = 'accounts-subtitle';
+  accountsSubtitle.textContent = COPY.accounts.subtitle
+    .replace('{live}', '—')
+    .replace('{total}', '—');
   const mappingsTable = document.createElement('div');
-  mappingsTable.style.display = 'grid';
-  mappingsTable.style.gap = '12px';
+  mappingsTable.className = 'chatgoose-account-rows';
   const mappingsLoading = document.createElement('div');
-  mappingsLoading.textContent = 'Loading Fansly accounts…';
+  mappingsLoading.textContent = COPY.accounts.loading;
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
-  mappingsSection.append(mappingsTable);
+  // Static tail: the honesty note about what «в работе» means and that labels
+  // never leave this device. Outside `mappingsTable`, which is replaced wholesale
+  // on every repaint.
+  const accountsHint = document.createElement('div');
+  accountsHint.className = 'chatgoose-status-hint';
+  accountsHint.textContent = COPY.accounts.hint;
+  mappingsSection.append(accountsSubtitle, mappingsTable, accountsHint);
   // One section per pane — the rail carries the reading order now (setup
   // order: the hub everything depends on, then the personas it serves, then
   // the accounts they map to, then the local-only settings).
@@ -2560,12 +2791,31 @@ async function render(): Promise<void> {
   shell.panes.personas.append(personalitiesSection);
   shell.panes.accounts.append(mappingsSection);
   shell.panes.generation.append(apiSection);
+  shell.panes.hotkeys.append(hotkeysSection);
   shell.panes.appearance.append(appearanceSection);
 
 
   cleanupTasks.push(() => {
     disposed = true;
   });
+
+  /** The background's honest account view: durable presence, local labels, tab
+   * attribution and the observed kernel page. `null` until the first read lands
+   * (or after one fails) — the renderer then degrades to what this page can see
+   * on its own instead of showing nothing. */
+  let accountsView: AccountsView | null = null;
+  const refreshAccountsView = async (): Promise<void> => {
+    try {
+      const reply = await sendRuntimeRequest('getAccountsView');
+      if (disposed) return;
+      const parsed = asAccountsView(reply);
+      // A malformed reply keeps the previous view rather than blanking the pane:
+      // stale-but-real beats invented-empty.
+      if (parsed) accountsView = parsed;
+    } catch (error) {
+      console.error('Failed to read the Fansly accounts view', error);
+    }
+  };
 
   type PersonalityMappingView = {
     personality: PersonaCatalogEntry;
@@ -2592,7 +2842,7 @@ async function render(): Promise<void> {
     });
   };
   // The mapped persona's name already lives in the select — the info cell
-  // carries only what the select can't: connection state and a dead mapping.
+  // carries only what the select can't: session state and a dead mapping.
   const renderMappingInfo = (
     info: HTMLElement,
     view: { label: string; usable: boolean } | null,
@@ -2601,11 +2851,13 @@ async function render(): Promise<void> {
     info.replaceChildren(
       createStatusPill(
         connected ? 'ok' : 'neutral',
-        connected ? 'Connected' : 'Disconnected',
+        connected ? COPY.accounts.stateLive : COPY.accounts.stateIdle,
       ),
     );
     if (view && !view.usable) {
-      info.append(createStatusPill('warn', 'Persona unavailable'));
+      // An archived persona still mapped: the only useful instruction is «pick a
+      // replacement», which is exactly what the Персоны pane says too.
+      info.append(createStatusPill('warn', COPY.personas.archivedMapped));
     }
   };
   const populateMappingSelect = (
@@ -2615,14 +2867,14 @@ async function render(): Promise<void> {
   ): { label: string; usable: boolean } | null => {
     const unmapped = document.createElement('option');
     unmapped.value = '';
-    unmapped.textContent = 'Unmapped';
+    unmapped.textContent = COPY.accounts.personaSelectNone;
     select.replaceChildren(unmapped);
     for (const view of views) {
       const option = document.createElement('option');
       option.value = view.personality.key;
       option.textContent = view.usable
         ? view.label
-        : `${view.label} · archived`;
+        : `${view.label} · ${COPY.accounts.personaSelectArchived}`;
       option.disabled = !view.usable;
       select.append(option);
     }
@@ -2633,7 +2885,10 @@ async function render(): Promise<void> {
     if (selectedPersonalityId && !selectedView) {
       const missing = document.createElement('option');
       missing.value = selectedPersonalityId;
-      missing.textContent = `Unavailable persona · ${selectedPersonalityId}`;
+      missing.textContent = COPY.accounts.personaSelectMissing.replace(
+        '{key}',
+        selectedPersonalityId,
+      );
       missing.disabled = true;
       select.append(missing);
       select.value = selectedPersonalityId;
@@ -2740,59 +2995,203 @@ async function render(): Promise<void> {
     });
   }
 
+  /**
+   * The rows to paint. The background's view is authoritative — it is the only
+   * side that knows durable presence, local labels and tab attribution.
+   *
+   * Without it (an older background, a rejected read) the pane degrades to what
+   * this page can see by itself: the known accounts and the live snapshot. The
+   * degraded rows deliberately claim LESS — no 'seen' state, no observed page,
+   * no tab id — instead of guessing.
+   */
+  const buildAccountRowViews = (
+    sessions: SessionSnapshotEntry[],
+  ): AccountsViewEntry[] => {
+    if (accountsView) {
+      return accountsView.accounts;
+    }
+    const lookup = buildSessionLookup(sessions);
+    return state.knownAccounts.map((accountId) => {
+      const session = lookup.get(accountId);
+      return {
+        accountId,
+        label: formatAccountHeading(accountId, session),
+        localLabel: null,
+        state: session?.connected ? 'live' : 'never',
+        lastSeenAt: session?.lastSeenAt ?? null,
+        tabId: null,
+        personaMapped: isAccountPersonaMapped(accountId),
+        observedPage: null,
+      } satisfies AccountsViewEntry;
+    });
+  };
+
   const renderAccountMappings = (
     sessions: SessionSnapshotEntry[],
     hydrationFailed: boolean,
   ): void => {
-    const sessionsByAccountId = buildSessionLookup(sessions);
     const personalityViews = buildPersonalityMappingViews();
+    const rows = buildAccountRowViews(sessions);
 
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
 
+    accountsSubtitle.textContent = rows.length === 0
+      ? COPY.accounts.subtitleFresh
+      : COPY.accounts.subtitle
+          .replace('{live}', String(rows.filter((row) => row.state === 'live').length))
+          .replace('{total}', String(rows.length));
+
     if (hydrationFailed) {
       const warning = document.createElement('div');
-      warning.textContent = 'Live account refresh failed. Showing mappings from local storage.';
+      warning.textContent = COPY.accounts.refreshFailed;
       warning.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(warning);
     }
 
-    state.knownAccounts.forEach((accountId) => {
-      const session = sessionsByAccountId.get(accountId);
+    rows.forEach((view) => {
+      const accountId = view.accountId;
+      const isLive = view.state === 'live';
       const row = document.createElement('div');
+      row.className = 'chatgoose-account-row';
       row.dataset.accountMappingRow = accountId;
-      row.style.display = 'grid';
-      row.style.gridTemplateColumns = '1fr minmax(220px, 320px) auto';
-      row.style.gap = '12px';
-      row.style.alignItems = 'center';
-      row.style.padding = '12px';
-      row.style.borderRadius = 'var(--chatgoose-radius-card)';
-      row.style.background = 'var(--chatgoose-bg2)';
-      row.style.border = '1px solid var(--chatgoose-line)';
+      row.dataset.accountState = view.state;
 
-      const label = document.createElement('div');
-      label.style.display = 'grid';
-      label.style.gap = '4px';
+      const identity = document.createElement('div');
+      identity.className = 'chatgoose-account-identity';
+      const dot = document.createElement('span');
+      dot.className = 'chatgoose-account-dot';
 
-      const headingText = formatAccountHeading(accountId, session);
-      const labelTitle = document.createElement('div');
-      labelTitle.textContent = headingText;
-      labelTitle.style.fontWeight = '600';
-      if (headingText === shortenAccountId(session?.resolvedAccountId ?? accountId)) {
-        // No resolved name yet — the heading IS the id, so render it as data.
-        labelTitle.classList.add('chatgoose-mono');
-        labelTitle.style.fontWeight = '500';
+      const body = document.createElement('div');
+      body.className = 'chatgoose-account-body';
+
+      const head = document.createElement('div');
+      head.className = 'chatgoose-account-head';
+      const labelNode = document.createElement('span');
+      labelNode.className = 'chatgoose-account-label';
+      labelNode.textContent = view.label;
+      if (view.localLabel) {
+        // Say WHOSE name this is — a local label must never be mistaken for the
+        // model's real Fansly handle.
+        labelNode.title = COPY.accounts.renameLocalTitle;
+        labelNode.dataset.accountLocalLabel = 'true';
+      } else if (view.label === shortenAccountId(accountId)) {
+        // No name resolved and no label: the heading IS the id, so render it as
+        // data rather than as a name.
+        labelNode.classList.add('chatgoose-mono');
+      }
+      head.append(labelNode);
+
+      const renameButton = document.createElement('button');
+      renameButton.type = 'button';
+      renameButton.className = 'chatgoose-account-rename';
+      renameButton.dataset.accountRename = accountId;
+      renameButton.title = COPY.accounts.renameTitle;
+      renameButton.setAttribute('aria-label', COPY.accounts.renameTitle);
+      renameButton.textContent = '✎';
+      head.append(renameButton);
+
+      if (!view.personaMapped) {
+        // Amber, not red: nothing is broken — the account simply cannot generate
+        // until a persona is chosen, and the hint says exactly that.
+        const aiOff = createBadge(COPY.accounts.personaUnmapped, 'amber');
+        aiOff.dataset.accountAiOff = accountId;
+        aiOff.title = COPY.accounts.personaUnmappedHint;
+        head.append(aiOff);
       }
 
-      label.append(
-        labelTitle,
-        createCopyableId(session?.resolvedAccountId ?? accountId),
-      );
+      // Inline label editor: Enter saves through the runtime operation (the only
+      // writer of the labels key), Esc — and a blur — cancel. There is no second
+      // save path, so a half-typed label can never be persisted by accident.
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.className = 'chatgoose-input chatgoose-account-rename-input';
+      labelInput.dataset.accountLabelInput = accountId;
+      labelInput.placeholder = COPY.accounts.renameEmpty;
+      labelInput.maxLength = 60;
+      labelInput.value = view.localLabel ?? '';
+      labelInput.hidden = true;
+
+      const closeEditor = (): void => {
+        labelInput.hidden = true;
+        labelInput.value = view.localLabel ?? '';
+        renameButton.hidden = false;
+        labelNode.hidden = false;
+      };
+      renameButton.addEventListener('click', () => {
+        labelNode.hidden = true;
+        renameButton.hidden = true;
+        labelInput.hidden = false;
+        labelInput.focus();
+        labelInput.select();
+      });
+      labelInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeEditor();
+          return;
+        }
+        if (event.key !== 'Enter') {
+          return;
+        }
+        event.preventDefault();
+        const nextLabel = labelInput.value;
+        labelInput.disabled = true;
+        void (async () => {
+          try {
+            const reply = await sendRuntimeRequest('setAccountLabel', {
+              accountId,
+              label: nextLabel,
+            });
+            if (reply?.ok !== true) {
+              throw new Error('Account label write was not acknowledged');
+            }
+            await refreshAccountsView();
+            if (!disposed) {
+              // The rebuilt row carries the new label; this editor goes with it.
+              renderAccountMappings(sessions, hydrationFailed);
+            }
+          } catch (error) {
+            // Keep the editor open with the typed text: a rename that did not
+            // stick must not look like it did.
+            console.error('Failed to save the local account label', error);
+            if (!disposed) {
+              labelInput.disabled = false;
+              labelInput.focus();
+            }
+          }
+        })();
+      });
+      labelInput.addEventListener('blur', () => {
+        if (!labelInput.disabled) closeEditor();
+      });
+
+      const sub = document.createElement('div');
+      sub.className = 'chatgoose-account-sub';
+      sub.append(createCopyableId(accountId));
+      const facts: string[] = [
+        isLive
+          ? COPY.accounts.subTabActive
+          : view.lastSeenAt !== null
+            ? COPY.accounts.subSeenAt.replace('{when}', formatSeenWhen(view.lastSeenAt))
+            : COPY.accounts.subNeverSeen,
+      ];
+      if (view.observedPage) {
+        facts.push(COPY.accounts.corePage.replace('{page}', view.observedPage));
+      }
+      const factsNode = document.createElement('span');
+      factsNode.className = 'chatgoose-account-facts';
+      factsNode.dataset.role = 'account-facts';
+      factsNode.textContent = facts.join(' · ');
+      sub.append(factsNode);
+
+      body.append(head, labelInput, sub);
+      identity.append(dot, body);
 
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
       select.dataset.accountId = accountId;
-      select.dataset.connected = session?.connected ? 'true' : 'false';
+      select.dataset.connected = isLive ? 'true' : 'false';
       const mappedView = populateMappingSelect(
         select,
         state.accountMappings[accountId] ?? '',
@@ -2812,6 +3211,12 @@ async function render(): Promise<void> {
             state.accountMappings = refreshedState.accountMappings;
             state.accountAliases = refreshedState.accountAliases;
             state.knownAccounts = refreshedState.knownAccounts;
+            // A fresh mapping flips this row's «AI отключён», so the background
+            // view has to be re-read before the rows are rebuilt.
+            await refreshAccountsView();
+            if (disposed) {
+              return;
+            }
             // Update only the account rows. Rebuilding the whole page here
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
@@ -2829,23 +3234,52 @@ async function render(): Promise<void> {
         })();
       });
 
+      const actions = document.createElement('div');
+      actions.className = 'chatgoose-account-actions';
       const info = document.createElement('div');
       info.dataset.role = 'mapping-info';
-      info.style.display = 'flex';
-      info.style.flexDirection = 'column';
-      info.style.alignItems = 'flex-end';
-      info.style.gap = '4px';
-      renderMappingInfo(info, mappedView, Boolean(session?.connected));
+      info.className = 'chatgoose-account-pills';
+      renderMappingInfo(info, mappedView, isLive);
+      actions.append(info);
+      // «к вкладке» ONLY for a live row: the tab id comes from the worker's
+      // in-memory capture map, and after a restart there is nothing to focus.
+      if (isLive && view.tabId !== null) {
+        const focusTab = createButton(COPY.accounts.focusTab, true);
+        focusTab.dataset.accountFocusTab = accountId;
+        focusTab.addEventListener('click', () => {
+          void sendRuntimeRequest('focusAccountTab', { accountId })
+            .catch((error: unknown) => {
+              console.error('Failed to focus the Fansly tab', error);
+            });
+        });
+        actions.append(focusTab);
+      }
 
-      row.append(label, select, info);
+      row.append(identity, select, actions);
       mappingsTable.append(row);
     });
 
-    if (state.knownAccounts.length === 0) {
+    if (rows.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'No Fansly accounts detected yet.';
+      empty.dataset.role = 'accounts-empty';
+      empty.textContent = COPY.accounts.emptyFresh;
       empty.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(empty);
+    }
+
+    // Open fansly.com tabs nothing is attributed to. An aggregate, never a
+    // per-account claim: after a worker restart the capture map is gone, and
+    // re-deriving it would mean reading Fansly (DP 1-B).
+    const unattributed = accountsView?.unattributedFanslyTabs ?? 0;
+    if (unattributed > 0) {
+      const tabsLine = document.createElement('div');
+      tabsLine.dataset.role = 'accounts-unattributed';
+      tabsLine.className = 'chatgoose-account-unattributed';
+      tabsLine.textContent = COPY.accounts.unattributedTabs.replace(
+        '{n}',
+        String(unattributed),
+      );
+      mappingsTable.append(tabsLine);
     }
   };
 
@@ -2900,6 +3334,14 @@ async function render(): Promise<void> {
       state.accountMappings = refreshedState.accountMappings;
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
+      // Read the accounts view AFTER the snapshot resolved: `getSessionsSnapshot`
+      // owns the identity rekey background-side, and the rekey is what moves
+      // presence and labels onto the canonical id. Reading earlier could paint a
+      // legacy row that no longer exists. A local read — no hub, no Fansly.
+      await refreshAccountsView();
+      if (disposed) {
+        return;
+      }
       // A background re-poll must never yank the control under the chatter's
       // hands: `renderAccountMappings` calls `replaceChildren`, which would
       // destroy a focused persona <select> (and its open dropdown) mid-choice.

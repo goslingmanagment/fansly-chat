@@ -429,6 +429,22 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getAgencyHubDeviceTokenMeta';
     case 'getSpendersStatus':
       return 'getSpendersStatus';
+    case 'getAccountsView':
+      return 'getAccountsView';
+    case 'focusAccountTab':
+      // An empty account id could only focus "some" tab — reject it rather than
+      // guess which one the chatter meant.
+      return isString(message.accountId) && message.accountId.trim()
+        ? 'focusAccountTab'
+        : null;
+    case 'setAccountLabel':
+      // The label may legitimately be empty (that is how a label is cleared);
+      // the account id may not.
+      return isString(message.accountId) &&
+        message.accountId.trim() &&
+        isString(message.label)
+        ? 'setAccountLabel'
+        : null;
     case 'getSpendersList':
       return isOptionalBoolean(message, 'refresh') &&
         isOptionalString(message, 'buildId')

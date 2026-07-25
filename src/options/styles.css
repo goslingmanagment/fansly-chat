@@ -348,6 +348,34 @@ input[type='checkbox'] {
   font-weight: 600;
 }
 
+/* Two-line label: what the setting is, then what it does. */
+.chatgoose-row-labels {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chatgoose-row-sub {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* ── Captioned subgroups inside a settings pane ── */
+.chatgoose-group {
+  display: grid;
+  gap: 6px;
+}
+
+.chatgoose-group-cap {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+}
+
 .chatgoose-row .chatgoose-input,
 .chatgoose-row .chatgoose-select {
   width: auto;
@@ -459,49 +487,8 @@ input[type='checkbox'] {
   gap: 10px;
 }
 
-/* Theme picker: three states visible at once, one click to switch. */
-.chatgoose-segmented {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--chatgoose-line-strong);
-  border-radius: var(--chatgoose-radius-chip);
-  background: var(--chatgoose-field);
-}
-
-.chatgoose-segmented input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-.chatgoose-segmented span {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 5px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--chatgoose-ink-mid);
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-}
-
-.chatgoose-segmented span:hover {
-  background: var(--chatgoose-bg2);
-}
-
-.chatgoose-segmented input:checked + span {
-  background: var(--chatgoose-clay);
-  color: #ffffff;
-}
-
-.chatgoose-segmented input:focus-visible + span {
-  outline: 2px solid var(--chatgoose-clay);
-  outline-offset: 1px;
-}
+/* `.chatgoose-segmented` (the old three-state theme switch) lived here until the
+   «Вид» pane replaced it with preview cards — see `.chatgoose-theme-cards`. */
 
 /* Legacy access: present but folded — the device token is the main path. */
 .chatgoose-details summary {
@@ -814,3 +801,336 @@ input[type='checkbox'] {
 
 .chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
 .chatgoose-cabinet-micro-setup { color: var(--chatgoose-amber); }
+
+/* ── «Вид» theme preview cards ── */
+.chatgoose-theme-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.chatgoose-theme-card {
+  display: grid;
+  gap: 4px;
+  position: relative;
+  padding: 10px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  cursor: pointer;
+}
+
+.chatgoose-theme-card:hover {
+  border-color: var(--chatgoose-line-strong);
+}
+
+.chatgoose-theme-card:has(.chatgoose-theme-radio:checked) {
+  border-color: var(--chatgoose-clay);
+  background: var(--chatgoose-clay-bg);
+}
+
+.chatgoose-theme-card:has(.chatgoose-theme-radio:focus-visible) {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+}
+
+/* Clipped, not display:none — the radio keeps its tab order and the group's
+   arrow-key navigation, which is the whole accessibility contract here. */
+.chatgoose-theme-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The preview colours are FIXED hex on purpose: the light card must look light
+   while the page is dark, so it cannot ride the theme variables. */
+.chatgoose-theme-preview {
+  display: flex;
+  height: 54px;
+  overflow: hidden;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid rgba(31, 30, 29, 0.14);
+}
+
+.chatgoose-theme-preview-rail {
+  flex: none;
+  width: 26%;
+}
+
+.chatgoose-theme-preview-body {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 8px 7px;
+}
+
+.chatgoose-theme-preview-bar {
+  height: 5px;
+  border-radius: 3px;
+}
+
+.chatgoose-theme-preview-bar-short {
+  width: 58%;
+}
+
+.chatgoose-theme-preview-light { background: #faf9f5; }
+.chatgoose-theme-preview-light .chatgoose-theme-preview-rail { background: #efece4; }
+.chatgoose-theme-preview-light .chatgoose-theme-preview-bar { background: #cfcaba; }
+
+.chatgoose-theme-preview-dark { background: #262420; }
+.chatgoose-theme-preview-dark .chatgoose-theme-preview-rail { background: #1b1a17; }
+.chatgoose-theme-preview-dark .chatgoose-theme-preview-bar { background: #4d4940; }
+
+/* «Системная» is split down the middle — it follows the OS, so it shows both. */
+.chatgoose-theme-preview-system {
+  background: linear-gradient(90deg, #faf9f5 0 50%, #262420 50% 100%);
+}
+
+.chatgoose-theme-preview-system .chatgoose-theme-preview-rail {
+  background: linear-gradient(90deg, #efece4 0 100%);
+}
+
+.chatgoose-theme-preview-system .chatgoose-theme-preview-bar {
+  background: linear-gradient(90deg, #cfcaba 0 50%, #4d4940 50% 100%);
+}
+
+.chatgoose-theme-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.chatgoose-theme-hint {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+}
+
+/* ── «Хоткеи» read-only cheatsheet ── */
+.chatgoose-hotkeys {
+  display: grid;
+}
+
+.chatgoose-hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-hotkey-row:last-child {
+  border-bottom: 0;
+}
+
+.chatgoose-kbd {
+  flex: none;
+  min-width: 96px;
+  padding: 3px 8px;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg2);
+  box-shadow: inset 0 -1px 0 var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 12px;
+  text-align: center;
+}
+
+.chatgoose-hotkey-name {
+  color: var(--chatgoose-ink-mid);
+  font-size: 13px;
+}
+
+/* ── «Персоны» rows ── */
+.chatgoose-persona-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.chatgoose-persona-row {
+  padding: 10px 12px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-persona-row-archived {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+}
+
+.chatgoose-persona-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-persona-name {
+  font-weight: 600;
+}
+
+.chatgoose-persona-count {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+}
+
+.chatgoose-persona-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.chatgoose-persona-catalog {
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+}
+
+/* ── «Аккаунты» rows ── */
+.chatgoose-account-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.chatgoose-account-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, 280px) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-account-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+
+.chatgoose-account-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* State dot. Only a LIVE row pulses — 'seen' and 'never' are quiet facts, and a
+   pulsing dot on a dead session would read as activity. */
+.chatgoose-account-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--chatgoose-line-strong);
+}
+
+.chatgoose-account-row[data-account-state='live'] .chatgoose-account-dot {
+  background: var(--chatgoose-green);
+  animation: chatgoose-account-pulse 2s ease-in-out infinite;
+}
+
+.chatgoose-account-row[data-account-state='seen'] .chatgoose-account-dot {
+  background: var(--chatgoose-line-strong);
+}
+
+@keyframes chatgoose-account-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(58, 125, 68, 0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(58, 125, 68, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatgoose-account-row[data-account-state='live'] .chatgoose-account-dot {
+    animation: none;
+  }
+}
+
+.chatgoose-account-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-account-label {
+  font-weight: 600;
+}
+
+.chatgoose-account-rename {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--chatgoose-ink-low);
+  border-radius: var(--chatgoose-radius-chip);
+  padding: 0 4px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.chatgoose-account-rename:hover {
+  color: var(--chatgoose-clay-ink);
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+}
+
+.chatgoose-account-rename:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+/* The inline editor replaces the label in place; the author `[hidden]` guard is
+   mandatory next to the display rule (same origin trap as the panes). */
+.chatgoose-account-rename-input {
+  display: block;
+  max-width: 240px;
+  font-size: 13px;
+  padding: 3px 7px;
+}
+
+.chatgoose-account-rename-input[hidden] {
+  display: none;
+}
+
+.chatgoose-account-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+}
+
+.chatgoose-account-facts {
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-account-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+.chatgoose-account-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.chatgoose-account-unattributed {
+  padding: 9px 12px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px dashed var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+}

@@ -39,17 +39,9 @@ export function labeledField(labelText: string, input: HTMLElement): HTMLElement
   return wrapper;
 }
 
-/** One setting per line: label left, compact control right. For the short
- * numeric/select settings where a full-width control reads as a form field. */
-export function inlineField(labelText: string, control: HTMLElement): HTMLElement {
-  const row = document.createElement('label');
-  row.className = 'chatgoose-row';
-  const label = document.createElement('span');
-  label.className = 'chatgoose-row-label';
-  label.textContent = labelText;
-  row.append(label, control);
-  return row;
-}
+// `inlineField` (single-label row) lived here until the «Генерация» pane gained
+// captioned groups with two-line labels; its last caller became `settingRow` in
+// `src/options/index.ts`, which owns the title + sublabel shape.
 
 export type StatusPillKind = 'ok' | 'warn' | 'bad' | 'neutral';
 
