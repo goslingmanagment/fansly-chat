@@ -18,7 +18,6 @@ import {
   createVersionTag,
   debounce,
   injectStyles,
-  inlineField,
   labeledField,
   setStatusPill,
   type BadgeTone,
@@ -628,8 +627,8 @@ async function render(): Promise<void> {
   themeRow.append(themeRowLabel, themeControl);
   appearanceSection.append(themeRow);
 
-  // ─── Generation settings (Stage 32: keys/models are kernel-side) ────
-  const apiSection = createSection('Generation');
+  // ─── «Генерация» (Stage 32: keys/models are kernel-side) ────
+  const apiSection = createSection(COPY.generation.title, COPY.generation.subtitle);
 
   const quickInput = document.createElement('input');
   quickInput.type = 'number';
@@ -672,9 +671,9 @@ async function render(): Promise<void> {
   const coachRecapSelect = document.createElement('select');
   coachRecapSelect.className = 'chatgoose-select';
   const coachRecapChoices: Array<{ value: Settings['coachAutoRecap']; label: string }> = [
-    { value: 'off', label: 'Off' },
-    { value: 'short', label: 'Short' },
-    { value: 'full', label: 'Full' },
+    { value: 'off', label: COPY.generation.coachRecapOff },
+    { value: 'short', label: COPY.generation.coachRecapShort },
+    { value: 'full', label: COPY.generation.coachRecapFull },
   ];
   for (const choice of coachRecapChoices) {
     const option = document.createElement('option');
@@ -707,8 +706,10 @@ async function render(): Promise<void> {
       DEEP_MAX_MESSAGE_COUNT,
       Math.max(DEEP_MIN_MESSAGE_COUNT, parsedDeep),
     );
-    coachRecapWarning.textContent =
-      `Full Recap loads up to ${shownDeep} messages — slow and expensive.`;
+    coachRecapWarning.textContent = COPY.generation.coachRecapWarning.replace(
+      '{n}',
+      String(shownDeep),
+    );
     coachRecapWarning.hidden = coachRecapSelect.value !== 'full';
   };
   updateCoachRecapWarning();
@@ -717,15 +718,44 @@ async function render(): Promise<void> {
   debugInput.type = 'checkbox';
   debugInput.checked = state.settings.debugMode;
 
+  /**
+   * One setting per line: a two-line label (what it is, then what it does) with
+   * the control on the right. `inlineField` carries only a single label, and a
+   * pane of bare counts is unreadable without the sublabel.
+   */
+  const settingRow = (title: string, hint: string, control: HTMLElement): HTMLElement => {
+    const row = document.createElement('label');
+    row.className = 'chatgoose-row';
+    const labels = document.createElement('span');
+    labels.className = 'chatgoose-row-labels';
+    const label = document.createElement('span');
+    label.className = 'chatgoose-row-label';
+    label.textContent = title;
+    const sub = document.createElement('span');
+    sub.className = 'chatgoose-row-sub';
+    sub.textContent = hint;
+    labels.append(label, sub);
+    row.append(labels, control);
+    return row;
+  };
+
   // The cost warning belongs to the recap row: full-width second line inside it.
-  const coachRecapRow = inlineField('Auto-Recap before coaching', coachRecapSelect);
+  const coachRecapRow = settingRow(
+    COPY.generation.coachRecapTitle,
+    COPY.generation.coachRecapHint,
+    coachRecapSelect,
+  );
   coachRecapRow.style.flexWrap = 'wrap';
   coachRecapRow.append(coachRecapWarning);
 
   // Count rows carry their allowed range beside the input; the same hint
   // flashes amber when a save clamps an out-of-range entry.
   const countHints = new Map<HTMLInputElement, HTMLSpanElement>();
-  const numberRow = (labelText: string, input: HTMLInputElement): HTMLElement => {
+  const numberRow = (
+    title: string,
+    hintText: string,
+    input: HTMLInputElement,
+  ): HTMLElement => {
     const hint = document.createElement('span');
     hint.className = 'chatgoose-row-hint';
     hint.textContent = `${input.min}–${input.max}`;
@@ -740,14 +770,14 @@ async function render(): Promise<void> {
         input.blur();
       }
     }, { passive: true });
-    return inlineField(labelText, control);
+    return settingRow(title, hintText, control);
   };
   const flashClampHint = (input: HTMLInputElement, value: number): void => {
     const hint = countHints.get(input);
     if (!hint) {
       return;
     }
-    hint.textContent = `saved as ${value}`;
+    hint.textContent = COPY.generation.savedAs.replace('{n}', String(value));
     hint.classList.add('chatgoose-row-hint-clamped');
     window.setTimeout(() => {
       hint.textContent = `${input.min}–${input.max}`;
@@ -755,18 +785,41 @@ async function render(): Promise<void> {
     }, 2600);
   };
 
-  const generationRows = document.createElement('div');
-  generationRows.className = 'chatgoose-rows';
-  generationRows.append(
-    numberRow('Reply + Help message count', quickInput),
-    numberRow('Ping message count', pingInput),
-    numberRow('Fix message count', improveInput),
-    numberRow('Deep feature message count', deepInput),
-    numberRow('Coach dialog memory (exchanges)', coachHistoryInput),
-    coachRecapRow,
-    inlineField('Enable debug mode', debugInput),
+  /** A captioned subgroup of setting rows. Three of them carry the pane: what
+   * goes into a prompt, what the coach does, and the service switch. */
+  const settingGroup = (caption: string, rows: HTMLElement[]): HTMLElement => {
+    const group = document.createElement('div');
+    group.className = 'chatgoose-group';
+    group.dataset.settingGroup = caption;
+    const cap = document.createElement('div');
+    cap.className = 'chatgoose-group-cap';
+    cap.textContent = caption;
+    const list = document.createElement('div');
+    list.className = 'chatgoose-rows';
+    list.append(...rows);
+    group.append(cap, list);
+    return group;
+  };
+
+  apiSection.append(
+    settingGroup(COPY.generation.groupWindows, [
+      numberRow(COPY.generation.quickTitle, COPY.generation.quickHint, quickInput),
+      numberRow(COPY.generation.pingTitle, COPY.generation.pingHint, pingInput),
+      numberRow(COPY.generation.improveTitle, COPY.generation.improveHint, improveInput),
+      numberRow(COPY.generation.deepTitle, COPY.generation.deepHint, deepInput),
+    ]),
+    settingGroup(COPY.generation.groupCoach, [
+      numberRow(
+        COPY.generation.coachHistoryTitle,
+        COPY.generation.coachHistoryHint,
+        coachHistoryInput,
+      ),
+      coachRecapRow,
+    ]),
+    settingGroup(COPY.generation.groupService, [
+      settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugInput),
+    ]),
   );
-  apiSection.append(generationRows);
 
   // ─── Agency Hub ───────────────────────────────────────────
   const agencyHubSection = createSection(

@@ -1221,10 +1221,57 @@ describe('Options page coach settings', () => {
       Array.from(select.options).some((option) => option.value === 'full'),
     )!;
 
+  /** The recap cost warning. Pinned through the dictionary's stem so the lookup
+   * survives a rewording of the sentence's tail. */
+  const RECAP_WARNING_STEM = COPY.generation.coachRecapWarning.split('{n}')[0]!;
+
   const getRecapWarning = (): HTMLElement | null =>
     Array.from(
-      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-meta'),
-    ).find((node) => node.textContent?.includes('Full Recap loads up to')) ?? null;
+      getSectionByTitle(COPY.generation.title).querySelectorAll<HTMLElement>('.chatgoose-meta'),
+    ).find((node) => node.textContent?.includes(RECAP_WARNING_STEM)) ?? null;
+
+  /** «… загружает до N сообщений …» with the live count substituted. */
+  const recapWarningFor = (count: number): string =>
+    COPY.generation.coachRecapWarning.replace('{n}', String(count));
+
+  it('groups the rows under the three russian captions with sublabels', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const section = getSectionByTitle(COPY.generation.title);
+    expect(
+      Array.from(section.querySelectorAll<HTMLElement>('.chatgoose-group-cap'))
+        .map((cap) => cap.textContent),
+    ).toEqual([
+      COPY.generation.groupWindows,
+      COPY.generation.groupCoach,
+      COPY.generation.groupService,
+    ]);
+
+    // Every row carries a title AND a sublabel saying what it does.
+    expect(section.textContent).toContain(COPY.generation.quickTitle);
+    expect(section.textContent).toContain(COPY.generation.quickHint);
+    expect(section.textContent).toContain(COPY.generation.deepHint);
+    expect(section.textContent).toContain(COPY.generation.debugHint);
+
+    // The owner's rulings: no reset affordances, no presets, no changed-markers.
+    const buttonLabels = Array.from(section.querySelectorAll('button'))
+      .map((button) => button.textContent ?? '');
+    expect(buttonLabels).toEqual([]);
+  });
+
+  it('flashes the clamped value in the row hint, in russian', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+    deepInput.value = '9999';
+    deepInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(
+        getSectionByTitle(COPY.generation.title).textContent,
+      ).toContain(COPY.generation.savedAs.replace('{n}', '3000'));
+    }, { timeout: 2000 });
+  });
 
   it('renders coach memory + auto-recap fields with stored defaults and a hidden warning', async () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
@@ -1331,14 +1378,14 @@ describe('Options page coach settings', () => {
     const warning = getRecapWarning()!;
     expect(warning).toBeTruthy();
     // Reflects the stored deep window (250), never the old hardcoded 3000.
-    expect(warning.textContent).toContain('Full Recap loads up to 250 messages');
+    expect(warning.textContent).toContain(recapWarningFor(250));
     expect(warning.textContent).not.toContain('3000');
 
     // Editing the deep-window field updates the warning message live.
     const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
     deepInput.value = '1234';
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(warning.textContent).toContain('Full Recap loads up to 1234 messages');
+    expect(warning.textContent).toContain(recapWarningFor(1234));
   });
 
   it('clamps the cost warning to the deep-window bounds — never quotes an unreachable count', async () => {
@@ -1356,13 +1403,13 @@ describe('Options page coach settings', () => {
     // Above the max: shows the clamped 3000, never the typed 99999.
     deepInput.value = '99999';
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(warning.textContent).toContain('Full Recap loads up to 3000 messages');
+    expect(warning.textContent).toContain(recapWarningFor(3000));
     expect(warning.textContent).not.toContain('99999');
 
     // Below the min: clamps up to 100.
     deepInput.value = '5';
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(warning.textContent).toContain('Full Recap loads up to 100 messages');
+    expect(warning.textContent).toContain(recapWarningFor(100));
   });
 });
 
