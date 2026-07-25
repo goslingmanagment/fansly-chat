@@ -831,6 +831,23 @@ async function render(): Promise<void> {
     previewBarShort.className = 'chatgoose-theme-preview-bar chatgoose-theme-preview-bar-short';
     previewBody.append(previewBar, previewBarShort);
     preview.append(previewRail, previewBody);
+    if (choice.value === 'system') {
+      // A complete dark miniature clipped to the right half (see styles.css):
+      // background, rail and bars all flip on ONE vertical line.
+      const darkHalf = document.createElement('span');
+      darkHalf.className = 'chatgoose-theme-preview-sysdark';
+      const darkRail = document.createElement('span');
+      darkRail.className = 'chatgoose-theme-preview-rail';
+      const darkBody = document.createElement('span');
+      darkBody.className = 'chatgoose-theme-preview-body';
+      const darkBar = document.createElement('span');
+      darkBar.className = 'chatgoose-theme-preview-bar';
+      const darkBarShort = document.createElement('span');
+      darkBarShort.className = 'chatgoose-theme-preview-bar chatgoose-theme-preview-bar-short';
+      darkBody.append(darkBar, darkBarShort);
+      darkHalf.append(darkRail, darkBody);
+      preview.append(darkHalf);
+    }
     const title = document.createElement('span');
     title.className = 'chatgoose-theme-title';
     title.textContent = choice.title;

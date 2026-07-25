@@ -101,6 +101,24 @@ describe('hotkeys pane DOM', () => {
     expect(list.querySelector('[data-hotkey-action="fast-reply"]')).not.toBeNull();
     expect(list.querySelector('[data-hotkey-extra="Enter"]')).not.toBeNull();
   });
+
+  it('renders three captioned groups and leaves no row outside them', () => {
+    const list = renderHotkeysPane(dom.window.document as unknown as Document, 'mac');
+    const groups = Array.from(list.querySelectorAll<HTMLElement>('[data-hotkey-group]'))
+      .map((group) => group.dataset.hotkeyGroup);
+    expect(groups).toEqual(['generation', 'panels', 'reference']);
+    // A row outside a group would silently fall out of the two-column layout.
+    for (const row of Array.from(list.querySelectorAll('.chatgoose-hotkey-row'))) {
+      expect(row.closest('[data-hotkey-group]')).not.toBeNull();
+    }
+    // Enter continues a generation; Esc closes — the extras land per the map.
+    expect(
+      list.querySelector('[data-hotkey-extra="Enter"]')?.closest('[data-hotkey-group]'),
+    ).toHaveProperty('dataset.hotkeyGroup', 'generation');
+    expect(
+      list.querySelector('[data-hotkey-extra="Esc"]')?.closest('[data-hotkey-group]'),
+    ).toHaveProperty('dataset.hotkeyGroup', 'reference');
+  });
 });
 
 describe('«Хоткеи» rail item', () => {
