@@ -58,6 +58,62 @@ export function navigateTo(pane: PaneKey, code?: string): void {
   view().location.hash = formatOptionsHash({ pane, code: code ?? null });
 }
 
+export interface RailFootHandles {
+  /** Show or hide the clay «нов.» dot next to the Changelog link. */
+  setUnseen(unseen: boolean): void;
+}
+
+/**
+ * Rail footer: the running version and the Changelog link.
+ *
+ * The changelog is a WEB page (E59) — nothing about it ships in the XPI, and
+ * this link is the only reference to it. The URL is passed in rather than
+ * imported so the rail stays DOM-only; the page owns both the constant and the
+ * decision of how to open it (a click writes the last-seen version first, which
+ * is why the anchor's default navigation is not what opens the tab).
+ */
+export function renderRailFoot(
+  slot: HTMLElement,
+  options: { version: string; changelogUrl: string; onOpenChangelog: () => void },
+): RailFootHandles {
+  const doc = slot.ownerDocument;
+
+  const versionTag = doc.createElement('div');
+  versionTag.className = 'chatgoose-cabinet-version';
+  versionTag.dataset.role = 'rail-version';
+  versionTag.textContent = `${COPY.rail.versionPrefix}${options.version}`;
+
+  const link = doc.createElement('a');
+  link.className = 'chatgoose-cabinet-changelog';
+  link.dataset.role = 'rail-changelog';
+  // A real href keeps «copy link» and middle-click working; the click handler
+  // takes over the ordinary activation so the seen-version write happens.
+  link.href = options.changelogUrl;
+  link.rel = 'noopener noreferrer';
+  link.target = '_blank';
+  const label = doc.createElement('span');
+  label.textContent = COPY.rail.changelog;
+  const dot = doc.createElement('span');
+  dot.className = 'chatgoose-cabinet-unseen';
+  dot.dataset.role = 'rail-changelog-unseen';
+  dot.textContent = COPY.rail.changelogUnseen;
+  dot.title = COPY.rail.changelogUnseenTitle;
+  dot.hidden = true;
+  link.append(label, dot);
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    options.onOpenChangelog();
+  });
+
+  slot.append(versionTag, link);
+
+  return {
+    setUnseen: (unseen) => {
+      dot.hidden = !unseen;
+    },
+  };
+}
+
 /**
  * `enabledPanes` — the rail shows only these; a deep link to a pane outside
  * the list falls back to the default route. Panes themselves are built for

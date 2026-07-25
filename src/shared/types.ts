@@ -894,6 +894,19 @@ export interface OnboardingSnapshot {
   dismissedAt: number | null;
 }
 
+/** Which release's changelog the chatter has already opened
+ * (`chatgoose:lastSeenVersion`). `version` is the RECORD's own version; the
+ * extension version it remembers is `lastSeenVersion`. */
+export interface LastSeenVersionSnapshot {
+  version: 1;
+  lastSeenVersion: string | null;
+}
+
+export interface SetLastSeenVersionRequest {
+  /** The extension version being marked as seen. */
+  version: string;
+}
+
 /** One row of the cabinet's «Аккаунты» pane.
  *
  * `state` is honest about what the background can actually prove: 'live' = a
@@ -958,6 +971,8 @@ export interface RuntimeRequestMap {
   setAccountLabel: SetAccountLabelRequest;
   getOnboardingState: undefined;
   dismissOnboarding: undefined;
+  getLastSeenVersion: undefined;
+  setLastSeenVersion: SetLastSeenVersionRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -987,6 +1002,8 @@ export interface RuntimeResponseMap {
   setAccountLabel: { ok: boolean };
   getOnboardingState: OnboardingSnapshot;
   dismissOnboarding: { ok: boolean };
+  getLastSeenVersion: LastSeenVersionSnapshot;
+  setLastSeenVersion: { ok: boolean };
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;

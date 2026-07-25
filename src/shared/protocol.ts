@@ -449,6 +449,13 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getOnboardingState';
     case 'dismissOnboarding':
       return 'dismissOnboarding';
+    case 'getLastSeenVersion':
+      return 'getLastSeenVersion';
+    case 'setLastSeenVersion':
+      // A blank version would mark «nothing» as seen and keep the dot forever.
+      return isString(message.version) && message.version.trim()
+        ? 'setLastSeenVersion'
+        : null;
     case 'getSpendersList':
       return isOptionalBoolean(message, 'refresh') &&
         isOptionalString(message, 'buildId')

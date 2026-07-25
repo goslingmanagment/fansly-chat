@@ -3,6 +3,7 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  LAST_SEEN_VERSION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
@@ -1430,6 +1431,48 @@ describe('runtime-api onboarding flag', () => {
 
     expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: false });
     expect(mockStorage[ONBOARDING_STORAGE_KEY]).toBeUndefined();
+  });
+});
+
+describe('runtime-api last-seen version', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('reads «none seen» for an absent or foreign-version record', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'getLastSeenVersion' }))
+      .toEqual({ version: 1, lastSeenVersion: null });
+
+    mockStorage[LAST_SEEN_VERSION_STORAGE_KEY] = { version: 7, lastSeenVersion: '9.9.9' };
+    expect(await harness.send({ type: 'getLastSeenVersion' }))
+      .toEqual({ version: 1, lastSeenVersion: null });
+  });
+
+  it('records the version the page marked as seen and reads it back', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'setLastSeenVersion', version: ' 2.0.0 ' }))
+      .toEqual({ ok: true });
+    expect(mockStorage[LAST_SEEN_VERSION_STORAGE_KEY])
+      .toEqual({ version: 1, lastSeenVersion: '2.0.0' });
+    expect(await harness.send({ type: 'getLastSeenVersion' }))
+      .toEqual({ version: 1, lastSeenVersion: '2.0.0' });
+  });
+
+  it('reports a failed write so the dot can stay on', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    (browser.storage.local.set as unknown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('quota'));
+
+    expect(await harness.send({ type: 'setLastSeenVersion', version: '2.0.0' }))
+      .toEqual({ ok: false });
+    expect(mockStorage[LAST_SEEN_VERSION_STORAGE_KEY]).toBeUndefined();
   });
 });
 

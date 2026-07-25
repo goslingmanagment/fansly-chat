@@ -198,6 +198,50 @@ input[type='checkbox'] {
   border-top: 1px solid var(--chatgoose-line);
 }
 
+.chatgoose-cabinet-version {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-cabinet-changelog {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.chatgoose-cabinet-changelog:hover {
+  color: var(--chatgoose-clay-ink);
+  text-decoration: underline;
+}
+
+.chatgoose-cabinet-changelog:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+  border-radius: var(--chatgoose-radius-chip);
+}
+
+/* «нов.» — the clay dot that says this build's changelog has not been opened.
+   The author `[hidden]` guard is mandatory next to the display rule. */
+.chatgoose-cabinet-unseen {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-clay);
+  color: var(--chatgoose-bg1);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+
+.chatgoose-cabinet-unseen[hidden] {
+  display: none;
+}
+
 .chatgoose-cabinet-main {
   flex: 1 1 auto;
   min-width: 0;

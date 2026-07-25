@@ -39,6 +39,23 @@ export const AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS = 5_000;
  * URL would dismiss the checklist that is still explaining what to do next.
  * Own key, own `version`; schema v15 is untouched. */
 export const ONBOARDING_STORAGE_KEY = 'chatgoose:onboarding';
+/** Operational: the extension version whose changelog the chatter has already
+ * opened. Drives the rail's «нов.» dot and nothing else. Own key, own
+ * `version`; schema v15 is untouched. */
+export const LAST_SEEN_VERSION_STORAGE_KEY = 'chatgoose:lastSeenVersion';
+
+// ─── Release pages ───────────────────────────────────────────────────────
+
+/** The changelog is a WEB page next to the update feed — zero changelog content
+ * ships in the XPI (E59). The host MUST equal `BASE_URL` in `scripts/deploy.sh`
+ * (the only place that publishes this page); `tests/release-pages.test.ts` fails
+ * the build if the two drift apart.
+ *
+ * No `#v<X-Y-Z>` anchor yet, deliberately: the anchored per-release page (E42)
+ * is not deployed, and a link to an anchor that does not exist lands on a blank
+ * viewport. Adding the anchor is a release-2.0 commit that MUST follow the
+ * anchored page's deploy, never precede it. */
+export const CHANGELOG_URL = 'https://ext.gosling-agency.ru/changelog.html';
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,

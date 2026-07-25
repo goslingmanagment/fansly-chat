@@ -81,6 +81,11 @@ export interface MountOverrides {
     /** `false` makes `dismissOnboarding` answer «did not stick», so a test can
      * prove the checklist stays instead of silently disappearing. */
     dismissOnboardingOk?: boolean;
+    /** Version whose changelog has already been opened. Omitted = none recorded
+     * (also what an older background answers), which earns the «нов.» dot. */
+    lastSeenVersion?: string | null;
+    /** `false` models a rejected seen-version write: the dot must stay on. */
+    setLastSeenVersionOk?: boolean;
     /** Reply for the mount-tail (and any post-mount) testAgencyHubConnection.
      * Defaults to a passing test so a fully-configured page reaches the hero's
      * all-green state — the hub step requires a `connected` feedback. A factory
@@ -120,6 +125,10 @@ export interface MountedOptionsPage {
   focusRequests: () => string[];
   /** How many times the page asked to stamp the onboarding flag. */
   onboardingDismissals: () => number;
+  /** Every version the page marked as seen, in order. */
+  lastSeenWrites: () => string[];
+  /** Every URL the page asked the browser to open in a new tab. */
+  openedTabs: () => string[];
 }
 
 let dom: InstanceType<typeof JSDOM> | null = null;
@@ -157,6 +166,8 @@ export async function mountOptionsPage(
   const labelWrites: Array<{ accountId: string; label: string }> = [];
   const focusRequests: string[] = [];
   const onboardingDismissals: number[] = [];
+  const lastSeenWrites: string[] = [];
+  const openedTabs: string[] = [];
   // Mutable so a label write is visible to the next view read, as in production.
   const accountsView: AccountsView | null = overrides.accounts
     ? structuredClone(overrides.accounts)
@@ -325,6 +336,14 @@ export async function mountOptionsPage(
             focusRequests.push(accountId);
             return { ok: runtime.focusAccountTabOk !== false };
           }
+          case 'getLastSeenVersion':
+            return { version: 1, lastSeenVersion: runtime.lastSeenVersion ?? null };
+          case 'setLastSeenVersion': {
+            const { version } = message as { version: string };
+            const ok = runtime.setLastSeenVersionOk !== false;
+            if (ok) lastSeenWrites.push(version);
+            return { ok };
+          }
           case 'getOnboardingState':
             // No override = no handler, exactly like an older background.
             return runtime.onboarding;
@@ -369,8 +388,11 @@ export async function mountOptionsPage(
     },
     tabs: {
       // Any tab-opening path (a readiness step, the Changelog link) is safe by
-      // default; a test override reassigns this to assert the URL.
-      create: vi.fn(async () => ({})),
+      // default; the URLs are recorded so a test can assert them.
+      create: vi.fn(async (info?: { url?: string }) => {
+        openedTabs.push(info?.url ?? '');
+        return {};
+      }),
     },
     permissions: {
       contains: vi.fn(async () => overrides.permissionGranted ?? false),
@@ -412,6 +434,8 @@ export async function mountOptionsPage(
     labelWrites: () => labelWrites.map((entry) => ({ ...entry })),
     focusRequests: () => [...focusRequests],
     onboardingDismissals: () => onboardingDismissals.length,
+    lastSeenWrites: () => [...lastSeenWrites],
+    openedTabs: () => [...openedTabs],
   };
 }
 

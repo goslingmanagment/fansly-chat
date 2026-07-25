@@ -4,6 +4,7 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+  LAST_SEEN_VERSION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
@@ -28,6 +29,7 @@ import type {
   AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubSignOutResponse,
+  LastSeenVersionSnapshot,
   OnboardingSnapshot,
   PopupStatus,
   RecapStatusResponse,
@@ -128,10 +130,10 @@ async function readDeviceTokenMeta(): Promise<AgencyHubDeviceTokenMeta | null> {
   }
 }
 
-// Operational-key writes (onboarding) are read-modify-write over a whole
-// record, so they run through ONE module-level FIFO queue — the same doctrine
-// the presence/labels stores follow. Two settings tabs finishing the checklist
-// at the same moment therefore cannot lose one another's stamp.
+// Operational-key writes (the onboarding flag, the last-seen version) rewrite a
+// whole record, so they run through ONE module-level FIFO queue — the same
+// doctrine the presence/labels stores follow. Two settings tabs finishing the
+// checklist at the same moment therefore cannot lose one another's stamp.
 let operationalWriteQueue: Promise<unknown> = Promise.resolve();
 function withOperationalWrite<T>(critical: () => Promise<T>): Promise<T> {
   const run = operationalWriteQueue.then(critical, critical);
@@ -161,6 +163,28 @@ async function readOnboardingState(): Promise<OnboardingSnapshot> {
     };
   } catch {
     return fresh;
+  }
+}
+
+/** Which release's changelog has already been opened. An unreadable record is
+ * «none seen», which shows the «нов.» dot — nagging once is strictly better than
+ * silently hiding a release note. */
+async function readLastSeenVersion(): Promise<LastSeenVersionSnapshot> {
+  const unseen: LastSeenVersionSnapshot = { version: 1, lastSeenVersion: null };
+  try {
+    const raw = await browser.storage.local.get(LAST_SEEN_VERSION_STORAGE_KEY);
+    const value = raw[LAST_SEEN_VERSION_STORAGE_KEY];
+    if (!isObjectRecord(value) || value.version !== 1) {
+      return unseen;
+    }
+    return {
+      version: 1,
+      lastSeenVersion: typeof value.lastSeenVersion === 'string' && value.lastSeenVersion
+        ? value.lastSeenVersion
+        : null,
+    };
+  } catch {
+    return unseen;
   }
 }
 
@@ -779,6 +803,31 @@ export function registerRuntimeApi({
             // A failed stamp means the checklist comes back on the next open.
             // Annoying, never destructive — and the page must be able to know.
             logWarn('Onboarding dismissal write failed', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return { ok: false };
+          }
+        });
+      }
+
+      if (requestType === 'getLastSeenVersion') {
+        return await readLastSeenVersion();
+      }
+
+      if (requestType === 'setLastSeenVersion') {
+        const { version } = message as unknown as { version: string };
+        return await withOperationalWrite(async () => {
+          try {
+            const next: LastSeenVersionSnapshot = {
+              version: 1,
+              lastSeenVersion: version.trim(),
+            };
+            await browser.storage.local.set({ [LAST_SEEN_VERSION_STORAGE_KEY]: next });
+            return { ok: true };
+          } catch (error) {
+            // The dot stays on until the write succeeds — an unread release note
+            // is the safe side of this failure.
+            logWarn('Last-seen version write failed', {
               error: error instanceof Error ? error.message.slice(0, 200) : String(error),
             });
             return { ok: false };

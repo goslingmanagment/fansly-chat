@@ -68,9 +68,18 @@ describe('protocol boundary guards', () => {
     expect(
       getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1', label: '' }),
     ).toBe('setAccountLabel');
-    // E59 wave D — the first-run checklist's durable flag.
+    // E59 wave D — the first-run checklist's durable flag and the changelog's
+    // seen-version bookkeeping.
     expect(getRuntimeRequestType({ type: 'getOnboardingState' })).toBe('getOnboardingState');
     expect(getRuntimeRequestType({ type: 'dismissOnboarding' })).toBe('dismissOnboarding');
+    expect(getRuntimeRequestType({ type: 'getLastSeenVersion' })).toBe('getLastSeenVersion');
+    expect(
+      getRuntimeRequestType({ type: 'setLastSeenVersion', version: '2.0.0' }),
+    ).toBe('setLastSeenVersion');
+    // A blank/absent version would mark «nothing» as seen — the dot would then
+    // never clear, so it is rejected at the boundary.
+    expect(getRuntimeRequestType({ type: 'setLastSeenVersion', version: '  ' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'setLastSeenVersion' })).toBeNull();
     // 1.6.0 shipped without this case — options-page device-token sign-in
     // was unreachable (found by the Stage 35 map regeneration).
     expect(

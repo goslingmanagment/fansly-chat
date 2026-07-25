@@ -38,7 +38,7 @@ import {
   shortenAccountId,
 } from './sessions.js';
 import { OPTIONS_PANES } from '../shared/options-routes.js';
-import { createShell, navigateTo } from './shell.js';
+import { createShell, navigateTo, renderRailFoot } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
@@ -52,6 +52,7 @@ import {
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  CHANGELOG_URL,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
   DEEP_MAX_MESSAGE_COUNT,
@@ -574,6 +575,29 @@ async function render(): Promise<void> {
   // Every pane now has content, so the rail carries the full route list.
   const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
+
+  // ─── Rail footer: version + Changelog ──────────────────────
+  // Opening the changelog records THIS version as seen, which is what retires
+  // the «нов.» dot. The write is fired first and the tab is opened regardless of
+  // how it settles: a failed write leaves the dot on (an unread release note is
+  // the safe side), never a link that refuses to open.
+  const markVersionSeen = (): void => {
+    void sendRuntimeRequest('setLastSeenVersion', { version: extensionVersion })
+      .then((reply) => {
+        if (!disposed && reply?.ok === true) railFoot.setUnseen(false);
+      })
+      .catch(() => undefined);
+  };
+  const railFoot = renderRailFoot(shell.railFootSlot, {
+    version: extensionVersion,
+    changelogUrl: CHANGELOG_URL,
+    onOpenChangelog: () => {
+      markVersionSeen();
+      void browser.tabs.create({ url: CHANGELOG_URL }).catch((error: unknown) => {
+        console.error('Failed to open the changelog', error);
+      });
+    },
+  });
 
   // ─── Первый запуск: чеклист ────────────────────────────────
   // Shown only on a genuinely untouched install, and it stays until every step
@@ -3636,19 +3660,37 @@ async function render(): Promise<void> {
   void hydrateHubStatusRows(storedHubSignature());
   // Local reads — no hub round-trip, no signature guard.
   void hydrateLocalStatusRows();
-  // The durable half of the first-run predicate. Read once per mount: the flag
-  // only ever goes from «null» to «stamped», and the local half was captured at
-  // mount, so there is nothing to re-poll.
-  void sendRuntimeRequest('getOnboardingState')
-    .then((snapshot) => {
-      if (disposed) return;
-      const onboarding = asOnboardingSnapshot(snapshot);
-      onboardingVisible = onboarding !== null &&
-        onboarding.dismissedAt === null &&
-        freshAtMount;
-      renderOnboarding();
-    })
-    .catch(() => undefined);
+  // The durable half of the first-run predicate, and — because it decides
+  // whether the «нов.» dot is appropriate at all — the changelog's seen-version
+  // read behind it. Both are read once per mount: the onboarding flag only ever
+  // goes from «null» to «stamped», the local half was captured at mount, and the
+  // running version cannot change under an open page.
+  void (async () => {
+    const onboarding = asOnboardingSnapshot(
+      await sendRuntimeRequest('getOnboardingState').catch(() => null),
+    );
+    if (disposed) return;
+    onboardingVisible = onboarding !== null &&
+      onboarding.dismissedAt === null &&
+      freshAtMount;
+    renderOnboarding();
+
+    const seen = await sendRuntimeRequest('getLastSeenVersion').catch(() => null);
+    if (disposed) return;
+    const lastSeenVersion = typeof (seen as { lastSeenVersion?: unknown } | null)?.lastSeenVersion === 'string'
+      ? (seen as { lastSeenVersion: string }).lastSeenVersion
+      : null;
+    if (lastSeenVersion === extensionVersion) {
+      return;
+    }
+    if (onboardingVisible) {
+      // A first run has nothing to catch up on: record the version silently so
+      // the NEXT update is the one that earns the dot.
+      markVersionSeen();
+      return;
+    }
+    railFoot.setUnseen(true);
+  })();
   // Which device token is stored here. Absent for tokens issued before this
   // version — the pane says so instead of guessing a date.
   void sendRuntimeRequest('getAgencyHubDeviceTokenMeta')

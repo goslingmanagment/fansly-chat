@@ -203,6 +203,42 @@ describe('options cabinet shell', () => {
     expect(shell.panes.personas.hidden).toBe(true);
   });
 
+  it('rail footer carries the version and a Changelog link with a toggleable «нов.»', async () => {
+    const { renderRailFoot } = await import('../src/options/shell.js');
+    const slot = mountRoot();
+    const onOpenChangelog = vi.fn();
+    const foot = renderRailFoot(slot, {
+      version: '9.8.7',
+      changelogUrl: 'https://ext.example/changelog.html',
+      onOpenChangelog,
+    });
+
+    expect(slot.querySelector('[data-role="rail-version"]')?.textContent)
+      .toBe(`${COPY.rail.versionPrefix}9.8.7`);
+    const link = slot.querySelector<HTMLAnchorElement>('[data-role="rail-changelog"]');
+    expect(link?.textContent).toContain(COPY.rail.changelog);
+    // A real href (copy-link, middle-click) even though the click is handled.
+    expect(link?.getAttribute('href')).toBe('https://ext.example/changelog.html');
+    expect(link?.rel).toBe('noopener noreferrer');
+    // No version anchor until the anchored page (E42) is deployed.
+    expect(link?.getAttribute('href')).not.toContain('#');
+
+    const dot = slot.querySelector<HTMLElement>('[data-role="rail-changelog-unseen"]');
+    expect(dot?.hidden).toBe(true);
+    foot.setUnseen(true);
+    expect(dot?.hidden).toBe(false);
+    expect(dot?.textContent).toBe(COPY.rail.changelogUnseen);
+    foot.setUnseen(false);
+    expect(dot?.hidden).toBe(true);
+
+    // The page opens the tab itself (after recording the version), so the
+    // anchor's own navigation must be suppressed.
+    const click = new dom.window.MouseEvent('click', { bubbles: true, cancelable: true });
+    link?.dispatchEvent(click);
+    expect(onOpenChangelog).toHaveBeenCalledTimes(1);
+    expect(click.defaultPrevented).toBe(true);
+  });
+
   it('styles.css pairs every author display rule with an author [hidden] guard', () => {
     // `hidden` sets an IDL flag; the UA `[hidden] { display: none }` rule loses
     // to ANY author display rule on the same element (origin precedes
@@ -218,6 +254,8 @@ describe('options cabinet shell', () => {
       'chatgoose-status-row',
       'chatgoose-card-actions',
       'chatgoose-readiness-open',
+      'chatgoose-cabinet-unseen',
+      'chatgoose-onboarding',
     ]) {
       expect(styles).toMatch(
         new RegExp(`\\.${selector}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`),
