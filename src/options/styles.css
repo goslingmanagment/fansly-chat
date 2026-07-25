@@ -1063,17 +1063,39 @@ input[type='checkbox'] {
 .chatgoose-theme-preview-dark .chatgoose-theme-preview-rail { background: #1b1a17; }
 .chatgoose-theme-preview-dark .chatgoose-theme-preview-bar { background: #4d4940; }
 
-/* «Системная» is split down the middle — it follows the OS, so it shows both. */
+/* «Системная» is split down the middle — it follows the OS, so it shows both.
+   The dark side is a COMPLETE dark miniature (rail, body, bars) clipped to the
+   right half over the light one, so background, rail and bars all change
+   colour on the same vertical line — the per-element gradients used to split
+   at three different x positions. Light rules use child combinators so they
+   never leak into the overlay's copies of the same classes. */
 .chatgoose-theme-preview-system {
-  background: linear-gradient(90deg, #faf9f5 0 50%, #262420 50% 100%);
+  position: relative;
+  background: #faf9f5;
 }
 
-.chatgoose-theme-preview-system .chatgoose-theme-preview-rail {
-  background: linear-gradient(90deg, #efece4 0 100%);
+.chatgoose-theme-preview-system > .chatgoose-theme-preview-rail {
+  background: #efece4;
 }
 
-.chatgoose-theme-preview-system .chatgoose-theme-preview-bar {
-  background: linear-gradient(90deg, #cfcaba 0 50%, #4d4940 50% 100%);
+.chatgoose-theme-preview-system > .chatgoose-theme-preview-body .chatgoose-theme-preview-bar {
+  background: #cfcaba;
+}
+
+.chatgoose-theme-preview-sysdark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  background: #262420;
+  clip-path: inset(0 0 0 50%);
+}
+
+.chatgoose-theme-preview-sysdark .chatgoose-theme-preview-rail {
+  background: #1b1a17;
+}
+
+.chatgoose-theme-preview-sysdark .chatgoose-theme-preview-bar {
+  background: #4d4940;
 }
 
 .chatgoose-theme-title {
@@ -1086,16 +1108,40 @@ input[type='checkbox'] {
   font-size: 12px;
 }
 
-/* ── «Хоткеи» read-only cheatsheet ── */
+/* ── «Хоткеи» read-only cheatsheet: two columns of captioned groups ── */
 .chatgoose-hotkeys {
   display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 28px;
+  align-items: start;
 }
 
+@media (max-width: 640px) {
+  .chatgoose-hotkeys {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chatgoose-hotkeys-col {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+
+.chatgoose-hotkeys-group {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+/* Action first, key at the right edge — a reference row, not a button row. */
 .chatgoose-hotkey-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  padding: 7px 0;
+  padding: 6px 0;
   border-bottom: 1px solid var(--chatgoose-line);
 }
 
@@ -1103,23 +1149,26 @@ input[type='checkbox'] {
   border-bottom: 0;
 }
 
+/* Flat and content-sized: a read-only chip must not look pressable. */
 .chatgoose-kbd {
   flex: none;
-  min-width: 96px;
-  padding: 3px 8px;
-  border-radius: var(--chatgoose-radius-chip);
+  padding: 2px 7px;
+  border-radius: 6px;
   border: 1px solid var(--chatgoose-line-strong);
   background: var(--chatgoose-bg2);
-  box-shadow: inset 0 -1px 0 var(--chatgoose-line-strong);
-  color: var(--chatgoose-ink);
+  color: var(--chatgoose-ink-mid);
   font-family: var(--chatgoose-font-mono);
-  font-size: 12px;
-  text-align: center;
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
 }
 
 .chatgoose-hotkey-name {
-  color: var(--chatgoose-ink-mid);
+  color: var(--chatgoose-ink);
   font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── «Персоны» rows ── */
