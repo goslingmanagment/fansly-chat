@@ -82,6 +82,7 @@ import type {
   AgencyHubIdentityResponse,
   AgencyHubSignOutResponse,
   AiQuotaStatus,
+  OnboardingSnapshot,
   OpsDailySnapshot,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
@@ -144,6 +145,18 @@ function asDeviceTokenMeta(value: unknown): AgencyHubDeviceTokenMeta | null {
     typeof record.issuedAt === 'number'
     ? (value as AgencyHubDeviceTokenMeta)
     : null;
+}
+
+/** An unreadable reply is NOT «never onboarded»: an older background (or a
+ * dropped frame) must never resurrect the first-run checklist over a working
+ * install, so only a well-formed v1 record can make the page consider it. */
+function asOnboardingSnapshot(value: unknown): OnboardingSnapshot | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return null;
+  const dismissedAt = record.dismissedAt;
+  if (dismissedAt !== null && typeof dismissedAt !== 'number') return null;
+  return { version: 1, dismissedAt: typeof dismissedAt === 'number' ? dismissedAt : null };
 }
 
 function asQuotaEntries(value: unknown): AiQuotaStatus[] {
@@ -561,6 +574,115 @@ async function render(): Promise<void> {
   // Every pane now has content, so the rail carries the full route list.
   const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
+
+  // ─── Первый запуск: чеклист ────────────────────────────────
+  // Shown only on a genuinely untouched install, and it stays until every step
+  // is really done. The «fresh» half of the predicate is captured HERE, from the
+  // mount snapshot, before any hydration can mutate it — and the durable half
+  // (`chatgoose:onboarding`) arrives from the background below. Deliberately not
+  // derived from live form state: in v1 typing the hub URL dismissed the
+  // checklist that was still explaining the next two steps.
+  const freshAtMount =
+    !state.settings.agencyHubDeviceToken.trim() &&
+    !state.settings.agencyHubApiKey.trim() &&
+    state.knownAccounts.length === 0;
+
+  const onboardingSection = document.createElement('section');
+  onboardingSection.className = 'chatgoose-onboarding';
+  onboardingSection.dataset.onboarding = 'true';
+  // Hidden until the durable flag has been read: a checklist that flashes over a
+  // configured install is worse than one that appears a tick late.
+  onboardingSection.hidden = true;
+  const onboardingHeading = document.createElement('h1');
+  onboardingHeading.className = 'chatgoose-onboarding-heading';
+  onboardingHeading.textContent = COPY.onboarding.greeting;
+  const onboardingSub = document.createElement('div');
+  onboardingSub.className = 'chatgoose-onboarding-sub';
+  onboardingSub.textContent = COPY.onboarding.greetingSubtitle;
+  const onboardingList = document.createElement('ol');
+  onboardingList.className = 'chatgoose-onboarding-steps';
+
+  type OnboardingStepKey = 'access' | 'signIn' | 'fansly';
+  const buildOnboardingStep = (
+    key: OnboardingStepKey,
+    ordinal: number,
+    title: string,
+    hint: string,
+    actionLabel: string,
+    onAction: () => void,
+  ): { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement } => {
+    const item = document.createElement('li');
+    item.className = 'chatgoose-onboarding-step';
+    item.dataset.onboardingStep = key;
+    item.dataset.done = 'false';
+    const number = document.createElement('span');
+    number.className = 'chatgoose-onboarding-step-num';
+    number.textContent = String(ordinal);
+    const body = document.createElement('div');
+    body.className = 'chatgoose-onboarding-step-body';
+    const titleNode = document.createElement('div');
+    titleNode.className = 'chatgoose-onboarding-step-title';
+    titleNode.textContent = title;
+    const hintNode = document.createElement('div');
+    hintNode.className = 'chatgoose-onboarding-step-hint';
+    hintNode.textContent = hint;
+    body.append(titleNode, hintNode);
+    const action = createButton(actionLabel, true);
+    action.dataset.onboardingAction = key;
+    action.addEventListener('click', onAction);
+    // The green «готово» that replaces the CTA once the step is truly satisfied.
+    const done = createBadge(COPY.onboarding.stepDone, 'green');
+    done.dataset.onboardingDone = key;
+    done.hidden = true;
+    item.append(number, body, action, done);
+    onboardingList.append(item);
+    return { root: item, action, done };
+  };
+
+  // Step order per E41's own flow: the host permission comes BEFORE sign-in,
+  // because sign-in cannot pass without it (a `no_permission` hub read is not a
+  // credential problem, and telling the chatter to log in first would send them
+  // into the failure).
+  const onboardingSteps: Record<
+    OnboardingStepKey,
+    { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement }
+  > = {
+    access: buildOnboardingStep(
+      'access',
+      1,
+      COPY.onboarding.step1Title,
+      COPY.onboarding.step1Hint,
+      COPY.onboarding.step1Action,
+      () => navigateTo('hub'),
+    ),
+    signIn: buildOnboardingStep(
+      'signIn',
+      2,
+      COPY.onboarding.step2Title,
+      COPY.onboarding.step2Hint,
+      COPY.onboarding.step2Action,
+      () => navigateTo('hub'),
+    ),
+    fansly: buildOnboardingStep(
+      'fansly',
+      3,
+      COPY.onboarding.step3Title,
+      COPY.onboarding.step3Hint,
+      COPY.onboarding.step3Action,
+      () => navigateTo('accounts'),
+    ),
+  };
+
+  const onboardingHint = document.createElement('div');
+  onboardingHint.className = 'chatgoose-status-hint';
+  onboardingHint.textContent = COPY.onboarding.hint;
+  onboardingSection.append(
+    onboardingHeading,
+    onboardingSub,
+    onboardingList,
+    onboardingHint,
+  );
+  shell.panes.status.append(onboardingSection);
 
   // ─── Readiness headline ────────────────────────────────────
   // The install's verdict in one line. It derives entirely from the SAME
@@ -1325,9 +1447,11 @@ async function render(): Promise<void> {
       hasToken ? 'Device token active ✓' : 'No device token yet.',
     );
     if (!hubSignInMeta.textContent) {
+      // With no token the line IS the first-sign-in card's copy: who hands out
+      // the credentials, and that the password is never stored on this device.
       hubSignInMeta.textContent = hasToken
         ? 'Hub requests use the device token; the legacy API key is the fallback.'
-        : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
+        : COPY.hub.signInHint;
     }
     // With a live token the credential form reads as unfinished business —
     // fold it away; «Перевыпустить токен» brings it back for rotation.
@@ -1712,6 +1836,65 @@ async function render(): Promise<void> {
     },
   ];
 
+  /** The checklist is live: every step reads the same sources the «Статус» rows
+   * do, so a step turns green the moment its state is genuinely satisfied — and
+   * only then. Step 1 demands a granted permission (not merely «not refused»):
+   * on a fresh install nothing has been granted yet, and the readiness row's
+   * lenient `!== false` would show step 1 as done before anything happened. */
+  const onboardingStepStates = (): Record<OnboardingStepKey, boolean> => ({
+    access: Boolean(normalizeAgencyHubBaseUrl(agencyHubUrlInput.value)) &&
+      hubPermissionGranted === true,
+    // A live identity read is the only proof a credential actually works —
+    // truer than «a token string exists in storage».
+    signIn: statusModel.identity?.ok === true,
+    fansly: capturedAccountIds.length > 0 &&
+      capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId)),
+  });
+
+  /** True once the durable flag AND the mount snapshot agree this install has
+   * never been set up. Never re-enabled afterwards: a sign-out must not put a
+   * working chatter back through onboarding. */
+  let onboardingVisible = false;
+  /** One-shot guard around the durable stamp; re-armed if the write fails. */
+  let onboardingStamping = false;
+
+  const renderOnboarding = (): void => {
+    if (!onboardingVisible) {
+      onboardingSection.hidden = true;
+      return;
+    }
+    const states = onboardingStepStates();
+    for (const key of Object.keys(states) as OnboardingStepKey[]) {
+      const step = onboardingSteps[key];
+      const done = states[key];
+      step.root.dataset.done = done ? 'true' : 'false';
+      step.action.hidden = done;
+      step.done.hidden = !done;
+    }
+    onboardingSection.hidden = false;
+    if (!Object.values(states).every(Boolean) || onboardingStamping) {
+      return;
+    }
+    // Every step is really done — stamp the durable flag and retire the card.
+    // Filling in the hub URL is NOT this moment (the v1 self-cancel bug).
+    onboardingStamping = true;
+    void sendRuntimeRequest('dismissOnboarding')
+      .then((reply) => {
+        if (disposed) return;
+        if (reply?.ok === true) {
+          onboardingVisible = false;
+          onboardingSection.hidden = true;
+          return;
+        }
+        // The flag did not stick: keep the card and let a later refresh retry
+        // rather than pretend onboarding is over.
+        onboardingStamping = false;
+      })
+      .catch(() => {
+        onboardingStamping = false;
+      });
+  };
+
   // The Hub pane's dense diagnostics. Everything it shows comes from the SAME
   // statusModel the Статус rows use plus the local connection/permission
   // mirrors — no extra requests, and no line invented when its source is
@@ -1821,6 +2004,8 @@ async function render(): Promise<void> {
   const refreshStatusView = (): void => {
     if (disposed) return;
     renderHubDiagnostics();
+    // Same sources, same tick: the checklist and the headline can never disagree.
+    renderOnboarding();
     // No datum at all yet: keep the honest loading line — never a fabricated
     // «Нужно N действий» over an install nobody has looked at.
     if (statusModel.identity === null && !fanslyRowPainted) {
@@ -2624,6 +2809,16 @@ async function render(): Promise<void> {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
     // migrateState hid may now resolve to an active persona.
     refreshStatusView();
+    // Rail micro: active personas, or «—» while the catalog has never been read
+    // for these credentials. «0» there would claim the hub answered «none».
+    const activePersonas = state.personaCatalog.filter(
+      (persona) => persona.status === 'active',
+    ).length;
+    const personasMicro = document.createElement('span');
+    personasMicro.textContent = state.personaCatalogFetchedAt === null && activePersonas === 0
+      ? COPY.rail.microNone
+      : String(activePersonas);
+    shell.setMicro('personas', personasMicro);
     const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
     personaCatalogLine.textContent = `${COPY.personas.catalogLabel}: ${
       changedDate
@@ -3260,12 +3455,44 @@ async function render(): Promise<void> {
     });
 
     if (rows.length === 0) {
+      // Two ghost rows: the shape of what will appear on its own once Fansly is
+      // open, so an empty pane reads as «not yet» instead of «broken». Pure
+      // decoration — `aria-hidden`, no controls, nothing to click.
+      for (let index = 0; index < 2; index += 1) {
+        const ghost = document.createElement('div');
+        ghost.className = 'chatgoose-account-row chatgoose-account-row-ghost';
+        ghost.dataset.role = 'account-ghost';
+        ghost.setAttribute('aria-hidden', 'true');
+        const ghostIdentity = document.createElement('div');
+        ghostIdentity.className = 'chatgoose-account-identity';
+        const ghostDot = document.createElement('span');
+        ghostDot.className = 'chatgoose-account-dot';
+        const ghostBody = document.createElement('div');
+        ghostBody.className = 'chatgoose-account-body';
+        const ghostHead = document.createElement('span');
+        ghostHead.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-head';
+        const ghostSub = document.createElement('span');
+        ghostSub.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-sub';
+        ghostBody.append(ghostHead, ghostSub);
+        ghostIdentity.append(ghostDot, ghostBody);
+        const ghostSelect = document.createElement('span');
+        ghostSelect.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-select';
+        ghost.append(ghostIdentity, ghostSelect);
+        mappingsTable.append(ghost);
+      }
       const empty = document.createElement('div');
       empty.dataset.role = 'accounts-empty';
       empty.textContent = COPY.accounts.emptyFresh;
       empty.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(empty);
     }
+
+    // Rail micro: how many accounts this browser knows about at all. «0» is the
+    // honest fresh-install answer — a local count, never a promise about the
+    // model being online.
+    const accountsMicro = document.createElement('span');
+    accountsMicro.textContent = String(rows.length);
+    shell.setMicro('accounts', accountsMicro);
 
     // Open fansly.com tabs nothing is attributed to. An aggregate, never a
     // per-account claim: after a worker restart the capture map is gone, and
@@ -3409,6 +3636,19 @@ async function render(): Promise<void> {
   void hydrateHubStatusRows(storedHubSignature());
   // Local reads — no hub round-trip, no signature guard.
   void hydrateLocalStatusRows();
+  // The durable half of the first-run predicate. Read once per mount: the flag
+  // only ever goes from «null» to «stamped», and the local half was captured at
+  // mount, so there is nothing to re-poll.
+  void sendRuntimeRequest('getOnboardingState')
+    .then((snapshot) => {
+      if (disposed) return;
+      const onboarding = asOnboardingSnapshot(snapshot);
+      onboardingVisible = onboarding !== null &&
+        onboarding.dismissedAt === null &&
+        freshAtMount;
+      renderOnboarding();
+    })
+    .catch(() => undefined);
   // Which device token is stored here. Absent for tokens issued before this
   // version — the pane says so instead of guessing a date.
   void sendRuntimeRequest('getAgencyHubDeviceTokenMeta')

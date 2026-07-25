@@ -802,6 +802,89 @@ input[type='checkbox'] {
 .chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
 .chatgoose-cabinet-micro-setup { color: var(--chatgoose-amber); }
 
+/* ── First-run checklist ──
+   Sits above the readiness headline on «Статус» and disappears for good once
+   every step is genuinely done. The `[hidden]` guard is mandatory next to the
+   display rule (author origin beats the UA `[hidden]` rule). */
+.chatgoose-onboarding {
+  display: grid;
+  gap: 8px;
+  margin: 20px 20px 0;
+  padding: 18px 20px;
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+}
+
+.chatgoose-onboarding[hidden] {
+  display: none;
+}
+
+.chatgoose-onboarding-heading {
+  margin: 0;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.chatgoose-onboarding-sub {
+  color: var(--chatgoose-ink-mid);
+  font-size: 13px;
+}
+
+.chatgoose-onboarding-steps {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.chatgoose-onboarding-step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 13px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-onboarding-step-num {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink-mid);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 11.5px;
+}
+
+.chatgoose-onboarding-step[data-done='true'] .chatgoose-onboarding-step-num {
+  border-color: var(--chatgoose-green);
+  color: var(--chatgoose-green);
+}
+
+.chatgoose-onboarding-step-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chatgoose-onboarding-step-title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.chatgoose-onboarding-step-hint {
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+}
+
 /* ── «Вид» theme preview cards ── */
 .chatgoose-theme-cards {
   display: grid;
@@ -1126,6 +1209,27 @@ input[type='checkbox'] {
   align-items: flex-end;
   gap: 4px;
 }
+
+/* Ghost rows: the SHAPE of a row that will appear on its own once Fansly is
+   open, so an empty pane reads as «not yet» rather than «broken». Decoration
+   only — aria-hidden, nothing focusable inside. */
+.chatgoose-account-row-ghost {
+  grid-template-columns: 1fr minmax(200px, 280px);
+  border-style: dashed;
+  background: none;
+  opacity: 0.55;
+}
+
+.chatgoose-ghost-bar {
+  display: block;
+  height: 9px;
+  border-radius: 5px;
+  background: var(--chatgoose-line);
+}
+
+.chatgoose-ghost-bar-head { width: 42%; }
+.chatgoose-ghost-bar-sub { width: 66%; height: 7px; }
+.chatgoose-ghost-bar-select { height: 30px; border-radius: var(--chatgoose-radius-chip); }
 
 .chatgoose-account-unattributed {
   padding: 9px 12px;

@@ -34,6 +34,11 @@ export const AGENCY_HUB_API_KEY_STORAGE_KEY = 'agencyHubApiKey';
 export const AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY = 'chatgoose:deviceTokenMeta';
 /** «Выйти» best-effort hub revoke budget. */
 export const AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS = 5_000;
+/** Operational: whether the first-run checklist has been completed. Durable on
+ * purpose — the predicate must not depend on a form field, or typing the hub
+ * URL would dismiss the checklist that is still explaining what to do next.
+ * Own key, own `version`; schema v15 is untouched. */
+export const ONBOARDING_STORAGE_KEY = 'chatgoose:onboarding';
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,

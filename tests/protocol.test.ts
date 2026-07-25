@@ -68,6 +68,9 @@ describe('protocol boundary guards', () => {
     expect(
       getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1', label: '' }),
     ).toBe('setAccountLabel');
+    // E59 wave D — the first-run checklist's durable flag.
+    expect(getRuntimeRequestType({ type: 'getOnboardingState' })).toBe('getOnboardingState');
+    expect(getRuntimeRequestType({ type: 'dismissOnboarding' })).toBe('dismissOnboarding');
     // 1.6.0 shipped without this case — options-page device-token sign-in
     // was unreachable (found by the Stage 35 map regeneration).
     expect(

@@ -445,6 +445,10 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         isString(message.label)
         ? 'setAccountLabel'
         : null;
+    case 'getOnboardingState':
+      return 'getOnboardingState';
+    case 'dismissOnboarding':
+      return 'dismissOnboarding';
     case 'getSpendersList':
       return isOptionalBoolean(message, 'refresh') &&
         isOptionalString(message, 'buildId')

@@ -4,6 +4,7 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  KNOWN_ACCOUNTS_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../../src/shared/constants.js';
 import {
@@ -18,6 +19,7 @@ import type {
   AgencyHubIdentityResponse,
   AgencyHubSignOutResponse,
   AiQuotaStatus,
+  OnboardingSnapshot,
   OpsDailySnapshot,
   PersistedState,
   PersonaCatalogEntry,
@@ -72,6 +74,13 @@ export interface MountOverrides {
     setAccountLabelOk?: boolean;
     /** `false` models a tab that closed between the view read and the click. */
     focusAccountTabOk?: boolean;
+    /** First-run checklist flag. Omitted = the operation is UNAVAILABLE (an
+     * older background), which the page must read as «not fresh» — no checklist.
+     * Pass `{ version: 1, dismissedAt: null }` for a genuine first run. */
+    onboarding?: OnboardingSnapshot;
+    /** `false` makes `dismissOnboarding` answer «did not stick», so a test can
+     * prove the checklist stays instead of silently disappearing. */
+    dismissOnboardingOk?: boolean;
     /** Reply for the mount-tail (and any post-mount) testAgencyHubConnection.
      * Defaults to a passing test so a fully-configured page reaches the hero's
      * all-green state — the hub step requires a `connected` feedback. A factory
@@ -109,6 +118,8 @@ export interface MountedOptionsPage {
   labelWrites: () => Array<{ accountId: string; label: string }>;
   /** Every account the page asked to focus a tab for, in order. */
   focusRequests: () => string[];
+  /** How many times the page asked to stamp the onboarding flag. */
+  onboardingDismissals: () => number;
 }
 
 let dom: InstanceType<typeof JSDOM> | null = null;
@@ -145,6 +156,7 @@ export async function mountOptionsPage(
   const sentRequestTypes: string[] = [];
   const labelWrites: Array<{ accountId: string; label: string }> = [];
   const focusRequests: string[] = [];
+  const onboardingDismissals: number[] = [];
   // Mutable so a label write is visible to the next view read, as in production.
   const accountsView: AccountsView | null = overrides.accounts
     ? structuredClone(overrides.accounts)
@@ -238,8 +250,29 @@ export async function mountOptionsPage(
           // E51 durable-migration handshake: the page fails closed without it.
           case 'ensureStorageReady':
             return { ready: true };
-          case 'getSessionsSnapshot':
-            return runtimeReply<SessionSnapshotEntry[]>(sessions, []);
+          case 'getSessionsSnapshot': {
+            const snapshot = await runtimeReply<SessionSnapshotEntry[]>(sessions, []);
+            // The real handler reconciles `knownAccounts` inside this request
+            // (storageCoordinator.reconcileKnownAccounts) — which is exactly why
+            // the page re-reads storage once the snapshot resolves. Model the
+            // UNION so a freshly captured account becomes known here too; the
+            // background's pruning of stale unmapped ids is deliberately not
+            // modelled (no suite depends on it, and a helper that removes rows
+            // would be a surprise).
+            const known = new Set(
+              Array.isArray(stored[KNOWN_ACCOUNTS_KEY]) ? stored[KNOWN_ACCOUNTS_KEY] as string[] : [],
+            );
+            const before = known.size;
+            for (const session of snapshot) {
+              if (session.connected) {
+                known.add(session.resolvedAccountId ?? session.legacyAccountId);
+              }
+            }
+            if (known.size !== before) {
+              stored = { ...stored, [KNOWN_ACCOUNTS_KEY]: [...known] };
+            }
+            return snapshot;
+          }
           case 'testAgencyHubConnection':
             if (overrides.revealCatalogOnConnect) {
               // The background refresh onAgencyHubReady would fire has just landed:
@@ -291,6 +324,18 @@ export async function mountOptionsPage(
             const { accountId } = message as { accountId: string };
             focusRequests.push(accountId);
             return { ok: runtime.focusAccountTabOk !== false };
+          }
+          case 'getOnboardingState':
+            // No override = no handler, exactly like an older background.
+            return runtime.onboarding;
+          case 'dismissOnboarding': {
+            const ok = runtime.dismissOnboardingOk !== false;
+            if (ok) {
+              // Mirror the background: the durable flag is stamped once and the
+              // record is what a follow-up read would see.
+              onboardingDismissals.push(Date.now());
+            }
+            return { ok };
           }
           case 'getAgencyHubDeviceTokenMeta': {
             if (runtime.deviceTokenMeta !== undefined) return runtime.deviceTokenMeta;
@@ -366,6 +411,7 @@ export async function mountOptionsPage(
     sentRequestTypes: () => [...sentRequestTypes],
     labelWrites: () => labelWrites.map((entry) => ({ ...entry })),
     focusRequests: () => [...focusRequests],
+    onboardingDismissals: () => onboardingDismissals.length,
   };
 }
 

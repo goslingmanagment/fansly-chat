@@ -3,6 +3,7 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   STORAGE_SCHEMA_VERSION,
@@ -1364,6 +1365,71 @@ describe('runtime-api getOpsDaily', () => {
       hubErrorsTotal: 1,
       pageByAccount: { 'acc-1': 'lora-1' },
     });
+  });
+});
+
+describe('runtime-api onboarding flag', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('reads «not dismissed yet» for an absent or foreign-version record', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'getOnboardingState' }))
+      .toEqual({ version: 1, dismissedAt: null });
+
+    // A record from a future/foreign shape is not half-trusted.
+    mockStorage[ONBOARDING_STORAGE_KEY] = { version: 2, dismissedAt: 111 };
+    expect(await harness.send({ type: 'getOnboardingState' }))
+      .toEqual({ version: 1, dismissedAt: null });
+  });
+
+  it('stamps the flag once and keeps the FIRST timestamp afterwards', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: true });
+    const first = (mockStorage[ONBOARDING_STORAGE_KEY] as { dismissedAt: number }).dismissedAt;
+    expect(typeof first).toBe('number');
+
+    expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: true });
+    // A second call (another settings tab, a reload) must not move the date the
+    // install actually finished setup.
+    expect((mockStorage[ONBOARDING_STORAGE_KEY] as { dismissedAt: number }).dismissedAt)
+      .toBe(first);
+    // …and the read reports it.
+    expect(await harness.send({ type: 'getOnboardingState' }))
+      .toEqual({ version: 1, dismissedAt: first });
+  });
+
+  it('serializes two concurrent stamps into one record', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    const [a, b] = await Promise.all([
+      harness.send({ type: 'dismissOnboarding' }),
+      harness.send({ type: 'dismissOnboarding' }),
+    ]);
+    expect(a).toEqual({ ok: true });
+    expect(b).toEqual({ ok: true });
+    // The FIFO queue means the second read-modify-write saw the first stamp, so
+    // exactly one write landed.
+    const writes = (browser.storage.local.set as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([items]) => ONBOARDING_STORAGE_KEY in (items as Record<string, unknown>));
+    expect(writes).toHaveLength(1);
+  });
+
+  it('reports a failed write instead of pretending onboarding is over', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    (browser.storage.local.set as unknown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('quota'));
+
+    expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: false });
+    expect(mockStorage[ONBOARDING_STORAGE_KEY]).toBeUndefined();
   });
 });
 

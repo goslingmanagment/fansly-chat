@@ -882,6 +882,18 @@ export interface AccountLabelsSnapshot {
   byAccount: Record<string, string>;
 }
 
+/** First-run checklist state (`chatgoose:onboarding`).
+ *
+ * `dismissedAt` is stamped ONCE — when every step of the checklist has actually
+ * been completed — and never cleared: signing out later does not put a chatter
+ * back through onboarding. A durable flag is the whole point: the v1 predicate
+ * read live form state, so typing the hub URL cancelled the checklist that was
+ * still explaining the next two steps. */
+export interface OnboardingSnapshot {
+  version: 1;
+  dismissedAt: number | null;
+}
+
 /** One row of the cabinet's «Аккаунты» pane.
  *
  * `state` is honest about what the background can actually prove: 'live' = a
@@ -944,6 +956,8 @@ export interface RuntimeRequestMap {
   getAccountsView: undefined;
   focusAccountTab: FocusAccountTabRequest;
   setAccountLabel: SetAccountLabelRequest;
+  getOnboardingState: undefined;
+  dismissOnboarding: undefined;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -971,6 +985,8 @@ export interface RuntimeResponseMap {
   getAccountsView: AccountsView;
   focusAccountTab: { ok: boolean };
   setAccountLabel: { ok: boolean };
+  getOnboardingState: OnboardingSnapshot;
+  dismissOnboarding: { ok: boolean };
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;

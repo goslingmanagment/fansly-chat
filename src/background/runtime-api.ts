@@ -4,6 +4,7 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+  ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_RESOLVE_TIMEOUT_MS,
@@ -27,6 +28,7 @@ import type {
   AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubSignOutResponse,
+  OnboardingSnapshot,
   PopupStatus,
   RecapStatusResponse,
   SpendersBuildPayload,
@@ -123,6 +125,42 @@ async function readDeviceTokenMeta(): Promise<AgencyHubDeviceTokenMeta | null> {
     };
   } catch {
     return null;
+  }
+}
+
+// Operational-key writes (onboarding) are read-modify-write over a whole
+// record, so they run through ONE module-level FIFO queue — the same doctrine
+// the presence/labels stores follow. Two settings tabs finishing the checklist
+// at the same moment therefore cannot lose one another's stamp.
+let operationalWriteQueue: Promise<unknown> = Promise.resolve();
+function withOperationalWrite<T>(critical: () => Promise<T>): Promise<T> {
+  const run = operationalWriteQueue.then(critical, critical);
+  operationalWriteQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** First-run checklist flag. An absent or foreign-version record reads as «not
+ * dismissed yet» — the honest default for a browser profile that has never run
+ * this version. */
+async function readOnboardingState(): Promise<OnboardingSnapshot> {
+  const fresh: OnboardingSnapshot = { version: 1, dismissedAt: null };
+  try {
+    const raw = await browser.storage.local.get(ONBOARDING_STORAGE_KEY);
+    const value = raw[ONBOARDING_STORAGE_KEY];
+    if (!isObjectRecord(value) || value.version !== 1) {
+      return fresh;
+    }
+    return {
+      version: 1,
+      dismissedAt: typeof value.dismissedAt === 'number' && Number.isFinite(value.dismissedAt)
+        ? value.dismissedAt
+        : null,
+    };
+  } catch {
+    return fresh;
   }
 }
 
@@ -718,6 +756,34 @@ export function registerRuntimeApi({
           // to be able to say so instead of silently reverting on reload.
           return { ok: false };
         }
+      }
+
+      if (requestType === 'getOnboardingState') {
+        return await readOnboardingState();
+      }
+
+      if (requestType === 'dismissOnboarding') {
+        // Stamped only by the page that watched every step turn green, and only
+        // once: a second call keeps the FIRST timestamp, so a later reload cannot
+        // move the date the install finished setup.
+        return await withOperationalWrite(async () => {
+          try {
+            const current = await readOnboardingState();
+            if (current.dismissedAt !== null) {
+              return { ok: true };
+            }
+            const next: OnboardingSnapshot = { version: 1, dismissedAt: Date.now() };
+            await browser.storage.local.set({ [ONBOARDING_STORAGE_KEY]: next });
+            return { ok: true };
+          } catch (error) {
+            // A failed stamp means the checklist comes back on the next open.
+            // Annoying, never destructive — and the page must be able to know.
+            logWarn('Onboarding dismissal write failed', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return { ok: false };
+          }
+        });
       }
 
       if (requestType === 'getSessionsSnapshot') {
