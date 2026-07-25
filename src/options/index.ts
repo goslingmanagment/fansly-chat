@@ -614,8 +614,10 @@ async function render(): Promise<void> {
     installUiTheme(state.settings.uiTheme);
   }
 
+  // The cabinet's bottom breathing room belongs to the PANE (styles.css), not
+  // to the page root: a root padding on top of the shell's `min-height: 100vh`
+  // made every pane — «Вид» with its three cards included — a scrolling page.
   root.replaceChildren();
-  root.style.paddingBottom = '24px';
 
   // ─── Cabinet frame ─────────────────────────────────────────
   // Panes are built once and shown/hidden; sections below are appended into
@@ -2903,13 +2905,14 @@ async function render(): Promise<void> {
 
   refreshStatusView(); // initial paint: the loading line until the first datum
 
-  // ─── AI Models ───────────────────────────────────────────
+  // ─── Save whisper ────────────────────────────────────────
+  // (The banner above used to say «AI Models» — that section left with Stage 32.)
 
   const saveToast = document.createElement('div');
   saveToast.className = 'chatgoose-save-toast';
   saveToast.setAttribute('role', 'status');
   saveToast.setAttribute('aria-live', 'polite');
-  saveToast.textContent = 'Saved ✓';
+  saveToast.textContent = COPY.common.saved;
   document.body.append(saveToast);
   let saveToastTimer: number | undefined;
   const showSaveToast = (): void => {
