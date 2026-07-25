@@ -75,7 +75,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
-| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists |
+| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim |
 
 ## Entries
 
@@ -1809,3 +1809,56 @@ value still use their text. A deep link into an already-open tab arrives as a
 hash change, so the note and the highlight re-arm
 on `hashchange` and the previous pane keeps neither. An unknown code still opens
 its pane and explains nothing: a rotted link must degrade, never fabricate.
+
+**E59 amendment — post-campaign fixes (2026-07-25).** The whole-campaign review
+found two custody holes and three honesty holes; all five are closed here.
+
+The device-token metadata record is CUSTODY-GRADE, not the «display convenience»
+its wave-B comment claimed: sign-out aims the revoke at `meta.issuedFrom`, so the
+record decides which hub receives the bearer. The issue path therefore commits the
+custody key and the metadata in ONE `storage.local.set` (`saveSettings`'s
+`alsoWrite`, still never the settings blob — schema stays v15, E19 intact). The
+bug that forced this: a re-issue against hub B could commit the token while the
+separate best-effort meta write failed, leaving `issuedFrom: A` on disk — sign-out
+then sent B's bearer to A, A's 401 mapped to `already-invalid`, and B's token
+stayed live with the UI reporting a clean sign-out. Second half of the same fix:
+when NO readable metadata exists while a token IS stored, the revoke goes to a
+GUESSED address, so its 401/403 is reported as `unreachable` («не подтверждён»)
+rather than `already-invalid` — a 401 from a hub that never issued the token
+proves nothing. With valid metadata the existing mapping stands, and the metadata
+REMOVAL stays best-effort (it runs after the custody keys are already empty
+strings, and a leftover record cannot resurrect a token).
+
+Custody is fenced ACROSS TABS. `openOptions` guarantees a single settings tab only
+for the paths it owns — a manually opened second tab is real — and that tab used to
+keep the wiped token in memory after the other tab's «Выйти», still rendering
+«Device token active ✓» and still willing to run a connection test with a
+credential that no longer exists on disk. The page's `storage.onChanged` listener
+now applies a custody-key change into this document's own settings and repaints the
+hub state (signed-out after an external wipe, re-read metadata when the token
+itself changed). A local unsaved edit wins over the input FIELD only: a dirty
+legacy-key input keeps its typed text while the state and every signed-in
+indicator tell the truth about what is stored. A change whose values already equal
+this tab's in-memory pair is this tab's own write echoed back and is ignored, so
+the fence never doubles the save path's hub checks.
+
+Deep-link readiness now covers the Hub diagnostics rows, amending wave D's «rows
+painted from a single value still use their text»: those rows PRE-FILL
+«неизвестно», so text would arm the one-shot highlight on a placeholder and the
+2s flash could expire before host access or identity hydrate — with nothing left
+to re-arm. Every row whose value can only come from a read that has not landed
+ships `data-deeplink-ready="false"` and flips to `"true"` the moment its own
+source SETTLES (a failure is a real answer too); «Проверка» stays text-based
+because its first paint is already complete from in-page state.
+
+Two honesty rules are tightened. (1) Availability of the local «Статус» reads is
+derived from settlement AND parse validity: a stale background can FULFIL with
+`undefined`, which the parsers used to collapse into `[]`/`null` — the same shape a
+quiet day produces — so the pane and the copied report asserted «сегодня генераций
+не было» / «доска ещё не открывалась» about a reply nobody could use. The parsers
+return `{ok, value}`, and an unusable reply paints the same «недоступно» a rejected
+read does, while a genuinely empty map or a null board observation keeps its honest
+empty. (2) A failed Fansly sessions read carries into `StatusReportModel`
+(`unavailable.fansly`): the row was already honest, but the report printed the
+zero-account claim from the same placeholder zero. A successful re-poll clears the
+flag.

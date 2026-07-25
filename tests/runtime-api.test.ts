@@ -927,6 +927,106 @@ describe('runtime-api testAgencyHubConnection', () => {
   });
 });
 
+describe('runtime-api issueAgencyHubDeviceToken', () => {
+  const fanslyClient = { getAuthenticatedAccount: vi.fn(async () => undefined) };
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('commits the device token and its issuing-hub metadata in ONE storage write', async () => {
+    // Custody-grade binding: sign-out revokes against `meta.issuedFrom`, so a
+    // token that lands without its metadata (or with a PREVIOUS hub's) sends the
+    // new bearer to the old hub, whose 401 reads as a clean sign-out while the
+    // token stays live. One `storage.set` makes that divergence impossible.
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_from_hub_a',
+      [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
+        version: 1,
+        keyPrefix: 'aaa',
+        issuedAt: 1,
+        expiresAt: '2026-08-01T00:00:00.000Z',
+        issuedFrom: 'https://hub-a.example',
+      },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-a.example' },
+    });
+    const { send } = await installRuntimeApiHarness(fanslyClient);
+
+    const setCalls: Array<Record<string, unknown>> = [];
+    const browserRef = (globalThis as {
+      browser: { storage: { local: { set: (items: Record<string, unknown>) => Promise<void> } } };
+    }).browser;
+    const realSet = browserRef.storage.local.set;
+    browserRef.storage.local.set = vi.fn(async (items: Record<string, unknown>) => {
+      setCalls.push({ ...items });
+      return realSet(items);
+    });
+
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+      const href = String(url);
+      const json = (payload: unknown): Response => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+      if (href.endsWith('/api/v1/auth/login')) {
+        return json({
+          authMethod: 'session',
+          user: {
+            id: 7, username: 'dasha', role: 'chatter', mustChangePassword: false, assignedPages: [],
+          },
+        });
+      }
+      if (href.endsWith('/api/v1/auth/device-tokens')) {
+        return json({
+          token: 'agency_hub_device_from_hub_b',
+          id: 12,
+          label: 'chatgoose-extension firefox',
+          keyPrefix: 'bbb',
+          expiresAt: '2026-10-04T00:00:00.000Z',
+        });
+      }
+      if (href.endsWith('/api/v1/auth/logout')) {
+        return json({ ok: true });
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    }));
+    try {
+      const response = await send({
+        type: 'issueAgencyHubDeviceToken',
+        baseUrl: 'https://hub-b.example',
+        username: 'dasha',
+        password: 'pw',
+      });
+      expect(response).toMatchObject({ ok: true, keyPrefix: 'bbb' });
+    } finally {
+      vi.unstubAllGlobals();
+      browserRef.storage.local.set = realSet;
+    }
+
+    // The custody key and the metadata rode the SAME set — there is no window in
+    // which the token belongs to hub B while the record still names hub A.
+    const custodyWrites = setCalls.filter(
+      (call) => AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY in call,
+    );
+    expect(custodyWrites).toHaveLength(1);
+    expect(custodyWrites[0]).toMatchObject({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_from_hub_b',
+      [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: expect.objectContaining({
+        version: 1,
+        keyPrefix: 'bbb',
+        issuedFrom: 'https://hub-b.example',
+      }),
+    });
+    // No separate metadata write is left anywhere in the sequence.
+    expect(
+      setCalls.filter((call) => AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY in call),
+    ).toHaveLength(1);
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]).toMatchObject({
+      issuedFrom: 'https://hub-b.example',
+    });
+  });
+});
+
 describe('runtime-api signOutAgencyHub', () => {
   const fanslyClient = { getAuthenticatedAccount: vi.fn(async () => undefined) };
   beforeEach(() => {
@@ -1081,6 +1181,57 @@ describe('runtime-api signOutAgencyHub', () => {
     expect(response).toEqual({ outcome: 'already-invalid' });
     expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // nothing to revoke
     expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe(''); // apiKey still wiped
+  });
+
+  it('maps a 401/403 revoke to "unreachable" when NO metadata names the issuing hub', async () => {
+    // Without a metadata record nothing here knows which hub minted the stored
+    // token, so the revoke goes to a guessed address. Its 401/403 is equally «the
+    // token is dead» and «this hub never issued it» — reporting «уже недействителен»
+    // would claim a clean sign-out over a bearer that may still be live elsewhere.
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b.example' },
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(async () => 'already-invalid' as const),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'unreachable' });
+    // The revoke WAS attempted (best effort against the only address we have)…
+    expect(agencyHubClient.revokeDeviceToken).toHaveBeenCalledTimes(1);
+    // …and the local wipe still happened — EMPTY strings, never removal (E19).
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    vi.restoreAllMocks();
+  });
+
+  it('keeps "already-invalid" when VALID metadata names the issuing hub', async () => {
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
+        version: 1,
+        keyPrefix: 'abc',
+        issuedAt: 1,
+        expiresAt: '2026-08-01T00:00:00.000Z',
+        issuedFrom: 'https://hub-a.example',
+      },
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(
+        async (
+          _settings: { agencyHubBaseUrl: string; agencyHubDeviceToken: string },
+          _signal: AbortSignal,
+        ) => 'already-invalid' as const,
+      ),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    // The 401 came from the hub that really minted this token: an honest sign-out.
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'already-invalid' });
+    const [passedSettings] = agencyHubClient.revokeDeviceToken.mock.calls[0]!;
+    expect(passedSettings.agencyHubBaseUrl).toBe('https://hub-a.example');
   });
 
   it('maps a thrown revoke to "unreachable" (already wiped)', async () => {

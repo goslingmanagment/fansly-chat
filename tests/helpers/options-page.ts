@@ -28,6 +28,10 @@ import type {
   SpendersObservation,
 } from '../../src/shared/types.js';
 
+/** A staged reply: the value itself, or a factory — which may defer, reject, or
+ * return a MALFORMED reply. */
+type MaybeFactory<T> = T | (() => T | Promise<T>);
+
 export interface MountOverrides {
   /** Merged over the default Settings. */
   settings?: Partial<Settings>;
@@ -64,9 +68,12 @@ export interface MountOverrides {
   runtime?: {
     health?: AgencyHubHealthResponse | (() => AgencyHubHealthResponse | Promise<AgencyHubHealthResponse>);
     identity?: AgencyHubIdentityResponse | (() => AgencyHubIdentityResponse | Promise<AgencyHubIdentityResponse>);
-    quotaByPage?: Record<string, AiQuotaStatus> | (() => Record<string, AiQuotaStatus> | Promise<Record<string, AiQuotaStatus>>);
-    spenders?: SpendersObservation | null | (() => SpendersObservation | null | Promise<SpendersObservation | null>);
-    opsDaily?: OpsDailySnapshot | (() => OpsDailySnapshot | Promise<OpsDailySnapshot>);
+    // These three accept a factory returning `undefined` on purpose: that is what
+    // a stale background (or a dropped frame) fulfils with, and the pane must read
+    // such a reply as «недоступно» rather than as an honest quiet day.
+    quotaByPage?: MaybeFactory<Record<string, AiQuotaStatus> | undefined>;
+    spenders?: MaybeFactory<SpendersObservation | null | undefined>;
+    opsDaily?: MaybeFactory<OpsDailySnapshot | undefined>;
     /** «Выйти» outcome. The default 'revoked' also performs the background's
      * durable wipe on the harness record, so a test sees what the real
      * background would have left behind. A factory may reject. */
@@ -99,6 +106,11 @@ export interface MountOverrides {
 
 type TestConnectionReply = { ok: true } | { ok: false; error?: unknown };
 
+type StorageChangeListener = (
+  changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+  areaName: string,
+) => void;
+
 export function emptyOpsDaily(dateUtc = new Date().toISOString().slice(0, 10)): OpsDailySnapshot {
   return {
     version: 1,
@@ -116,6 +128,14 @@ export interface MountedOptionsPage {
   window: Window & typeof globalThis;
   /** Drain microtasks and any pending timers so render() settles. */
   flushAsync: () => Promise<void>;
+  /** Model ANOTHER writer (a second options tab, the background) changing
+   * storage.local: each change's `newValue` is applied to the record first — an
+   * absent `newValue` removes the key — and only then are the page's
+   * `storage.onChanged` listeners notified, exactly as the browser orders it. */
+  emitStorageChange: (
+    changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+    areaName?: string,
+  ) => void;
   /** The in-memory storage record, normalized the way the app reads it. */
   getState: () => PersistedState;
   /** The raw storage record — for asserting operational/custody keys directly. */
@@ -165,6 +185,7 @@ export async function mountOptionsPage(
 
   const sessions = overrides.sessions ?? [];
   const runtime = overrides.runtime ?? {};
+  const storageChangeListeners = new Set<StorageChangeListener>();
   const sentRequestTypes: string[] = [];
   const labelWrites: Array<{ accountId: string; label: string }> = [];
   const focusRequests: string[] = [];
@@ -234,8 +255,12 @@ export async function mountOptionsPage(
         }),
       },
       onChanged: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: vi.fn((listener: StorageChangeListener) => {
+          storageChangeListeners.add(listener);
+        }),
+        removeListener: vi.fn((listener: StorageChangeListener) => {
+          storageChangeListeners.delete(listener);
+        }),
       },
     },
     runtime: {
@@ -305,13 +330,13 @@ export async function mountOptionsPage(
           case 'getAgencyHubIdentity':
             return runtimeReply<AgencyHubIdentityResponse>(runtime.identity, { ok: false, reason: 'no_credential' });
           case 'getAiQuotaByPage':
-            return runtimeReply<Record<string, AiQuotaStatus>>(runtime.quotaByPage, {});
+            return runtimeReply<Record<string, AiQuotaStatus> | undefined>(runtime.quotaByPage, {});
           case 'getAiQuotaStatus':
             return null;
           case 'getOpsDaily':
-            return runtimeReply<OpsDailySnapshot>(runtime.opsDaily, emptyOpsDaily());
+            return runtimeReply<OpsDailySnapshot | undefined>(runtime.opsDaily, emptyOpsDaily());
           case 'getSpendersStatus':
-            return runtimeReply<SpendersObservation | null>(runtime.spenders, null);
+            return runtimeReply<SpendersObservation | null | undefined>(runtime.spenders, null);
           case 'getAccountsView':
             // `undefined` is what an older background answers — the page must
             // degrade instead of blanking the pane.
@@ -431,6 +456,20 @@ export async function mountOptionsPage(
     document: window.document as unknown as Document,
     window: window as unknown as Window & typeof globalThis,
     flushAsync,
+    emitStorageChange: (changes, areaName = 'local') => {
+      const next = { ...stored };
+      for (const [key, change] of Object.entries(changes)) {
+        if (Object.prototype.hasOwnProperty.call(change, 'newValue')) {
+          next[key] = structuredClone(change.newValue);
+        } else {
+          delete next[key];
+        }
+      }
+      stored = next;
+      for (const listener of storageChangeListeners) {
+        listener(changes, areaName);
+      }
+    },
     getState: () => migrateState(structuredClone(stored)),
     getRawStorage: () => structuredClone(stored),
     sentRequestTypes: () => [...sentRequestTypes],

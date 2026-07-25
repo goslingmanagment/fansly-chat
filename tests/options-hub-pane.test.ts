@@ -227,6 +227,73 @@ describe('options «Agency Hub» pane', () => {
       expect(raw.settings).not.toHaveProperty('agencyHubDeviceToken');
     });
 
+    it('fences a SECOND tab: an external custody wipe repaints this tab signed-out', async () => {
+      // `openOptions` keeps ONE settings tab only for the paths it owns — a
+      // manually opened second tab is real. Without the fence this tab keeps the
+      // wiped token in memory after the other tab's «Выйти»: it renders «Device
+      // token active ✓» and would run a connection test with a credential that no
+      // longer exists on disk.
+      const page = await signedInMount({
+        settings: {
+          agencyHubBaseUrl: 'https://hub.example',
+          agencyHubDeviceToken: 'agency_hub_device_SECRET',
+          agencyHubApiKey: 'legacy-SECRET',
+        },
+      });
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+      const keyInput = page.document.querySelector<HTMLInputElement>(
+        'input[type="password"][autocomplete="off"]',
+      );
+      expect(keyInput?.value).toBe('legacy-SECRET');
+
+      // The other tab's sign-out: EMPTY strings, never removal (E19).
+      page.emitStorageChange({
+        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+          oldValue: 'agency_hub_device_SECRET',
+          newValue: '',
+        },
+        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
+      });
+      await page.flushAsync();
+
+      // This document's own state followed the wipe…
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
+      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenActive);
+      expect(keyInput?.value).toBe('');
+      // …so there is nothing left to sign out of, and the sign-in form is back.
+      expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
+      expect(page.document.body.textContent).toContain('No device token yet.');
+    });
+
+    it('keeps a dirty legacy-key input while still updating the signed-in state', async () => {
+      // The typed text belongs to THIS chatter and is not saved yet, so it must
+      // survive — but the indicators may not claim a credential that was wiped.
+      const page = await signedInMount({
+        settings: {
+          agencyHubBaseUrl: 'https://hub.example',
+          agencyHubDeviceToken: 'agency_hub_device_SECRET',
+          agencyHubApiKey: 'legacy-SECRET',
+        },
+      });
+      const keyInput = page.document.querySelector<HTMLInputElement>(
+        'input[type="password"][autocomplete="off"]',
+      );
+      keyInput!.value = 'legacy-typed-SECRET';
+      keyInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+
+      page.emitStorageChange({
+        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+          oldValue: 'agency_hub_device_SECRET',
+          newValue: '',
+        },
+        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
+      });
+      await page.flushAsync();
+
+      expect(keyInput!.value).toBe('legacy-typed-SECRET');
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
+    });
+
     it('drops a pending legacy-key write instead of letting it land during the revoke', async () => {
       // The page's debounced settings chain writes `agencyHubApiKey` OUTSIDE
       // the background's auth FIFO. A snapshot still armed when «Выйти» is

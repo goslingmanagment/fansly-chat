@@ -204,7 +204,18 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
 export async function saveSettings(
   settingsPatch: Partial<Settings>,
   baseSettings?: Settings,
-  options: { observedSchemaVersion?: number | null } = {},
+  options: {
+    observedSchemaVersion?: number | null;
+    /** Extra TOP-LEVEL storage.local keys to commit in the SAME `storage.set`
+     * as this write. The one use is a record that must never disagree with a
+     * credential written here: the device-token metadata says WHICH hub minted
+     * the stored token, and sign-out revokes against that address, so a
+     * separate write that fails would leave a live bearer orphaned on the
+     * issuing hub (E59 post-campaign fix). Never the `settings` blob, never
+     * `schemaVersion`, and never a key this function already writes itself —
+     * those are owned above and a duplicate here would silently win. */
+    alsoWrite?: Record<string, unknown>;
+  } = {},
 ): Promise<Settings> {
   const observedSchemaVersion = options.observedSchemaVersion;
   if (
@@ -270,6 +281,11 @@ export async function saveSettings(
   }
   if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubApiKey')) {
     items[AGENCY_HUB_API_KEY_STORAGE_KEY] = nextSettings.agencyHubApiKey;
+  }
+  // Co-writes land in the same set as the credential above — one atomic commit,
+  // so the two can never describe different tokens.
+  for (const [key, value] of Object.entries(options.alsoWrite ?? {})) {
+    items[key] = value;
   }
   await browser.storage.local.set(items);
   return nextSettings;
