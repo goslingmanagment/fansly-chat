@@ -12,6 +12,7 @@ import {
   serializePersistedState,
 } from '../../src/shared/migrations.js';
 import type {
+  AccountsView,
   AgencyHubDeviceTokenMeta,
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
@@ -45,6 +46,12 @@ export interface MountOverrides {
   /** Extra raw storage.local keys, merged over the serialized state. Operational
    * keys (`chatgoose:*`) live outside PersistedState and are seeded here. */
   storage?: Record<string, unknown>;
+  /** The background's «Аккаунты» view. Omitted = the operation is unavailable
+   * (the page then degrades to knownAccounts + the sessions snapshot, exactly as
+   * it would against an older background). The harness keeps this object
+   * MUTABLE: a `setAccountLabel` the page sends is applied to it, so the
+   * follow-up `getAccountsView` reflects the rename the way production does. */
+  accounts?: AccountsView;
   /** Deterministic replies for the status/hero runtime reads. Each field may be
    * a value OR a factory — a factory lets a test return a deferred promise
    * (signature-guard A→B race) or a rejecting promise (independent-source
@@ -60,6 +67,11 @@ export interface MountOverrides {
      * background would have left behind. A factory may reject. */
     signOut?: AgencyHubSignOutResponse | (() => AgencyHubSignOutResponse | Promise<AgencyHubSignOutResponse>);
     deviceTokenMeta?: AgencyHubDeviceTokenMeta | null;
+    /** `false` makes every `setAccountLabel` fail the way a rejected storage
+     * write does, so a test can prove the editor stays open with the typed text. */
+    setAccountLabelOk?: boolean;
+    /** `false` models a tab that closed between the view read and the click. */
+    focusAccountTabOk?: boolean;
     /** Reply for the mount-tail (and any post-mount) testAgencyHubConnection.
      * Defaults to a passing test so a fully-configured page reaches the hero's
      * all-green state — the hub step requires a `connected` feedback. A factory
@@ -93,6 +105,10 @@ export interface MountedOptionsPage {
   getRawStorage: () => Record<string, unknown>;
   /** Every runtime request type the page issued, in order. */
   sentRequestTypes: () => string[];
+  /** Every `setAccountLabel` the page sent, in order. */
+  labelWrites: () => Array<{ accountId: string; label: string }>;
+  /** Every account the page asked to focus a tab for, in order. */
+  focusRequests: () => string[];
 }
 
 let dom: InstanceType<typeof JSDOM> | null = null;
@@ -127,6 +143,12 @@ export async function mountOptionsPage(
   const sessions = overrides.sessions ?? [];
   const runtime = overrides.runtime ?? {};
   const sentRequestTypes: string[] = [];
+  const labelWrites: Array<{ accountId: string; label: string }> = [];
+  const focusRequests: string[] = [];
+  // Mutable so a label write is visible to the next view read, as in production.
+  const accountsView: AccountsView | null = overrides.accounts
+    ? structuredClone(overrides.accounts)
+    : null;
 
   // v15 storage.local layout: credentials live in their own custody keys and
   // the `settings` blob is stripped of them. serializePersistedState is the
@@ -243,6 +265,33 @@ export async function mountOptionsPage(
             return runtimeReply<OpsDailySnapshot>(runtime.opsDaily, emptyOpsDaily());
           case 'getSpendersStatus':
             return runtimeReply<SpendersObservation | null>(runtime.spenders, null);
+          case 'getAccountsView':
+            // `undefined` is what an older background answers — the page must
+            // degrade instead of blanking the pane.
+            return accountsView ? structuredClone(accountsView) : undefined;
+          case 'setAccountLabel': {
+            const { accountId, label } = message as { accountId: string; label: string };
+            labelWrites.push({ accountId, label });
+            if (runtime.setAccountLabelOk === false) {
+              return { ok: false };
+            }
+            // Mirror the background: the labels store is the only writer, and the
+            // row label prefers the local one.
+            const entry = accountsView?.accounts.find(
+              (candidate) => candidate.accountId === accountId,
+            );
+            if (entry) {
+              const normalized = label.replace(/\s+/g, ' ').trim().slice(0, 60);
+              entry.localLabel = normalized || null;
+              if (normalized) entry.label = normalized;
+            }
+            return { ok: true };
+          }
+          case 'focusAccountTab': {
+            const { accountId } = message as { accountId: string };
+            focusRequests.push(accountId);
+            return { ok: runtime.focusAccountTabOk !== false };
+          }
           case 'getAgencyHubDeviceTokenMeta': {
             if (runtime.deviceTokenMeta !== undefined) return runtime.deviceTokenMeta;
             const meta = stored[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
@@ -315,6 +364,8 @@ export async function mountOptionsPage(
     getState: () => migrateState(structuredClone(stored)),
     getRawStorage: () => structuredClone(stored),
     sentRequestTypes: () => [...sentRequestTypes],
+    labelWrites: () => labelWrites.map((entry) => ({ ...entry })),
+    focusRequests: () => [...focusRequests],
   };
 }
 

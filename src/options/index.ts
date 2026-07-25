@@ -67,6 +67,8 @@ import {
 } from '../shared/storage.js';
 import { installUiTheme } from '../shared/theme.js';
 import type {
+  AccountsView,
+  AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
@@ -154,9 +156,49 @@ function asSpendersObservation(value: unknown): SpendersObservation | null {
     : null;
 }
 
+function asAccountsView(value: unknown): AccountsView | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.accounts) || typeof record.unattributedFanslyTabs !== 'number') {
+    return null;
+  }
+  const accounts = record.accounts.filter((entry): entry is AccountsViewEntry => {
+    if (typeof entry !== 'object' || entry === null) return false;
+    const candidate = entry as Record<string, unknown>;
+    return typeof candidate.accountId === 'string' &&
+      Boolean(candidate.accountId) &&
+      typeof candidate.label === 'string' &&
+      (candidate.state === 'live' || candidate.state === 'seen' || candidate.state === 'never');
+  });
+  return { accounts, unattributedFanslyTabs: record.unattributedFanslyTabs };
+}
+
 function formatClockTime(at: number): string {
   const date = new Date(at);
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate();
+}
+
+/** «была {when}» for an account this browser is not currently holding a session
+ * for. A bare «21:40» three days later would read as today, so anything older
+ * than yesterday carries its date. */
+function formatSeenWhen(at: number): string {
+  const seenAt = new Date(at);
+  const now = new Date();
+  const time = formatClockTime(at);
+  if (isSameLocalDay(seenAt, now)) {
+    return COPY.accounts.whenToday.replace('{time}', time);
+  }
+  if (isSameLocalDay(seenAt, new Date(now.getTime() - 24 * 60 * 60 * 1000))) {
+    return COPY.accounts.whenYesterday.replace('{time}', time);
+  }
+  const date = `${String(seenAt.getDate()).padStart(2, '0')}.${String(seenAt.getMonth() + 1).padStart(2, '0')}`;
+  return COPY.accounts.whenDate.replace('{date}', date).replace('{time}', time);
 }
 
 /**
@@ -2542,17 +2584,30 @@ async function render(): Promise<void> {
     createLegacyPersonaExportControls(),
   );
 
-  // ─── Account Mappings ──────────────────────────────────────
-  const mappingsSection = createSection('Account Mappings');
+  // ─── «Аккаунты» ────────────────────────────────────────────
+  const mappingsSection = createSection(COPY.accounts.title);
   mappingsSection.dataset.sessionHydration = 'loading';
+  // Own node rather than createSection's description: the subtitle counts live
+  // accounts, so it has to be repaintable.
+  const accountsSubtitle = document.createElement('div');
+  accountsSubtitle.className = 'chatgoose-section-desc';
+  accountsSubtitle.dataset.role = 'accounts-subtitle';
+  accountsSubtitle.textContent = COPY.accounts.subtitle
+    .replace('{live}', '—')
+    .replace('{total}', '—');
   const mappingsTable = document.createElement('div');
-  mappingsTable.style.display = 'grid';
-  mappingsTable.style.gap = '12px';
+  mappingsTable.className = 'chatgoose-account-rows';
   const mappingsLoading = document.createElement('div');
-  mappingsLoading.textContent = 'Loading Fansly accounts…';
+  mappingsLoading.textContent = COPY.accounts.loading;
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
   mappingsTable.append(mappingsLoading);
-  mappingsSection.append(mappingsTable);
+  // Static tail: the honesty note about what «в работе» means and that labels
+  // never leave this device. Outside `mappingsTable`, which is replaced wholesale
+  // on every repaint.
+  const accountsHint = document.createElement('div');
+  accountsHint.className = 'chatgoose-status-hint';
+  accountsHint.textContent = COPY.accounts.hint;
+  mappingsSection.append(accountsSubtitle, mappingsTable, accountsHint);
   // One section per pane — the rail carries the reading order now (setup
   // order: the hub everything depends on, then the personas it serves, then
   // the accounts they map to, then the local-only settings).
@@ -2566,6 +2621,24 @@ async function render(): Promise<void> {
   cleanupTasks.push(() => {
     disposed = true;
   });
+
+  /** The background's honest account view: durable presence, local labels, tab
+   * attribution and the observed kernel page. `null` until the first read lands
+   * (or after one fails) — the renderer then degrades to what this page can see
+   * on its own instead of showing nothing. */
+  let accountsView: AccountsView | null = null;
+  const refreshAccountsView = async (): Promise<void> => {
+    try {
+      const reply = await sendRuntimeRequest('getAccountsView');
+      if (disposed) return;
+      const parsed = asAccountsView(reply);
+      // A malformed reply keeps the previous view rather than blanking the pane:
+      // stale-but-real beats invented-empty.
+      if (parsed) accountsView = parsed;
+    } catch (error) {
+      console.error('Failed to read the Fansly accounts view', error);
+    }
+  };
 
   type PersonalityMappingView = {
     personality: PersonaCatalogEntry;
@@ -2592,7 +2665,7 @@ async function render(): Promise<void> {
     });
   };
   // The mapped persona's name already lives in the select — the info cell
-  // carries only what the select can't: connection state and a dead mapping.
+  // carries only what the select can't: session state and a dead mapping.
   const renderMappingInfo = (
     info: HTMLElement,
     view: { label: string; usable: boolean } | null,
@@ -2601,11 +2674,13 @@ async function render(): Promise<void> {
     info.replaceChildren(
       createStatusPill(
         connected ? 'ok' : 'neutral',
-        connected ? 'Connected' : 'Disconnected',
+        connected ? COPY.accounts.stateLive : COPY.accounts.stateIdle,
       ),
     );
     if (view && !view.usable) {
-      info.append(createStatusPill('warn', 'Persona unavailable'));
+      // An archived persona still mapped: the only useful instruction is «pick a
+      // replacement», which is exactly what the Персоны pane says too.
+      info.append(createStatusPill('warn', COPY.personas.archivedMapped));
     }
   };
   const populateMappingSelect = (
@@ -2615,14 +2690,14 @@ async function render(): Promise<void> {
   ): { label: string; usable: boolean } | null => {
     const unmapped = document.createElement('option');
     unmapped.value = '';
-    unmapped.textContent = 'Unmapped';
+    unmapped.textContent = COPY.accounts.personaSelectNone;
     select.replaceChildren(unmapped);
     for (const view of views) {
       const option = document.createElement('option');
       option.value = view.personality.key;
       option.textContent = view.usable
         ? view.label
-        : `${view.label} · archived`;
+        : `${view.label} · ${COPY.accounts.personaSelectArchived}`;
       option.disabled = !view.usable;
       select.append(option);
     }
@@ -2633,7 +2708,10 @@ async function render(): Promise<void> {
     if (selectedPersonalityId && !selectedView) {
       const missing = document.createElement('option');
       missing.value = selectedPersonalityId;
-      missing.textContent = `Unavailable persona · ${selectedPersonalityId}`;
+      missing.textContent = COPY.accounts.personaSelectMissing.replace(
+        '{key}',
+        selectedPersonalityId,
+      );
       missing.disabled = true;
       select.append(missing);
       select.value = selectedPersonalityId;
@@ -2740,59 +2818,203 @@ async function render(): Promise<void> {
     });
   }
 
+  /**
+   * The rows to paint. The background's view is authoritative — it is the only
+   * side that knows durable presence, local labels and tab attribution.
+   *
+   * Without it (an older background, a rejected read) the pane degrades to what
+   * this page can see by itself: the known accounts and the live snapshot. The
+   * degraded rows deliberately claim LESS — no 'seen' state, no observed page,
+   * no tab id — instead of guessing.
+   */
+  const buildAccountRowViews = (
+    sessions: SessionSnapshotEntry[],
+  ): AccountsViewEntry[] => {
+    if (accountsView) {
+      return accountsView.accounts;
+    }
+    const lookup = buildSessionLookup(sessions);
+    return state.knownAccounts.map((accountId) => {
+      const session = lookup.get(accountId);
+      return {
+        accountId,
+        label: formatAccountHeading(accountId, session),
+        localLabel: null,
+        state: session?.connected ? 'live' : 'never',
+        lastSeenAt: session?.lastSeenAt ?? null,
+        tabId: null,
+        personaMapped: isAccountPersonaMapped(accountId),
+        observedPage: null,
+      } satisfies AccountsViewEntry;
+    });
+  };
+
   const renderAccountMappings = (
     sessions: SessionSnapshotEntry[],
     hydrationFailed: boolean,
   ): void => {
-    const sessionsByAccountId = buildSessionLookup(sessions);
     const personalityViews = buildPersonalityMappingViews();
+    const rows = buildAccountRowViews(sessions);
 
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
 
+    accountsSubtitle.textContent = rows.length === 0
+      ? COPY.accounts.subtitleFresh
+      : COPY.accounts.subtitle
+          .replace('{live}', String(rows.filter((row) => row.state === 'live').length))
+          .replace('{total}', String(rows.length));
+
     if (hydrationFailed) {
       const warning = document.createElement('div');
-      warning.textContent = 'Live account refresh failed. Showing mappings from local storage.';
+      warning.textContent = COPY.accounts.refreshFailed;
       warning.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(warning);
     }
 
-    state.knownAccounts.forEach((accountId) => {
-      const session = sessionsByAccountId.get(accountId);
+    rows.forEach((view) => {
+      const accountId = view.accountId;
+      const isLive = view.state === 'live';
       const row = document.createElement('div');
+      row.className = 'chatgoose-account-row';
       row.dataset.accountMappingRow = accountId;
-      row.style.display = 'grid';
-      row.style.gridTemplateColumns = '1fr minmax(220px, 320px) auto';
-      row.style.gap = '12px';
-      row.style.alignItems = 'center';
-      row.style.padding = '12px';
-      row.style.borderRadius = 'var(--chatgoose-radius-card)';
-      row.style.background = 'var(--chatgoose-bg2)';
-      row.style.border = '1px solid var(--chatgoose-line)';
+      row.dataset.accountState = view.state;
 
-      const label = document.createElement('div');
-      label.style.display = 'grid';
-      label.style.gap = '4px';
+      const identity = document.createElement('div');
+      identity.className = 'chatgoose-account-identity';
+      const dot = document.createElement('span');
+      dot.className = 'chatgoose-account-dot';
 
-      const headingText = formatAccountHeading(accountId, session);
-      const labelTitle = document.createElement('div');
-      labelTitle.textContent = headingText;
-      labelTitle.style.fontWeight = '600';
-      if (headingText === shortenAccountId(session?.resolvedAccountId ?? accountId)) {
-        // No resolved name yet — the heading IS the id, so render it as data.
-        labelTitle.classList.add('chatgoose-mono');
-        labelTitle.style.fontWeight = '500';
+      const body = document.createElement('div');
+      body.className = 'chatgoose-account-body';
+
+      const head = document.createElement('div');
+      head.className = 'chatgoose-account-head';
+      const labelNode = document.createElement('span');
+      labelNode.className = 'chatgoose-account-label';
+      labelNode.textContent = view.label;
+      if (view.localLabel) {
+        // Say WHOSE name this is — a local label must never be mistaken for the
+        // model's real Fansly handle.
+        labelNode.title = COPY.accounts.renameLocalTitle;
+        labelNode.dataset.accountLocalLabel = 'true';
+      } else if (view.label === shortenAccountId(accountId)) {
+        // No name resolved and no label: the heading IS the id, so render it as
+        // data rather than as a name.
+        labelNode.classList.add('chatgoose-mono');
+      }
+      head.append(labelNode);
+
+      const renameButton = document.createElement('button');
+      renameButton.type = 'button';
+      renameButton.className = 'chatgoose-account-rename';
+      renameButton.dataset.accountRename = accountId;
+      renameButton.title = COPY.accounts.renameTitle;
+      renameButton.setAttribute('aria-label', COPY.accounts.renameTitle);
+      renameButton.textContent = '✎';
+      head.append(renameButton);
+
+      if (!view.personaMapped) {
+        // Amber, not red: nothing is broken — the account simply cannot generate
+        // until a persona is chosen, and the hint says exactly that.
+        const aiOff = createBadge(COPY.accounts.personaUnmapped, 'amber');
+        aiOff.dataset.accountAiOff = accountId;
+        aiOff.title = COPY.accounts.personaUnmappedHint;
+        head.append(aiOff);
       }
 
-      label.append(
-        labelTitle,
-        createCopyableId(session?.resolvedAccountId ?? accountId),
-      );
+      // Inline label editor: Enter saves through the runtime operation (the only
+      // writer of the labels key), Esc — and a blur — cancel. There is no second
+      // save path, so a half-typed label can never be persisted by accident.
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.className = 'chatgoose-input chatgoose-account-rename-input';
+      labelInput.dataset.accountLabelInput = accountId;
+      labelInput.placeholder = COPY.accounts.renameEmpty;
+      labelInput.maxLength = 60;
+      labelInput.value = view.localLabel ?? '';
+      labelInput.hidden = true;
+
+      const closeEditor = (): void => {
+        labelInput.hidden = true;
+        labelInput.value = view.localLabel ?? '';
+        renameButton.hidden = false;
+        labelNode.hidden = false;
+      };
+      renameButton.addEventListener('click', () => {
+        labelNode.hidden = true;
+        renameButton.hidden = true;
+        labelInput.hidden = false;
+        labelInput.focus();
+        labelInput.select();
+      });
+      labelInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeEditor();
+          return;
+        }
+        if (event.key !== 'Enter') {
+          return;
+        }
+        event.preventDefault();
+        const nextLabel = labelInput.value;
+        labelInput.disabled = true;
+        void (async () => {
+          try {
+            const reply = await sendRuntimeRequest('setAccountLabel', {
+              accountId,
+              label: nextLabel,
+            });
+            if (reply?.ok !== true) {
+              throw new Error('Account label write was not acknowledged');
+            }
+            await refreshAccountsView();
+            if (!disposed) {
+              // The rebuilt row carries the new label; this editor goes with it.
+              renderAccountMappings(sessions, hydrationFailed);
+            }
+          } catch (error) {
+            // Keep the editor open with the typed text: a rename that did not
+            // stick must not look like it did.
+            console.error('Failed to save the local account label', error);
+            if (!disposed) {
+              labelInput.disabled = false;
+              labelInput.focus();
+            }
+          }
+        })();
+      });
+      labelInput.addEventListener('blur', () => {
+        if (!labelInput.disabled) closeEditor();
+      });
+
+      const sub = document.createElement('div');
+      sub.className = 'chatgoose-account-sub';
+      sub.append(createCopyableId(accountId));
+      const facts: string[] = [
+        isLive
+          ? COPY.accounts.subTabActive
+          : view.lastSeenAt !== null
+            ? COPY.accounts.subSeenAt.replace('{when}', formatSeenWhen(view.lastSeenAt))
+            : COPY.accounts.subNeverSeen,
+      ];
+      if (view.observedPage) {
+        facts.push(COPY.accounts.corePage.replace('{page}', view.observedPage));
+      }
+      const factsNode = document.createElement('span');
+      factsNode.className = 'chatgoose-account-facts';
+      factsNode.dataset.role = 'account-facts';
+      factsNode.textContent = facts.join(' · ');
+      sub.append(factsNode);
+
+      body.append(head, labelInput, sub);
+      identity.append(dot, body);
 
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
       select.dataset.accountId = accountId;
-      select.dataset.connected = session?.connected ? 'true' : 'false';
+      select.dataset.connected = isLive ? 'true' : 'false';
       const mappedView = populateMappingSelect(
         select,
         state.accountMappings[accountId] ?? '',
@@ -2812,6 +3034,12 @@ async function render(): Promise<void> {
             state.accountMappings = refreshedState.accountMappings;
             state.accountAliases = refreshedState.accountAliases;
             state.knownAccounts = refreshedState.knownAccounts;
+            // A fresh mapping flips this row's «AI отключён», so the background
+            // view has to be re-read before the rows are rebuilt.
+            await refreshAccountsView();
+            if (disposed) {
+              return;
+            }
             // Update only the account rows. Rebuilding the whole page here
             // would replace personality inputs and could flush stale debounced
             // form state over a user's in-progress edit.
@@ -2829,23 +3057,52 @@ async function render(): Promise<void> {
         })();
       });
 
+      const actions = document.createElement('div');
+      actions.className = 'chatgoose-account-actions';
       const info = document.createElement('div');
       info.dataset.role = 'mapping-info';
-      info.style.display = 'flex';
-      info.style.flexDirection = 'column';
-      info.style.alignItems = 'flex-end';
-      info.style.gap = '4px';
-      renderMappingInfo(info, mappedView, Boolean(session?.connected));
+      info.className = 'chatgoose-account-pills';
+      renderMappingInfo(info, mappedView, isLive);
+      actions.append(info);
+      // «к вкладке» ONLY for a live row: the tab id comes from the worker's
+      // in-memory capture map, and after a restart there is nothing to focus.
+      if (isLive && view.tabId !== null) {
+        const focusTab = createButton(COPY.accounts.focusTab, true);
+        focusTab.dataset.accountFocusTab = accountId;
+        focusTab.addEventListener('click', () => {
+          void sendRuntimeRequest('focusAccountTab', { accountId })
+            .catch((error: unknown) => {
+              console.error('Failed to focus the Fansly tab', error);
+            });
+        });
+        actions.append(focusTab);
+      }
 
-      row.append(label, select, info);
+      row.append(identity, select, actions);
       mappingsTable.append(row);
     });
 
-    if (state.knownAccounts.length === 0) {
+    if (rows.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'No Fansly accounts detected yet.';
+      empty.dataset.role = 'accounts-empty';
+      empty.textContent = COPY.accounts.emptyFresh;
       empty.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(empty);
+    }
+
+    // Open fansly.com tabs nothing is attributed to. An aggregate, never a
+    // per-account claim: after a worker restart the capture map is gone, and
+    // re-deriving it would mean reading Fansly (DP 1-B).
+    const unattributed = accountsView?.unattributedFanslyTabs ?? 0;
+    if (unattributed > 0) {
+      const tabsLine = document.createElement('div');
+      tabsLine.dataset.role = 'accounts-unattributed';
+      tabsLine.className = 'chatgoose-account-unattributed';
+      tabsLine.textContent = COPY.accounts.unattributedTabs.replace(
+        '{n}',
+        String(unattributed),
+      );
+      mappingsTable.append(tabsLine);
     }
   };
 
@@ -2900,6 +3157,14 @@ async function render(): Promise<void> {
       state.accountMappings = refreshedState.accountMappings;
       state.accountAliases = refreshedState.accountAliases;
       state.knownAccounts = refreshedState.knownAccounts;
+      // Read the accounts view AFTER the snapshot resolved: `getSessionsSnapshot`
+      // owns the identity rekey background-side, and the rekey is what moves
+      // presence and labels onto the canonical id. Reading earlier could paint a
+      // legacy row that no longer exists. A local read — no hub, no Fansly.
+      await refreshAccountsView();
+      if (disposed) {
+        return;
+      }
       // A background re-poll must never yank the control under the chatter's
       // hands: `renderAccountMappings` calls `replaceChildren`, which would
       // destroy a focused persona <select> (and its open dropdown) mid-choice.

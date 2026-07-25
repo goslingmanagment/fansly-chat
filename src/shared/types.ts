@@ -860,6 +860,71 @@ export interface OpsDailySnapshot {
   lastSummaryPush: { at: number; accountLabel: string } | null;
 }
 
+/** One account's durable "this browser has seen it" record. Operational storage
+ * (`chatgoose:accountPresence`), NOT the settings blob: the MV3 worker forgets
+ * its SessionStore on suspension, and the cabinet must still be able to say
+ * «была вчера 21:40» instead of «сессий не было». */
+export interface AccountPresenceEntry {
+  lastSeenAt: number;
+  username: string | null;
+  displayName: string | null;
+}
+
+export interface AccountPresenceSnapshot {
+  version: 1;
+  byAccount: Record<string, AccountPresenceEntry>;
+}
+
+/** Local, chatter-owned account nicknames (`chatgoose:accountLabels`). Never
+ * sent anywhere; never part of the settings blob (schema stays v15). */
+export interface AccountLabelsSnapshot {
+  version: 1;
+  byAccount: Record<string, string>;
+}
+
+/** One row of the cabinet's «Аккаунты» pane.
+ *
+ * `state` is honest about what the background can actually prove: 'live' = a
+ * captured session in THIS worker's memory (so a tab id is known), 'seen' = a
+ * durable presence record with no live session, 'never' = a known account this
+ * browser has no observation for at all. */
+export interface AccountsViewEntry {
+  accountId: string;
+  /** What the row leads with: local label > display name/@username > short id. */
+  label: string;
+  /** The chatter's own label, when set — the pane marks it as local. */
+  localLabel: string | null;
+  state: 'live' | 'seen' | 'never';
+  lastSeenAt: number | null;
+  /** Only ever set for a 'live' row (the in-memory tab map). A worker restart
+   * cannot re-attribute a tab to an account, and the view never pretends it
+   * can — see `unattributedFanslyTabs`. */
+  tabId: number | null;
+  /** An ACTIVE persona resolves for this account. An archived mapping is not
+   * mapped: it cannot generate. */
+  personaMapped: boolean;
+  /** Kernel page label a generation was observed against (ops-daily), or null
+   * until the first generation of the day proves the binding. */
+  observedPage: string | null;
+}
+
+export interface AccountsView {
+  accounts: AccountsViewEntry[];
+  /** Open fansly.com tabs that no live session is attributed to. After a worker
+   * restart every tab lands here: the aggregate is the honest answer, and a
+   * per-account claim would be invented. */
+  unattributedFanslyTabs: number;
+}
+
+export interface FocusAccountTabRequest {
+  accountId: string;
+}
+
+export interface SetAccountLabelRequest {
+  accountId: string;
+  label: string;
+}
+
 // ─── Runtime API ─────────────────────────────────────────────────────────
 
 export interface RuntimeRequestMap {
@@ -876,6 +941,9 @@ export interface RuntimeRequestMap {
   getAgencyHubIdentity: undefined;
   getAiQuotaByPage: undefined;
   getSpendersStatus: undefined;
+  getAccountsView: undefined;
+  focusAccountTab: FocusAccountTabRequest;
+  setAccountLabel: SetAccountLabelRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -900,6 +968,9 @@ export interface RuntimeResponseMap {
   getAgencyHubIdentity: AgencyHubIdentityResponse;
   getAiQuotaByPage: Record<string, AiQuotaStatus>;
   getSpendersStatus: SpendersObservation | null;
+  getAccountsView: AccountsView;
+  focusAccountTab: { ok: boolean };
+  setAccountLabel: { ok: boolean };
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;

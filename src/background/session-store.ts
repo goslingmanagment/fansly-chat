@@ -1,4 +1,5 @@
 import type { RouteKey, SessionSnapshotEntry, SessionTemplate } from '../shared/types.js';
+import { recordAccountPresence } from './account-presence.js';
 
 export interface SessionCaptureResult {
   accountId: string;
@@ -58,7 +59,37 @@ export class SessionStore {
 
     this.sessionsByAccount.set(capture.accountId, session);
     this.accountByTabId.set(tabId, capture.accountId);
+    // Durable presence: this map dies with the worker, so the moment is recorded
+    // outside it (leading write + 30s coalescing inside the store — every Fansly
+    // request is a capture). Keyed by the canonical id once identity resolved, so
+    // a rekeyed account does not resurrect its legacy row. Names are still null
+    // at capture time; the fansly-client hook fills them in after `account/me`.
+    // Fire-and-forget by design: presence must never delay or fail a capture.
+    void recordAccountPresence({
+      accountId: session.resolvedAccountId ?? capture.accountId,
+      username: session.resolvedUsername,
+      displayName: session.resolvedDisplayName,
+    }).catch(() => undefined);
     return session;
+  }
+
+  /** The tab a live account is captured on, or null. Only the in-memory map can
+   * answer this: after a worker restart no tab is attributable to an account,
+   * and the accounts view says so instead of guessing. */
+  getTabIdForAccount(accountId: string | null | undefined): number | null {
+    if (!accountId) {
+      return null;
+    }
+    for (const [tabId, mappedAccountId] of this.accountByTabId) {
+      if (mappedAccountId === accountId) {
+        return tabId;
+      }
+      const session = this.sessionsByAccount.get(mappedAccountId);
+      if (session?.resolvedAccountId === accountId) {
+        return tabId;
+      }
+    }
+    return null;
   }
 
   getSessionByAccount(accountId: string | null | undefined): SessionTemplate | null {

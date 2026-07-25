@@ -711,4 +711,66 @@ describe('StorageCoordinator', () => {
     );
     expect(storageSet).not.toHaveBeenCalled();
   });
+
+  it('carries account presence and the local label onto the canonical id on rekey', async () => {
+    // The operational account stores are keyed by account id too. Without this
+    // transfer the «Аккаунты» pane grows a second, permanently «сессий не было»
+    // row for the same model and silently loses her local label.
+    mockStorage = createStorage({
+      accountMappings: { legacy: 'p1' },
+      knownAccounts: ['legacy'],
+      'chatgoose:accountPresence': {
+        version: 1,
+        byAccount: {
+          legacy: { lastSeenAt: 500, username: 'lora', displayName: 'Lora' },
+        },
+      },
+      'chatgoose:accountLabels': { version: 1, byAccount: { legacy: 'Лора · утро' } },
+    });
+    const { coordinator } = await installStorageCoordinatorHarness();
+
+    const result = await coordinator.rekeyAccountIdentity('legacy', 'canonical');
+
+    expect(result.mappingMigrated).toBe(true);
+    expect(mockStorage['chatgoose:accountPresence']).toEqual({
+      version: 1,
+      byAccount: {
+        canonical: { lastSeenAt: 500, username: 'lora', displayName: 'Lora' },
+      },
+    });
+    expect(mockStorage['chatgoose:accountLabels']).toEqual({
+      version: 1,
+      byAccount: { canonical: 'Лора · утро' },
+    });
+  });
+
+  it('still transfers presence and the label when mappings are already canonical', async () => {
+    // The mapping/knownAccounts side can have nothing left to do (an earlier
+    // rekey already moved it) while presence or a label still points at the
+    // legacy id — so the transfer runs BEFORE the "nothing changed" return.
+    mockStorage = createStorage({
+      accountMappings: { canonical: 'p1' },
+      accountAliases: { legacy: 'canonical' },
+      knownAccounts: ['canonical'],
+      'chatgoose:accountPresence': {
+        version: 1,
+        byAccount: { legacy: { lastSeenAt: 900, username: null, displayName: null } },
+      },
+      'chatgoose:accountLabels': { version: 1, byAccount: { legacy: 'Лора' } },
+    });
+    const { coordinator } = await installStorageCoordinatorHarness();
+
+    const result = await coordinator.rekeyAccountIdentity('legacy', 'canonical');
+
+    expect(result.mappingMigrated).toBe(false);
+    expect(result.knownAccountsChanged).toBe(false);
+    expect(mockStorage['chatgoose:accountPresence']).toEqual({
+      version: 1,
+      byAccount: { canonical: { lastSeenAt: 900, username: null, displayName: null } },
+    });
+    expect(mockStorage['chatgoose:accountLabels']).toEqual({
+      version: 1,
+      byAccount: { canonical: 'Лора' },
+    });
+  });
 });

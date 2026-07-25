@@ -316,6 +316,14 @@ export const COPY = {
     subtitleFresh: 'Пока пусто — аккаунты появляются здесь сами.',
     emptyFresh:
       'Открой fansly.com в этом браузере и войди под аккаунтом модели — строка появится сама, останется назначить персону.',
+    loading: 'Загружаем аккаунты Fansly…',
+    /** The live snapshot failed; the durable/local view is what is on screen. */
+    refreshFailed: 'Живое обновление аккаунтов не удалось — показаны сохранённые данные.',
+    /** Persona <select> vocabulary. Lives here rather than inline so the pane
+     * has no English left in a Russian cabinet. */
+    personaSelectNone: 'Персона не назначена',
+    personaSelectArchived: 'в архиве',
+    personaSelectMissing: 'Недоступная персона · {key}',
     idPrefix: 'ID аккаунта: ',
     idCopyTitle: 'Скопировать {id}',
     idCopied: 'Скопировано ✓',
@@ -329,6 +337,10 @@ export const COPY = {
     stateIdle: 'не активна',
     subTabActive: 'вкладка активна',
     subSeenAt: 'была {when}',
+    /** `{when}` forms for `subSeenAt` — a bare «21:40» three days later lies. */
+    whenToday: 'сегодня {time}',
+    whenYesterday: 'вчера {time}',
+    whenDate: '{date} в {time}',
     subNeverSeen: 'сессий не было',
     corePage: 'страница ядра: {page}',
     personaUnmapped: 'AI отключён',
