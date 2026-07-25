@@ -455,6 +455,10 @@ export const COPY = {
     actions: HOTKEY_ACTION_NAMES,
     extraEnter: 'Вставить следующую часть ответа',
     extraEsc: 'Закрыть оверлей, доску или шпаргалку',
+    /** The three semantic groups of the reference. */
+    groupGeneration: 'Генерация',
+    groupPanels: 'Панели',
+    groupReference: 'Справка',
   },
 
   appearance: {
