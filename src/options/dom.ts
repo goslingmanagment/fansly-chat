@@ -181,9 +181,7 @@ export function createStatusRow(label: string, key: string): StatusRow {
 export function createVersionTag(extensionVersion: string): HTMLDivElement {
   const tag = document.createElement('div');
   tag.className = 'chatgoose-version-tag';
-  // Same spelling as the rail footer (`v1.9.11`, no space) — one version, one
-  // way to write it.
-  tag.textContent = `v${extensionVersion}`;
+  tag.textContent = `v ${extensionVersion}`;
   return tag;
 }
 
