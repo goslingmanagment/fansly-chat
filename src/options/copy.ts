@@ -152,7 +152,10 @@ export const COPY = {
     accessUnknown: 'состояние хаба неизвестно',
     accessRejected: 'credential отклонён хабом',
     accessGrantedFor: 'выдан для',
-    aiEmpty: 'сегодня генераций не было — квота неизвестна',
+    /** Says the same two facts the old long line did (no generations yet ⇒
+     * quota unknown) without word-for-word repeating `activityEmpty` one row
+     * below. */
+    aiEmpty: 'неизвестна до первой генерации',
     aiByPageNote: 'по страницам · худшая первой',
     aiRemaining: '{page} · осталось {n}',
     aiNoLimit: '{page} · лимит не сообщён',
@@ -196,7 +199,10 @@ export const COPY = {
     pillNoData: 'нет данных',
     pillTokenExpired: 'токен истёк',
     reportHint:
-      '«Скопировать отчёт» кладёт в буфер текстовый снимок этой страницы (версия, статусы, последние ошибки) — прислать в поддержку одним сообщением. Строки честные: «неизвестно» — это «неизвестно».',
+      '«Скопировать отчёт» — текстовый снимок этой страницы (версия, статусы, последние ошибки) в буфер, прислать в поддержку одним сообщением.',
+    /** Tooltip on the report button — the honesty clause that used to close
+     * `reportHint` before the visible hint shrank to a single line. */
+    reportHonesty: 'Строки честные: «неизвестно» — это «неизвестно».',
   },
 
   /**
