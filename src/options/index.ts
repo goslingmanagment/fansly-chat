@@ -3566,10 +3566,14 @@ async function render(): Promise<void> {
         }
         await refreshAgencyHubPermissionState();
         if (disposed) return;
-        // With no credential left this resolves to the local «idle» state without
-        // any hub round trip; with a rotated one it re-tests honestly.
-        await runAgencyHubConnectionTest({ force: true });
-        if (disposed) return;
+        // NO local connection test here. This tab's form may hold a different
+        // base URL (the blob field the fence deliberately does not touch) or an
+        // uncommitted key draft, so a forced test would mix sources — worst
+        // case sending the OTHER hub's fresh token to the URL still shown in
+        // THIS form. The tab that performed the custody write already ran the
+        // checks; this tab only READS: the status rows below hydrate from the
+        // stored snapshot, and the «Проверка» line keeps honestly reporting the
+        // last test this tab itself ran.
         await hydrateHubStatusRows(storedHubSignature());
       })().catch((error: unknown) => {
         console.error('Failed to apply an external Agency Hub custody change', error);

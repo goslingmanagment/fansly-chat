@@ -331,6 +331,39 @@ describe('options «Agency Hub» pane', () => {
       expect(signInMeta?.textContent).not.toContain('device token;');
     });
 
+    it('never runs a LOCAL connection test from the fence: an external token rotation only reads', async () => {
+      // This tab's form may hold a different base URL (a blob field the fence
+      // does not touch) or an uncommitted key draft — a forced local test would
+      // mix those sources and could send the OTHER hub's fresh token to the URL
+      // still shown in THIS form. The writing tab already ran the checks.
+      const page = await signedInMount({
+        settings: {
+          agencyHubBaseUrl: 'https://hub.example',
+          agencyHubDeviceToken: 'agency_hub_device_OLD',
+          agencyHubApiKey: '',
+        },
+      });
+      const testsBefore = page
+        .sentRequestTypes()
+        .filter((type) => type === 'testAgencyHubConnection').length;
+
+      page.emitStorageChange({
+        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+          oldValue: 'agency_hub_device_OLD',
+          newValue: 'agency_hub_device_ROTATED',
+        },
+      });
+      await page.flushAsync();
+
+      // State followed the rotation, the pill is honest…
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+      // …but not one additional LOCAL connection test was fired by the fence.
+      const testsAfter = page
+        .sentRequestTypes()
+        .filter((type) => type === 'testAgencyHubConnection').length;
+      expect(testsAfter).toBe(testsBefore);
+    });
+
     it('applies the fence even when a later event supersedes the custody read', async () => {
       // The generation guard drops the callback of a superseded read. With the
       // custody decision taken from the EVENT, a persona-catalog change landing one

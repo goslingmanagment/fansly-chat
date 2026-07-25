@@ -1897,6 +1897,15 @@ the new custody state (it is real) but skips permission → connection-test →
 hydrate. This is what keeps the round-1 sentence about not doubling the save path's
 hub checks true.
 
+Round-2 correction (final review): the fence's OWN follow-up chain runs NO local
+connection test at all — only the permission re-read and the status-row
+hydration from the stored snapshot. A forced test from the fence mixes sources:
+the form still shows THIS tab's base URL and possibly an uncommitted key draft
+(blob fields the fence deliberately does not touch), while the token is the
+freshly applied one — worst case sending the other hub's fresh token to the URL
+in this form. The tab that performed the custody write already ran the checks;
+the «Проверка» line keeps reporting the last test THIS tab ran.
+
 Superseded wording, corrected: (1) the honest-outcome rule keys on the recorded
 ADDRESS, not on the metadata record's existence — `!capturedMeta?.issuedFrom`. A
 valid pre-`issuedFrom` v1 record is readable yet says nothing about who minted the
