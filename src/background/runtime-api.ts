@@ -4,6 +4,8 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+  LAST_SEEN_VERSION_STORAGE_KEY,
+  ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_RESOLVE_TIMEOUT_MS,
@@ -20,6 +22,7 @@ import { logWarn } from '../shared/log.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
+import { formatOptionsHash, type PaneKey } from '../shared/options-routes.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
@@ -27,6 +30,8 @@ import type {
   AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubSignOutResponse,
+  LastSeenVersionSnapshot,
+  OnboardingSnapshot,
   PopupStatus,
   RecapStatusResponse,
   SpendersBuildPayload,
@@ -126,6 +131,81 @@ async function readDeviceTokenMeta(): Promise<AgencyHubDeviceTokenMeta | null> {
   }
 }
 
+// Operational-key writes (the onboarding flag, the last-seen version) rewrite a
+// whole record, so they run through ONE module-level FIFO queue — the same
+// doctrine the presence/labels stores follow. Two settings tabs finishing the
+// checklist at the same moment therefore cannot lose one another's stamp.
+let operationalWriteQueue: Promise<unknown> = Promise.resolve();
+function withOperationalWrite<T>(critical: () => Promise<T>): Promise<T> {
+  const run = operationalWriteQueue.then(critical, critical);
+  operationalWriteQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+// The single-options-tab guarantee is a read-then-create sequence, so it needs
+// its OWN FIFO: two requests arriving in the same tick (a double-clicked
+// «Settings» on the mapping banner is one click too many, and that button is not
+// one-shot) would both see «no tab» at the `tabs.query` await and both create
+// one — two options tabs, i.e. two pagehide settings writers over one blob.
+// Separate from the operational-write queue on purpose: a slow storage stamp
+// must not delay opening the page, and vice versa.
+let openOptionsQueue: Promise<unknown> = Promise.resolve();
+function withOpenOptionsLock<T>(critical: () => Promise<T>): Promise<T> {
+  const run = openOptionsQueue.then(critical, critical);
+  openOptionsQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** First-run checklist flag. An absent or foreign-version record reads as «not
+ * dismissed yet» — the honest default for a browser profile that has never run
+ * this version. */
+async function readOnboardingState(): Promise<OnboardingSnapshot> {
+  const fresh: OnboardingSnapshot = { version: 1, dismissedAt: null };
+  try {
+    const raw = await browser.storage.local.get(ONBOARDING_STORAGE_KEY);
+    const value = raw[ONBOARDING_STORAGE_KEY];
+    if (!isObjectRecord(value) || value.version !== 1) {
+      return fresh;
+    }
+    return {
+      version: 1,
+      dismissedAt: typeof value.dismissedAt === 'number' && Number.isFinite(value.dismissedAt)
+        ? value.dismissedAt
+        : null,
+    };
+  } catch {
+    return fresh;
+  }
+}
+
+/** Which release's changelog has already been opened. An unreadable record is
+ * «none seen», which shows the «нов.» dot — nagging once is strictly better than
+ * silently hiding a release note. */
+async function readLastSeenVersion(): Promise<LastSeenVersionSnapshot> {
+  const unseen: LastSeenVersionSnapshot = { version: 1, lastSeenVersion: null };
+  try {
+    const raw = await browser.storage.local.get(LAST_SEEN_VERSION_STORAGE_KEY);
+    const value = raw[LAST_SEEN_VERSION_STORAGE_KEY];
+    if (!isObjectRecord(value) || value.version !== 1) {
+      return unseen;
+    }
+    return {
+      version: 1,
+      lastSeenVersion: typeof value.lastSeenVersion === 'string' && value.lastSeenVersion
+        ? value.lastSeenVersion
+        : null,
+    };
+  } catch {
+    return unseen;
+  }
+}
+
 export interface RuntimeApiDeps {
   agencyHubClient: AgencyHubClient;
   fanslyClient: FanslyClient;
@@ -151,6 +231,12 @@ export interface RuntimeApiDeps {
  * origin AND path (not a prefix — `debug-prompt.html.evil` starts with it too);
  * the query string is where the token rides, so it is excluded from the match. */
 export const DEBUG_PROMPT_PAGE_PATH = 'debug-prompt.html';
+
+/** `options_ui.page` in the manifest — the deep-link target. Exported so a test
+ * can pin it to the manifest: if the two drift, `tabs.query` silently stops
+ * finding the open settings tab and the singleton degrades to always-create
+ * (i.e. a second pagehide settings writer per deep link). */
+export const OPTIONS_PAGE_PATH = 'options.html';
 
 function isDebugPromptViewer(sender: browser.runtime.MessageSender): boolean {
   if (typeof sender.url !== 'string') {
@@ -718,6 +804,113 @@ export function registerRuntimeApi({
           // to be able to say so instead of silently reverting on reload.
           return { ok: false };
         }
+      }
+
+      if (requestType === 'getOnboardingState') {
+        return await readOnboardingState();
+      }
+
+      if (requestType === 'dismissOnboarding') {
+        // Stamped only by the page that watched every step turn green, and only
+        // once: a second call keeps the FIRST timestamp, so a later reload cannot
+        // move the date the install finished setup.
+        return await withOperationalWrite(async () => {
+          try {
+            const current = await readOnboardingState();
+            if (current.dismissedAt !== null) {
+              return { ok: true };
+            }
+            const next: OnboardingSnapshot = { version: 1, dismissedAt: Date.now() };
+            await browser.storage.local.set({ [ONBOARDING_STORAGE_KEY]: next });
+            return { ok: true };
+          } catch (error) {
+            // A failed stamp means the checklist comes back on the next open.
+            // Annoying, never destructive — and the page must be able to know.
+            logWarn('Onboarding dismissal write failed', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return { ok: false };
+          }
+        });
+      }
+
+      if (requestType === 'openOptions') {
+        // Deep link from a surface that cannot route itself. Exactly ONE options
+        // tab may exist: the page is a synchronous settings writer on pagehide,
+        // so a second tab is a second writer racing the first over the same
+        // blob. Re-point the open one instead of opening another.
+        //
+        // The whole lookup→reuse→create sequence runs under one lock: the check
+        // and the create are separated by awaits, so concurrent requests must
+        // not interleave across them (the second one then SEES the first one's
+        // tab and re-points it).
+        const { pane, code } = message as unknown as { pane: PaneKey; code?: string };
+        return await withOpenOptionsLock(async () => {
+          const pagePath = browser.runtime.getURL(OPTIONS_PAGE_PATH);
+          const url = `${pagePath}${formatOptionsHash({ pane, code: code ?? null })}`;
+          let existingTabId: number | undefined;
+          try {
+            // Match patterns ignore the fragment, so this finds the tab whatever
+            // pane it is currently showing.
+            const tabs = await browser.tabs.query({ url: `${pagePath}*` });
+            existingTabId = tabs.find((tab) => tab.id !== undefined)?.id;
+          } catch {
+            // No answer is not «no tab open», but creating one is the only other
+            // move available — and the reuse path is best-effort by nature.
+          }
+          if (existingTabId !== undefined) {
+            try {
+              // Same document, new hash: the page's hashchange listener paints the
+              // pane and arms the highlight — no reload, no lost form state.
+              await browser.tabs.update(existingTabId, { active: true, url });
+              try {
+                const tab = await browser.tabs.get(existingTabId);
+                if (tab.windowId !== undefined) {
+                  await browser.windows.update(tab.windowId, { focused: true });
+                }
+              } catch {
+                // Raising the window is a nicety; the tab is already active.
+              }
+              return { opened: true, reused: true };
+            } catch {
+              // The tab closed between the query and the update — fall through.
+            }
+          }
+          try {
+            await browser.tabs.create({ url });
+            return { opened: true, reused: false };
+          } catch (error) {
+            logWarn('Opening the settings page failed', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return { opened: false, reused: false };
+          }
+        });
+      }
+
+      if (requestType === 'getLastSeenVersion') {
+        return await readLastSeenVersion();
+      }
+
+      if (requestType === 'setLastSeenVersion') {
+        const { version } = message as unknown as { version: string };
+        return await withOperationalWrite(async () => {
+          try {
+            const next: LastSeenVersionSnapshot = {
+              version: 1,
+              lastSeenVersion: version.trim(),
+            };
+            await browser.storage.local.set({ [LAST_SEEN_VERSION_STORAGE_KEY]: next });
+            return { ok: true };
+          } catch (error) {
+            // The dot stays on until the write succeeds — an unread release note
+            // is the safe side of this failure.
+            logWarn('Last-seen version write failed', {
+              error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+            });
+            return { ok: false };
+          }
+        });
       }
 
       if (requestType === 'getSessionsSnapshot') {

@@ -37,8 +37,12 @@ import {
   formatCaptureStatus,
   shortenAccountId,
 } from './sessions.js';
-import { OPTIONS_PANES } from '../shared/options-routes.js';
-import { createShell, navigateTo } from './shell.js';
+import {
+  OPTIONS_PANES,
+  parseOptionsHash,
+  type PaneKey,
+} from '../shared/options-routes.js';
+import { createShell, navigateTo, renderRailFoot } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
@@ -46,12 +50,15 @@ import {
 import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
+  findErrorKeyByCode,
   formatUserErrorTechnicalDetail,
+  getErrorMessage,
   getUserErrorDescription,
 } from '../shared/errors.js';
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  CHANGELOG_URL,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
   DEEP_MAX_MESSAGE_COUNT,
@@ -82,6 +89,7 @@ import type {
   AgencyHubIdentityResponse,
   AgencyHubSignOutResponse,
   AiQuotaStatus,
+  OnboardingSnapshot,
   OpsDailySnapshot,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
@@ -117,6 +125,9 @@ const SESSIONS_REPOLL_MIN_INTERVAL_MS = 5_000;
 const CHECK_ALL_THROTTLE_MS = 10_000;
 /** Below this the quota badge turns amber; at 0 it turns red. */
 const AI_QUOTA_LOW_THRESHOLD = 20;
+/** How long a deep link's row stays highlighted. Long enough to find with the
+ * eye, short enough that it never reads as a permanent state. */
+const DEEP_LINK_FLASH_MS = 2_000;
 
 type SessionsResult =
   | { ok: true; sessions: SessionSnapshotEntry[] }
@@ -144,6 +155,18 @@ function asDeviceTokenMeta(value: unknown): AgencyHubDeviceTokenMeta | null {
     typeof record.issuedAt === 'number'
     ? (value as AgencyHubDeviceTokenMeta)
     : null;
+}
+
+/** An unreadable reply is NOT «never onboarded»: an older background (or a
+ * dropped frame) must never resurrect the first-run checklist over a working
+ * install, so only a well-formed v1 record can make the page consider it. */
+function asOnboardingSnapshot(value: unknown): OnboardingSnapshot | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return null;
+  const dismissedAt = record.dismissedAt;
+  if (dismissedAt !== null && typeof dismissedAt !== 'number') return null;
+  return { version: 1, dismissedAt: typeof dismissedAt === 'number' ? dismissedAt : null };
 }
 
 function asQuotaEntries(value: unknown): AiQuotaStatus[] {
@@ -561,6 +584,143 @@ async function render(): Promise<void> {
   // Every pane now has content, so the rail carries the full route list.
   const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
+
+  /** Assigned by the deep-link block below; every repaint that can produce the
+   * highlight's target row calls it through this hook, so nothing depends on
+   * declaration order (`renderPersonaCatalog` runs before that block). */
+  let flashPendingDeepLink: () => void = () => undefined;
+
+  // ─── Rail footer: version + Changelog ──────────────────────
+  // Opening the changelog records THIS version as seen, which is what retires
+  // the «нов.» dot. The write is fired first and the tab is opened regardless of
+  // how it settles: a failed write leaves the dot on (an unread release note is
+  // the safe side), never a link that refuses to open.
+  const markVersionSeen = (): void => {
+    void sendRuntimeRequest('setLastSeenVersion', { version: extensionVersion })
+      .then((reply) => {
+        if (!disposed && reply?.ok === true) railFoot.setUnseen(false);
+      })
+      .catch(() => undefined);
+  };
+  const railFoot = renderRailFoot(shell.railFootSlot, {
+    version: extensionVersion,
+    changelogUrl: CHANGELOG_URL,
+    onOpenChangelog: () => {
+      markVersionSeen();
+      void browser.tabs.create({ url: CHANGELOG_URL }).catch((error: unknown) => {
+        console.error('Failed to open the changelog', error);
+      });
+    },
+  });
+
+  // ─── Первый запуск: чеклист ────────────────────────────────
+  // Shown only on a genuinely untouched install, and it stays until every step
+  // is really done. The «fresh» half of the predicate is captured HERE, from the
+  // mount snapshot, before any hydration can mutate it — and the durable half
+  // (`chatgoose:onboarding`) arrives from the background below. Deliberately not
+  // derived from live form state: in v1 typing the hub URL dismissed the
+  // checklist that was still explaining the next two steps.
+  const freshAtMount =
+    !state.settings.agencyHubDeviceToken.trim() &&
+    !state.settings.agencyHubApiKey.trim() &&
+    state.knownAccounts.length === 0;
+
+  const onboardingSection = document.createElement('section');
+  onboardingSection.className = 'chatgoose-onboarding';
+  onboardingSection.dataset.onboarding = 'true';
+  // Hidden until the durable flag has been read: a checklist that flashes over a
+  // configured install is worse than one that appears a tick late.
+  onboardingSection.hidden = true;
+  const onboardingHeading = document.createElement('h1');
+  onboardingHeading.className = 'chatgoose-onboarding-heading';
+  onboardingHeading.textContent = COPY.onboarding.greeting;
+  const onboardingSub = document.createElement('div');
+  onboardingSub.className = 'chatgoose-onboarding-sub';
+  onboardingSub.textContent = COPY.onboarding.greetingSubtitle;
+  const onboardingList = document.createElement('ol');
+  onboardingList.className = 'chatgoose-onboarding-steps';
+
+  type OnboardingStepKey = 'access' | 'signIn' | 'fansly';
+  const buildOnboardingStep = (
+    key: OnboardingStepKey,
+    ordinal: number,
+    title: string,
+    hint: string,
+    actionLabel: string,
+    onAction: () => void,
+  ): { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement } => {
+    const item = document.createElement('li');
+    item.className = 'chatgoose-onboarding-step';
+    item.dataset.onboardingStep = key;
+    item.dataset.done = 'false';
+    const number = document.createElement('span');
+    number.className = 'chatgoose-onboarding-step-num';
+    number.textContent = String(ordinal);
+    const body = document.createElement('div');
+    body.className = 'chatgoose-onboarding-step-body';
+    const titleNode = document.createElement('div');
+    titleNode.className = 'chatgoose-onboarding-step-title';
+    titleNode.textContent = title;
+    const hintNode = document.createElement('div');
+    hintNode.className = 'chatgoose-onboarding-step-hint';
+    hintNode.textContent = hint;
+    body.append(titleNode, hintNode);
+    const action = createButton(actionLabel, true);
+    action.dataset.onboardingAction = key;
+    action.addEventListener('click', onAction);
+    // The green «готово» that replaces the CTA once the step is truly satisfied.
+    const done = createBadge(COPY.onboarding.stepDone, 'green');
+    done.dataset.onboardingDone = key;
+    done.hidden = true;
+    item.append(number, body, action, done);
+    onboardingList.append(item);
+    return { root: item, action, done };
+  };
+
+  // Step order per E41's own flow: the host permission comes BEFORE sign-in,
+  // because sign-in cannot pass without it (a `no_permission` hub read is not a
+  // credential problem, and telling the chatter to log in first would send them
+  // into the failure).
+  const onboardingSteps: Record<
+    OnboardingStepKey,
+    { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement }
+  > = {
+    access: buildOnboardingStep(
+      'access',
+      1,
+      COPY.onboarding.step1Title,
+      COPY.onboarding.step1Hint,
+      COPY.onboarding.step1Action,
+      () => navigateTo('hub'),
+    ),
+    signIn: buildOnboardingStep(
+      'signIn',
+      2,
+      COPY.onboarding.step2Title,
+      COPY.onboarding.step2Hint,
+      COPY.onboarding.step2Action,
+      () => navigateTo('hub'),
+    ),
+    fansly: buildOnboardingStep(
+      'fansly',
+      3,
+      COPY.onboarding.step3Title,
+      COPY.onboarding.step3Hint,
+      COPY.onboarding.step3Action,
+      () => navigateTo('accounts'),
+    ),
+  };
+
+  const onboardingHint = document.createElement('div');
+  onboardingHint.className = 'chatgoose-status-hint';
+  onboardingHint.textContent = COPY.onboarding.hint;
+  onboardingSection.append(
+    onboardingHeading,
+    onboardingSub,
+    onboardingList,
+    onboardingHint,
+  );
+  shell.panes.status.append(onboardingSection);
 
   // ─── Readiness headline ────────────────────────────────────
   // The install's verdict in one line. It derives entirely from the SAME
@@ -1325,9 +1485,11 @@ async function render(): Promise<void> {
       hasToken ? 'Device token active ✓' : 'No device token yet.',
     );
     if (!hubSignInMeta.textContent) {
+      // With no token the line IS the first-sign-in card's copy: who hands out
+      // the credentials, and that the password is never stored on this device.
       hubSignInMeta.textContent = hasToken
         ? 'Hub requests use the device token; the legacy API key is the fallback.'
-        : 'Sign in once to issue a device-bound token — no more pasting an issued key, and it survives key rotation.';
+        : COPY.hub.signInHint;
     }
     // With a live token the credential form reads as unfinished business —
     // fold it away; «Перевыпустить токен» brings it back for rotation.
@@ -1594,8 +1756,13 @@ async function render(): Promise<void> {
     legacyKeyDetails,
   );
 
+  // Tagged so a `CG-HUB-01` (invalid URL) deep link can highlight the field the
+  // code is actually about.
+  const hubBaseUrlField = labeledField('Agency Hub base URL', agencyHubUrlInput);
+  hubBaseUrlField.dataset.hubField = 'base-url';
+
   agencyHubSection.append(
-    labeledField('Agency Hub base URL', agencyHubUrlInput),
+    hubBaseUrlField,
     labeledField('Sign in (device token)', hubSignInWrap),
     hubSignInStatus,
     hubSignInMeta,
@@ -1712,6 +1879,75 @@ async function render(): Promise<void> {
     },
   ];
 
+  /** The checklist is live: every step reads the same sources the «Статус» rows
+   * do, so a step turns green the moment its state is genuinely satisfied — and
+   * only then. Step 1 demands a granted permission (not merely «not refused»):
+   * on a fresh install nothing has been granted yet, and the readiness row's
+   * lenient `!== false` would show step 1 as done before anything happened. */
+  const onboardingStepStates = (): Record<OnboardingStepKey, boolean> => ({
+    access: Boolean(normalizeAgencyHubBaseUrl(agencyHubUrlInput.value)) &&
+      hubPermissionGranted === true,
+    // A live identity read is the only proof a credential actually works —
+    // truer than «a token string exists in storage».
+    signIn: statusModel.identity?.ok === true,
+    fansly: capturedAccountIds.length > 0 &&
+      capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId)),
+  });
+
+  /** True once the durable flag AND the mount snapshot agree this install has
+   * never been set up. Never re-enabled afterwards: a sign-out must not put a
+   * working chatter back through onboarding. */
+  let onboardingVisible = false;
+  /** One-shot guard around the durable stamp; re-armed if the write fails. */
+  let onboardingStamping = false;
+
+  /** The checklist and the readiness hero are ONE decision: while the checklist
+   * is up it owns the three open steps (with a CTA each), so the hero — which
+   * would restate exactly that list one card below — is hidden. The hero returns
+   * the moment onboarding is dismissed, or immediately on an install that was
+   * never fresh. This function is the single writer of both flags. */
+  const renderOnboarding = (): void => {
+    if (!onboardingVisible) {
+      onboardingSection.hidden = true;
+      readinessHero.hidden = false;
+      return;
+    }
+    const states = onboardingStepStates();
+    for (const key of Object.keys(states) as OnboardingStepKey[]) {
+      const step = onboardingSteps[key];
+      const done = states[key];
+      step.root.dataset.done = done ? 'true' : 'false';
+      step.action.hidden = done;
+      step.done.hidden = !done;
+    }
+    onboardingSection.hidden = false;
+    readinessHero.hidden = true;
+    if (!Object.values(states).every(Boolean) || onboardingStamping) {
+      return;
+    }
+    // Every step is really done — stamp the durable flag and retire the card.
+    // Filling in the hub URL is NOT this moment (the v1 self-cancel bug).
+    onboardingStamping = true;
+    void sendRuntimeRequest('dismissOnboarding')
+      .then((reply) => {
+        if (disposed) return;
+        if (reply?.ok === true) {
+          onboardingVisible = false;
+          onboardingSection.hidden = true;
+          // Setup is over: the headline takes the card's place immediately —
+          // «Готово к смене.» is exactly what the chatter earned.
+          readinessHero.hidden = false;
+          return;
+        }
+        // The flag did not stick: keep the card and let a later refresh retry
+        // rather than pretend onboarding is over.
+        onboardingStamping = false;
+      })
+      .catch(() => {
+        onboardingStamping = false;
+      });
+  };
+
   // The Hub pane's dense diagnostics. Everything it shows comes from the SAME
   // statusModel the Статус rows use plus the local connection/permission
   // mirrors — no extra requests, and no line invented when its source is
@@ -1816,11 +2052,19 @@ async function render(): Promise<void> {
             .replace('{when}', formatClockTime(push.at))
             .replace('{account}', push.accountLabel || COPY.common.unknown)
         : COPY.hub.fanSummaryEmpty;
+    // A hub-row deep link waits for these values before it highlights anything.
+    flashPendingDeepLink();
   };
 
   const refreshStatusView = (): void => {
     if (disposed) return;
     renderHubDiagnostics();
+    // Same sources, same tick: the checklist and the headline can never disagree.
+    // (It also owns whether the readiness hero is visible at all — the two must
+    // never state the same three steps twice.) The hero below keeps rendering
+    // underneath either way, so the moment the checklist retires the headline is
+    // already correct.
+    renderOnboarding();
     // No datum at all yet: keep the honest loading line — never a fabricated
     // «Нужно N действий» over an install nobody has looked at.
     if (statusModel.identity === null && !fanslyRowPainted) {
@@ -2624,6 +2868,16 @@ async function render(): Promise<void> {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
     // migrateState hid may now resolve to an active persona.
     refreshStatusView();
+    // Rail micro: active personas, or «—» while the catalog has never been read
+    // for these credentials. «0» there would claim the hub answered «none».
+    const activePersonas = state.personaCatalog.filter(
+      (persona) => persona.status === 'active',
+    ).length;
+    const personasMicro = document.createElement('span');
+    personasMicro.textContent = state.personaCatalogFetchedAt === null && activePersonas === 0
+      ? COPY.rail.microNone
+      : String(activePersonas);
+    shell.setMicro('personas', personasMicro);
     const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
     personaCatalogLine.textContent = `${COPY.personas.catalogLabel}: ${
       changedDate
@@ -2647,6 +2901,7 @@ async function render(): Promise<void> {
             fetchedAt: state.personaCatalogFetchedAt,
           })];
       personalitiesList.append(empty);
+      flashPendingDeepLink();
       return;
     }
     for (const view of rows) {
@@ -2682,6 +2937,7 @@ async function render(): Promise<void> {
       row.append(head);
       personalitiesList.append(row);
     }
+    flashPendingDeepLink();
   };
 
   const preservationNote = document.createElement('div');
@@ -2773,6 +3029,11 @@ async function render(): Promise<void> {
     .replace('{total}', '—');
   const mappingsTable = document.createElement('div');
   mappingsTable.className = 'chatgoose-account-rows';
+  // A `no_mapping` deep link points here, and this table is the slowest thing on
+  // the page (the sessions snapshot resolves identities against Fansly first).
+  // Until it has been painted from a real result it is NOT a highlight target —
+  // the loading line below would otherwise consume the one-shot flash.
+  mappingsTable.dataset.deeplinkReady = 'false';
   const mappingsLoading = document.createElement('div');
   mappingsLoading.textContent = COPY.accounts.loading;
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
@@ -2793,6 +3054,111 @@ async function render(): Promise<void> {
   shell.panes.generation.append(apiSection);
   shell.panes.hotkeys.append(hotkeysSection);
   shell.panes.appearance.append(appearanceSection);
+
+  // ─── Диплинк из ошибки ─────────────────────────────────────
+  // A deep link (`#hub:CG-HUB-04`) carries the code that sent the chatter here.
+  // Two things follow: one line naming it — text read straight from the E58
+  // registry, never restated in COPY — and a one-shot highlight of the row that
+  // code is about. The highlight is PENDING until its target is actually there:
+  // the diagnostics and the account rows hydrate asynchronously, and flashing an
+  // empty container would point at nothing.
+  const DEEP_LINK_TARGETS: Record<string, string> = {
+    'CG-HUB-01': '[data-hub-field="base-url"]',
+    'CG-HUB-02': '[data-hub-detail="device-token"]',
+    'CG-HUB-03': '[data-hub-detail="device-token"]',
+    'CG-HUB-04': '[data-hub-detail="host-access"]',
+    'CG-HUB-05': '[data-hub-detail="pages"]',
+    'CG-FLOW-01': '.chatgoose-persona-rows',
+    'CG-FLOW-02': '.chatgoose-account-rows',
+  };
+  const deepLinkNote = document.createElement('div');
+  deepLinkNote.className = 'chatgoose-deeplink';
+  deepLinkNote.dataset.role = 'deeplink-note';
+  let pendingDeepLink: { code: string; pane: PaneKey } | null = null;
+  let flashedElement: HTMLElement | null = null;
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearFlash = (): void => {
+    if (flashTimer !== undefined) {
+      clearTimeout(flashTimer);
+      flashTimer = undefined;
+    }
+    flashedElement?.classList.remove('chatgoose-flash');
+    flashedElement = null;
+  };
+  cleanupTasks.push(clearFlash);
+
+  /** Is this target REALLY there, or is it still a placeholder?
+   *
+   * Nonempty text is not proof: the accounts table ships with a loading line, so
+   * an arm against it would burn the one-shot highlight on «Загружаем…» and let
+   * the 2s flash expire long before `getSessionsSnapshot` (up to 5s) paints the
+   * rows — with `pendingDeepLink` already consumed, the later repaint could not
+   * re-arm. A container that hydrates asynchronously therefore declares its own
+   * readiness (`data-deeplink-ready`), and only that answer counts. */
+  const isDeepLinkTargetReady = (target: HTMLElement): boolean => {
+    const declared = target.dataset.deeplinkReady;
+    if (declared !== undefined) {
+      return declared === 'true';
+    }
+    // Rows that paint synchronously from a single value: text IS the hydration
+    // signal (a diagnostics row before its first paint is empty).
+    return Boolean(target.textContent?.trim());
+  };
+
+  flashPendingDeepLink = (): void => {
+    if (disposed || !pendingDeepLink) return;
+    const selector = DEEP_LINK_TARGETS[pendingDeepLink.code];
+    if (!selector) {
+      // A settings-linked code with no row of its own: the note above is the
+      // whole answer, so stop waiting for a target that does not exist.
+      pendingDeepLink = null;
+      return;
+    }
+    const target = shell.panes[pendingDeepLink.pane].querySelector<HTMLElement>(selector);
+    // Not hydrated yet — keep waiting. Every repaint that can produce the target
+    // calls back into here, so a late hydration still fires the pending flash.
+    if (!target || !isDeepLinkTargetReady(target)) return;
+    pendingDeepLink = null;
+    clearFlash();
+    flashedElement = target;
+    target.classList.add('chatgoose-flash');
+    flashTimer = setTimeout(() => {
+      if (flashedElement === target) clearFlash();
+    }, DEEP_LINK_FLASH_MS);
+  };
+
+  const armDeepLink = (): void => {
+    if (disposed) return;
+    // A new deep link supersedes the previous one — including its highlight.
+    clearFlash();
+    pendingDeepLink = null;
+    deepLinkNote.remove();
+    const route = parseOptionsHash(window.location.hash);
+    const key = route.code ? findErrorKeyByCode(route.code) : null;
+    if (!route.code || !key) {
+      // No code, or a code this build does not know: the pane still opens (the
+      // shell already did that) — we just have nothing honest to say about it.
+      return;
+    }
+    const registryEntry = getErrorMessage(key);
+    deepLinkNote.textContent = `${registryEntry.code} · ${
+      getUserErrorDescription(registryEntry) ?? registryEntry.message
+    }`;
+    shell.panes[route.pane].prepend(deepLinkNote);
+    pendingDeepLink = { code: route.code, pane: route.pane };
+    flashPendingDeepLink();
+  };
+
+  // A deep link into an ALREADY OPEN settings tab arrives as a hash change (the
+  // background re-points the one tab rather than opening a second one), so this
+  // has to re-arm — not just run at mount.
+  const handleDeepLinkHashChange = (): void => armDeepLink();
+  window.addEventListener('hashchange', handleDeepLinkHashChange);
+  cleanupTasks.push(() => {
+    window.removeEventListener('hashchange', handleDeepLinkHashChange);
+  });
+  armDeepLink();
 
 
   cleanupTasks.push(() => {
@@ -3035,6 +3401,10 @@ async function render(): Promise<void> {
 
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
+    // The loading line is gone: whatever this paint produced — rows, the fresh
+    // empty state, or the refresh-failed warning — is the real answer, so a
+    // pending deep-link highlight may now land on it.
+    mappingsTable.dataset.deeplinkReady = 'true';
 
     accountsSubtitle.textContent = rows.length === 0
       ? COPY.accounts.subtitleFresh
@@ -3259,13 +3629,51 @@ async function render(): Promise<void> {
       mappingsTable.append(row);
     });
 
-    if (rows.length === 0) {
+    // `!hydrationFailed` is load-bearing: «появится само» is a promise about a
+    // read that SUCCEEDED and found nothing. Painting it next to the
+    // refresh-failed warning would answer «not yet» for a question nobody could
+    // answer — the failure is the whole honest state here.
+    if (rows.length === 0 && !hydrationFailed) {
+      // Two ghost rows: the shape of what will appear on its own once Fansly is
+      // open, so an empty pane reads as «not yet» instead of «broken». Pure
+      // decoration — `aria-hidden`, no controls, nothing to click.
+      for (let index = 0; index < 2; index += 1) {
+        const ghost = document.createElement('div');
+        ghost.className = 'chatgoose-account-row chatgoose-account-row-ghost';
+        ghost.dataset.role = 'account-ghost';
+        ghost.setAttribute('aria-hidden', 'true');
+        const ghostIdentity = document.createElement('div');
+        ghostIdentity.className = 'chatgoose-account-identity';
+        const ghostDot = document.createElement('span');
+        ghostDot.className = 'chatgoose-account-dot';
+        const ghostBody = document.createElement('div');
+        ghostBody.className = 'chatgoose-account-body';
+        const ghostHead = document.createElement('span');
+        ghostHead.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-head';
+        const ghostSub = document.createElement('span');
+        ghostSub.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-sub';
+        ghostBody.append(ghostHead, ghostSub);
+        ghostIdentity.append(ghostDot, ghostBody);
+        const ghostSelect = document.createElement('span');
+        ghostSelect.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-select';
+        ghost.append(ghostIdentity, ghostSelect);
+        mappingsTable.append(ghost);
+      }
       const empty = document.createElement('div');
       empty.dataset.role = 'accounts-empty';
       empty.textContent = COPY.accounts.emptyFresh;
       empty.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(empty);
     }
+
+    // Rail micro: how many accounts this browser knows about at all. «0» is the
+    // honest fresh-install answer — a local count, never a promise about the
+    // model being online.
+    const accountsMicro = document.createElement('span');
+    accountsMicro.textContent = String(rows.length);
+    shell.setMicro('accounts', accountsMicro);
+    // The rows a `no_mapping` deep link points at exist only now.
+    flashPendingDeepLink();
 
     // Open fansly.com tabs nothing is attributed to. An aggregate, never a
     // per-account claim: after a worker restart the capture map is gone, and
@@ -3409,6 +3817,37 @@ async function render(): Promise<void> {
   void hydrateHubStatusRows(storedHubSignature());
   // Local reads — no hub round-trip, no signature guard.
   void hydrateLocalStatusRows();
+  // The durable half of the first-run predicate, and — because it decides
+  // whether the «нов.» dot is appropriate at all — the changelog's seen-version
+  // read behind it. Both are read once per mount: the onboarding flag only ever
+  // goes from «null» to «stamped», the local half was captured at mount, and the
+  // running version cannot change under an open page.
+  void (async () => {
+    const onboarding = asOnboardingSnapshot(
+      await sendRuntimeRequest('getOnboardingState').catch(() => null),
+    );
+    if (disposed) return;
+    onboardingVisible = onboarding !== null &&
+      onboarding.dismissedAt === null &&
+      freshAtMount;
+    renderOnboarding();
+
+    const seen = await sendRuntimeRequest('getLastSeenVersion').catch(() => null);
+    if (disposed) return;
+    const lastSeenVersion = typeof (seen as { lastSeenVersion?: unknown } | null)?.lastSeenVersion === 'string'
+      ? (seen as { lastSeenVersion: string }).lastSeenVersion
+      : null;
+    if (lastSeenVersion === extensionVersion) {
+      return;
+    }
+    if (onboardingVisible) {
+      // A first run has nothing to catch up on: record the version silently so
+      // the NEXT update is the one that earns the dot.
+      markVersionSeen();
+      return;
+    }
+    railFoot.setUnseen(true);
+  })();
   // Which device token is stored here. Absent for tokens issued before this
   // version — the pane says so instead of guessing a date.
   void sendRuntimeRequest('getAgencyHubDeviceTokenMeta')

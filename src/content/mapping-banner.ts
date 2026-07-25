@@ -2,8 +2,14 @@ import { buildAccountLookupOrder } from '../shared/account-aliases.js';
 import { getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { loadStorageState, saveAccountMapping } from '../shared/storage.js';
 
+/** Which error the banner is standing in for when its settings button is
+ * pressed. The banner covers two different registry classes — «no active
+ * personas exist» and «this account has none assigned» — and they are fixed on
+ * DIFFERENT panes, so the reason has to travel with the click. */
+export type MappingBannerSettingsReason = 'no-personalities' | 'no-mapping';
+
 interface MappingBannerCallbacks {
-  onOpenSettings: () => void;
+  onOpenSettings: (reason: MappingBannerSettingsReason) => void;
 }
 
 export class MappingBanner {
@@ -62,7 +68,7 @@ export class MappingBanner {
       button.type = 'button';
       button.className = 'chatgoose-button';
       button.textContent = 'Open Settings';
-      button.addEventListener('click', () => this.callbacks.onOpenSettings());
+      button.addEventListener('click', () => this.callbacks.onOpenSettings('no-personalities'));
       this.actions.append(button);
       return;
     }
@@ -116,7 +122,7 @@ export class MappingBanner {
     settings.type = 'button';
     settings.className = 'chatgoose-button chatgoose-button-secondary';
     settings.textContent = 'Settings';
-    settings.addEventListener('click', () => this.callbacks.onOpenSettings());
+    settings.addEventListener('click', () => this.callbacks.onOpenSettings('no-mapping'));
 
     select.addEventListener('change', () => {
       save.disabled = !select.value;

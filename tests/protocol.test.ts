@@ -68,6 +68,27 @@ describe('protocol boundary guards', () => {
     expect(
       getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1', label: '' }),
     ).toBe('setAccountLabel');
+    // E59 wave D — the first-run checklist's durable flag and the changelog's
+    // seen-version bookkeeping.
+    expect(getRuntimeRequestType({ type: 'getOnboardingState' })).toBe('getOnboardingState');
+    expect(getRuntimeRequestType({ type: 'dismissOnboarding' })).toBe('dismissOnboarding');
+    expect(getRuntimeRequestType({ type: 'getLastSeenVersion' })).toBe('getLastSeenVersion');
+    expect(
+      getRuntimeRequestType({ type: 'setLastSeenVersion', version: '2.0.0' }),
+    ).toBe('setLastSeenVersion');
+    // A blank/absent version would mark «nothing» as seen — the dot would then
+    // never clear, so it is rejected at the boundary.
+    expect(getRuntimeRequestType({ type: 'setLastSeenVersion', version: '  ' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'setLastSeenVersion' })).toBeNull();
+    // Error deep links. The code is optional; a pane outside the vocabulary
+    // would open a blank cabinet, so it is refused at the boundary.
+    expect(getRuntimeRequestType({ type: 'openOptions', pane: 'hub' })).toBe('openOptions');
+    expect(
+      getRuntimeRequestType({ type: 'openOptions', pane: 'accounts', code: 'CG-FLOW-02' }),
+    ).toBe('openOptions');
+    expect(getRuntimeRequestType({ type: 'openOptions', pane: 'nope' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'openOptions' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'openOptions', pane: 'hub', code: 7 })).toBeNull();
     // 1.6.0 shipped without this case — options-page device-token sign-in
     // was unreachable (found by the Stage 35 map regeneration).
     expect(

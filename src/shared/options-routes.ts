@@ -8,6 +8,9 @@
 // Anything unparseable falls back to the default route; a settings page must
 // never render blank because a link rotted.
 
+import { findErrorKeyByCode } from './errors.js';
+import type { UserErrorKey } from './types.js';
+
 export type PaneKey =
   | 'status'
   | 'hub'
@@ -40,8 +43,8 @@ export const DEFAULT_OPTIONS_ROUTE: OptionsRoute = { pane: 'status', code: null 
 // treated as noise rather than echoed into the DOM.
 const CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 
-function isPaneKey(value: string): value is PaneKey {
-  return (OPTIONS_PANES as readonly string[]).includes(value);
+export function isOptionsPaneKey(value: unknown): value is PaneKey {
+  return typeof value === 'string' && (OPTIONS_PANES as readonly string[]).includes(value);
 }
 
 export function parseOptionsHash(hash: string): OptionsRoute {
@@ -51,7 +54,7 @@ export function parseOptionsHash(hash: string): OptionsRoute {
   }
   const separator = raw.indexOf(':');
   const paneCandidate = (separator === -1 ? raw : raw.slice(0, separator)).toLowerCase();
-  if (!isPaneKey(paneCandidate)) {
+  if (!isOptionsPaneKey(paneCandidate)) {
     return { ...DEFAULT_OPTIONS_ROUTE };
   }
   if (separator === -1) {
@@ -67,4 +70,36 @@ export function parseOptionsHash(hash: string): OptionsRoute {
 export function formatOptionsHash(route: OptionsRoute): string {
   const code = route.code?.trim();
   return code && CODE_PATTERN.test(code) ? `#${route.pane}:${code}` : `#${route.pane}`;
+}
+
+/**
+ * Which pane can actually FIX a given error class. Keyed by registry key, not by
+ * code string: the key is the stable identifier, the code is presentation (and a
+ * retired code must never be reused, so it may not be re-pointed either).
+ *
+ * Anything not listed falls back to the hub for `CG-HUB-*` (every hub code names
+ * a connection problem the Hub pane owns) and to «Статус» otherwise — which is
+ * where a chatter can see the whole install at once. That fallback is load
+ * bearing: `settingsLink: true` is NOT only on hub codes, and a future
+ * settings-linked error must land somewhere useful without a code change here.
+ */
+const PANE_BY_ERROR_KEY: Partial<Record<UserErrorKey, PaneKey>> = {
+  // A persona is assigned per ACCOUNT, so the fix lives in «Аккаунты».
+  no_mapping: 'accounts',
+  // Nothing to assign yet — the catalog pane explains who creates personas.
+  no_personalities: 'personas',
+};
+
+/** Route for an error code that came from outside (a toast action, a banner, a
+ * deep link). An unknown code still routes — to «Статус» — but does not travel
+ * on as a code the page would try to explain. */
+export function resolveOptionsRouteForCode(code: string): OptionsRoute {
+  const normalized = (code ?? '').trim();
+  const key = findErrorKeyByCode(normalized);
+  if (!key) {
+    return { ...DEFAULT_OPTIONS_ROUTE };
+  }
+  const pane = PANE_BY_ERROR_KEY[key] ??
+    (normalized.startsWith('CG-HUB-') ? 'hub' : DEFAULT_OPTIONS_ROUTE.pane);
+  return { pane, code: CODE_PATTERN.test(normalized) ? normalized : null };
 }
