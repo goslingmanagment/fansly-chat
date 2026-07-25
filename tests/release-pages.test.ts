@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { CHANGELOG_URL } from '../src/shared/constants.js';
+
 const root = new URL('../', import.meta.url);
 const readRepoFile = (path: string): string =>
   readFileSync(new URL(path, root), 'utf8');
@@ -64,6 +66,22 @@ describe('release page stamping', () => {
       expect(script).toContain('ChatGoose v)[^<]+( &middot; Gosling Agency');
       expect(script).toContain('matches.length !== 1');
     }
+  });
+
+  it('pins the in-extension changelog link to the host deploy.sh publishes', () => {
+    // The changelog is a WEB page (E59) — the extension only links to it, so the
+    // constant and the deploy target are one fact in two files. A drift here ships
+    // a rail link to a host nobody publishes.
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const baseUrl = /readonly BASE_URL="([^"]+)"/.exec(deploy)?.[1];
+    expect(baseUrl).toBeTruthy();
+    expect(CHANGELOG_URL).toBe(`${baseUrl ?? ''}/changelog.html`);
+    // …and that is the file the deploy actually uploads.
+    expect(deploy).toContain('REMOTE_CHANGELOG_PATH="$REMOTE_DIR/changelog.html"');
+    // No `#v<X-Y-Z>` anchor while the anchored per-release page (E42) is not
+    // deployed: adding the anchor is a release commit that must FOLLOW that
+    // deploy, never precede it.
+    expect(CHANGELOG_URL).not.toContain('#');
   });
 
   it('keeps the guide intentionally versionless', () => {

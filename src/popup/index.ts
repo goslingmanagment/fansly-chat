@@ -145,6 +145,9 @@ function renderUnavailable(): void {
   message.textContent = "Couldn't reach ChatGoose. Reopen this popup after it reconnects.";
   message.className = 'chatgoose-popup-sub';
 
+  // This screen exists BECAUSE the runtime did not answer, so its button keeps
+  // the native path: routing through a background operation here would be the
+  // one thing we already know is broken.
   const button = createButton('Open Settings');
   button.addEventListener('click', () => {
     void browser.runtime.openOptionsPage();
@@ -222,9 +225,25 @@ async function render(): Promise<void> {
     panel.append(quotaRow);
   }
 
+  // The runtime just answered `getPopupStatus`, so the deep link is the right
+  // path here: it lands on «Статус» in the ONE options tab (a second tab would
+  // be a second pagehide settings writer). A request that rejected — or answered
+  // that it opened nothing — opened nothing, so the native fallback cannot
+  // double-open anything.
   const button = createButton('Open Settings');
   button.addEventListener('click', () => {
-    void browser.runtime.openOptionsPage();
+    void sendRuntimeRequest('openOptions', { pane: 'status' })
+      // A resolved `{opened:false}` is a REFUSAL, not a success: the background
+      // answered that it opened nothing (tabs.create denied), so the fallback is
+      // the same one a rejection gets — and it cannot double-open either.
+      .then((response) => {
+        if (!response?.opened) {
+          void browser.runtime.openOptionsPage();
+        }
+      })
+      .catch(() => {
+        void browser.runtime.openOptionsPage();
+      });
   });
 
   root.append(createVersionTag(), title, panel, button);

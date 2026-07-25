@@ -4,6 +4,7 @@ import {
   COACH_QUESTION_MAX_CHARS,
 } from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
+import { isOptionsPaneKey } from './options-routes.js';
 import {
   isStoredVoiceAttemptRoute,
   parseVoiceAttemptStoreSnapshot,
@@ -444,6 +445,23 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         message.accountId.trim() &&
         isString(message.label)
         ? 'setAccountLabel'
+        : null;
+    case 'getOnboardingState':
+      return 'getOnboardingState';
+    case 'dismissOnboarding':
+      return 'dismissOnboarding';
+    case 'openOptions':
+      // A pane outside the vocabulary would open a blank cabinet; the code is
+      // optional and its own shape is re-validated by the hash grammar.
+      return isOptionsPaneKey(message.pane) && isOptionalString(message, 'code')
+        ? 'openOptions'
+        : null;
+    case 'getLastSeenVersion':
+      return 'getLastSeenVersion';
+    case 'setLastSeenVersion':
+      // A blank version would mark «nothing» as seen and keep the dot forever.
+      return isString(message.version) && message.version.trim()
+        ? 'setLastSeenVersion'
         : null;
     case 'getSpendersList':
       return isOptionalBoolean(message, 'refresh') &&

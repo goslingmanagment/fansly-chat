@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import manifest from '../manifest.json';
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  LAST_SEEN_VERSION_STORAGE_KEY,
+  ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   STORAGE_SCHEMA_VERSION,
@@ -1364,6 +1367,227 @@ describe('runtime-api getOpsDaily', () => {
       hubErrorsTotal: 1,
       pageByAccount: { 'acc-1': 'lora-1' },
     });
+  });
+});
+
+describe('runtime-api onboarding flag', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('reads «not dismissed yet» for an absent or foreign-version record', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'getOnboardingState' }))
+      .toEqual({ version: 1, dismissedAt: null });
+
+    // A record from a future/foreign shape is not half-trusted.
+    mockStorage[ONBOARDING_STORAGE_KEY] = { version: 2, dismissedAt: 111 };
+    expect(await harness.send({ type: 'getOnboardingState' }))
+      .toEqual({ version: 1, dismissedAt: null });
+  });
+
+  it('stamps the flag once and keeps the FIRST timestamp afterwards', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: true });
+    const first = (mockStorage[ONBOARDING_STORAGE_KEY] as { dismissedAt: number }).dismissedAt;
+    expect(typeof first).toBe('number');
+
+    expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: true });
+    // A second call (another settings tab, a reload) must not move the date the
+    // install actually finished setup.
+    expect((mockStorage[ONBOARDING_STORAGE_KEY] as { dismissedAt: number }).dismissedAt)
+      .toBe(first);
+    // …and the read reports it.
+    expect(await harness.send({ type: 'getOnboardingState' }))
+      .toEqual({ version: 1, dismissedAt: first });
+  });
+
+  it('serializes two concurrent stamps into one record', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    const [a, b] = await Promise.all([
+      harness.send({ type: 'dismissOnboarding' }),
+      harness.send({ type: 'dismissOnboarding' }),
+    ]);
+    expect(a).toEqual({ ok: true });
+    expect(b).toEqual({ ok: true });
+    // The FIFO queue means the second read-modify-write saw the first stamp, so
+    // exactly one write landed.
+    const writes = (browser.storage.local.set as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([items]) => ONBOARDING_STORAGE_KEY in (items as Record<string, unknown>));
+    expect(writes).toHaveLength(1);
+  });
+
+  it('reports a failed write instead of pretending onboarding is over', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    (browser.storage.local.set as unknown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('quota'));
+
+    expect(await harness.send({ type: 'dismissOnboarding' })).toEqual({ ok: false });
+    expect(mockStorage[ONBOARDING_STORAGE_KEY]).toBeUndefined();
+  });
+});
+
+describe('runtime-api openOptions', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('re-points the ALREADY OPEN settings tab and raises its window', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsQuery.mockResolvedValueOnce([
+      { id: 41, url: 'moz-extension://cg-test-uuid/options.html#generation' },
+    ]);
+    harness.tabsGet.mockResolvedValueOnce({ id: 41, windowId: 5 } as never);
+
+    const result = await harness.send({
+      type: 'openOptions',
+      pane: 'hub',
+      code: 'CG-HUB-04',
+    });
+
+    expect(result).toEqual({ opened: true, reused: true });
+    // The query has to be a prefix match: the hash is not part of a match
+    // pattern, so the open tab is found whatever pane it is showing.
+    expect(harness.tabsQuery).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/options.html*',
+    });
+    expect(harness.tabsUpdate).toHaveBeenCalledWith(41, {
+      active: true,
+      url: 'moz-extension://cg-test-uuid/options.html#hub:CG-HUB-04',
+    });
+    expect(harness.windowsUpdate).toHaveBeenCalledWith(5, { focused: true });
+    // A SECOND options tab would be a second pagehide settings writer.
+    expect(harness.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('opens one tab when none is open, and drops an unusable code', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    const result = await harness.send({
+      type: 'openOptions',
+      pane: 'accounts',
+      code: '<script>',
+    });
+
+    expect(result).toEqual({ opened: true, reused: false });
+    // The hash grammar refuses the junk code and keeps the pane.
+    expect(harness.tabsCreate).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/options.html#accounts',
+    });
+  });
+
+  it('falls back to creating a tab when the open one disappeared mid-flight', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
+    harness.tabsUpdate.mockRejectedValueOnce(new Error('No tab with id: 41'));
+
+    expect(await harness.send({ type: 'openOptions', pane: 'status' }))
+      .toEqual({ opened: true, reused: false });
+    expect(harness.tabsCreate).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/options.html#status',
+    });
+  });
+
+  it('reports honestly when the browser refuses to open anything', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsCreate.mockRejectedValueOnce(new Error('denied'));
+
+    expect(await harness.send({ type: 'openOptions', pane: 'status' }))
+      .toEqual({ opened: false, reused: false });
+  });
+
+  it('serializes concurrent requests into ONE tab (double-clicked Settings)', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    // The browser's own truth: the tab is queryable only after tabs.create
+    // resolved. Without the lock both requests see «no tab» at the query await
+    // and both create one — two options tabs, two pagehide settings writers.
+    const openTabs: Array<{ id: number; url?: string }> = [];
+    harness.tabsQuery.mockImplementation(async () => [...openTabs]);
+    harness.tabsCreate.mockImplementation(async (info: { url: string }) => {
+      openTabs.push({ id: 41, url: info.url });
+      return { id: 41 };
+    });
+    harness.tabsGet.mockResolvedValue({ id: 41, windowId: 5 } as never);
+
+    const [first, second] = await Promise.all([
+      harness.send({ type: 'openOptions', pane: 'status' }),
+      harness.send({ type: 'openOptions', pane: 'hub', code: 'CG-HUB-04' }),
+    ]);
+
+    expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(first).toEqual({ opened: true, reused: false });
+    // The second request found the first one's tab and re-pointed it.
+    expect(second).toEqual({ opened: true, reused: true });
+    expect(harness.tabsUpdate).toHaveBeenCalledWith(41, {
+      active: true,
+      url: 'moz-extension://cg-test-uuid/options.html#hub:CG-HUB-04',
+    });
+  });
+
+  it('pins the deep-link page path to the manifest options_ui.page', async () => {
+    mockStorage = createStorage();
+    await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    // One fact in two files. A drift here does not throw: `tabs.query` simply
+    // stops matching the open settings tab, and the singleton silently degrades
+    // to always-create — the exact failure the reuse path exists to prevent.
+    const { OPTIONS_PAGE_PATH } = await import('../src/background/runtime-api.js');
+    expect(OPTIONS_PAGE_PATH).toBe(manifest.options_ui.page);
+  });
+});
+
+describe('runtime-api last-seen version', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('reads «none seen» for an absent or foreign-version record', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'getLastSeenVersion' }))
+      .toEqual({ version: 1, lastSeenVersion: null });
+
+    mockStorage[LAST_SEEN_VERSION_STORAGE_KEY] = { version: 7, lastSeenVersion: '9.9.9' };
+    expect(await harness.send({ type: 'getLastSeenVersion' }))
+      .toEqual({ version: 1, lastSeenVersion: null });
+  });
+
+  it('records the version the page marked as seen and reads it back', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    expect(await harness.send({ type: 'setLastSeenVersion', version: ' 2.0.0 ' }))
+      .toEqual({ ok: true });
+    expect(mockStorage[LAST_SEEN_VERSION_STORAGE_KEY])
+      .toEqual({ version: 1, lastSeenVersion: '2.0.0' });
+    expect(await harness.send({ type: 'getLastSeenVersion' }))
+      .toEqual({ version: 1, lastSeenVersion: '2.0.0' });
+  });
+
+  it('reports a failed write so the dot can stay on', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    (browser.storage.local.set as unknown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('quota'));
+
+    expect(await harness.send({ type: 'setLastSeenVersion', version: '2.0.0' }))
+      .toEqual({ ok: false });
+    expect(mockStorage[LAST_SEEN_VERSION_STORAGE_KEY]).toBeUndefined();
   });
 });
 

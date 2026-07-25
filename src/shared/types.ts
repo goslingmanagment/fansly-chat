@@ -1,3 +1,4 @@
+import type { PaneKey } from './options-routes.js';
 import type {
   StoredVoiceAttemptRoute,
   VoiceAttemptStoreEntry,
@@ -882,6 +883,48 @@ export interface AccountLabelsSnapshot {
   byAccount: Record<string, string>;
 }
 
+/** First-run checklist state (`chatgoose:onboarding`).
+ *
+ * `dismissedAt` is stamped ONCE — when every step of the checklist has actually
+ * been completed — and never cleared: signing out later does not put a chatter
+ * back through onboarding. A durable flag is the whole point: the v1 predicate
+ * read live form state, so typing the hub URL cancelled the checklist that was
+ * still explaining the next two steps. */
+export interface OnboardingSnapshot {
+  version: 1;
+  dismissedAt: number | null;
+}
+
+/** Which release's changelog the chatter has already opened
+ * (`chatgoose:lastSeenVersion`). `version` is the RECORD's own version; the
+ * extension version it remembers is `lastSeenVersion`. */
+export interface LastSeenVersionSnapshot {
+  version: 1;
+  lastSeenVersion: string | null;
+}
+
+export interface SetLastSeenVersionRequest {
+  /** The extension version being marked as seen. */
+  version: string;
+}
+
+/** Deep link into the settings page from a surface that cannot route itself (an
+ * error toast in the Fansly DOM, the popup, a banner). The background resolves it
+ * to ONE options tab. */
+export interface OpenOptionsRequest {
+  pane: PaneKey;
+  /** Error registry code the page explains and highlights on arrival. */
+  code?: string;
+}
+
+export interface OpenOptionsResponse {
+  opened: boolean;
+  /** True when an ALREADY OPEN settings tab was re-pointed rather than a second
+   * one created — a second options tab would be a second pagehide settings
+   * writer. */
+  reused: boolean;
+}
+
 /** One row of the cabinet's «Аккаунты» pane.
  *
  * `state` is honest about what the background can actually prove: 'live' = a
@@ -944,6 +987,11 @@ export interface RuntimeRequestMap {
   getAccountsView: undefined;
   focusAccountTab: FocusAccountTabRequest;
   setAccountLabel: SetAccountLabelRequest;
+  getOnboardingState: undefined;
+  dismissOnboarding: undefined;
+  getLastSeenVersion: undefined;
+  setLastSeenVersion: SetLastSeenVersionRequest;
+  openOptions: OpenOptionsRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -971,6 +1019,11 @@ export interface RuntimeResponseMap {
   getAccountsView: AccountsView;
   focusAccountTab: { ok: boolean };
   setAccountLabel: { ok: boolean };
+  getOnboardingState: OnboardingSnapshot;
+  dismissOnboarding: { ok: boolean };
+  getLastSeenVersion: LastSeenVersionSnapshot;
+  setLastSeenVersion: { ok: boolean };
+  openOptions: OpenOptionsResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;

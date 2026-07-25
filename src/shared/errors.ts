@@ -457,6 +457,24 @@ export function isUserFacingError(value: unknown): value is UserFacingError {
   );
 }
 
+/** Reverse lookup: the registry entry behind a code. Codes are what travel
+ * OUTSIDE the extension's own objects — a deep-link hash, a support thread, a
+ * screenshot — so a surface that receives one has to be able to come back to the
+ * canonical text instead of restating it. Unknown codes answer null: an old link
+ * must degrade, never fabricate. */
+export function findErrorKeyByCode(code: string): UserErrorKey | null {
+  const normalized = code?.trim();
+  if (!normalized) {
+    return null;
+  }
+  for (const entry of Object.values(ERROR_REGISTRY)) {
+    if (entry.code === normalized) {
+      return entry.key;
+    }
+  }
+  return null;
+}
+
 export function getErrorMessage(key: UserErrorKey): UserFacingError {
   const definition = ERROR_REGISTRY[key];
   return {

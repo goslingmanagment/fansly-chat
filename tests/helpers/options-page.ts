@@ -4,6 +4,7 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  KNOWN_ACCOUNTS_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../../src/shared/constants.js';
 import {
@@ -18,6 +19,7 @@ import type {
   AgencyHubIdentityResponse,
   AgencyHubSignOutResponse,
   AiQuotaStatus,
+  OnboardingSnapshot,
   OpsDailySnapshot,
   PersistedState,
   PersonaCatalogEntry,
@@ -43,6 +45,9 @@ export interface MountOverrides {
   /** Granted host permission for the hub origin (defaults to false — a fresh
    * install). */
   permissionGranted?: boolean;
+  /** Location hash the page is mounted with — how an error deep link arrives
+   * («#hub:CG-HUB-04»). Defaults to none, i.e. the landing pane. */
+  hash?: string;
   /** Extra raw storage.local keys, merged over the serialized state. Operational
    * keys (`chatgoose:*`) live outside PersistedState and are seeded here. */
   storage?: Record<string, unknown>;
@@ -72,6 +77,18 @@ export interface MountOverrides {
     setAccountLabelOk?: boolean;
     /** `false` models a tab that closed between the view read and the click. */
     focusAccountTabOk?: boolean;
+    /** First-run checklist flag. Omitted = the operation is UNAVAILABLE (an
+     * older background), which the page must read as «not fresh» — no checklist.
+     * Pass `{ version: 1, dismissedAt: null }` for a genuine first run. */
+    onboarding?: OnboardingSnapshot;
+    /** `false` makes `dismissOnboarding` answer «did not stick», so a test can
+     * prove the checklist stays instead of silently disappearing. */
+    dismissOnboardingOk?: boolean;
+    /** Version whose changelog has already been opened. Omitted = none recorded
+     * (also what an older background answers), which earns the «нов.» dot. */
+    lastSeenVersion?: string | null;
+    /** `false` models a rejected seen-version write: the dot must stay on. */
+    setLastSeenVersionOk?: boolean;
     /** Reply for the mount-tail (and any post-mount) testAgencyHubConnection.
      * Defaults to a passing test so a fully-configured page reaches the hero's
      * all-green state — the hub step requires a `connected` feedback. A factory
@@ -109,6 +126,12 @@ export interface MountedOptionsPage {
   labelWrites: () => Array<{ accountId: string; label: string }>;
   /** Every account the page asked to focus a tab for, in order. */
   focusRequests: () => string[];
+  /** How many times the page asked to stamp the onboarding flag. */
+  onboardingDismissals: () => number;
+  /** Every version the page marked as seen, in order. */
+  lastSeenWrites: () => string[];
+  /** Every URL the page asked the browser to open in a new tab. */
+  openedTabs: () => string[];
 }
 
 let dom: InstanceType<typeof JSDOM> | null = null;
@@ -145,6 +168,9 @@ export async function mountOptionsPage(
   const sentRequestTypes: string[] = [];
   const labelWrites: Array<{ accountId: string; label: string }> = [];
   const focusRequests: string[] = [];
+  const onboardingDismissals: number[] = [];
+  const lastSeenWrites: string[] = [];
+  const openedTabs: string[] = [];
   // Mutable so a label write is visible to the next view read, as in production.
   const accountsView: AccountsView | null = overrides.accounts
     ? structuredClone(overrides.accounts)
@@ -161,7 +187,7 @@ export async function mountOptionsPage(
 
   dom = new JSDOM(
     '<!doctype html><html><head></head><body><div id="chatgoose-options-root"></div></body></html>',
-    { url: 'https://localhost/options.html' },
+    { url: `https://localhost/options.html${overrides.hash ?? ''}` },
   );
   const { window } = dom;
 
@@ -238,8 +264,29 @@ export async function mountOptionsPage(
           // E51 durable-migration handshake: the page fails closed without it.
           case 'ensureStorageReady':
             return { ready: true };
-          case 'getSessionsSnapshot':
-            return runtimeReply<SessionSnapshotEntry[]>(sessions, []);
+          case 'getSessionsSnapshot': {
+            const snapshot = await runtimeReply<SessionSnapshotEntry[]>(sessions, []);
+            // The real handler reconciles `knownAccounts` inside this request
+            // (storageCoordinator.reconcileKnownAccounts) — which is exactly why
+            // the page re-reads storage once the snapshot resolves. Model the
+            // UNION so a freshly captured account becomes known here too; the
+            // background's pruning of stale unmapped ids is deliberately not
+            // modelled (no suite depends on it, and a helper that removes rows
+            // would be a surprise).
+            const known = new Set(
+              Array.isArray(stored[KNOWN_ACCOUNTS_KEY]) ? stored[KNOWN_ACCOUNTS_KEY] as string[] : [],
+            );
+            const before = known.size;
+            for (const session of snapshot) {
+              if (session.connected) {
+                known.add(session.resolvedAccountId ?? session.legacyAccountId);
+              }
+            }
+            if (known.size !== before) {
+              stored = { ...stored, [KNOWN_ACCOUNTS_KEY]: [...known] };
+            }
+            return snapshot;
+          }
           case 'testAgencyHubConnection':
             if (overrides.revealCatalogOnConnect) {
               // The background refresh onAgencyHubReady would fire has just landed:
@@ -292,6 +339,26 @@ export async function mountOptionsPage(
             focusRequests.push(accountId);
             return { ok: runtime.focusAccountTabOk !== false };
           }
+          case 'getLastSeenVersion':
+            return { version: 1, lastSeenVersion: runtime.lastSeenVersion ?? null };
+          case 'setLastSeenVersion': {
+            const { version } = message as { version: string };
+            const ok = runtime.setLastSeenVersionOk !== false;
+            if (ok) lastSeenWrites.push(version);
+            return { ok };
+          }
+          case 'getOnboardingState':
+            // No override = no handler, exactly like an older background.
+            return runtime.onboarding;
+          case 'dismissOnboarding': {
+            const ok = runtime.dismissOnboardingOk !== false;
+            if (ok) {
+              // Mirror the background: the durable flag is stamped once and the
+              // record is what a follow-up read would see.
+              onboardingDismissals.push(Date.now());
+            }
+            return { ok };
+          }
           case 'getAgencyHubDeviceTokenMeta': {
             if (runtime.deviceTokenMeta !== undefined) return runtime.deviceTokenMeta;
             const meta = stored[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
@@ -324,8 +391,11 @@ export async function mountOptionsPage(
     },
     tabs: {
       // Any tab-opening path (a readiness step, the Changelog link) is safe by
-      // default; a test override reassigns this to assert the URL.
-      create: vi.fn(async () => ({})),
+      // default; the URLs are recorded so a test can assert them.
+      create: vi.fn(async (info?: { url?: string }) => {
+        openedTabs.push(info?.url ?? '');
+        return {};
+      }),
     },
     permissions: {
       contains: vi.fn(async () => overrides.permissionGranted ?? false),
@@ -366,6 +436,9 @@ export async function mountOptionsPage(
     sentRequestTypes: () => [...sentRequestTypes],
     labelWrites: () => labelWrites.map((entry) => ({ ...entry })),
     focusRequests: () => [...focusRequests],
+    onboardingDismissals: () => onboardingDismissals.length,
+    lastSeenWrites: () => [...lastSeenWrites],
+    openedTabs: () => [...openedTabs],
   };
 }
 
