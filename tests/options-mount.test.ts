@@ -4,7 +4,6 @@
 // loudly and once — instead of as a puzzling assertion in every pane suite.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { COPY } from '../src/options/copy.js';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 
 describe('options mount helper', () => {
@@ -18,7 +17,7 @@ describe('options mount helper', () => {
     // The E51 readiness handshake was acknowledged, so the page rendered the
     // real cabinet rather than the recovery screen.
     expect(page.document.querySelector('.chatgoose-cabinet')).not.toBeNull();
-    expect(page.document.body.textContent).not.toContain(COPY.recovery.storageTitle);
+    expect(page.document.body.textContent).not.toContain('Settings Unavailable');
     expect(page.sentRequestTypes()).toContain('ensureStorageReady');
   });
 

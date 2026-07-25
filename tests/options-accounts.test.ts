@@ -240,7 +240,7 @@ async function loadOptionsPage(options: {
   await import('../src/options/index.js');
   if (options.expectStorageFailure) {
     await vi.waitFor(() => {
-      expect(document.querySelector('h1')?.textContent).toBe(COPY.recovery.storageTitle);
+      expect(document.querySelector('h1')?.textContent).toBe('ChatGoose Settings Unavailable');
     }, { timeout: 2000 });
     return;
   }
@@ -918,10 +918,8 @@ describe('Options page settings and read-only personas', () => {
 
     const username = document.querySelector<HTMLInputElement>('input[autocomplete="username"]')!;
     const password = document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!;
-    // Scoped to the hub pane: «Войти» also labels the onboarding checklist CTA.
-    const signIn = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'),
-    ).find((button) => button.textContent === COPY.hub.signIn)!;
+    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Sign in & issue device token')!;
     username.value = 'owner';
     password.value = 'secret';
     signIn.click();
@@ -947,9 +945,7 @@ describe('Options page settings and read-only personas', () => {
       expiresAt: Date.now() + 86_400_000,
     });
     await vi.waitFor(() => {
-      expect(
-      document.querySelector('[data-hub-detail="device-token"]')?.textContent,
-    ).toContain(COPY.hub.deviceTokenActive);
+      expect(document.body.textContent).toContain('Device token active');
     });
 
     releaseFirstStorageSet?.();
@@ -962,9 +958,7 @@ describe('Options page settings and read-only personas', () => {
     await vi.waitFor(() => {
       expect(connectionTokens.at(-1)).toBe('device-token-new');
     });
-    expect(
-      document.querySelector('[data-hub-detail="device-token"]')?.textContent,
-    ).toContain(COPY.hub.deviceTokenActive);
+    expect(document.body.textContent).toContain('Device token active');
   });
 
   it('re-tests the hub connection automatically after a successful sign-in', async () => {
@@ -1002,10 +996,8 @@ describe('Options page settings and read-only personas', () => {
 
     const username = document.querySelector<HTMLInputElement>('input[autocomplete="username"]')!;
     const password = document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!;
-    // Scoped to the hub pane: «Войти» also labels the onboarding checklist CTA.
-    const signIn = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'),
-    ).find((button) => button.textContent === COPY.hub.signIn)!;
+    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Sign in & issue device token')!;
     username.value = 'owner';
     password.value = 'secret';
     signIn.click();
@@ -1017,7 +1009,7 @@ describe('Options page settings and read-only personas', () => {
       expect(connectionTokens).toContain('device-token-auto');
     });
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain(COPY.hub.connOk);
+      expect(document.body.textContent).toContain('Connected ✓');
     });
   });
 

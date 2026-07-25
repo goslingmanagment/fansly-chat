@@ -75,6 +75,8 @@ export const COPY = {
   sections: {
     statusTitle: 'Статус',
     statusHint: 'Что сейчас работает: Fansly, Hub, доступ, AI-квота и Spenders.',
+    hubTitle: 'Agency Hub',
+    hubHint: 'Кернел агентства: генерация, персоны, Spenders. Вход — по device token.',
     personasTitle: 'Персоны',
     accountsTitle: 'Аккаунты',
     accountsHint: 'Fansly-аккаунты, которые видит расширение, и их персоны.',
@@ -150,9 +152,7 @@ export const COPY = {
     accessUnknown: 'состояние хаба неизвестно',
     accessRejected: 'credential отклонён хабом',
     accessGrantedFor: 'выдан для',
-    /** Deliberately NOT the activity row's «сегодня генераций не было»: the two
-     * rows sit next to each other and must not read as a copy-paste echo. */
-    aiEmpty: 'квота неизвестна — появится с первой генерацией за день',
+    aiEmpty: 'сегодня генераций не было — квота неизвестна',
     aiByPageNote: 'по страницам · худшая первой',
     aiRemaining: '{page} · осталось {n}',
     aiNoLimit: '{page} · лимит не сообщён',
@@ -230,36 +230,6 @@ export const COPY = {
     /** Connection card. */
     baseUrlLabel: 'Базовый URL',
     baseUrlPlaceholder: 'https://адрес-вашего-хаба',
-    signInSectionLabel: 'Вход (device token)',
-    /** Live connection-test box: pill + meta per state. */
-    connIdle: 'Не проверено',
-    connIdleMeta: 'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
-    connPending: 'Сохраняем…',
-    connPendingMeta: 'Дописываем изменения настроек перед живой проверкой.',
-    connTesting: 'Проверяем…',
-    connTestingMeta: 'Проверяем доступность хаба, разрешение и credential.',
-    connOk: 'Связь есть ✓',
-    connOkMeta: 'Живая проверка прошла для {url}.',
-    connFailed: 'Ошибка связи: {code}',
-    /** Host-permission box: status + meta per state. Placeholders: `{origin}`
-     * is the granted pattern, `{message}` the browser's own error text. */
-    permGranted: 'Доступ к хосту выдан.',
-    permGrantedMeta: 'ChatGoose может обращаться к {origin}. Синк оживёт после успешной проверки связи ниже.',
-    permNoUrl: 'Синк выключен: не задан адрес Agency Hub.',
-    permNoUrlMeta: 'Укажи базовый URL хаба, затем разреши доступ к этому адресу.',
-    permInvalidUrl: 'Синк выключен: адрес Agency Hub некорректен.',
-    permInvalidUrlMeta: 'Нужен полный URL с http:// или https://.',
-    permCheckError: 'Синк выключен: не удалось проверить доступ к хосту.',
-    permCheckErrorMeta: 'Firefox вернул ошибку при проверке {origin}: {message}.',
-    permDenied: 'Синк выключен: доступ к хосту не выдан.',
-    permDeniedMeta: 'Firefox не выдал доступ для {origin}. Нажми «Разрешить доступ» ещё раз.',
-    permRequestErrorTitle: 'Синк выключен: запрос доступа не удался.',
-    permRequestErrorMeta: 'Firefox вернул ошибку при запросе {origin}: {message}.',
-    permUnsupported: 'Синк выключен: запрос доступа недоступен в этой сборке.',
-    permUnsupportedMeta: 'Эта сборка браузера не даёт browser.permissions.request для доступа к Agency Hub.',
-    permAskMeta: 'Разреши доступ для {origin} — без него ChatGoose не достучится до хаба.',
-    permNoCredential: 'Синк выключен: нет credential для Agency Hub.',
-    permNoCredentialMeta: 'Доступ для {origin} выдан, но нужен вход или legacy-ключ.',
     identityLabel: 'Аккаунт',
     pagesLabel: 'Страницы ядра',
     pagesMore: 'и ещё {n}',
@@ -275,11 +245,6 @@ export const COPY = {
     signIn: 'Войти',
     signInHint:
       'Адрес и логин выдаёт владелец агентства. Вход выпустит device token — пароль на устройстве не хранится.',
-    signInMissingFields: 'Сначала заполни адрес хаба, логин и пароль.',
-    signingIn: 'Входим…',
-    signInFailed: 'Вход не удался: {message}',
-    signInIssued: 'Device token {prefix}… выпущен (истекает {date}).',
-    tokenFallbackNote: 'Запросы к хабу идут по device token; legacy API-ключ — запасной путь.',
     testConnection: 'Проверить связь',
     reconnectAccess: 'Переподключить',
     reissueToken: 'Перевыпустить токен',
@@ -302,7 +267,6 @@ export const COPY = {
     checkLabel: 'Проверка',
     checkSuccess: 'успех',
     checkFailure: 'ошибка',
-    checkDuration: '{n} мс',
     checkViaDeviceToken: 'через device token',
     checkViaLegacyKey: 'по legacy-ключу',
     checkNever: 'ещё не проверяли',
@@ -319,31 +283,9 @@ export const COPY = {
     fanSummaryLast: 'последний пуш — {when} · {account}',
     fanSummaryEmpty: 'пушей ещё не было',
     legacyKeyFold: 'Legacy API-ключ (запасной путь)',
-    legacyKeyFieldLabel: 'API-ключ Agency Hub (запасной)',
     legacyKeyShow: 'Показать',
     legacyKeyHide: 'Скрыть',
     legacyKeyRemove: 'Удалить',
-  },
-
-  /** The two pre-cabinet gate screens: persona-snapshot recovery and the
-   * storage-unavailable barrier. Rare, but user-visible — same language rules. */
-  recovery: {
-    personaTitle: 'ChatGoose — восстановление персоны',
-    personaSubtitle:
-      'Сохранённый снапшот legacy-персоны повреждён. Настройки и Agency Hub отключены, чтобы снапшот нельзя было затереть.',
-    personaSectionTitle: 'Экспорт для восстановления',
-    personaSectionHint:
-      'Выгрузи повреждённое значение вместе с текущими данными legacy-персоны, маппингами и алиасами — для ручного восстановления.',
-    storageTitle: 'ChatGoose — настройки недоступны',
-    storageSubtitle:
-      'Локальное хранилище не удалось безопасно подготовить. Перезагрузи Настройки перед правками.',
-    storageSectionTitle: 'Защита хранилища',
-    storageSectionHint:
-      'Эта страница не применила ни одной правки. Перезагрузка разбудит фоновый воркер и повторит защищённую миграцию.',
-    storageReload: 'Перезагрузить Настройки',
-    /** The read-only barrier when a NEWER build upgraded storage under this page. */
-    futureSchema:
-      'Настройки обновлены более новой сборкой ChatGoose (storage v{n}). Перезагрузи страницу перед правками.',
   },
 
   personas: {
@@ -363,9 +305,6 @@ export const COPY = {
     archivedMapped: 'выбери замену',
     catalogLabel: 'Каталог',
     catalogUpdated: 'обновлён {date}',
-    /** Appended after `catalogUpdated` when the read is older than two days —
-     * an absolute timestamp alone hides how stale the catalog is. */
-    catalogAge: '· {n} дн назад',
     catalogNever: 'ещё не обновлялся',
     catalogRefresh: 'Проверить связь и обновить',
     catalogRefreshHint: 'Каталог перечитывается после успешной проверки связи.',
@@ -394,9 +333,6 @@ export const COPY = {
     personaSelectNone: 'Персона не назначена',
     personaSelectArchived: 'в архиве',
     personaSelectMissing: 'Недоступная персона · {key}',
-    /** aria-label of the per-account persona <select>; `{label}` is the row's
-     * visible heading (handle, local label, or shortened id). */
-    personaSelectAria: 'Персона аккаунта {label}',
     idPrefix: 'ID аккаунта: ',
     idCopyTitle: 'Скопировать {id}',
     idCopied: 'Скопировано ✓',
