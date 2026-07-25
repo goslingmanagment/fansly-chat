@@ -92,6 +92,17 @@ export class SessionStore {
     return null;
   }
 
+  /** EVERY tab the capture map can attribute to an account.
+   *
+   * The accounts view needs the whole mapping, not one tab per row: an account
+   * can hold several captured tabs (a second chat window, a duplicated tab), and
+   * each of them is attributed even though a row can only point at one. Deriving
+   * the set from the rows counts the extras as «без атрибуции» and prints a false
+   * instruction — «открой чат, и строка оживёт» about a chat already open. */
+  getAttributedTabIds(): Set<number> {
+    return new Set(this.accountByTabId.keys());
+  }
+
   getSessionByAccount(accountId: string | null | undefined): SessionTemplate | null {
     if (!accountId) {
       return null;

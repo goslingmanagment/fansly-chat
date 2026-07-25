@@ -174,6 +174,28 @@ describe('account presence store', () => {
     expect(snapshot.byAccount['acc-2']?.username).toBe('two');
   });
 
+  it('writes only when the mutation actually changed the record', async () => {
+    const { recordAccountPresence, transferAccountPresence } = await loadModule();
+
+    // `rekeyAccountIdentity` calls the transfer on EVERY getSessionsSnapshot
+    // while a legacy-id session is open (an options mount plus a ≥5s
+    // focus/visibility repoll). With no legacy record there is nothing to move,
+    // and storage.local.set replaces the WHOLE record — an unconditional write
+    // here is constant churn.
+    await transferAccountPresence('legacy', 'canonical');
+    expect(storage.setCalls()).toBe(0);
+
+    await recordAccountPresence({ accountId: 'legacy' });
+    expect(storage.setCalls()).toBe(1);
+
+    // The one REAL transfer writes; every repoll after it is a no-op.
+    await transferAccountPresence('legacy', 'canonical');
+    expect(storage.setCalls()).toBe(2);
+    await transferAccountPresence('legacy', 'canonical');
+    expect(storage.setCalls()).toBe(2);
+    expect(Object.keys(stored(storage.record).byAccount)).toEqual(['canonical']);
+  });
+
   it('discards a foreign-version or malformed record instead of half-trusting it', async () => {
     const { getAccountPresence } = await loadModule();
     storage.record[STORAGE_KEY] = { version: 2, byAccount: { 'acc-1': { lastSeenAt: 1 } } };

@@ -499,11 +499,21 @@ export function registerRuntimeApi({
       }
 
       if (requestType === 'getAccountsView') {
-        // The cabinet's «Аккаунты» rows. Local reads only — the state
-        // coordinator, the two operational account stores, today's ops counters
-        // and `tabs.query`. NOTHING here touches Fansly or the hub: this handler
-        // is called on every mount and must not become egress (DP 1-B).
-        const state = await storageCoordinator.getState();
+        // The cabinet's «Аккаунты» rows. Local reads only — storage, the two
+        // operational account stores, today's ops counters and `tabs.query`.
+        // NOTHING here touches Fansly or the hub: this handler is called on every
+        // mount and must not become egress (DP 1-B).
+        //
+        // The coordinator supplies the BARRIER only (its startup load, deferred
+        // repair and the unsupported-future-schema assertion), never the answer:
+        // `storage.local.set` resolves before `storage.onChanged` refreshes that
+        // cache, so a persona the page just assigned or cleared would still read
+        // stale here and the «AI отключён» badge would lie until the next poll.
+        // The mappings/aliases/catalog therefore come from a FRESH non-mutating
+        // snapshot — readStorageState never writes its snapshot back, so it
+        // cannot clobber a concurrent background-owned identity rekey.
+        await storageCoordinator.getState();
+        const state = await readStorageState();
         const [presence, labels, opsDaily] = await Promise.all([
           getAccountPresence(),
           getAccountLabels(),
@@ -652,11 +662,11 @@ export function registerRuntimeApi({
         let unattributedFanslyTabs = 0;
         try {
           const tabs = await browser.tabs.query({ url: FANSLY_TAB_URL_PATTERN });
-          const attributedTabIds = new Set(
-            accounts
-              .map((entry) => entry.tabId)
-              .filter((tabId): tabId is number => tabId !== null),
-          );
+          // The FULL capture map, not one tab per row: an account can hold
+          // several captured tabs and every one of them IS attributed, while a
+          // row can only carry a single tab id. Counting the extras here would
+          // tell the chatter to «открой чат» for a chat that is already open.
+          const attributedTabIds = sessionStore.getAttributedTabIds();
           unattributedFanslyTabs = tabs.filter(
             (tab) => tab.id === undefined || !attributedTabIds.has(tab.id),
           ).length;

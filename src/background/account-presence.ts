@@ -113,11 +113,20 @@ async function write(snapshot: AccountPresenceSnapshot): Promise<void> {
 
 /** Serialize a read-modify-write of the whole record. Each queued task re-reads
  * the freshest snapshot before applying its own change, so overlapping
- * recorders compose instead of clobbering. */
-async function mutate(apply: (snapshot: AccountPresenceSnapshot) => void): Promise<void> {
+ * recorders compose instead of clobbering.
+ *
+ * `apply` returns whether it CHANGED anything, and a false answer skips the
+ * write entirely. storage.local.set replaces the whole record, so an
+ * unconditional write would churn the disk for nothing — and this is not a rare
+ * path: `rekeyAccountIdentity` calls `transferAccountPresence` on EVERY
+ * `getSessionsSnapshot` while a legacy-id session is open (an options mount plus
+ * a ≥5s focus/visibility repoll), long after the one real transfer happened. */
+async function mutate(apply: (snapshot: AccountPresenceSnapshot) => boolean): Promise<void> {
   const run = mutationQueue.then(async () => {
     const snapshot = await read();
-    apply(snapshot);
+    if (!apply(snapshot)) {
+      return;
+    }
     await write(snapshot);
   });
   // Keep the queue usable after a storage failure; each caller awaits its own
@@ -162,11 +171,21 @@ export async function recordAccountPresence(entry: {
   });
   await mutate((snapshot) => {
     const stored = snapshot.byAccount[accountId];
-    snapshot.byAccount[accountId] = {
+    const next: AccountPresenceEntry = {
       lastSeenAt: now,
       username: username ?? stored?.username ?? null,
       displayName: displayName ?? stored?.displayName ?? null,
     };
+    if (
+      stored &&
+      stored.lastSeenAt === next.lastSeenAt &&
+      stored.username === next.username &&
+      stored.displayName === next.displayName
+    ) {
+      return false;
+    }
+    snapshot.byAccount[accountId] = next;
+    return true;
   });
 }
 
@@ -187,7 +206,10 @@ export async function transferAccountPresence(
   await mutate((snapshot) => {
     const legacy = snapshot.byAccount[legacyAccountId];
     if (!legacy) {
-      return;
+      // Nothing to move: the transfer already ran (or this account never had a
+      // legacy record). The rekey calls it on every repoll, so this must not
+      // write.
+      return false;
     }
     delete snapshot.byAccount[legacyAccountId];
     const canonical = snapshot.byAccount[canonicalAccountId];
@@ -199,9 +221,12 @@ export async function transferAccountPresence(
         username: canonical.username ?? legacy.username,
         displayName: canonical.displayName ?? legacy.displayName,
       };
-      return;
+      // The legacy key was deleted above, so the record changed even when the
+      // canonical entry kept every one of its own fields.
+      return true;
     }
     snapshot.byAccount[canonicalAccountId] = legacy;
+    return true;
   });
 }
 

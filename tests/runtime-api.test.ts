@@ -123,7 +123,12 @@ async function installRuntimeApiHarness(fanslyClient: {
   };
   tabContexts?: TabContextStoreClass;
   storageCoordinator?: {
-    ensurePersistedState: () => Promise<unknown>;
+    ensurePersistedState?: () => Promise<unknown>;
+    // A stub can pin `getState` to a deliberately STALE snapshot: the real
+    // coordinator in this harness re-reads storage on every call (its listener
+    // probe is never observed), so only a stub can reproduce the cache lag a
+    // handler sees in Firefox.
+    getState?: () => Promise<unknown>;
   };
 }) {
   vi.resetModules();
@@ -2129,6 +2134,87 @@ describe('runtime-api accounts view', () => {
     expect(view.accounts[1]).toMatchObject({ localLabel: 'Мика · вечер', label: 'Мика · вечер' });
     // The unattributed tab is reported as an AGGREGATE, never as a row.
     expect(view.unattributedFanslyTabs).toBe(1);
+  });
+
+  it('counts every captured tab as attributed, not one tab per row', async () => {
+    mockStorage = createStorage({ knownAccounts: ['acc-live'] });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: resolvedAccount('acc-live', 'lora', 'Lora'),
+    });
+    // ONE account, TWO captured tabs (a second chat window). A row can only
+    // carry one tab id, so a set built from the rows would call tab 32
+    // unattributed and tell the chatter «открой чат, и строка оживёт» about a
+    // chat that is already open.
+    harness.sessionStore.registerCapture(31, makeCapture('acc-live'));
+    harness.sessionStore.registerCapture(32, makeCapture('acc-live'));
+    harness.tabsQuery.mockResolvedValue([{ id: 31 }, { id: 32 }, { id: 99 }]);
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<{ accountId: string; state: string }>;
+      unattributedFanslyTabs: number;
+    };
+
+    expect(view.accounts.map((entry) => [entry.accountId, entry.state])).toEqual([
+      ['acc-live', 'live'],
+    ]);
+    // Only the foreign tab is genuinely unattributed.
+    expect(view.unattributedFanslyTabs).toBe(1);
+  });
+
+  it('reads the mappings FRESH, so a just-assigned persona is not reported as unmapped', async () => {
+    // storage.local.set resolves before storage.onChanged refreshes the
+    // coordinator cache, so the pane can call getAccountsView while that cache
+    // still predates the write it just made.
+    const settings = {
+      ...createDefaultSettings(),
+      agencyHubBaseUrl: 'https://hub.example.test',
+      agencyHubDeviceToken: 'device-x',
+    };
+    const personaCatalog = [
+      {
+        key: 'p-active',
+        displayName: 'Closer',
+        definitionId: 'v1:persona-active-definition',
+        version: 1,
+        status: 'active',
+      },
+    ];
+    mockStorage = createStorage({
+      settings,
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'device-x',
+      knownAccounts: ['acc-1'],
+      // No mapping yet: this is the snapshot the coordinator cached.
+      accountMappings: {},
+      personaCatalog,
+      personaCatalogSource: personaCatalogSource(settings),
+      personaCatalogFetchedAt: '2026-07-25T00:00:00.000Z',
+    });
+    const staleState = structuredClone(mockStorage);
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => undefined) },
+      {
+        storageCoordinator: {
+          ensurePersistedState: vi.fn(async () => staleState),
+          getState: vi.fn(async () => staleState),
+        },
+      },
+    );
+
+    // The options page assigns the persona; the coordinator cache still says {}.
+    mockStorage.accountMappings = { 'acc-1': 'p-active' };
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<{ accountId: string; personaMapped: boolean }>;
+    };
+
+    // Answering from the cache would paint a false amber «AI отключён» until the
+    // next poll.
+    expect(view.accounts).toEqual([
+      expect.objectContaining({ accountId: 'acc-1', personaMapped: true }),
+    ]);
+    expect(
+      (staleState as { accountMappings: Record<string, string> }).accountMappings,
+    ).toEqual({});
   });
 
   it('treats an archived mapping as unmapped — an archived persona cannot generate', async () => {

@@ -88,11 +88,19 @@ async function write(snapshot: AccountLabelsSnapshot): Promise<void> {
 
 /** Serialize a read-modify-write of the whole record: storage.local.set replaces
  * it, so two chatters' rapid renames (or a rename racing a rekey transfer) would
- * otherwise let the later writer erase the earlier label. */
-async function mutate(apply: (snapshot: AccountLabelsSnapshot) => void): Promise<void> {
+ * otherwise let the later writer erase the earlier label.
+ *
+ * `apply` returns whether it CHANGED anything, and a false answer skips the
+ * write. Because the whole record is rewritten, a no-op write is pure churn —
+ * and `rekeyAccountIdentity` calls `transferAccountLabel` on EVERY
+ * `getSessionsSnapshot` while a legacy-id session is open (an options mount plus
+ * a ≥5s focus/visibility repoll), with nothing left to move. */
+async function mutate(apply: (snapshot: AccountLabelsSnapshot) => boolean): Promise<void> {
   const run = mutationQueue.then(async () => {
     const snapshot = await read();
-    apply(snapshot);
+    if (!apply(snapshot)) {
+      return;
+    }
     await write(snapshot);
   });
   // Keep the queue usable after a failure; each caller awaits its own attempt.
@@ -112,12 +120,22 @@ export async function setAccountLabel(accountId: string, label: string): Promise
   }
   const normalized = normalizeLabel(label ?? '');
   await mutate((snapshot) => {
+    const stored = snapshot.byAccount[id];
     if (normalized) {
+      if (stored === normalized) {
+        // Re-saving the same text (a blur after no edit) is not a change.
+        return false;
+      }
       snapshot.byAccount[id] = normalized;
-    } else {
-      // An emptied field is «remove the label», never a stored empty string.
-      delete snapshot.byAccount[id];
+      return true;
     }
+    // An emptied field is «remove the label», never a stored empty string — but
+    // clearing a label that was never set removes nothing.
+    if (stored === undefined) {
+      return false;
+    }
+    delete snapshot.byAccount[id];
+    return true;
   });
 }
 
@@ -136,12 +154,17 @@ export async function transferAccountLabel(
   await mutate((snapshot) => {
     const legacy = snapshot.byAccount[legacyAccountId];
     if (legacy === undefined) {
-      return;
+      // Nothing to move: the transfer already ran (or this account never carried
+      // a legacy label). The rekey calls it on every repoll, so this must not
+      // write.
+      return false;
     }
     delete snapshot.byAccount[legacyAccountId];
     if (snapshot.byAccount[canonicalAccountId] === undefined) {
       snapshot.byAccount[canonicalAccountId] = legacy;
     }
+    // The legacy key was deleted either way, so the record changed.
+    return true;
   });
 }
 

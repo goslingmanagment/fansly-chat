@@ -20,10 +20,12 @@ function installStorage(): {
   record: Record<string, unknown>;
   stallNextSet: () => Deferred<void>;
   failNextSet: () => void;
+  setCalls: () => number;
 } {
   const record: Record<string, unknown> = {};
   let pendingStall: Deferred<void> | null = null;
   let pendingFailure = false;
+  let setCalls = 0;
   (globalThis as Record<string, unknown>).browser = {
     storage: {
       local: {
@@ -33,6 +35,7 @@ function installStorage(): {
             : {}
         )),
         set: vi.fn(async (items: Record<string, unknown>) => {
+          setCalls += 1;
           if (pendingFailure) {
             pendingFailure = false;
             throw new Error('quota exceeded');
@@ -56,6 +59,7 @@ function installStorage(): {
     failNextSet: () => {
       pendingFailure = true;
     },
+    setCalls: () => setCalls,
   };
 }
 
@@ -113,6 +117,31 @@ describe('account labels store', () => {
       'acc-1': 'one',
       'acc-2': 'two',
     });
+  });
+
+  it('writes only when the mutation actually changed the record', async () => {
+    const { setAccountLabel, transferAccountLabel } = await loadModule();
+
+    // Clearing a label that was never set removes nothing, and
+    // storage.local.set replaces the WHOLE record — writing here is pure churn.
+    await setAccountLabel('ghost', '');
+    expect(storage.setCalls()).toBe(0);
+
+    // `rekeyAccountIdentity` calls the transfer on EVERY getSessionsSnapshot
+    // while a legacy-id session is open (an options mount plus a ≥5s
+    // focus/visibility repoll), long after the one real transfer.
+    await transferAccountLabel('legacy', 'canonical');
+    expect(storage.setCalls()).toBe(0);
+
+    await setAccountLabel('acc-1', 'Лора');
+    expect(storage.setCalls()).toBe(1);
+    // Re-saving the same text (a blur after no edit) is not a change.
+    await setAccountLabel('acc-1', '  Лора  ');
+    expect(storage.setCalls()).toBe(1);
+    expect(storage.record[STORAGE_KEY]).toEqual({
+      version: 1,
+      byAccount: { 'acc-1': 'Лора' },
+    } satisfies AccountLabelsSnapshot);
   });
 
   it('rejects a failed write so the pane can say the rename did not stick', async () => {

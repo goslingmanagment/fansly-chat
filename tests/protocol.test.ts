@@ -54,6 +54,20 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'getAgencyHubIdentity' })).toBe('getAgencyHubIdentity');
     expect(getRuntimeRequestType({ type: 'getAiQuotaByPage' })).toBe('getAiQuotaByPage');
     expect(getRuntimeRequestType({ type: 'getSpendersStatus' })).toBe('getSpendersStatus');
+    // E59 wave C — the cabinet's «Аккаунты» operations. Same E8 lesson as
+    // above: a request type without its protocol case dies silently before the
+    // handler, so the canonical suite has to know all three.
+    expect(getRuntimeRequestType({ type: 'getAccountsView' })).toBe('getAccountsView');
+    expect(
+      getRuntimeRequestType({ type: 'focusAccountTab', accountId: 'acc-1' }),
+    ).toBe('focusAccountTab');
+    expect(
+      getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1', label: 'Лора' }),
+    ).toBe('setAccountLabel');
+    // An empty label is how a label is CLEARED — it must stay routable.
+    expect(
+      getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1', label: '' }),
+    ).toBe('setAccountLabel');
     // 1.6.0 shipped without this case — options-page device-token sign-in
     // was unreachable (found by the Stage 35 map regeneration).
     expect(
@@ -108,6 +122,21 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: '12' })).toBeNull();
     expect(getRuntimeRequestType({ type: 'unknown' })).toBeNull();
     expect(getRuntimeRequestType(null)).toBeNull();
+
+    // A blank account id could only focus/label "some" account — rejected at the
+    // boundary rather than half-applied by the handler.
+    expect(getRuntimeRequestType({ type: 'focusAccountTab' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'focusAccountTab', accountId: '   ' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'focusAccountTab', accountId: 42 })).toBeNull();
+    expect(
+      getRuntimeRequestType({ type: 'setAccountLabel', accountId: '   ', label: 'Лора' }),
+    ).toBeNull();
+    // The label is required (absent is not «clear it» on this wire) and must be a
+    // string.
+    expect(getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1' })).toBeNull();
+    expect(
+      getRuntimeRequestType({ type: 'setAccountLabel', accountId: 'acc-1', label: 42 }),
+    ).toBeNull();
     expect(
       getRuntimeRequestType({ type: 'resolveFanChat', username: 'ghost', displayName: null }),
     ).toBeNull();
