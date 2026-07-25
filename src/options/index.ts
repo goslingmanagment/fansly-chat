@@ -25,6 +25,12 @@ import {
 } from './dom.js';
 import { COPY } from './copy.js';
 import {
+  buildPersonaRowViews,
+  classifyPersonaEmptyState,
+  formatCatalogChangedDate,
+  type PersonaEmptyState,
+} from './personas.js';
+import {
   buildSessionLookup,
   formatAccountHeading,
   formatCaptureStatus,
@@ -36,6 +42,7 @@ import {
   buildAgencyHubOriginPattern,
   normalizeAgencyHubBaseUrl,
 } from '../shared/agency-hub.js';
+import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
   formatUserErrorTechnicalDetail,
@@ -318,6 +325,15 @@ export function buildStatusReport(model: StatusReportModel): string {
 }
 
 /** The account-id meta line doubles as a copy button (popup discipline). */
+/** Why the persona section is empty, said honestly. «Каталог пуст» is a claim
+ * about the SERVER's answer and may only be made when the server actually
+ * answered for these credentials. */
+const PERSONA_EMPTY_COPY: Record<PersonaEmptyState, string> = {
+  'no-credentials': COPY.personas.emptyFresh,
+  'awaiting-refresh': COPY.personas.emptyUnknown,
+  'empty-catalog': COPY.personas.emptyConfirmed,
+};
+
 function createCopyableId(fullId: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
@@ -357,7 +373,7 @@ function createLegacyPersonaExportControls(): DocumentFragment {
     null,
     2,
   );
-  const downloadExport = createButton('Download legacy persona JSON', true);
+  const downloadExport = createButton(COPY.personas.legacyDownload, true);
   downloadExport.addEventListener('click', () => {
     downloadExport.disabled = true;
     void exportJson().then((json) => {
@@ -367,23 +383,23 @@ function createLegacyPersonaExportControls(): DocumentFragment {
       link.download = `chatgoose-legacy-personas-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      exportStatus.textContent = 'Legacy persona JSON downloaded.';
+      exportStatus.textContent = COPY.personas.legacyDownloaded;
     }).catch((error: unknown) => {
       console.error('Failed to export legacy persona data', error);
-      exportStatus.textContent = 'Export failed. Reload Settings and try again.';
+      exportStatus.textContent = COPY.personas.legacyDownloadFailed;
     }).finally(() => {
       downloadExport.disabled = false;
     });
   });
-  const copyExport = createButton('Copy legacy persona JSON', true);
+  const copyExport = createButton(COPY.personas.legacyCopy, true);
   copyExport.addEventListener('click', () => {
     copyExport.disabled = true;
     void exportJson().then(async (json) => {
       await navigator.clipboard.writeText(json);
-      exportStatus.textContent = 'Legacy persona JSON copied.';
+      exportStatus.textContent = COPY.personas.legacyCopied;
     }).catch((error: unknown) => {
       console.error('Failed to copy legacy persona data', error);
-      exportStatus.textContent = 'Copy failed. Use Download instead.';
+      exportStatus.textContent = COPY.personas.legacyCopyFailed;
     }).finally(() => {
       copyExport.disabled = false;
     });
@@ -2482,51 +2498,126 @@ async function render(): Promise<void> {
     });
   }
 
-  // ─── Persona catalog (server-owned, metadata only) ─────────
+  // ─── «Персоны» (server-owned catalog, metadata only) ────────
   const personalitiesSection = createSection(
-    'Model Personalities',
-    'Global personalities are managed by Agency Hub admins. This extension only reads the catalog and stores account mappings.',
+    COPY.personas.title,
+    COPY.personas.subtitle,
   );
   const personalitiesList = document.createElement('div');
-  personalitiesList.style.display = 'grid';
-  personalitiesList.style.gap = '10px';
+  personalitiesList.className = 'chatgoose-persona-rows';
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
+
+  // Catalog footer: when it last CHANGED, plus the only refresh path there is.
+  const personaCatalogLine = document.createElement('div');
+  personaCatalogLine.dataset.role = 'persona-catalog';
+  personaCatalogLine.className = 'chatgoose-persona-catalog';
+  // There is no standalone «refetch the catalog» operation, and inventing one is
+  // out of scope: the background re-reads the catalog after a SUCCESSFUL
+  // connection test, so the button says exactly what it does.
+  const personaRefreshButton = createButton(COPY.personas.catalogRefresh, true);
+  personaRefreshButton.dataset.role = 'persona-catalog-refresh';
+  personaRefreshButton.addEventListener('click', () => {
+    personaRefreshButton.disabled = true;
+    void (async () => {
+      try {
+        await refreshAgencyHubPermissionState();
+        if (!disposed) {
+          await runAgencyHubConnectionTest({ force: true, saveFirst: true });
+        }
+      } finally {
+        if (!disposed) personaRefreshButton.disabled = false;
+      }
+    })();
+  });
+  const personaRefreshHint = document.createElement('div');
+  personaRefreshHint.className = 'chatgoose-status-hint';
+  personaRefreshHint.textContent = COPY.personas.catalogRefreshHint;
+  const personaFooter = document.createElement('div');
+  personaFooter.className = 'chatgoose-persona-footer';
+  personaFooter.append(personaCatalogLine, personaRefreshButton);
 
   const renderPersonaCatalog = (): void => {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
     // migrateState hid may now resolve to an active persona.
     refreshStatusView();
+    const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
+    personaCatalogLine.textContent = `${COPY.personas.catalogLabel}: ${
+      changedDate
+        ? COPY.personas.catalogUpdated.replace('{date}', changedDate)
+        : COPY.personas.catalogNever
+    }`;
     personalitiesList.replaceChildren();
-    if (state.personaCatalog.length === 0) {
+    const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
+    if (rows.length === 0) {
       const empty = document.createElement('div');
-      empty.textContent = 'No server personas are available yet. Check the Agency Hub connection or ask an admin to create one.';
+      empty.dataset.role = 'persona-empty';
       empty.style.color = 'var(--chatgoose-ink-mid)';
+      // A non-empty raw catalog with zero rows means every persona is archived AND
+      // unreferenced — a real catalog, so «каталог пуст» would be false. Only a
+      // genuinely empty raw catalog defers to the credential/fetch classifier.
+      empty.textContent = state.personaCatalog.length > 0
+        ? COPY.personas.emptyAllArchived
+        : PERSONA_EMPTY_COPY[classifyPersonaEmptyState({
+            currentSource: personaCatalogSource(state.settings),
+            storedSource: state.personaCatalogSource,
+            fetchedAt: state.personaCatalogFetchedAt,
+          })];
       personalitiesList.append(empty);
       return;
     }
-    for (const persona of state.personaCatalog) {
-      const card = document.createElement('div');
-      card.className = 'chatgoose-card';
-      card.dataset.personaKey = persona.key;
-      const heading = document.createElement('div');
-      heading.textContent = persona.displayName;
-      heading.style.fontWeight = '700';
-      const meta = document.createElement('div');
-      meta.textContent = `${persona.key} • version ${persona.version} • ${persona.status}`;
-      meta.style.fontSize = '12px';
-      meta.style.color = persona.status === 'active'
-        ? 'var(--chatgoose-ink-mid)'
-        : 'var(--chatgoose-bad)';
-      card.append(heading, meta);
-      personalitiesList.append(card);
+    for (const view of rows) {
+      const row = document.createElement('div');
+      row.className = view.archived
+        ? 'chatgoose-persona-row chatgoose-persona-row-archived'
+        : 'chatgoose-persona-row';
+      row.dataset.personaKey = view.key;
+      const head = document.createElement('div');
+      head.className = 'chatgoose-persona-head';
+      const name = document.createElement('span');
+      name.className = 'chatgoose-persona-name';
+      name.textContent = view.displayName;
+      head.append(name);
+      if (view.builtin) {
+        head.append(createBadge(COPY.personas.builtInBadge, 'neutral'));
+      }
+      head.append(
+        createBadge(`${COPY.personas.versionPrefix}${view.version}`, 'neutral', true),
+      );
+      const count = document.createElement('span');
+      count.className = 'chatgoose-persona-count';
+      count.textContent = COPY.personas.accountsCount.replace(
+        '{n}',
+        String(view.accountCount),
+      );
+      head.append(count);
+      if (view.archived) {
+        // Only reachable while a mapping still points at it — amber, because the
+        // one useful instruction is «pick a replacement».
+        head.append(createBadge(COPY.personas.archivedMapped, 'amber'));
+      }
+      row.append(head);
+      personalitiesList.append(row);
     }
   };
-  renderPersonaCatalog();
 
   const preservationNote = document.createElement('div');
-  preservationNote.textContent = 'Legacy local persona text is preserved unchanged on this device. Export it before removing the extension or clearing browser data.';
+  preservationNote.textContent = COPY.personas.legacyNote;
   preservationNote.style.color = 'var(--chatgoose-ink-mid)';
   preservationNote.style.fontSize = '13px';
+  // The legacy archive is a rarely-needed escape hatch — folded away so it does
+  // not compete with the live catalog above it.
+  const preservationFold = document.createElement('details');
+  preservationFold.className = 'chatgoose-details';
+  preservationFold.dataset.role = 'persona-legacy-fold';
+  const preservationSummary = document.createElement('summary');
+  preservationSummary.textContent = COPY.personas.legacyFold;
+  preservationFold.append(
+    preservationSummary,
+    preservationNote,
+    createLegacyPersonaExportControls(),
+  );
+
+  renderPersonaCatalog();
 
   const flushPendingEdits = (): Promise<void> => {
     void flushSettingsSave();
@@ -2580,8 +2671,9 @@ async function render(): Promise<void> {
 
   personalitiesSection.append(
     personalitiesList,
-    preservationNote,
-    createLegacyPersonaExportControls(),
+    personaFooter,
+    personaRefreshHint,
+    preservationFold,
   );
 
   // ─── «Аккаунты» ────────────────────────────────────────────

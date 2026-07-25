@@ -815,6 +815,54 @@ input[type='checkbox'] {
 .chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
 .chatgoose-cabinet-micro-setup { color: var(--chatgoose-amber); }
 
+/* ── «Персоны» rows ── */
+.chatgoose-persona-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.chatgoose-persona-row {
+  padding: 10px 12px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-persona-row-archived {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+}
+
+.chatgoose-persona-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.chatgoose-persona-name {
+  font-weight: 600;
+}
+
+.chatgoose-persona-count {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+}
+
+.chatgoose-persona-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.chatgoose-persona-catalog {
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+}
+
 /* ── «Аккаунты» rows ── */
 .chatgoose-account-rows {
   display: grid;

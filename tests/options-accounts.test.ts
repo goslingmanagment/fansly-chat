@@ -115,10 +115,15 @@ function accountIdText(accountId: string): string {
   return `${COPY.accounts.idPrefix}${accountId}`;
 }
 
-/** The «Аккаунты» section. Its title is Russian and owned by the dictionary, so
- * it is looked up through COPY rather than a duplicated literal. */
+/** The «Аккаунты» / «Персоны» sections. Their titles are Russian and owned by
+ * the dictionary, so they are looked up through COPY rather than duplicated
+ * literals. */
 function getAccountsSection(): HTMLElement {
   return getSectionByTitle(COPY.accounts.title);
+}
+
+function getPersonasSection(): HTMLElement {
+  return getSectionByTitle(COPY.personas.title);
 }
 
 function getSectionByTitle(title: string): HTMLElement {
@@ -348,7 +353,7 @@ describe('Options page account sections', () => {
       waitForHydration: false,
     });
 
-    const personalityCard = getSectionByTitle('Model Personalities')
+    const personalityCard = getPersonasSection()
       .querySelector<HTMLElement>('[data-persona-key="p1"]')!;
     const mappingsSection = getAccountsSection();
 
@@ -378,7 +383,7 @@ describe('Options page account sections', () => {
     });
 
     // Session hydration must not rebuild unrelated catalog UI.
-    expect(getSectionByTitle('Model Personalities')
+    expect(getPersonasSection()
       .querySelector('[data-persona-key="p1"]')).toBe(personalityCard);
     expect(currentState.personalities[0]?.name).toBe('Closer');
   });
@@ -563,9 +568,9 @@ describe('Options page settings and read-only personas', () => {
       sessions: [],
     });
 
-    const section = getSectionByTitle('Model Personalities');
+    const section = getPersonasSection();
     expect(section.textContent).toContain('Closer');
-    expect(section.textContent).toContain('version 1');
+    expect(section.textContent).toContain(`${COPY.personas.versionPrefix}1`);
     expect(section.querySelector('input[data-role="name"]')).toBeNull();
     expect(section.querySelector('textarea[data-role="content"]')).toBeNull();
     expect(Array.from(section.querySelectorAll('button')).map((button) => button.textContent))
@@ -600,8 +605,8 @@ describe('Options page settings and read-only personas', () => {
     });
 
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Model Personalities').textContent)
-        .toContain('version 2 • archived');
+      expect(getPersonasSection().textContent)
+        .toContain(COPY.personas.archivedMapped);
     });
     const mappingSelect = getAccountsSection()
       .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
@@ -645,7 +650,7 @@ describe('Options page settings and read-only personas', () => {
         sessions: [],
       });
 
-      expect(getSectionByTitle('Model Personalities').textContent).toContain('Source A');
+      expect(getPersonasSection().textContent).toContain('Source A');
 
       let changes: Record<string, browser.storage.StorageChange>;
       if (sourceChangeKey === 'settings') {
@@ -676,10 +681,10 @@ describe('Options page settings and read-only personas', () => {
       emitStorageChanges(changes);
 
       await vi.waitFor(() => {
-        expect(getSectionByTitle('Model Personalities').textContent)
-          .toContain('No server personas are available yet');
+        expect(getPersonasSection().textContent)
+          .toContain(COPY.personas.emptyUnknown);
       });
-      expect(getSectionByTitle('Model Personalities').textContent).not.toContain('Source A');
+      expect(getPersonasSection().textContent).not.toContain('Source A');
 
       const mappingSelect = getAccountsSection()
         .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
@@ -695,9 +700,9 @@ describe('Options page settings and read-only personas', () => {
     await loadOptionsPage({ state: makeState({ accountMappings: { creator: 'p1' } }), sessions: [] });
     const writeText = vi.fn(async (_value: string) => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    const section = getSectionByTitle('Model Personalities');
+    const section = getPersonasSection();
     const copy = Array.from(section.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Copy legacy persona JSON')!;
+      .find((button) => button.textContent === COPY.personas.legacyCopy)!;
     copy.click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const exported = JSON.parse(writeText.mock.calls[0]![0]);
