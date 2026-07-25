@@ -23,6 +23,8 @@ import {
   type BadgeTone,
 } from './dom.js';
 import { COPY } from './copy.js';
+import { renderHotkeysPane } from './hotkeys-pane.js';
+import { detectLabelPlatform } from '../shared/hotkeys.js';
 import {
   buildPersonaRowViews,
   classifyPersonaEmptyState,
@@ -556,12 +558,8 @@ async function render(): Promise<void> {
   // Panes are built once and shown/hidden; sections below are appended into
   // their pane instead of into the page root. The recovery gates above return
   // before this point — they are deliberately outside the shell.
-  // «Хоткеи» enables with its pane content (plan task 12); until then the rail
-  // hides the item and a #hotkeys deep link falls back to «Статус».
-  const shell = createShell(
-    root,
-    OPTIONS_PANES.filter((pane) => pane !== 'hotkeys'),
-  );
+  // Every pane now has content, so the rail carries the full route list.
+  const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
 
   // ─── Readiness headline ────────────────────────────────────
@@ -819,6 +817,19 @@ async function render(): Promise<void> {
     settingGroup(COPY.generation.groupService, [
       settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugInput),
     ]),
+  );
+
+  // ─── «Хоткеи» (read-only reference) ─────────────────────────
+  // Derived from the live binding table, so the pane cannot drift from what the
+  // keymap dispatches. The platform is detected at render time: the same install
+  // shows ⌘⇧ on macOS and Alt+Shift elsewhere.
+  const hotkeysSection = createSection(COPY.hotkeys.title, COPY.hotkeys.subtitle);
+  const hotkeysHint = document.createElement('div');
+  hotkeysHint.className = 'chatgoose-status-hint';
+  hotkeysHint.textContent = COPY.hotkeys.hint;
+  hotkeysSection.append(
+    renderHotkeysPane(document, detectLabelPlatform()),
+    hotkeysHint,
   );
 
   // ─── Agency Hub ───────────────────────────────────────────
@@ -2760,6 +2771,7 @@ async function render(): Promise<void> {
   shell.panes.personas.append(personalitiesSection);
   shell.panes.accounts.append(mappingsSection);
   shell.panes.generation.append(apiSection);
+  shell.panes.hotkeys.append(hotkeysSection);
   shell.panes.appearance.append(appearanceSection);
 
 

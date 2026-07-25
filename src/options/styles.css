@@ -843,6 +843,42 @@ input[type='checkbox'] {
 .chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
 .chatgoose-cabinet-micro-setup { color: var(--chatgoose-amber); }
 
+/* ── «Хоткеи» read-only cheatsheet ── */
+.chatgoose-hotkeys {
+  display: grid;
+}
+
+.chatgoose-hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-hotkey-row:last-child {
+  border-bottom: 0;
+}
+
+.chatgoose-kbd {
+  flex: none;
+  min-width: 96px;
+  padding: 3px 8px;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg2);
+  box-shadow: inset 0 -1px 0 var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 12px;
+  text-align: center;
+}
+
+.chatgoose-hotkey-name {
+  color: var(--chatgoose-ink-mid);
+  font-size: 13px;
+}
+
 /* ── «Персоны» rows ── */
 .chatgoose-persona-rows {
   display: grid;
