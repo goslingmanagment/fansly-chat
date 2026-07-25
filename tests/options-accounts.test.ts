@@ -515,18 +515,47 @@ describe('Options page account sections', () => {
     expect(fanslyRow.textContent).toContain('Creator (@creator)');
   });
 
-  it('saves the theme picked in the segmented control', async () => {
+  it('saves the theme picked on a preview card through the existing save path', async () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
 
+    // The card still wraps the same radio the settings writer reads — no second
+    // writer and no new storage field were introduced for the cards.
     const darkRadio = document.querySelector<HTMLInputElement>(
       'input[name="chatgoose-ui-theme"][value="dark"]',
     )!;
+    expect(darkRadio.closest('[data-theme-card="dark"]')).not.toBeNull();
     darkRadio.checked = true;
     darkRadio.dispatchEvent(new Event('change', { bubbles: true }));
 
     await vi.waitFor(() => {
       expect(currentState.settings.uiTheme).toBe('dark');
     }, { timeout: 2000 });
+  });
+
+  it('renders three theme cards with russian titles and a chat-panel note', async () => {
+    await loadOptionsPage({
+      state: makeState({ settings: { ...makeState().settings, uiTheme: 'light' } }),
+      sessions: [],
+    });
+
+    const section = getSectionByTitle(COPY.appearance.title);
+    expect(
+      Array.from(section.querySelectorAll<HTMLElement>('[data-theme-card]'))
+        .map((card) => card.dataset.themeCard),
+    ).toEqual(['system', 'light', 'dark']);
+    expect(section.textContent).toContain(COPY.appearance.systemTitle);
+    expect(section.textContent).toContain(COPY.appearance.systemHint);
+    expect(section.textContent).toContain(COPY.appearance.darkHint);
+    // The subtitle says the theme reaches the in-chat panel too.
+    expect(section.textContent).toContain(COPY.appearance.subtitle);
+
+    // The stored theme is the checked card; each card carries a CSS-only preview.
+    expect(
+      section.querySelector<HTMLInputElement>('[data-theme-card="light"] input')?.checked,
+    ).toBe(true);
+    expect(section.querySelectorAll('.chatgoose-theme-preview')).toHaveLength(3);
+    // No reset-to-default affordance (owner ruling).
+    expect(Array.from(section.querySelectorAll('button'))).toEqual([]);
   });
 
   it('folds the sign-in form once a device token is active', async () => {

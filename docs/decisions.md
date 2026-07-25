@@ -75,7 +75,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
-| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO |
+| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path |
 
 ## Entries
 
@@ -1638,3 +1638,85 @@ failure flag into both the row and the support report.
 
 Neither the AI quota nor the popup's `getAiQuotaStatus` operation changes: the
 popup keeps its freshest-single read; the cabinet uses the new per-page map.
+
+**E59 amendment — wave C «Разделы» (2026-07-25).** Two more operational keys, on
+the same terms as wave B's (own `version: 1`, own module-level FIFO queue, never
+the settings blob — the planned v16 migration is CANCELLED, and account labels
+are the reason it is not needed). `chatgoose:accountPresence` remembers when this
+browser last saw each account and the names identity resolution produced;
+`chatgoose:accountLabels` holds the chatter's own row nicknames.
+
+Presence is written with a LEADING write plus a 30s coalescing window per
+account, never a trailing debounce: every Fansly request the tab makes is a
+capture, and MV3 can suspend the worker before any tail would fire — a lost
+sighting is exactly what makes the pane lie. The coalesced `lastSeenAt` is at
+most 30s stale and never invented. An identity UPGRADE bypasses the window
+because there are TWO hooks: `SessionStore.registerCapture` fires with names
+still null (they do not exist until `account/me` answers), and
+`FanslyClient.getAuthenticatedAccount` fires again once they do. A capture's null
+names never erase a resolved one.
+
+Labels have exactly ONE writer — the `setAccountLabel` runtime operation. The
+options page never touches that key itself, so however many settings tabs are
+open there is a single serialized path into it. A failed label write REJECTS
+(unlike best-effort presence): a rename is a deliberate action, and the editor
+must be able to stay open with the typed text instead of silently reverting on
+reload. Labels are local by contract and outrank the model's public display name
+in the row.
+
+`rekeyAccountIdentity` now also moves presence and the label onto the canonical
+id, BEFORE its "nothing changed" return — mappings and `knownAccounts` can
+already be canonical while presence or a label still points at the legacy id.
+Canonical wins on conflict and the legacy record is removed; without this the
+pane grows a second, permanently «сессий не было» row for the same model and
+loses her label. Both transfers are best-effort: they may never abort the
+identity rekey the rest of the extension depends on.
+
+`getAccountsView` says only what the background can prove. 'live' means a
+captured session in THIS worker's memory, which is the only way a tab id is
+knowable; 'seen' is a durable presence record with no live session; 'never' is a
+known account with no observation at all. After a worker restart NO fansly.com
+tab is attributable to an account, so `tabs.query` contributes only the
+`unattributedFanslyTabs` AGGREGATE — a per-account claim would be invented, and
+re-deriving one would mean reading Fansly (DP 1-B). Rows sort live → seen by
+recency → never. An ARCHIVED mapping counts as unmapped: it cannot generate, so
+the row shows the amber «AI отключён» rather than a false green. «к вкладке»
+exists only on a live row and does `tabs.update(id, {active:true})` followed by
+`windows.update(windowId, {focused:true})` — activating a tab in a background
+window would otherwise leave it invisible. When the operation is unavailable the
+pane degrades to knownAccounts + the live snapshot and deliberately claims LESS
+(no 'seen', no tab id, no observed page).
+
+The persona catalog's byte-identical write suppression now requires an already
+stamped `fetchedAt`. `clearForSource` leaves `{catalog: [], source, fetchedAt:
+null}`, so a server-confirmed EMPTY catalog is byte-identical to a cleared cache;
+suppressing that commit left `fetchedAt` null forever and made «каталог пуст»
+unreachable — the pane could only ever say «ещё не читался» about a source the hub
+had actually answered for. «Персоны» stays read-only with four honest empty
+states: no credentials, not-synced-for-these-credentials (source mismatch OR no
+landed fetch — a failed refresh included), a server-confirmed empty catalog, and
+a non-empty catalog whose every persona is archived and unreferenced. There is no
+standalone catalog-refetch operation and none was invented: the catalog is
+re-read after a SUCCESSFUL connection test, and the button's copy names that side
+effect.
+
+«Хоткеи» is a READ-ONLY reference, not an editor: the combos are fixed by
+`src/shared/hotkeys.ts` (a content script cannot preventDefault a reserved
+browser chord), so a rebinding UI would promise control the page does not have.
+Every row is derived from `buildHotkeyBindings(detectLabelPlatform())` plus
+`CHEATSHEET_EXTRAS`, so the pane cannot drift from what the keymap dispatches;
+only the Russian action name comes from COPY, and each binding's English
+`description` is never duplicated there. `COPY.hotkeys.actions` is a total
+`Record<HotkeyAction, string>`, so a new shortcut fails typecheck until it is
+named, and a test additionally fails on any row that fell back to an English
+description. Enabling this pane is what switches the shell from wave A's filtered
+rail to the full `OPTIONS_PANES` list.
+
+«Вид» is three clickable CSS-preview cards (system split, light, dark). Each card
+still wraps the SAME radio the settings writer reads, so a theme change rides the
+existing debounced save path — no second writer and no new field. The radios are
+clipped rather than `display: none` so they keep their tab order and the group's
+arrow-key navigation, and the previews use FIXED hex instead of the theme
+variables: a preview of the light theme has to look light while the page is dark.
+Per the owner's rulings this wave adds no reset-to-default affordances, no
+changed-from-default markers and no presets anywhere.

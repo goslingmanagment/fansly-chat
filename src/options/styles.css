@@ -487,49 +487,8 @@ input[type='checkbox'] {
   gap: 10px;
 }
 
-/* Theme picker: three states visible at once, one click to switch. */
-.chatgoose-segmented {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--chatgoose-line-strong);
-  border-radius: var(--chatgoose-radius-chip);
-  background: var(--chatgoose-field);
-}
-
-.chatgoose-segmented input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-.chatgoose-segmented span {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 5px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--chatgoose-ink-mid);
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-}
-
-.chatgoose-segmented span:hover {
-  background: var(--chatgoose-bg2);
-}
-
-.chatgoose-segmented input:checked + span {
-  background: var(--chatgoose-clay);
-  color: #ffffff;
-}
-
-.chatgoose-segmented input:focus-visible + span {
-  outline: 2px solid var(--chatgoose-clay);
-  outline-offset: 1px;
-}
+/* `.chatgoose-segmented` (the old three-state theme switch) lived here until the
+   «Вид» pane replaced it with preview cards — see `.chatgoose-theme-cards`. */
 
 /* Legacy access: present but folded — the device token is the main path. */
 .chatgoose-details summary {
@@ -842,6 +801,112 @@ input[type='checkbox'] {
 
 .chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
 .chatgoose-cabinet-micro-setup { color: var(--chatgoose-amber); }
+
+/* ── «Вид» theme preview cards ── */
+.chatgoose-theme-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.chatgoose-theme-card {
+  display: grid;
+  gap: 4px;
+  position: relative;
+  padding: 10px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg2);
+  cursor: pointer;
+}
+
+.chatgoose-theme-card:hover {
+  border-color: var(--chatgoose-line-strong);
+}
+
+.chatgoose-theme-card:has(.chatgoose-theme-radio:checked) {
+  border-color: var(--chatgoose-clay);
+  background: var(--chatgoose-clay-bg);
+}
+
+.chatgoose-theme-card:has(.chatgoose-theme-radio:focus-visible) {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+}
+
+/* Clipped, not display:none — the radio keeps its tab order and the group's
+   arrow-key navigation, which is the whole accessibility contract here. */
+.chatgoose-theme-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The preview colours are FIXED hex on purpose: the light card must look light
+   while the page is dark, so it cannot ride the theme variables. */
+.chatgoose-theme-preview {
+  display: flex;
+  height: 54px;
+  overflow: hidden;
+  border-radius: var(--chatgoose-radius-chip);
+  border: 1px solid rgba(31, 30, 29, 0.14);
+}
+
+.chatgoose-theme-preview-rail {
+  flex: none;
+  width: 26%;
+}
+
+.chatgoose-theme-preview-body {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 8px 7px;
+}
+
+.chatgoose-theme-preview-bar {
+  height: 5px;
+  border-radius: 3px;
+}
+
+.chatgoose-theme-preview-bar-short {
+  width: 58%;
+}
+
+.chatgoose-theme-preview-light { background: #faf9f5; }
+.chatgoose-theme-preview-light .chatgoose-theme-preview-rail { background: #efece4; }
+.chatgoose-theme-preview-light .chatgoose-theme-preview-bar { background: #cfcaba; }
+
+.chatgoose-theme-preview-dark { background: #262420; }
+.chatgoose-theme-preview-dark .chatgoose-theme-preview-rail { background: #1b1a17; }
+.chatgoose-theme-preview-dark .chatgoose-theme-preview-bar { background: #4d4940; }
+
+/* «Системная» is split down the middle — it follows the OS, so it shows both. */
+.chatgoose-theme-preview-system {
+  background: linear-gradient(90deg, #faf9f5 0 50%, #262420 50% 100%);
+}
+
+.chatgoose-theme-preview-system .chatgoose-theme-preview-rail {
+  background: linear-gradient(90deg, #efece4 0 100%);
+}
+
+.chatgoose-theme-preview-system .chatgoose-theme-preview-bar {
+  background: linear-gradient(90deg, #cfcaba 0 50%, #4d4940 50% 100%);
+}
+
+.chatgoose-theme-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.chatgoose-theme-hint {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+}
 
 /* ── «Хоткеи» read-only cheatsheet ── */
 .chatgoose-hotkeys {

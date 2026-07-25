@@ -587,43 +587,63 @@ async function render(): Promise<void> {
   );
   shell.panes.status.append(readinessHero);
 
-  // ─── Appearance ─────────────────────────────────────────────
+  // ─── «Вид» ──────────────────────────────────────────────────
+  // Three clickable preview cards. Each one still wraps the SAME radio the
+  // settings writer already reads, so picking a theme rides the existing
+  // debounced save path — no second writer, no new storage field.
   const appearanceSection = createSection(
-    'Appearance',
-    'One family look, light and dark. System follows your OS.',
+    COPY.appearance.title,
+    COPY.appearance.subtitle,
   );
-  const themeChoices: Array<{ value: UiThemeSetting; label: string }> = [
-    { value: 'system', label: 'System' },
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
+  const themeChoices: Array<{ value: UiThemeSetting; title: string; hint: string }> = [
+    { value: 'system', title: COPY.appearance.systemTitle, hint: COPY.appearance.systemHint },
+    { value: 'light', title: COPY.appearance.lightTitle, hint: COPY.appearance.lightHint },
+    { value: 'dark', title: COPY.appearance.darkTitle, hint: COPY.appearance.darkHint },
   ];
-  const themeControl = document.createElement('div');
-  themeControl.className = 'chatgoose-segmented';
+  const themeCards = document.createElement('div');
+  themeCards.className = 'chatgoose-theme-cards';
   const themeRadios: HTMLInputElement[] = [];
   for (const choice of themeChoices) {
-    const segment = document.createElement('label');
+    const card = document.createElement('label');
+    card.className = 'chatgoose-theme-card';
+    card.dataset.themeCard = choice.value;
     const radio = document.createElement('input');
     radio.type = 'radio';
     radio.name = 'chatgoose-ui-theme';
     radio.value = choice.value;
     radio.checked = state.settings.uiTheme === choice.value;
-    const text = document.createElement('span');
-    text.textContent = choice.label;
-    segment.append(radio, text);
-    themeControl.append(segment);
+    // Visually hidden, NOT display:none — the radio must keep its place in the
+    // tab order and in the group's arrow-key navigation.
+    radio.className = 'chatgoose-theme-radio';
+    // A miniature of the cabinet in that theme: a rail and two content bars.
+    // Pure CSS with FIXED colours (never the theme variables) — a preview of the
+    // light theme has to look light while the page itself is dark.
+    const preview = document.createElement('span');
+    preview.className = `chatgoose-theme-preview chatgoose-theme-preview-${choice.value}`;
+    preview.setAttribute('aria-hidden', 'true');
+    const previewRail = document.createElement('span');
+    previewRail.className = 'chatgoose-theme-preview-rail';
+    const previewBody = document.createElement('span');
+    previewBody.className = 'chatgoose-theme-preview-body';
+    const previewBar = document.createElement('span');
+    previewBar.className = 'chatgoose-theme-preview-bar';
+    const previewBarShort = document.createElement('span');
+    previewBarShort.className = 'chatgoose-theme-preview-bar chatgoose-theme-preview-bar-short';
+    previewBody.append(previewBar, previewBarShort);
+    preview.append(previewRail, previewBody);
+    const title = document.createElement('span');
+    title.className = 'chatgoose-theme-title';
+    title.textContent = choice.title;
+    const hint = document.createElement('span');
+    hint.className = 'chatgoose-theme-hint';
+    hint.textContent = choice.hint;
+    card.append(radio, preview, title, hint);
+    themeCards.append(card);
     themeRadios.push(radio);
   }
   const getSelectedTheme = (): UiThemeSetting =>
     (themeRadios.find((radio) => radio.checked)?.value ?? 'system') as UiThemeSetting;
-  // Not inlineField: that wraps in a <label>, and a label around the radio
-  // group would nest labels and misroute clicks to the first radio.
-  const themeRow = document.createElement('div');
-  themeRow.className = 'chatgoose-row';
-  const themeRowLabel = document.createElement('span');
-  themeRowLabel.className = 'chatgoose-row-label';
-  themeRowLabel.textContent = 'Theme';
-  themeRow.append(themeRowLabel, themeControl);
-  appearanceSection.append(themeRow);
+  appearanceSection.append(themeCards);
 
   // ─── «Генерация» (Stage 32: keys/models are kernel-side) ────
   const apiSection = createSection(COPY.generation.title, COPY.generation.subtitle);
