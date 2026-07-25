@@ -15,6 +15,7 @@ import {
   estimateTargetPages,
   extractOldestMessageId,
 } from '../shared/transcript.js';
+import { recordAccountPresence } from './account-presence.js';
 
 /** Retry-After header → ms (seconds or HTTP-date form). Relocated from the
  * deleted llm-stream-utils (Stage 32) — Fansly rate limits still use it. */
@@ -486,6 +487,17 @@ export class FanslyClient {
     session.resolvedAccountId = accountId;
     session.resolvedUsername = response.account?.username?.trim() || null;
     session.resolvedDisplayName = response.account?.displayName?.trim() || null;
+
+    // Second presence hook. The capture hook fires with names still null (they
+    // only exist once `account/me` answers), so without this the durable record
+    // would carry a bare id forever and the «Аккаунты» pane could only ever show
+    // «была вчера» next to 18 digits. An identity upgrade bypasses the store's
+    // 30s coalescing window; fire-and-forget so it cannot fail a resolution.
+    void recordAccountPresence({
+      accountId,
+      username: session.resolvedUsername,
+      displayName: session.resolvedDisplayName,
+    }).catch(() => undefined);
 
     return {
       id: accountId,

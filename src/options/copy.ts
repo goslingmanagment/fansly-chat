@@ -292,6 +292,9 @@ export const COPY = {
     emptyFresh: 'Каталог персон появится после подключения Agency Hub — шаг 1 в «Статусе».',
     emptyConfirmed: 'Каталог пуст — админы Agency Hub ещё не создали ни одной персоны.',
     emptyUnknown: 'Каталог ещё не читался — проверь связь с Agency Hub.',
+    /** A NON-empty catalog whose every persona is archived and unreferenced, so
+     * no row renders. Saying «каталог пуст» here would be false. */
+    emptyAllArchived: 'Все персоны каталога в архиве.',
     builtInBadge: 'built-in',
     versionPrefix: 'v',
     accountsCount: 'аккаунтов: {n}',
@@ -308,6 +311,10 @@ export const COPY = {
       'Legacy: локальный текст персоны сохранён без изменений. Экспортируйте его перед удалением расширения или чисткой данных браузера.',
     legacyDownload: 'Скачать JSON',
     legacyCopy: 'Копировать',
+    legacyDownloaded: 'JSON с легаси-персонами скачан.',
+    legacyCopied: 'JSON с легаси-персонами скопирован.',
+    legacyDownloadFailed: 'Экспорт не удался. Перезагрузи Настройки и повтори.',
+    legacyCopyFailed: 'Копирование не удалось — используй «Скачать JSON».',
   },
 
   accounts: {
@@ -316,6 +323,14 @@ export const COPY = {
     subtitleFresh: 'Пока пусто — аккаунты появляются здесь сами.',
     emptyFresh:
       'Открой fansly.com в этом браузере и войди под аккаунтом модели — строка появится сама, останется назначить персону.',
+    loading: 'Загружаем аккаунты Fansly…',
+    /** The live snapshot failed; the durable/local view is what is on screen. */
+    refreshFailed: 'Живое обновление аккаунтов не удалось — показаны сохранённые данные.',
+    /** Persona <select> vocabulary. Lives here rather than inline so the pane
+     * has no English left in a Russian cabinet. */
+    personaSelectNone: 'Персона не назначена',
+    personaSelectArchived: 'в архиве',
+    personaSelectMissing: 'Недоступная персона · {key}',
     idPrefix: 'ID аккаунта: ',
     idCopyTitle: 'Скопировать {id}',
     idCopied: 'Скопировано ✓',
@@ -329,6 +344,10 @@ export const COPY = {
     stateIdle: 'не активна',
     subTabActive: 'вкладка активна',
     subSeenAt: 'была {when}',
+    /** `{when}` forms for `subSeenAt` — a bare «21:40» three days later lies. */
+    whenToday: 'сегодня {time}',
+    whenYesterday: 'вчера {time}',
+    whenDate: '{date} в {time}',
     subNeverSeen: 'сессий не было',
     corePage: 'страница ядра: {page}',
     personaUnmapped: 'AI отключён',

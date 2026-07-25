@@ -10,6 +10,7 @@ import {
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 import { normalizeAgencyHubBaseUrl } from '../src/shared/agency-hub.js';
+import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import { SpendersService } from '../src/background/spenders-service.js';
 import { spendersObservationScope } from '../src/background/spenders-status-tracker.js';
 import type {
@@ -122,7 +123,12 @@ async function installRuntimeApiHarness(fanslyClient: {
   };
   tabContexts?: TabContextStoreClass;
   storageCoordinator?: {
-    ensurePersistedState: () => Promise<unknown>;
+    ensurePersistedState?: () => Promise<unknown>;
+    // A stub can pin `getState` to a deliberately STALE snapshot: the real
+    // coordinator in this harness re-reads storage on every call (its listener
+    // probe is never observed), so only a stub can reproduce the cache lag a
+    // handler sees in Firefox.
+    getState?: () => Promise<unknown>;
   };
 }) {
   vi.resetModules();
@@ -137,6 +143,12 @@ async function installRuntimeApiHarness(fanslyClient: {
   const tabsCreate = vi.fn<(info: { url: string }) => Promise<{ id: number }>>(
     async () => ({ id: 7 }),
   );
+  const tabsUpdate = vi.fn<
+    (tabId: number, info: { active?: boolean }) => Promise<{ id: number }>
+  >(async (tabId: number) => ({ id: tabId }));
+  const windowsUpdate = vi.fn<
+    (windowId: number, info: { focused?: boolean }) => Promise<{ id: number }>
+  >(async (windowId: number) => ({ id: windowId }));
 
   // A shared in-memory storage.session so a REAL SpendersService's status
   // observation (written through the tracker's storage.session custody) is
@@ -189,6 +201,10 @@ async function installRuntimeApiHarness(fanslyClient: {
       query: tabsQuery,
       get: tabsGet,
       create: tabsCreate,
+      update: tabsUpdate,
+    },
+    windows: {
+      update: windowsUpdate,
     },
   };
 
@@ -253,6 +269,8 @@ async function installRuntimeApiHarness(fanslyClient: {
     tabsQuery,
     tabsGet,
     tabsCreate,
+    tabsUpdate,
+    windowsUpdate,
     agencyHubClient,
     spendersService,
     debugPrompts,
@@ -2064,5 +2082,260 @@ describe('runtime-api debug prompt viewer (E28)', () => {
     );
     expect(refused).toEqual({ opened: false });
     expect(expired.tabsCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('runtime-api accounts view', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  const resolvedAccount = (id: string, username: string, displayName: string) =>
+    vi.fn(async (session: SessionTemplate) => {
+      session.resolvedAccountId = id;
+      session.resolvedUsername = username;
+      session.resolvedDisplayName = displayName;
+      return { id, username, displayName };
+    });
+
+  it('classifies live / seen / never and never invents a tab for a restarted worker', async () => {
+    mockStorage = createStorage({
+      knownAccounts: ['acc-live', 'acc-never'],
+      'chatgoose:accountPresence': {
+        version: 1,
+        byAccount: {
+          'acc-live': { lastSeenAt: 900, username: 'lora', displayName: 'Lora' },
+          'acc-seen': { lastSeenAt: 500, username: 'mika', displayName: 'Mika' },
+        },
+      },
+      'chatgoose:accountLabels': { version: 1, byAccount: { 'acc-seen': 'Мика · вечер' } },
+    });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: resolvedAccount('acc-live', 'lora', 'Lora'),
+    });
+    harness.sessionStore.registerCapture(31, makeCapture('acc-live'));
+    // Two fansly.com tabs are open, but only one is attributable to a session.
+    harness.tabsQuery.mockResolvedValue([{ id: 31 }, { id: 32 }]);
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<Record<string, unknown>>;
+      unattributedFanslyTabs: number;
+    };
+
+    expect(view.accounts.map((entry) => [entry.accountId, entry.state])).toEqual([
+      ['acc-live', 'live'],
+      ['acc-seen', 'seen'],
+      ['acc-never', 'never'],
+    ]);
+    // A tab id exists ONLY for the live row.
+    expect(view.accounts.map((entry) => entry.tabId)).toEqual([31, null, null]);
+    // The chatter's own label beats the model's public name.
+    expect(view.accounts[1]).toMatchObject({ localLabel: 'Мика · вечер', label: 'Мика · вечер' });
+    // The unattributed tab is reported as an AGGREGATE, never as a row.
+    expect(view.unattributedFanslyTabs).toBe(1);
+  });
+
+  it('counts every captured tab as attributed, not one tab per row', async () => {
+    mockStorage = createStorage({ knownAccounts: ['acc-live'] });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: resolvedAccount('acc-live', 'lora', 'Lora'),
+    });
+    // ONE account, TWO captured tabs (a second chat window). A row can only
+    // carry one tab id, so a set built from the rows would call tab 32
+    // unattributed and tell the chatter «открой чат, и строка оживёт» about a
+    // chat that is already open.
+    harness.sessionStore.registerCapture(31, makeCapture('acc-live'));
+    harness.sessionStore.registerCapture(32, makeCapture('acc-live'));
+    harness.tabsQuery.mockResolvedValue([{ id: 31 }, { id: 32 }, { id: 99 }]);
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<{ accountId: string; state: string }>;
+      unattributedFanslyTabs: number;
+    };
+
+    expect(view.accounts.map((entry) => [entry.accountId, entry.state])).toEqual([
+      ['acc-live', 'live'],
+    ]);
+    // Only the foreign tab is genuinely unattributed.
+    expect(view.unattributedFanslyTabs).toBe(1);
+  });
+
+  it('reads the mappings FRESH, so a just-assigned persona is not reported as unmapped', async () => {
+    // storage.local.set resolves before storage.onChanged refreshes the
+    // coordinator cache, so the pane can call getAccountsView while that cache
+    // still predates the write it just made.
+    const settings = {
+      ...createDefaultSettings(),
+      agencyHubBaseUrl: 'https://hub.example.test',
+      agencyHubDeviceToken: 'device-x',
+    };
+    const personaCatalog = [
+      {
+        key: 'p-active',
+        displayName: 'Closer',
+        definitionId: 'v1:persona-active-definition',
+        version: 1,
+        status: 'active',
+      },
+    ];
+    mockStorage = createStorage({
+      settings,
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'device-x',
+      knownAccounts: ['acc-1'],
+      // No mapping yet: this is the snapshot the coordinator cached.
+      accountMappings: {},
+      personaCatalog,
+      personaCatalogSource: personaCatalogSource(settings),
+      personaCatalogFetchedAt: '2026-07-25T00:00:00.000Z',
+    });
+    const staleState = structuredClone(mockStorage);
+    const harness = await installRuntimeApiHarness(
+      { getAuthenticatedAccount: vi.fn(async () => undefined) },
+      {
+        storageCoordinator: {
+          ensurePersistedState: vi.fn(async () => staleState),
+          getState: vi.fn(async () => staleState),
+        },
+      },
+    );
+
+    // The options page assigns the persona; the coordinator cache still says {}.
+    mockStorage.accountMappings = { 'acc-1': 'p-active' };
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<{ accountId: string; personaMapped: boolean }>;
+    };
+
+    // Answering from the cache would paint a false amber «AI отключён» until the
+    // next poll.
+    expect(view.accounts).toEqual([
+      expect.objectContaining({ accountId: 'acc-1', personaMapped: true }),
+    ]);
+    expect(
+      (staleState as { accountMappings: Record<string, string> }).accountMappings,
+    ).toEqual({});
+  });
+
+  it('treats an archived mapping as unmapped — an archived persona cannot generate', async () => {
+    // The catalog is fenced to the credentials it was fetched for (E37), so the
+    // stored source has to match or the whole catalog reads as absent.
+    const settings = {
+      ...createDefaultSettings(),
+      agencyHubBaseUrl: 'https://hub.example.test',
+      agencyHubDeviceToken: 'device-x',
+    };
+    mockStorage = createStorage({
+      settings,
+      // v15 custody layout: the token lives in its own key, and that is what the
+      // catalog source is derived from.
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'device-x',
+      knownAccounts: ['acc-active', 'acc-archived'],
+      accountMappings: { 'acc-active': 'p-active', 'acc-archived': 'p-old' },
+      personaCatalog: [
+        {
+          key: 'p-active',
+          displayName: 'Closer',
+          definitionId: 'v1:persona-active-definition',
+          version: 1,
+          status: 'active',
+        },
+        {
+          key: 'p-old',
+          displayName: 'Old',
+          definitionId: 'v1:persona-archived-definition',
+          version: 1,
+          status: 'archived',
+        },
+      ],
+      personaCatalogSource: personaCatalogSource(settings),
+      personaCatalogFetchedAt: '2026-07-25T00:00:00.000Z',
+    });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    });
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<{ accountId: string; personaMapped: boolean }>;
+    };
+
+    expect(
+      Object.fromEntries(view.accounts.map((entry) => [entry.accountId, entry.personaMapped])),
+    ).toEqual({ 'acc-active': true, 'acc-archived': false });
+  });
+
+  it('carries the observed kernel page from the day’s ops counters', async () => {
+    mockStorage = createStorage({
+      knownAccounts: ['acc-1'],
+      'chatgoose:opsDaily': {
+        version: 1,
+        dateUtc: new Date().toISOString().slice(0, 10),
+        hubErrors: [],
+        hubErrorsTotal: 0,
+        lastGeneration: null,
+        pageByAccount: { 'acc-1': 'lora-1' },
+        lastSummaryPush: null,
+      },
+    });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    });
+
+    const view = await harness.send({ type: 'getAccountsView' }) as {
+      accounts: Array<{ accountId: string; observedPage: string | null }>;
+    };
+
+    expect(view.accounts[0]).toMatchObject({ accountId: 'acc-1', observedPage: 'lora-1' });
+  });
+
+  it('focuses a live account’s tab AND raises its window', async () => {
+    mockStorage = createStorage({ knownAccounts: ['acc-live'] });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    });
+    harness.sessionStore.registerCapture(44, makeCapture('acc-live'));
+    harness.tabsGet.mockResolvedValue({ id: 44, windowId: 9 } as never);
+
+    await expect(harness.send({ type: 'focusAccountTab', accountId: 'acc-live' }))
+      .resolves.toEqual({ ok: true });
+
+    expect(harness.tabsUpdate).toHaveBeenCalledWith(44, { active: true });
+    // Activating a tab in a background window leaves it invisible — the window
+    // has to be raised too or «к вкладке» does nothing visible.
+    expect(harness.windowsUpdate).toHaveBeenCalledWith(9, { focused: true });
+  });
+
+  it('refuses to focus an account with no live session instead of guessing a tab', async () => {
+    mockStorage = createStorage({ knownAccounts: ['acc-seen'] });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    });
+
+    await expect(harness.send({ type: 'focusAccountTab', accountId: 'acc-seen' }))
+      .resolves.toEqual({ ok: false });
+    expect(harness.tabsUpdate).not.toHaveBeenCalled();
+    expect(harness.windowsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('writes a local label only through setAccountLabel, and rejects a blank account id', async () => {
+    mockStorage = createStorage({ knownAccounts: ['acc-1'] });
+    const harness = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+    });
+
+    await expect(
+      harness.send({ type: 'setAccountLabel', accountId: 'acc-1', label: '  Лора  ' }),
+    ).resolves.toEqual({ ok: true });
+    expect(mockStorage['chatgoose:accountLabels']).toEqual({
+      version: 1,
+      byAccount: { 'acc-1': 'Лора' },
+    });
+
+    // An unroutable request is dropped by the protocol guard, not half-applied.
+    await expect(
+      harness.send({ type: 'setAccountLabel', accountId: '   ', label: 'x' }),
+    ).resolves.toBeUndefined();
+    // The settings blob is untouched by any of this: labels are operational.
+    expect((mockStorage.settings as Record<string, unknown>).accountLabels).toBeUndefined();
   });
 });

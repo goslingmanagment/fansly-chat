@@ -23,6 +23,8 @@ import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
+  AccountsView,
+  AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubSignOutResponse,
   PopupStatus,
@@ -37,6 +39,8 @@ import { resolveHubBearer, type AgencyHubClient } from './agency-hub-client.js';
 import type { DebugPromptStore } from './debug-prompt-store.js';
 import type { FanslyClient } from './fansly-client.js';
 import { parseGroupIdFromUrl } from './operation-utils.js';
+import { getAccountLabels, setAccountLabel } from './account-labels.js';
+import { getAccountPresence } from './account-presence.js';
 import { getOpsDaily } from './ops-daily.js';
 import { getLatestQuotaSnapshot, getQuotaSnapshotsByPage } from './quota-tracker.js';
 import { getLatestSpendersObservation } from './spenders-status-tracker.js';
@@ -176,6 +180,34 @@ function formatSessionAccountName(
   }
   return displayName;
 }
+
+/** Same shortening as Options' `shortenAccountId`: an 18-digit Fansly id does
+ * not read as a row heading, but enough of it must survive to tell two accounts
+ * apart. The full id stays in the pane's «ID аккаунта» line. */
+function shortenAccountId(accountId: string): string {
+  return accountId.length > 12
+    ? `${accountId.slice(0, 4)}…${accountId.slice(-4)}`
+    : accountId;
+}
+
+/** What an «Аккаунты» row leads with. The chatter's own label wins over the
+ * model's public name — she named it for a reason (six accounts, one face). */
+function buildAccountRowLabel(
+  accountId: string,
+  localLabel: string | null,
+  username: string | null,
+  displayName: string | null,
+): string {
+  return (
+    localLabel ??
+    formatSessionAccountName({ resolvedUsername: username, resolvedDisplayName: displayName }) ??
+    shortenAccountId(accountId)
+  );
+}
+
+/** Every fansly.com tab, however deep the route. Matches the manifest's own
+ * host permission so the query can never ask for more than is granted. */
+const FANSLY_TAB_URL_PATTERN = '*://fansly.com/*';
 
 interface ValidVoiceAttemptSender {
   tabId: number;
@@ -464,6 +496,228 @@ export function registerRuntimeApi({
           normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl),
           resolveHubBearer(settings),
         );
+      }
+
+      if (requestType === 'getAccountsView') {
+        // The cabinet's «Аккаунты» rows. Local reads only — storage, the two
+        // operational account stores, today's ops counters and `tabs.query`.
+        // NOTHING here touches Fansly or the hub: this handler is called on every
+        // mount and must not become egress (DP 1-B).
+        //
+        // The coordinator supplies the BARRIER only (its startup load, deferred
+        // repair and the unsupported-future-schema assertion), never the answer:
+        // `storage.local.set` resolves before `storage.onChanged` refreshes that
+        // cache, so a persona the page just assigned or cleared would still read
+        // stale here and the «AI отключён» badge would lie until the next poll.
+        // The mappings/aliases/catalog therefore come from a FRESH non-mutating
+        // snapshot — readStorageState never writes its snapshot back, so it
+        // cannot clobber a concurrent background-owned identity rekey.
+        await storageCoordinator.getState();
+        const state = await readStorageState();
+        const [presence, labels, opsDaily] = await Promise.all([
+          getAccountPresence(),
+          getAccountLabels(),
+          getOpsDaily(),
+        ]);
+
+        // LIVE: a captured session in THIS worker's memory. `snapshot()` only
+        // returns accounts that still hold a tab, so a tab id is knowable.
+        const liveByAccountId = new Map<
+          string,
+          {
+            username: string | null;
+            displayName: string | null;
+            legacyAccountId: string;
+            lastSeenAt: number;
+            tabId: number | null;
+          }
+        >();
+        for (const session of sessionStore.snapshot()) {
+          if (!session.connected) {
+            continue;
+          }
+          const accountId = session.resolvedAccountId ?? session.legacyAccountId;
+          const existing = liveByAccountId.get(accountId);
+          // Two captures collided on one canonical account: the newest wins, so a
+          // stale name can never shadow the live one.
+          if (existing && existing.lastSeenAt >= session.lastSeenAt) {
+            continue;
+          }
+          liveByAccountId.set(accountId, {
+            username: session.username,
+            displayName: session.displayName,
+            legacyAccountId: session.legacyAccountId,
+            lastSeenAt: session.lastSeenAt,
+            tabId: sessionStore.getTabIdForAccount(accountId),
+          });
+        }
+
+        const buildEntry = (
+          accountId: string,
+          fields: {
+            state: AccountsViewEntry['state'];
+            lastSeenAt: number | null;
+            tabId: number | null;
+            username: string | null;
+            displayName: string | null;
+            legacyAccountId?: string | null;
+          },
+        ): AccountsViewEntry => {
+          const localLabel = labels.byAccount[accountId] ?? null;
+          const mappedKey = resolveMappedPersonalityId(
+            state.accountMappings,
+            accountId,
+            fields.legacyAccountId ?? null,
+            state.accountAliases,
+          );
+          return {
+            accountId,
+            label: buildAccountRowLabel(
+              accountId,
+              localLabel,
+              fields.username,
+              fields.displayName,
+            ),
+            localLabel,
+            state: fields.state,
+            lastSeenAt: fields.lastSeenAt,
+            tabId: fields.tabId,
+            // An ARCHIVED mapping is not mapped: it cannot generate, so the row
+            // must show the amber «AI отключён» rather than a false green.
+            personaMapped: Boolean(findActivePersona(state.personaCatalog, mappedKey)),
+            observedPage: opsDaily.pageByAccount[accountId] ?? null,
+          };
+        };
+
+        const accounts: AccountsViewEntry[] = [];
+        const claimed = new Set<string>();
+        for (const [accountId, live] of liveByAccountId) {
+          claimed.add(accountId);
+          accounts.push(buildEntry(accountId, {
+            state: 'live',
+            // The durable record can lag the live session by up to the presence
+            // store's coalescing window; either way this is «last seen», so take
+            // the later moment rather than the staler one.
+            lastSeenAt: Math.max(
+              live.lastSeenAt,
+              presence.byAccount[accountId]?.lastSeenAt ?? 0,
+            ),
+            tabId: live.tabId,
+            username: live.username ?? presence.byAccount[accountId]?.username ?? null,
+            displayName: live.displayName ?? presence.byAccount[accountId]?.displayName ?? null,
+            legacyAccountId: live.legacyAccountId,
+          }));
+        }
+        // SEEN: a durable presence record with no live session (typically a
+        // worker restart, or a tab the chatter closed).
+        for (const [accountId, entry] of Object.entries(presence.byAccount)) {
+          if (claimed.has(accountId)) {
+            continue;
+          }
+          claimed.add(accountId);
+          accounts.push(buildEntry(accountId, {
+            state: 'seen',
+            lastSeenAt: entry.lastSeenAt,
+            tabId: null,
+            username: entry.username,
+            displayName: entry.displayName,
+          }));
+        }
+        // NEVER: a known account this browser holds no observation for at all
+        // (a mapping restored from another device, or presence recorded before
+        // this feature existed).
+        for (const accountId of state.knownAccounts) {
+          if (claimed.has(accountId)) {
+            continue;
+          }
+          claimed.add(accountId);
+          accounts.push(buildEntry(accountId, {
+            state: 'never',
+            lastSeenAt: null,
+            tabId: null,
+            username: null,
+            displayName: null,
+          }));
+        }
+
+        // Live first, then the freshest observation, then the never-seen —
+        // ordered by how much the chatter can do with the row right now.
+        const stateRank: Record<AccountsViewEntry['state'], number> = {
+          live: 0,
+          seen: 1,
+          never: 2,
+        };
+        accounts.sort((left, right) => {
+          if (stateRank[left.state] !== stateRank[right.state]) {
+            return stateRank[left.state] - stateRank[right.state];
+          }
+          const byRecency = (right.lastSeenAt ?? 0) - (left.lastSeenAt ?? 0);
+          return byRecency !== 0 ? byRecency : left.accountId.localeCompare(right.accountId);
+        });
+
+        // An AGGREGATE only. A fansly.com tab cannot be attributed to an account
+        // after a worker restart (the capture map is gone and re-deriving it would
+        // mean reading Fansly), so the pane says «N вкладок без атрибуции» rather
+        // than inventing a per-account claim.
+        let unattributedFanslyTabs = 0;
+        try {
+          const tabs = await browser.tabs.query({ url: FANSLY_TAB_URL_PATTERN });
+          // The FULL capture map, not one tab per row: an account can hold
+          // several captured tabs and every one of them IS attributed, while a
+          // row can only carry a single tab id. Counting the extras here would
+          // tell the chatter to «открой чат» for a chat that is already open.
+          const attributedTabIds = sessionStore.getAttributedTabIds();
+          unattributedFanslyTabs = tabs.filter(
+            (tab) => tab.id === undefined || !attributedTabIds.has(tab.id),
+          ).length;
+        } catch {
+          // No tabs answer is not "zero tabs": leave the aggregate at 0 so the
+          // pane simply omits the line instead of claiming an empty browser.
+        }
+
+        return { accounts, unattributedFanslyTabs } satisfies AccountsView;
+      }
+
+      if (requestType === 'focusAccountTab') {
+        const { accountId } = message as unknown as { accountId: string };
+        const tabId = sessionStore.getTabIdForAccount(accountId.trim());
+        if (tabId === null) {
+          return { ok: false };
+        }
+        try {
+          await browser.tabs.update(tabId, { active: true });
+          // Activating a tab in a background window leaves it invisible — raise
+          // its window too, so «к вкладке» actually shows the chat.
+          const tab = await browser.tabs.get(tabId);
+          if (tab.windowId !== undefined) {
+            await browser.windows.update(tab.windowId, { focused: true });
+          }
+          return { ok: true };
+        } catch {
+          // The tab closed between the view read and the click.
+          return { ok: false };
+        }
+      }
+
+      if (requestType === 'setAccountLabel') {
+        // The ONLY writer of `chatgoose:accountLabels`. The options page never
+        // touches that key itself, so however many settings tabs are open there
+        // is exactly one serialized path into it.
+        const { accountId, label } = message as unknown as {
+          accountId: string;
+          label: string;
+        };
+        try {
+          await setAccountLabel(accountId, label);
+          return { ok: true };
+        } catch (error) {
+          logWarn('Account label write failed', {
+            error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+          });
+          // A rename the chatter typed either stuck or it did not — the pane has
+          // to be able to say so instead of silently reverting on reload.
+          return { ok: false };
+        }
       }
 
       if (requestType === 'getSessionsSnapshot') {

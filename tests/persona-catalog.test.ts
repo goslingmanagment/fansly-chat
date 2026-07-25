@@ -21,6 +21,7 @@ import {
   findActivePersona,
   normalizePersonaCatalog,
 } from '../src/shared/persona-catalog.js';
+import { classifyPersonaEmptyState } from '../src/options/personas.js';
 import {
   buildLegacyPersonaExport,
   ensureLegacyPersonaSnapshot,
@@ -61,17 +62,18 @@ function makeStorage(initial: Record<string, unknown>): {
   return { storage, data, writes, failNextSet: () => { shouldFail = true; } };
 }
 
-function makeHub(): {
+function makeHub(catalog?: PersonaCatalogEntry[]): {
   hub: PersonaCatalogHub;
   fetchAiPersonaCatalog: ReturnType<typeof vi.fn>;
 } {
-  const fetchAiPersonaCatalog = vi.fn(async () => [{
+  const answer: PersonaCatalogEntry[] = catalog ?? [{
     key: 'persona-1',
     displayName: 'Closer',
     definitionId: 'v1:persona-one-definition',
     version: 7,
     status: 'active' as const,
-  }]);
+  }];
+  const fetchAiPersonaCatalog = vi.fn(async () => structuredClone(answer));
   return {
     fetchAiPersonaCatalog,
     hub: {
@@ -401,6 +403,50 @@ describe('read-only persona catalog controller', () => {
     expect(local.writes).toEqual([]);
     expect(local.data[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY])
       .toBe('2026-07-13T12:00:00.000Z');
+  });
+
+  it('stamps fetchedAt on a CONFIRMED empty catalog so «подтверждённо пусто» is reachable', async () => {
+    // clearForSource leaves {catalog: [], source, fetchedAt: null}. A server that
+    // genuinely answers with zero personas is byte-identical to that cleared
+    // cache, so the write-suppression shortcut would keep fetchedAt null forever
+    // — and the Options classifier would report «каталог ещё не читался» about a
+    // source the hub has actually answered for.
+    const settings = configuredSettings();
+    const source = personaCatalogSource(settings);
+    const local = makeStorage({
+      schemaVersion: 14,
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      [PERSONA_CATALOG_STORAGE_KEY]: [],
+      [PERSONA_CATALOG_SOURCE_STORAGE_KEY]: source,
+      [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: null,
+    });
+    const { hub } = makeHub([]);
+    const { controller } = makeController({
+      hub,
+      storage: local.storage,
+      settings,
+      now: () => new Date('2026-07-25T12:05:00.000Z'),
+    });
+    await ensureLegacyPersonaSnapshot(local.storage);
+    local.writes.length = 0;
+
+    await controller.refresh();
+
+    expect(local.data[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY])
+      .toBe('2026-07-25T12:05:00.000Z');
+    // The classifier can now tell «server said empty» from «never loaded».
+    expect(classifyPersonaEmptyState({
+      currentSource: source,
+      storedSource: local.data[PERSONA_CATALOG_SOURCE_STORAGE_KEY] as string | null,
+      fetchedAt: local.data[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY] as string | null,
+    })).toBe('empty-catalog');
+
+    // Once stamped, a second byte-identical empty response is suppressed again.
+    local.writes.length = 0;
+    await controller.refresh();
+    expect(local.writes).toEqual([]);
   });
 
   it('persists an ID-only definition change even when the numeric version is unchanged', async () => {

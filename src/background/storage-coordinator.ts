@@ -23,6 +23,8 @@ import {
   type SummaryCacheMode,
 } from '../shared/summary-cache.js';
 import type { PersistedState, SummaryCacheEntry } from '../shared/types.js';
+import { transferAccountLabel } from './account-labels.js';
+import { transferAccountPresence } from './account-presence.js';
 
 function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -394,6 +396,28 @@ export class StorageCoordinator {
 
       if (!legacyAccountId || !resolvedAccountId || legacyAccountId === resolvedAccountId) {
         return { state, mappingMigrated: false, mappingConflict: false, knownAccountsChanged: false };
+      }
+
+      // The operational account stores are keyed by account id too, so they have
+      // to follow the same rekey — otherwise the pane grows a second, permanently
+      // «сессий не было» row for the same model and silently loses her local
+      // label. Both are OUTSIDE PersistedState (own storage.local keys, own FIFO
+      // queues), so they are transferred here rather than in the write below, and
+      // BEFORE the early "nothing changed" return: mappings/knownAccounts can
+      // already be canonical while presence or a label still points at the legacy
+      // id. Canonical wins on conflict; the legacy record is removed.
+      //
+      // Best-effort: a failed transfer must never abort the identity rekey, which
+      // is the invariant the rest of the extension depends on.
+      try {
+        await transferAccountPresence(legacyAccountId, resolvedAccountId);
+      } catch {
+        // Presence is an observation log; the pane degrades to «сессий не было».
+      }
+      try {
+        await transferAccountLabel(legacyAccountId, resolvedAccountId);
+      } catch {
+        // The label survives under the legacy id and can be re-entered.
       }
 
       const legacyMapping = state.accountMappings[legacyAccountId];

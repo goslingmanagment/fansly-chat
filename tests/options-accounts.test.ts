@@ -5,7 +5,14 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
-import type { PersistedState, SessionSnapshotEntry } from '../src/shared/types.js';
+import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
+import type { MountedOptionsPage } from './helpers/options-page.js';
+import type {
+  AccountsViewEntry,
+  PersistedState,
+  PersonaCatalogEntry,
+  SessionSnapshotEntry,
+} from '../src/shared/types.js';
 
 let dom: InstanceType<typeof JSDOM>;
 let currentState: PersistedState;
@@ -106,6 +113,17 @@ function installDom() {
  * duplicated literal — the copy is Russian and owned by `src/options/copy.ts`. */
 function accountIdText(accountId: string): string {
   return `${COPY.accounts.idPrefix}${accountId}`;
+}
+
+/** The «Аккаунты» / «Персоны» sections. Their titles are Russian and owned by
+ * the dictionary, so they are looked up through COPY rather than duplicated
+ * literals. */
+function getAccountsSection(): HTMLElement {
+  return getSectionByTitle(COPY.accounts.title);
+}
+
+function getPersonasSection(): HTMLElement {
+  return getSectionByTitle(COPY.personas.title);
 }
 
 function getSectionByTitle(title: string): HTMLElement {
@@ -227,11 +245,11 @@ async function loadOptionsPage(options: {
     return;
   }
   await vi.waitFor(() => {
-    getSectionByTitle('Account Mappings');
+    getAccountsSection();
   }, { timeout: 2000 });
   if (options.waitForHydration !== false) {
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Account Mappings').dataset.sessionHydration).toBe('ready');
+      expect(getAccountsSection().dataset.sessionHydration).toBe('ready');
     }, { timeout: 2000 });
   }
 }
@@ -310,7 +328,7 @@ describe('Options page account sections', () => {
       },
     });
 
-    const mappingsSection = getSectionByTitle('Account Mappings');
+    const mappingsSection = getAccountsSection();
 
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
     expect(mappingsSection.textContent).toContain(accountIdText('active-resolved'));
@@ -318,10 +336,10 @@ describe('Options page account sections', () => {
     expect(mappingsSection.textContent).not.toContain('stale');
     const activeRow = mappingsSection
       .querySelector<HTMLElement>('[data-account-mapping-row="active-resolved"]')!;
-    expect(activeRow.textContent).toContain('Connected');
+    expect(activeRow.textContent).toContain(COPY.accounts.stateLive);
     const offlineRow = mappingsSection
       .querySelector<HTMLElement>('[data-account-mapping-row="mappedOffline"]')!;
-    expect(offlineRow.textContent).toContain('Disconnected');
+    expect(offlineRow.textContent).toContain(COPY.accounts.stateIdle);
   });
 
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
@@ -335,13 +353,13 @@ describe('Options page account sections', () => {
       waitForHydration: false,
     });
 
-    const personalityCard = getSectionByTitle('Model Personalities')
+    const personalityCard = getPersonasSection()
       .querySelector<HTMLElement>('[data-persona-key="p1"]')!;
-    const mappingsSection = getSectionByTitle('Account Mappings');
+    const mappingsSection = getAccountsSection();
 
     expect(personalityCard.textContent).toContain('Closer');
     expect(mappingsSection.dataset.sessionHydration).toBe('loading');
-    expect(mappingsSection.textContent).toContain('Loading Fansly accounts');
+    expect(mappingsSection.textContent).toContain(COPY.accounts.loading);
     expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
 
     // getSessionsSnapshot owns identity rekey/reconciliation in the real
@@ -365,7 +383,7 @@ describe('Options page account sections', () => {
     });
 
     // Session hydration must not rebuild unrelated catalog UI.
-    expect(getSectionByTitle('Model Personalities')
+    expect(getPersonasSection()
       .querySelector('[data-persona-key="p1"]')).toBe(personalityCard);
     expect(currentState.personalities[0]?.name).toBe('Closer');
   });
@@ -413,8 +431,8 @@ describe('Options page account sections', () => {
     expect(currentState.accountMappings).toEqual({ canonical: 'p1' });
     expect(currentState.accountAliases).toEqual({ legacy: 'canonical' });
     expect(currentState.knownAccounts).toEqual(['canonical']);
-    expect(getSectionByTitle('Account Mappings').textContent).toContain(accountIdText('canonical'));
-    expect(getSectionByTitle('Account Mappings').textContent).not.toContain(accountIdText('legacy'));
+    expect(getAccountsSection().textContent).toContain(accountIdText('canonical'));
+    expect(getAccountsSection().textContent).not.toContain(accountIdText('legacy'));
   });
 
   it('keeps local settings usable and marks only account sections failed when session loading rejects', async () => {
@@ -431,11 +449,11 @@ describe('Options page account sections', () => {
 
     snapshot.reject(new Error('Fansly identity timed out'));
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Account Mappings').dataset.sessionHydration).toBe('failed');
+      expect(getAccountsSection().dataset.sessionHydration).toBe('failed');
     });
 
-    expect(getSectionByTitle('Account Mappings').textContent).toContain(accountIdText('offline-account'));
-    expect(getSectionByTitle('Account Mappings').textContent).toContain('Live account refresh failed');
+    expect(getAccountsSection().textContent).toContain(accountIdText('offline-account'));
+    expect(getAccountsSection().textContent).toContain(COPY.accounts.refreshFailed);
     expect(document.body.contains(quickInput)).toBe(true);
 
     quickInput.value = '40';
@@ -468,7 +486,7 @@ describe('Options page account sections', () => {
       ],
     });
 
-    const mappingsSection = getSectionByTitle('Account Mappings');
+    const mappingsSection = getAccountsSection();
 
     expect(mappingsSection.textContent).toContain('Newer');
     expect(mappingsSection.textContent).not.toContain('Older');
@@ -497,18 +515,47 @@ describe('Options page account sections', () => {
     expect(fanslyRow.textContent).toContain('Creator (@creator)');
   });
 
-  it('saves the theme picked in the segmented control', async () => {
+  it('saves the theme picked on a preview card through the existing save path', async () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
 
+    // The card still wraps the same radio the settings writer reads — no second
+    // writer and no new storage field were introduced for the cards.
     const darkRadio = document.querySelector<HTMLInputElement>(
       'input[name="chatgoose-ui-theme"][value="dark"]',
     )!;
+    expect(darkRadio.closest('[data-theme-card="dark"]')).not.toBeNull();
     darkRadio.checked = true;
     darkRadio.dispatchEvent(new Event('change', { bubbles: true }));
 
     await vi.waitFor(() => {
       expect(currentState.settings.uiTheme).toBe('dark');
     }, { timeout: 2000 });
+  });
+
+  it('renders three theme cards with russian titles and a chat-panel note', async () => {
+    await loadOptionsPage({
+      state: makeState({ settings: { ...makeState().settings, uiTheme: 'light' } }),
+      sessions: [],
+    });
+
+    const section = getSectionByTitle(COPY.appearance.title);
+    expect(
+      Array.from(section.querySelectorAll<HTMLElement>('[data-theme-card]'))
+        .map((card) => card.dataset.themeCard),
+    ).toEqual(['system', 'light', 'dark']);
+    expect(section.textContent).toContain(COPY.appearance.systemTitle);
+    expect(section.textContent).toContain(COPY.appearance.systemHint);
+    expect(section.textContent).toContain(COPY.appearance.darkHint);
+    // The subtitle says the theme reaches the in-chat panel too.
+    expect(section.textContent).toContain(COPY.appearance.subtitle);
+
+    // The stored theme is the checked card; each card carries a CSS-only preview.
+    expect(
+      section.querySelector<HTMLInputElement>('[data-theme-card="light"] input')?.checked,
+    ).toBe(true);
+    expect(section.querySelectorAll('.chatgoose-theme-preview')).toHaveLength(3);
+    // No reset-to-default affordance (owner ruling).
+    expect(Array.from(section.querySelectorAll('button'))).toEqual([]);
   });
 
   it('folds the sign-in form once a device token is active', async () => {
@@ -550,9 +597,9 @@ describe('Options page settings and read-only personas', () => {
       sessions: [],
     });
 
-    const section = getSectionByTitle('Model Personalities');
+    const section = getPersonasSection();
     expect(section.textContent).toContain('Closer');
-    expect(section.textContent).toContain('version 1');
+    expect(section.textContent).toContain(`${COPY.personas.versionPrefix}1`);
     expect(section.querySelector('input[data-role="name"]')).toBeNull();
     expect(section.querySelector('textarea[data-role="content"]')).toBeNull();
     expect(Array.from(section.querySelectorAll('button')).map((button) => button.textContent))
@@ -587,16 +634,16 @@ describe('Options page settings and read-only personas', () => {
     });
 
     await vi.waitFor(() => {
-      expect(getSectionByTitle('Model Personalities').textContent)
-        .toContain('version 2 • archived');
+      expect(getPersonasSection().textContent)
+        .toContain(COPY.personas.archivedMapped);
     });
-    const mappingSelect = getSectionByTitle('Account Mappings')
+    const mappingSelect = getAccountsSection()
       .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
     const archivedOption = Array.from(mappingSelect.options)
       .find((option) => option.value === 'p1');
     expect(archivedOption?.disabled).toBe(true);
     expect(mappingSelect.closest('[data-account-mapping-row]')?.textContent)
-      .toContain('unavailable');
+      .toContain(COPY.personas.archivedMapped);
     expect(currentState.accountMappings).toEqual({ account: 'p1' });
   });
 
@@ -632,7 +679,7 @@ describe('Options page settings and read-only personas', () => {
         sessions: [],
       });
 
-      expect(getSectionByTitle('Model Personalities').textContent).toContain('Source A');
+      expect(getPersonasSection().textContent).toContain('Source A');
 
       let changes: Record<string, browser.storage.StorageChange>;
       if (sourceChangeKey === 'settings') {
@@ -663,17 +710,17 @@ describe('Options page settings and read-only personas', () => {
       emitStorageChanges(changes);
 
       await vi.waitFor(() => {
-        expect(getSectionByTitle('Model Personalities').textContent)
-          .toContain('No server personas are available yet');
+        expect(getPersonasSection().textContent)
+          .toContain(COPY.personas.emptyUnknown);
       });
-      expect(getSectionByTitle('Model Personalities').textContent).not.toContain('Source A');
+      expect(getPersonasSection().textContent).not.toContain('Source A');
 
-      const mappingSelect = getSectionByTitle('Account Mappings')
+      const mappingSelect = getAccountsSection()
         .querySelector<HTMLSelectElement>('select[data-account-id="account"]')!;
       const unresolved = Array.from(mappingSelect.options)
         .find((option) => option.value === 'source-a-persona');
       expect(unresolved?.disabled).toBe(true);
-      expect(unresolved?.textContent).toContain('Unavailable persona');
+      expect(unresolved?.textContent).toContain('Недоступная персона');
       expect(currentState.accountMappings).toEqual({ account: 'source-a-persona' });
     },
   );
@@ -682,9 +729,9 @@ describe('Options page settings and read-only personas', () => {
     await loadOptionsPage({ state: makeState({ accountMappings: { creator: 'p1' } }), sessions: [] });
     const writeText = vi.fn(async (_value: string) => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    const section = getSectionByTitle('Model Personalities');
+    const section = getPersonasSection();
     const copy = Array.from(section.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Copy legacy persona JSON')!;
+      .find((button) => button.textContent === COPY.personas.legacyCopy)!;
     copy.click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const exported = JSON.parse(writeText.mock.calls[0]![0]);
@@ -1122,7 +1169,7 @@ describe('Options page settings and read-only personas', () => {
       sessions: [],
     });
 
-    const section = getSectionByTitle('Account Mappings');
+    const section = getAccountsSection();
     const lunaOptions = Array.from(section.querySelectorAll('option'))
       .map((option) => option.textContent)
       .filter((text) => text?.startsWith('Luna'));
@@ -1139,13 +1186,13 @@ describe('Options page settings and read-only personas', () => {
       }),
       sessions: [],
     });
-    const mappingSection = getSectionByTitle('Account Mappings');
+    const mappingSection = getAccountsSection();
     const mappingSelect = mappingSection.querySelector<HTMLSelectElement>('select')!;
     expect(mappingSelect.value).toBe('p1');
     expect(mappingSelect.querySelector<HTMLOptionElement>('option[value="p1"]')?.disabled)
       .toBe(true);
     expect(mappingSection.querySelector<HTMLElement>('[data-role="mapping-info"]')?.textContent)
-      .toContain('unavailable');
+      .toContain(COPY.personas.archivedMapped);
     expect(currentState.accountMappings).toEqual({ 'acc-1': 'p1' });
   });
 
@@ -1176,7 +1223,7 @@ describe('Options page settings and read-only personas', () => {
 
     const legacyBefore = structuredClone(currentState.personalities);
 
-    const mappingSelect = getSectionByTitle('Account Mappings')
+    const mappingSelect = getAccountsSection()
       .querySelector<HTMLSelectElement>('select')!;
     mappingSelect.value = 'p1';
     mappingSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1203,10 +1250,57 @@ describe('Options page coach settings', () => {
       Array.from(select.options).some((option) => option.value === 'full'),
     )!;
 
+  /** The recap cost warning. Pinned through the dictionary's stem so the lookup
+   * survives a rewording of the sentence's tail. */
+  const RECAP_WARNING_STEM = COPY.generation.coachRecapWarning.split('{n}')[0]!;
+
   const getRecapWarning = (): HTMLElement | null =>
     Array.from(
-      getSectionByTitle('Generation').querySelectorAll<HTMLElement>('.chatgoose-meta'),
-    ).find((node) => node.textContent?.includes('Full Recap loads up to')) ?? null;
+      getSectionByTitle(COPY.generation.title).querySelectorAll<HTMLElement>('.chatgoose-meta'),
+    ).find((node) => node.textContent?.includes(RECAP_WARNING_STEM)) ?? null;
+
+  /** «… загружает до N сообщений …» with the live count substituted. */
+  const recapWarningFor = (count: number): string =>
+    COPY.generation.coachRecapWarning.replace('{n}', String(count));
+
+  it('groups the rows under the three russian captions with sublabels', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const section = getSectionByTitle(COPY.generation.title);
+    expect(
+      Array.from(section.querySelectorAll<HTMLElement>('.chatgoose-group-cap'))
+        .map((cap) => cap.textContent),
+    ).toEqual([
+      COPY.generation.groupWindows,
+      COPY.generation.groupCoach,
+      COPY.generation.groupService,
+    ]);
+
+    // Every row carries a title AND a sublabel saying what it does.
+    expect(section.textContent).toContain(COPY.generation.quickTitle);
+    expect(section.textContent).toContain(COPY.generation.quickHint);
+    expect(section.textContent).toContain(COPY.generation.deepHint);
+    expect(section.textContent).toContain(COPY.generation.debugHint);
+
+    // The owner's rulings: no reset affordances, no presets, no changed-markers.
+    const buttonLabels = Array.from(section.querySelectorAll('button'))
+      .map((button) => button.textContent ?? '');
+    expect(buttonLabels).toEqual([]);
+  });
+
+  it('flashes the clamped value in the row hint, in russian', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
+    deepInput.value = '9999';
+    deepInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(
+        getSectionByTitle(COPY.generation.title).textContent,
+      ).toContain(COPY.generation.savedAs.replace('{n}', '3000'));
+    }, { timeout: 2000 });
+  });
 
   it('renders coach memory + auto-recap fields with stored defaults and a hidden warning', async () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
@@ -1313,14 +1407,14 @@ describe('Options page coach settings', () => {
     const warning = getRecapWarning()!;
     expect(warning).toBeTruthy();
     // Reflects the stored deep window (250), never the old hardcoded 3000.
-    expect(warning.textContent).toContain('Full Recap loads up to 250 messages');
+    expect(warning.textContent).toContain(recapWarningFor(250));
     expect(warning.textContent).not.toContain('3000');
 
     // Editing the deep-window field updates the warning message live.
     const deepInput = document.querySelector<HTMLInputElement>('input[type="number"][max="3000"]')!;
     deepInput.value = '1234';
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(warning.textContent).toContain('Full Recap loads up to 1234 messages');
+    expect(warning.textContent).toContain(recapWarningFor(1234));
   });
 
   it('clamps the cost warning to the deep-window bounds — never quotes an unreachable count', async () => {
@@ -1338,12 +1432,300 @@ describe('Options page coach settings', () => {
     // Above the max: shows the clamped 3000, never the typed 99999.
     deepInput.value = '99999';
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(warning.textContent).toContain('Full Recap loads up to 3000 messages');
+    expect(warning.textContent).toContain(recapWarningFor(3000));
     expect(warning.textContent).not.toContain('99999');
 
     // Below the min: clamps up to 100.
     deepInput.value = '5';
     deepInput.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(warning.textContent).toContain('Full Recap loads up to 100 messages');
+    expect(warning.textContent).toContain(recapWarningFor(100));
+  });
+});
+
+// ─── «Аккаунты» pane (wave C) ───────────────────────────────────────────────
+// These ride the cabinet mount helper: the pane's honest states come from the
+// background's `getAccountsView`, which the older harness above deliberately
+// does not answer (which is what proves the degraded path still renders).
+
+describe('Options «Аккаунты» pane', () => {
+  let page: MountedOptionsPage;
+
+  afterEach(async () => {
+    await unmountOptionsPage();
+    delete (globalThis as Record<string, unknown>).browser;
+  });
+
+  const CATALOG: PersonaCatalogEntry[] = [{
+    key: 'p1',
+    displayName: 'Closer',
+    definitionId: 'v1:persona-one-definition',
+    version: 1,
+    status: 'active',
+  }];
+
+  const viewEntry = (over: Partial<AccountsViewEntry>): AccountsViewEntry => ({
+    accountId: 'acc-live',
+    label: 'Lora (@lora)',
+    localLabel: null,
+    state: 'live',
+    lastSeenAt: Date.now(),
+    tabId: 11,
+    personaMapped: true,
+    observedPage: null,
+    ...over,
+  });
+
+  const accountRow = (accountId: string): HTMLElement => {
+    const row = page.document.querySelector<HTMLElement>(
+      `[data-account-mapping-row="${accountId}"]`,
+    );
+    if (!row) throw new Error(`No account row for ${accountId}`);
+    return row;
+  };
+
+  const rowLabel = (accountId: string): string | null | undefined =>
+    accountRow(accountId).querySelector<HTMLElement>('.chatgoose-account-label')?.textContent;
+
+  it('sorts live first, then by recency, then never-seen — naming each state honestly', async () => {
+    const now = Date.now();
+    page = await mountOptionsPage({
+      state: {
+        personaCatalog: CATALOG,
+        accountMappings: {
+          'acc-live': 'p1',
+          'acc-old': 'p1',
+          'acc-new': 'p1',
+          'acc-never': 'p1',
+        },
+        knownAccounts: ['acc-live', 'acc-never', 'acc-new', 'acc-old'],
+      },
+      accounts: {
+        accounts: [
+          viewEntry({ accountId: 'acc-live', state: 'live', lastSeenAt: now, tabId: 11 }),
+          viewEntry({
+            accountId: 'acc-new',
+            label: 'Newer',
+            state: 'seen',
+            lastSeenAt: now - 60_000,
+            tabId: null,
+          }),
+          viewEntry({
+            accountId: 'acc-old',
+            label: 'Older',
+            state: 'seen',
+            lastSeenAt: now - 3 * 60 * 60 * 1000,
+            tabId: null,
+          }),
+          viewEntry({
+            accountId: 'acc-never',
+            label: 'Never',
+            state: 'never',
+            lastSeenAt: null,
+            tabId: null,
+          }),
+        ],
+        unattributedFanslyTabs: 0,
+      },
+    });
+
+    const rows = Array.from(
+      page.document.querySelectorAll<HTMLElement>('[data-account-mapping-row]'),
+    );
+    expect(rows.map((row) => row.dataset.accountMappingRow)).toEqual([
+      'acc-live',
+      'acc-new',
+      'acc-old',
+      'acc-never',
+    ]);
+    expect(rows.map((row) => row.dataset.accountState)).toEqual([
+      'live',
+      'seen',
+      'seen',
+      'never',
+    ]);
+
+    // «вкладка активна» only where a session actually is; the rest say when they
+    // were last seen, or admit there was never one.
+    expect(accountRow('acc-live').textContent).toContain(COPY.accounts.subTabActive);
+    expect(accountRow('acc-new').textContent).not.toContain(COPY.accounts.subTabActive);
+    expect(accountRow('acc-never').textContent).toContain(COPY.accounts.subNeverSeen);
+    // The subtitle counts what is LIVE, not what is known.
+    expect(
+      page.document.querySelector<HTMLElement>('[data-role="accounts-subtitle"]')?.textContent,
+    ).toBe(COPY.accounts.subtitle.replace('{live}', '1').replace('{total}', '4'));
+  });
+
+  it('marks an unmapped account «AI отключён» in amber and says why', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
+      accounts: {
+        accounts: [viewEntry({ personaMapped: false })],
+        unattributedFanslyTabs: 0,
+      },
+    });
+
+    const badge = page.document.querySelector<HTMLElement>('[data-account-ai-off="acc-live"]');
+    expect(badge?.textContent).toBe(COPY.accounts.personaUnmapped);
+    // Amber, not red: nothing is broken — a persona simply has to be chosen.
+    expect(badge?.className).toContain('chatgoose-badge-amber');
+    expect(badge?.title).toBe(COPY.accounts.personaUnmappedHint);
+  });
+
+  it('offers «к вкладке» only for a live row with a known tab', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live', 'acc-seen'] },
+      accounts: {
+        accounts: [
+          viewEntry({ accountId: 'acc-live', state: 'live', tabId: 11 }),
+          viewEntry({ accountId: 'acc-seen', state: 'seen', tabId: null }),
+        ],
+        unattributedFanslyTabs: 0,
+      },
+    });
+
+    const focus = page.document.querySelector<HTMLButtonElement>(
+      '[data-account-focus-tab="acc-live"]',
+    );
+    expect(focus?.textContent).toBe(COPY.accounts.focusTab);
+    // A worker restart leaves no tab attribution, so a 'seen' row must never
+    // offer to focus a tab it cannot identify.
+    expect(page.document.querySelector('[data-account-focus-tab="acc-seen"]')).toBeNull();
+
+    focus!.click();
+    await page.flushAsync();
+    expect(page.focusRequests()).toEqual(['acc-live']);
+  });
+
+  it('saves an inline label through setAccountLabel and prefers it over the display name', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
+      accounts: { accounts: [viewEntry({})], unattributedFanslyTabs: 0 },
+    });
+
+    page.document.querySelector<HTMLButtonElement>('[data-account-rename="acc-live"]')!.click();
+    const editor = page.document.querySelector<HTMLInputElement>(
+      '[data-account-label-input="acc-live"]',
+    )!;
+    expect(editor.hidden).toBe(false);
+
+    editor.value = 'Лора · утро';
+    editor.dispatchEvent(
+      new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+    await page.flushAsync();
+
+    // The runtime operation is the ONLY writer of the labels key — the page never
+    // touches that storage key itself.
+    expect(page.labelWrites()).toEqual([{ accountId: 'acc-live', label: 'Лора · утро' }]);
+    expect(page.getRawStorage()['chatgoose:accountLabels']).toBeUndefined();
+    expect(rowLabel('acc-live')).toBe('Лора · утро');
+    expect(
+      accountRow('acc-live')
+        .querySelector<HTMLElement>('.chatgoose-account-label')?.dataset.accountLocalLabel,
+    ).toBe('true');
+  });
+
+  it('Esc cancels the inline editor without writing anything', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
+      accounts: { accounts: [viewEntry({})], unattributedFanslyTabs: 0 },
+    });
+
+    page.document.querySelector<HTMLButtonElement>('[data-account-rename="acc-live"]')!.click();
+    const editor = page.document.querySelector<HTMLInputElement>(
+      '[data-account-label-input="acc-live"]',
+    )!;
+    editor.value = 'не сохранять';
+    editor.dispatchEvent(
+      new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await page.flushAsync();
+
+    expect(page.labelWrites()).toEqual([]);
+    expect(editor.hidden).toBe(true);
+    expect(rowLabel('acc-live')).toBe('Lora (@lora)');
+  });
+
+  it('keeps the editor open with the typed text when the label write fails', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
+      accounts: { accounts: [viewEntry({})], unattributedFanslyTabs: 0 },
+      runtime: { setAccountLabelOk: false },
+    });
+
+    page.document.querySelector<HTMLButtonElement>('[data-account-rename="acc-live"]')!.click();
+    const editor = page.document.querySelector<HTMLInputElement>(
+      '[data-account-label-input="acc-live"]',
+    )!;
+    editor.value = 'Лора';
+    editor.dispatchEvent(
+      new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+    await page.flushAsync();
+
+    // A rename that did not stick must not look like it did.
+    expect(editor.hidden).toBe(false);
+    expect(editor.value).toBe('Лора');
+    expect(rowLabel('acc-live')).toBe('Lora (@lora)');
+  });
+
+  it('shows the observed kernel page only once a generation proved the binding', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live', 'acc-quiet'] },
+      accounts: {
+        accounts: [
+          viewEntry({ accountId: 'acc-live', observedPage: 'lora-1' }),
+          viewEntry({ accountId: 'acc-quiet', state: 'seen', tabId: null, observedPage: null }),
+        ],
+        unattributedFanslyTabs: 0,
+      },
+    });
+
+    expect(accountRow('acc-live').textContent)
+      .toContain(COPY.accounts.corePage.replace('{page}', 'lora-1'));
+    // Honest-empty: no line at all rather than an invented page.
+    expect(accountRow('acc-quiet').textContent).not.toContain('страница ядра');
+  });
+
+  it('reports unattributed Fansly tabs as an aggregate, never as a per-account claim', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: [] },
+      accounts: { accounts: [], unattributedFanslyTabs: 2 },
+    });
+
+    expect(
+      page.document.querySelector<HTMLElement>('[data-role="accounts-unattributed"]')?.textContent,
+    ).toBe(COPY.accounts.unattributedTabs.replace('{n}', '2'));
+    // Nothing was invented into a row.
+    expect(page.document.querySelectorAll('[data-account-mapping-row]')).toHaveLength(0);
+    expect(page.document.querySelector('[data-role="accounts-empty"]')?.textContent)
+      .toBe(COPY.accounts.emptyFresh);
+  });
+
+  it('degrades to the local view when the background has no getAccountsView', async () => {
+    // An older background answers `undefined`. The pane must still list the known
+    // accounts — and must NOT claim a 'seen' state, a tab id or an observed page
+    // it cannot know without the operation.
+    page = await mountOptionsPage({
+      state: {
+        personaCatalog: CATALOG,
+        accountMappings: { 'acc-1': 'p1' },
+        knownAccounts: ['acc-1'],
+      },
+      sessions: [{
+        legacyAccountId: 'acc-1',
+        resolvedAccountId: 'acc-1',
+        username: 'lora',
+        displayName: 'Lora',
+        connected: true,
+        lastSeenAt: Date.now(),
+      }],
+    });
+
+    const row = accountRow('acc-1');
+    expect(row.dataset.accountState).toBe('live');
+    expect(row.textContent).toContain('Lora (@lora)');
+    expect(page.document.querySelector('[data-account-focus-tab="acc-1"]')).toBeNull();
+    expect(page.document.querySelector('[data-role="accounts-unattributed"]')).toBeNull();
   });
 });

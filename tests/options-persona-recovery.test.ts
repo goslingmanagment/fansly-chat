@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
+import { COPY } from '../src/options/copy.js';
 import { LEGACY_PERSONA_SNAPSHOT_KEY } from '../src/shared/constants.js';
 
 describe('Options malformed persona snapshot recovery', () => {
@@ -73,8 +74,8 @@ describe('Options malformed persona snapshot recovery', () => {
     });
 
     expect(document.body.textContent).toContain('Legacy Persona Recovery');
-    expect(document.body.textContent).toContain('Download legacy persona JSON');
-    expect(document.body.textContent).toContain('Copy legacy persona JSON');
+    expect(document.body.textContent).toContain(COPY.personas.legacyDownload);
+    expect(document.body.textContent).toContain(COPY.personas.legacyCopy);
     const sectionTitles = Array.from(document.querySelectorAll('h2'))
       .map((heading) => heading.textContent);
     expect(sectionTitles).toEqual(['Legacy Persona Recovery']);
@@ -82,7 +83,7 @@ describe('Options malformed persona snapshot recovery', () => {
     expect(storageSet).not.toHaveBeenCalled();
 
     const copy = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Copy legacy persona JSON');
+      .find((button) => button.textContent === COPY.personas.legacyCopy);
     copy?.click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const exported = JSON.parse(writeText.mock.calls[0]![0] as string) as Record<string, unknown>;
