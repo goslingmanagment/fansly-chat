@@ -231,6 +231,126 @@ describe('options «Статус» pane', () => {
     expect(report).not.toContain(COPY.status.activityEmpty);
   });
 
+  it('reads a MALFORMED fulfilled local reply as unavailable, not as an empty day', async () => {
+    // A stale background — or a dropped frame — resolves the read with
+    // `undefined` instead of rejecting. The parsers used to collapse that into
+    // `[]`/`null`, i.e. into the honest quiet-day answer, so the pane and the
+    // copied report asserted «сегодня генераций не было» about a reply nobody
+    // could use. Settlement alone is not availability: the shape has to parse.
+    const malformed = () => undefined;
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        quotaByPage: malformed,
+        spenders: malformed,
+        opsDaily: malformed,
+      },
+    });
+
+    expect(row(page, 'ai').textContent).toContain(COPY.status.aiUnavailable);
+    expect(row(page, 'ai').textContent).not.toContain(COPY.status.aiEmpty);
+    expect(row(page, 'activity').textContent).toContain(COPY.status.activityUnavailable);
+    expect(row(page, 'activity').textContent).not.toContain(COPY.status.activityEmpty);
+    expect(row(page, 'spenders').textContent).toContain(COPY.status.spendersUnavailable);
+    expect(row(page, 'spenders').textContent).not.toContain(COPY.status.spendersEmpty);
+
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(page.window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    const report = writeText.mock.calls[0]?.[0] as unknown as string;
+    expect(report).toContain(COPY.status.aiUnavailable);
+    expect(report).toContain(COPY.status.activityUnavailable);
+    expect(report).toContain(COPY.status.spendersUnavailable);
+    expect(report).not.toContain(COPY.status.activityEmpty);
+    expect(report).not.toContain(COPY.status.spendersEmpty);
+  });
+
+  it('still reads a genuinely EMPTY local reply as the honest empty', async () => {
+    // The other side of the same discrimination: an empty quota map, a null board
+    // observation and a quiet ops-daily record are real answers, and they must
+    // keep their own copy instead of being demoted to «недоступно».
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        quotaByPage: {},
+        spenders: null,
+        opsDaily: emptyOpsDaily(),
+      },
+    });
+
+    expect(row(page, 'ai').textContent).toContain(COPY.status.aiEmpty);
+    expect(row(page, 'ai').textContent).not.toContain(COPY.status.aiUnavailable);
+    expect(row(page, 'activity').textContent).toContain(COPY.status.activityEmpty);
+    expect(row(page, 'spenders').textContent).toContain(COPY.status.spendersEmpty);
+    expect(row(page, 'spenders').textContent).not.toContain(COPY.status.spendersUnavailable);
+  });
+
+  it('carries a failed Fansly read into the report instead of claiming zero accounts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const page = await readyMount({
+      sessions: () => Promise.reject(new Error('sessions snapshot died')),
+      runtime: { health: HEALTH_UP, identity: IDENTITY_AUTH },
+    });
+
+    // The row is already honest…
+    expect(row(page, 'fansly').textContent).toContain(COPY.status.fanslyUnavailable);
+
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(page.window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    const report = writeText.mock.calls[0]?.[0] as unknown as string;
+    // …and so is the support snapshot: «аккаунты не обнаружены» is a claim about a
+    // snapshot that was actually read.
+    expect(report).toContain(COPY.status.fanslyUnavailable);
+    expect(report).not.toContain(COPY.status.fanslyEmpty);
+    vi.restoreAllMocks();
+  });
+
+  it('does not claim zero Fansly accounts in a report copied BEFORE the first read', async () => {
+    // The report model starts with a placeholder zero, and the sessions snapshot
+    // can take up to 5s. A report copied in that window must not turn the
+    // placeholder into «аккаунты не обнаружены» — nobody has read anything yet.
+    let releaseSessions!: (sessions: SessionSnapshotEntry[]) => void;
+    const pendingSessions = new Promise<SessionSnapshotEntry[]>((resolve) => {
+      releaseSessions = resolve;
+    });
+    const page = await readyMount({
+      sessions: () => pendingSessions,
+      runtime: { health: HEALTH_UP, identity: IDENTITY_AUTH },
+    });
+
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(page.window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    expect(writeText.mock.calls[0]?.[0] as unknown as string)
+      .toContain(COPY.status.fanslyUnavailable);
+    expect(writeText.mock.calls[0]?.[0] as unknown as string)
+      .not.toContain(COPY.status.fanslyEmpty);
+
+    // Once the read lands, the report speaks about the snapshot again.
+    releaseSessions([LIVE_SESSION]);
+    await page.flushAsync();
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    const second = writeText.mock.calls[1]?.[0] as unknown as string;
+    expect(second).toContain('Lora (@lora)');
+    expect(second).not.toContain(COPY.status.fanslyUnavailable);
+  });
+
   it('keeps no_permission a distinct amber verdict with a grant action, not a dead core', async () => {
     const page = await mountOptionsPage({
       settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'tok' },
