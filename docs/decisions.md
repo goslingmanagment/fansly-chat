@@ -75,7 +75,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
-| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path |
+| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists |
 
 ## Entries
 
@@ -1720,3 +1720,70 @@ arrow-key navigation, and the previews use FIXED hex instead of the theme
 variables: a preview of the light theme has to look light while the page is dark.
 Per the owner's rulings this wave adds no reset-to-default affordances, no
 changed-from-default markers and no presets anywhere.
+
+**E59 amendment — wave D «Онбординг и хвосты» (2026-07-25).** The first-run
+checklist is gated by a DURABLE operational flag, `chatgoose:onboarding`
+(`{version: 1, dismissedAt}`), written only by the background over the same FIFO
+queue class the other operational keys use. «Fresh» means all three of: the flag
+was never stamped, no custody credential is stored, and `knownAccounts` is empty
+in the MOUNT snapshot. The durable half is what fixes v1's self-cancelling
+predicate: it read live form state, so typing the hub URL dismissed the checklist
+that was still explaining the next two steps. The `knownAccounts` half is what
+keeps a sign-out from putting a working chatter back through onboarding. An
+unreadable `getOnboardingState` reply counts as NOT fresh — an older background
+must never resurrect the checklist over a configured install.
+
+The steps run host access → sign-in → «Fansly и персона», which is E41's own
+flow: sign-in cannot pass without the host permission (a `no_permission` hub read
+is not a credential problem), so ordering sign-in first would send the chatter
+into the failure. Each step reads the same sources the «Статус» rows do, but step
+1 requires a GRANTED permission rather than the readiness row's lenient
+`!== false`: on a fresh install nothing has been granted yet. Step 2 follows the
+live identity read, not the presence of a token string — the credential either
+works or it does not. When all three are done the flag is stamped ONCE and the
+card retires; a failed write keeps the card rather than pretending setup is over.
+Fresh empty states are honest rather than blank: ghost account rows (aria-hidden,
+nothing focusable) next to the «open Fansly» instruction, the Russian
+first-sign-in hint that says the password is not stored on the device, and rail
+micros «настройка» / «—» (catalog never read) / «0» (a local count that IS zero).
+
+The changelog stays a WEB page: `CHANGELOG_URL` in shared constants is pinned
+against `BASE_URL` in `scripts/deploy.sh` by a test, because the constant and the
+deploy target are one fact stored in two files. The link ships WITHOUT a
+`#v<X-Y-Z>` anchor — the anchored per-release page (E42) is not deployed, and a
+link into an anchor that does not exist lands on a blank viewport. RELEASE GATE:
+adding the anchor is a release-2.0 commit that must FOLLOW that page's deploy,
+never precede it; the pin test fails on an anchor added early. «нов.» is shown
+when `chatgoose:lastSeenVersion` differs from `getManifest().version`; a click
+records the version and clears the dot, the tab opens regardless of how that
+write settles, and a rejected write leaves the dot on (an unread release note is
+the safe side). On a first run the version is recorded silently — there is
+nothing to catch up on, and the checklist is already the message.
+
+Error surfaces deep-link through ONE background operation, `openOptions
+{pane, code?}`. It queries for an already-open options tab FIRST and re-points it
+(`tabs.update` with the new hash + a window raise); `tabs.create` is only the
+no-tab path. A second options tab is a second synchronous settings writer on
+pagehide racing the first over the same blob, so it must never be created — the
+handler reports whether it reused a tab, and a tab that vanished between the
+query and the update falls back to creating one. Routing comes from the E58
+registry by KEY (the stable identifier), not by code string: `no_mapping` →
+«Аккаунты», `no_personalities` → «Персоны», `CG-HUB-*` → «Agency Hub», anything
+else that carries `settingsLink` → «Статус». That last branch is load bearing:
+`settingsLink` is not a hub-only flag. The mapping banner covers TWO classes
+through one callback, so the reason now travels with the click — «no active
+personas exist» opens «Персоны», «this account has none assigned» opens
+«Аккаунты». The popup's normal path uses the operation; its unavailable screen
+KEEPS the native `openOptionsPage`, because that screen exists precisely because
+the runtime did not answer. Content and popup fall back to the native opener when
+the request rejects: nothing was opened in that case, so the fallback cannot
+double-open.
+
+On arrival the page shows ONE line, `<code> · <registry description>` — read from
+`src/shared/errors.ts`, never restated in COPY — and highlights the row that code
+names. The highlight is PENDING: hub diagnostics and account rows hydrate
+asynchronously, so it fires the first time the target exists AND has content,
+which is why every relevant repaint calls the same hook. A deep link into an
+already-open tab arrives as a hash change, so the note and the highlight re-arm
+on `hashchange` and the previous pane keeps neither. An unknown code still opens
+its pane and explains nothing: a rotted link must degrade, never fabricate.

@@ -1434,6 +1434,81 @@ describe('runtime-api onboarding flag', () => {
   });
 });
 
+describe('runtime-api openOptions', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('re-points the ALREADY OPEN settings tab and raises its window', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsQuery.mockResolvedValueOnce([
+      { id: 41, url: 'moz-extension://cg-test-uuid/options.html#generation' },
+    ]);
+    harness.tabsGet.mockResolvedValueOnce({ id: 41, windowId: 5 } as never);
+
+    const result = await harness.send({
+      type: 'openOptions',
+      pane: 'hub',
+      code: 'CG-HUB-04',
+    });
+
+    expect(result).toEqual({ opened: true, reused: true });
+    // The query has to be a prefix match: the hash is not part of a match
+    // pattern, so the open tab is found whatever pane it is showing.
+    expect(harness.tabsQuery).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/options.html*',
+    });
+    expect(harness.tabsUpdate).toHaveBeenCalledWith(41, {
+      active: true,
+      url: 'moz-extension://cg-test-uuid/options.html#hub:CG-HUB-04',
+    });
+    expect(harness.windowsUpdate).toHaveBeenCalledWith(5, { focused: true });
+    // A SECOND options tab would be a second pagehide settings writer.
+    expect(harness.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('opens one tab when none is open, and drops an unusable code', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+
+    const result = await harness.send({
+      type: 'openOptions',
+      pane: 'accounts',
+      code: '<script>',
+    });
+
+    expect(result).toEqual({ opened: true, reused: false });
+    // The hash grammar refuses the junk code and keeps the pane.
+    expect(harness.tabsCreate).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/options.html#accounts',
+    });
+  });
+
+  it('falls back to creating a tab when the open one disappeared mid-flight', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
+    harness.tabsUpdate.mockRejectedValueOnce(new Error('No tab with id: 41'));
+
+    expect(await harness.send({ type: 'openOptions', pane: 'status' }))
+      .toEqual({ opened: true, reused: false });
+    expect(harness.tabsCreate).toHaveBeenCalledWith({
+      url: 'moz-extension://cg-test-uuid/options.html#status',
+    });
+  });
+
+  it('reports honestly when the browser refuses to open anything', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsCreate.mockRejectedValueOnce(new Error('denied'));
+
+    expect(await harness.send({ type: 'openOptions', pane: 'status' }))
+      .toEqual({ opened: false, reused: false });
+  });
+});
+
 describe('runtime-api last-seen version', () => {
   beforeEach(() => {
     mockStorage = {};

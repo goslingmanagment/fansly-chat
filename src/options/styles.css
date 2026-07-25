@@ -258,6 +258,41 @@ input[type='checkbox'] {
   display: none;
 }
 
+/* ── Deep link from an error ── */
+/* One line naming the code that opened this pane. The text comes from the E58
+   registry, so this rule owns the LOOK and nothing else. */
+.chatgoose-deeplink {
+  margin: 20px 20px 0;
+  padding: 9px 14px;
+  border-radius: var(--chatgoose-radius-card);
+  border: 1px solid var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+  font-size: 12.5px;
+}
+
+/* The row that code is about, highlighted once on arrival. Reduced motion keeps
+   the highlight and drops the movement — the point is «this row», not the
+   animation. */
+.chatgoose-flash {
+  animation: chatgoose-flash 2s ease-out 1;
+  border-radius: var(--chatgoose-radius-card);
+}
+
+@keyframes chatgoose-flash {
+  0% { background: var(--chatgoose-clay-bg); box-shadow: 0 0 0 3px var(--chatgoose-clay-line); }
+  70% { background: var(--chatgoose-clay-bg); box-shadow: 0 0 0 3px var(--chatgoose-clay-line); }
+  100% { background: none; box-shadow: 0 0 0 3px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatgoose-flash {
+    animation: none;
+    background: var(--chatgoose-clay-bg);
+    box-shadow: 0 0 0 3px var(--chatgoose-clay-line);
+  }
+}
+
 /* Inside a pane the rail owns the left gutter, so a section card only keeps
    its outer breathing room. */
 .chatgoose-cabinet-pane .chatgoose-section {

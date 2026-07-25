@@ -37,7 +37,11 @@ import {
   formatCaptureStatus,
   shortenAccountId,
 } from './sessions.js';
-import { OPTIONS_PANES } from '../shared/options-routes.js';
+import {
+  OPTIONS_PANES,
+  parseOptionsHash,
+  type PaneKey,
+} from '../shared/options-routes.js';
 import { createShell, navigateTo, renderRailFoot } from './shell.js';
 import {
   buildAgencyHubOriginPattern,
@@ -46,7 +50,9 @@ import {
 import { personaCatalogSource } from '../shared/persona-catalog.js';
 import {
   createUserError,
+  findErrorKeyByCode,
   formatUserErrorTechnicalDetail,
+  getErrorMessage,
   getUserErrorDescription,
 } from '../shared/errors.js';
 import {
@@ -119,6 +125,9 @@ const SESSIONS_REPOLL_MIN_INTERVAL_MS = 5_000;
 const CHECK_ALL_THROTTLE_MS = 10_000;
 /** Below this the quota badge turns amber; at 0 it turns red. */
 const AI_QUOTA_LOW_THRESHOLD = 20;
+/** How long a deep link's row stays highlighted. Long enough to find with the
+ * eye, short enough that it never reads as a permanent state. */
+const DEEP_LINK_FLASH_MS = 2_000;
 
 type SessionsResult =
   | { ok: true; sessions: SessionSnapshotEntry[] }
@@ -575,6 +584,11 @@ async function render(): Promise<void> {
   // Every pane now has content, so the rail carries the full route list.
   const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
+
+  /** Assigned by the deep-link block below; every repaint that can produce the
+   * highlight's target row calls it through this hook, so nothing depends on
+   * declaration order (`renderPersonaCatalog` runs before that block). */
+  let flashPendingDeepLink: () => void = () => undefined;
 
   // ─── Rail footer: version + Changelog ──────────────────────
   // Opening the changelog records THIS version as seen, which is what retires
@@ -1742,8 +1756,13 @@ async function render(): Promise<void> {
     legacyKeyDetails,
   );
 
+  // Tagged so a `CG-HUB-01` (invalid URL) deep link can highlight the field the
+  // code is actually about.
+  const hubBaseUrlField = labeledField('Agency Hub base URL', agencyHubUrlInput);
+  hubBaseUrlField.dataset.hubField = 'base-url';
+
   agencyHubSection.append(
-    labeledField('Agency Hub base URL', agencyHubUrlInput),
+    hubBaseUrlField,
     labeledField('Sign in (device token)', hubSignInWrap),
     hubSignInStatus,
     hubSignInMeta,
@@ -2023,6 +2042,8 @@ async function render(): Promise<void> {
             .replace('{when}', formatClockTime(push.at))
             .replace('{account}', push.accountLabel || COPY.common.unknown)
         : COPY.hub.fanSummaryEmpty;
+    // A hub-row deep link waits for these values before it highlights anything.
+    flashPendingDeepLink();
   };
 
   const refreshStatusView = (): void => {
@@ -2866,6 +2887,7 @@ async function render(): Promise<void> {
             fetchedAt: state.personaCatalogFetchedAt,
           })];
       personalitiesList.append(empty);
+      flashPendingDeepLink();
       return;
     }
     for (const view of rows) {
@@ -2901,6 +2923,7 @@ async function render(): Promise<void> {
       row.append(head);
       personalitiesList.append(row);
     }
+    flashPendingDeepLink();
   };
 
   const preservationNote = document.createElement('div');
@@ -3012,6 +3035,93 @@ async function render(): Promise<void> {
   shell.panes.generation.append(apiSection);
   shell.panes.hotkeys.append(hotkeysSection);
   shell.panes.appearance.append(appearanceSection);
+
+  // ─── Диплинк из ошибки ─────────────────────────────────────
+  // A deep link (`#hub:CG-HUB-04`) carries the code that sent the chatter here.
+  // Two things follow: one line naming it — text read straight from the E58
+  // registry, never restated in COPY — and a one-shot highlight of the row that
+  // code is about. The highlight is PENDING until its target is actually there:
+  // the diagnostics and the account rows hydrate asynchronously, and flashing an
+  // empty container would point at nothing.
+  const DEEP_LINK_TARGETS: Record<string, string> = {
+    'CG-HUB-01': '[data-hub-field="base-url"]',
+    'CG-HUB-02': '[data-hub-detail="device-token"]',
+    'CG-HUB-03': '[data-hub-detail="device-token"]',
+    'CG-HUB-04': '[data-hub-detail="host-access"]',
+    'CG-HUB-05': '[data-hub-detail="pages"]',
+    'CG-FLOW-01': '.chatgoose-persona-rows',
+    'CG-FLOW-02': '.chatgoose-account-rows',
+  };
+  const deepLinkNote = document.createElement('div');
+  deepLinkNote.className = 'chatgoose-deeplink';
+  deepLinkNote.dataset.role = 'deeplink-note';
+  let pendingDeepLink: { code: string; pane: PaneKey } | null = null;
+  let flashedElement: HTMLElement | null = null;
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearFlash = (): void => {
+    if (flashTimer !== undefined) {
+      clearTimeout(flashTimer);
+      flashTimer = undefined;
+    }
+    flashedElement?.classList.remove('chatgoose-flash');
+    flashedElement = null;
+  };
+  cleanupTasks.push(clearFlash);
+
+  flashPendingDeepLink = (): void => {
+    if (disposed || !pendingDeepLink) return;
+    const selector = DEEP_LINK_TARGETS[pendingDeepLink.code];
+    if (!selector) {
+      // A settings-linked code with no row of its own: the note above is the
+      // whole answer, so stop waiting for a target that does not exist.
+      pendingDeepLink = null;
+      return;
+    }
+    const target = shell.panes[pendingDeepLink.pane].querySelector<HTMLElement>(selector);
+    // Empty text = not hydrated yet (an accounts table still loading, a
+    // diagnostics row before its first paint). Keep waiting.
+    if (!target || !target.textContent?.trim()) return;
+    pendingDeepLink = null;
+    clearFlash();
+    flashedElement = target;
+    target.classList.add('chatgoose-flash');
+    flashTimer = setTimeout(() => {
+      if (flashedElement === target) clearFlash();
+    }, DEEP_LINK_FLASH_MS);
+  };
+
+  const armDeepLink = (): void => {
+    if (disposed) return;
+    // A new deep link supersedes the previous one — including its highlight.
+    clearFlash();
+    pendingDeepLink = null;
+    deepLinkNote.remove();
+    const route = parseOptionsHash(window.location.hash);
+    const key = route.code ? findErrorKeyByCode(route.code) : null;
+    if (!route.code || !key) {
+      // No code, or a code this build does not know: the pane still opens (the
+      // shell already did that) — we just have nothing honest to say about it.
+      return;
+    }
+    const registryEntry = getErrorMessage(key);
+    deepLinkNote.textContent = `${registryEntry.code} · ${
+      getUserErrorDescription(registryEntry) ?? registryEntry.message
+    }`;
+    shell.panes[route.pane].prepend(deepLinkNote);
+    pendingDeepLink = { code: route.code, pane: route.pane };
+    flashPendingDeepLink();
+  };
+
+  // A deep link into an ALREADY OPEN settings tab arrives as a hash change (the
+  // background re-points the one tab rather than opening a second one), so this
+  // has to re-arm — not just run at mount.
+  const handleDeepLinkHashChange = (): void => armDeepLink();
+  window.addEventListener('hashchange', handleDeepLinkHashChange);
+  cleanupTasks.push(() => {
+    window.removeEventListener('hashchange', handleDeepLinkHashChange);
+  });
+  armDeepLink();
 
 
   cleanupTasks.push(() => {
@@ -3517,6 +3627,8 @@ async function render(): Promise<void> {
     const accountsMicro = document.createElement('span');
     accountsMicro.textContent = String(rows.length);
     shell.setMicro('accounts', accountsMicro);
+    // The rows a `no_mapping` deep link points at exist only now.
+    flashPendingDeepLink();
 
     // Open fansly.com tabs nothing is attributed to. An aggregate, never a
     // per-account claim: after a worker restart the capture map is gone, and

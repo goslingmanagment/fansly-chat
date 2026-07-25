@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 import {
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
+import { getErrorMessage } from '../src/shared/errors.js';
 import type {
   CompareInlineViewModel,
   OperationProfilingSnapshot,
@@ -44,6 +45,9 @@ function installDom() {
   (globalThis as Record<string, unknown>).browser = {
     runtime: {
       openOptionsPage: vi.fn(async () => undefined),
+      // Deep links into Settings ride the runtime API (one options tab, routed
+      // by error code); the native page opener is only the dead-runtime path.
+      sendMessage: vi.fn(async () => ({ opened: true, reused: false })),
     },
     storage: {
       local: {
@@ -1757,5 +1761,97 @@ describe('ChatGooseContentApp', () => {
     expect(model.rawText).toBe(advice);
     // The advice is surfaced, NOT swallowed into an unusable-output error.
     expect(model.error).toBeUndefined();
+  });
+
+  it('deep-links an error toast to the pane that can fix that error', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const runtime = (globalThis as any).browser.runtime;
+
+    app.showUserErrorToast(getErrorMessage('no_mapping'));
+    const action = document.querySelector<HTMLButtonElement>(
+      '.chatgoose-toast-actions .chatgoose-button',
+    );
+    expect(action?.textContent).toBe('Настройки');
+    action?.click();
+
+    // «Настройте персону» lands on the pane that assigns one — with the code, so
+    // the page can say why it opened there.
+    expect(runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'openOptions',
+      pane: 'accounts',
+      code: 'CG-FLOW-02',
+    });
+    // The native opener is the DEAD-runtime path only: using it here would risk a
+    // second options tab, i.e. a second pagehide settings writer.
+    expect(runtime.openOptionsPage).not.toHaveBeenCalled();
+  });
+
+  it('routes a hub error toast to the Hub pane', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const runtime = (globalThis as any).browser.runtime;
+
+    app.showUserErrorToast(getErrorMessage('hub_missing_permission'));
+    document.querySelector<HTMLButtonElement>(
+      '.chatgoose-toast-actions .chatgoose-button',
+    )?.click();
+
+    expect(runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'openOptions',
+      pane: 'hub',
+      code: 'CG-HUB-04',
+    });
+  });
+
+  it('falls back to the native opener when the runtime cannot answer', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const runtime = (globalThis as any).browser.runtime;
+    runtime.sendMessage.mockRejectedValueOnce(new Error('Could not establish connection'));
+
+    app.showUserErrorToast(getErrorMessage('no_mapping'));
+    document.querySelector<HTMLButtonElement>(
+      '.chatgoose-toast-actions .chatgoose-button',
+    )?.click();
+    await vi.waitFor(() => {
+      // A rejected request opened nothing, so the fallback cannot double-open.
+      expect(runtime.openOptionsPage).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('sends the mapping banner to the pane matching WHICH gap it reported', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const runtime = (globalThis as any).browser.runtime;
+
+    // No active personas exist at all: the fix is in «Персоны».
+    mockStorageState = createStorageState({ personaCatalog: [] });
+    await app.mappingBanner.render('account-1', false);
+    (app.mappingBanner.root as HTMLElement)
+      .querySelector<HTMLButtonElement>('button')?.click();
+    expect(runtime.sendMessage).toHaveBeenLastCalledWith({
+      type: 'openOptions',
+      pane: 'personas',
+      code: 'CG-FLOW-01',
+    });
+
+    // A persona exists but this account has none: the fix is in «Аккаунты».
+    mockStorageState = createStorageState({
+      personaCatalog: [
+        { key: 'personality-1', displayName: 'Closer', definitionId: 'v1:persona-one-definition', version: 1, status: 'active' },
+      ],
+      accountMappings: {},
+    });
+    await app.mappingBanner.render('account-1', false);
+    const buttons = Array.from(
+      (app.mappingBanner.root as HTMLElement).querySelectorAll('button'),
+    ) as HTMLButtonElement[];
+    buttons.find((button) => button.textContent === 'Settings')?.click();
+    expect(runtime.sendMessage).toHaveBeenLastCalledWith({
+      type: 'openOptions',
+      pane: 'accounts',
+      code: 'CG-FLOW-02',
+    });
   });
 });

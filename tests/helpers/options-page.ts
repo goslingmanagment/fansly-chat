@@ -45,6 +45,9 @@ export interface MountOverrides {
   /** Granted host permission for the hub origin (defaults to false — a fresh
    * install). */
   permissionGranted?: boolean;
+  /** Location hash the page is mounted with — how an error deep link arrives
+   * («#hub:CG-HUB-04»). Defaults to none, i.e. the landing pane. */
+  hash?: string;
   /** Extra raw storage.local keys, merged over the serialized state. Operational
    * keys (`chatgoose:*`) live outside PersistedState and are seeded here. */
   storage?: Record<string, unknown>;
@@ -184,7 +187,7 @@ export async function mountOptionsPage(
 
   dom = new JSDOM(
     '<!doctype html><html><head></head><body><div id="chatgoose-options-root"></div></body></html>',
-    { url: 'https://localhost/options.html' },
+    { url: `https://localhost/options.html${overrides.hash ?? ''}` },
   );
   const { window } = dom;
 

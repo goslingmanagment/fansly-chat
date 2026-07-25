@@ -48,6 +48,7 @@ import { createKeymap } from '../shared/keymap.js';
 import { COACH_RECAP_FRESH_MS, SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
 import { parseCoachDrafts } from '../shared/coach-draft.js';
 import { isRecapStatusResponse, sendRuntimeRequest } from '../shared/protocol.js';
+import { resolveOptionsRouteForCode } from '../shared/options-routes.js';
 import { projectDebugPromptEcho } from '../shared/kernel-context.js';
 import {
   getCompareCardsFingerprintForPersonality,
@@ -480,8 +481,14 @@ export class ChatGooseContentApp {
     onCoachClick: () => this.openCoach(),
   });
   private readonly mappingBanner = new MappingBanner({
-    onOpenSettings: () => {
-      void browser.runtime.openOptionsPage();
+    // The banner stands in for a registry error, so it deep-links exactly like
+    // that error's toast would — and it covers TWO classes: «no active personas
+    // exist at all» belongs to «Персоны», «this account has none assigned» to
+    // «Аккаунты».
+    onOpenSettings: (reason) => {
+      this.openSettings(
+        getErrorMessage(reason === 'no-personalities' ? 'no_personalities' : 'no_mapping').code,
+      );
     },
   });
   private readonly root = document.createElement('div');
@@ -691,9 +698,29 @@ export class ChatGooseContentApp {
       ...(userError.settingsLink
         ? {
             actionLabel: 'Настройки',
-            onAction: () => { void browser.runtime.openOptionsPage(); },
+            // Land on the pane that can actually fix THIS error, with the code
+            // carried along so the page can say why it opened there.
+            onAction: () => { this.openSettings(userError.code); },
           }
         : {}),
+    });
+  }
+
+  /**
+   * Open the settings page on the pane that owns `code`.
+   *
+   * The background resolves this to exactly one options tab (a second tab would
+   * be a second pagehide settings writer). `openOptionsPage` remains the
+   * fallback for a runtime that cannot answer at all — otherwise a worker
+   * restarting at that moment would leave a dead button.
+   */
+  private openSettings(code: string): void {
+    const route = resolveOptionsRouteForCode(code);
+    void sendRuntimeRequest('openOptions', {
+      pane: route.pane,
+      ...(route.code ? { code: route.code } : {}),
+    }).catch(() => {
+      void browser.runtime.openOptionsPage();
     });
   }
 

@@ -96,6 +96,38 @@ describe('Popup', () => {
     expect(rootText()).not.toContain('Agency Hub not set up');
   });
 
+  it('opens Settings through the runtime on the normal path, natively on the fallback', async () => {
+    // The runtime just answered getPopupStatus, so the deep link is the right
+    // path: it lands in the ONE options tab the background owns.
+    await loadPopup(async () => makeStatus());
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Open Settings');
+    });
+    const runtime = (globalThis as unknown as {
+      browser: { runtime: { sendMessage: ReturnType<typeof vi.fn>; openOptionsPage: ReturnType<typeof vi.fn> } };
+    }).browser.runtime;
+    const settingsButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-button'),
+    ).find((button) => button.textContent === 'Open Settings');
+    settingsButton?.click();
+    expect(runtime.sendMessage).toHaveBeenLastCalledWith({ type: 'openOptions', pane: 'status' });
+    expect(runtime.openOptionsPage).not.toHaveBeenCalled();
+
+    // The unavailable screen exists BECAUSE the runtime did not answer, so its
+    // button keeps the native opener — the independent path.
+    await loadPopup(async () => {
+      throw new Error('Could not establish connection');
+    });
+    await vi.waitFor(() => {
+      expect(rootText()).toContain("Couldn't reach ChatGoose");
+    });
+    const fallbackRuntime = (globalThis as unknown as {
+      browser: { runtime: { openOptionsPage: ReturnType<typeof vi.fn> } };
+    }).browser.runtime;
+    document.querySelector<HTMLButtonElement>('.chatgoose-button')?.click();
+    expect(fallbackRuntime.openOptionsPage).toHaveBeenCalledTimes(1);
+  });
+
   it('shortens long ids and copies the full value on click', async () => {
     const writeText = vi.fn(async () => undefined);
     await loadPopup(async () =>

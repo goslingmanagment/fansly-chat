@@ -4,6 +4,7 @@ import {
   COACH_QUESTION_MAX_CHARS,
 } from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
+import { isOptionsPaneKey } from './options-routes.js';
 import {
   isStoredVoiceAttemptRoute,
   parseVoiceAttemptStoreSnapshot,
@@ -449,6 +450,12 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getOnboardingState';
     case 'dismissOnboarding':
       return 'dismissOnboarding';
+    case 'openOptions':
+      // A pane outside the vocabulary would open a blank cabinet; the code is
+      // optional and its own shape is re-validated by the hash grammar.
+      return isOptionsPaneKey(message.pane) && isOptionalString(message, 'code')
+        ? 'openOptions'
+        : null;
     case 'getLastSeenVersion':
       return 'getLastSeenVersion';
     case 'setLastSeenVersion':

@@ -2,11 +2,13 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { COPY } from '../src/options/copy.js';
+import { ERROR_REGISTRY, getErrorMessage } from '../src/shared/errors.js';
 import {
   DEFAULT_OPTIONS_ROUTE,
   formatOptionsHash,
   OPTIONS_PANES,
   parseOptionsHash,
+  resolveOptionsRouteForCode,
 } from '../src/shared/options-routes.js';
 
 let dom: InstanceType<typeof JSDOM>;
@@ -53,6 +55,43 @@ describe('options hash routes', () => {
     expect(parseOptionsHash('#nope:CG-HUB-04')).toEqual(DEFAULT_OPTIONS_ROUTE);
     // A known pane with an unusable code keeps the pane and drops the code.
     expect(parseOptionsHash('#hub:<script>')).toEqual({ pane: 'hub', code: null });
+  });
+
+  it('routes an error code to the pane that can fix it', () => {
+    // The registry is canonical: these are looked up by code, so a renamed code
+    // cannot silently keep routing to the old pane.
+    expect(resolveOptionsRouteForCode(getErrorMessage('hub_missing_permission').code))
+      .toEqual({ pane: 'hub', code: 'CG-HUB-04' });
+    expect(resolveOptionsRouteForCode(getErrorMessage('hub_invalid_url').code))
+      .toEqual({ pane: 'hub', code: 'CG-HUB-01' });
+    // A persona is assigned per account…
+    expect(resolveOptionsRouteForCode(getErrorMessage('no_mapping').code))
+      .toEqual({ pane: 'accounts', code: 'CG-FLOW-02' });
+    // …and when there is nothing to assign, the catalog pane explains why.
+    expect(resolveOptionsRouteForCode(getErrorMessage('no_personalities').code))
+      .toEqual({ pane: 'personas', code: 'CG-FLOW-01' });
+    // Any other settings-linked class lands on «Статус» — the one screen that
+    // shows the whole install. `settingsLink` is not a hub-only flag, so this
+    // branch has to exist even while no code needs it.
+    expect(resolveOptionsRouteForCode(getErrorMessage('hub_page_match_failed').code).pane)
+      .toBe('hub');
+    expect(resolveOptionsRouteForCode(getErrorMessage('not_connected').code))
+      .toEqual({ pane: 'status', code: 'CG-FAN-01' });
+    // An unknown code still opens the page, without a code it cannot explain.
+    expect(resolveOptionsRouteForCode('CG-NOPE-99')).toEqual(DEFAULT_OPTIONS_ROUTE);
+    expect(resolveOptionsRouteForCode('')).toEqual(DEFAULT_OPTIONS_ROUTE);
+  });
+
+  it('every settings-linked registry code routes to an enabled pane', () => {
+    // A settings link that lands nowhere useful is worse than no link: the
+    // chatter is told to open Settings and then has to hunt.
+    const linked = Object.values(ERROR_REGISTRY).filter((entry) => entry.settingsLink);
+    expect(linked.length).toBeGreaterThan(0);
+    for (const entry of linked) {
+      const route = resolveOptionsRouteForCode(entry.code);
+      expect(OPTIONS_PANES).toContain(route.pane);
+      expect(route.code).toBe(entry.code);
+    }
   });
 
   it('formats routes back into the same grammar', () => {

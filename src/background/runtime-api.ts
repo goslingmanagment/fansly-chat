@@ -22,6 +22,7 @@ import { logWarn } from '../shared/log.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { readStorageState, saveSettings } from '../shared/storage.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
+import { formatOptionsHash, type PaneKey } from '../shared/options-routes.js';
 import { ChatGooseError } from '../shared/errors.js';
 import { issueAgencyHubDeviceToken } from './device-token.js';
 import type {
@@ -213,6 +214,9 @@ export interface RuntimeApiDeps {
  * origin AND path (not a prefix — `debug-prompt.html.evil` starts with it too);
  * the query string is where the token rides, so it is excluded from the match. */
 export const DEBUG_PROMPT_PAGE_PATH = 'debug-prompt.html';
+
+/** `options_ui.page` in the manifest — the deep-link target. */
+const OPTIONS_PAGE_PATH = 'options.html';
 
 function isDebugPromptViewer(sender: browser.runtime.MessageSender): boolean {
   if (typeof sender.url !== 'string') {
@@ -808,6 +812,53 @@ export function registerRuntimeApi({
             return { ok: false };
           }
         });
+      }
+
+      if (requestType === 'openOptions') {
+        // Deep link from a surface that cannot route itself. Exactly ONE options
+        // tab may exist: the page is a synchronous settings writer on pagehide,
+        // so a second tab is a second writer racing the first over the same
+        // blob. Re-point the open one instead of opening another.
+        const { pane, code } = message as unknown as { pane: PaneKey; code?: string };
+        const pagePath = browser.runtime.getURL(OPTIONS_PAGE_PATH);
+        const url = `${pagePath}${formatOptionsHash({ pane, code: code ?? null })}`;
+        let existingTabId: number | undefined;
+        try {
+          // Match patterns ignore the fragment, so this finds the tab whatever
+          // pane it is currently showing.
+          const tabs = await browser.tabs.query({ url: `${pagePath}*` });
+          existingTabId = tabs.find((tab) => tab.id !== undefined)?.id;
+        } catch {
+          // No answer is not «no tab open», but creating one is the only other
+          // move available — and the reuse path is best-effort by nature.
+        }
+        if (existingTabId !== undefined) {
+          try {
+            // Same document, new hash: the page's hashchange listener paints the
+            // pane and arms the highlight — no reload, no lost form state.
+            await browser.tabs.update(existingTabId, { active: true, url });
+            try {
+              const tab = await browser.tabs.get(existingTabId);
+              if (tab.windowId !== undefined) {
+                await browser.windows.update(tab.windowId, { focused: true });
+              }
+            } catch {
+              // Raising the window is a nicety; the tab is already active.
+            }
+            return { opened: true, reused: true };
+          } catch {
+            // The tab closed between the query and the update — fall through.
+          }
+        }
+        try {
+          await browser.tabs.create({ url });
+          return { opened: true, reused: false };
+        } catch (error) {
+          logWarn('Opening the settings page failed', {
+            error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+          });
+          return { opened: false, reused: false };
+        }
       }
 
       if (requestType === 'getLastSeenVersion') {

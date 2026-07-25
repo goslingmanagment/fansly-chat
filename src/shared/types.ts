@@ -1,3 +1,4 @@
+import type { PaneKey } from './options-routes.js';
 import type {
   StoredVoiceAttemptRoute,
   VoiceAttemptStoreEntry,
@@ -907,6 +908,23 @@ export interface SetLastSeenVersionRequest {
   version: string;
 }
 
+/** Deep link into the settings page from a surface that cannot route itself (an
+ * error toast in the Fansly DOM, the popup, a banner). The background resolves it
+ * to ONE options tab. */
+export interface OpenOptionsRequest {
+  pane: PaneKey;
+  /** Error registry code the page explains and highlights on arrival. */
+  code?: string;
+}
+
+export interface OpenOptionsResponse {
+  opened: boolean;
+  /** True when an ALREADY OPEN settings tab was re-pointed rather than a second
+   * one created — a second options tab would be a second pagehide settings
+   * writer. */
+  reused: boolean;
+}
+
 /** One row of the cabinet's «Аккаунты» pane.
  *
  * `state` is honest about what the background can actually prove: 'live' = a
@@ -973,6 +991,7 @@ export interface RuntimeRequestMap {
   dismissOnboarding: undefined;
   getLastSeenVersion: undefined;
   setLastSeenVersion: SetLastSeenVersionRequest;
+  openOptions: OpenOptionsRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getRecapStatus: RecapStatusRequest;
@@ -1004,6 +1023,7 @@ export interface RuntimeResponseMap {
   dismissOnboarding: { ok: boolean };
   getLastSeenVersion: LastSeenVersionSnapshot;
   setLastSeenVersion: { ok: boolean };
+  openOptions: OpenOptionsResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getRecapStatus: RecapStatusResponse;

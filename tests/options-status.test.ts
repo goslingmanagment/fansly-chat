@@ -173,6 +173,26 @@ describe('options «Статус» pane', () => {
     expect(row(page, 'spenders').textContent).not.toContain('FLAG OFF');
   });
 
+  it('paints a DEGRADED core as amber, not as down and not as fine', async () => {
+    // Wave D smoke item: a degraded kernel is a real, distinct verdict — «ядро
+    // отвечает» would hide it and «ядро недоступно» would overstate it.
+    const page = await readyMount({
+      runtime: {
+        health: { ...HEALTH_UP, status: 'degraded', dbLatencyMs: 940 },
+        identity: IDENTITY_AUTH,
+      },
+    });
+
+    const hub = row(page, 'hub');
+    expect(hub.querySelector('.chatgoose-badge-mono')?.textContent).toBe('DEGRADED');
+    expect(hub.dataset.tone).toBe('amber');
+    expect(hub.textContent).toContain(COPY.status.hubDegraded);
+    expect(hub.textContent).toContain('940');
+    // Health is not a readiness prerequisite: the credential still works, so the
+    // headline keeps its verdict instead of turning red over a slow database.
+    expect(hero(page).dataset.heroState).toBe('ready');
+  });
+
   it('reports a failed LOCAL read as unavailable, never as an empty day', async () => {
     // `[]` and `null` are exactly what these three sources look like on a quiet
     // install, so reusing them after a rejected read would have the pane assert
