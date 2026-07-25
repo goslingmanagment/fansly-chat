@@ -1904,8 +1904,12 @@ async function render(): Promise<void> {
   // a live value rather than a stale one.
   if (!state.settings.debugMode) statusRows.contract.root.hidden = true;
 
-  const checkAllButton = createButton(COPY.status.checkAll, true);
+  // «Проверить всё» is THE action of this pane, so it alone wears the primary
+  // clay; the honesty note lives in the report button's tooltip now that the
+  // visible hint below is a single line.
+  const checkAllButton = createButton(COPY.status.checkAll);
   const copyReportButton = createButton(COPY.status.copyReport, true);
+  copyReportButton.title = COPY.status.reportHonesty;
   const statusActions = document.createElement('div');
   statusActions.className = 'chatgoose-status-actions';
   statusActions.append(checkAllButton, copyReportButton);

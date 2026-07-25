@@ -750,13 +750,21 @@ input[type='checkbox'] {
 }
 
 /* ── «Статус»: read-only state rows ── */
+/* The badge column is a fixed-minimum SLOT so the labels share one vertical;
+   the pill itself keeps its natural width via `justify-self` below. This is
+   NOT the reverted #46 treatment, which stretched the pills themselves to a
+   56px min-width (revert 4e31a3d). */
 .chatgoose-status-row {
   display: grid;
-  grid-template-columns: 10px auto minmax(0, 1fr) auto;
+  grid-template-columns: 10px minmax(60px, auto) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 9px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-status-row > .chatgoose-badge {
+  justify-self: start;
 }
 
 /* Author `display: grid` beats the UA `[hidden] { display: none }` rule
@@ -802,14 +810,23 @@ input[type='checkbox'] {
   text-overflow: ellipsis;
 }
 
+/* Action and detail SHARE the right cell of the single-line row: every
+   renderer state fills at most one of them (`set()` wipes the detail, and both
+   action states — «НЕТ ДОСТУПА», 401 — carry no detail). If a state ever needs
+   both at once, split the column before shipping it. */
 .chatgoose-status-action {
+  grid-column: 4;
+  grid-row: 1;
   justify-self: end;
 }
 
 .chatgoose-status-detail {
-  grid-column: 3 / 5;
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: end;
   display: grid;
   gap: 2px;
+  text-align: right;
 }
 
 .chatgoose-status-detail-line {
