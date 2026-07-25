@@ -333,17 +333,20 @@ export const COPY = {
     personaSelectNone: 'Персона не назначена',
     personaSelectArchived: 'в архиве',
     personaSelectMissing: 'Недоступная персона · {key}',
-    idPrefix: 'ID аккаунта: ',
     idCopyTitle: 'Скопировать {id}',
     idCopied: 'Скопировано ✓',
+    /** aria-label of the per-account persona <select>; `{label}` is the row's
+     * visible heading (handle, local label, or shortened id). */
+    personaSelectAria: 'Персона аккаунта {label}',
     focusTab: 'к вкладке',
     renameTitle: 'Изменить подпись',
     renameEmpty: 'подписать…',
     renameLocalTitle: 'Локальная подпись',
     renameSave: 'Сохранить',
     renameCancel: 'Отмена',
+    /** The one pill an account row can wear — quiet rows carry no pill at all:
+     * the grey dot and the mono «была…»/«сессий не было» line are the state. */
     stateLive: 'в работе',
-    stateIdle: 'не активна',
     subTabActive: 'вкладка активна',
     subSeenAt: 'была {when}',
     /** `{when}` forms for `subSeenAt` — a bare «21:40» three days later lies. */
@@ -356,7 +359,11 @@ export const COPY = {
     personaUnmappedHint: 'назначь персону — без неё генерации не запускаются',
     unattributedTabs: 'Вкладки Fansly без атрибуции: {n} — открой чат, и строка оживёт',
     hint:
-      '«В работе» = живая Fansly-сессия аккаунта в этом браузере — не присутствие модели на сайте. Подписи (✎) — локальные, никуда не отправляются. Строка «сессий не было» оживёт, когда в этом браузере откроют Fansly под аккаунтом.',
+      '«В работе» — живая Fansly-сессия аккаунта в этом браузере, не присутствие модели на сайте; подписи (✎) — локальные, никуда не отправляются.',
+    /** Tooltip tail of `hint` — the rare-question sentence that used to make
+     * the visible footer a three-line paragraph. */
+    hintNeverSeen:
+      'Строка «сессий не было» оживёт, когда в этом браузере откроют Fansly под аккаунтом.',
   },
 
   generation: {

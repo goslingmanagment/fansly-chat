@@ -1170,42 +1170,35 @@ input[type='checkbox'] {
   font-size: 12.5px;
 }
 
-/* ── «Аккаунты» rows ── */
+/* ── «Аккаунты» rows: two dense lines (М2) ──
+   Line one: dot · name cluster · state pills. Line two: mono meta
+   «full id · fact» · persona select. Children are placed by the grid rules
+   below — the row keeps no wrapper divs. */
 .chatgoose-account-rows {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .chatgoose-account-row {
   display: grid;
-  grid-template-columns: 1fr minmax(200px, 280px) auto;
-  gap: 12px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 6px;
   align-items: center;
-  padding: 12px;
+  padding: 10px 12px;
   border-radius: var(--chatgoose-radius-card);
   border: 1px solid var(--chatgoose-line);
   background: var(--chatgoose-bg2);
 }
 
-.chatgoose-account-identity {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  min-width: 0;
-}
-
-.chatgoose-account-body {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
 /* State dot. Only a LIVE row pulses — 'seen' and 'never' are quiet facts, and a
    pulsing dot on a dead session would read as activity. */
 .chatgoose-account-dot {
+  grid-row: 1;
+  grid-column: 1;
   width: 8px;
   height: 8px;
-  margin-top: 6px;
   border-radius: 50%;
   flex: none;
   background: var(--chatgoose-line-strong);
@@ -1231,15 +1224,23 @@ input[type='checkbox'] {
   }
 }
 
+/* The name cluster is ONE nowrap line (the reverted #46 fix, BL-003): a long
+   handle ellipsizes instead of dropping the ✎ onto its own line. */
 .chatgoose-account-head {
+  grid-row: 1;
+  grid-column: 2;
   display: flex;
   align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .chatgoose-account-label {
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chatgoose-account-rename {
@@ -1278,38 +1279,61 @@ input[type='checkbox'] {
   display: none;
 }
 
+/* The mono meta line: «full id · fact». The copy-id button already speaks
+   11px mono; the fact matches it so the line reads as one receipt. */
 .chatgoose-account-sub {
+  grid-row: 2;
+  grid-column: 2;
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  color: var(--chatgoose-ink-mid);
-  font-size: 12px;
-}
-
-.chatgoose-account-facts {
+  min-width: 0;
   color: var(--chatgoose-ink-low);
 }
 
+.chatgoose-account-sub-sep {
+  font: 400 11px/1.5 var(--chatgoose-font-mono);
+}
+
+.chatgoose-account-facts {
+  font: 400 11px/1.5 var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-ink-low);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The persona select keeps a fixed lane at the right edge of line two — it
+   stopped being the widest thing on the page (the reverted #46 review's
+   «selects outweigh the accounts» note). */
+.chatgoose-account-row > .chatgoose-select {
+  grid-row: 2;
+  grid-column: 3;
+  width: 220px;
+  justify-self: end;
+}
+
 .chatgoose-account-actions {
+  grid-row: 1;
+  grid-column: 3;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
 }
 
 .chatgoose-account-pills {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Ghost rows: the SHAPE of a row that will appear on its own once Fansly is
    open, so an empty pane reads as «not yet» rather than «broken». Decoration
    only — aria-hidden, nothing focusable inside. */
 .chatgoose-account-row-ghost {
-  grid-template-columns: 1fr minmax(200px, 280px);
   border-style: dashed;
   background: none;
   opacity: 0.55;
@@ -1322,9 +1346,16 @@ input[type='checkbox'] {
   background: var(--chatgoose-line);
 }
 
-.chatgoose-ghost-bar-head { width: 42%; }
-.chatgoose-ghost-bar-sub { width: 66%; height: 7px; }
-.chatgoose-ghost-bar-select { height: 30px; border-radius: var(--chatgoose-radius-chip); }
+/* Ghost bars occupy the same grid slots as a real row's parts. */
+.chatgoose-ghost-bar-head { grid-row: 1; grid-column: 2; width: 42%; }
+.chatgoose-ghost-bar-sub { grid-row: 2; grid-column: 2; width: 66%; height: 7px; }
+.chatgoose-ghost-bar-select {
+  grid-row: 2;
+  grid-column: 3;
+  width: 220px;
+  height: 30px;
+  border-radius: var(--chatgoose-radius-chip);
+}
 
 .chatgoose-account-unattributed {
   padding: 9px 12px;
