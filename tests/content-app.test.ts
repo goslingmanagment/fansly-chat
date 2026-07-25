@@ -1820,6 +1820,23 @@ describe('ChatGooseContentApp', () => {
     });
   });
 
+  it('falls back natively when the runtime answers that it opened nothing', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const runtime = (globalThis as any).browser.runtime;
+    // A resolved refusal (tabs.create denied), not a rejection: treating it as
+    // success left «Настройки» dead — one click and nothing happens at all.
+    runtime.sendMessage.mockResolvedValueOnce({ opened: false, reused: false });
+
+    app.showUserErrorToast(getErrorMessage('no_mapping'));
+    document.querySelector<HTMLButtonElement>(
+      '.chatgoose-toast-actions .chatgoose-button',
+    )?.click();
+    await vi.waitFor(() => {
+      expect(runtime.openOptionsPage).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('sends the mapping banner to the pane matching WHICH gap it reported', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

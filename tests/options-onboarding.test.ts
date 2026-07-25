@@ -261,4 +261,22 @@ describe('options first-run onboarding', () => {
     expect(micro('personas')).toBe(COPY.rail.microNone);
     expect(micro('accounts')).toBe('0');
   });
+
+  it('never paints the fresh ghosts over a hydration that FAILED', async () => {
+    // «Аккаунты появятся сами» is a promise about a read that succeeded and
+    // found nothing. When the snapshot rejects, nobody knows whether this
+    // browser has accounts — so the failure is the whole answer, without
+    // decorative rows suggesting an empty-but-healthy pane.
+    const page = await mountOptionsPage({
+      sessions: () => Promise.reject(new Error('Fansly identity timed out')),
+      runtime: { onboarding: FRESH },
+    });
+
+    const accounts = page.document.querySelector<HTMLElement>(
+      '.chatgoose-cabinet-pane[data-pane="accounts"]',
+    );
+    expect(accounts?.textContent).toContain(COPY.accounts.refreshFailed);
+    expect(page.document.querySelectorAll('[data-role="account-ghost"]')).toHaveLength(0);
+    expect(page.document.querySelector('[data-role="accounts-empty"]')).toBeNull();
+  });
 });

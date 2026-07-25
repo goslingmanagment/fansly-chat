@@ -697,6 +697,10 @@ input[type='checkbox'] {
 }
 
 /* ── Badge: the compact mono token a status row leads with ── */
+/* The `[hidden]` rule below MUST stay next to this one: an author `display`
+   rule beats the UA `[hidden] { display: none }` (origin precedes specificity).
+   The onboarding checklist hides a step's green «готово» badge with the IDL
+   flag alone — without this guard every step, done or not, wears it. */
 .chatgoose-badge {
   display: inline-flex;
   align-items: center;
@@ -709,6 +713,10 @@ input[type='checkbox'] {
   font-weight: 600;
   line-height: 1.5;
   white-space: nowrap;
+}
+
+.chatgoose-badge[hidden] {
+  display: none;
 }
 
 .chatgoose-badge-mono {
@@ -825,7 +833,11 @@ input[type='checkbox'] {
 /* ── Readiness headline above the status rows ── */
 /* `position: relative` is load-bearing: this card carries the absolutely
    positioned version tag, and without a containing block here the tag would
-   anchor to the viewport and drift across a wide window. */
+   anchor to the viewport and drift across a wide window.
+   The `[hidden]` rule below MUST stay next to the display rule: the hero stands
+   down while the first-run checklist owns the same three steps, and an author
+   `display: grid` beats the UA `[hidden] { display: none }` (origin precedes
+   specificity) — without it a fresh install shows the list twice. */
 .chatgoose-readiness {
   position: relative;
   margin: 20px 20px 0;
@@ -836,6 +848,10 @@ input[type='checkbox'] {
   box-shadow: var(--chatgoose-shadow);
   display: grid;
   gap: 6px;
+}
+
+.chatgoose-readiness[hidden] {
+  display: none;
 }
 
 .chatgoose-readiness-heading {

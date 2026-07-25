@@ -1901,9 +1901,15 @@ async function render(): Promise<void> {
   /** One-shot guard around the durable stamp; re-armed if the write fails. */
   let onboardingStamping = false;
 
+  /** The checklist and the readiness hero are ONE decision: while the checklist
+   * is up it owns the three open steps (with a CTA each), so the hero — which
+   * would restate exactly that list one card below — is hidden. The hero returns
+   * the moment onboarding is dismissed, or immediately on an install that was
+   * never fresh. This function is the single writer of both flags. */
   const renderOnboarding = (): void => {
     if (!onboardingVisible) {
       onboardingSection.hidden = true;
+      readinessHero.hidden = false;
       return;
     }
     const states = onboardingStepStates();
@@ -1915,6 +1921,7 @@ async function render(): Promise<void> {
       step.done.hidden = !done;
     }
     onboardingSection.hidden = false;
+    readinessHero.hidden = true;
     if (!Object.values(states).every(Boolean) || onboardingStamping) {
       return;
     }
@@ -1927,6 +1934,9 @@ async function render(): Promise<void> {
         if (reply?.ok === true) {
           onboardingVisible = false;
           onboardingSection.hidden = true;
+          // Setup is over: the headline takes the card's place immediately —
+          // «Готово к смене.» is exactly what the chatter earned.
+          readinessHero.hidden = false;
           return;
         }
         // The flag did not stick: keep the card and let a later refresh retry
@@ -2050,6 +2060,10 @@ async function render(): Promise<void> {
     if (disposed) return;
     renderHubDiagnostics();
     // Same sources, same tick: the checklist and the headline can never disagree.
+    // (It also owns whether the readiness hero is visible at all — the two must
+    // never state the same three steps twice.) The hero below keeps rendering
+    // underneath either way, so the moment the checklist retires the headline is
+    // already correct.
     renderOnboarding();
     // No datum at all yet: keep the honest loading line — never a fabricated
     // «Нужно N действий» over an install nobody has looked at.
@@ -3015,6 +3029,11 @@ async function render(): Promise<void> {
     .replace('{total}', '—');
   const mappingsTable = document.createElement('div');
   mappingsTable.className = 'chatgoose-account-rows';
+  // A `no_mapping` deep link points here, and this table is the slowest thing on
+  // the page (the sessions snapshot resolves identities against Fansly first).
+  // Until it has been painted from a real result it is NOT a highlight target —
+  // the loading line below would otherwise consume the one-shot flash.
+  mappingsTable.dataset.deeplinkReady = 'false';
   const mappingsLoading = document.createElement('div');
   mappingsLoading.textContent = COPY.accounts.loading;
   mappingsLoading.style.color = 'var(--chatgoose-ink-mid)';
@@ -3069,6 +3088,24 @@ async function render(): Promise<void> {
   };
   cleanupTasks.push(clearFlash);
 
+  /** Is this target REALLY there, or is it still a placeholder?
+   *
+   * Nonempty text is not proof: the accounts table ships with a loading line, so
+   * an arm against it would burn the one-shot highlight on «Загружаем…» and let
+   * the 2s flash expire long before `getSessionsSnapshot` (up to 5s) paints the
+   * rows — with `pendingDeepLink` already consumed, the later repaint could not
+   * re-arm. A container that hydrates asynchronously therefore declares its own
+   * readiness (`data-deeplink-ready`), and only that answer counts. */
+  const isDeepLinkTargetReady = (target: HTMLElement): boolean => {
+    const declared = target.dataset.deeplinkReady;
+    if (declared !== undefined) {
+      return declared === 'true';
+    }
+    // Rows that paint synchronously from a single value: text IS the hydration
+    // signal (a diagnostics row before its first paint is empty).
+    return Boolean(target.textContent?.trim());
+  };
+
   flashPendingDeepLink = (): void => {
     if (disposed || !pendingDeepLink) return;
     const selector = DEEP_LINK_TARGETS[pendingDeepLink.code];
@@ -3079,9 +3116,9 @@ async function render(): Promise<void> {
       return;
     }
     const target = shell.panes[pendingDeepLink.pane].querySelector<HTMLElement>(selector);
-    // Empty text = not hydrated yet (an accounts table still loading, a
-    // diagnostics row before its first paint). Keep waiting.
-    if (!target || !target.textContent?.trim()) return;
+    // Not hydrated yet — keep waiting. Every repaint that can produce the target
+    // calls back into here, so a late hydration still fires the pending flash.
+    if (!target || !isDeepLinkTargetReady(target)) return;
     pendingDeepLink = null;
     clearFlash();
     flashedElement = target;
@@ -3364,6 +3401,10 @@ async function render(): Promise<void> {
 
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
+    // The loading line is gone: whatever this paint produced — rows, the fresh
+    // empty state, or the refresh-failed warning — is the real answer, so a
+    // pending deep-link highlight may now land on it.
+    mappingsTable.dataset.deeplinkReady = 'true';
 
     accountsSubtitle.textContent = rows.length === 0
       ? COPY.accounts.subtitleFresh
@@ -3588,7 +3629,11 @@ async function render(): Promise<void> {
       mappingsTable.append(row);
     });
 
-    if (rows.length === 0) {
+    // `!hydrationFailed` is load-bearing: «появится само» is a promise about a
+    // read that SUCCEEDED and found nothing. Painting it next to the
+    // refresh-failed warning would answer «not yet» for a question nobody could
+    // answer — the failure is the whole honest state here.
+    if (rows.length === 0 && !hydrationFailed) {
       // Two ghost rows: the shape of what will appear on its own once Fansly is
       // open, so an empty pane reads as «not yet» instead of «broken». Pure
       // decoration — `aria-hidden`, no controls, nothing to click.

@@ -2,6 +2,7 @@
 // registry line that explains it, and the pending highlight of the row it names.
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { COPY } from '../src/options/copy.js';
 import { getErrorMessage } from '../src/shared/errors.js';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
@@ -104,6 +105,41 @@ describe('options error deep links', () => {
     expect(flashed).toHaveLength(1);
     expect(flashed[0]?.classList.contains('chatgoose-account-rows')).toBe(true);
     // The row it points at really is rendered by now.
+    expect(page.document.querySelector('[data-account-mapping-row="acc-1"]')).toBeTruthy();
+  });
+
+  it('does not burn the flash on the loading line while the table hydrates', async () => {
+    // The regression this guards: nonempty text is not hydration. The accounts
+    // table ships with «Загружаем аккаунты Fansly…», so an arm at mount would
+    // highlight the loading line, expire after 2s — and the real rows, which
+    // arrive up to 5s later, could no longer re-arm the consumed one-shot.
+    let releaseSessions!: (sessions: SessionSnapshotEntry[]) => void;
+    const pendingSessions = new Promise<SessionSnapshotEntry[]>((resolve) => {
+      releaseSessions = resolve;
+    });
+    const page = await mountOptionsPage({
+      hash: '#accounts:CG-FLOW-02',
+      state: {
+        knownAccounts: ['acc-1'],
+        personaCatalog: [ACTIVE_PERSONA],
+      },
+      accounts: ACCOUNTS_VIEW,
+      sessions: () => pendingSessions,
+    });
+
+    // Still loading: the note is up, nothing is highlighted yet.
+    const table = page.document.querySelector<HTMLElement>('.chatgoose-account-rows');
+    expect(table?.textContent).toContain(COPY.accounts.loading);
+    expect(note(page)?.textContent).toContain('CG-FLOW-02');
+    expect(page.document.querySelectorAll('.chatgoose-flash')).toHaveLength(0);
+
+    releaseSessions([LIVE_SESSION]);
+    await page.flushAsync();
+
+    // The late paint is what fires the pending flash.
+    const flashed = page.document.querySelectorAll('.chatgoose-flash');
+    expect(flashed).toHaveLength(1);
+    expect(flashed[0]?.classList.contains('chatgoose-account-rows')).toBe(true);
     expect(page.document.querySelector('[data-account-mapping-row="acc-1"]')).toBeTruthy();
   });
 

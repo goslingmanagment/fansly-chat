@@ -712,16 +712,24 @@ export class ChatGooseContentApp {
    * The background resolves this to exactly one options tab (a second tab would
    * be a second pagehide settings writer). `openOptionsPage` remains the
    * fallback for a runtime that cannot answer at all — otherwise a worker
-   * restarting at that moment would leave a dead button.
+   * restarting at that moment would leave a dead button. A runtime that answers
+   * `{opened:false}` opened nothing either, so it takes the same fallback: the
+   * chatter clicked «Настройки» and must end up in Settings.
    */
   private openSettings(code: string): void {
     const route = resolveOptionsRouteForCode(code);
     void sendRuntimeRequest('openOptions', {
       pane: route.pane,
       ...(route.code ? { code: route.code } : {}),
-    }).catch(() => {
-      void browser.runtime.openOptionsPage();
-    });
+    })
+      .then((response) => {
+        if (!response?.opened) {
+          void browser.runtime.openOptionsPage();
+        }
+      })
+      .catch(() => {
+        void browser.runtime.openOptionsPage();
+      });
   }
 
   init(): void {

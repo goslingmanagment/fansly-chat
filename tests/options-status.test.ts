@@ -527,11 +527,44 @@ describe('options «Статус» pane', () => {
       expect(micro?.textContent).toBe(COPY.rail.microSetup);
     });
 
-    it('pluralizes several open steps', async () => {
-      const page = await mountOptionsPage({ sessions: [] });
+    it('pluralizes several open steps once onboarding is out of the way', async () => {
+      // A dismissed install: setup happened, so the hero — not the checklist —
+      // is what routes this chatter. (Wave D: while the checklist IS visible the
+      // hero stands down, see below.)
+      const page = await mountOptionsPage({
+        sessions: [],
+        runtime: { onboarding: { version: 1, dismissedAt: Date.parse('2026-07-01T10:00:00.000Z') } },
+      });
+      expect(hero(page).hidden).toBe(false);
       expect(hero(page).dataset.heroState).toBe('route');
       // hub + fansly + persona are open (access is unchecked, not failed).
       expect(hero(page).textContent).toContain('Нужно 3 действия.');
+    });
+
+    it('stands down while the first-run checklist owns the same three steps', async () => {
+      // The fresh screen said everything twice: the checklist listed three steps
+      // with a CTA each, and the hero restated the identical list one card below.
+      const page = await mountOptionsPage({
+        sessions: [],
+        runtime: { onboarding: { version: 1, dismissedAt: null } },
+      });
+
+      // The card is the ONE visible list of the three steps — and it is not a
+      // descendant of the hero, so hiding the hero cannot take it down with it.
+      const card = page.document.querySelector<HTMLElement>('[data-onboarding="true"]');
+      expect(card?.hidden).toBe(false);
+      expect(hero(page).contains(card)).toBe(false);
+      expect(page.document.querySelectorAll('[data-onboarding-step]')).toHaveLength(3);
+      expect(hero(page).hidden).toBe(true);
+      // The hero keeps its own verdict current INSIDE that hidden card, so it is
+      // already right the moment the checklist retires — hidden, never stale.
+      expect(hero(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
+      expect(hero(page).dataset.heroState).toBe('route');
+      // …and the rail micro still carries the aggregate: the pane says «setup»
+      // whichever card is doing the talking.
+      expect(
+        page.document.querySelector<HTMLElement>('[data-pane-micro="status"]')?.textContent,
+      ).toBe(COPY.rail.microSetup);
     });
   });
 

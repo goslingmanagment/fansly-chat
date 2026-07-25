@@ -292,9 +292,13 @@ describe('options cabinet shell', () => {
       'chatgoose-cabinet-pane',
       'chatgoose-status-row',
       'chatgoose-card-actions',
+      'chatgoose-readiness',
       'chatgoose-readiness-open',
       'chatgoose-cabinet-unseen',
       'chatgoose-onboarding',
+      // …and for `.chatgoose-badge` it means every onboarding step wears the
+      // green «готово», done or not.
+      'chatgoose-badge',
     ]) {
       expect(styles).toMatch(
         new RegExp(`\\.${selector}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`),

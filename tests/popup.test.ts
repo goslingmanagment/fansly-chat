@@ -29,7 +29,7 @@ function makeStatus(overrides: Partial<PopupStatus> = {}): PopupStatus {
   } as unknown as PopupStatus;
 }
 
-async function loadPopup(sendMessage: () => Promise<unknown>): Promise<void> {
+async function loadPopup(sendMessage: (message?: unknown) => Promise<unknown>): Promise<void> {
   vi.resetModules();
   installDom();
   (globalThis as Record<string, unknown>).browser = {
@@ -99,7 +99,11 @@ describe('Popup', () => {
   it('opens Settings through the runtime on the normal path, natively on the fallback', async () => {
     // The runtime just answered getPopupStatus, so the deep link is the right
     // path: it lands in the ONE options tab the background owns.
-    await loadPopup(async () => makeStatus());
+    const openOptionsReply = (message: unknown): unknown =>
+      (message as { type?: unknown } | undefined)?.type === 'openOptions'
+        ? { opened: true, reused: false }
+        : makeStatus();
+    await loadPopup(async (message) => openOptionsReply(message));
     await vi.waitFor(() => {
       expect(rootText()).toContain('Open Settings');
     });
@@ -126,6 +130,30 @@ describe('Popup', () => {
     }).browser.runtime;
     document.querySelector<HTMLButtonElement>('.chatgoose-button')?.click();
     expect(fallbackRuntime.openOptionsPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the native path when the background answers that it opened nothing', async () => {
+    // `{opened:false}` is a refusal that RESOLVES (tabs.create denied). Treating
+    // it as success left the button dead — one click, nothing happens, no error.
+    await loadPopup(async (message) =>
+      (message as { type?: unknown } | undefined)?.type === 'openOptions'
+        ? { opened: false, reused: false }
+        : makeStatus(),
+    );
+    await vi.waitFor(() => {
+      expect(rootText()).toContain('Open Settings');
+    });
+    const runtime = (globalThis as unknown as {
+      browser: { runtime: { openOptionsPage: ReturnType<typeof vi.fn> } };
+    }).browser.runtime;
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-button'))
+      .find((button) => button.textContent === 'Open Settings')
+      ?.click();
+
+    await vi.waitFor(() => {
+      // Nothing was opened, so the fallback cannot produce a second tab.
+      expect(runtime.openOptionsPage).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shortens long ids and copies the full value on click', async () => {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import manifest from '../manifest.json';
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
@@ -1506,6 +1507,45 @@ describe('runtime-api openOptions', () => {
 
     expect(await harness.send({ type: 'openOptions', pane: 'status' }))
       .toEqual({ opened: false, reused: false });
+  });
+
+  it('serializes concurrent requests into ONE tab (double-clicked Settings)', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    // The browser's own truth: the tab is queryable only after tabs.create
+    // resolved. Without the lock both requests see «no tab» at the query await
+    // and both create one — two options tabs, two pagehide settings writers.
+    const openTabs: Array<{ id: number; url?: string }> = [];
+    harness.tabsQuery.mockImplementation(async () => [...openTabs]);
+    harness.tabsCreate.mockImplementation(async (info: { url: string }) => {
+      openTabs.push({ id: 41, url: info.url });
+      return { id: 41 };
+    });
+    harness.tabsGet.mockResolvedValue({ id: 41, windowId: 5 } as never);
+
+    const [first, second] = await Promise.all([
+      harness.send({ type: 'openOptions', pane: 'status' }),
+      harness.send({ type: 'openOptions', pane: 'hub', code: 'CG-HUB-04' }),
+    ]);
+
+    expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(first).toEqual({ opened: true, reused: false });
+    // The second request found the first one's tab and re-pointed it.
+    expect(second).toEqual({ opened: true, reused: true });
+    expect(harness.tabsUpdate).toHaveBeenCalledWith(41, {
+      active: true,
+      url: 'moz-extension://cg-test-uuid/options.html#hub:CG-HUB-04',
+    });
+  });
+
+  it('pins the deep-link page path to the manifest options_ui.page', async () => {
+    mockStorage = createStorage();
+    await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    // One fact in two files. A drift here does not throw: `tabs.query` simply
+    // stops matching the open settings tab, and the singleton silently degrades
+    // to always-create — the exact failure the reuse path exists to prevent.
+    const { OPTIONS_PAGE_PATH } = await import('../src/background/runtime-api.js');
+    expect(OPTIONS_PAGE_PATH).toBe(manifest.options_ui.page);
   });
 });
 

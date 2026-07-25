@@ -1746,6 +1746,15 @@ Fresh empty states are honest rather than blank: ghost account rows (aria-hidden
 nothing focusable) next to the «open Fansly» instruction, the Russian
 first-sign-in hint that says the password is not stored on the device, and rail
 micros «настройка» / «—» (catalog never read) / «0» (a local count that IS zero).
+The ghosts and «появится само» are gated on a hydration that SUCCEEDED: over a
+failed sessions read the refresh-failed warning is the whole answer, because
+nobody knows whether this browser has accounts. While the checklist is visible
+the wave-B readiness hero is HIDDEN — the two would otherwise state the same
+three steps twice, one card apart — and it returns the moment the flag is stamped
+or on an install that was never fresh; `renderOnboarding` is the single writer of
+both flags, and `.chatgoose-readiness[hidden]`/`.chatgoose-badge[hidden]` join the
+author-origin guard list (without the badge guard every step wears the green
+«готово», the same origin trap the pane and the card actions documented).
 
 The changelog stays a WEB page: `CHANGELOG_URL` in shared constants is pinned
 against `BASE_URL` in `scripts/deploy.sh` by a test, because the constant and the
@@ -1766,9 +1775,15 @@ Error surfaces deep-link through ONE background operation, `openOptions
 no-tab path. A second options tab is a second synchronous settings writer on
 pagehide racing the first over the same blob, so it must never be created — the
 handler reports whether it reused a tab, and a tab that vanished between the
-query and the update falls back to creating one. Routing comes from the E58
-registry by KEY (the stable identifier), not by code string: `no_mapping` →
-«Аккаунты», `no_personalities` → «Персоны», `CG-HUB-*` → «Agency Hub», anything
+query and the update falls back to creating one. The whole lookup→reuse→create
+sequence runs under its OWN module-level FIFO: the query and the create are
+separated by awaits, so two requests in one tick (the mapping banner's «Settings»
+is not one-shot — a double click sends two) would both see «no tab» and both
+create one. `OPTIONS_PAGE_PATH` is pinned to `manifest.json`'s `options_ui.page`
+by a test: on a drift `tabs.query` silently stops matching and the singleton
+degrades to always-create. Routing comes from the E58 registry by KEY (the stable
+identifier), not by code string: `no_mapping` → «Аккаунты», `no_personalities` →
+«Персоны», `CG-HUB-*` → «Agency Hub», anything
 else that carries `settingsLink` → «Статус». That last branch is load bearing:
 `settingsLink` is not a hub-only flag. The mapping banner covers TWO classes
 through one callback, so the reason now travels with the click — «no active
@@ -1776,14 +1791,21 @@ personas exist» opens «Персоны», «this account has none assigned» op
 «Аккаунты». The popup's normal path uses the operation; its unavailable screen
 KEEPS the native `openOptionsPage`, because that screen exists precisely because
 the runtime did not answer. Content and popup fall back to the native opener when
-the request rejects: nothing was opened in that case, so the fallback cannot
-double-open.
+the request rejects OR resolves `{opened:false}` — a refusal that resolves opened
+nothing either, and a click that does nothing at all is worse than a second path;
+in both cases nothing was opened, so the fallback cannot double-open.
 
 On arrival the page shows ONE line, `<code> · <registry description>` — read from
 `src/shared/errors.ts`, never restated in COPY — and highlights the row that code
 names. The highlight is PENDING: hub diagnostics and account rows hydrate
-asynchronously, so it fires the first time the target exists AND has content,
-which is why every relevant repaint calls the same hook. A deep link into an
-already-open tab arrives as a hash change, so the note and the highlight re-arm
+asynchronously, so it fires the first time the target exists AND is really there,
+which is why every relevant repaint calls the same hook. Nonempty text is NOT
+that proof — the accounts table ships with a loading line, and an arm against it
+would burn the one-shot on «Загружаем…» and expire (2s) before the snapshot
+(up to 5s) paints the rows, with nothing left to re-arm. A container that
+hydrates asynchronously therefore declares its own readiness
+(`data-deeplink-ready`), and only that answer counts; rows painted from a single
+value still use their text. A deep link into an already-open tab arrives as a
+hash change, so the note and the highlight re-arm
 on `hashchange` and the previous pane keeps neither. An unknown code still opens
 its pane and explains nothing: a rotted link must degrade, never fabricate.
