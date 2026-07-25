@@ -401,7 +401,9 @@ function createCopyableId(fullId: string): HTMLButtonElement {
   button.type = 'button';
   button.className = 'chatgoose-copy-id';
   button.title = COPY.accounts.idCopyTitle.replace('{id}', fullId);
-  const idText = `${COPY.accounts.idPrefix}${fullId}`;
+  // The bare id, no «ID аккаунта:» prefix — the meta line it lives in is the
+  // ONE place the full id appears (the heading carries the name or short id).
+  const idText = fullId;
   button.textContent = idText;
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
   button.addEventListener('click', () => {
@@ -3330,6 +3332,8 @@ async function render(): Promise<void> {
   const accountsHint = document.createElement('div');
   accountsHint.className = 'chatgoose-status-hint';
   accountsHint.textContent = COPY.accounts.hint;
+  // The rare-question tail lives in the tooltip, not in a third visible line.
+  accountsHint.title = COPY.accounts.hintNeverSeen;
   mappingsSection.append(accountsSubtitle, mappingsTable, accountsHint);
   // One section per pane — the rail carries the reading order now (setup
   // order: the hub everything depends on, then the personas it serves, then
@@ -3500,11 +3504,13 @@ async function render(): Promise<void> {
     view: { label: string; usable: boolean } | null,
     connected: boolean,
   ): void => {
+    // Only a LIVE row wears a pill — a sleeping account is a quiet fact (grey
+    // dot + the mono «была…»/«сессий не было» line), and a «не активна» plaque
+    // on every quiet row shouted as loudly as the one live signal.
     info.replaceChildren(
-      createStatusPill(
-        connected ? 'ok' : 'neutral',
-        connected ? COPY.accounts.stateLive : COPY.accounts.stateIdle,
-      ),
+      ...(connected
+        ? [createStatusPill('ok', COPY.accounts.stateLive)]
+        : []),
     );
     if (view && !view.usable) {
       // An archived persona still mapped: the only useful instruction is «pick a
@@ -3830,13 +3836,11 @@ async function render(): Promise<void> {
       row.dataset.accountMappingRow = accountId;
       row.dataset.accountState = view.state;
 
-      const identity = document.createElement('div');
-      identity.className = 'chatgoose-account-identity';
+      // Two-line anatomy (М2): dot · name-cluster · state pills on line one;
+      // mono meta «full id · fact» · persona select on line two. Placement is
+      // the row grid's job — there are no wrapper divs to fight.
       const dot = document.createElement('span');
       dot.className = 'chatgoose-account-dot';
-
-      const body = document.createElement('div');
-      body.className = 'chatgoose-account-body';
 
       const head = document.createElement('div');
       head.className = 'chatgoose-account-head';
@@ -3863,15 +3867,6 @@ async function render(): Promise<void> {
       renameButton.setAttribute('aria-label', COPY.accounts.renameTitle);
       renameButton.textContent = '✎';
       head.append(renameButton);
-
-      if (!view.personaMapped) {
-        // Amber, not red: nothing is broken — the account simply cannot generate
-        // until a persona is chosen, and the hint says exactly that.
-        const aiOff = createBadge(COPY.accounts.personaUnmapped, 'amber');
-        aiOff.dataset.accountAiOff = accountId;
-        aiOff.title = COPY.accounts.personaUnmappedHint;
-        head.append(aiOff);
-      }
 
       // Inline label editor: Enter saves through the runtime operation (the only
       // writer of the labels key), Esc — and a blur — cancel. There is no second
@@ -3938,10 +3933,16 @@ async function render(): Promise<void> {
       labelInput.addEventListener('blur', () => {
         if (!labelInput.disabled) closeEditor();
       });
+      head.append(labelInput);
 
       const sub = document.createElement('div');
       sub.className = 'chatgoose-account-sub';
       sub.append(createCopyableId(accountId));
+      const subSep = document.createElement('span');
+      subSep.className = 'chatgoose-account-sub-sep';
+      subSep.setAttribute('aria-hidden', 'true');
+      subSep.textContent = '·';
+      sub.append(subSep);
       const facts: string[] = [
         isLive
           ? COPY.accounts.subTabActive
@@ -3958,13 +3959,14 @@ async function render(): Promise<void> {
       factsNode.textContent = facts.join(' · ');
       sub.append(factsNode);
 
-      body.append(head, labelInput, sub);
-      identity.append(dot, body);
-
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
       select.dataset.accountId = accountId;
       select.dataset.connected = isLive ? 'true' : 'false';
+      select.setAttribute(
+        'aria-label',
+        COPY.accounts.personaSelectAria.replace('{label}', view.label),
+      );
       const mappedView = populateMappingSelect(
         select,
         state.accountMappings[accountId] ?? '',
@@ -4013,6 +4015,14 @@ async function render(): Promise<void> {
       info.dataset.role = 'mapping-info';
       info.className = 'chatgoose-account-pills';
       renderMappingInfo(info, mappedView, isLive);
+      if (!view.personaMapped) {
+        // Amber, not red: nothing is broken — the account simply cannot generate
+        // until a persona is chosen, and the hint says exactly that.
+        const aiOff = createBadge(COPY.accounts.personaUnmapped, 'amber');
+        aiOff.dataset.accountAiOff = accountId;
+        aiOff.title = COPY.accounts.personaUnmappedHint;
+        info.append(aiOff);
+      }
       actions.append(info);
       // «к вкладке» ONLY for a live row: the tab id comes from the worker's
       // in-memory capture map, and after a restart there is nothing to focus.
@@ -4028,7 +4038,7 @@ async function render(): Promise<void> {
         actions.append(focusTab);
       }
 
-      row.append(identity, select, actions);
+      row.append(dot, head, actions, sub, select);
       mappingsTable.append(row);
     });
 
@@ -4045,21 +4055,16 @@ async function render(): Promise<void> {
         ghost.className = 'chatgoose-account-row chatgoose-account-row-ghost';
         ghost.dataset.role = 'account-ghost';
         ghost.setAttribute('aria-hidden', 'true');
-        const ghostIdentity = document.createElement('div');
-        ghostIdentity.className = 'chatgoose-account-identity';
         const ghostDot = document.createElement('span');
         ghostDot.className = 'chatgoose-account-dot';
-        const ghostBody = document.createElement('div');
-        ghostBody.className = 'chatgoose-account-body';
         const ghostHead = document.createElement('span');
         ghostHead.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-head';
         const ghostSub = document.createElement('span');
         ghostSub.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-sub';
-        ghostBody.append(ghostHead, ghostSub);
-        ghostIdentity.append(ghostDot, ghostBody);
         const ghostSelect = document.createElement('span');
         ghostSelect.className = 'chatgoose-ghost-bar chatgoose-ghost-bar-select';
-        ghost.append(ghostIdentity, ghostSelect);
+        // Same grid slots as a real row: dot · head bar / sub bar · select bar.
+        ghost.append(ghostDot, ghostHead, ghostSub, ghostSelect);
         mappingsTable.append(ghost);
       }
       const empty = document.createElement('div');

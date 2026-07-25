@@ -109,10 +109,10 @@ function installDom() {
   vi.stubGlobal('Event', window.Event);
 }
 
-/** The account-id meta line, pinned through the dictionary rather than a
- * duplicated literal — the copy is Russian and owned by `src/options/copy.ts`. */
+/** The account-id meta line: the bare full id — the «ID аккаунта:» prefix died
+ * with the two-line row (the id appears exactly once, in the mono meta line). */
 function accountIdText(accountId: string): string {
-  return `${COPY.accounts.idPrefix}${accountId}`;
+  return accountId;
 }
 
 /** The «Аккаунты» / «Персоны» sections. Their titles are Russian and owned by
@@ -339,7 +339,9 @@ describe('Options page account sections', () => {
     expect(activeRow.textContent).toContain(COPY.accounts.stateLive);
     const offlineRow = mappingsSection
       .querySelector<HTMLElement>('[data-account-mapping-row="mappedOffline"]')!;
-    expect(offlineRow.textContent).toContain(COPY.accounts.stateIdle);
+    // A sleeping row wears NO pill — the mono fact line carries its state.
+    expect(offlineRow.textContent).not.toContain('не активна');
+    expect(offlineRow.textContent).toContain(COPY.accounts.subNeverSeen);
   });
 
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
