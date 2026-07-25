@@ -216,6 +216,53 @@ describe('saveSettings custody contract', () => {
     expect(after.settings.agencyHubDeviceToken).toBe('fresh-token');
     expect(after.settings.quickMessageCount).toBe(30);
   });
+
+  it('co-writes an extra key in the SAME set as the credential', async () => {
+    // E59 post-campaign: the device-token metadata must never land in a separate
+    // write from the token it describes.
+    mockStorage = v12Store();
+    await storage.loadStorageState();
+
+    (browser.storage.local.set as ReturnType<typeof vi.fn>).mockClear();
+    await storage.saveSettings(
+      { agencyHubDeviceToken: 'issued-token' },
+      undefined,
+      { alsoWrite: { 'chatgoose:someMeta': { version: 1 } } },
+    );
+
+    const calls = (browser.storage.local.set as ReturnType<typeof vi.fn>).mock.calls;
+    const custodyWrites = calls.filter(
+      ([items]) => Object.prototype.hasOwnProperty.call(items, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY),
+    );
+    expect(custodyWrites).toHaveLength(1);
+    expect(custodyWrites[0]![0]).toMatchObject({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'issued-token',
+      'chatgoose:someMeta': { version: 1 },
+    });
+  });
+
+  it('REFUSES a co-write that would overwrite a key this write owns', async () => {
+    // The invariant in the doc comment is enforced, not trusted: a colliding
+    // co-write would silently win over the credential (or the schema stamp) this
+    // call computed.
+    mockStorage = v12Store();
+    await storage.loadStorageState();
+
+    for (const collision of [
+      { settings: {} },
+      { schemaVersion: 999 },
+      { [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'smuggled-token' },
+    ]) {
+      await expect(storage.saveSettings(
+        { agencyHubDeviceToken: 'issued-token' },
+        undefined,
+        { alsoWrite: collision },
+      )).rejects.toThrow('alsoWrite');
+    }
+    // …and nothing of the sort reached disk.
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).not.toBe('smuggled-token');
+    expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+  });
 });
 
 describe('saveSettings durably stamps schemaVersion (E45)', () => {

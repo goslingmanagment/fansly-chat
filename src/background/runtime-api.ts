@@ -80,21 +80,25 @@ function withAgencyHubCustodyLock<T>(critical: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Operational metadata about the stored device token — its own storage.local
- * key with its own `version`, never the settings blob (schema stays v15) and
- * never a custody key. Written inside the auth critical section, so it is
- * already serialized against every other token mutation. */
-async function writeDeviceTokenMeta(meta: AgencyHubDeviceTokenMeta | null): Promise<void> {
+/** Drop the metadata record describing a token that no longer exists here.
+ *
+ * The metadata is CUSTODY-RELEVANT, not a display convenience: `issuedFrom`
+ * decides which hub the sign-out revoke is aimed at. That is why the ISSUE path
+ * commits the token and this record in ONE `storage.set` (see
+ * `issueAgencyHubDeviceToken` below) instead of writing them separately.
+ *
+ * The REMOVAL, however, may stay best-effort: it runs only after the custody
+ * keys were already wiped to empty strings, and a leftover record cannot
+ * resurrect a token — the next sign-out finds no bearer to revoke, and the next
+ * issuance overwrites the record atomically with its own address. Its own
+ * storage.local key with its own `version`, never the settings blob (schema
+ * stays v15) and never a custody key. Called inside the auth critical section,
+ * so it is already serialized against every other token mutation. */
+async function clearDeviceTokenMeta(): Promise<void> {
   try {
-    if (meta === null) {
-      await browser.storage.local.remove(AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY);
-      return;
-    }
-    await browser.storage.local.set({ [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: meta });
+    await browser.storage.local.remove(AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY);
   } catch (error) {
-    // Metadata is a display convenience: never fail a sign-in or a sign-out
-    // over it. The pane falls back to its honest "no data yet" line.
-    logWarn('Device token metadata write failed', {
+    logWarn('Device token metadata removal failed', {
       error: error instanceof Error ? error.message.slice(0, 200) : String(error),
     });
   }
@@ -1061,13 +1065,7 @@ export function registerRuntimeApi({
               password: input.password,
               label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
             });
-            // The token never crosses the runtime-message boundary — it lands
-            // straight in settings storage (same custody class as the key).
-            await saveSettings({ agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token });
-            // Operational metadata about the token we just stored. Written
-            // inside the lock, so a concurrent sign-out cannot leave the meta
-            // describing a token that is already wiped.
-            await writeDeviceTokenMeta({
+            const meta: AgencyHubDeviceTokenMeta = {
               version: 1,
               keyPrefix: issued.keyPrefix,
               issuedAt: Date.now(),
@@ -1076,7 +1074,22 @@ export function registerRuntimeApi({
               // address, so a later base-URL change cannot leave a live bearer
               // orphaned on the issuing hub. Never the token itself.
               issuedFrom: baseUrl,
-            });
+            };
+            // ONE atomic commit for the token AND its issuing-hub binding. The
+            // token never crosses the runtime-message boundary — it lands
+            // straight in its custody storage key (same custody class as the
+            // legacy key), and `alsoWrite` puts the metadata in the SAME
+            // storage.set. A separate best-effort meta write was the bug: a
+            // re-issue against hub B that committed the token but lost the meta
+            // write left `issuedFrom: A` on disk, so sign-out sent B's bearer to
+            // A, A answered 401 → «already-invalid», and B's token stayed live.
+            // Written inside the lock, so a concurrent sign-out can neither wipe
+            // the token this write commits nor leave the meta describing it.
+            await saveSettings(
+              { agencyHubBaseUrl: baseUrl, agencyHubDeviceToken: issued.token },
+              undefined,
+              { alsoWrite: { [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: meta } },
+            );
             return {
               ok: true,
               keyPrefix: issued.keyPrefix,
@@ -1115,6 +1128,16 @@ export function registerRuntimeApi({
           // dropped/foreign metadata write) fall back to the captured address.
           const capturedMeta = await readDeviceTokenMeta();
           const capturedBaseUrl = capturedMeta?.issuedFrom || before.settings.agencyHubBaseUrl;
+          // No recorded ADDRESS for the token that is stored: nothing on this
+          // device knows which hub minted it. That covers an absent, foreign or
+          // unreadable metadata record AND a valid pre-`issuedFrom` v1 record —
+          // the latter is exactly the case that falls back to the CURRENT base URL
+          // above, i.e. also a guess. The revoke below is then aimed at that
+          // guess, so a 401/403 from it is not proof the bearer is dead — it is
+          // equally the answer of a hub that never issued it. Such a revoke is
+          // reported as `unreachable` («не подтверждён») further down; only a
+          // recorded issuing address keeps the 401/403 → `already-invalid` mapping.
+          const issuingHubUnknown = !capturedMeta?.issuedFrom;
 
           // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable
           // step. Write ONLY the two top-level custody storage keys, never the
@@ -1139,7 +1162,7 @@ export function registerRuntimeApi({
             return { outcome: 'wipe-failed', error: detail };
           }
           // The metadata describes a token that no longer exists here.
-          await writeDeviceTokenMeta(null);
+          await clearDeviceTokenMeta();
 
           // (d) The SECOND, idempotent wipe. The revoke below can take up to 5s,
           // and the options page's debounced settings chain writes
@@ -1189,6 +1212,16 @@ export function registerRuntimeApi({
               { agencyHubBaseUrl: capturedBaseUrl, agencyHubDeviceToken: capturedToken },
               controller.signal,
             );
+            if (outcome === 'already-invalid' && issuingHubUnknown) {
+              // A 401/403 from an address we only guessed at proves nothing about
+              // the token: report the honest «не подтверждён» instead of claiming
+              // a clean sign-out. Locally it is already wiped either way, and the
+              // bearer dies by sliding-expiry if it really is still alive.
+              logWarn('Device token revoke unconfirmed: no issuing-hub metadata', {
+                baseUrl: capturedBaseUrl,
+              });
+              return await settle({ outcome: 'unreachable' });
+            }
             return await settle({ outcome });
           } catch (error) {
             // Abort/network/5xx/missing-base-URL — server truth unknown. Already

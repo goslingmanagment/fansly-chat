@@ -8,6 +8,7 @@ import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js'
 import type { MountedOptionsPage } from './helpers/options-page.js';
 import type {
   AccountsView,
+  AgencyHubIdentityResponse,
   PersonaCatalogEntry,
   SessionSnapshotEntry,
 } from '../src/shared/types.js';
@@ -141,6 +142,45 @@ describe('options error deep links', () => {
     expect(flashed).toHaveLength(1);
     expect(flashed[0]?.classList.contains('chatgoose-account-rows')).toBe(true);
     expect(page.document.querySelector('[data-account-mapping-row="acc-1"]')).toBeTruthy();
+  });
+
+  it('does not burn the flash on a hub row still showing «неизвестно»', async () => {
+    // Same regression as the accounts table, one card over: the diagnostics rows
+    // pre-fill «неизвестно», so an arm at mount would highlight the placeholder
+    // and expire (2s) long before the identity read lands — and the repaint that
+    // finally paints the row would have nothing left to re-arm.
+    let releaseIdentity!: (identity: AgencyHubIdentityResponse) => void;
+    const pendingIdentity = new Promise<AgencyHubIdentityResponse>((resolve) => {
+      releaseIdentity = resolve;
+    });
+    const page = await mountOptionsPage({
+      hash: '#hub:CG-HUB-05',
+      sessions: [],
+      settings: {
+        agencyHubBaseUrl: 'https://hub.example',
+        agencyHubDeviceToken: 'agency_hub_device_tok',
+      },
+      permissionGranted: true,
+      runtime: { identity: () => pendingIdentity },
+    });
+
+    // The pane and the note are up; the «Страницы ядра» row is still a placeholder.
+    expect(pane(page, 'hub').hidden).toBe(false);
+    expect(note(page)?.textContent).toContain('CG-HUB-05');
+    const pagesRow = page.document.querySelector<HTMLElement>('[data-hub-detail="pages"]');
+    expect(pagesRow?.dataset.deeplinkReady).toBe('false');
+    expect(pagesRow?.textContent).toContain(COPY.common.unknown);
+    expect(page.document.querySelectorAll('.chatgoose-flash')).toHaveLength(0);
+
+    releaseIdentity({ ok: true, username: 'lora-chatter', role: 'chatter', pages: ['lora-1'] });
+    await page.flushAsync();
+
+    // The late hydration fires the pending flash — exactly once, on the real row.
+    expect(pagesRow?.dataset.deeplinkReady).toBe('true');
+    const flashed = page.document.querySelectorAll('.chatgoose-flash');
+    expect(flashed).toHaveLength(1);
+    expect((flashed[0] as HTMLElement).dataset.hubDetail).toBe('pages');
+    expect(flashed[0]?.textContent).toContain('1');
   });
 
   it('re-arms when a deep link lands in the ALREADY OPEN tab', async () => {

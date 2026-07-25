@@ -137,14 +137,27 @@ type SessionsResult =
  * truncated frame or a harness with no handler resolves to something that is
  * NOT the declared type; painting it would fabricate a verdict, so every
  * optional read passes through a guard and falls back to honest-unknown. */
-function asOpsDailySnapshot(value: unknown): OpsDailySnapshot | null {
-  if (typeof value !== 'object' || value === null) return null;
+
+/**
+ * …and for the «Статус» local reads that verdict has to travel in the RESULT,
+ * not in the value: `[]` and `null` are exactly what those sources look like on a
+ * quiet install, so a parser that collapsed a malformed reply into one of them
+ * would make the pane AND the copied report claim «сегодня генераций не было» /
+ * «доска ещё не открывалась» about state nobody could read. `{ok: false}` is the
+ * discriminator between «parsed, and it is genuinely empty» and «this reply
+ * cannot be used» — the latter paints the same «недоступно» a rejected read does.
+ */
+type ParsedReply<T> = { ok: true; value: T } | { ok: false };
+const UNUSABLE_REPLY: { ok: false } = { ok: false };
+
+function parseOpsDailySnapshot(value: unknown): ParsedReply<OpsDailySnapshot> {
+  if (typeof value !== 'object' || value === null) return UNUSABLE_REPLY;
   const record = value as Record<string, unknown>;
   return record.version === 1 &&
     Array.isArray(record.hubErrors) &&
     typeof record.hubErrorsTotal === 'number'
-    ? (value as OpsDailySnapshot)
-    : null;
+    ? { ok: true, value: value as OpsDailySnapshot }
+    : UNUSABLE_REPLY;
 }
 
 function asDeviceTokenMeta(value: unknown): AgencyHubDeviceTokenMeta | null {
@@ -169,22 +182,33 @@ function asOnboardingSnapshot(value: unknown): OnboardingSnapshot | null {
   return { version: 1, dismissedAt: typeof dismissedAt === 'number' ? dismissedAt : null };
 }
 
-function asQuotaEntries(value: unknown): AiQuotaStatus[] {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
-  return Object.values(value as Record<string, unknown>).filter(
-    (entry): entry is AiQuotaStatus =>
-      typeof entry === 'object' &&
-      entry !== null &&
-      typeof (entry as AiQuotaStatus).pageLabel === 'string',
-  );
+/** The quota reply is a MAP keyed by page label; the EMPTY map is valid («no
+ * observation today»). A fulfilled `undefined`, an array or a scalar is not. */
+function parseQuotaEntries(value: unknown): ParsedReply<AiQuotaStatus[]> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return UNUSABLE_REPLY;
+  }
+  return {
+    ok: true,
+    value: Object.values(value as Record<string, unknown>).filter(
+      (entry): entry is AiQuotaStatus =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof (entry as AiQuotaStatus).pageLabel === 'string',
+    ),
+  };
 }
 
-function asSpendersObservation(value: unknown): SpendersObservation | null {
-  if (typeof value !== 'object' || value === null) return null;
+/** `null` is the DECLARED honest answer here — «the board was never observed» —
+ * so it parses successfully; only a non-null reply that is not an observation
+ * (undefined, a scalar, an object with no outcome) is unusable. */
+function parseSpendersObservation(value: unknown): ParsedReply<SpendersObservation | null> {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== 'object') return UNUSABLE_REPLY;
   const record = value as Record<string, unknown>;
   return record.outcome === 'ok' || record.outcome === 'fail'
-    ? (value as SpendersObservation)
-    : null;
+    ? { ok: true, value: value as SpendersObservation }
+    : UNUSABLE_REPLY;
 }
 
 function asAccountsView(value: unknown): AccountsView | null {
@@ -251,12 +275,21 @@ interface StatusReportModel {
   quotaByPage: AiQuotaStatus[];
   spenders: SpendersObservation | null;
   opsDaily: OpsDailySnapshot | null;
-  /** Which LOCAL reads REJECTED. An empty `quotaByPage` and a null `spenders`
-   * are ambiguous on their own — they are equally the honest-empty state and
-   * the failed-read state — so the failure is carried explicitly. Without it
-   * both the rows and the report would print «сегодня генераций не было» about
-   * a source nobody managed to read. */
-  unavailable: { quota: boolean; opsDaily: boolean; spenders: boolean };
+  /** Which reads could NOT be used — rejected, or fulfilled with a reply whose
+   * shape the parser refused. An empty `quotaByPage`, a null `spenders` and a
+   * zero-account `fansly` are ambiguous on their own — they are equally the
+   * honest-empty state and the failed-read state — so the failure is carried
+   * explicitly. Without it both the rows and the report would print «сегодня
+   * генераций не было» / «аккаунты не обнаружены» about a source nobody managed
+   * to read. */
+  unavailable: {
+    quota: boolean;
+    opsDaily: boolean;
+    spenders: boolean;
+    /** The sessions snapshot the Fansly row is painted from. Its failure used to
+     * stop at the row: the report still printed the zero-account claim. */
+    fansly: boolean;
+  };
   readiness: Array<{ key: string; label: string; done: boolean }>;
 }
 
@@ -272,11 +305,15 @@ export function buildStatusReport(model: StatusReportModel): string {
   ];
 
   lines.push(`${COPY.status.fanslyLabel}: ${
-    model.fansly.accounts === 0
-      ? COPY.status.fanslyEmpty
-      : `${model.fansly.accounts} — ${model.fansly.handles.join(', ')}${
-          model.fansly.capture ? ` (${model.fansly.capture})` : ''
-        }`
+    model.unavailable.fansly
+      // «аккаунты не обнаружены» is a claim about a snapshot that was READ. After
+      // a failed read the support snapshot must say so, not report zero accounts.
+      ? COPY.status.fanslyUnavailable
+      : model.fansly.accounts === 0
+        ? COPY.status.fanslyEmpty
+        : `${model.fansly.accounts} — ${model.fansly.handles.join(', ')}${
+            model.fansly.capture ? ` (${model.fansly.capture})` : ''
+          }`
   }`);
 
   const health = model.health;
@@ -1077,6 +1114,13 @@ async function render(): Promise<void> {
     viaDeviceToken: boolean;
     code?: string;
   } | null = null;
+  /** True while THIS page owns a custody write — the sign-in / re-issue RPC or
+   * «Выйти» — INCLUDING the permission → connection-test → hydrate chain that
+   * path runs afterwards. The background's write reaches this document as a
+   * `storage.onChanged` event too, and it can arrive before the RPC resolves: the
+   * cross-tab fence must then still APPLY the new custody state (it is real) but
+   * must NOT re-run that chain, or every hub check would fire twice. */
+  let ownCustodyWriteInFlight = false;
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
@@ -1228,6 +1272,11 @@ async function render(): Promise<void> {
   let agencyHubPermissionRefreshVersion = 0;
   /** null = not checked yet (no origin to check). Feeds the «Доступ» step. */
   let hubPermissionGranted: boolean | null = null;
+  /** Has the host-permission check SETTLED at least once? `hubPermissionGranted`
+   * cannot answer that — its `null` is both «never checked» and «checked, but
+   * there is no origin to check» — and the Доступ diagnostics row needs the
+   * difference to know whether it is still a placeholder (deep-link readiness). */
+  let hubPermissionChecked = false;
   const refreshAgencyHubPermissionState = async (): Promise<void> => {
     const refreshVersion = ++agencyHubPermissionRefreshVersion;
     // Every early-return branch below is a "Sync disabled" state — amber by
@@ -1248,6 +1297,7 @@ async function render(): Promise<void> {
     // knows whether Firefox granted the hub origin. Forward reference: the
     // status view is defined below and this function only ever runs later.
     hubPermissionGranted = originPattern ? permissionGranted : null;
+    hubPermissionChecked = true;
     refreshStatusView();
     renderHubDiagnostics();
 
@@ -1438,6 +1488,10 @@ async function render(): Promise<void> {
   const hubSignInStatus = document.createElement('div');
   const hubSignInMeta = document.createElement('div');
   hubSignInMeta.className = 'chatgoose-meta';
+  // Tagged so a test can pin WHICH line this is: it is the one line that survives
+  // a repaint by itself (`renderHubSignInState` only fills it when empty), so a
+  // stale sign-in message next to a signed-out pill is a real failure mode.
+  hubSignInMeta.dataset.role = 'hub-signin-meta';
 
   let hubSignInFormExpanded = false;
   const hubReissueButton = createButton(COPY.hub.reissueToken, true);
@@ -1541,6 +1595,13 @@ async function render(): Promise<void> {
       }
       hubSignInButton.disabled = true;
       hubSignInMeta.textContent = 'Signing in…';
+      // THIS tab is about to make the background write custody. The storage event
+      // for that write lands in the cross-tab fence below; the claim is held until
+      // the refresh chain this path owns has run, so the fence never doubles it.
+      ownCustodyWriteInFlight = true;
+      // Set once the chain below took over the claim — the `finally` must then not
+      // release it early.
+      let ownRefreshStarted = false;
       try {
         // Finish the shared local form write before the background issues a
         // device token from those Hub inputs. This prevents a delayed local
@@ -1570,12 +1631,17 @@ async function render(): Promise<void> {
           // storage re-read), so the signature-change refresh never fires on
           // its own — without this the diagnostics card and the hero pill
           // keep claiming "not set up" next to an active token.
+          ownRefreshStarted = true;
           void (async () => {
-            await refreshAgencyHubPermissionState();
-            await runAgencyHubConnectionTest({ force: true });
-            // The freshly-issued device token makes checkIdentity return AUTH,
-            // so the Доступ row (and the headline) flip in place — no reload.
-            await hydrateHubStatusRows(storedHubSignature());
+            try {
+              await refreshAgencyHubPermissionState();
+              await runAgencyHubConnectionTest({ force: true });
+              // The freshly-issued device token makes checkIdentity return AUTH,
+              // so the Доступ row (and the headline) flip in place — no reload.
+              await hydrateHubStatusRows(storedHubSignature());
+            } finally {
+              ownCustodyWriteInFlight = false;
+            }
           })().catch((error: unknown) => {
             console.error('Failed to refresh Agency Hub status after sign-in', error);
           });
@@ -1583,6 +1649,9 @@ async function render(): Promise<void> {
           hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
         }
       } finally {
+        if (!ownRefreshStarted) {
+          ownCustodyWriteInFlight = false;
+        }
         hubSignInButton.disabled = false;
         renderHubSignInState();
       }
@@ -1611,64 +1680,81 @@ async function render(): Promise<void> {
       hubSignOutConfirmButton.disabled = true;
       hubSignOutCancelButton.disabled = true;
       hubSignOutStatus.textContent = COPY.hub.signOutRunning;
-      // Quiesce this page's settings writer FIRST. A debounced snapshot still
-      // pending here carries `agencyHubApiKey`, and letting it land during the
-      // background's revoke window would resurrect a usable key after the wipe
-      // — the handler would then honestly report `revoked` about a credential
-      // that is back on disk. Cancel the pending write and join any already-
-      // running one before the wipe begins.
-      await quiesceSettingsBeforeSignOut();
-      if (disposed) return;
-      // The background owns the whole sequence — capture, wipe, revoke — so a
-      // pagehide mid-revoke can never leave the credentials on disk. The token
-      // never crosses this boundary; only the outcome does.
-      let outcome: AgencyHubSignOutResponse;
+      // The background's wipe reaches the cross-tab fence as a storage event.
+      // Claim it for this path until the refresh chain below has run (see the
+      // sign-in path) — otherwise both would repaint and re-check the hub.
+      ownCustodyWriteInFlight = true;
+      let ownRefreshStarted = false;
       try {
-        outcome = await sendRuntimeRequest('signOutAgencyHub');
-      } catch (error) {
-        // A rejected request means the background may have wiped NOTHING.
-        // Report the loud case, never a comforting «стёрт локально».
-        console.error('Agency Hub sign-out request failed', error);
-        outcome = { outcome: 'wipe-failed' };
+        // Quiesce this page's settings writer FIRST. A debounced snapshot still
+        // pending here carries `agencyHubApiKey`, and letting it land during the
+        // background's revoke window would resurrect a usable key after the wipe
+        // — the handler would then honestly report `revoked` about a credential
+        // that is back on disk. Cancel the pending write and join any already-
+        // running one before the wipe begins.
+        await quiesceSettingsBeforeSignOut();
+        if (disposed) return;
+        // The background owns the whole sequence — capture, wipe, revoke — so a
+        // pagehide mid-revoke can never leave the credentials on disk. The token
+        // never crosses this boundary; only the outcome does.
+        let outcome: AgencyHubSignOutResponse;
+        try {
+          outcome = await sendRuntimeRequest('signOutAgencyHub');
+        } catch (error) {
+          // A rejected request means the background may have wiped NOTHING.
+          // Report the loud case, never a comforting «стёрт локально».
+          console.error('Agency Hub sign-out request failed', error);
+          outcome = { outcome: 'wipe-failed' };
+        }
+        if (disposed) return;
+
+        // Re-read storage as the source of truth about what is actually stored
+        // now — including the wipe-failed case, where the fields must show what
+        // really survived rather than an optimistic blank.
+        try {
+          state.settings = (await loadStorageState()).settings;
+        } catch (error) {
+          console.error('Failed to re-read settings after sign-out', error);
+        }
+        deviceTokenMeta = asDeviceTokenMeta(
+          await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
+        );
+        agencyHubApiKeyDirty = false;
+        agencyHubKeyInput.value = state.settings.agencyHubApiKey;
+
+        hubSignOutStatus.textContent = {
+          revoked: COPY.hub.signOutRevoked,
+          'already-invalid': COPY.hub.signOutAlreadyInvalid,
+          unreachable: COPY.hub.signOutUnreachable,
+          'wipe-failed': COPY.hub.signOutWipeFailed,
+        }[outcome.outcome];
+        hubSignOutStatus.dataset.signOutOutcome = outcome.outcome;
+
+        hubSignOutConfirmButton.disabled = false;
+        hubSignOutCancelButton.disabled = false;
+        hubSignOutConfirmRow.hidden = true;
+        hubSignInMeta.textContent = '';
+        renderHubSignInState();
+        // The credential is gone: repaint the hub-facing diagnosis rather than
+        // leaving an AUTH row next to an empty token field.
+        ownRefreshStarted = true;
+        void (async () => {
+          try {
+            await refreshAgencyHubPermissionState();
+            await runAgencyHubConnectionTest({ force: true });
+            await hydrateHubStatusRows(storedHubSignature());
+          } finally {
+            ownCustodyWriteInFlight = false;
+          }
+        })().catch((error: unknown) => {
+          console.error('Failed to refresh Agency Hub status after sign-out', error);
+        });
+      } finally {
+        if (!ownRefreshStarted) {
+          // Every early return above (a disposed page included) lands here.
+          ownCustodyWriteInFlight = false;
+        }
       }
-      if (disposed) return;
-
-      // Re-read storage as the source of truth about what is actually stored
-      // now — including the wipe-failed case, where the fields must show what
-      // really survived rather than an optimistic blank.
-      try {
-        state.settings = (await loadStorageState()).settings;
-      } catch (error) {
-        console.error('Failed to re-read settings after sign-out', error);
-      }
-      deviceTokenMeta = asDeviceTokenMeta(
-        await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
-      );
-      agencyHubApiKeyDirty = false;
-      agencyHubKeyInput.value = state.settings.agencyHubApiKey;
-
-      hubSignOutStatus.textContent = {
-        revoked: COPY.hub.signOutRevoked,
-        'already-invalid': COPY.hub.signOutAlreadyInvalid,
-        unreachable: COPY.hub.signOutUnreachable,
-        'wipe-failed': COPY.hub.signOutWipeFailed,
-      }[outcome.outcome];
-      hubSignOutStatus.dataset.signOutOutcome = outcome.outcome;
-
-      hubSignOutConfirmButton.disabled = false;
-      hubSignOutCancelButton.disabled = false;
-      hubSignOutConfirmRow.hidden = true;
-      hubSignInMeta.textContent = '';
-      renderHubSignInState();
-      // The credential is gone: repaint the hub-facing diagnosis rather than
-      // leaving an AUTH row next to an empty token field.
-      void (async () => {
-        await refreshAgencyHubPermissionState();
-        await runAgencyHubConnectionTest({ force: true });
-        await hydrateHubStatusRows(storedHubSignature());
-      })().catch((error: unknown) => {
-        console.error('Failed to refresh Agency Hub status after sign-out', error);
-      });
     })();
   });
 
@@ -1716,10 +1802,28 @@ async function render(): Promise<void> {
   // ── Hub diagnostics: dense, always-visible facts about THIS connection ──
   // Unlike the «Статус» pane's Контракт row (debug-only), every line here is
   // shown unconditionally: this card exists to be pasted into a support thread.
-  const hubDetailRow = (label: string, key: string): { root: HTMLElement; value: HTMLElement } => {
+  //
+  // `hydration: 'async'` marks a row whose value can only come from a read that
+  // has not landed yet. Such a row ships `data-deeplink-ready="false"` — the
+  // wave-D pattern the accounts table uses — because it pre-fills «неизвестно»,
+  // and nonempty text would let an error deep link (`#hub:CG-HUB-04`,
+  // `#hub:CG-HUB-05`) burn its one-shot highlight on that placeholder: the 2s
+  // flash can easily expire before host access or identity hydrate, and the later
+  // repaint has nothing left to re-arm. The flag flips in `renderHubDiagnostics`
+  // the moment the row's own source has SETTLED (a failure is a real answer too),
+  // and every paint there calls `flashPendingDeepLink`, so a late hydration fires
+  // the pending flash.
+  const hubDetailRow = (
+    label: string,
+    key: string,
+    hydration: 'async' | 'sync' = 'sync',
+  ): { root: HTMLElement; value: HTMLElement } => {
     const root = document.createElement('div');
     root.className = 'chatgoose-status-body';
     root.dataset.hubDetail = key;
+    if (hydration === 'async') {
+      root.dataset.deeplinkReady = 'false';
+    }
     const labelNode = document.createElement('span');
     labelNode.className = 'chatgoose-status-label';
     labelNode.textContent = label;
@@ -1730,8 +1834,17 @@ async function render(): Promise<void> {
     return { root, value };
   };
 
-  const hubIdentityRow = hubDetailRow(COPY.hub.identityLabel, 'identity');
-  const hubPagesRow = hubDetailRow(COPY.hub.pagesLabel, 'pages');
+  /** One writer for a diagnostics row's deep-link readiness: `settled` is «this
+   * row's source has answered», never «the answer was good news». */
+  const markHubRowHydrated = (
+    row: { root: HTMLElement },
+    settled: boolean,
+  ): void => {
+    row.root.dataset.deeplinkReady = settled ? 'true' : 'false';
+  };
+
+  const hubIdentityRow = hubDetailRow(COPY.hub.identityLabel, 'identity', 'async');
+  const hubPagesRow = hubDetailRow(COPY.hub.pagesLabel, 'pages', 'async');
   const hubPagesChips = document.createElement('span');
   hubPagesChips.className = 'chatgoose-hub-chips';
   hubPagesRow.root.append(hubPagesChips);
@@ -1739,11 +1852,14 @@ async function render(): Promise<void> {
   hubConnectionCard.className = 'chatgoose-card';
   hubConnectionCard.append(hubIdentityRow.root, hubPagesRow.root);
 
+  // «Проверка» is deliberately SYNC: its value is complete from in-page state on
+  // the very first paint — either the last live test or the honest «проверка не
+  // выполнялась» — so it is never a placeholder waiting on a read.
   const hubCheckRow = hubDetailRow(COPY.hub.checkLabel, 'check');
-  const hubHostAccessRow = hubDetailRow(COPY.hub.hostAccessLabel, 'host-access');
-  const hubContractRow = hubDetailRow(COPY.hub.contractLabel, 'contract');
-  const hubErrorsRow = hubDetailRow(COPY.hub.errorsLabel, 'errors');
-  const hubFanSummaryRow = hubDetailRow(COPY.hub.fanSummaryLabel, 'fan-summary');
+  const hubHostAccessRow = hubDetailRow(COPY.hub.hostAccessLabel, 'host-access', 'async');
+  const hubContractRow = hubDetailRow(COPY.hub.contractLabel, 'contract', 'async');
+  const hubErrorsRow = hubDetailRow(COPY.hub.errorsLabel, 'errors', 'async');
+  const hubFanSummaryRow = hubDetailRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
   const hubDiagnosticsCard = document.createElement('div');
   hubDiagnosticsCard.className = 'chatgoose-card';
   hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
@@ -1829,7 +1945,11 @@ async function render(): Promise<void> {
     quotaByPage: [],
     spenders: null,
     opsDaily: null,
-    unavailable: { quota: false, opsDaily: false, spenders: false },
+    // Fansly starts UNAVAILABLE: before the first sessions read lands, the zero
+    // above is a placeholder, and a report copied in that window would otherwise
+    // claim «аккаунты не обнаружены» about a snapshot nobody has taken yet. The
+    // first `paintFanslyStatusRow` sets the honest value in BOTH its branches.
+    unavailable: { quota: false, opsDaily: false, spenders: false, fansly: true },
     readiness: [],
   };
   // The account ids that currently have a CAPTURED session. The persona step
@@ -1983,6 +2103,10 @@ async function render(): Promise<void> {
       hubPagesRow.value.textContent = COPY.common.unknown;
       hubPagesChips.replaceChildren();
     }
+    // Both rows read ONE source: a non-null response is the settled answer
+    // (`{ok:false}` included), `null` is «the identity read has not landed».
+    markHubRowHydrated(hubIdentityRow, identity !== null);
+    markHubRowHydrated(hubPagesRow, identity !== null);
 
     // Проверка — when, outcome, how long, and which credential carried it.
     if (!lastConnectionCheck) {
@@ -2009,6 +2133,10 @@ async function render(): Promise<void> {
       : hubPermissionGranted
         ? `${COPY.hub.hostAccessGrantedFor} ${originPattern}`
         : COPY.status.hubNoPermission;
+    // Settled once Firefox has answered `permissions.contains` — including the
+    // «no origin to check» case, where «неизвестно» IS the final answer for the
+    // address currently in the field.
+    markHubRowHydrated(hubHostAccessRow, hubPermissionChecked);
 
     // Контракт SDK — ALWAYS visible here (the Статус row stays debug-only).
     const health = statusModel.health;
@@ -2024,6 +2152,7 @@ async function render(): Promise<void> {
     } else {
       hubContractRow.value.textContent = COPY.status.contractUnknown;
     }
+    markHubRowHydrated(hubContractRow, health !== null);
 
     // Ошибки генераций (Hub) — today's exact count; the list is capped at 20,
     // so say so rather than let «за сегодня: 37» look like 37 listed rows.
@@ -2052,6 +2181,12 @@ async function render(): Promise<void> {
             .replace('{when}', formatClockTime(push.at))
             .replace('{account}', push.accountLabel || COPY.common.unknown)
         : COPY.hub.fanSummaryEmpty;
+    // Both ops-daily rows settle together: a parsed snapshot, or a read that
+    // answered but could not be used (`unavailable.opsDaily`) — «неизвестно» is
+    // then the final answer, not a placeholder.
+    const opsSettled = ops !== null || statusModel.unavailable.opsDaily;
+    markHubRowHydrated(hubErrorsRow, opsSettled);
+    markHubRowHydrated(hubFanSummaryRow, opsSettled);
     // A hub-row deep link waits for these values before it highlights anything.
     flashPendingDeepLink();
   };
@@ -2124,6 +2259,9 @@ async function render(): Promise<void> {
     if (failed) {
       capturedAccountIds = [];
       statusModel.fansly = { accounts: 0, handles: [], capture: null };
+      // The zero above is a placeholder, not an observation — carry the failure
+      // into the model so «Скопировать отчёт» cannot turn it into a claim.
+      statusModel.unavailable.fansly = true;
       statusRows.fansly.set({
         badge: '—',
         tone: 'neutral',
@@ -2148,6 +2286,9 @@ async function render(): Promise<void> {
       handles,
       capture: freshest ? formatCaptureStatus(freshest) : null,
     };
+    // A successful re-poll clears an earlier failure: this snapshot IS an
+    // observation, so the report may speak about it again.
+    statusModel.unavailable.fansly = false;
 
     if (capturedAccountIds.length === 0) {
       statusRows.fansly.set({ badge: '0', tone: 'amber', fact: COPY.status.fanslyEmpty });
@@ -2309,31 +2450,39 @@ async function render(): Promise<void> {
       sendRuntimeRequest('getOpsDaily'),
     ]);
     if (disposed) return;
-    // A rejected read is NOT an empty one. `[]` and `null` are what these
-    // sources honestly look like on a quiet day, so falling back to them after a
-    // transport failure would have the pane assert «сегодня генераций не было»
-    // and «доска ещё не открывалась» about state nobody could read. Each read
-    // carries its own failure flag into the row AND into the support report.
-    const quotaUnavailable = quotaResult.status === 'rejected';
-    const spendersUnavailable = spendersResult.status === 'rejected';
-    const opsUnavailable = opsResult.status === 'rejected';
+    // A read is usable only when it SETTLED and its reply parsed. `[]` and `null`
+    // are what these sources honestly look like on a quiet day, so falling back to
+    // them after a transport failure would have the pane assert «сегодня генераций
+    // не было» and «доска ещё не открывалась» about state nobody could read — and
+    // a REJECTION is not the only way to get there: a stale background (or a
+    // truncated frame) fulfils with `undefined`, which the parsers would otherwise
+    // collapse into the very same empty. Both failures now paint «недоступно»,
+    // while a genuinely empty map / null observation stays an honest empty. Each
+    // verdict travels into the row AND into the support report.
+    const quotaParsed = quotaResult.status === 'fulfilled'
+      ? parseQuotaEntries(quotaResult.value)
+      : UNUSABLE_REPLY;
+    const spendersParsed = spendersResult.status === 'fulfilled'
+      ? parseSpendersObservation(spendersResult.value)
+      : UNUSABLE_REPLY;
+    const opsParsed = opsResult.status === 'fulfilled'
+      ? parseOpsDailySnapshot(opsResult.value)
+      : UNUSABLE_REPLY;
+    const quotaUnavailable = !quotaParsed.ok;
+    const spendersUnavailable = !spendersParsed.ok;
+    const opsUnavailable = !opsParsed.ok;
     statusModel.unavailable = {
+      ...statusModel.unavailable,
       quota: quotaUnavailable,
       opsDaily: opsUnavailable,
       spenders: spendersUnavailable,
     };
-    const spenders = spendersResult.status === 'fulfilled'
-      ? asSpendersObservation(spendersResult.value)
-      : null;
-    const opsDaily = opsResult.status === 'fulfilled'
-      ? asOpsDailySnapshot(opsResult.value)
-      : null;
+    const spenders = spendersParsed.ok ? spendersParsed.value : null;
+    const opsDaily = opsParsed.ok ? opsParsed.value : null;
 
     // Квота AI — requests per page only; NEVER a micro-USD figure (E14). An
     // empty map is «no observation today», not «no quota».
-    const quotaEntries = quotaResult.status === 'fulfilled'
-      ? asQuotaEntries(quotaResult.value)
-      : [];
+    const quotaEntries = quotaParsed.ok ? quotaParsed.value : [];
     // Worst first: a page at 0 is what the chatter needs to see, not an average.
     const worstFirst = [...quotaEntries].sort(
       (left, right) =>
@@ -3322,6 +3471,115 @@ async function render(): Promise<void> {
     if (futureSchemaObserved !== null) {
       activateFutureSchemaBarrier(futureSchemaObserved);
     }
+    /**
+     * A CUSTODY key changed on disk and this document did not write it.
+     *
+     * The single-options-tab guarantee covers only the paths `openOptions` owns —
+     * a manually opened second settings tab is real. Without this fence that tab
+     * keeps the wiped token in `state.settings` after the other tab's «Выйти»:
+     * it still renders «Device token active ✓», still offers «Выйти», and a
+     * connection test from it would send a credential that no longer exists on
+     * disk. So the fresh custody values are applied here and the hub state is
+     * repainted from them (signed-out, after an external wipe).
+     *
+     * A local unsaved edit wins over the input FIELD only: `agencyHubApiKeyDirty`
+     * means the chatter typed a key in THIS tab and has not saved it yet, so the
+     * typed text stays — but `state.settings` and every signed-in indicator still
+     * describe what is actually stored. E19 holds throughout: a wipe arrives as
+     * EMPTY strings, never as removed keys.
+     */
+    const applyExternalCustodyChange = (persisted: Settings): void => {
+      if (
+        persisted.agencyHubDeviceToken === state.settings.agencyHubDeviceToken &&
+        persisted.agencyHubApiKey === state.settings.agencyHubApiKey
+      ) {
+        // Already in sync — this tab's own write echoed back, or an unrelated
+        // (settings / persona-catalog) event. Nothing to apply, and no reason to
+        // re-run the hub checks the writing path already fired. This equality
+        // check is the ONLY no-op suppressor, which is why the caller may invoke
+        // this on every applied read instead of trusting a per-event flag.
+        return;
+      }
+      const tokenChanged = persisted.agencyHubDeviceToken !== state.settings.agencyHubDeviceToken;
+      const hadCredential = Boolean(
+        state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim(),
+      );
+      const wipedExternally = hadCredential &&
+        !persisted.agencyHubDeviceToken.trim() &&
+        !persisted.agencyHubApiKey.trim();
+      state.settings = {
+        ...state.settings,
+        agencyHubDeviceToken: persisted.agencyHubDeviceToken,
+        agencyHubApiKey: persisted.agencyHubApiKey,
+      };
+      if (!agencyHubApiKeyDirty && document.activeElement !== agencyHubKeyInput) {
+        agencyHubKeyInput.value = persisted.agencyHubApiKey;
+      }
+      if (wipedExternally) {
+        // Another tab (or the background) destroyed the credentials. THIS tab's
+        // pending credential write must not resurrect them: the wave-B quiesce
+        // only covers the tab that pressed «Выйти», so a debounced snapshot armed
+        // here — 350 ms is easily inside the revoke window — would persist the
+        // typed key AFTER the wipe, exactly the hole the sign-out quiesce closes
+        // locally. Cancel that pending write, drop the credential's dirty claim,
+        // and stale-out any ALREADY RUNNING one (the snapshot-version bump is the
+        // same instrument the future-schema barrier uses, so an in-flight persist
+        // can no longer move `state.settings.agencyHubApiKey` back). The typed
+        // text stays in the field as a non-persisting draft; an explicit later
+        // edit re-arms it deliberately.
+        saveSettingsDebounced.cancel();
+        agencyHubApiKeyDirty = false;
+        settingsSnapshotVersion += 1;
+        agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
+        // The cancelled snapshot is deliberately NOT re-armed for its
+        // non-credential half: `persist` writes the STORED key back into the field
+        // whenever the dirty claim is gone, which would erase the draft this fence
+        // just promised to keep. `settingsDirty` stays set, so the next edit, blur
+        // or pagehide still persists those edits — without the credential, because
+        // `collectSettingsPatch` only includes it for a dirty claim.
+      }
+      // Immediate, synchronous truth: the token pill, the folded sign-in form and
+      // the «Выйти» button all read `state.settings` only. The meta line is
+      // cleared first: `renderHubSignInState` only fills it when empty, so a stale
+      // «Device token abc… issued (expires …)» would otherwise sit next to a
+      // signed-out pill.
+      hubSignInMeta.textContent = '';
+      renderHubSignInState();
+      renderAgencyHubConnectionState();
+      if (ownCustodyWriteInFlight) {
+        // THIS tab's own sign-in / re-issue / «Выйти» is mid-flight (the storage
+        // event can beat its RPC reply). The state above is applied — it is real —
+        // but that path owns the permission → connection-test → hydrate chain and
+        // runs it exactly once; doing it here too would double every hub check.
+        return;
+      }
+      void (async () => {
+        if (tokenChanged) {
+          // The metadata record travels WITH the token (one atomic write on
+          // issue, removed on sign-out), so re-read it instead of describing a
+          // token that is gone.
+          deviceTokenMeta = asDeviceTokenMeta(
+            await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
+          );
+          if (disposed) return;
+          renderHubSignInState();
+        }
+        await refreshAgencyHubPermissionState();
+        if (disposed) return;
+        // NO local connection test here. This tab's form may hold a different
+        // base URL (the blob field the fence deliberately does not touch) or an
+        // uncommitted key draft, so a forced test would mix sources — worst
+        // case sending the OTHER hub's fresh token to the URL still shown in
+        // THIS form. The tab that performed the custody write already ran the
+        // checks; this tab only READS: the status rows below hydrate from the
+        // stored snapshot, and the «Проверка» line keeps honestly reporting the
+        // last test this tab itself ran.
+        await hydrateHubStatusRows(storedHubSignature());
+      })().catch((error: unknown) => {
+        console.error('Failed to apply an external Agency Hub custody change', error);
+      });
+    };
+
     const handleCatalogStorageChange = (
       changes: Record<string, browser.storage.StorageChange>,
       areaName: string,
@@ -3349,6 +3607,14 @@ async function render(): Promise<void> {
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
         renderPersonaCatalog();
         refreshAccountMappingPersonalityOptions?.();
+        // Custody is applied from the STATE this generation read, never gated on
+        // which event started it. A per-event `custodyChanged` flag belongs to the
+        // read that the generation guard above then DISCARDS: a settings or
+        // persona-catalog event landing one tick after a wipe would supersede the
+        // custody read, and the surviving callback (flag `false`) would leave this
+        // tab holding a revoked token until the next custody event. The equality
+        // check inside is what suppresses the no-ops.
+        applyExternalCustodyChange(refreshedState.settings);
       }).catch((error: unknown) => {
         console.error('Failed to apply live persona catalog update', error);
       });
