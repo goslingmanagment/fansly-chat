@@ -255,7 +255,7 @@ describe('Options page - Agency Hub section', () => {
 
     expect(urlInput?.value).toBe('http://localhost:3000');
     expect(keyInput?.value).toBe('hub-key');
-    expect(section.textContent).toContain(COPY.hub.permDenied);
+    expect(section.textContent).toContain('Sync disabled: host access not granted.');
     expect(section.textContent).toContain('http://localhost/*');
     expect(permissionsContains).toHaveBeenCalled();
   });
@@ -329,7 +329,7 @@ describe('Options page - Agency Hub section', () => {
     storageDeferred.resolve();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain(COPY.hub.permGranted);
+      expect(section.textContent).toContain('Host access granted.');
       // Readiness is claimed only by the live connection test, never by the
       // local permission check (they contradicted each other on screen).
       expect(section.textContent).not.toContain('Sync ready');
@@ -347,10 +347,8 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain(COPY.hub.permDenied);
-      expect(section.textContent).toContain(
-        COPY.hub.permDeniedMeta.replace('{origin}', 'http://localhost/*'),
-      );
+      expect(section.textContent).toContain('Sync disabled: host access not granted.');
+      expect(section.textContent).toContain('Firefox did not grant access for http://localhost/*.');
     }, { timeout: 2000 });
   });
 
@@ -369,7 +367,7 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain(COPY.hub.permRequestErrorTitle);
+      expect(section.textContent).toContain('Sync disabled: failed to request host access.');
       expect(section.textContent).toContain('May only request permissions from a user input handler');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
@@ -399,9 +397,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain(COPY.hub.connOk);
+      expect(section.textContent).toContain('Connected ✓');
       expect(section.textContent).toContain(
-        COPY.hub.connOkMeta.replace('{url}', 'http://localhost:3000'),
+        'Live connection test succeeded for http://localhost:3000.',
       );
     }, { timeout: 2000 });
 
@@ -436,7 +434,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain(COPY.hub.connFailed.replace('{code}', 'CG-HUB-07'));
+      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
       expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
       expect(section.textContent).toContain('Hub вернул ошибку или недоступен.');
     }, { timeout: 2000 });
@@ -469,8 +467,10 @@ describe('Options page - Agency Hub section', () => {
     const button = getTestConnectionButton(section);
 
     expect(button.disabled).toBe(true);
-    expect(section.textContent).toContain(COPY.hub.connIdle);
-    expect(section.textContent).toContain(COPY.hub.connIdleMeta);
+    expect(section.textContent).toContain('Not tested yet.');
+    expect(section.textContent).toContain(
+      'Save a Hub URL and API key to run a live connection test.',
+    );
     expect(runtimeSendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'testAgencyHubConnection',
@@ -478,7 +478,7 @@ describe('Options page - Agency Hub section', () => {
     );
   });
 
-  it('falls back to the registry description when the Hub connection test throws', async () => {
+  it('uses the custom catch-path description when the Hub connection test throws', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const runtimeError = new Error('background disconnected');
 
@@ -497,10 +497,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain(COPY.hub.connFailed.replace('{code}', 'CG-HUB-07'));
+      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
       expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
-      // No page-local override: the E58 registry owns the description.
-      expect(section.textContent).toContain('Hub вернул ошибку или недоступен.');
+      expect(section.textContent).toContain('The connection test could not be completed.');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
       'Agency Hub connection test failed',
@@ -557,7 +556,7 @@ describe('Options page - Agency Hub section', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
       });
       expect(savedCustody).toEqual({ agencyHubApiKey: 'invalid-key' });
-      expect(section.textContent).toContain(COPY.hub.connFailed.replace('{code}', 'CG-HUB-03'));
+      expect(section.textContent).toContain('Connection failed: CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
       expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
       expect(section.textContent).toContain('HTTP 401 • {"message":"Unauthorized"}');
