@@ -1430,14 +1430,19 @@ input[type='checkbox'] {
   white-space: nowrap;
 }
 
-/* ── «Персоны» rows ── */
+/* ── «Персоны» rows: name and chips left, mono count (and the archived
+   instruction) at the right edge — the М2 anatomy of #48–#50. ── */
 .chatgoose-persona-rows {
   display: grid;
   gap: 8px;
 }
 
 .chatgoose-persona-row {
-  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 9px 12px;
   border-radius: var(--chatgoose-radius-card);
   border: 1px solid var(--chatgoose-line);
   background: var(--chatgoose-bg2);
@@ -1453,29 +1458,54 @@ input[type='checkbox'] {
   align-items: center;
   gap: 7px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .chatgoose-persona-name {
   font-weight: 600;
 }
 
-.chatgoose-persona-count {
-  color: var(--chatgoose-ink-low);
-  font-size: 12px;
-}
-
-.chatgoose-persona-footer {
+.chatgoose-persona-side {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding-top: 4px;
+  gap: 8px;
 }
 
-.chatgoose-persona-catalog {
+.chatgoose-persona-count {
+  font: 400 11.5px/1.5 var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-ink-low);
+  white-space: nowrap;
+}
+
+/* Catalog status row: label · fact · mono staleness right. The hairline above
+   separates the catalog meta from the persona list. */
+.chatgoose-persona-catrow {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid var(--chatgoose-line);
+  padding-top: 12px;
+}
+
+.chatgoose-persona-catlabel {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.chatgoose-persona-catfact {
   color: var(--chatgoose-ink-mid);
-  font-size: 12.5px;
+  font-size: 13px;
+}
+
+/* Visible only when the catalog is stale (>48h) — amber by definition. */
+.chatgoose-persona-catage {
+  justify-self: end;
+  text-align: right;
+  font: 400 11.5px/1.4 var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chatgoose-amber);
 }
 
 /* ── «Аккаунты» rows: two dense lines (М2) ──

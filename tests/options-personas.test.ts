@@ -165,9 +165,10 @@ describe('«Персоны» pane', () => {
       },
     });
     expect(emptyText()).toBe(COPY.personas.emptyUnknown);
-    expect(
-      page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]')?.textContent,
-    ).toBe(`${COPY.personas.catalogLabel}: ${COPY.personas.catalogNever}`);
+    const catalogRow =
+      page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
+    expect(catalogRow?.textContent).toContain(COPY.personas.catalogLabel);
+    expect(catalogRow?.textContent).toContain(COPY.personas.catalogNever);
   });
 
   it('says «каталог пуст» only once the server confirmed it for these credentials', async () => {
@@ -185,13 +186,35 @@ describe('«Персоны» pane', () => {
       },
     });
     expect(emptyText()).toBe(COPY.personas.emptyConfirmed);
-    expect(
-      page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]')?.textContent,
-    ).toBe(
-      `${COPY.personas.catalogLabel}: ${
-        COPY.personas.catalogUpdated.replace('{date}', '25.07.2026 14:05')
-      }`,
+    const catalogRow =
+      page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
+    expect(catalogRow?.textContent).toContain(
+      COPY.personas.catalogUpdated.replace('{date}', '25.07.2026 14:05'),
     );
+    // Fresh catalog (< 48h): no staleness marker.
+    const age = catalogRow?.querySelector<HTMLElement>('.chatgoose-persona-catage');
+    expect(age?.hidden).toBe(true);
+  });
+
+  it('marks a stale catalog with its age in days once it is older than 48h', async () => {
+    const source = personaCatalogSource({
+      agencyHubBaseUrl: 'https://hub.example.test',
+      agencyHubApiKey: '',
+      agencyHubDeviceToken: 'device-x',
+    });
+    page = await mountOptionsPage({
+      settings: HUB_SETTINGS,
+      state: {
+        personaCatalog: [],
+        personaCatalogSource: source,
+        personaCatalogFetchedAt: new Date(Date.now() - 11 * 86_400_000).toISOString(),
+      },
+    });
+    const age = page.document.querySelector<HTMLElement>(
+      '[data-role="persona-catalog"] .chatgoose-persona-catage',
+    );
+    expect(age?.hidden).toBe(false);
+    expect(age?.textContent).toBe(COPY.personas.catalogAge.replace('{n}', '11'));
   });
 
   it('renders a row with the built-in badge, mono version and mapping count', async () => {

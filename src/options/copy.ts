@@ -350,18 +350,22 @@ export const COPY = {
     emptyAllArchived: 'Все персоны каталога в архиве.',
     builtInBadge: 'built-in',
     versionPrefix: 'v',
-    accountsCount: 'аккаунтов: {n}',
+    accountsCount: 'аккаунтов · {n}',
     statusActive: 'активна',
     statusArchived: 'архивная',
     archivedMapped: 'выбери замену',
     catalogLabel: 'Каталог',
     catalogUpdated: 'обновлён {date}',
     catalogNever: 'ещё не обновлялся',
+    /** Staleness marker at the right edge of the catalog row — shown (amber)
+     * only once the catalog is older than 48 hours; an absolute timestamp
+     * alone hides how stale it is. */
+    catalogAge: '{n} дн назад',
     catalogRefresh: 'Проверить связь и обновить',
-    catalogRefreshHint: 'Каталог перечитывается после успешной проверки связи.',
+    catalogRefreshHint: 'каталог перечитывается после успешной проверки связи',
     legacyFold: 'Архив локальной персоны',
     legacyNote:
-      'Legacy: локальный текст персоны сохранён без изменений. Экспортируйте его перед удалением расширения или чисткой данных браузера.',
+      'Legacy: локальный текст персоны сохранён без изменений. Экспортируй его перед удалением расширения или чисткой данных браузера.',
     legacyDownload: 'Скачать JSON',
     legacyCopy: 'Копировать',
     legacyDownloaded: 'JSON с легаси-персонами скачан.',
