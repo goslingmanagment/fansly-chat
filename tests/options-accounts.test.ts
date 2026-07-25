@@ -1285,9 +1285,18 @@ describe('Options page coach settings', () => {
     expect(section.textContent).toContain(COPY.generation.debugHint);
 
     // The owner's rulings: no reset affordances, no presets, no changed-markers.
+    // The М2 controls are the ONLY buttons this pane may carry — −/+ steppers
+    // and the recap segment. Anything else in this list is a regression.
+    const allowedButtons = new Set([
+      '−',
+      '+',
+      COPY.generation.coachRecapOff,
+      COPY.generation.coachRecapShort,
+      COPY.generation.coachRecapFull,
+    ]);
     const buttonLabels = Array.from(section.querySelectorAll('button'))
       .map((button) => button.textContent ?? '');
-    expect(buttonLabels).toEqual([]);
+    expect(buttonLabels.filter((label) => !allowedButtons.has(label))).toEqual([]);
   });
 
   it('flashes the clamped value in the row hint, in russian', async () => {
@@ -1391,6 +1400,55 @@ describe('Options page coach settings', () => {
     expect(warning.hidden).toBe(true);
     await vi.waitFor(() => {
       expect(currentState.settings.coachAutoRecap).toBe('short');
+    }, { timeout: 2000 });
+  });
+
+  it('drives the hidden recap select from the visible segment buttons', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const recapSelect = getRecapSelect();
+    expect(recapSelect.hidden).toBe(true);
+    const warning = getRecapWarning()!;
+    const fullButton = document.querySelector<HTMLButtonElement>(
+      'button[data-recap-choice="full"]',
+    )!;
+    const offButton = document.querySelector<HTMLButtonElement>(
+      'button[data-recap-choice="off"]',
+    )!;
+    expect(offButton.getAttribute('aria-pressed')).toBe('true');
+
+    fullButton.click();
+
+    // The segment writes THROUGH the select: value, pressed state, warning and
+    // the persisted setting all follow the one carrier.
+    expect(recapSelect.value).toBe('full');
+    expect(fullButton.getAttribute('aria-pressed')).toBe('true');
+    expect(offButton.getAttribute('aria-pressed')).toBe('false');
+    expect(warning.hidden).toBe(false);
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachAutoRecap).toBe('full');
+    }, { timeout: 2000 });
+  });
+
+  it('steps and persists a count from the −/+ stepper buttons', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const memoryInput = getCoachMemoryInput();
+    const stepper = memoryInput.closest('.chatgoose-stepper')!;
+    const [minusButton, plusButton] = Array.from(
+      stepper.querySelectorAll<HTMLButtonElement>('.chatgoose-stepper-btn'),
+    );
+
+    plusButton!.click();
+    expect(memoryInput.value).toBe('11');
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachHistoryLimit).toBe(11);
+    }, { timeout: 2000 });
+
+    minusButton!.click();
+    expect(memoryInput.value).toBe('10');
+    await vi.waitFor(() => {
+      expect(currentState.settings.coachHistoryLimit).toBe(10);
     }, { timeout: 2000 });
   });
 
