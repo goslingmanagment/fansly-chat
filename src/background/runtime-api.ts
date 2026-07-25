@@ -1128,15 +1128,16 @@ export function registerRuntimeApi({
           // dropped/foreign metadata write) fall back to the captured address.
           const capturedMeta = await readDeviceTokenMeta();
           const capturedBaseUrl = capturedMeta?.issuedFrom || before.settings.agencyHubBaseUrl;
-          // No readable metadata at all while a token IS stored: nothing on this
-          // device knows which hub minted it (a pre-metadata record, a foreign
-          // version, an unreadable storage read). The revoke below is then aimed
-          // at a GUESS, so a 401/403 from that address is not proof the bearer is
-          // dead — it is equally the answer of a hub that never issued it. Such a
-          // revoke is reported as `unreachable` («не подтверждён») further down.
-          // With valid metadata the address is known and the 401/403 →
-          // `already-invalid` mapping stands.
-          const issuingHubUnknown = capturedMeta === null;
+          // No recorded ADDRESS for the token that is stored: nothing on this
+          // device knows which hub minted it. That covers an absent, foreign or
+          // unreadable metadata record AND a valid pre-`issuedFrom` v1 record —
+          // the latter is exactly the case that falls back to the CURRENT base URL
+          // above, i.e. also a guess. The revoke below is then aimed at that
+          // guess, so a 401/403 from it is not proof the bearer is dead — it is
+          // equally the answer of a hub that never issued it. Such a revoke is
+          // reported as `unreachable` («не подтверждён») further down; only a
+          // recorded issuing address keeps the 401/403 → `already-invalid` mapping.
+          const issuingHubUnknown = !capturedMeta?.issuedFrom;
 
           // (b) ALWAYS wipe both custody keys to EMPTY strings FIRST — the durable
           // step. Write ONLY the two top-level custody storage keys, never the

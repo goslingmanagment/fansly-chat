@@ -1207,6 +1207,35 @@ describe('runtime-api signOutAgencyHub', () => {
     vi.restoreAllMocks();
   });
 
+  it('maps a 401/403 revoke to "unreachable" for a metadata record with no issuing address', async () => {
+    // A valid pre-`issuedFrom` v1 record is READABLE but says nothing about who
+    // minted the token, so the revoke falls back to the CURRENT base URL — also a
+    // guess. Keying the honest-outcome decision on the record's existence rather
+    // than on the address would report «уже недействителен» over that guess.
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockStorage = createStorage({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
+      [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
+        version: 1, keyPrefix: 'abc', issuedAt: 1, expiresAt: '2026-08-01T00:00:00.000Z',
+      },
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://hub-b.example' },
+    });
+    const agencyHubClient = {
+      testConnection: vi.fn(async () => ({ ok: true })),
+      revokeDeviceToken: vi.fn(
+        async (
+          _settings: { agencyHubBaseUrl: string; agencyHubDeviceToken: string },
+          _signal: AbortSignal,
+        ) => 'already-invalid' as const,
+      ),
+    };
+    const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
+    expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'unreachable' });
+    const [passedSettings] = agencyHubClient.revokeDeviceToken.mock.calls[0]!;
+    expect(passedSettings.agencyHubBaseUrl).toBe('https://hub-b.example');
+    vi.restoreAllMocks();
+  });
+
   it('keeps "already-invalid" when VALID metadata names the issuing hub', async () => {
     mockStorage = createStorage({
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',

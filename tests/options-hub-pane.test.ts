@@ -9,6 +9,7 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
 } from '../src/shared/constants.js';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
@@ -150,6 +151,62 @@ describe('options «Agency Hub» pane', () => {
     expect(detail(page, 'fan-summary').textContent).toContain(COPY.hub.fanSummaryEmpty);
   });
 
+  it('runs ONE connection test when this tab signs in, despite its own storage event', async () => {
+    // The background's custody write reaches this document as a storage event too,
+    // and it can arrive before the RPC reply. The fence must still apply the new
+    // credential, but the sign-in path owns the permission → connection-test →
+    // hydrate chain: two chains would double every hub check (and the E59 wording
+    // promises the fence never does that).
+    let releaseIssue!: () => void;
+    const heldIssue = new Promise<void>((resolve) => { releaseIssue = resolve; });
+    const page = await mountOptionsPage({
+      settings: { agencyHubBaseUrl: 'https://hub.example' },
+      permissionGranted: true,
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_SIX_PAGES,
+        issueDeviceToken: async () => {
+          await heldIssue;
+          return {
+            ok: true,
+            keyPrefix: 'abc123',
+            label: 'chatgoose-extension firefox',
+            expiresAt: '2026-10-04T00:00:00.000Z',
+          };
+        },
+      },
+    });
+    const connectionTests = (): number =>
+      page.sentRequestTypes().filter((type) => type === 'testAgencyHubConnection').length;
+    const before = connectionTests();
+
+    const inputs = Array.from(page.document.querySelectorAll<HTMLInputElement>('input'));
+    const username = inputs.find((input) => input.autocomplete === 'username');
+    const password = inputs.find((input) => input.autocomplete === 'current-password');
+    username!.value = 'lora-chatter';
+    password!.value = 'pw';
+    hubButton(page, 'Sign in & issue device token').click();
+    await page.flushAsync();
+
+    // The background already committed the token; its storage event lands while the
+    // RPC is still open.
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+        oldValue: '',
+        newValue: 'agency_hub_device_abc123',
+      },
+    });
+    await page.flushAsync();
+
+    releaseIssue();
+    await page.flushAsync();
+
+    // The sign-in is real (the pane shows the live token)…
+    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+    // …and exactly one live test was run for it.
+    expect(connectionTests() - before).toBe(1);
+  });
+
   describe('«Выйти…»', () => {
     it('asks for confirmation before destroying anything', async () => {
       const page = await signedInMount();
@@ -263,6 +320,85 @@ describe('options «Agency Hub» pane', () => {
       // …so there is nothing left to sign out of, and the sign-in form is back.
       expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
       expect(page.document.body.textContent).toContain('No device token yet.');
+      // The sign-in meta line is RE-RENDERED: it normally survives a repaint on
+      // its own, which would leave a «Hub requests use the device token» line (or,
+      // after a sign-in in this session, «Device token abc… issued») next to a
+      // signed-out pill.
+      const signInMeta = page.document.querySelector<HTMLElement>(
+        '[data-role="hub-signin-meta"]',
+      );
+      expect(signInMeta?.textContent).toBe(COPY.hub.signInHint);
+      expect(signInMeta?.textContent).not.toContain('device token;');
+    });
+
+    it('applies the fence even when a later event supersedes the custody read', async () => {
+      // The generation guard drops the callback of a superseded read. With the
+      // custody decision taken from the EVENT, a persona-catalog change landing one
+      // tick after the wipe discarded the fence entirely and this tab kept a
+      // revoked token until the next custody event. The decision belongs to the
+      // STATE the surviving read returned.
+      const page = await signedInMount({
+        settings: {
+          agencyHubBaseUrl: 'https://hub.example',
+          agencyHubDeviceToken: 'agency_hub_device_SECRET',
+          agencyHubApiKey: 'legacy-SECRET',
+        },
+      });
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+
+      // Burst: the wipe, then an unrelated event in the same tick — the second
+      // read wins the generation race.
+      page.emitStorageChange({
+        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+          oldValue: 'agency_hub_device_SECRET',
+          newValue: '',
+        },
+        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
+      });
+      page.emitStorageChange({
+        [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: { oldValue: null, newValue: Date.now() },
+      });
+      await page.flushAsync();
+
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
+      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenActive);
+      expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
+    });
+
+    it('invalidates THIS tab’s pending credential save when another tab wipes', async () => {
+      // The wave-B quiesce only covers the tab that pressed «Выйти». Here the OTHER
+      // tab wiped while this one had a typed-but-unsaved key: the 350 ms debounce
+      // would fire afterwards and put a usable credential back on disk while the
+      // signing-out tab honestly reported `revoked`. Real timers on purpose — the
+      // point is that the debounce genuinely elapses after the wipe.
+      const page = await signedInMount({
+        settings: {
+          agencyHubBaseUrl: 'https://hub.example',
+          agencyHubDeviceToken: 'agency_hub_device_SECRET',
+          agencyHubApiKey: 'legacy-SECRET',
+        },
+      });
+      const keyInput = page.document.querySelector<HTMLInputElement>(
+        'input[type="password"][autocomplete="off"]',
+      );
+      keyInput!.value = 'legacy-typed-SECRET';
+      keyInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+
+      page.emitStorageChange({
+        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+          oldValue: 'agency_hub_device_SECRET',
+          newValue: '',
+        },
+        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
+      });
+      await page.flushAsync();
+
+      // Well past the debounce window: nothing persisted the typed key…
+      await new Promise((resolve) => { setTimeout(resolve, 500); });
+      expect(page.getRawStorage()[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+      expect(page.getRawStorage()[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+      // …and the draft the chatter typed is still in front of them.
+      expect(keyInput!.value).toBe('legacy-typed-SECRET');
     });
 
     it('keeps a dirty legacy-key input while still updating the signed-in state', async () => {

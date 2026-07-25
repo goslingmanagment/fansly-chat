@@ -1114,6 +1114,13 @@ async function render(): Promise<void> {
     viaDeviceToken: boolean;
     code?: string;
   } | null = null;
+  /** True while THIS page owns a custody write — the sign-in / re-issue RPC or
+   * «Выйти» — INCLUDING the permission → connection-test → hydrate chain that
+   * path runs afterwards. The background's write reaches this document as a
+   * `storage.onChanged` event too, and it can arrive before the RPC resolves: the
+   * cross-tab fence must then still APPLY the new custody state (it is real) but
+   * must NOT re-run that chain, or every hub check would fire twice. */
+  let ownCustodyWriteInFlight = false;
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
@@ -1481,6 +1488,10 @@ async function render(): Promise<void> {
   const hubSignInStatus = document.createElement('div');
   const hubSignInMeta = document.createElement('div');
   hubSignInMeta.className = 'chatgoose-meta';
+  // Tagged so a test can pin WHICH line this is: it is the one line that survives
+  // a repaint by itself (`renderHubSignInState` only fills it when empty), so a
+  // stale sign-in message next to a signed-out pill is a real failure mode.
+  hubSignInMeta.dataset.role = 'hub-signin-meta';
 
   let hubSignInFormExpanded = false;
   const hubReissueButton = createButton(COPY.hub.reissueToken, true);
@@ -1584,6 +1595,13 @@ async function render(): Promise<void> {
       }
       hubSignInButton.disabled = true;
       hubSignInMeta.textContent = 'Signing in…';
+      // THIS tab is about to make the background write custody. The storage event
+      // for that write lands in the cross-tab fence below; the claim is held until
+      // the refresh chain this path owns has run, so the fence never doubles it.
+      ownCustodyWriteInFlight = true;
+      // Set once the chain below took over the claim — the `finally` must then not
+      // release it early.
+      let ownRefreshStarted = false;
       try {
         // Finish the shared local form write before the background issues a
         // device token from those Hub inputs. This prevents a delayed local
@@ -1613,12 +1631,17 @@ async function render(): Promise<void> {
           // storage re-read), so the signature-change refresh never fires on
           // its own — without this the diagnostics card and the hero pill
           // keep claiming "not set up" next to an active token.
+          ownRefreshStarted = true;
           void (async () => {
-            await refreshAgencyHubPermissionState();
-            await runAgencyHubConnectionTest({ force: true });
-            // The freshly-issued device token makes checkIdentity return AUTH,
-            // so the Доступ row (and the headline) flip in place — no reload.
-            await hydrateHubStatusRows(storedHubSignature());
+            try {
+              await refreshAgencyHubPermissionState();
+              await runAgencyHubConnectionTest({ force: true });
+              // The freshly-issued device token makes checkIdentity return AUTH,
+              // so the Доступ row (and the headline) flip in place — no reload.
+              await hydrateHubStatusRows(storedHubSignature());
+            } finally {
+              ownCustodyWriteInFlight = false;
+            }
           })().catch((error: unknown) => {
             console.error('Failed to refresh Agency Hub status after sign-in', error);
           });
@@ -1626,6 +1649,9 @@ async function render(): Promise<void> {
           hubSignInMeta.textContent = `Sign-in failed: ${response.error.message}`;
         }
       } finally {
+        if (!ownRefreshStarted) {
+          ownCustodyWriteInFlight = false;
+        }
         hubSignInButton.disabled = false;
         renderHubSignInState();
       }
@@ -1654,64 +1680,81 @@ async function render(): Promise<void> {
       hubSignOutConfirmButton.disabled = true;
       hubSignOutCancelButton.disabled = true;
       hubSignOutStatus.textContent = COPY.hub.signOutRunning;
-      // Quiesce this page's settings writer FIRST. A debounced snapshot still
-      // pending here carries `agencyHubApiKey`, and letting it land during the
-      // background's revoke window would resurrect a usable key after the wipe
-      // — the handler would then honestly report `revoked` about a credential
-      // that is back on disk. Cancel the pending write and join any already-
-      // running one before the wipe begins.
-      await quiesceSettingsBeforeSignOut();
-      if (disposed) return;
-      // The background owns the whole sequence — capture, wipe, revoke — so a
-      // pagehide mid-revoke can never leave the credentials on disk. The token
-      // never crosses this boundary; only the outcome does.
-      let outcome: AgencyHubSignOutResponse;
+      // The background's wipe reaches the cross-tab fence as a storage event.
+      // Claim it for this path until the refresh chain below has run (see the
+      // sign-in path) — otherwise both would repaint and re-check the hub.
+      ownCustodyWriteInFlight = true;
+      let ownRefreshStarted = false;
       try {
-        outcome = await sendRuntimeRequest('signOutAgencyHub');
-      } catch (error) {
-        // A rejected request means the background may have wiped NOTHING.
-        // Report the loud case, never a comforting «стёрт локально».
-        console.error('Agency Hub sign-out request failed', error);
-        outcome = { outcome: 'wipe-failed' };
+        // Quiesce this page's settings writer FIRST. A debounced snapshot still
+        // pending here carries `agencyHubApiKey`, and letting it land during the
+        // background's revoke window would resurrect a usable key after the wipe
+        // — the handler would then honestly report `revoked` about a credential
+        // that is back on disk. Cancel the pending write and join any already-
+        // running one before the wipe begins.
+        await quiesceSettingsBeforeSignOut();
+        if (disposed) return;
+        // The background owns the whole sequence — capture, wipe, revoke — so a
+        // pagehide mid-revoke can never leave the credentials on disk. The token
+        // never crosses this boundary; only the outcome does.
+        let outcome: AgencyHubSignOutResponse;
+        try {
+          outcome = await sendRuntimeRequest('signOutAgencyHub');
+        } catch (error) {
+          // A rejected request means the background may have wiped NOTHING.
+          // Report the loud case, never a comforting «стёрт локально».
+          console.error('Agency Hub sign-out request failed', error);
+          outcome = { outcome: 'wipe-failed' };
+        }
+        if (disposed) return;
+
+        // Re-read storage as the source of truth about what is actually stored
+        // now — including the wipe-failed case, where the fields must show what
+        // really survived rather than an optimistic blank.
+        try {
+          state.settings = (await loadStorageState()).settings;
+        } catch (error) {
+          console.error('Failed to re-read settings after sign-out', error);
+        }
+        deviceTokenMeta = asDeviceTokenMeta(
+          await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
+        );
+        agencyHubApiKeyDirty = false;
+        agencyHubKeyInput.value = state.settings.agencyHubApiKey;
+
+        hubSignOutStatus.textContent = {
+          revoked: COPY.hub.signOutRevoked,
+          'already-invalid': COPY.hub.signOutAlreadyInvalid,
+          unreachable: COPY.hub.signOutUnreachable,
+          'wipe-failed': COPY.hub.signOutWipeFailed,
+        }[outcome.outcome];
+        hubSignOutStatus.dataset.signOutOutcome = outcome.outcome;
+
+        hubSignOutConfirmButton.disabled = false;
+        hubSignOutCancelButton.disabled = false;
+        hubSignOutConfirmRow.hidden = true;
+        hubSignInMeta.textContent = '';
+        renderHubSignInState();
+        // The credential is gone: repaint the hub-facing diagnosis rather than
+        // leaving an AUTH row next to an empty token field.
+        ownRefreshStarted = true;
+        void (async () => {
+          try {
+            await refreshAgencyHubPermissionState();
+            await runAgencyHubConnectionTest({ force: true });
+            await hydrateHubStatusRows(storedHubSignature());
+          } finally {
+            ownCustodyWriteInFlight = false;
+          }
+        })().catch((error: unknown) => {
+          console.error('Failed to refresh Agency Hub status after sign-out', error);
+        });
+      } finally {
+        if (!ownRefreshStarted) {
+          // Every early return above (a disposed page included) lands here.
+          ownCustodyWriteInFlight = false;
+        }
       }
-      if (disposed) return;
-
-      // Re-read storage as the source of truth about what is actually stored
-      // now — including the wipe-failed case, where the fields must show what
-      // really survived rather than an optimistic blank.
-      try {
-        state.settings = (await loadStorageState()).settings;
-      } catch (error) {
-        console.error('Failed to re-read settings after sign-out', error);
-      }
-      deviceTokenMeta = asDeviceTokenMeta(
-        await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
-      );
-      agencyHubApiKeyDirty = false;
-      agencyHubKeyInput.value = state.settings.agencyHubApiKey;
-
-      hubSignOutStatus.textContent = {
-        revoked: COPY.hub.signOutRevoked,
-        'already-invalid': COPY.hub.signOutAlreadyInvalid,
-        unreachable: COPY.hub.signOutUnreachable,
-        'wipe-failed': COPY.hub.signOutWipeFailed,
-      }[outcome.outcome];
-      hubSignOutStatus.dataset.signOutOutcome = outcome.outcome;
-
-      hubSignOutConfirmButton.disabled = false;
-      hubSignOutCancelButton.disabled = false;
-      hubSignOutConfirmRow.hidden = true;
-      hubSignInMeta.textContent = '';
-      renderHubSignInState();
-      // The credential is gone: repaint the hub-facing diagnosis rather than
-      // leaving an AUTH row next to an empty token field.
-      void (async () => {
-        await refreshAgencyHubPermissionState();
-        await runAgencyHubConnectionTest({ force: true });
-        await hydrateHubStatusRows(storedHubSignature());
-      })().catch((error: unknown) => {
-        console.error('Failed to refresh Agency Hub status after sign-out', error);
-      });
     })();
   });
 
@@ -1902,7 +1945,11 @@ async function render(): Promise<void> {
     quotaByPage: [],
     spenders: null,
     opsDaily: null,
-    unavailable: { quota: false, opsDaily: false, spenders: false, fansly: false },
+    // Fansly starts UNAVAILABLE: before the first sessions read lands, the zero
+    // above is a placeholder, and a report copied in that window would otherwise
+    // claim «аккаунты не обнаружены» about a snapshot nobody has taken yet. The
+    // first `paintFanslyStatusRow` sets the honest value in BOTH its branches.
+    unavailable: { quota: false, opsDaily: false, spenders: false, fansly: true },
     readiness: [],
   };
   // The account ids that currently have a CAPTURED session. The persona step
@@ -3446,12 +3493,20 @@ async function render(): Promise<void> {
         persisted.agencyHubDeviceToken === state.settings.agencyHubDeviceToken &&
         persisted.agencyHubApiKey === state.settings.agencyHubApiKey
       ) {
-        // This tab's own write echoed back by storage.onChanged: nothing to
-        // apply, and no reason to re-run the hub checks its save path already
-        // fired.
+        // Already in sync — this tab's own write echoed back, or an unrelated
+        // (settings / persona-catalog) event. Nothing to apply, and no reason to
+        // re-run the hub checks the writing path already fired. This equality
+        // check is the ONLY no-op suppressor, which is why the caller may invoke
+        // this on every applied read instead of trusting a per-event flag.
         return;
       }
       const tokenChanged = persisted.agencyHubDeviceToken !== state.settings.agencyHubDeviceToken;
+      const hadCredential = Boolean(
+        state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim(),
+      );
+      const wipedExternally = hadCredential &&
+        !persisted.agencyHubDeviceToken.trim() &&
+        !persisted.agencyHubApiKey.trim();
       state.settings = {
         ...state.settings,
         agencyHubDeviceToken: persisted.agencyHubDeviceToken,
@@ -3460,10 +3515,44 @@ async function render(): Promise<void> {
       if (!agencyHubApiKeyDirty && document.activeElement !== agencyHubKeyInput) {
         agencyHubKeyInput.value = persisted.agencyHubApiKey;
       }
+      if (wipedExternally) {
+        // Another tab (or the background) destroyed the credentials. THIS tab's
+        // pending credential write must not resurrect them: the wave-B quiesce
+        // only covers the tab that pressed «Выйти», so a debounced snapshot armed
+        // here — 350 ms is easily inside the revoke window — would persist the
+        // typed key AFTER the wipe, exactly the hole the sign-out quiesce closes
+        // locally. Cancel that pending write, drop the credential's dirty claim,
+        // and stale-out any ALREADY RUNNING one (the snapshot-version bump is the
+        // same instrument the future-schema barrier uses, so an in-flight persist
+        // can no longer move `state.settings.agencyHubApiKey` back). The typed
+        // text stays in the field as a non-persisting draft; an explicit later
+        // edit re-arms it deliberately.
+        saveSettingsDebounced.cancel();
+        agencyHubApiKeyDirty = false;
+        settingsSnapshotVersion += 1;
+        agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
+        // The cancelled snapshot is deliberately NOT re-armed for its
+        // non-credential half: `persist` writes the STORED key back into the field
+        // whenever the dirty claim is gone, which would erase the draft this fence
+        // just promised to keep. `settingsDirty` stays set, so the next edit, blur
+        // or pagehide still persists those edits — without the credential, because
+        // `collectSettingsPatch` only includes it for a dirty claim.
+      }
       // Immediate, synchronous truth: the token pill, the folded sign-in form and
-      // the «Выйти» button all read `state.settings` only.
+      // the «Выйти» button all read `state.settings` only. The meta line is
+      // cleared first: `renderHubSignInState` only fills it when empty, so a stale
+      // «Device token abc… issued (expires …)» would otherwise sit next to a
+      // signed-out pill.
+      hubSignInMeta.textContent = '';
       renderHubSignInState();
       renderAgencyHubConnectionState();
+      if (ownCustodyWriteInFlight) {
+        // THIS tab's own sign-in / re-issue / «Выйти» is mid-flight (the storage
+        // event can beat its RPC reply). The state above is applied — it is real —
+        // but that path owns the permission → connection-test → hydrate chain and
+        // runs it exactly once; doing it here too would double every hub check.
+        return;
+      }
       void (async () => {
         if (tokenChanged) {
           // The metadata record travels WITH the token (one atomic write on
@@ -3491,15 +3580,12 @@ async function render(): Promise<void> {
       changes: Record<string, browser.storage.StorageChange>,
       areaName: string,
     ): void => {
-      const custodyChanged = Boolean(
-        changes[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] ||
-        changes[AGENCY_HUB_API_KEY_STORAGE_KEY],
-      );
       if (
         areaName !== 'local' ||
         !(
           changes.settings ||
-          custodyChanged ||
+          changes[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] ||
+          changes[AGENCY_HUB_API_KEY_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_SOURCE_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]
@@ -3517,9 +3603,14 @@ async function render(): Promise<void> {
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
         renderPersonaCatalog();
         refreshAccountMappingPersonalityOptions?.();
-        if (custodyChanged) {
-          applyExternalCustodyChange(refreshedState.settings);
-        }
+        // Custody is applied from the STATE this generation read, never gated on
+        // which event started it. A per-event `custodyChanged` flag belongs to the
+        // read that the generation guard above then DISCARDS: a settings or
+        // persona-catalog event landing one tick after a wipe would supersede the
+        // custody read, and the surviving callback (flag `false`) would leave this
+        // tab holding a revoked token until the next custody event. The equality
+        // check inside is what suppresses the no-ops.
+        applyExternalCustodyChange(refreshedState.settings);
       }).catch((error: unknown) => {
         console.error('Failed to apply live persona catalog update', error);
       });

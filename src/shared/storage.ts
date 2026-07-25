@@ -283,8 +283,15 @@ export async function saveSettings(
     items[AGENCY_HUB_API_KEY_STORAGE_KEY] = nextSettings.agencyHubApiKey;
   }
   // Co-writes land in the same set as the credential above — one atomic commit,
-  // so the two can never describe different tokens.
+  // so the two can never describe different tokens. The documented invariant is
+  // ENFORCED here rather than trusted: a co-write that collided with `settings`,
+  // `schemaVersion` or a custody key this call already owns would silently win
+  // over the value computed above, which is how a credential (or the schema
+  // stamp) gets clobbered by an unrelated caller. Fail closed instead.
   for (const [key, value] of Object.entries(options.alsoWrite ?? {})) {
+    if (Object.prototype.hasOwnProperty.call(items, key)) {
+      throw new Error(`saveSettings: alsoWrite may not overwrite the key this write owns: ${key}`);
+    }
     items[key] = value;
   }
   await browser.storage.local.set(items);

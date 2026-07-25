@@ -316,6 +316,41 @@ describe('options «Статус» pane', () => {
     vi.restoreAllMocks();
   });
 
+  it('does not claim zero Fansly accounts in a report copied BEFORE the first read', async () => {
+    // The report model starts with a placeholder zero, and the sessions snapshot
+    // can take up to 5s. A report copied in that window must not turn the
+    // placeholder into «аккаунты не обнаружены» — nobody has read anything yet.
+    let releaseSessions!: (sessions: SessionSnapshotEntry[]) => void;
+    const pendingSessions = new Promise<SessionSnapshotEntry[]>((resolve) => {
+      releaseSessions = resolve;
+    });
+    const page = await readyMount({
+      sessions: () => pendingSessions,
+      runtime: { health: HEALTH_UP, identity: IDENTITY_AUTH },
+    });
+
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(page.window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    expect(writeText.mock.calls[0]?.[0] as unknown as string)
+      .toContain(COPY.status.fanslyUnavailable);
+    expect(writeText.mock.calls[0]?.[0] as unknown as string)
+      .not.toContain(COPY.status.fanslyEmpty);
+
+    // Once the read lands, the report speaks about the snapshot again.
+    releaseSessions([LIVE_SESSION]);
+    await page.flushAsync();
+    statusButton(page, COPY.status.copyReport).click();
+    await page.flushAsync();
+    const second = writeText.mock.calls[1]?.[0] as unknown as string;
+    expect(second).toContain('Lora (@lora)');
+    expect(second).not.toContain(COPY.status.fanslyUnavailable);
+  });
+
   it('keeps no_permission a distinct amber verdict with a grant action, not a dead core', async () => {
     const page = await mountOptionsPage({
       settings: { agencyHubBaseUrl: 'https://hub.example', agencyHubDeviceToken: 'tok' },

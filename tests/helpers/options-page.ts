@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { getErrorMessage } from '../../src/shared/errors.js';
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
@@ -15,6 +16,7 @@ import {
 import type {
   AccountsView,
   AgencyHubDeviceTokenMeta,
+  AgencyHubDeviceTokenResponse,
   AgencyHubHealthResponse,
   AgencyHubIdentityResponse,
   AgencyHubSignOutResponse,
@@ -78,6 +80,12 @@ export interface MountOverrides {
      * durable wipe on the harness record, so a test sees what the real
      * background would have left behind. A factory may reject. */
     signOut?: AgencyHubSignOutResponse | (() => AgencyHubSignOutResponse | Promise<AgencyHubSignOutResponse>);
+    /** Reply for the sign-in / re-issue RPC (`issueAgencyHubDeviceToken`). A
+     * successful reply ALSO performs the background's atomic co-write on the
+     * harness record — the custody key plus the metadata that names the issuing
+     * hub — so the page under test sees production storage. A factory may defer
+     * (which is how a test holds the RPC open while the storage event lands). */
+    issueDeviceToken?: MaybeFactory<AgencyHubDeviceTokenResponse>;
     deviceTokenMeta?: AgencyHubDeviceTokenMeta | null;
     /** `false` makes every `setAccountLabel` fail the way a rejected storage
      * write does, so a test can prove the editor stays open with the typed text. */
@@ -388,6 +396,30 @@ export async function mountOptionsPage(
             if (runtime.deviceTokenMeta !== undefined) return runtime.deviceTokenMeta;
             const meta = stored[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
             return meta ?? null;
+          }
+          case 'issueAgencyHubDeviceToken': {
+            const reply = await runtimeReply<AgencyHubDeviceTokenResponse>(
+              runtime.issueDeviceToken,
+              { ok: false, error: getErrorMessage('hub_request_failed') },
+            );
+            if (reply.ok) {
+              // The background commits the token AND its issuing-hub metadata in
+              // ONE storage.set (E59 post-campaign) — model both so the page's
+              // storage re-read sees a real sign-in.
+              const { baseUrl } = message as { baseUrl?: string };
+              stored = {
+                ...stored,
+                [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: `agency_hub_device_${reply.keyPrefix}`,
+                [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
+                  version: 1,
+                  keyPrefix: reply.keyPrefix,
+                  issuedAt: Date.now(),
+                  expiresAt: reply.expiresAt,
+                  ...(baseUrl ? { issuedFrom: baseUrl } : {}),
+                },
+              };
+            }
+            return reply;
           }
           case 'signOutAgencyHub': {
             const reply = await runtimeReply<AgencyHubSignOutResponse>(

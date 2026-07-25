@@ -75,7 +75,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E56 | 2026-07-24 | Voice player uses decoded complete-buffer duration, persistent keyed media nodes, and explicit hidden-media suspension |
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
-| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim |
+| E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim. **Amended (post-campaign round 2):** the fence runs from the state of EVERY applied read (never a per-event flag the generation guard can discard) and invalidates this tab's pending credential write, while skipping the hub-check chain owned by this page's own custody RPC; the honest-outcome rule keys on the recorded issuing ADDRESS (`!meta.issuedFrom`), `alsoWrite` throws on a key the same write owns, `unavailable.fansly` starts TRUE, and the fence re-renders the sign-in meta line |
 
 ## Entries
 
@@ -1862,3 +1862,54 @@ empty. (2) A failed Fansly sessions read carries into `StatusReportModel`
 (`unavailable.fansly`): the row was already honest, but the report printed the
 zero-account claim from the same placeholder zero. A successful re-poll clears the
 flag.
+
+**E59 amendment — post-campaign round 2 (2026-07-25).** Two independent reviews of
+the block above found the fence still losable and one rule mis-keyed; seven
+corrections, and three of them supersede wording recorded one paragraph earlier.
+
+The fence is applied from the STATE of every applied read, never gated on which
+event started it. A per-event `custodyChanged` flag belongs to the read the
+generation guard then discards: a `settings` or persona-catalog change landing one
+tick after the wipe superseded the custody read, and the surviving callback (flag
+`false`) left the tab holding a revoked token until the next custody event. The
+in-fence equality check is the ONLY no-op suppressor, which is what makes the
+unconditional call safe.
+
+An external wipe now also invalidates THIS tab's pending credential write.
+Wave B's quiesce covers only the tab that pressed «Выйти»; a second tab with a
+typed-but-unsaved legacy key would let its 350 ms debounce fire after the wipe and
+put a usable credential back on disk while the signing-out tab honestly reported
+`revoked`. The fence cancels that pending snapshot, drops the credential's dirty
+claim and bumps the snapshot versions (the future-schema barrier's instrument) so
+an already-running persist can no longer move the in-memory key back. The typed
+text stays in the field as a NON-PERSISTING draft — the cancelled snapshot is
+deliberately not re-armed, because a save with the dirty claim gone writes the
+stored value back into the field and would erase that draft; `settingsDirty`
+survives, so the next edit, blur or pagehide still persists the non-credential
+edits without the credential.
+
+The fence must not double the hub checks it shares with this page's OWN custody
+RPCs. The background's write arrives as a storage event that can beat the RPC
+reply, so the equality check cannot see it coming. A page-level claim
+(`ownCustodyWriteInFlight`) is held across sign-in / re-issue / «Выйти» AND the
+refresh chain each of those paths owns; while it is held the fence still APPLIES
+the new custody state (it is real) but skips permission → connection-test →
+hydrate. This is what keeps the round-1 sentence about not doubling the save path's
+hub checks true.
+
+Superseded wording, corrected: (1) the honest-outcome rule keys on the recorded
+ADDRESS, not on the metadata record's existence — `!capturedMeta?.issuedFrom`. A
+valid pre-`issuedFrom` v1 record is readable yet says nothing about who minted the
+token, so its revoke also goes to a guess (the current base URL) and its 401/403
+must read `unreachable` too. (2) `alsoWrite` no longer trusts its documented
+invariant: a co-write colliding with `settings`, `schemaVersion` or a custody key
+the same call owns THROWS, because a silent overwrite there is how a credential or
+the schema stamp gets clobbered. (3) `unavailable.fansly` starts TRUE — before the
+first sessions read there is no snapshot to speak about, and the report copied in
+that window (up to 5s) would otherwise print «аккаунты не обнаружены» from the
+placeholder zero; both branches of the first paint set the honest value.
+
+Finally, the fence re-renders the sign-in meta line. `renderHubSignInState` fills
+that line only when it is EMPTY, so an external wipe used to leave «Hub requests
+use the device token …» — or, after a sign-in in the same session, «Device token
+abc… issued (expires …)» — sitting next to a signed-out pill.
