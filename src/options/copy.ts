@@ -75,8 +75,6 @@ export const COPY = {
   sections: {
     statusTitle: 'Статус',
     statusHint: 'Что сейчас работает: Fansly, Hub, доступ, AI-квота и Spenders.',
-    hubTitle: 'Agency Hub',
-    hubHint: 'Кернел агентства: генерация, персоны, Spenders. Вход — по device token.',
     personasTitle: 'Персоны',
     accountsTitle: 'Аккаунты',
     accountsHint: 'Fansly-аккаунты, которые видит расширение, и их персоны.',
@@ -232,14 +230,51 @@ export const COPY = {
 
   hub: {
     title: 'Agency Hub',
-    subtitle: 'Подключение к ядру: генерации, персоны, синк Fan Summary.',
-    /** Connection card. */
-    baseUrlLabel: 'Базовый URL',
+    /** Owner-fixed wording (2026-07-25): «ядро»/«хаб», never «кернел»; sign-in
+     * is login+password — the device token is issued BY the sign-in, nobody
+     * signs in «by token». */
+    subtitle: 'Ядро агентства: генерация, персоны, Spenders. Вход — по логину и паролю.',
+    /** The four zone captions, in the working order of the pane. */
+    zoneConnection: 'Подключение',
+    zoneSignIn: 'Вход',
+    zoneAccount: 'Аккаунт',
+    zoneDiagnostics: 'Диагностика',
+    /** Connection zone. */
+    baseUrlLabel: 'Адрес Agency Hub',
     baseUrlPlaceholder: 'https://адрес-вашего-хаба',
+    /** «Доступ к хосту» status row: pill word per state + the sentence the meta
+     * line shows while the state needs fixing (granted shows no sentence — the
+     * mono origin on the right already says everything). */
+    permLabel: 'Доступ к хосту',
+    permPillGranted: 'выдан',
+    permPillMissing: 'не выдан',
+    permPillNeedsCredential: 'нужен вход',
+    permPillCheckFailed: 'не проверился',
+    permPillNoUrl: 'нет адреса',
+    permPillInvalidUrl: 'адрес некорректен',
+    permPillUnsupported: 'недоступен',
+    permNoUrl: 'Синк выключен: не задан адрес Agency Hub. Укажи базовый URL хаба, затем разреши доступ к этому адресу.',
+    permInvalidUrl: 'Синк выключен: адрес Agency Hub некорректен. Нужен полный URL с http:// или https://.',
+    permCheckError: 'Синк выключен: не удалось проверить доступ к хосту. Firefox вернул ошибку при проверке {origin}: {message}.',
+    permDenied: 'Синк выключен: доступ к хосту не выдан. Firefox не выдал доступ для {origin}. Нажми «Разрешить доступ» ещё раз.',
+    permRequestError: 'Синк выключен: запрос доступа не удался. Firefox вернул ошибку при запросе {origin}: {message}.',
+    permUnsupported: 'Синк выключен: запрос доступа недоступен в этой сборке. Эта сборка браузера не даёт browser.permissions.request для доступа к Agency Hub.',
+    permAsk: 'Разреши доступ для {origin} — без него ChatGoose не достучится до хаба.',
+    permNoCredential: 'Доступ для {origin} выдан, но нужен вход или legacy-ключ.',
+    /** «Связь» status row: pill word per state + metas. */
+    connLabel: 'Связь',
+    connPillIdle: 'не проверялась',
+    connPillPending: 'сохраняем…',
+    connPillTesting: 'проверяем…',
+    connPillOk: 'есть',
+    connIdleMeta: 'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
+    connPendingMeta: 'Дописываем изменения настроек перед живой проверкой.',
+    connTestingMeta: 'Проверяем доступность хаба, разрешение и credential.',
+    /** Account zone. */
     identityLabel: 'Аккаунт',
     pagesLabel: 'Страницы ядра',
     pagesMore: 'и ещё {n}',
-    pagesCount: 'страниц: {n}',
+    pagesCount: '· {n}',
     deviceTokenLabel: 'Device token',
     deviceTokenActive: 'активен',
     deviceTokenRenews: 'продлевается при использовании',
@@ -251,6 +286,13 @@ export const COPY = {
     signIn: 'Войти',
     signInHint:
       'Адрес и логин выдаёт владелец агентства. Вход выпустит device token — пароль на устройстве не хранится.',
+    signInMissingFields: 'Сначала заполни адрес хаба, логин и пароль.',
+    signingIn: 'Входим…',
+    signInFailed: 'Вход не удался: {message}',
+    signInIssued: 'Device token {prefix}… выпущен (истекает {date}).',
+    /** Owner-fixed wording: the token is issued BY the login+password sign-in. */
+    tokenFallbackNote:
+      'Вход по логину и паролю выпускает device token; запросы идут по нему, legacy API-ключ — запасной путь.',
     testConnection: 'Проверить связь',
     reconnectAccess: 'Переподключить',
     reissueToken: 'Перевыпустить токен',
@@ -276,12 +318,14 @@ export const COPY = {
     checkViaDeviceToken: 'через device token',
     checkViaLegacyKey: 'по legacy-ключу',
     checkNever: 'ещё не проверяли',
+    checkDuration: '{n} мс',
     hostAccessLabel: 'Доступ к хосту',
+    hostAccessGranted: 'выдан',
     hostAccessGrantedFor: 'выдан для',
     contractLabel: 'Контракт SDK',
     contractMatches: 'совпадает с ядром',
     contractMismatch: 'не совпадает с ядром',
-    errorsLabel: 'Ошибки генераций (Hub)',
+    errorsLabel: 'Ошибки Hub',
     errorsToday: 'за сегодня: {n}',
     errorsLast: 'последняя {code} в {time}',
     errorsCapped: 'показаны последние 20',
@@ -289,6 +333,7 @@ export const COPY = {
     fanSummaryLast: 'последний пуш — {when} · {account}',
     fanSummaryEmpty: 'пушей ещё не было',
     legacyKeyFold: 'Legacy API-ключ (запасной путь)',
+    legacyKeyFieldLabel: 'API-ключ Agency Hub (запасной)',
     legacyKeyShow: 'Показать',
     legacyKeyHide: 'Скрыть',
     legacyKeyRemove: 'Удалить',

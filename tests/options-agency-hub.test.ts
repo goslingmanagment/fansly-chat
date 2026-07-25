@@ -255,7 +255,7 @@ describe('Options page - Agency Hub section', () => {
 
     expect(urlInput?.value).toBe('http://localhost:3000');
     expect(keyInput?.value).toBe('hub-key');
-    expect(section.textContent).toContain('Sync disabled: host access not granted.');
+    expect(section.textContent).toContain('Разреши доступ для http://localhost/*');
     expect(section.textContent).toContain('http://localhost/*');
     expect(permissionsContains).toHaveBeenCalled();
   });
@@ -329,10 +329,9 @@ describe('Options page - Agency Hub section', () => {
     storageDeferred.resolve();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Host access granted.');
-      // Readiness is claimed only by the live connection test, never by the
-      // local permission check (they contradicted each other on screen).
-      expect(section.textContent).not.toContain('Sync ready');
+      // Granted: the pill word flips and every «Синк выключен» sentence is gone.
+      expect(section.textContent).toContain('выдан');
+      expect(section.textContent).not.toContain('Синк выключен');
     }, { timeout: 2000 });
   });
 
@@ -347,8 +346,8 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Sync disabled: host access not granted.');
-      expect(section.textContent).toContain('Firefox did not grant access for http://localhost/*.');
+      expect(section.textContent).toContain('Синк выключен: доступ к хосту не выдан.');
+      expect(section.textContent).toContain('Firefox не выдал доступ для http://localhost/*.');
     }, { timeout: 2000 });
   });
 
@@ -367,7 +366,7 @@ describe('Options page - Agency Hub section', () => {
     button.click();
 
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Sync disabled: failed to request host access.');
+      expect(section.textContent).toContain('Синк выключен: запрос доступа не удался.');
       expect(section.textContent).toContain('May only request permissions from a user input handler');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
@@ -397,10 +396,11 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connected ✓');
-      expect(section.textContent).toContain(
-        'Live connection test succeeded for http://localhost:3000.',
-      );
+      // Success: the pill flips to «есть» and the mono receipt names the
+      // credential that carried the test (no device token here — the key did).
+      expect(section.textContent).toContain('есть');
+      expect(section.textContent).toContain('по legacy-ключу');
+      expect(section.textContent).toContain('мс');
     }, { timeout: 2000 });
 
     expect(runtimeSendMessage).toHaveBeenCalledWith({
@@ -434,7 +434,7 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
+      expect(section.textContent).toContain('CG-HUB-07');
       expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
       expect(section.textContent).toContain('Hub вернул ошибку или недоступен.');
     }, { timeout: 2000 });
@@ -467,9 +467,9 @@ describe('Options page - Agency Hub section', () => {
     const button = getTestConnectionButton(section);
 
     expect(button.disabled).toBe(true);
-    expect(section.textContent).toContain('Not tested yet.');
+    expect(section.textContent).toContain('не проверялась');
     expect(section.textContent).toContain(
-      'Save a Hub URL and API key to run a live connection test.',
+      'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
     );
     expect(runtimeSendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -497,9 +497,9 @@ describe('Options page - Agency Hub section', () => {
 
     const section = getSectionByTitle('Agency Hub');
     await vi.waitFor(() => {
-      expect(section.textContent).toContain('Connection failed: CG-HUB-07');
+      expect(section.textContent).toContain('CG-HUB-07');
       expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
-      expect(section.textContent).toContain('The connection test could not be completed.');
+      expect(section.textContent).toContain('Проверка связи не завершилась.');
     }, { timeout: 2000 });
     expect(consoleError).toHaveBeenCalledWith(
       'Agency Hub connection test failed',
@@ -556,7 +556,7 @@ describe('Options page - Agency Hub section', () => {
         agencyHubBaseUrl: 'http://localhost:3000',
       });
       expect(savedCustody).toEqual({ agencyHubApiKey: 'invalid-key' });
-      expect(section.textContent).toContain('Connection failed: CG-HUB-03');
+      expect(section.textContent).toContain('CG-HUB-03');
       expect(section.textContent).toContain('Agency Hub API key is invalid.');
       expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
       expect(section.textContent).toContain('HTTP 401 • {"message":"Unauthorized"}');
