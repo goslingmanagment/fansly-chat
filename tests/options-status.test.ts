@@ -64,6 +64,17 @@ function hero(page: MountedOptionsPage): HTMLElement {
   return element;
 }
 
+/** «Что мешает» — the card in the pane's right column that owns the open steps
+ * (E61). The list element is the same one the headline renderer fills; it is no
+ * longer a descendant of the headline block. */
+function todo(page: MountedOptionsPage): HTMLElement {
+  const element = page.document.querySelector<HTMLElement>('[data-role="status-todo"]');
+  if (!element) {
+    throw new Error('Missing «Что мешает» card');
+  }
+  return element;
+}
+
 function statusButton(page: MountedOptionsPage, label: string): HTMLButtonElement {
   const button = Array.from(
     page.document.querySelectorAll<HTMLButtonElement>('.chatgoose-status-actions button'),
@@ -184,7 +195,8 @@ describe('options «Статус» pane', () => {
     });
 
     const hub = row(page, 'hub');
-    expect(hub.querySelector('.chatgoose-badge-mono')?.textContent).toBe('DEGRADED');
+    // No mono badge column since E61 — the fact and the dot tone carry the state.
+    expect(hub.querySelector('.chatgoose-badge-mono')).toBeNull();
     expect(hub.dataset.tone).toBe('amber');
     expect(hub.textContent).toContain(COPY.status.hubDegraded);
     expect(hub.textContent).toContain('940');
@@ -399,7 +411,6 @@ describe('options «Статус» pane', () => {
       });
 
       const access = row(page, 'access');
-      expect(access.querySelector('.chatgoose-badge-mono')?.textContent).toBe('401');
       expect(access.dataset.tone).toBe('bad');
       expect(access.textContent).toContain(COPY.status.accessRejected);
 
@@ -433,7 +444,8 @@ describe('options «Статус» pane', () => {
       releaseHealth(HEALTH_UP);
       await page.flushAsync();
 
-      expect(row(page, 'hub').querySelector('.chatgoose-badge-mono')?.textContent).not.toBe('UP');
+      // The dropped paint would have turned the row green with «ядро отвечает».
+      expect(row(page, 'hub').textContent).not.toContain(COPY.status.hubUp);
     });
 
     it('delayed-START variant: a persisted-B run never issues once the field already shows hub C', async () => {
@@ -511,15 +523,17 @@ describe('options «Статус» pane', () => {
       await page.flushAsync();
       expect(healthResolvers).toHaveLength(2);
 
-      // run2 resolves first → paints UP (it is the current run).
+      // run2 resolves first → paints «ядро отвечает» (it is the current run).
       healthResolvers[1]!(HEALTH_UP);
       await page.flushAsync();
-      expect(row(page, 'hub').querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
+      expect(row(page, 'hub').textContent).toContain(COPY.status.hubUp);
+      expect(row(page, 'hub').dataset.tone).toBe('green');
 
       // run1 resolves LATE with a different verdict → its paint must be dropped.
       healthResolvers[0]!({ ...HEALTH_UP, status: 'degraded', dbLatencyMs: 9 });
       await page.flushAsync();
-      expect(row(page, 'hub').querySelector('.chatgoose-badge-mono')?.textContent).toBe('UP');
+      expect(row(page, 'hub').textContent).toContain(COPY.status.hubUp);
+      expect(row(page, 'hub').dataset.tone).toBe('green');
     });
 
     it('re-polls sessions on visibilitychange and closes the Fansly step in place', async () => {
@@ -641,8 +655,13 @@ describe('options «Статус» pane', () => {
       });
 
       expect(hero(page).dataset.heroState).toBe('route');
-      expect(hero(page).textContent).toContain(COPY.status.stepPersona);
       expect(hero(page).textContent).toContain(COPY.status.actionNeededTitle);
+      // The open step, and the button that closes it, live in «Что мешает».
+      expect(todo(page).hidden).toBe(false);
+      expect(todo(page).textContent).toContain(COPY.status.stepPersona);
+      expect(
+        todo(page).querySelector<HTMLButtonElement>('[data-readiness-action="persona"]')?.textContent,
+      ).toBe(COPY.status.stepPersonaAction);
       const micro = page.document.querySelector<HTMLElement>('[data-pane-micro="status"]');
       expect(micro?.textContent).toBe(COPY.rail.microSetup);
     });
@@ -678,7 +697,7 @@ describe('options «Статус» pane', () => {
       expect(hero(page).hidden).toBe(true);
       // The hero keeps its own verdict current INSIDE that hidden card, so it is
       // already right the moment the checklist retires — hidden, never stale.
-      expect(hero(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
+      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
       expect(hero(page).dataset.heroState).toBe('route');
       // …and the rail micro still carries the aggregate: the pane says «setup»
       // whichever card is doing the talking.

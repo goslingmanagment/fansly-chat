@@ -12,11 +12,13 @@ import {
 import {
   createBadge,
   createButton,
+  createPaneHead,
   createSection,
   createStatusPill,
   createStatusRow,
   createVersionTag,
   debounce,
+  factRow,
   injectStyles,
   labeledField,
   setStatusPill,
@@ -769,8 +771,13 @@ async function render(): Promise<void> {
   // `statusModel` the Статус rows paint from — zero extra requests — and counts
   // ONLY the actionable prerequisites (E41): an unknown quota or an unopened
   // Spenders board is an observation, not a broken install.
+  // It is the first block INSIDE the rows card (E61), not a plate of its own —
+  // the two stacked cards said one thing twice — and it no longer carries the
+  // version pill: that pill was positioned for a 28px-padded card it no longer
+  // lived in, and the same version already renders in the rail footer. The
+  // support card below states it once, in one format.
   const readinessHero = document.createElement('section');
-  readinessHero.className = 'chatgoose-readiness';
+  readinessHero.className = 'chatgoose-readiness chatgoose-readiness-inline';
   readinessHero.dataset.readinessHero = 'true';
   const readinessHeading = document.createElement('h1');
   readinessHeading.className = 'chatgoose-readiness-heading';
@@ -778,16 +785,12 @@ async function render(): Promise<void> {
   const readinessSub = document.createElement('div');
   readinessSub.className = 'chatgoose-readiness-sub';
   readinessSub.textContent = COPY.status.checkingSubtitle;
+  readinessHero.append(readinessHeading, readinessSub);
+  // The open-steps list is the body of the «Что мешает» card in the pane's right
+  // column; it stays THIS element so the headline renderer keeps one writer.
   const readinessOpen = document.createElement('ul');
   readinessOpen.className = 'chatgoose-readiness-open';
   readinessOpen.hidden = true;
-  readinessHero.append(
-    createVersionTag(extensionVersion),
-    readinessHeading,
-    readinessSub,
-    readinessOpen,
-  );
-  shell.panes.status.append(readinessHero);
 
   // ─── «Вид» ──────────────────────────────────────────────────
   // Three clickable preview cards. Each one still wraps the SAME radio the
@@ -1167,7 +1170,10 @@ async function render(): Promise<void> {
   );
 
   // ─── Agency Hub ───────────────────────────────────────────
-  const agencyHubSection = createSection(COPY.hub.title, COPY.hub.subtitle);
+  // A plain container, not a card: the pane's title lives in its head and the
+  // four zones are cards of their own inside the grid below (E61).
+  const agencyHubSection = document.createElement('section');
+  agencyHubSection.className = 'chatgoose-pane-plain';
   const agencyHubUrlInput = document.createElement('input');
   agencyHubUrlInput.type = 'url';
   agencyHubUrlInput.className = 'chatgoose-input';
@@ -1213,6 +1219,12 @@ async function render(): Promise<void> {
   };
 
   const agencyHubPermissionRow = hubStatusRow(COPY.hub.permLabel);
+  // The host-access deep-link anchor lives on THIS row (E61): CG-HUB-04 used to
+  // flash a read-only diagnostics line while «Разрешить доступ» sat in another
+  // zone. `data-deeplink-ready` starts false — `permissions.contains` has not
+  // answered yet, and a flash burned on the placeholder cannot be re-armed.
+  agencyHubPermissionRow.root.dataset.hubDetail = 'host-access';
+  agencyHubPermissionRow.root.dataset.deeplinkReady = 'false';
   const agencyHubPermissionStatus = agencyHubPermissionRow.pill;
   const agencyHubPermissionMono = agencyHubPermissionRow.mono;
 
@@ -1300,8 +1312,12 @@ async function render(): Promise<void> {
       case 'failed': {
         const failedError = agencyHubConnectionFeedback.error;
         const description = getUserErrorDescription(failedError);
-        setStatusPill(agencyHubConnectionStatus, 'bad', failedError.code);
-        agencyHubConnectionMono.textContent = '';
+        // Pills speak WORDS across the whole cabinet («выдан», «есть»,
+        // «активен») — the raw registry code used to land in this one (E61). It
+        // keeps its place in the mono receipt at the right edge, right next to
+        // the sentence that explains it.
+        setStatusPill(agencyHubConnectionStatus, 'bad', COPY.hub.connPillFailed);
+        agencyHubConnectionMono.textContent = failedError.code;
         const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -1674,18 +1690,33 @@ async function render(): Promise<void> {
   hubSignOutHint.className = 'chatgoose-meta';
   hubSignOutHint.textContent = COPY.hub.signOutHint;
 
-  // «Device token» line: pill + which token (its prefix) + when it was issued.
-  // The expiry date is deliberately NOT shown — hub expiry slides on every use.
+  // «Device token»: state on one line (label · pill · «продлевается при
+  // использовании» in mono at the right edge), provenance on the next. Both used
+  // to be one «·»-joined sentence that wrapped across two lines next to the pill
+  // (E61). The expiry date is deliberately NOT shown — hub expiry slides on use.
+  // The deep-link anchor sits on the BLOCK: CG-HUB-02/03 are about the token as
+  // a whole, and its two facts now live on two rows.
+  const hubTokenBlock = document.createElement('div');
+  hubTokenBlock.dataset.hubDetail = 'device-token';
   const hubTokenRow = document.createElement('div');
-  hubTokenRow.className = 'chatgoose-status-body';
-  hubTokenRow.dataset.hubDetail = 'device-token';
+  hubTokenRow.className = 'chatgoose-hub-srow';
   const hubTokenLabel = document.createElement('span');
-  hubTokenLabel.className = 'chatgoose-status-label';
+  hubTokenLabel.className = 'chatgoose-hub-srow-label';
   hubTokenLabel.textContent = COPY.hub.deviceTokenLabel;
   const hubTokenPill = document.createElement('span');
+  const hubTokenRenews = document.createElement('span');
+  hubTokenRenews.className = 'chatgoose-hub-srow-meta';
+  hubTokenRow.append(hubTokenLabel, hubTokenPill, hubTokenRenews);
+
+  const hubTokenIssuedRow = document.createElement('div');
+  hubTokenIssuedRow.className = 'chatgoose-hub-srow';
+  const hubTokenIssuedLabel = document.createElement('span');
+  hubTokenIssuedLabel.className = 'chatgoose-hub-srow-label';
+  hubTokenIssuedLabel.textContent = COPY.hub.deviceTokenIssuedLabel;
   const hubTokenMeta = document.createElement('span');
-  hubTokenMeta.className = 'chatgoose-status-fact';
-  hubTokenRow.append(hubTokenLabel, hubTokenPill, hubTokenMeta);
+  hubTokenMeta.className = 'chatgoose-hub-srow-fact';
+  hubTokenIssuedRow.append(hubTokenIssuedLabel, hubTokenMeta);
+  hubTokenBlock.append(hubTokenRow, hubTokenIssuedRow);
 
   let deviceTokenMeta: AgencyHubDeviceTokenMeta | null = null;
 
@@ -1715,6 +1746,10 @@ async function render(): Promise<void> {
       hasToken ? 'ok' : 'neutral',
       hasToken ? COPY.hub.deviceTokenActive : COPY.hub.deviceTokenMissing,
     );
+    // The renewal note belongs to the token's STATE (right edge of line one);
+    // provenance is line two, and the «Выпущен» row disappears with the token.
+    hubTokenRenews.textContent = hasToken ? COPY.hub.deviceTokenRenews : '';
+    hubTokenIssuedRow.hidden = !hasToken;
     if (!hasToken) {
       hubTokenMeta.textContent = '';
     } else if (deviceTokenMeta) {
@@ -1724,12 +1759,11 @@ async function render(): Promise<void> {
           '{date}',
           new Date(deviceTokenMeta.issuedAt).toLocaleDateString(),
         ),
-        COPY.hub.deviceTokenRenews,
       ].join(' · ');
     } else {
       // A token issued before this version has no recorded metadata. Say that
       // instead of inventing a date.
-      hubTokenMeta.textContent = `${COPY.hub.deviceTokenUnknown} · ${COPY.hub.deviceTokenRenews}`;
+      hubTokenMeta.textContent = COPY.hub.deviceTokenUnknown;
     }
 
     // The danger zone exists only while it has something to say: a sign-out to
@@ -1923,7 +1957,7 @@ async function render(): Promise<void> {
   // «Выйти» does NOT live here — destructive actions sit in their own zone at
   // the very bottom of the pane.
   const hubSignInWrap = document.createElement('div');
-  hubSignInWrap.className = 'chatgoose-card';
+  hubSignInWrap.className = 'chatgoose-zone-body';
   hubReissueButton.style.justifySelf = 'start';
   const hubTokenActions = document.createElement('div');
   hubTokenActions.className = 'chatgoose-card-actions';
@@ -1931,18 +1965,20 @@ async function render(): Promise<void> {
   const hubTokenFallbackNote = document.createElement('div');
   hubTokenFallbackNote.className = 'chatgoose-status-hint';
   hubTokenFallbackNote.textContent = COPY.hub.tokenFallbackNote;
+  // Order (E61): state → form → what just happened → the explanation. The
+  // «Перевыпустить токен» button moved OUT of this stack and into the card head,
+  // where it stops sitting between two paragraphs of explanatory text.
   hubSignInWrap.append(
-    hubTokenRow,
+    hubTokenBlock,
     hubSignInRow,
     hubSignInMeta,
     hubTokenFallbackNote,
-    hubTokenActions,
   );
 
   // The connect-zone card is assembled in the pane layout below — the base-URL
   // field it opens with is created there.
   const agencyHubConnectCard = document.createElement('div');
-  agencyHubConnectCard.className = 'chatgoose-card';
+  agencyHubConnectCard.className = 'chatgoose-zone-body';
 
   // The device token is the main path (E9d) — the legacy key stays reachable
   // but folded, open only when one is actually stored.
@@ -1960,7 +1996,8 @@ async function render(): Promise<void> {
   // ── Danger zone: sign-out and its two-step confirm, fenced off at the bottom ──
   const hubDangerRow = document.createElement('div');
   hubDangerRow.className = 'chatgoose-hub-danger-row';
-  hubDangerRow.append(hubSignOutButton, hubSignOutHint);
+  // Consequence on the left, the button that causes it on the right.
+  hubDangerRow.append(hubSignOutHint, hubSignOutButton);
   const hubDangerZone = document.createElement('div');
   hubDangerZone.className = 'chatgoose-hub-danger';
   hubDangerZone.append(hubDangerRow, hubSignOutConfirmRow, hubSignOutStatus);
@@ -2016,7 +2053,7 @@ async function render(): Promise<void> {
   hubPagesChips.className = 'chatgoose-hub-chips';
   hubPagesRow.root.append(hubPagesChips);
   const hubConnectionCard = document.createElement('div');
-  hubConnectionCard.className = 'chatgoose-card';
+  hubConnectionCard.className = 'chatgoose-zone-body';
   hubConnectionCard.append(hubIdentityRow.root, hubPagesRow.root);
 
   // ── Diagnostics rows: the «Статус»-pane anatomy — token · label · fact ·
@@ -2028,7 +2065,7 @@ async function render(): Promise<void> {
     hydration: 'async' | 'sync' = 'sync',
   ): {
     root: HTMLElement;
-    set: (view: { badge: string; tone: BadgeTone; fact: string; detail?: string }) => void;
+    set: (view: { tone: BadgeTone; fact: string; detail?: string | string[] }) => void;
   } => {
     const root = document.createElement('div');
     root.className = 'chatgoose-hub-drow';
@@ -2036,7 +2073,6 @@ async function render(): Promise<void> {
     if (hydration === 'async') {
       root.dataset.deeplinkReady = 'false';
     }
-    const badge = createBadge('…', 'neutral', true);
     const labelNode = document.createElement('span');
     labelNode.className = 'chatgoose-hub-drow-label';
     labelNode.textContent = label;
@@ -2044,14 +2080,29 @@ async function render(): Promise<void> {
     fact.className = 'chatgoose-hub-drow-fact';
     const detail = document.createElement('div');
     detail.className = 'chatgoose-hub-drow-det';
-    root.append(badge, labelNode, fact, detail);
+    root.append(labelNode, fact, detail);
     return {
       root,
       set: (view) => {
-        badge.textContent = view.badge;
-        badge.className = `chatgoose-badge chatgoose-badge-${view.tone} chatgoose-badge-mono`;
+        // The tone колours the FACT here — the row has no dot of its own, and
+        // the mono badge it used to lead with said «OK» next to «успех» and «0»
+        // next to «за сегодня 0» (E61).
         fact.textContent = view.fact;
-        detail.textContent = view.detail ?? '';
+        fact.className = view.tone === 'bad' || view.tone === 'amber'
+          ? `chatgoose-hub-drow-fact chatgoose-hub-drow-fact-${view.tone}`
+          : 'chatgoose-hub-drow-fact';
+        // An array becomes one mono line per entry: two contract hashes do not
+        // fit beside a fact on one line.
+        const lines = view.detail === undefined
+          ? []
+          : (Array.isArray(view.detail) ? view.detail : [view.detail]);
+        detail.replaceChildren(
+          ...lines.map((text) => {
+            const line = document.createElement('div');
+            line.textContent = text;
+            return line;
+          }),
+        );
       },
     };
   };
@@ -2059,17 +2110,23 @@ async function render(): Promise<void> {
   // «Проверка» is deliberately SYNC: its value is complete from in-page state on
   // the very first paint — either the last live test or the honest «проверка не
   // выполнялась» — so it is never a placeholder waiting on a read.
+  // «Ядро» — the health the pane is actually about. Both facts already reach the
+  // page for the «Статус» rows; the hub pane simply never said them (E61).
+  const hubCoreRow = hubDiagRow(COPY.hub.coreLabel, 'core', 'async');
   const hubCheckRow = hubDiagRow(COPY.hub.checkLabel, 'check');
-  const hubHostAccessRow = hubDiagRow(COPY.hub.hostAccessLabel, 'host-access', 'async');
   const hubContractRow = hubDiagRow(COPY.hub.contractLabel, 'contract', 'async');
   const hubErrorsRow = hubDiagRow(COPY.hub.errorsLabel, 'errors', 'async');
   const hubFanSummaryRow = hubDiagRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
+  // «Доступ к хосту» is NOT here: the same flag already paints the pill in
+  // «Подключение», next to the button that fixes it. That row carried the
+  // `host-access` deep-link anchor, so the anchor moved with the fact — a
+  // CG-HUB-04 link now highlights the row that has «Разрешить доступ» in it.
   const hubDiagnosticsCard = document.createElement('div');
   hubDiagnosticsCard.className = 'chatgoose-hub-diag';
   hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
   hubDiagnosticsCard.append(
+    hubCoreRow.root,
     hubCheckRow.root,
-    hubHostAccessRow.root,
     hubContractRow.root,
     hubErrorsRow.root,
     hubFanSummaryRow.root,
@@ -2090,27 +2147,64 @@ async function render(): Promise<void> {
     agencyHubActionRow,
   );
 
-  // ── Pane layout: four zones in the working order, danger fenced at the end ──
-  const hubZone = (cap: string, ...children: HTMLElement[]): HTMLElement => {
-    const zone = document.createElement('div');
-    zone.className = 'chatgoose-group';
-    const capNode = document.createElement('div');
-    capNode.className = 'chatgoose-group-cap';
-    capNode.textContent = cap;
-    zone.append(capNode, ...children);
-    return zone;
+  // ── Pane layout (E61): four zone CARDS in two columns — connection and
+  // sign-in on the left (they are one flow), account and diagnostics on the
+  // right. The zones used to be uppercase captions над a card inside a card, and
+  // the pane was the only one long enough to scroll the rail away.
+  const hubZoneCard = (title: string, body: HTMLElement, action?: HTMLElement): HTMLElement => {
+    const card = document.createElement('div');
+    card.className = 'chatgoose-panecard';
+    const head = document.createElement('div');
+    head.className = 'chatgoose-panecard-head';
+    const titleNode = document.createElement('span');
+    titleNode.className = 'chatgoose-panecard-title';
+    titleNode.textContent = title;
+    head.append(titleNode);
+    if (action) head.append(action);
+    card.append(head, body);
+    return card;
   };
 
-  agencyHubSection.append(
-    hubZone(COPY.hub.zoneConnection, agencyHubConnectCard),
-    hubZone(COPY.hub.zoneSignIn, hubSignInWrap),
-    hubZone(COPY.hub.zoneAccount, hubConnectionCard),
-    hubZone(COPY.hub.zoneDiagnostics, hubDiagnosticsCard),
-    hubDangerZone,
+  const hubHead = createPaneHead(COPY.hub.title, COPY.hub.subtitle);
+  const hubGrid = document.createElement('div');
+  hubGrid.className = 'chatgoose-panegrid chatgoose-panegrid-even';
+  const hubLeftCol = document.createElement('div');
+  hubLeftCol.className = 'chatgoose-panecol';
+  const hubRightCol = document.createElement('div');
+  hubRightCol.className = 'chatgoose-panecol';
+  // The sign-out fence belongs to the card that owns the credential, at its
+  // bottom edge — not to the pane, below everything else.
+  hubSignInWrap.append(hubDangerZone);
+  hubLeftCol.append(
+    hubZoneCard(COPY.hub.zoneConnection, agencyHubConnectCard),
+    hubZoneCard(COPY.hub.zoneSignIn, hubSignInWrap, hubTokenActions),
   );
+  hubRightCol.append(
+    hubZoneCard(COPY.hub.zoneAccount, hubConnectionCard),
+    hubZoneCard(COPY.hub.zoneDiagnostics, hubDiagnosticsCard),
+  );
+  hubGrid.append(hubLeftCol, hubRightCol);
+  agencyHubSection.append(hubHead.root, hubGrid);
+
+  /** A cross-pane pointer. It writes the hash like every other route change —
+   * the rail and a deep link stay the only two ways a pane becomes visible. */
+  const paneLink = (label: string, pane: PaneKey): HTMLButtonElement => {
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'chatgoose-fact-link';
+    link.textContent = label;
+    link.addEventListener('click', () => navigateTo(pane));
+    return link;
+  };
 
   // ─── «Статус»: read-only state rows ────────────────────────
-  const statusSection = createSection(COPY.sections.statusTitle, COPY.sections.statusHint);
+  // Layout (E61): the pane head carries the title and «Проверить всё»; the left
+  // card is the readiness headline plus the rows; the right column holds what is
+  // OPEN (with the button that closes it) and what support needs.
+  const statusHead = createPaneHead(
+    COPY.sections.statusTitle,
+    `${COPY.sections.statusHint} ${COPY.status.paneHonesty}`,
+  );
   const statusRows = {
     fansly: createStatusRow(COPY.status.fanslyLabel, 'fansly'),
     hub: createStatusRow(COPY.status.hubLabel, 'hub'),
@@ -2127,14 +2221,23 @@ async function render(): Promise<void> {
   if (!state.settings.debugMode) statusRows.contract.root.hidden = true;
 
   // «Проверить всё» is THE action of this pane, so it alone wears the primary
-  // clay; the honesty note lives in the report button's tooltip now that the
-  // visible hint below is a single line.
+  // clay — and it sits in the pane head, where a chatter looks first.
   const checkAllButton = createButton(COPY.status.checkAll);
   const copyReportButton = createButton(COPY.status.copyReport, true);
   copyReportButton.title = COPY.status.reportHonesty;
+  // Both action containers keep the `chatgoose-status-actions` class: it is the
+  // pane's action vocabulary, not a position.
   const statusActions = document.createElement('div');
   statusActions.className = 'chatgoose-status-actions';
-  statusActions.append(checkAllButton, copyReportButton);
+  statusActions.append(checkAllButton);
+  // The stamp a check leaves behind: without it a run that changed nothing was
+  // indistinguishable from a run that never happened.
+  const statusRefreshedTag = document.createElement('span');
+  statusRefreshedTag.className = 'chatgoose-panehead-stamp';
+  statusRefreshedTag.dataset.role = 'status-refreshed';
+  statusRefreshedTag.textContent = COPY.status.refreshedNever;
+  statusHead.side.append(statusRefreshedTag, statusActions);
+
   const statusActionNote = document.createElement('div');
   statusActionNote.className = 'chatgoose-status-hint';
   statusActionNote.setAttribute('role', 'status');
@@ -2143,7 +2246,9 @@ async function render(): Promise<void> {
   statusReportHint.className = 'chatgoose-status-hint';
   statusReportHint.textContent = COPY.status.reportHint;
 
-  statusSection.append(
+  const statusRowList = document.createElement('div');
+  statusRowList.className = 'chatgoose-status-rows';
+  statusRowList.append(
     statusRows.fansly.root,
     statusRows.hub.root,
     statusRows.access.root,
@@ -2151,11 +2256,77 @@ async function render(): Promise<void> {
     statusRows.activity.root,
     statusRows.spenders.root,
     statusRows.contract.root,
-    statusActions,
+  );
+
+  const statusCard = document.createElement('div');
+  statusCard.className = 'chatgoose-panecard';
+  statusCard.append(readinessHero, statusRowList);
+
+  // «Что мешает» — the open readiness steps, each with the button that closes
+  // it. The list element itself (and its [data-readiness-step] items) is the one
+  // the headline renderer already fills.
+  const statusTodoCard = document.createElement('div');
+  statusTodoCard.className = 'chatgoose-panecard chatgoose-todo';
+  statusTodoCard.dataset.role = 'status-todo';
+  statusTodoCard.hidden = true;
+  const statusTodoHead = document.createElement('div');
+  statusTodoHead.className = 'chatgoose-panecard-head';
+  const statusTodoTitle = document.createElement('span');
+  statusTodoTitle.className = 'chatgoose-panecard-title';
+  statusTodoTitle.textContent = COPY.status.todoTitle;
+  statusTodoHead.append(statusTodoTitle);
+  statusTodoCard.append(statusTodoHead, readinessOpen);
+
+  const statusSupportCard = document.createElement('div');
+  statusSupportCard.className = 'chatgoose-panecard';
+  const statusSupportHead = document.createElement('div');
+  statusSupportHead.className = 'chatgoose-panecard-head';
+  const statusSupportTitle = document.createElement('span');
+  statusSupportTitle.className = 'chatgoose-panecard-title';
+  statusSupportTitle.textContent = COPY.status.supportTitle;
+  statusSupportHead.append(statusSupportTitle);
+  const statusSupportFacts = document.createElement('div');
+  statusSupportFacts.className = 'chatgoose-facts';
+  statusSupportFacts.append(
+    factRow(COPY.status.supportVersion, extensionVersion),
+    factRow(COPY.status.supportSchema, `v${STORAGE_SCHEMA_VERSION}`),
+  );
+  const statusReportActions = document.createElement('div');
+  statusReportActions.className = 'chatgoose-status-actions';
+  statusReportActions.append(copyReportButton);
+  statusSupportCard.append(
+    statusSupportHead,
+    statusSupportFacts,
+    statusReportActions,
     statusActionNote,
     statusReportHint,
   );
-  shell.panes.status.append(statusSection);
+
+  // The two panes a broken row is usually fixed on. The cabinet had no pointer
+  // between panes at all before this.
+  const statusWhereCard = document.createElement('div');
+  statusWhereCard.className = 'chatgoose-panecard chatgoose-panecard-quiet';
+  const statusWhereTitle = document.createElement('span');
+  statusWhereTitle.className = 'chatgoose-panecard-title';
+  statusWhereTitle.textContent = COPY.status.whereTitle;
+  const statusWhereFacts = document.createElement('div');
+  statusWhereFacts.className = 'chatgoose-facts';
+  statusWhereFacts.append(
+    factRow(COPY.status.whereHub, paneLink(COPY.status.whereHubLink, 'hub')),
+    factRow(COPY.status.whereAccounts, paneLink(COPY.status.whereAccountsLink, 'accounts')),
+  );
+  statusWhereCard.append(statusWhereTitle, statusWhereFacts);
+
+  const statusGrid = document.createElement('div');
+  statusGrid.className = 'chatgoose-panegrid';
+  const statusMainCol = document.createElement('div');
+  statusMainCol.className = 'chatgoose-panecol';
+  statusMainCol.append(statusCard);
+  const statusSideCol = document.createElement('div');
+  statusSideCol.className = 'chatgoose-panecol';
+  statusSideCol.append(statusTodoCard, statusSupportCard, statusWhereCard);
+  statusGrid.append(statusMainCol, statusSideCol);
+  shell.panes.status.append(statusHead.root, statusGrid);
 
   // The single read-only model the rows, the readiness headline and the support
   // report all paint from. Nothing here is a credential: the report is
@@ -2185,12 +2356,25 @@ async function render(): Promise<void> {
   // Until the first real datum lands — a hub identity read OR the Fansly row
   // painting — the headline stays «Проверяем…» instead of inventing a verdict.
   let fanslyRowPainted = false;
+  /** When the rows last took a real answer from any of their sources. The head
+   * prints it so a check that changed nothing still leaves a trace (E61). */
+  let rowsRefreshedAt = 0;
 
   const isAccountPersonaMapped = (accountId: string): boolean => {
     const mappedKey = state.accountMappings[accountId] ?? '';
     return Boolean(mappedKey) && state.personaCatalog.some(
       (persona) => persona.key === mappedKey && persona.status === 'active',
     );
+  };
+
+  /** Every open step's way out. The pane a step is fixed on is the same one the
+   * first-run checklist routes to, so the two never send a chatter to different
+   * places for the same problem. */
+  const READINESS_STEP_ACTIONS: Record<string, { label: string; pane: PaneKey }> = {
+    hub: { label: COPY.status.stepHubAction, pane: 'hub' },
+    access: { label: COPY.status.grantAccess, pane: 'hub' },
+    fansly: { label: COPY.status.stepFanslyAction, pane: 'accounts' },
+    persona: { label: COPY.status.stepPersonaAction, pane: 'accounts' },
   };
 
   const pluralizeActions = (count: number): string => {
@@ -2305,10 +2489,9 @@ async function render(): Promise<void> {
     const identity = statusModel.identity;
     if (identity?.ok) {
       hubIdentityRow.value.textContent = `${identity.username} · ${identity.role}`;
-      hubPagesRow.value.textContent = COPY.hub.pagesCount.replace(
-        '{n}',
-        String(identity.pages.length),
-      );
+      // A bare number: the «· {n}» template this used to share with the «Статус»
+      // pane's detail read as an orphan middot after the label's grid gap (E61).
+      hubPagesRow.value.textContent = String(identity.pages.length);
       // Four chips, then an honest «и ещё N» — a chatter on twelve pages must
       // not get a wall of chips.
       const shown = identity.pages.slice(0, 4);
@@ -2334,15 +2517,40 @@ async function render(): Promise<void> {
     markHubRowHydrated(hubIdentityRow, identity !== null);
     markHubRowHydrated(hubPagesRow, identity !== null);
 
+    // Ядро — the health response's own two facts. «Статус» says the same thing
+    // one pane away; here it is the subject of the page.
+    const coreHealth = statusModel.health;
+    if (coreHealth === null) {
+      hubCoreRow.set({ tone: 'neutral', fact: COPY.common.unknown });
+    } else if (coreHealth.ok) {
+      hubCoreRow.set({
+        tone: coreHealth.status === 'degraded' ? 'amber' : 'green',
+        fact: coreHealth.status === 'degraded' ? COPY.status.hubDegraded : COPY.status.hubUp,
+        ...(coreHealth.dbLatencyMs === null
+          ? {}
+          : { detail: COPY.status.hubDbLatency.replace('{n}', String(coreHealth.dbLatencyMs)) }),
+      });
+    } else if (coreHealth.reason === 'no_base_url') {
+      hubCoreRow.set({ tone: 'neutral', fact: COPY.status.hubEmpty });
+    } else if (coreHealth.reason === 'no_permission') {
+      hubCoreRow.set({ tone: 'amber', fact: COPY.status.hubNoPermission });
+    } else {
+      hubCoreRow.set({ tone: 'bad', fact: COPY.status.hubDown });
+    }
+    markHubRowHydrated(hubCoreRow, coreHealth !== null);
+    // Settled once Firefox has answered `permissions.contains` — including the
+    // «no origin to check» case, where «неизвестно» IS the final answer for the
+    // address currently in the field.
+    markHubRowHydrated(agencyHubPermissionRow, hubPermissionChecked);
+
     // Проверка — when, outcome, how long, and which credential carried it.
     if (!lastConnectionCheck) {
-      hubCheckRow.set({ badge: '—', tone: 'neutral', fact: COPY.hub.checkNever });
+      hubCheckRow.set({ tone: 'neutral', fact: COPY.hub.checkNever });
     } else {
       const via = lastConnectionCheck.viaDeviceToken
         ? COPY.hub.checkViaDeviceToken
         : COPY.hub.checkViaLegacyKey;
       hubCheckRow.set({
-        badge: lastConnectionCheck.ok ? 'OK' : 'FAIL',
         tone: lastConnectionCheck.ok ? 'green' : 'bad',
         fact: lastConnectionCheck.ok
           ? `${COPY.hub.checkSuccess} · ${via}`
@@ -2354,34 +2562,12 @@ async function render(): Promise<void> {
       });
     }
 
-    // Доступ к хосту
-    const originPattern = buildAgencyHubOriginPattern(
-      normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
-    );
-    if (hubPermissionGranted === null || !originPattern) {
-      hubHostAccessRow.set({ badge: '—', tone: 'neutral', fact: COPY.common.unknown });
-    } else if (hubPermissionGranted) {
-      hubHostAccessRow.set({
-        badge: 'OK',
-        tone: 'green',
-        fact: COPY.hub.hostAccessGranted,
-        detail: originPattern,
-      });
-    } else {
-      hubHostAccessRow.set({ badge: 'НЕТ', tone: 'amber', fact: COPY.status.hubNoPermission });
-    }
-    // Settled once Firefox has answered `permissions.contains` — including the
-    // «no origin to check» case, where «неизвестно» IS the final answer for the
-    // address currently in the field.
-    markHubRowHydrated(hubHostAccessRow, hubPermissionChecked);
-
     // Контракт SDK — ALWAYS visible here (the Статус row stays debug-only), and
     // it wears the same MATCH/DRIFT badge as the «Статус» pane's row.
     const health = statusModel.health;
     if (health?.ok) {
       const match = health.contractHash === health.sdkContractHash;
       hubContractRow.set({
-        badge: match ? 'MATCH' : 'DRIFT',
         tone: match ? 'green' : 'bad',
         fact: match ? COPY.hub.contractMatches : COPY.hub.contractMismatch,
         detail: [
@@ -2389,18 +2575,19 @@ async function render(): Promise<void> {
           ...(health.sdkSourceCommit
             ? [COPY.status.contractSourceCommit.replace('{commit}', health.sdkSourceCommit.slice(0, 12))]
             : []),
-        ].join(' · '),
+        ],
       });
     } else {
-      hubContractRow.set({ badge: '—', tone: 'neutral', fact: COPY.status.contractUnknown });
+      hubContractRow.set({ tone: 'neutral', fact: COPY.status.contractUnknown });
     }
     markHubRowHydrated(hubContractRow, health !== null);
 
-    // Ошибки Hub — today's exact count in the badge; the list is capped at 20,
-    // so say so rather than let «за сегодня: 37» look like 37 listed rows.
+    // Ошибки Hub — the count is stated ONCE (it used to be both the badge and
+    // the fact); the list is capped at 20, so say so rather than let «за
+    // сегодня: 37» look like 37 listed rows.
     const ops = statusModel.opsDaily;
     if (!ops) {
-      hubErrorsRow.set({ badge: '—', tone: 'neutral', fact: COPY.common.unknown });
+      hubErrorsRow.set({ tone: 'neutral', fact: COPY.common.unknown });
     } else {
       const last = ops.hubErrors[ops.hubErrors.length - 1];
       const detail = [
@@ -2412,7 +2599,6 @@ async function render(): Promise<void> {
         ...(ops.hubErrorsTotal > ops.hubErrors.length ? [COPY.hub.errorsCapped] : []),
       ].join(' · ');
       hubErrorsRow.set({
-        badge: String(ops.hubErrorsTotal),
         tone: ops.hubErrorsTotal > 0 ? 'amber' : 'green',
         fact: COPY.hub.errorsToday.replace('{n}', String(ops.hubErrorsTotal)),
         ...(detail ? { detail } : {}),
@@ -2422,17 +2608,16 @@ async function render(): Promise<void> {
     // Fan Summary — the last push that LANDED, honest-empty otherwise.
     const push = ops?.lastSummaryPush ?? null;
     if (!ops) {
-      hubFanSummaryRow.set({ badge: '—', tone: 'neutral', fact: COPY.common.unknown });
+      hubFanSummaryRow.set({ tone: 'neutral', fact: COPY.common.unknown });
     } else if (push) {
       hubFanSummaryRow.set({
-        badge: 'OK',
         tone: 'green',
         fact: COPY.hub.fanSummaryLast
           .replace('{when}', formatClockTime(push.at))
           .replace('{account}', push.accountLabel || COPY.common.unknown),
       });
     } else {
-      hubFanSummaryRow.set({ badge: '—', tone: 'neutral', fact: COPY.hub.fanSummaryEmpty });
+      hubFanSummaryRow.set({ tone: 'neutral', fact: COPY.hub.fanSummaryEmpty });
     }
     // Both ops-daily rows settle together: a parsed snapshot, or a read that
     // answered but could not be used (`unavailable.opsDaily`) — «неизвестно» is
@@ -2475,6 +2660,7 @@ async function render(): Promise<void> {
       readinessSub.textContent = COPY.status.readySubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
+      statusTodoCard.hidden = true;
     } else {
       readinessHero.dataset.heroState = 'route';
       readinessHeading.textContent = open.length === 1
@@ -2482,17 +2668,33 @@ async function render(): Promise<void> {
         : COPY.status.actionsNeededTitle
             .replace('{n}', String(open.length))
             .replace('{word}', pluralizeActions(open.length));
-      readinessSub.textContent = COPY.sections.statusHint;
+      // NOT `COPY.sections.statusHint` — that sentence is already the pane's
+      // subline in the head, one block above.
+      readinessSub.textContent = COPY.status.readinessRouteSub;
       readinessOpen.replaceChildren(
         ...open.map((step) => {
           const item = document.createElement('li');
           item.dataset.readinessStep = step.key;
-          item.textContent = step.label;
+          const text = document.createElement('span');
+          text.textContent = step.label;
+          const cta = READINESS_STEP_ACTIONS[step.key];
+          item.append(text);
+          if (cta) {
+            const button = createButton(cta.label, true);
+            button.dataset.readinessAction = step.key;
+            button.addEventListener('click', () => navigateTo(cta.pane));
+            item.append(button);
+          }
           return item;
         }),
       );
       readinessOpen.hidden = false;
+      statusTodoCard.hidden = false;
     }
+
+    statusRefreshedTag.textContent = rowsRefreshedAt === 0
+      ? COPY.status.refreshedNever
+      : COPY.status.refreshedAt.replace('{time}', formatClockTime(rowsRefreshedAt));
 
     const micro = document.createElement('span');
     micro.className = open.length === 0
@@ -2509,17 +2711,14 @@ async function render(): Promise<void> {
     // Either branch paints a real Fansly state — enough to lift the headline out
     // of its loading line even before the hub identity read lands.
     fanslyRowPainted = true;
+    rowsRefreshedAt = Date.now();
     if (failed) {
       capturedAccountIds = [];
       statusModel.fansly = { accounts: 0, handles: [], capture: null };
       // The zero above is a placeholder, not an observation — carry the failure
       // into the model so «Скопировать отчёт» cannot turn it into a claim.
       statusModel.unavailable.fansly = true;
-      statusRows.fansly.set({
-        badge: '—',
-        tone: 'neutral',
-        fact: COPY.status.fanslyUnavailable,
-      });
+      statusRows.fansly.set({ tone: 'neutral', fact: COPY.status.fanslyUnavailable });
       refreshStatusView();
       return;
     }
@@ -2544,12 +2743,14 @@ async function render(): Promise<void> {
     statusModel.unavailable.fansly = false;
 
     if (capturedAccountIds.length === 0) {
-      statusRows.fansly.set({ badge: '0', tone: 'amber', fact: COPY.status.fanslyEmpty });
+      statusRows.fansly.set({ tone: 'amber', fact: COPY.status.fanslyEmpty });
     } else {
       statusRows.fansly.set({
-        badge: String(capturedAccountIds.length),
         tone: 'green',
-        fact: `${COPY.status.fanslyWorking} ${handles.join(', ')}`,
+        // The count the badge column used to carry now leads the fact.
+        fact: COPY.status.fanslyWorking
+          .replace('{n}', String(capturedAccountIds.length))
+          .replace('{handles}', handles.join(', ')),
         detail: formatCaptureStatus(freshest),
       });
     }
@@ -2622,7 +2823,6 @@ async function render(): Promise<void> {
     statusRows.hub.setAction(null);
     if (health.ok) {
       statusRows.hub.set({
-        badge: health.status === 'degraded' ? 'DEGRADED' : 'UP',
         tone: health.status === 'degraded' ? 'amber' : 'green',
         fact: health.status === 'degraded' ? COPY.status.hubDegraded : COPY.status.hubUp,
         detail: health.dbLatencyMs === null
@@ -2630,57 +2830,53 @@ async function render(): Promise<void> {
           : COPY.status.hubDbLatency.replace('{n}', String(health.dbLatencyMs)),
       });
     } else if (health.reason === 'no_base_url') {
-      statusRows.hub.set({ badge: '—', tone: 'neutral', fact: COPY.status.hubEmpty });
+      statusRows.hub.set({ tone: 'neutral', fact: COPY.status.hubEmpty });
     } else if (health.reason === 'no_permission') {
       // A fresh install has no host permission (permissions.contains defaults
       // false) — that is NOT a down core. Distinct amber badge + a grant action
       // routed to the Hub pane, so the renderer never falls through to a false
       // red «ядро недоступно».
-      statusRows.hub.set({
-        badge: 'НЕТ ДОСТУПА',
-        tone: 'amber',
-        fact: COPY.status.hubNoPermission,
-      });
+      statusRows.hub.set({ tone: 'amber', fact: COPY.status.hubNoPermission });
       const grant = createButton(COPY.status.grantAccess, true);
       grant.addEventListener('click', () => navigateTo('hub'));
       statusRows.hub.setAction(grant);
     } else {
-      statusRows.hub.set({ badge: 'DOWN', tone: 'bad', fact: COPY.status.hubDown });
+      statusRows.hub.set({ tone: 'bad', fact: COPY.status.hubDown });
     }
 
     // Доступ — CREDENTIAL validity only, never a hub-health verdict.
     statusRows.access.setAction(null);
     if (identity.ok) {
       statusRows.access.set({
-        badge: 'AUTH',
         tone: 'green',
         fact: `${identity.username} · ${identity.role}`,
-        detail: COPY.hub.pagesCount.replace('{n}', String(identity.pages.length)),
+        // Its own key — the «· {n}» template this row used to borrow read as a
+        // separator after the Hub pane's label and as an orphan at this edge.
+        detail: COPY.status.accessPages.replace('{n}', String(identity.pages.length)),
       });
     } else if (identity.reason === 'unauthorized') {
-      statusRows.access.set({ badge: '401', tone: 'bad', fact: COPY.status.accessRejected });
+      statusRows.access.set({ tone: 'bad', fact: COPY.status.accessRejected });
       const reLogin = createButton(COPY.status.reLogin, true);
       reLogin.addEventListener('click', () => navigateTo('hub'));
       statusRows.access.setAction(reLogin);
     } else if (identity.reason === 'no_credential') {
-      statusRows.access.set({ badge: '—', tone: 'neutral', fact: COPY.status.accessEmpty });
+      statusRows.access.set({ tone: 'neutral', fact: COPY.status.accessEmpty });
     } else if (identity.reason === 'no_base_url') {
       // A credential is present but the hub address is blank — nothing is wrong
       // with the credential, so the badge stays neutral and the fact names the
       // real gap (the missing address), not a false «нет credential».
-      statusRows.access.set({ badge: '—', tone: 'neutral', fact: COPY.status.hubEmpty });
+      statusRows.access.set({ tone: 'neutral', fact: COPY.status.hubEmpty });
     } else {
       // no_permission and unreachable are HUB-health conditions, not credential
       // verdicts — the Доступ badge stays neutral (the blocker is surfaced on
       // the Hub row), never a red «нет credential».
-      statusRows.access.set({ badge: '—', tone: 'neutral', fact: COPY.status.accessUnknown });
+      statusRows.access.set({ tone: 'neutral', fact: COPY.status.accessUnknown });
     }
 
     // Контракт (debug-only here; derived from the same health response)
     if (health.ok) {
       const match = health.contractHash === health.sdkContractHash;
       statusRows.contract.set({
-        badge: match ? 'MATCH' : 'DRIFT',
         tone: match ? 'green' : 'bad',
         fact: match ? COPY.status.contractMatches : COPY.status.contractDrift,
         detail: health.sdkSourceCommit
@@ -2688,9 +2884,10 @@ async function render(): Promise<void> {
           : undefined,
       });
     } else {
-      statusRows.contract.set({ badge: '—', tone: 'neutral', fact: COPY.status.contractUnknown });
+      statusRows.contract.set({ tone: 'neutral', fact: COPY.status.contractUnknown });
     }
 
+    rowsRefreshedAt = Date.now();
     refreshStatusView();
   };
 
@@ -2746,9 +2943,9 @@ async function render(): Promise<void> {
     if (quotaUnavailable) {
       // `set` also clears any detail lines a previous successful read painted —
       // per-page numbers under an «недоступно» fact would be stale.
-      statusRows.ai.set({ badge: '—', tone: 'neutral', fact: COPY.status.aiUnavailable });
+      statusRows.ai.set({ tone: 'neutral', fact: COPY.status.aiUnavailable });
     } else if (worstFirst.length === 0) {
-      statusRows.ai.set({ badge: '—', tone: 'neutral', fact: COPY.status.aiEmpty });
+      statusRows.ai.set({ tone: 'neutral', fact: COPY.status.aiEmpty });
     } else {
       const remaining = worstFirst[0]?.remainingRequestsToday ?? null;
       let tone: BadgeTone;
@@ -2766,9 +2963,14 @@ async function render(): Promise<void> {
         fact = COPY.status.aiExhausted;
       } else {
         tone = remaining <= AI_QUOTA_LOW_THRESHOLD ? 'amber' : 'green';
-        fact = COPY.status.aiByPageNote;
+        // The number used to live in the badge while the fact was a LEGEND
+        // («по страницам · худшая первой»). With the badge gone the row states
+        // the worst page and its remainder; the full ledger stays below.
+        fact = COPY.status.aiWorst
+          .replace('{page}', worstFirst[0]?.pageLabel ?? '')
+          .replace('{n}', String(remaining));
       }
-      statusRows.ai.set({ badge: remaining === null ? '—' : String(remaining), tone, fact });
+      statusRows.ai.set({ tone, fact });
       statusRows.ai.setDetailLines(worstFirst.map((entry) => (
         entry.remainingRequestsToday === null
           ? COPY.status.aiNoLimit.replace('{page}', entry.pageLabel)
@@ -2785,13 +2987,9 @@ async function render(): Promise<void> {
     if (opsUnavailable) {
       // «Сегодня генераций не было» is a claim about the day; a failed read
       // cannot make it. Say the row could not be read instead.
-      statusRows.activity.set({
-        badge: '—',
-        tone: 'neutral',
-        fact: COPY.status.activityUnavailable,
-      });
+      statusRows.activity.set({ tone: 'neutral', fact: COPY.status.activityUnavailable });
     } else if (!lastGeneration) {
-      statusRows.activity.set({ badge: '—', tone: 'neutral', fact: COPY.status.activityEmpty });
+      statusRows.activity.set({ tone: 'neutral', fact: COPY.status.activityEmpty });
       statusRows.activity.setDetailLines(
         opsDaily && opsDaily.hubErrorsTotal > 0
           ? [COPY.status.activityHubErrors.replace('{n}', String(opsDaily.hubErrorsTotal))]
@@ -2800,9 +2998,12 @@ async function render(): Promise<void> {
     } else {
       const label = lastGeneration.accountLabel || shortenAccountId(lastGeneration.accountId);
       statusRows.activity.set({
-        badge: formatClockTime(lastGeneration.at),
         tone: 'neutral',
-        fact: `${lastGeneration.feature} · ${label}`,
+        // The clock time used to be this row's badge.
+        fact: COPY.status.activityLast
+          .replace('{time}', formatClockTime(lastGeneration.at))
+          .replace('{feature}', lastGeneration.feature)
+          .replace('{account}', label),
       });
       statusRows.activity.setDetailLines([
         COPY.accounts.corePage.replace('{page}', lastGeneration.pageLabel),
@@ -2819,39 +3020,30 @@ async function render(): Promise<void> {
     if (spendersUnavailable) {
       // Not «доска ещё не открывалась» — that would blame the chatter for a
       // read this page failed to make.
-      statusRows.spenders.set({
-        badge: '—',
-        tone: 'neutral',
-        fact: COPY.status.spendersUnavailable,
-      });
+      statusRows.spenders.set({ tone: 'neutral', fact: COPY.status.spendersUnavailable });
     } else if (!spenders) {
-      statusRows.spenders.set({ badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty });
+      statusRows.spenders.set({ tone: 'neutral', fact: COPY.status.spendersEmpty });
     } else if (spenders.outcome === 'fail') {
-      statusRows.spenders.set({ badge: 'FAIL', tone: 'bad', fact: COPY.status.spendersFail });
+      statusRows.spenders.set({ tone: 'bad', fact: COPY.status.spendersFail });
     } else {
-      const byState: Record<SpendersStreamState, { badge: string; tone: BadgeTone; fact: string }> = {
-        ramped: { badge: 'RAMPED', tone: 'green', fact: COPY.status.spendersRamped },
-        flag_off: { badge: 'FLAG OFF', tone: 'neutral', fact: COPY.status.spendersFlagOff },
-        not_allowlisted: {
-          badge: 'NOT ALLOWLISTED',
-          tone: 'amber',
-          fact: COPY.status.spendersNotAllowlisted,
-        },
-        unsupported_platform: {
-          badge: 'FLAG OFF',
-          tone: 'neutral',
-          fact: COPY.status.spendersUnsupported,
-        },
+      // Four states, four facts — the badge column used to print «FLAG OFF» for
+      // two of them, so the token alone could not be read.
+      const byState: Record<SpendersStreamState, { tone: BadgeTone; fact: string }> = {
+        ramped: { tone: 'green', fact: COPY.status.spendersRamped },
+        flag_off: { tone: 'neutral', fact: COPY.status.spendersFlagOff },
+        not_allowlisted: { tone: 'amber', fact: COPY.status.spendersNotAllowlisted },
+        unsupported_platform: { tone: 'neutral', fact: COPY.status.spendersUnsupported },
       };
       // FLAG OFF only from a real flag_off observation; a null streamState on a
       // successful outcome is «not yet observed», so keep the neutral em-dash.
       statusRows.spenders.set(
         spenders.streamState
           ? byState[spenders.streamState]
-          : { badge: '—', tone: 'neutral', fact: COPY.status.spendersEmpty },
+          : { tone: 'neutral', fact: COPY.status.spendersEmpty },
       );
     }
 
+    rowsRefreshedAt = Date.now();
     refreshStatusView();
   };
 

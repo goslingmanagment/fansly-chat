@@ -28,6 +28,59 @@ export function createSection(title: string, description?: string): HTMLElement 
   return wrapper;
 }
 
+export interface PaneHead {
+  root: HTMLElement;
+  /** Right side of the head: counters, stamps and the pane's primary action. */
+  side: HTMLElement;
+}
+
+/**
+ * The head of a pane: title and subline on the left, the pane's own controls on
+ * the right, ABOVE the cards (E61). It replaces the per-card `<h2>` + subtitle
+ * pair for panes that own more than one card — a pane says its name once.
+ */
+export function createPaneHead(title: string, subtitle?: string): PaneHead {
+  const root = document.createElement('div');
+  root.className = 'chatgoose-panehead';
+
+  const text = document.createElement('div');
+  const titleNode = document.createElement('h1');
+  titleNode.className = 'chatgoose-panehead-title';
+  titleNode.textContent = title;
+  text.append(titleNode);
+  if (subtitle) {
+    const sub = document.createElement('div');
+    sub.className = 'chatgoose-panehead-sub';
+    sub.textContent = subtitle;
+    text.append(sub);
+  }
+
+  const side = document.createElement('div');
+  side.className = 'chatgoose-panehead-side';
+  root.append(text, side);
+  return { root, side };
+}
+
+/** One label → value line. The value is mono when it is a plain string; pass a
+ * node (a link, a chip) when it is not a receipt. */
+export function factRow(label: string, value: string | HTMLElement): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'chatgoose-fact';
+  const key = document.createElement('span');
+  key.className = 'chatgoose-fact-k';
+  key.textContent = label;
+  row.append(key);
+  if (typeof value === 'string') {
+    const node = document.createElement('span');
+    node.className = 'chatgoose-fact-v';
+    node.textContent = value;
+    row.append(node);
+  } else {
+    row.append(value);
+  }
+  return row;
+}
+
 export function labeledField(labelText: string, input: HTMLElement): HTMLElement {
   const wrapper = document.createElement('label');
   wrapper.style.display = 'grid';
@@ -92,8 +145,12 @@ export function createBadge(
   return badge;
 }
 
+/** A row states its case in WORDS (E61). The mono badge column this view used
+ * to carry spoke six vocabularies at once — counts, English state words, an
+ * HTTP code, a Russian phrase, a clock time and an em dash that meant four
+ * different things — so every reader fell back to the fact text anyway. The
+ * tone still colours the dot; what the badge said now lives inside `fact`. */
 export interface StatusRowView {
-  badge: string;
   tone: BadgeTone;
   fact: string;
   detail?: string;
@@ -109,32 +166,29 @@ export interface StatusRow {
   skeleton: () => void;
 }
 
-/** One read-only state row: dot, mono badge, label, fact, optional action and
- * detail lines. `skeleton()` is the honest pre-hydration state — never a
- * fabricated verdict. */
+/** One read-only state row: dot, label, fact, optional action and detail lines.
+ * The label sits in its own fixed column so every fact starts on one vertical —
+ * the badge slot's `minmax(60px, auto)` only held that line while the token was
+ * short. `skeleton()` is the honest pre-hydration state — never a fabricated
+ * verdict. */
 export function createStatusRow(label: string, key: string): StatusRow {
   const root = document.createElement('div');
   root.className = 'chatgoose-status-row';
   root.dataset.statusRow = key;
   const dot = document.createElement('span');
   dot.className = 'chatgoose-status-dot';
-  const badge = createBadge('…', 'neutral', true);
-  const body = document.createElement('div');
-  body.className = 'chatgoose-status-body';
   const labelNode = document.createElement('span');
   labelNode.className = 'chatgoose-status-label';
   labelNode.textContent = label;
   const fact = document.createElement('span');
   fact.className = 'chatgoose-status-fact';
-  body.append(labelNode, fact);
   const actionSlot = document.createElement('span');
   actionSlot.className = 'chatgoose-status-action';
   const detail = document.createElement('div');
   detail.className = 'chatgoose-status-detail';
-  root.append(dot, badge, body, actionSlot, detail);
+  root.append(dot, labelNode, fact, actionSlot, detail);
 
   const applyTone = (tone: BadgeTone): void => {
-    badge.className = `chatgoose-badge chatgoose-badge-${tone} chatgoose-badge-mono`;
     root.dataset.tone = tone;
   };
 
@@ -149,7 +203,6 @@ export function createStatusRow(label: string, key: string): StatusRow {
     root,
     skeleton: () => {
       root.dataset.status = 'loading';
-      badge.textContent = '…';
       applyTone('neutral');
       fact.textContent = '';
       detail.replaceChildren();
@@ -157,7 +210,6 @@ export function createStatusRow(label: string, key: string): StatusRow {
     },
     set: (view) => {
       root.dataset.status = 'ready';
-      badge.textContent = view.badge;
       applyTone(view.tone);
       fact.textContent = view.fact;
       detail.replaceChildren();
