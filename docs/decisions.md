@@ -76,6 +76,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E57 | 2026-07-24 | Kernel provider failures get exact Russian cause cards; unknown provider codes retain E38 fallback, truncation gets a dedicated fail-closed card |
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
 | E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim. **Amended (post-campaign round 2):** the fence runs from the state of EVERY applied read (never a per-event flag the generation guard can discard) and invalidates this tab's pending credential write, while skipping the hub-check chain owned by this page's own custody RPC; the honest-outcome rule keys on the recorded issuing ADDRESS (`!meta.issuedFrom`), `alsoWrite` throws on a key the same write owns, `unavailable.fansly` starts TRUE, and the fence re-renders the sign-in meta line |
+| E60 | 2026-07-26 | Cabinet frame R3: the shell fills the window — no width clamp on `<body>` — with a sticky rail that owns one viewport and a reading column capped at 1120px on the pane itself; the page root's permanent 24px bottom padding moves into that pane. Supersedes the 900px ribbon chosen when #46 was reverted (owner ruling on the R3 mockups, 2026-07-26). Narrow windows collapse the rail (BL-003 п.1), disabled controls finally look disabled, and the save whisper speaks Russian |
 
 ## Entries
 
@@ -1922,3 +1923,45 @@ Finally, the fence re-renders the sign-in meta line. `renderHubSignInState` fill
 that line only when it is EMPTY, so an external wipe used to leave «Hub requests
 use the device token …» — or, after a sign-in in the same session, «Device token
 abc… issued (expires …)» — sitting next to a signed-out pill.
+
+**E60 (2026-07-26).** The cabinet's FRAME, chosen from the R3 «было/стало»
+mockups. `body { max-width: 900px }` put the whole cabinet — rail included — in
+a ribbon in the middle of the canvas: on a 1870px window the shell used less
+than half the width, and the rail scrolled away on the one long pane. The shell
+now fills the window; the rail is `position: sticky` with `height: 100vh` and
+its own overflow, so navigation survives Agency Hub; the reading column is
+capped at 1120px and centred by `.chatgoose-cabinet-pane`, which is also where
+the bottom breathing room now lives.
+
+This supersedes the 900px choice recorded in BL-003 after the #46 revert. That
+ruling settled a comparison between the .907 build (900px) and #46's 1280px
+frame, which ALSO stretched cards and 56px badges; the owner's objection was to
+that treatment, not to the window being used. R3 changes the frame alone — cards,
+palette, row anatomy and the panes' contents are untouched in this wave — and the
+1280px clamp is not reinstated: a capped, centred column is what keeps the line
+length readable on a wide monitor.
+
+`root.style.paddingBottom = '24px'` is gone from the cabinet path. It sat on top
+of the shell's `min-height: 100vh`, so every pane — «Вид» with its three cards
+included — was a scrolling page. The two recovery gates keep their own padding:
+they render outside the shell and have no pane to hold it.
+
+Narrow windows (BL-003 п.1, open since wave A) close here: below 900px the rail
+gives back width, below 640px it stops being a rail and becomes a wrapped strip
+above the content, and the dense rows (status, hub, accounts, persona catalog)
+drop their right-hand mono column onto a second line instead of overflowing the
+card. The rules live at the END of the stylesheet on purpose — a media block
+placed before the base rules it overrides loses to them on source order.
+
+Two honesty fixes ride along, both from the R3 diagnosis. Disabled controls had
+NO styling anywhere in the stylesheet, so «Проверить связь» and «Разрешить
+доступ» — off for the whole fresh-install flow — read as broken clay buttons;
+they now wash out and drop the pointer. And the save whisper said «Saved ✓» on a
+fully Russian page while `COPY.common.saved` sat unused.
+
+Dead copy removed with the frame: the `hero` block (11 keys) died with the health
+strip in wave B, `pageTitle`/`pageSubtitle` died with the page header the rail
+replaced, and seven `sections.*` keys duplicated titles the panes own themselves
+— every one of them verified unreferenced in `src/` and `tests/`.
+`COPY.documentTitle` claimed to mirror the static `<title>` with nothing
+enforcing it; a one-line test now pins the claim.

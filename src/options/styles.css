@@ -76,14 +76,16 @@
   color-scheme: dark;
 }
 
+/* The shell fills the window (E60): the rail is pinned to the left edge and the
+   reading column is centred inside the main area by `.chatgoose-cabinet-pane`.
+   The old `max-width: 900px` on <body> put the whole cabinet — rail included —
+   in a ribbon on the canvas. */
 body {
   margin: 0;
   background: var(--chatgoose-bg0);
   color: var(--chatgoose-ink);
   font-family: var(--chatgoose-font);
   font-size: 14px;
-  max-width: 900px;
-  margin: 0 auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -114,9 +116,19 @@ input[type='checkbox'] {
   min-height: 100vh;
 }
 
+/* Pinned, not scrolled away: the rail owns exactly one viewport and scrolls
+   inside itself, so navigation survives the one long pane (Agency Hub).
+   `height: 100vh` (not `align-items: stretch`) is what keeps the footer at the
+   bottom edge once the item stops stretching to the flex container. */
 .chatgoose-cabinet-rail {
-  width: 216px;
+  width: 236px;
   flex: none;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -249,9 +261,17 @@ input[type='checkbox'] {
 
 /* One pane at a time. The `[hidden]` rule below MUST stay next to this one:
    an author display rule beats the UA `[hidden] { display: none }` (origin
-   precedes specificity), so the attribute alone would not hide the pane. */
+   precedes specificity), so the attribute alone would not hide the pane.
+   The pane IS the reading column: it caps the line length on a wide window and
+   centres itself in the main area, and its bottom padding is what closes the
+   last card — the page root no longer carries a permanent one (that padding
+   sat on top of `min-height: 100vh` and produced a scrollbar on every pane). */
 .chatgoose-cabinet-pane {
   display: block;
+  box-sizing: border-box;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-bottom: 28px;
 }
 
 .chatgoose-cabinet-pane[hidden] {
@@ -351,6 +371,53 @@ input[type='checkbox'] {
   background: var(--chatgoose-clay-bg);
   border-color: var(--chatgoose-clay-line);
   color: var(--chatgoose-clay-ink);
+}
+
+/* Disabled controls must LOOK disabled (E60). «Проверить связь» is off for the
+   whole fresh-install flow and «Разрешить доступ» until an origin exists — as
+   fully-painted clay buttons they read as broken rather than as not-yet. The
+   hover rules are repeated because the base ones would otherwise still fire. */
+.chatgoose-button:disabled,
+.chatgoose-button:disabled:hover {
+  background: var(--chatgoose-bg2);
+  border-color: var(--chatgoose-line);
+  color: var(--chatgoose-ink-low);
+  cursor: default;
+}
+
+.chatgoose-input:disabled,
+.chatgoose-select:disabled,
+.chatgoose-textarea:disabled {
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-low);
+  cursor: default;
+}
+
+.chatgoose-stepper-btn:disabled,
+.chatgoose-stepper-btn:disabled:hover,
+.chatgoose-segment-btn:disabled {
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-low);
+  cursor: default;
+}
+
+.chatgoose-switch input:disabled {
+  cursor: default;
+}
+
+.chatgoose-switch input:disabled + .chatgoose-switch-track {
+  opacity: 0.5;
+}
+
+.chatgoose-theme-card:has(.chatgoose-theme-radio:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.chatgoose-copy-id:disabled,
+.chatgoose-account-rename:disabled {
+  cursor: default;
+  color: var(--chatgoose-ink-low);
 }
 
 .chatgoose-button-danger {
@@ -1701,4 +1768,128 @@ input[type='checkbox'] {
   border: 1px dashed var(--chatgoose-line-strong);
   color: var(--chatgoose-ink-mid);
   font-size: 12.5px;
+}
+
+/* ── Narrow windows (BL-003 п.1) ──
+   A settings page opened in half a screen must stay usable: first the rail
+   gives back width, then it stops being a rail at all and the dense rows
+   (status, hub, accounts, numeric settings) drop their right-hand column onto
+   a second line instead of overflowing the card. */
+@media (max-width: 900px) {
+  .chatgoose-cabinet-rail {
+    width: 188px;
+    padding: 18px 8px 14px;
+  }
+
+  .chatgoose-cabinet-pane {
+    padding-bottom: 22px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chatgoose-cabinet {
+    display: block;
+  }
+
+  .chatgoose-cabinet-rail {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 12px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--chatgoose-line);
+  }
+
+  .chatgoose-cabinet-brand {
+    flex-basis: 100%;
+    padding: 0 4px 8px;
+  }
+
+  .chatgoose-cabinet-item {
+    width: auto;
+  }
+
+  .chatgoose-cabinet-railfoot {
+    flex-basis: 100%;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px 0;
+  }
+
+  .chatgoose-cabinet-pane .chatgoose-section,
+  .chatgoose-readiness,
+  .chatgoose-onboarding,
+  .chatgoose-deeplink {
+    margin: 12px 12px 0;
+  }
+
+  .chatgoose-section {
+    padding: 16px;
+  }
+
+  /* Label above, control below — the numeric steppers and the segment stop
+     being squeezed against the right edge. */
+  .chatgoose-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* The right-edge mono details move under the fact they belong to. */
+  .chatgoose-status-row {
+    grid-template-columns: 10px minmax(48px, auto) minmax(0, 1fr);
+    row-gap: 4px;
+  }
+
+  .chatgoose-status-action,
+  .chatgoose-status-detail {
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: start;
+    text-align: left;
+  }
+
+  .chatgoose-hub-srow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 4px;
+  }
+
+  .chatgoose-hub-srow-meta {
+    grid-column: 1 / -1;
+    justify-self: start;
+    text-align: left;
+  }
+
+  .chatgoose-hub-drow {
+    grid-template-columns: 46px minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .chatgoose-hub-drow-det {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+  }
+
+  /* The persona select keeps its lane but stops being the widest thing in the
+     row — 220px does not fit next to an 18-digit id on a phone-width window. */
+  .chatgoose-account-row {
+    grid-template-columns: 8px minmax(0, 1fr) minmax(96px, 140px);
+  }
+
+  .chatgoose-account-row > .chatgoose-select,
+  .chatgoose-ghost-bar-select {
+    width: 100%;
+  }
+
+  .chatgoose-persona-catrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 4px;
+  }
 }
