@@ -81,10 +81,21 @@ describe('options error deep links', () => {
     // …and it lives in the pane the link opened.
     expect(pane(page, 'hub').contains(note(page))).toBe(true);
 
-    // The row that code is about is highlighted, and only that row.
+    // The block that code is about is highlighted, and only that block.
     const flashed = page.document.querySelectorAll('.chatgoose-flash');
     expect(flashed).toHaveLength(1);
-    expect((flashed[0] as HTMLElement).dataset.hubDetail).toBe('host-access');
+    const target = flashed[0] as HTMLElement;
+    expect(target.dataset.hubDetail).toBe('host-access');
+    // …and it CONTAINS the control that closes the error. E61 claimed this while
+    // the anchor sat on the read-only status row and «Разрешить доступ» lived in
+    // a sibling action row of the same card — the flash framed the diagnosis and
+    // left out the cure.
+    const grant = Array.from(target.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === COPY.status.grantAccess);
+    expect(grant).toBeTruthy();
+    // The fact it is about is in there too, so the highlight still reads as one
+    // statement rather than as a lone button.
+    expect(target.textContent).toContain(COPY.hub.permLabel);
   });
 
   it('waits for an asynchronous row before highlighting it', async () => {
@@ -105,8 +116,15 @@ describe('options error deep links', () => {
     const flashed = page.document.querySelectorAll('.chatgoose-flash');
     expect(flashed).toHaveLength(1);
     expect(flashed[0]?.classList.contains('chatgoose-account-rows')).toBe(true);
-    // The row it points at really is rendered by now.
+    // The selector is a `querySelector`, so the class has to name EXACTLY one
+    // element — the state groups wore it too for a while, and the highlight
+    // landed on the table only because the table comes first in the DOM.
+    expect(page.document.querySelectorAll('.chatgoose-account-rows')).toHaveLength(1);
+    // …and the table really is the one that holds the rows.
     expect(page.document.querySelector('[data-account-mapping-row="acc-1"]')).toBeTruthy();
+    expect(flashed[0]?.contains(
+      page.document.querySelector('[data-account-mapping-row="acc-1"]'),
+    )).toBe(true);
   });
 
   it('does not burn the flash on the loading line while the table hydrates', async () => {

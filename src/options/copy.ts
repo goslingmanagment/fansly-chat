@@ -347,8 +347,9 @@ export const COPY = {
     checkViaLegacyKey: 'по legacy-ключу',
     checkNever: 'ещё не проверяли',
     checkDuration: '{n} мс',
-    hostAccessLabel: 'Доступ к хосту',
-    hostAccessGranted: 'выдан',
+    /** The label and the bare «выдан» went with the diagnostics host-access row
+     * (E61): «Подключение» already states that fact next to the button that
+     * fixes it, and only the «для {origin}» form survived. */
     hostAccessGrantedFor: 'выдан для',
     contractLabel: 'Контракт SDK',
     contractMatches: 'совпадает с ядром',
@@ -382,15 +383,24 @@ export const COPY = {
     statusActive: 'активна',
     statusArchived: 'архивная',
     archivedMapped: 'выбери замену',
-    catalogLabel: 'Каталог',
-    catalogUpdated: 'обновлён {date}',
     catalogNever: 'ещё не обновлялся',
     /** Staleness marker at the right edge of the catalog row — shown (amber)
      * only once the catalog is older than 48 hours; an absolute timestamp
      * alone hides how stale it is. */
     catalogAge: '{n} дн назад',
     catalogRefresh: 'Проверить связь и обновить',
-    catalogRefreshHint: 'каталог перечитывается после успешной проверки связи',
+    catalogRefreshHint: 'Каталог перечитывается после успешной проверки связи с ядром.',
+    /** Second line of a persona row: which accounts sit on it. The pane held the
+     * mapping and printed only its size (E62). */
+    mappedLabel: 'на ней',
+    mappedEmpty: 'аккаунтов нет',
+    /** Right column of the pane. */
+    catalogCardTitle: 'Каталог',
+    listCardTitle: 'Каталог ядра',
+    catalogUpdatedLabel: 'Обновлён',
+    catalogSourceLabel: 'Источник',
+    catalogSourceUnknown: 'неизвестен',
+    toAccounts: 'К аккаунтам →',
     legacyFold: 'Архив локальной персоны',
     legacyNote:
       'Legacy: локальный текст персоны сохранён без изменений. Экспортируй его перед удалением расширения или чисткой данных браузера.',
@@ -404,7 +414,22 @@ export const COPY = {
 
   accounts: {
     title: 'Аккаунты Fansly',
-    subtitle: '{live} из {total} в работе · персона назначается на аккаунт · ID копируется кликом',
+    /** Head chip: the live count, and nothing else — the two instructions that
+     * used to ride this sentence live in the pane's subtitle now (E62). */
+    subtitle: '{live} из {total} в работе',
+    paneSubtitle:
+      'Аккаунты появляются здесь сами, когда в этом браузере открыт Fansly. Персона назначается на аккаунт, ID копируется кликом.',
+    /** Group captions: the row state said once per block instead of once per row. */
+    groupLive: 'В работе',
+    groupSeen: 'Видели раньше',
+    groupNever: 'Сессий не было',
+    /** Only the degraded path reaches this group: without the background's
+     * accounts view the page sees the live snapshot and nothing else, so
+     * «сессий не было» would be a verdict it cannot prove. */
+    groupUnknown: 'Состояние неизвестно',
+    /** An account with no resolved name and no local label: the heading invites
+     * one instead of repeating the id printed right below it. */
+    renameInvite: 'подписать',
     subtitleFresh: 'Пока пусто — аккаунты появляются здесь сами.',
     emptyFresh:
       'Открой fansly.com в этом браузере и войди под аккаунтом модели — строка появится сама, останется назначить персону.',
@@ -427,9 +452,6 @@ export const COPY = {
     renameLocalTitle: 'Локальная подпись',
     renameSave: 'Сохранить',
     renameCancel: 'Отмена',
-    /** The one pill an account row can wear — quiet rows carry no pill at all:
-     * the grey dot and the mono «была…»/«сессий не было» line are the state. */
-    stateLive: 'в работе',
     subTabActive: 'вкладка активна',
     subSeenAt: 'была {when}',
     /** `{when}` forms for `subSeenAt` — a bare «21:40» three days later lies. */
@@ -437,6 +459,9 @@ export const COPY = {
     whenYesterday: 'вчера {time}',
     whenDate: '{date} в {time}',
     subNeverSeen: 'сессий не было',
+    /** The degraded row's fact line — it matches its group caption instead of
+     * borrowing «сессий не было» from a state nobody established. */
+    subStateUnknown: 'о прошлых сессиях этот браузер не знает',
     corePage: 'страница ядра: {page}',
     personaUnmapped: 'AI отключён',
     personaUnmappedHint: 'назначь персону — без неё генерации не запускаются',
@@ -474,6 +499,8 @@ export const COPY = {
     debugTitle: 'Режим отладки',
     debugHint: 'подробные логи фоновой страницы',
     savedAs: 'сохранено как {n}',
+    /** Under the range: what one −/+ press moves. */
+    stepNote: 'шаг {n}',
     /** aria-labels of the −/+ stepper buttons (pointer affordance; the field
      * itself keeps typing and arrow keys). */
     stepDown: 'Уменьшить',
@@ -484,6 +511,10 @@ export const COPY = {
     title: 'Хоткеи',
     subtitle: 'Работают на вкладке Fansly. Сочетания заданы расширением — справочник только для чтения.',
     hint: 'Сочетание не срабатывает — проверь, что фокус в чате Fansly, а не в адресной строке.',
+    /** Which modifier THIS computer uses — the page detected it for the labels
+     * and never said it out loud (E62). */
+    platformMac: 'этот компьютер · macOS · ⌘⇧',
+    platformOther: 'этот компьютер · Windows/Linux · Alt+Shift',
     actions: HOTKEY_ACTION_NAMES,
     extraEnter: 'Вставить следующую часть ответа',
     extraEsc: 'Закрыть оверлей, доску или шпаргалку',
@@ -495,7 +526,17 @@ export const COPY = {
 
   appearance: {
     title: 'Вид',
-    subtitle: 'Одна семья, светлая и тёмная — тема действует и на панель в чате.',
+    subtitle: 'Одна семья, светлая и тёмная. Тема общая для панели в чате Fansly, кабинета и попапа.',
+    themeCardTitle: 'Тема',
+    /** What «Системная» resolves to right now — the OS scheme, computed, never
+     * guessed. It names the SYSTEM out loud because it stays on screen while
+     * «Светлая»/«Тёмная» is the live choice, and «сейчас — светлая» there would
+     * read as a claim about the page. */
+    resolvedLight: 'система сейчас — светлая',
+    resolvedDark: 'система сейчас — тёмная',
+    chatCardTitle: 'Панель в чате',
+    chatCardNote: 'Тема применяется сразу во всех вкладках Fansly и в попапе — перезагружать ничего не нужно.',
+    chatToneChip: 'тон · flirty',
     systemTitle: 'Системная',
     systemHint: 'следует за ОС',
     lightTitle: 'Светлая',

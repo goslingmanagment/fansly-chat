@@ -678,6 +678,10 @@ describe('options «Статус» pane', () => {
       expect(hero(page).dataset.heroState).toBe('route');
       // hub + fansly + persona are open (access is unchecked, not failed).
       expect(hero(page).textContent).toContain('Нужно 3 действия.');
+      // With no checklist to defer to, «Что мешает» is where those steps live —
+      // the suppression below must not become a permanent one.
+      expect(todo(page).hidden).toBe(false);
+      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
     });
 
     it('stands down while the first-run checklist owns the same three steps', async () => {
@@ -695,8 +699,13 @@ describe('options «Статус» pane', () => {
       expect(hero(page).contains(card)).toBe(false);
       expect(page.document.querySelectorAll('[data-onboarding-step]')).toHaveLength(3);
       expect(hero(page).hidden).toBe(true);
-      // The hero keeps its own verdict current INSIDE that hidden card, so it is
-      // already right the moment the checklist retires — hidden, never stale.
+      // …and so does «Что мешает». The open-steps LIST moved out of the hero into
+      // its own card (E62), so hiding the hero alone stopped being enough: a
+      // genuinely fresh install stated the same three steps twice, once with a
+      // CTA each and once in the amber card beside them. One decision, one writer.
+      expect(todo(page).hidden).toBe(true);
+      // The list inside keeps its verdict current while hidden, so it is already
+      // right the moment the checklist retires — hidden, never stale.
       expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
       expect(hero(page).dataset.heroState).toBe('route');
       // …and the rail micro still carries the aggregate: the pane says «setup»
@@ -740,6 +749,41 @@ describe('options «Статус» pane', () => {
       expect(page.sentRequestTypes().filter((type) => type === 'getAgencyHubHealth').length)
         .toBe(afterFirst);
       expect(page.document.body.textContent).toContain(COPY.status.checkAllThrottled);
+    });
+
+    it('answers in its OWN live region, not in the report card', async () => {
+      // «Проверить всё» moved into the pane head and its only feedback element
+      // stayed next to «Скопировать отчёт»: the throttle message read as a
+      // verdict on the report, and a later check wiped «Отчёт скопировано».
+      const page = await readyMount();
+      const writeText = vi.fn(async (_text: string) => undefined);
+      Object.defineProperty(page.window.navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      });
+      const checkNote = page.document
+        .querySelector<HTMLElement>('[data-role="status-check-note"]')!;
+      const reportNote = page.document
+        .querySelector<HTMLElement>('[data-role="status-report-note"]')!;
+      expect(checkNote).not.toBe(reportNote);
+      // Each note lives with the button it answers for.
+      expect(checkNote.closest('.chatgoose-panehead')).toBeTruthy();
+      expect(reportNote.closest('.chatgoose-panehead')).toBeNull();
+
+      statusButton(page, COPY.status.copyReport).click();
+      await page.flushAsync();
+      expect(reportNote.textContent).toBe(COPY.status.copyReportDone);
+
+      // Two presses: the first consumes the window, the second is throttled.
+      const button = statusButton(page, COPY.status.checkAll);
+      button.click();
+      await page.flushAsync();
+      button.click();
+      await page.flushAsync();
+
+      expect(checkNote.textContent).toBe(COPY.status.checkAllThrottled);
+      // The report's receipt survives — the check never spoke for it.
+      expect(reportNote.textContent).toBe(COPY.status.copyReportDone);
     });
   });
 

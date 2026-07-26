@@ -64,6 +64,12 @@ import {
   CHANGELOG_URL,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
+  IMPROVE_MAX_MESSAGE_COUNT,
+  IMPROVE_MIN_MESSAGE_COUNT,
+  PING_MAX_MESSAGE_COUNT,
+  PING_MIN_MESSAGE_COUNT,
+  QUICK_MAX_MESSAGE_COUNT,
+  QUICK_MIN_MESSAGE_COUNT,
   DEEP_MAX_MESSAGE_COUNT,
   DEEP_MIN_MESSAGE_COUNT,
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
@@ -83,7 +89,7 @@ import {
   saveAccountMapping,
   saveSettings,
 } from '../shared/storage.js';
-import { installUiTheme } from '../shared/theme.js';
+import { installUiTheme, resolveUiTheme, systemPrefersDark } from '../shared/theme.js';
 import type {
   AccountsView,
   AccountsViewEntry,
@@ -213,6 +219,18 @@ function parseSpendersObservation(value: unknown): ParsedReply<SpendersObservati
     ? { ok: true, value: value as SpendersObservation }
     : UNUSABLE_REPLY;
 }
+
+/**
+ * One account row as the PANE knows it. The background's contract has three
+ * states; the pane adds a fourth for its degraded path (see
+ * `buildAccountRowViews`) — «this browser has no observation either way», which
+ * is not the same claim as «сессий не было». It never travels: nothing sends an
+ * `AccountRowView` back to the background, and `asAccountsView` still admits
+ * only the three contract states from it.
+ */
+type AccountRowView = Omit<AccountsViewEntry, 'state'> & {
+  state: AccountsViewEntry['state'] | 'unknown';
+};
 
 function asAccountsView(value: unknown): AccountsView | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -796,10 +814,9 @@ async function render(): Promise<void> {
   // Three clickable preview cards. Each one still wraps the SAME radio the
   // settings writer already reads, so picking a theme rides the existing
   // debounced save path — no second writer, no new storage field.
-  const appearanceSection = createSection(
-    COPY.appearance.title,
-    COPY.appearance.subtitle,
-  );
+  const appearanceSection = document.createElement('section');
+  appearanceSection.className = 'chatgoose-pane-plain';
+  const appearanceHead = createPaneHead(COPY.appearance.title, COPY.appearance.subtitle);
   const themeChoices: Array<{ value: UiThemeSetting; title: string; hint: string }> = [
     { value: 'system', title: COPY.appearance.systemTitle, hint: COPY.appearance.systemHint },
     { value: 'light', title: COPY.appearance.lightTitle, hint: COPY.appearance.lightHint },
@@ -834,7 +851,9 @@ async function render(): Promise<void> {
     previewBar.className = 'chatgoose-theme-preview-bar';
     const previewBarShort = document.createElement('span');
     previewBarShort.className = 'chatgoose-theme-preview-bar chatgoose-theme-preview-bar-short';
-    previewBody.append(previewBar, previewBarShort);
+    const previewButton = document.createElement('span');
+    previewButton.className = 'chatgoose-theme-preview-btn';
+    previewBody.append(previewBar, previewBarShort, previewButton);
     preview.append(previewRail, previewBody);
     if (choice.value === 'system') {
       // A complete dark miniature clipped to the right half (see styles.css):
@@ -849,7 +868,9 @@ async function render(): Promise<void> {
       darkBar.className = 'chatgoose-theme-preview-bar';
       const darkBarShort = document.createElement('span');
       darkBarShort.className = 'chatgoose-theme-preview-bar chatgoose-theme-preview-bar-short';
-      darkBody.append(darkBar, darkBarShort);
+      const darkButton = document.createElement('span');
+      darkButton.className = 'chatgoose-theme-preview-btn';
+      darkBody.append(darkBar, darkBarShort, darkButton);
       darkHalf.append(darkRail, darkBody);
       preview.append(darkHalf);
     }
@@ -865,38 +886,144 @@ async function render(): Promise<void> {
   }
   const getSelectedTheme = (): UiThemeSetting =>
     (themeRadios.find((radio) => radio.checked)?.value ?? 'system') as UiThemeSetting;
-  appearanceSection.append(themeCards);
+
+  // The radios are a GROUP; screen readers used to meet three loose radios whose
+  // only context was the pane heading (E62).
+  themeCards.setAttribute('role', 'radiogroup');
+  themeCards.setAttribute('aria-label', COPY.appearance.title);
+
+  /** «Системная» alone is ambiguous — say which half of it the OS is asking for.
+   * The note answers about the SYSTEM, never about the live document: read from
+   * the resolved theme class it said «сейчас — тёмная» with «Тёмная» explicitly
+   * selected, which is true of the page and false of the sentence it was
+   * claiming to explain. `resolveUiTheme('system', …)` is that sentence. */
+  const renderResolvedTheme = (): void => {
+    themeResolvedNote.textContent = resolveUiTheme('system', systemPrefersDark()) === 'dark'
+      ? COPY.appearance.resolvedDark
+      : COPY.appearance.resolvedLight;
+  };
+
+  const appearanceGrid = document.createElement('div');
+  appearanceGrid.className = 'chatgoose-panegrid';
+  const themeCard = document.createElement('div');
+  themeCard.className = 'chatgoose-panecard';
+  const themeCardHead = document.createElement('div');
+  themeCardHead.className = 'chatgoose-panecard-head';
+  const themeCardTitle = document.createElement('span');
+  themeCardTitle.className = 'chatgoose-panecard-title';
+  themeCardTitle.textContent = COPY.appearance.themeCardTitle;
+  // What «Системная» resolves to RIGHT NOW. `resolveUiTheme` existed and this
+  // pane never called it.
+  const themeResolvedNote = document.createElement('span');
+  themeResolvedNote.className = 'chatgoose-panecard-note';
+  themeResolvedNote.dataset.role = 'theme-resolved';
+  themeCardHead.append(themeCardTitle, themeResolvedNote);
+  themeCard.append(themeCardHead, themeCards);
+
+  // The surface the subtitle promises: the panel in the Fansly chat. The old
+  // miniature drew the cabinet — the one surface the chatter is already looking
+  // at while reading this pane.
+  const chatPreviewCard = document.createElement('div');
+  chatPreviewCard.className = 'chatgoose-panecard';
+  const chatPreviewHead = document.createElement('div');
+  chatPreviewHead.className = 'chatgoose-panecard-head';
+  const chatPreviewTitle = document.createElement('span');
+  chatPreviewTitle.className = 'chatgoose-panecard-title';
+  chatPreviewTitle.textContent = COPY.appearance.chatCardTitle;
+  chatPreviewHead.append(chatPreviewTitle);
+  const chatPreview = document.createElement('div');
+  chatPreview.className = 'chatgoose-chat-preview';
+  chatPreview.dataset.role = 'chat-preview';
+  chatPreview.setAttribute('aria-hidden', 'true');
+  const chatPreviewBar = document.createElement('div');
+  chatPreviewBar.className = 'chatgoose-chat-preview-bar';
+  const chatPreviewName = document.createElement('span');
+  chatPreviewName.textContent = COPY.rail.brand;
+  const chatPreviewTone = document.createElement('span');
+  chatPreviewTone.className = 'chatgoose-chat-preview-tone';
+  chatPreviewTone.textContent = COPY.appearance.chatToneChip;
+  chatPreviewBar.append(chatPreviewName, chatPreviewTone);
+  const chatPreviewBody = document.createElement('div');
+  chatPreviewBody.className = 'chatgoose-chat-preview-body';
+  for (const width of ['100%', '100%', '62%']) {
+    const line = document.createElement('span');
+    line.className = 'chatgoose-chat-preview-line';
+    line.style.width = width;
+    chatPreviewBody.append(line);
+  }
+  const chatPreviewActions = document.createElement('div');
+  chatPreviewActions.className = 'chatgoose-chat-preview-actions';
+  const chatPreviewPrimary = document.createElement('span');
+  chatPreviewPrimary.className = 'chatgoose-chat-preview-btn';
+  const chatPreviewGhost = document.createElement('span');
+  chatPreviewGhost.className = 'chatgoose-chat-preview-btn chatgoose-chat-preview-btn-ghost';
+  chatPreviewActions.append(chatPreviewPrimary, chatPreviewGhost);
+  chatPreviewBody.append(chatPreviewActions);
+  chatPreview.append(chatPreviewBar, chatPreviewBody);
+  const chatPreviewNote = document.createElement('div');
+  chatPreviewNote.className = 'chatgoose-status-hint';
+  chatPreviewNote.textContent = COPY.appearance.chatCardNote;
+  chatPreviewCard.append(chatPreviewHead, chatPreview, chatPreviewNote);
+
+  appearanceGrid.append(themeCard, chatPreviewCard);
+  appearanceSection.append(appearanceHead.root, appearanceGrid);
+  renderResolvedTheme();
+  // The OS scheme is the note's ONLY input, so the OS query is what it listens
+  // to. The document class it used to watch is the wrong signal twice over: with
+  // an explicit theme picked the class never moves when the OS flips (a stale
+  // note), and it moves when the chatter picks a theme (a note about the choice,
+  // not about the system).
+  const themeSystemQuery = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : null;
+  if (themeSystemQuery) {
+    themeSystemQuery.addEventListener('change', renderResolvedTheme);
+    cleanupTasks.push(() => themeSystemQuery.removeEventListener('change', renderResolvedTheme));
+  }
 
   // ─── «Генерация» (Stage 32: keys/models are kernel-side) ────
-  const apiSection = createSection(COPY.generation.title, COPY.generation.subtitle);
+  const apiSection = document.createElement('section');
+  apiSection.className = 'chatgoose-pane-plain';
 
-  const quickInput = document.createElement('input');
-  quickInput.type = 'number';
-  quickInput.className = 'chatgoose-input chatgoose-input-num';
-  quickInput.min = '5';
-  quickInput.max = '200';
-  quickInput.value = String(state.settings.quickMessageCount);
+  // Bounds come from the SAME constants the storage clamp uses — they used to be
+  // string literals here, free to drift from the clamp in silence. The step is
+  // what makes the −/+ affordance usable: with the browser default of 1 the
+  // «Глубокое окно» stepper needed 2900 clicks to cross its range (E62).
+  const windowInput = (value: number, min: number, max: number, step: number): HTMLInputElement => {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'chatgoose-input chatgoose-input-num';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    return input;
+  };
 
-  const pingInput = document.createElement('input');
-  pingInput.type = 'number';
-  pingInput.className = 'chatgoose-input chatgoose-input-num';
-  pingInput.min = '5';
-  pingInput.max = '200';
-  pingInput.value = String(state.settings.pingMessageCount);
-
-  const improveInput = document.createElement('input');
-  improveInput.type = 'number';
-  improveInput.className = 'chatgoose-input chatgoose-input-num';
-  improveInput.min = '5';
-  improveInput.max = '200';
-  improveInput.value = String(state.settings.improveMessageCount);
-
-  const deepInput = document.createElement('input');
-  deepInput.type = 'number';
-  deepInput.className = 'chatgoose-input chatgoose-input-num';
-  deepInput.min = '100';
-  deepInput.max = '3000';
-  deepInput.value = String(state.settings.deepMessageCount);
+  const quickInput = windowInput(
+    state.settings.quickMessageCount,
+    QUICK_MIN_MESSAGE_COUNT,
+    QUICK_MAX_MESSAGE_COUNT,
+    5,
+  );
+  const pingInput = windowInput(
+    state.settings.pingMessageCount,
+    PING_MIN_MESSAGE_COUNT,
+    PING_MAX_MESSAGE_COUNT,
+    5,
+  );
+  const improveInput = windowInput(
+    state.settings.improveMessageCount,
+    IMPROVE_MIN_MESSAGE_COUNT,
+    IMPROVE_MAX_MESSAGE_COUNT,
+    5,
+  );
+  const deepInput = windowInput(
+    state.settings.deepMessageCount,
+    DEEP_MIN_MESSAGE_COUNT,
+    DEEP_MAX_MESSAGE_COUNT,
+    50,
+  );
 
   const coachHistoryInput = document.createElement('input');
   coachHistoryInput.type = 'number';
@@ -1046,16 +1173,30 @@ async function render(): Promise<void> {
   // flashes amber when a save clamps an out-of-range entry. The input rides
   // inside a −/+ stepper: big pointer targets instead of the OS spinners; the
   // field itself still takes typing and arrow keys exactly as before.
-  const countHints = new Map<HTMLInputElement, HTMLSpanElement>();
+  /** Per-input clamp chips and their timers (see `flashClampHint`). */
+  const clampChips = new Map<HTMLInputElement, HTMLElement>();
+  const clampTimers = new Map<HTMLInputElement, number>();
+
   const numberRow = (
     title: string,
     hintText: string,
     input: HTMLInputElement,
   ): HTMLElement => {
+    // The range lives in a FIXED column so every stepper on the pane lines up —
+    // «5–200» and «100–3000» used to hug their steppers and start at different
+    // x positions (E62). A step other than 1 is stated: it is what the −/+
+    // buttons actually do.
     const hint = document.createElement('span');
     hint.className = 'chatgoose-row-hint';
-    hint.textContent = `${input.min}–${input.max}`;
-    countHints.set(input, hint);
+    const range = document.createElement('span');
+    range.textContent = `${input.min}–${input.max}`;
+    hint.append(range);
+    if (input.step && input.step !== '1') {
+      const step = document.createElement('span');
+      step.className = 'chatgoose-row-hint-step';
+      step.textContent = COPY.generation.stepNote.replace('{n}', input.step);
+      hint.append(step);
+    }
     // Rows are DIVs now (see settingRow) — the field names itself.
     input.setAttribute('aria-label', title);
     const stepButton = (direction: -1 | 1): HTMLButtonElement => {
@@ -1094,8 +1235,15 @@ async function render(): Promise<void> {
     stepper.className = 'chatgoose-stepper';
     stepper.append(stepButton(-1), input, stepButton(1));
     const control = document.createElement('span');
-    control.className = 'chatgoose-row-control';
-    control.append(hint, stepper);
+    // The numeric lane is its OWN class — `.chatgoose-row-control` stays the
+    // generic inline-flex wrapper the segmented controls wear.
+    control.className = 'chatgoose-row-numeric';
+    const clampChip = document.createElement('span');
+    clampChip.className = 'chatgoose-row-clamped';
+    clampChip.dataset.role = 'clamp-note';
+    clampChip.hidden = true;
+    clampChips.set(input, clampChip);
+    control.append(hint, stepper, clampChip);
     // A wheel over a focused number input silently changes the value while
     // the chatter is just scrolling the page — blur keeps the scroll a scroll.
     input.addEventListener('wheel', () => {
@@ -1105,43 +1253,79 @@ async function render(): Promise<void> {
     }, { passive: true });
     return settingRow(title, hintText, control);
   };
+  /** «сохранено как N» after a clamp. It is a CHIP under the row now (E62): it
+   * used to overwrite the range hint for 2.6s — taking the bounds away exactly
+   * when the chatter was being told about them — with a colour change as the
+   * only signal that the slot had changed meaning. The timer is registered for
+   * cleanup, so it can no longer fire into a disposed DOM. */
   const flashClampHint = (input: HTMLInputElement, value: number): void => {
-    const hint = countHints.get(input);
-    if (!hint) {
+    const chip = clampChips.get(input);
+    if (!chip) {
       return;
     }
-    hint.textContent = COPY.generation.savedAs.replace('{n}', String(value));
-    hint.classList.add('chatgoose-row-hint-clamped');
-    window.setTimeout(() => {
-      hint.textContent = `${input.min}–${input.max}`;
-      hint.classList.remove('chatgoose-row-hint-clamped');
+    chip.textContent = COPY.generation.savedAs.replace('{n}', String(value));
+    chip.hidden = false;
+    const previous = clampTimers.get(input);
+    if (previous !== undefined) {
+      window.clearTimeout(previous);
+    }
+    const timer = window.setTimeout(() => {
+      clampTimers.delete(input);
+      chip.hidden = true;
     }, 2600);
+    clampTimers.set(input, timer);
   };
+  cleanupTasks.push(() => {
+    for (const timer of clampTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    clampTimers.clear();
+  });
 
-  /** A captioned subgroup of setting rows. Three of them carry the pane: what
-   * goes into a prompt, what the coach does, and the service switch. */
-  const settingGroup = (caption: string, rows: HTMLElement[]): HTMLElement => {
-    const group = document.createElement('div');
-    group.className = 'chatgoose-group';
-    group.dataset.settingGroup = caption;
-    const cap = document.createElement('div');
-    cap.className = 'chatgoose-group-cap';
-    cap.textContent = caption;
+  // `settingGroup` (caption over a bare list of rows) became `settingCard`
+  // below when «Генерация» split into two columns of cards (E62).
+
+  // Layout (E62): the four context windows on the left, the coach and the
+  // service switch on the right. The «Служебное» caption used to float over a
+  // single row whose first- AND last-child padding was zeroed — a caption over
+  // nothing.
+  const generationHead = createPaneHead(COPY.generation.title, COPY.generation.subtitle);
+  const generationGrid = document.createElement('div');
+  generationGrid.className = 'chatgoose-panegrid chatgoose-panegrid-even';
+  const generationLeft = document.createElement('div');
+  generationLeft.className = 'chatgoose-panecol';
+  const generationRight = document.createElement('div');
+  generationRight.className = 'chatgoose-panecol';
+
+  const settingCard = (caption: string, rows: HTMLElement[], quiet = false): HTMLElement => {
+    const card = document.createElement('div');
+    card.className = quiet
+      ? 'chatgoose-panecard chatgoose-panecard-quiet'
+      : 'chatgoose-panecard';
+    card.dataset.settingGroup = caption;
+    const head = document.createElement('div');
+    head.className = 'chatgoose-panecard-head';
+    const title = document.createElement('span');
+    title.className = 'chatgoose-panecard-title';
+    title.textContent = caption;
+    head.append(title);
     const list = document.createElement('div');
     list.className = 'chatgoose-rows';
     list.append(...rows);
-    group.append(cap, list);
-    return group;
+    card.append(head, list);
+    return card;
   };
 
-  apiSection.append(
-    settingGroup(COPY.generation.groupWindows, [
+  generationLeft.append(
+    settingCard(COPY.generation.groupWindows, [
       numberRow(COPY.generation.quickTitle, COPY.generation.quickHint, quickInput),
       numberRow(COPY.generation.pingTitle, COPY.generation.pingHint, pingInput),
       numberRow(COPY.generation.improveTitle, COPY.generation.improveHint, improveInput),
       numberRow(COPY.generation.deepTitle, COPY.generation.deepHint, deepInput),
     ]),
-    settingGroup(COPY.generation.groupCoach, [
+  );
+  generationRight.append(
+    settingCard(COPY.generation.groupCoach, [
       numberRow(
         COPY.generation.coachHistoryTitle,
         COPY.generation.coachHistoryHint,
@@ -1149,25 +1333,47 @@ async function render(): Promise<void> {
       ),
       coachRecapRow,
     ]),
-    settingGroup(COPY.generation.groupService, [
-      settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugSwitch, {
-        asLabel: true,
-      }),
-    ]),
+    settingCard(
+      COPY.generation.groupService,
+      [
+        settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugSwitch, {
+          asLabel: true,
+        }),
+      ],
+      true,
+    ),
   );
+  generationGrid.append(generationLeft, generationRight);
+  apiSection.append(generationHead.root, generationGrid);
 
   // ─── «Хоткеи» (read-only reference) ─────────────────────────
   // Derived from the live binding table, so the pane cannot drift from what the
   // keymap dispatches. The platform is detected at render time: the same install
   // shows ⌘⇧ on macOS and Alt+Shift elsewhere.
-  const hotkeysSection = createSection(COPY.hotkeys.title, COPY.hotkeys.subtitle);
+  const hotkeysSection = document.createElement('section');
+  hotkeysSection.className = 'chatgoose-pane-plain';
+  const hotkeysPlatform = detectLabelPlatform();
+  const hotkeysHead = createPaneHead(COPY.hotkeys.title, COPY.hotkeys.subtitle);
+  // Which modifier THIS computer uses. The platform was already detected for the
+  // key labels; the page never said it, so a chatter comparing with a colleague's
+  // screenshot had no explanation for the difference (E62).
+  const hotkeysPlatformTag = document.createElement('span');
+  hotkeysPlatformTag.className = 'chatgoose-panehead-stamp';
+  hotkeysPlatformTag.dataset.role = 'hotkeys-platform';
+  hotkeysPlatformTag.textContent = hotkeysPlatform === 'mac'
+    ? COPY.hotkeys.platformMac
+    : COPY.hotkeys.platformOther;
+  hotkeysHead.side.append(hotkeysPlatformTag);
+  const hotkeysCard = document.createElement('div');
+  hotkeysCard.className = 'chatgoose-panecard';
   const hotkeysHint = document.createElement('div');
   hotkeysHint.className = 'chatgoose-status-hint';
   hotkeysHint.textContent = COPY.hotkeys.hint;
-  hotkeysSection.append(
-    renderHotkeysPane(document, detectLabelPlatform()),
-    hotkeysHint,
-  );
+  hotkeysCard.append(renderHotkeysPane(document, hotkeysPlatform), hotkeysHint);
+  const hotkeysBody = document.createElement('div');
+  hotkeysBody.className = 'chatgoose-panegrid-single';
+  hotkeysBody.append(hotkeysCard);
+  hotkeysSection.append(hotkeysHead.root, hotkeysBody);
 
   // ─── Agency Hub ───────────────────────────────────────────
   // A plain container, not a card: the pane's title lives in its head and the
@@ -1219,19 +1425,36 @@ async function render(): Promise<void> {
   };
 
   const agencyHubPermissionRow = hubStatusRow(COPY.hub.permLabel);
-  // The host-access deep-link anchor lives on THIS row (E61): CG-HUB-04 used to
-  // flash a read-only diagnostics line while «Разрешить доступ» sat in another
-  // zone. `data-deeplink-ready` starts false — `permissions.contains` has not
-  // answered yet, and a flash burned on the placeholder cannot be re-armed.
-  agencyHubPermissionRow.root.dataset.hubDetail = 'host-access';
-  agencyHubPermissionRow.root.dataset.deeplinkReady = 'false';
   const agencyHubPermissionStatus = agencyHubPermissionRow.pill;
   const agencyHubPermissionMono = agencyHubPermissionRow.mono;
 
   const agencyHubPermissionMeta = document.createElement('div');
   agencyHubPermissionMeta.className = 'chatgoose-meta';
 
+  // «Разрешить доступ» rides its OWN row directly under the permission fact
+  // rather than the zone's shared action row. E61 promised a CG-HUB-04 deep link
+  // would highlight «the row that has «Разрешить доступ» in it»; the anchor sat
+  // on the status row while the button lived two siblings away, so the flash
+  // framed the diagnosis without the cure. Grouping them is what makes the claim
+  // true — and keeps «Проверить связь» the zone's single primary.
   const agencyHubPermissionButton = createButton(COPY.status.grantAccess, true);
+  const agencyHubPermissionActions = document.createElement('div');
+  agencyHubPermissionActions.className = 'chatgoose-hub-srow-actions';
+  agencyHubPermissionActions.append(agencyHubPermissionButton);
+
+  // The block IS the deep-link target: fact, explanation and the control that
+  // fixes it. `data-deeplink-ready` starts false — `permissions.contains` has not
+  // answered yet, and a flash burned on the placeholder cannot be re-armed.
+  const agencyHubHostAccessBlock = document.createElement('div');
+  agencyHubHostAccessBlock.className = 'chatgoose-hub-hostaccess';
+  agencyHubHostAccessBlock.dataset.hubDetail = 'host-access';
+  agencyHubHostAccessBlock.dataset.deeplinkReady = 'false';
+  agencyHubHostAccessBlock.append(
+    agencyHubPermissionRow.root,
+    agencyHubPermissionMeta,
+    agencyHubPermissionActions,
+  );
+
   const agencyHubConnectionRow = hubStatusRow(COPY.hub.connLabel);
   const agencyHubConnectionStatus = agencyHubConnectionRow.pill;
   const agencyHubConnectionMono = agencyHubConnectionRow.mono;
@@ -1245,7 +1468,7 @@ async function render(): Promise<void> {
   agencyHubActionRow.style.display = 'flex';
   agencyHubActionRow.style.gap = '8px';
   agencyHubActionRow.style.flexWrap = 'wrap';
-  agencyHubActionRow.append(agencyHubConnectionButton, agencyHubPermissionButton);
+  agencyHubActionRow.append(agencyHubConnectionButton);
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
@@ -2118,9 +2341,9 @@ async function render(): Promise<void> {
   const hubErrorsRow = hubDiagRow(COPY.hub.errorsLabel, 'errors', 'async');
   const hubFanSummaryRow = hubDiagRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
   // «Доступ к хосту» is NOT here: the same flag already paints the pill in
-  // «Подключение», next to the button that fixes it. That row carried the
+  // «Подключение», next to the button that fixes it. That block carries the
   // `host-access` deep-link anchor, so the anchor moved with the fact — a
-  // CG-HUB-04 link now highlights the row that has «Разрешить доступ» in it.
+  // CG-HUB-04 link highlights the fact, its explanation AND «Разрешить доступ».
   const hubDiagnosticsCard = document.createElement('div');
   hubDiagnosticsCard.className = 'chatgoose-hub-diag';
   hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
@@ -2140,8 +2363,7 @@ async function render(): Promise<void> {
   // Address, host access and the live test share one fate — one card.
   agencyHubConnectCard.append(
     hubBaseUrlField,
-    agencyHubPermissionRow.root,
-    agencyHubPermissionMeta,
+    agencyHubHostAccessBlock,
     agencyHubConnectionRow.root,
     agencyHubConnectionMeta,
     agencyHubActionRow,
@@ -2236,10 +2458,20 @@ async function render(): Promise<void> {
   statusRefreshedTag.className = 'chatgoose-panehead-stamp';
   statusRefreshedTag.dataset.role = 'status-refreshed';
   statusRefreshedTag.textContent = COPY.status.refreshedNever;
-  statusHead.side.append(statusRefreshedTag, statusActions);
+  // Each action answers in its OWN live region. «Проверить всё» moved into the
+  // pane head and left its only feedback line behind in «Поддержка», where the
+  // throttle message read as a verdict on «Скопировать отчёт» — and a later
+  // check silently wiped «Отчёт скопирован».
+  const statusCheckNote = document.createElement('div');
+  statusCheckNote.className = 'chatgoose-status-hint chatgoose-panehead-note';
+  statusCheckNote.dataset.role = 'status-check-note';
+  statusCheckNote.setAttribute('role', 'status');
+  statusCheckNote.setAttribute('aria-live', 'polite');
+  statusHead.side.append(statusRefreshedTag, statusActions, statusCheckNote);
 
   const statusActionNote = document.createElement('div');
   statusActionNote.className = 'chatgoose-status-hint';
+  statusActionNote.dataset.role = 'status-report-note';
   statusActionNote.setAttribute('role', 'status');
   statusActionNote.setAttribute('aria-live', 'polite');
   const statusReportHint = document.createElement('div');
@@ -2431,15 +2663,26 @@ async function render(): Promise<void> {
   /** One-shot guard around the durable stamp; re-armed if the write fails. */
   let onboardingStamping = false;
 
-  /** The checklist and the readiness hero are ONE decision: while the checklist
-   * is up it owns the three open steps (with a CTA each), so the hero — which
-   * would restate exactly that list one card below — is hidden. The hero returns
-   * the moment onboarding is dismissed, or immediately on an install that was
-   * never fresh. This function is the single writer of both flags. */
+  /** How many readiness steps were open at the last `refreshStatusView`. Kept
+   * here because the visibility of «Что мешает» is not that renderer's call. */
+  let openReadinessSteps = 0;
+
+  /** The checklist, the readiness hero and «Что мешает» are ONE decision, and
+   * this is its SINGLE writer: while the checklist is up it owns the three open
+   * steps (with a CTA each), so neither the hero nor the open-steps card — both
+   * of which would restate exactly that list one card below — is drawn. They
+   * return the moment onboarding is dismissed, or immediately on an install that
+   * was never fresh. Hiding the hero alone stopped being enough when the list
+   * moved out of it into its own card (E62). */
+  const applyReadinessVisibility = (): void => {
+    readinessHero.hidden = onboardingVisible;
+    statusTodoCard.hidden = onboardingVisible || openReadinessSteps === 0;
+  };
+
   const renderOnboarding = (): void => {
     if (!onboardingVisible) {
       onboardingSection.hidden = true;
-      readinessHero.hidden = false;
+      applyReadinessVisibility();
       return;
     }
     const states = onboardingStepStates();
@@ -2451,7 +2694,7 @@ async function render(): Promise<void> {
       step.done.hidden = !done;
     }
     onboardingSection.hidden = false;
-    readinessHero.hidden = true;
+    applyReadinessVisibility();
     if (!Object.values(states).every(Boolean) || onboardingStamping) {
       return;
     }
@@ -2466,7 +2709,7 @@ async function render(): Promise<void> {
           onboardingSection.hidden = true;
           // Setup is over: the headline takes the card's place immediately —
           // «Готово к смене.» is exactly what the chatter earned.
-          readinessHero.hidden = false;
+          applyReadinessVisibility();
           return;
         }
         // The flag did not stick: keep the card and let a later refresh retry
@@ -2541,7 +2784,7 @@ async function render(): Promise<void> {
     // Settled once Firefox has answered `permissions.contains` — including the
     // «no origin to check» case, where «неизвестно» IS the final answer for the
     // address currently in the field.
-    markHubRowHydrated(agencyHubPermissionRow, hubPermissionChecked);
+    markHubRowHydrated({ root: agencyHubHostAccessBlock }, hubPermissionChecked);
 
     // Проверка — when, outcome, how long, and which credential carried it.
     if (!lastConnectionCheck) {
@@ -2646,6 +2889,8 @@ async function render(): Promise<void> {
       readinessSub.textContent = COPY.status.checkingSubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
+      openReadinessSteps = 0;
+      applyReadinessVisibility();
       shell.setMicro('status', null);
       return;
     }
@@ -2660,7 +2905,6 @@ async function render(): Promise<void> {
       readinessSub.textContent = COPY.status.readySubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
-      statusTodoCard.hidden = true;
     } else {
       readinessHero.dataset.heroState = 'route';
       readinessHeading.textContent = open.length === 1
@@ -2689,8 +2933,12 @@ async function render(): Promise<void> {
         }),
       );
       readinessOpen.hidden = false;
-      statusTodoCard.hidden = false;
     }
+    // The list itself always stays current — hidden, never stale, so it is
+    // already right the moment the checklist retires. WHETHER it is on screen is
+    // `applyReadinessVisibility`'s call, and only its.
+    openReadinessSteps = open.length;
+    applyReadinessVisibility();
 
     statusRefreshedTag.textContent = rowsRefreshedAt === 0
       ? COPY.status.refreshedNever
@@ -3055,13 +3303,13 @@ async function render(): Promise<void> {
   checkAllButton.addEventListener('click', () => {
     const now = Date.now();
     if (now - lastCheckAllAt < CHECK_ALL_THROTTLE_MS) {
-      statusActionNote.textContent = COPY.status.checkAllThrottled;
+      statusCheckNote.textContent = COPY.status.checkAllThrottled;
       return;
     }
     lastCheckAllAt = now;
     checkAllButton.disabled = true;
     checkAllButton.textContent = COPY.status.checkAllRunning;
-    statusActionNote.textContent = '';
+    statusCheckNote.textContent = '';
     void (async () => {
       try {
         await Promise.all([
@@ -3426,28 +3674,42 @@ async function render(): Promise<void> {
   }
 
   // ─── «Персоны» (server-owned catalog, metadata only) ────────
-  const personalitiesSection = createSection(
-    COPY.personas.title,
-    COPY.personas.subtitle,
-  );
+  /** accountId → the label the «Аккаунты» pane shows for it. Filled by the
+   * accounts renderer (the ONE place that resolves a name), read by the persona
+   * rows so both panes call an account the same thing (E62). A plain Map, not a
+   * read of `accountsView`: this renderer runs at build time, long before that
+   * binding is initialised. */
+  const accountLabelIndex = new Map<string, string>();
+  const accountLabelFor = (accountId: string): string =>
+    accountLabelIndex.get(accountId) ?? shortenAccountId(accountId);
+
+  const personalitiesSection = document.createElement('section');
+  personalitiesSection.className = 'chatgoose-pane-plain';
+  const personasHead = createPaneHead(COPY.personas.title, COPY.personas.subtitle);
+  const personasToAccounts = createButton(COPY.personas.toAccounts, true);
+  personasToAccounts.addEventListener('click', () => navigateTo('accounts'));
+  personasHead.side.append(personasToAccounts);
   const personalitiesList = document.createElement('div');
   personalitiesList.className = 'chatgoose-persona-rows';
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
   // Catalog status row (М2 anatomy): label · fact · mono staleness at the
   // right edge, then the refresh action with its hint inline.
+  // «Каталог · обновлён {дата}» is one fact line of the catalog card now; the
+  // staleness marker moved to that card's head (E62).
   const personaCatalogRow = document.createElement('div');
   personaCatalogRow.dataset.role = 'persona-catalog';
-  personaCatalogRow.className = 'chatgoose-persona-catrow';
+  personaCatalogRow.className = 'chatgoose-fact';
   const personaCatalogLabel = document.createElement('span');
-  personaCatalogLabel.className = 'chatgoose-persona-catlabel';
-  personaCatalogLabel.textContent = COPY.personas.catalogLabel;
+  personaCatalogLabel.className = 'chatgoose-fact-k';
+  // «Обновлён» — the card it lives in is already called «Каталог» (E62).
+  personaCatalogLabel.textContent = COPY.personas.catalogUpdatedLabel;
   const personaCatalogFact = document.createElement('span');
-  personaCatalogFact.className = 'chatgoose-persona-catfact';
+  personaCatalogFact.className = 'chatgoose-fact-v';
   const personaCatalogAge = document.createElement('span');
   personaCatalogAge.className = 'chatgoose-persona-catage';
   personaCatalogAge.hidden = true;
-  personaCatalogRow.append(personaCatalogLabel, personaCatalogFact, personaCatalogAge);
+  personaCatalogRow.append(personaCatalogLabel, personaCatalogFact);
   // There is no standalone «refetch the catalog» operation, and inventing one is
   // out of scope: the background re-reads the catalog after a SUCCESSFUL
   // connection test, so the button says exactly what it does.
@@ -3471,7 +3733,14 @@ async function render(): Promise<void> {
   personaRefreshHint.textContent = COPY.personas.catalogRefreshHint;
   const personaActions = document.createElement('div');
   personaActions.className = 'chatgoose-status-actions';
-  personaActions.append(personaRefreshButton, personaRefreshHint);
+  personaActions.append(personaRefreshButton);
+  // Which hub this catalog came from — in memory since wave C, shown nowhere.
+  const personaSourceFact = factRow(COPY.personas.catalogSourceLabel, '');
+  // A hub address can be long (an origin plus a path). It WRAPS rather than
+  // pushing the card past a narrow window — an ellipsis would hide exactly the
+  // path that tells two agencies on one host apart.
+  const personaSourceValue = personaSourceFact.querySelector<HTMLElement>('.chatgoose-fact-v');
+  personaSourceValue?.classList.add('chatgoose-fact-v-wrap');
 
   const renderPersonaCatalog = (): void => {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
@@ -3488,9 +3757,7 @@ async function render(): Promise<void> {
       : String(activePersonas);
     shell.setMicro('personas', personasMicro);
     const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
-    personaCatalogFact.textContent = changedDate
-      ? COPY.personas.catalogUpdated.replace('{date}', changedDate)
-      : COPY.personas.catalogNever;
+    personaCatalogFact.textContent = changedDate ?? COPY.personas.catalogNever;
     // Staleness marker: only once the catalog is older than 48h — a fresh date
     // needs no age, and «0 дн назад» would be noise (the reverted #46 rule).
     const changedAt = state.personaCatalogFetchedAt === null
@@ -3504,6 +3771,18 @@ async function render(): Promise<void> {
       ? ''
       : COPY.personas.catalogAge.replace('{n}', String(staleDays));
     personaCatalogAge.hidden = staleDays === null;
+    // Which hub this catalog belongs to. The source is «baseUrl|hash» — only the
+    // address half is meaningful to a chatter, and the hash is a credential
+    // fingerprint that has no business on screen. The address is shown WHOLE:
+    // `normalizeAgencyHubBaseUrl` deliberately keeps a non-root path, so two hubs
+    // on one host («…/agency-a», «…/agency-b») collapsed into one line when this
+    // printed the host alone.
+    if (personaSourceValue) {
+      const storedBaseUrl = normalizeAgencyHubBaseUrl(
+        state.personaCatalogSource?.split('|')[0] ?? '',
+      );
+      personaSourceValue.textContent = storedBaseUrl || COPY.personas.catalogSourceUnknown;
+    }
     personalitiesList.replaceChildren();
     const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
     if (rows.length === 0) {
@@ -3559,6 +3838,23 @@ async function render(): Promise<void> {
         side.append(createBadge(COPY.personas.archivedMapped, 'amber'));
       }
       row.append(head, side);
+      // Which accounts sit on this persona. The map was already in memory; the
+      // pane used to collapse it into the count above and drop the names (E62).
+      const mapped = document.createElement('div');
+      mapped.className = 'chatgoose-persona-mapped';
+      mapped.dataset.role = 'persona-mapped';
+      const mappedLabel = document.createElement('span');
+      mappedLabel.className = 'chatgoose-persona-mapped-cap';
+      mappedLabel.textContent = view.accountIds.length > 0
+        ? COPY.personas.mappedLabel
+        : COPY.personas.mappedEmpty;
+      mapped.append(mappedLabel);
+      for (const accountId of view.accountIds) {
+        const chip = createBadge(accountLabelFor(accountId), 'neutral');
+        chip.dataset.personaAccount = accountId;
+        mapped.append(chip);
+      }
+      row.append(mapped);
       personalitiesList.append(row);
     }
     flashPendingDeepLink();
@@ -3633,20 +3929,60 @@ async function render(): Promise<void> {
   window.addEventListener('pagehide', handlePageHide);
   cleanupTasks.push(() => window.removeEventListener('pagehide', handlePageHide));
 
-  personalitiesSection.append(
-    personalitiesList,
-    personaCatalogRow,
+  // Layout (E62): the catalog itself on the left, its provenance and the rarely
+  // used archive on the right — the pane used to be one strip and 700px of air.
+  const personasGrid = document.createElement('div');
+  personasGrid.className = 'chatgoose-panegrid';
+  const personasMainCol = document.createElement('div');
+  personasMainCol.className = 'chatgoose-panecol';
+  const personasListCard = document.createElement('div');
+  personasListCard.className = 'chatgoose-panecard';
+  const personasListHead = document.createElement('div');
+  personasListHead.className = 'chatgoose-panecard-head';
+  const personasListTitle = document.createElement('span');
+  personasListTitle.className = 'chatgoose-panecard-title';
+  personasListTitle.textContent = COPY.personas.listCardTitle;
+  personasListHead.append(personasListTitle);
+  personasListCard.append(personasListHead, personalitiesList);
+  personasMainCol.append(personasListCard);
+
+  const personasSideCol = document.createElement('div');
+  personasSideCol.className = 'chatgoose-panecol';
+  const personaCatalogCard = document.createElement('div');
+  personaCatalogCard.className = 'chatgoose-panecard';
+  const personaCatalogHead = document.createElement('div');
+  personaCatalogHead.className = 'chatgoose-panecard-head';
+  const personaCatalogTitle = document.createElement('span');
+  personaCatalogTitle.className = 'chatgoose-panecard-title';
+  personaCatalogTitle.textContent = COPY.personas.catalogCardTitle;
+  // The staleness marker rides the card head — visible (amber) only past 48h.
+  personaCatalogHead.append(personaCatalogTitle, personaCatalogAge);
+  const personaCatalogFacts = document.createElement('div');
+  personaCatalogFacts.className = 'chatgoose-facts';
+  personaCatalogFacts.append(personaCatalogRow, personaSourceFact);
+  personaCatalogCard.append(
+    personaCatalogHead,
+    personaCatalogFacts,
     personaActions,
-    preservationFold,
+    personaRefreshHint,
   );
+  const personaArchiveCard = document.createElement('div');
+  personaArchiveCard.className = 'chatgoose-panecard chatgoose-panecard-quiet';
+  personaArchiveCard.append(preservationFold);
+  personasSideCol.append(personaCatalogCard, personaArchiveCard);
+  personasGrid.append(personasMainCol, personasSideCol);
+  personalitiesSection.append(personasHead.root, personasGrid);
 
   // ─── «Аккаунты» ────────────────────────────────────────────
-  const mappingsSection = createSection(COPY.accounts.title);
+  const mappingsSection = document.createElement('section');
+  mappingsSection.className = 'chatgoose-pane-plain';
   mappingsSection.dataset.sessionHydration = 'loading';
   // Own node rather than createSection's description: the subtitle counts live
-  // accounts, so it has to be repaintable.
+  // accounts, so it has to be repaintable. The live counter is a chip in the
+  // pane head; the two instructions it used to be glued to are the pane's
+  // subtitle now (E62).
   const accountsSubtitle = document.createElement('div');
-  accountsSubtitle.className = 'chatgoose-section-desc';
+  accountsSubtitle.className = 'chatgoose-chip';
   accountsSubtitle.dataset.role = 'accounts-subtitle';
   accountsSubtitle.textContent = COPY.accounts.subtitle
     .replace('{live}', '—')
@@ -3670,7 +4006,15 @@ async function render(): Promise<void> {
   accountsHint.textContent = COPY.accounts.hint;
   // The rare-question tail lives in the tooltip, not in a third visible line.
   accountsHint.title = COPY.accounts.hintNeverSeen;
-  mappingsSection.append(accountsSubtitle, mappingsTable, accountsHint);
+  const accountsHead = createPaneHead(COPY.accounts.title, COPY.accounts.paneSubtitle);
+  accountsHead.side.append(accountsSubtitle);
+  const accountsCard = document.createElement('div');
+  accountsCard.className = 'chatgoose-panecard';
+  accountsCard.append(mappingsTable);
+  const accountsBody = document.createElement('div');
+  accountsBody.className = 'chatgoose-panegrid-single';
+  accountsBody.append(accountsCard, accountsHint);
+  mappingsSection.append(accountsHead.root, accountsBody);
   // One section per pane — the rail carries the reading order now (setup
   // order: the hub everything depends on, then the personas it serves, then
   // the accounts they map to, then the local-only settings).
@@ -3840,14 +4184,11 @@ async function render(): Promise<void> {
     view: { label: string; usable: boolean } | null,
     connected: boolean,
   ): void => {
-    // Only a LIVE row wears a pill — a sleeping account is a quiet fact (grey
-    // dot + the mono «была…»/«сессий не было» line), and a «не активна» plaque
-    // on every quiet row shouted as loudly as the one live signal.
-    info.replaceChildren(
-      ...(connected
-        ? [createStatusPill('ok', COPY.accounts.stateLive)]
-        : []),
-    );
+    // No «в работе» pill any more: the rows are grouped BY state (E62), so the
+    // group caption says it once for its whole block instead of once per row.
+    // What stays here is only what carries a problem or an action.
+    void connected;
+    info.replaceChildren();
     if (view && !view.usable) {
       // An archived persona still mapped: the only useful instruction is «pick a
       // replacement», which is exactly what the Персоны pane says too.
@@ -4071,7 +4412,11 @@ async function render(): Promise<void> {
           changes[AGENCY_HUB_API_KEY_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_SOURCE_STORAGE_KEY] ||
-          changes[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]
+          changes[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY] ||
+          // A persona assignment writes ONLY this key, and the persona rows
+          // state a per-persona account list — without it those rows kept a
+          // stale count until the next reload (E62 / BL-005).
+          changes.accountMappings
         )
       ) {
         return;
@@ -4084,6 +4429,7 @@ async function render(): Promise<void> {
         state.personaCatalog = refreshedState.personaCatalog;
         state.personaCatalogSource = refreshedState.personaCatalogSource;
         state.personaCatalogFetchedAt = refreshedState.personaCatalogFetchedAt;
+        state.accountMappings = refreshedState.accountMappings;
         renderPersonaCatalog();
         refreshAccountMappingPersonalityOptions?.();
         // Custody is applied from the STATE this generation read, never gated on
@@ -4112,12 +4458,15 @@ async function render(): Promise<void> {
    *
    * Without it (an older background, a rejected read) the pane degrades to what
    * this page can see by itself: the known accounts and the live snapshot. The
-   * degraded rows deliberately claim LESS — no 'seen' state, no observed page,
-   * no tab id — instead of guessing.
+   * degraded rows deliberately claim LESS — no observed page, no tab id — and
+   * they get a FOURTH state the contract does not have: an account the live
+   * snapshot says nothing about is 'unknown', not 'never'. The state is a group
+   * CAPTION since E62, and «Сессий не было» over a row is a verdict only durable
+   * presence can support.
    */
   const buildAccountRowViews = (
     sessions: SessionSnapshotEntry[],
-  ): AccountsViewEntry[] => {
+  ): AccountRowView[] => {
     if (accountsView) {
       return accountsView.accounts;
     }
@@ -4128,12 +4477,15 @@ async function render(): Promise<void> {
         accountId,
         label: formatAccountHeading(accountId, session),
         localLabel: null,
-        state: session?.connected ? 'live' : 'never',
+        // A snapshot entry IS an observation: connected means live, and a
+        // disconnected entry still carries the moment it was last seen. No entry
+        // at all means this page has nothing to say.
+        state: session ? (session.connected ? 'live' : 'seen') : 'unknown',
         lastSeenAt: session?.lastSeenAt ?? null,
         tabId: null,
         personaMapped: isAccountPersonaMapped(accountId),
         observedPage: null,
-      } satisfies AccountsViewEntry;
+      } satisfies AccountRowView;
     });
   };
 
@@ -4143,6 +4495,16 @@ async function render(): Promise<void> {
   ): void => {
     const personalityViews = buildPersonalityMappingViews();
     const rows = buildAccountRowViews(sessions);
+    // One vocabulary for an account across the cabinet: the persona rows render
+    // these labels as chips (E62). Repaint them only when a label actually
+    // changed — this renderer runs on every session re-poll.
+    let labelsChanged = false;
+    for (const view of rows) {
+      if (accountLabelIndex.get(view.accountId) !== view.label) {
+        accountLabelIndex.set(view.accountId, view.label);
+        labelsChanged = true;
+      }
+    }
 
     mappingsTable.replaceChildren();
     mappingsSection.dataset.sessionHydration = hydrationFailed ? 'failed' : 'ready';
@@ -4163,6 +4525,41 @@ async function render(): Promise<void> {
       warning.style.color = 'var(--chatgoose-ink-mid)';
       mappingsTable.append(warning);
     }
+
+    // Groups (E62): «В работе», «Видели раньше», «Сессий не было» — a caption
+    // and a count per block, and an empty group is not drawn at all. Six
+    // identical tiles used to carry their state in an 8px dot alone.
+    const groupCaptions: Record<AccountRowView['state'], string> = {
+      live: COPY.accounts.groupLive,
+      seen: COPY.accounts.groupSeen,
+      never: COPY.accounts.groupNever,
+      unknown: COPY.accounts.groupUnknown,
+    };
+    const groupLists = new Map<AccountRowView['state'], HTMLElement>();
+    const groupFor = (state: AccountRowView['state']): HTMLElement => {
+      const existing = groupLists.get(state);
+      if (existing) return existing;
+      const group = document.createElement('div');
+      group.className = 'chatgoose-account-group';
+      group.dataset.accountGroup = state;
+      const caption = document.createElement('div');
+      caption.className = 'chatgoose-account-group-cap';
+      const captionText = document.createElement('span');
+      captionText.textContent = groupCaptions[state];
+      const captionCount = document.createElement('span');
+      captionCount.dataset.role = 'account-group-count';
+      captionCount.textContent = String(rows.filter((row) => row.state === state).length);
+      caption.append(captionText, captionCount);
+      const list = document.createElement('div');
+      // NOT `chatgoose-account-rows`: that class is the TABLE's, and it is what
+      // the `CG-FLOW-02` deep link selects with `querySelector` — wearing it here
+      // too made the highlight land on the right element by DOM order alone.
+      list.className = 'chatgoose-account-group-rows';
+      group.append(caption, list);
+      mappingsTable.append(group);
+      groupLists.set(state, list);
+      return list;
+    };
 
     rows.forEach((view) => {
       const accountId = view.accountId;
@@ -4190,8 +4587,10 @@ async function render(): Promise<void> {
         labelNode.dataset.accountLocalLabel = 'true';
       } else if (view.label === shortenAccountId(accountId)) {
         // No name resolved and no label: the heading IS the id, so render it as
-        // data rather than as a name.
+        // data rather than as a name — and the rename affordance beside it says
+        // what to do about that (E62).
         labelNode.classList.add('chatgoose-mono');
+        labelNode.dataset.accountUnnamed = 'true';
       }
       head.append(labelNode);
 
@@ -4201,7 +4600,11 @@ async function render(): Promise<void> {
       renameButton.dataset.accountRename = accountId;
       renameButton.title = COPY.accounts.renameTitle;
       renameButton.setAttribute('aria-label', COPY.accounts.renameTitle);
-      renameButton.textContent = '✎';
+      // An unnamed row gets the invitation spelled out; a named one keeps the
+      // quiet pencil (E62).
+      renameButton.textContent = labelNode.dataset.accountUnnamed === 'true'
+        ? `✎ ${COPY.accounts.renameInvite}`
+        : '✎';
       head.append(renameButton);
 
       // Inline label editor: Enter saves through the runtime operation (the only
@@ -4279,12 +4682,16 @@ async function render(): Promise<void> {
       subSep.setAttribute('aria-hidden', 'true');
       subSep.textContent = '·';
       sub.append(subSep);
+      // The fact line must never contradict the caption above it: an 'unknown'
+      // row says it knows nothing rather than borrowing «сессий не было».
       const facts: string[] = [
         isLive
           ? COPY.accounts.subTabActive
           : view.lastSeenAt !== null
             ? COPY.accounts.subSeenAt.replace('{when}', formatSeenWhen(view.lastSeenAt))
-            : COPY.accounts.subNeverSeen,
+            : view.state === 'unknown'
+              ? COPY.accounts.subStateUnknown
+              : COPY.accounts.subNeverSeen,
       ];
       if (view.observedPage) {
         facts.push(COPY.accounts.corePage.replace('{page}', view.observedPage));
@@ -4375,7 +4782,7 @@ async function render(): Promise<void> {
       }
 
       row.append(dot, head, actions, sub, select);
-      mappingsTable.append(row);
+      groupFor(view.state).append(row);
     });
 
     // `!hydrationFailed` is load-bearing: «появится само» is a promise about a
@@ -4433,6 +4840,9 @@ async function render(): Promise<void> {
       );
       mappingsTable.append(tabsLine);
     }
+    // The persona rows show these labels as chips; repaint them when a label
+    // actually changed (this renderer also runs on every session re-poll).
+    if (labelsChanged) renderPersonaCatalog();
   };
 
   // True while the chatter is inside the mappings table — a persona <select> has

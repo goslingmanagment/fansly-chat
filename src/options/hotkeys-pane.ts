@@ -157,15 +157,17 @@ export function renderHotkeysPane(
     return wrap;
   };
 
+  // One column per group (E62). The old split was «Генерация» left, «Панели» +
+  // «Справка» right — eight rows against six, with a ragged bottom edge; the CSS
+  // collapses to two and then one column as the window narrows.
   const list = doc.createElement('div');
   list.className = 'chatgoose-hotkeys';
   list.dataset.role = 'hotkeys-list';
-  const leftColumn = doc.createElement('div');
-  leftColumn.className = 'chatgoose-hotkeys-col';
-  leftColumn.append(renderGroup('generation'));
-  const rightColumn = doc.createElement('div');
-  rightColumn.className = 'chatgoose-hotkeys-col';
-  rightColumn.append(renderGroup('panels'), renderGroup('reference'));
-  list.append(leftColumn, rightColumn);
+  for (const group of ['generation', 'panels', 'reference'] as const) {
+    const column = doc.createElement('div');
+    column.className = 'chatgoose-hotkeys-col';
+    column.append(renderGroup(group));
+    list.append(column);
+  }
   return list;
 }
