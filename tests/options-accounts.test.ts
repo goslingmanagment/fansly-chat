@@ -127,15 +127,17 @@ function getPersonasSection(): HTMLElement {
 }
 
 function getSectionByTitle(title: string): HTMLElement {
-  const sections = Array.from(document.querySelectorAll<HTMLElement>('section'));
-  const section = sections.find(
-    (candidate) => candidate.querySelector('h2')?.textContent === title,
+  // A pane that lays out its own cards states its title in the pane HEAD (an
+  // <h1> above the cards, E61); the older single-card panes still carry an <h2>
+  // inside the card. Accept either, and return the block that owns the heading.
+  const heading = Array.from(document.querySelectorAll<HTMLElement>('h1, h2')).find(
+    (candidate) => candidate.textContent === title,
   );
-
+  const section = heading?.closest<HTMLElement>('section')
+    ?? (heading ? heading.closest<HTMLElement>('.chatgoose-cabinet-pane') : null);
   if (!section) {
     throw new Error(`Missing section: ${title}`);
   }
-
   return section;
 }
 
@@ -513,7 +515,11 @@ describe('Options page account sections', () => {
     const fanslyRow = document.querySelector<HTMLElement>('[data-status-row="fansly"]')!;
     expect(fanslyRow.dataset.status).toBe('ready');
     expect(fanslyRow.dataset.tone).toBe('green');
-    expect(fanslyRow.textContent).toContain(COPY.status.fanslyWorking);
+    // The row states the live COUNT in words now (E61) — the badge that used to
+    // carry it is gone.
+    expect(fanslyRow.textContent).toContain(
+      COPY.status.fanslyWorking.replace('{n}', '1').replace('{handles}', 'Creator (@creator)'),
+    );
     expect(fanslyRow.textContent).toContain('Creator (@creator)');
   });
 
