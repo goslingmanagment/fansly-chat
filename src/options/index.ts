@@ -89,7 +89,7 @@ import {
   saveAccountMapping,
   saveSettings,
 } from '../shared/storage.js';
-import { installUiTheme, THEME_DARK_CLASS } from '../shared/theme.js';
+import { installUiTheme, resolveUiTheme, systemPrefersDark } from '../shared/theme.js';
 import type {
   AccountsView,
   AccountsViewEntry,
@@ -219,6 +219,18 @@ function parseSpendersObservation(value: unknown): ParsedReply<SpendersObservati
     ? { ok: true, value: value as SpendersObservation }
     : UNUSABLE_REPLY;
 }
+
+/**
+ * One account row as the PANE knows it. The background's contract has three
+ * states; the pane adds a fourth for its degraded path (see
+ * `buildAccountRowViews`) — «this browser has no observation either way», which
+ * is not the same claim as «сессий не было». It never travels: nothing sends an
+ * `AccountRowView` back to the background, and `asAccountsView` still admits
+ * only the three contract states from it.
+ */
+type AccountRowView = Omit<AccountsViewEntry, 'state'> & {
+  state: AccountsViewEntry['state'] | 'unknown';
+};
 
 function asAccountsView(value: unknown): AccountsView | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -880,12 +892,13 @@ async function render(): Promise<void> {
   themeCards.setAttribute('role', 'radiogroup');
   themeCards.setAttribute('aria-label', COPY.appearance.title);
 
-  /** «Системная» alone is ambiguous — say which half of it is live right now.
-   * The DOCUMENT class is the resolved truth: `installUiTheme` already keeps it
-   * current for both the stored setting and the OS scheme. */
+  /** «Системная» alone is ambiguous — say which half of it the OS is asking for.
+   * The note answers about the SYSTEM, never about the live document: read from
+   * the resolved theme class it said «сейчас — тёмная» with «Тёмная» explicitly
+   * selected, which is true of the page and false of the sentence it was
+   * claiming to explain. `resolveUiTheme('system', …)` is that sentence. */
   const renderResolvedTheme = (): void => {
-    const dark = document.documentElement.classList.contains(THEME_DARK_CLASS);
-    themeResolvedNote.textContent = dark
+    themeResolvedNote.textContent = resolveUiTheme('system', systemPrefersDark()) === 'dark'
       ? COPY.appearance.resolvedDark
       : COPY.appearance.resolvedLight;
   };
@@ -955,18 +968,17 @@ async function render(): Promise<void> {
   appearanceGrid.append(themeCard, chatPreviewCard);
   appearanceSection.append(appearanceHead.root, appearanceGrid);
   renderResolvedTheme();
-  // The class flips on a theme change from ANY source — this tab, another tab,
-  // or the OS scheme — and `installUiTheme` owns all three. Watching the class
-  // keeps the note honest without a second listener stack; where the observer is
-  // unavailable the note simply stays at its last painted value (the radio
-  // handler below repaints it on a local change either way).
-  if (typeof MutationObserver === 'function') {
-    const themeClassObserver = new MutationObserver(renderResolvedTheme);
-    themeClassObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-    cleanupTasks.push(() => themeClassObserver.disconnect());
+  // The OS scheme is the note's ONLY input, so the OS query is what it listens
+  // to. The document class it used to watch is the wrong signal twice over: with
+  // an explicit theme picked the class never moves when the OS flips (a stale
+  // note), and it moves when the chatter picks a theme (a note about the choice,
+  // not about the system).
+  const themeSystemQuery = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : null;
+  if (themeSystemQuery) {
+    themeSystemQuery.addEventListener('change', renderResolvedTheme);
+    cleanupTasks.push(() => themeSystemQuery.removeEventListener('change', renderResolvedTheme));
   }
 
   // ─── «Генерация» (Stage 32: keys/models are kernel-side) ────
@@ -1223,7 +1235,9 @@ async function render(): Promise<void> {
     stepper.className = 'chatgoose-stepper';
     stepper.append(stepButton(-1), input, stepButton(1));
     const control = document.createElement('span');
-    control.className = 'chatgoose-row-control';
+    // The numeric lane is its OWN class — `.chatgoose-row-control` stays the
+    // generic inline-flex wrapper the segmented controls wear.
+    control.className = 'chatgoose-row-numeric';
     const clampChip = document.createElement('span');
     clampChip.className = 'chatgoose-row-clamped';
     clampChip.dataset.role = 'clamp-note';
@@ -1411,19 +1425,36 @@ async function render(): Promise<void> {
   };
 
   const agencyHubPermissionRow = hubStatusRow(COPY.hub.permLabel);
-  // The host-access deep-link anchor lives on THIS row (E61): CG-HUB-04 used to
-  // flash a read-only diagnostics line while «Разрешить доступ» sat in another
-  // zone. `data-deeplink-ready` starts false — `permissions.contains` has not
-  // answered yet, and a flash burned on the placeholder cannot be re-armed.
-  agencyHubPermissionRow.root.dataset.hubDetail = 'host-access';
-  agencyHubPermissionRow.root.dataset.deeplinkReady = 'false';
   const agencyHubPermissionStatus = agencyHubPermissionRow.pill;
   const agencyHubPermissionMono = agencyHubPermissionRow.mono;
 
   const agencyHubPermissionMeta = document.createElement('div');
   agencyHubPermissionMeta.className = 'chatgoose-meta';
 
+  // «Разрешить доступ» rides its OWN row directly under the permission fact
+  // rather than the zone's shared action row. E61 promised a CG-HUB-04 deep link
+  // would highlight «the row that has «Разрешить доступ» in it»; the anchor sat
+  // on the status row while the button lived two siblings away, so the flash
+  // framed the diagnosis without the cure. Grouping them is what makes the claim
+  // true — and keeps «Проверить связь» the zone's single primary.
   const agencyHubPermissionButton = createButton(COPY.status.grantAccess, true);
+  const agencyHubPermissionActions = document.createElement('div');
+  agencyHubPermissionActions.className = 'chatgoose-hub-srow-actions';
+  agencyHubPermissionActions.append(agencyHubPermissionButton);
+
+  // The block IS the deep-link target: fact, explanation and the control that
+  // fixes it. `data-deeplink-ready` starts false — `permissions.contains` has not
+  // answered yet, and a flash burned on the placeholder cannot be re-armed.
+  const agencyHubHostAccessBlock = document.createElement('div');
+  agencyHubHostAccessBlock.className = 'chatgoose-hub-hostaccess';
+  agencyHubHostAccessBlock.dataset.hubDetail = 'host-access';
+  agencyHubHostAccessBlock.dataset.deeplinkReady = 'false';
+  agencyHubHostAccessBlock.append(
+    agencyHubPermissionRow.root,
+    agencyHubPermissionMeta,
+    agencyHubPermissionActions,
+  );
+
   const agencyHubConnectionRow = hubStatusRow(COPY.hub.connLabel);
   const agencyHubConnectionStatus = agencyHubConnectionRow.pill;
   const agencyHubConnectionMono = agencyHubConnectionRow.mono;
@@ -1437,7 +1468,7 @@ async function render(): Promise<void> {
   agencyHubActionRow.style.display = 'flex';
   agencyHubActionRow.style.gap = '8px';
   agencyHubActionRow.style.flexWrap = 'wrap';
-  agencyHubActionRow.append(agencyHubConnectionButton, agencyHubPermissionButton);
+  agencyHubActionRow.append(agencyHubConnectionButton);
 
   let agencyHubConnectionVersion = 0;
   let lastAgencyHubConnectionSignature: string | null = null;
@@ -2310,9 +2341,9 @@ async function render(): Promise<void> {
   const hubErrorsRow = hubDiagRow(COPY.hub.errorsLabel, 'errors', 'async');
   const hubFanSummaryRow = hubDiagRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
   // «Доступ к хосту» is NOT here: the same flag already paints the pill in
-  // «Подключение», next to the button that fixes it. That row carried the
+  // «Подключение», next to the button that fixes it. That block carries the
   // `host-access` deep-link anchor, so the anchor moved with the fact — a
-  // CG-HUB-04 link now highlights the row that has «Разрешить доступ» in it.
+  // CG-HUB-04 link highlights the fact, its explanation AND «Разрешить доступ».
   const hubDiagnosticsCard = document.createElement('div');
   hubDiagnosticsCard.className = 'chatgoose-hub-diag';
   hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
@@ -2332,8 +2363,7 @@ async function render(): Promise<void> {
   // Address, host access and the live test share one fate — one card.
   agencyHubConnectCard.append(
     hubBaseUrlField,
-    agencyHubPermissionRow.root,
-    agencyHubPermissionMeta,
+    agencyHubHostAccessBlock,
     agencyHubConnectionRow.root,
     agencyHubConnectionMeta,
     agencyHubActionRow,
@@ -2428,10 +2458,20 @@ async function render(): Promise<void> {
   statusRefreshedTag.className = 'chatgoose-panehead-stamp';
   statusRefreshedTag.dataset.role = 'status-refreshed';
   statusRefreshedTag.textContent = COPY.status.refreshedNever;
-  statusHead.side.append(statusRefreshedTag, statusActions);
+  // Each action answers in its OWN live region. «Проверить всё» moved into the
+  // pane head and left its only feedback line behind in «Поддержка», where the
+  // throttle message read as a verdict on «Скопировать отчёт» — and a later
+  // check silently wiped «Отчёт скопирован».
+  const statusCheckNote = document.createElement('div');
+  statusCheckNote.className = 'chatgoose-status-hint chatgoose-panehead-note';
+  statusCheckNote.dataset.role = 'status-check-note';
+  statusCheckNote.setAttribute('role', 'status');
+  statusCheckNote.setAttribute('aria-live', 'polite');
+  statusHead.side.append(statusRefreshedTag, statusActions, statusCheckNote);
 
   const statusActionNote = document.createElement('div');
   statusActionNote.className = 'chatgoose-status-hint';
+  statusActionNote.dataset.role = 'status-report-note';
   statusActionNote.setAttribute('role', 'status');
   statusActionNote.setAttribute('aria-live', 'polite');
   const statusReportHint = document.createElement('div');
@@ -2623,15 +2663,26 @@ async function render(): Promise<void> {
   /** One-shot guard around the durable stamp; re-armed if the write fails. */
   let onboardingStamping = false;
 
-  /** The checklist and the readiness hero are ONE decision: while the checklist
-   * is up it owns the three open steps (with a CTA each), so the hero — which
-   * would restate exactly that list one card below — is hidden. The hero returns
-   * the moment onboarding is dismissed, or immediately on an install that was
-   * never fresh. This function is the single writer of both flags. */
+  /** How many readiness steps were open at the last `refreshStatusView`. Kept
+   * here because the visibility of «Что мешает» is not that renderer's call. */
+  let openReadinessSteps = 0;
+
+  /** The checklist, the readiness hero and «Что мешает» are ONE decision, and
+   * this is its SINGLE writer: while the checklist is up it owns the three open
+   * steps (with a CTA each), so neither the hero nor the open-steps card — both
+   * of which would restate exactly that list one card below — is drawn. They
+   * return the moment onboarding is dismissed, or immediately on an install that
+   * was never fresh. Hiding the hero alone stopped being enough when the list
+   * moved out of it into its own card (E62). */
+  const applyReadinessVisibility = (): void => {
+    readinessHero.hidden = onboardingVisible;
+    statusTodoCard.hidden = onboardingVisible || openReadinessSteps === 0;
+  };
+
   const renderOnboarding = (): void => {
     if (!onboardingVisible) {
       onboardingSection.hidden = true;
-      readinessHero.hidden = false;
+      applyReadinessVisibility();
       return;
     }
     const states = onboardingStepStates();
@@ -2643,7 +2694,7 @@ async function render(): Promise<void> {
       step.done.hidden = !done;
     }
     onboardingSection.hidden = false;
-    readinessHero.hidden = true;
+    applyReadinessVisibility();
     if (!Object.values(states).every(Boolean) || onboardingStamping) {
       return;
     }
@@ -2658,7 +2709,7 @@ async function render(): Promise<void> {
           onboardingSection.hidden = true;
           // Setup is over: the headline takes the card's place immediately —
           // «Готово к смене.» is exactly what the chatter earned.
-          readinessHero.hidden = false;
+          applyReadinessVisibility();
           return;
         }
         // The flag did not stick: keep the card and let a later refresh retry
@@ -2733,7 +2784,7 @@ async function render(): Promise<void> {
     // Settled once Firefox has answered `permissions.contains` — including the
     // «no origin to check» case, where «неизвестно» IS the final answer for the
     // address currently in the field.
-    markHubRowHydrated(agencyHubPermissionRow, hubPermissionChecked);
+    markHubRowHydrated({ root: agencyHubHostAccessBlock }, hubPermissionChecked);
 
     // Проверка — when, outcome, how long, and which credential carried it.
     if (!lastConnectionCheck) {
@@ -2838,6 +2889,8 @@ async function render(): Promise<void> {
       readinessSub.textContent = COPY.status.checkingSubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
+      openReadinessSteps = 0;
+      applyReadinessVisibility();
       shell.setMicro('status', null);
       return;
     }
@@ -2852,7 +2905,6 @@ async function render(): Promise<void> {
       readinessSub.textContent = COPY.status.readySubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
-      statusTodoCard.hidden = true;
     } else {
       readinessHero.dataset.heroState = 'route';
       readinessHeading.textContent = open.length === 1
@@ -2881,8 +2933,12 @@ async function render(): Promise<void> {
         }),
       );
       readinessOpen.hidden = false;
-      statusTodoCard.hidden = false;
     }
+    // The list itself always stays current — hidden, never stale, so it is
+    // already right the moment the checklist retires. WHETHER it is on screen is
+    // `applyReadinessVisibility`'s call, and only its.
+    openReadinessSteps = open.length;
+    applyReadinessVisibility();
 
     statusRefreshedTag.textContent = rowsRefreshedAt === 0
       ? COPY.status.refreshedNever
@@ -3247,13 +3303,13 @@ async function render(): Promise<void> {
   checkAllButton.addEventListener('click', () => {
     const now = Date.now();
     if (now - lastCheckAllAt < CHECK_ALL_THROTTLE_MS) {
-      statusActionNote.textContent = COPY.status.checkAllThrottled;
+      statusCheckNote.textContent = COPY.status.checkAllThrottled;
       return;
     }
     lastCheckAllAt = now;
     checkAllButton.disabled = true;
     checkAllButton.textContent = COPY.status.checkAllRunning;
-    statusActionNote.textContent = '';
+    statusCheckNote.textContent = '';
     void (async () => {
       try {
         await Promise.all([
@@ -3680,6 +3736,11 @@ async function render(): Promise<void> {
   personaActions.append(personaRefreshButton);
   // Which hub this catalog came from — in memory since wave C, shown nowhere.
   const personaSourceFact = factRow(COPY.personas.catalogSourceLabel, '');
+  // A hub address can be long (an origin plus a path). It WRAPS rather than
+  // pushing the card past a narrow window — an ellipsis would hide exactly the
+  // path that tells two agencies on one host apart.
+  const personaSourceValue = personaSourceFact.querySelector<HTMLElement>('.chatgoose-fact-v');
+  personaSourceValue?.classList.add('chatgoose-fact-v-wrap');
 
   const renderPersonaCatalog = (): void => {
     // A repopulated catalog can flip the «персона назначена» step: a mapping
@@ -3712,20 +3773,15 @@ async function render(): Promise<void> {
     personaCatalogAge.hidden = staleDays === null;
     // Which hub this catalog belongs to. The source is «baseUrl|hash» — only the
     // address half is meaningful to a chatter, and the hash is a credential
-    // fingerprint that has no business on screen.
-    const sourceValue = personaSourceFact.querySelector('.chatgoose-fact-v');
-    if (sourceValue) {
-      const storedSource = state.personaCatalogSource;
-      const host = storedSource
-        ? (() => {
-            try {
-              return new URL(storedSource.split('|')[0] ?? '').host;
-            } catch {
-              return null;
-            }
-          })()
-        : null;
-      sourceValue.textContent = host ?? COPY.personas.catalogSourceUnknown;
+    // fingerprint that has no business on screen. The address is shown WHOLE:
+    // `normalizeAgencyHubBaseUrl` deliberately keeps a non-root path, so two hubs
+    // on one host («…/agency-a», «…/agency-b») collapsed into one line when this
+    // printed the host alone.
+    if (personaSourceValue) {
+      const storedBaseUrl = normalizeAgencyHubBaseUrl(
+        state.personaCatalogSource?.split('|')[0] ?? '',
+      );
+      personaSourceValue.textContent = storedBaseUrl || COPY.personas.catalogSourceUnknown;
     }
     personalitiesList.replaceChildren();
     const rows = buildPersonaRowViews(state.personaCatalog, state.accountMappings);
@@ -3922,9 +3978,11 @@ async function render(): Promise<void> {
   mappingsSection.className = 'chatgoose-pane-plain';
   mappingsSection.dataset.sessionHydration = 'loading';
   // Own node rather than createSection's description: the subtitle counts live
-  // accounts, so it has to be repaintable.
+  // accounts, so it has to be repaintable. The live counter is a chip in the
+  // pane head; the two instructions it used to be glued to are the pane's
+  // subtitle now (E62).
   const accountsSubtitle = document.createElement('div');
-  accountsSubtitle.className = 'chatgoose-section-desc';
+  accountsSubtitle.className = 'chatgoose-chip';
   accountsSubtitle.dataset.role = 'accounts-subtitle';
   accountsSubtitle.textContent = COPY.accounts.subtitle
     .replace('{live}', '—')
@@ -3949,9 +4007,6 @@ async function render(): Promise<void> {
   // The rare-question tail lives in the tooltip, not in a third visible line.
   accountsHint.title = COPY.accounts.hintNeverSeen;
   const accountsHead = createPaneHead(COPY.accounts.title, COPY.accounts.paneSubtitle);
-  // The live counter is a chip in the head; the two instructions it used to be
-  // glued to are the pane's subtitle now (E62).
-  accountsSubtitle.className = 'chatgoose-chip chatgoose-chip-count';
   accountsHead.side.append(accountsSubtitle);
   const accountsCard = document.createElement('div');
   accountsCard.className = 'chatgoose-panecard';
@@ -4403,12 +4458,15 @@ async function render(): Promise<void> {
    *
    * Without it (an older background, a rejected read) the pane degrades to what
    * this page can see by itself: the known accounts and the live snapshot. The
-   * degraded rows deliberately claim LESS — no 'seen' state, no observed page,
-   * no tab id — instead of guessing.
+   * degraded rows deliberately claim LESS — no observed page, no tab id — and
+   * they get a FOURTH state the contract does not have: an account the live
+   * snapshot says nothing about is 'unknown', not 'never'. The state is a group
+   * CAPTION since E62, and «Сессий не было» over a row is a verdict only durable
+   * presence can support.
    */
   const buildAccountRowViews = (
     sessions: SessionSnapshotEntry[],
-  ): AccountsViewEntry[] => {
+  ): AccountRowView[] => {
     if (accountsView) {
       return accountsView.accounts;
     }
@@ -4419,12 +4477,15 @@ async function render(): Promise<void> {
         accountId,
         label: formatAccountHeading(accountId, session),
         localLabel: null,
-        state: session?.connected ? 'live' : 'never',
+        // A snapshot entry IS an observation: connected means live, and a
+        // disconnected entry still carries the moment it was last seen. No entry
+        // at all means this page has nothing to say.
+        state: session ? (session.connected ? 'live' : 'seen') : 'unknown',
         lastSeenAt: session?.lastSeenAt ?? null,
         tabId: null,
         personaMapped: isAccountPersonaMapped(accountId),
         observedPage: null,
-      } satisfies AccountsViewEntry;
+      } satisfies AccountRowView;
     });
   };
 
@@ -4468,13 +4529,14 @@ async function render(): Promise<void> {
     // Groups (E62): «В работе», «Видели раньше», «Сессий не было» — a caption
     // and a count per block, and an empty group is not drawn at all. Six
     // identical tiles used to carry their state in an 8px dot alone.
-    const groupCaptions: Record<AccountsViewEntry['state'], string> = {
+    const groupCaptions: Record<AccountRowView['state'], string> = {
       live: COPY.accounts.groupLive,
       seen: COPY.accounts.groupSeen,
       never: COPY.accounts.groupNever,
+      unknown: COPY.accounts.groupUnknown,
     };
-    const groupLists = new Map<AccountsViewEntry['state'], HTMLElement>();
-    const groupFor = (state: AccountsViewEntry['state']): HTMLElement => {
+    const groupLists = new Map<AccountRowView['state'], HTMLElement>();
+    const groupFor = (state: AccountRowView['state']): HTMLElement => {
       const existing = groupLists.get(state);
       if (existing) return existing;
       const group = document.createElement('div');
@@ -4489,7 +4551,10 @@ async function render(): Promise<void> {
       captionCount.textContent = String(rows.filter((row) => row.state === state).length);
       caption.append(captionText, captionCount);
       const list = document.createElement('div');
-      list.className = 'chatgoose-account-rows';
+      // NOT `chatgoose-account-rows`: that class is the TABLE's, and it is what
+      // the `CG-FLOW-02` deep link selects with `querySelector` — wearing it here
+      // too made the highlight land on the right element by DOM order alone.
+      list.className = 'chatgoose-account-group-rows';
       group.append(caption, list);
       mappingsTable.append(group);
       groupLists.set(state, list);
@@ -4617,12 +4682,16 @@ async function render(): Promise<void> {
       subSep.setAttribute('aria-hidden', 'true');
       subSep.textContent = '·';
       sub.append(subSep);
+      // The fact line must never contradict the caption above it: an 'unknown'
+      // row says it knows nothing rather than borrowing «сессий не было».
       const facts: string[] = [
         isLive
           ? COPY.accounts.subTabActive
           : view.lastSeenAt !== null
             ? COPY.accounts.subSeenAt.replace('{when}', formatSeenWhen(view.lastSeenAt))
-            : COPY.accounts.subNeverSeen,
+            : view.state === 'unknown'
+              ? COPY.accounts.subStateUnknown
+              : COPY.accounts.subNeverSeen,
       ];
       if (view.observedPage) {
         facts.push(COPY.accounts.corePage.replace('{page}', view.observedPage));

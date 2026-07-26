@@ -347,8 +347,9 @@ export const COPY = {
     checkViaLegacyKey: 'по legacy-ключу',
     checkNever: 'ещё не проверяли',
     checkDuration: '{n} мс',
-    hostAccessLabel: 'Доступ к хосту',
-    hostAccessGranted: 'выдан',
+    /** The label and the bare «выдан» went with the diagnostics host-access row
+     * (E61): «Подключение» already states that fact next to the button that
+     * fixes it, and only the «для {origin}» form survived. */
     hostAccessGrantedFor: 'выдан для',
     contractLabel: 'Контракт SDK',
     contractMatches: 'совпадает с ядром',
@@ -422,6 +423,10 @@ export const COPY = {
     groupLive: 'В работе',
     groupSeen: 'Видели раньше',
     groupNever: 'Сессий не было',
+    /** Only the degraded path reaches this group: without the background's
+     * accounts view the page sees the live snapshot and nothing else, so
+     * «сессий не было» would be a verdict it cannot prove. */
+    groupUnknown: 'Состояние неизвестно',
     /** An account with no resolved name and no local label: the heading invites
      * one instead of repeating the id printed right below it. */
     renameInvite: 'подписать',
@@ -447,9 +452,6 @@ export const COPY = {
     renameLocalTitle: 'Локальная подпись',
     renameSave: 'Сохранить',
     renameCancel: 'Отмена',
-    /** The one pill an account row can wear — quiet rows carry no pill at all:
-     * the grey dot and the mono «была…»/«сессий не было» line are the state. */
-    stateLive: 'в работе',
     subTabActive: 'вкладка активна',
     subSeenAt: 'была {when}',
     /** `{when}` forms for `subSeenAt` — a bare «21:40» three days later lies. */
@@ -457,6 +459,9 @@ export const COPY = {
     whenYesterday: 'вчера {time}',
     whenDate: '{date} в {time}',
     subNeverSeen: 'сессий не было',
+    /** The degraded row's fact line — it matches its group caption instead of
+     * borrowing «сессий не было» from a state nobody established. */
+    subStateUnknown: 'о прошлых сессиях этот браузер не знает',
     corePage: 'страница ядра: {page}',
     personaUnmapped: 'AI отключён',
     personaUnmappedHint: 'назначь персону — без неё генерации не запускаются',
@@ -523,9 +528,12 @@ export const COPY = {
     title: 'Вид',
     subtitle: 'Одна семья, светлая и тёмная. Тема общая для панели в чате Fansly, кабинета и попапа.',
     themeCardTitle: 'Тема',
-    /** What «Системная» resolves to right now — computed, never guessed. */
-    resolvedLight: 'сейчас — светлая',
-    resolvedDark: 'сейчас — тёмная',
+    /** What «Системная» resolves to right now — the OS scheme, computed, never
+     * guessed. It names the SYSTEM out loud because it stays on screen while
+     * «Светлая»/«Тёмная» is the live choice, and «сейчас — светлая» there would
+     * read as a claim about the page. */
+    resolvedLight: 'система сейчас — светлая',
+    resolvedDark: 'система сейчас — тёмная',
     chatCardTitle: 'Панель в чате',
     chatCardNote: 'Тема применяется сразу во всех вкладках Fansly и в попапе — перезагружать ничего не нужно.',
     chatToneChip: 'тон · flirty',

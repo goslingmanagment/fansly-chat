@@ -288,6 +288,11 @@ describe('options cabinet shell', () => {
       new URL('../src/options/styles.css', import.meta.url),
       'utf8',
     );
+    // The list is FIXED on purpose: every class the page hides with the IDL flag
+    // AND styles with an author `display` belongs here. Grep `.hidden =` under
+    // `src/options/` when adding a surface — the R3 waves added five of these,
+    // and `.chatgoose-hub-srow` shipped without a guard (the «Выпущен» row stayed
+    // on screen, empty, on every signed-out install and after «Выйти»).
     for (const selector of [
       'chatgoose-cabinet-pane',
       'chatgoose-status-row',
@@ -299,11 +304,35 @@ describe('options cabinet shell', () => {
       // …and for `.chatgoose-badge` it means every onboarding step wears the
       // green «готово», done or not.
       'chatgoose-badge',
+      // Wave B/C surfaces: the token provenance row, «Что мешает», the catalog
+      // staleness marker, the clamp chip and the inline rename editor.
+      'chatgoose-hub-srow',
+      'chatgoose-hub-danger',
+      'chatgoose-todo',
+      'chatgoose-persona-catage',
+      'chatgoose-row-clamped',
+      'chatgoose-account-rename-input',
     ]) {
       expect(styles).toMatch(
         new RegExp(`\\.${selector}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`),
       );
     }
+  });
+
+  it('keeps ONE bare .chatgoose-row-control rule — the numeric lane has its own class', () => {
+    // Two bare rules for one class is a silent override: same specificity, later
+    // wins, for EVERY wearer. `.chatgoose-row-control` is worn by the segmented
+    // auto-recap control and used to be worn by the numeric lane too, so the
+    // lane's `grid-template-columns: 66px auto` squeezed the recap's three
+    // buttons into the 66px range track — «Полный» was neither visible nor
+    // clickable.
+    const styles = readFileSync(
+      new URL('../src/options/styles.css', import.meta.url),
+      'utf8',
+    );
+    expect(styles.match(/^\.chatgoose-row-control \{/gm) ?? []).toHaveLength(1);
+    expect(styles).toMatch(/\.chatgoose-row-control \{[^}]*display:\s*inline-flex/);
+    expect(styles).toMatch(/\.chatgoose-row-numeric \{[^}]*display:\s*grid/);
   });
 
   it('COPY.documentTitle matches the static <title> it claims to mirror', () => {

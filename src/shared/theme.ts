@@ -18,7 +18,11 @@ export function resolveUiTheme(
   return systemPrefersDark ? 'dark' : 'light';
 }
 
-function systemPrefersDark(): boolean {
+/** What the OS is asking for right now, independent of the stored setting.
+ * Exported because the cabinet's «Вид» pane has to say what «Системная» would
+ * resolve to even while «Светлая»/«Тёмная» is the live choice — reading the
+ * document's resolved class there would describe the CHOICE instead. */
+export function systemPrefersDark(): boolean {
   return typeof window.matchMedia === 'function'
     ? window.matchMedia('(prefers-color-scheme: dark)').matches
     : false;

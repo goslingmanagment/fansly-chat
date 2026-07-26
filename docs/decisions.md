@@ -77,8 +77,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
 | E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim. **Amended (post-campaign round 2):** the fence runs from the state of EVERY applied read (never a per-event flag the generation guard can discard) and invalidates this tab's pending credential write, while skipping the hub-check chain owned by this page's own custody RPC; the honest-outcome rule keys on the recorded issuing ADDRESS (`!meta.issuedFrom`), `alsoWrite` throws on a key the same write owns, `unavailable.fansly` starts TRUE, and the fence re-renders the sign-in meta line |
 | E60 | 2026-07-26 | Cabinet frame R3: the shell fills the window — no width clamp on `<body>` — with a sticky rail that owns one viewport and a reading column capped at 1120px on the pane itself; the page root's permanent 24px bottom padding moves into that pane. Supersedes the 900px ribbon chosen when #46 was reverted (owner ruling on the R3 mockups, 2026-07-26). Narrow windows collapse the rail (BL-003 п.1), disabled controls finally look disabled, and the save whisper speaks Russian |
-| E61 | 2026-07-26 | «Статус» and Agency Hub speak in WORDS: the mono badge column goes (it ran six vocabularies at once and its «—» meant four different things) and every row is dot · fixed label · fact · one right cell holding a detail OR an action. Each pane gets a HEAD (title, subline, its primary action) above cards that carry content only; «Статус» adds «Что мешает» — the open readiness steps with the button that closes each — plus a support card (version, storage schema, report) and cross-pane pointers. Hub loses its duplicated facts (host access and the check receipt were stated twice), gains the «Ядро» row it never had, un-nests its zones into four cards in two columns, fences «Выйти» inside the sign-in card, and stops printing a raw error code in a pill |
-| E62 | 2026-07-26 | The five remaining panes: «Персоны» name the accounts sitting on each persona (the map was in memory, only its size was printed) and repaint when a mapping changes; «Аккаунты» group rows by state with a caption + count each, so the per-row «в работе» pill goes; «Генерация» splits into two card columns with a fixed numeric lane, bounds from the shared constants and a step that matches the range (the deep window stepped by 1 across 100–3000), and the clamp notice becomes its own chip instead of eating the range hint; «Хоткеи» give each group its own column and let names wrap, with the detected platform stated in the head; «Вид» previews the IN-CHAT panel the subtitle promises, says what «Системная» resolves to right now, and labels its radio group |
+| E61 | 2026-07-26 | «Статус» and Agency Hub speak in WORDS: the mono badge column goes (it ran six vocabularies at once and its «—» meant four different things) and every row is dot · fixed label · fact · one right cell holding a detail OR an action. Each pane gets a HEAD (title, subline, its primary action) above cards that carry content only; «Статус» adds «Что мешает» — the open readiness steps with the button that closes each — plus a support card (version, storage schema, report) and cross-pane pointers. Hub loses its duplicated facts (host access and the check receipt were stated twice), gains the «Ядро» row it never had, un-nests its zones into four cards in two columns, fences «Выйти» inside the sign-in card, and stops printing a raw error code in a pill. **Amended (review fixes):** the `host-access` deep-link anchor covers the fact AND «Разрешить доступ» (the claim was false — the button sat in a sibling action row); `renderOnboarding` is the single writer of «Что мешает» too, not only of the hero (a fresh install listed the same three steps twice); «Проверить всё» and «Скопировать отчёт» get one live region each; the pane head wraps at ~320px, the <640px diagnostics row drops the 46px column of the deleted badge, and `.chatgoose-hub-srow` gets the author `[hidden]` guard its `display: grid` needs |
+| E62 | 2026-07-26 | The five remaining panes: «Персоны» name the accounts sitting on each persona (the map was in memory, only its size was printed) and repaint when a mapping changes; «Аккаунты» group rows by state with a caption + count each, so the per-row «в работе» pill goes; «Генерация» splits into two card columns with a fixed numeric lane, bounds from the shared constants and a step that matches the range (the deep window stepped by 1 across 100–3000), and the clamp notice becomes its own chip instead of eating the range hint; «Хоткеи» give each group its own column and let names wrap, with the detected platform stated in the head; «Вид» previews the IN-CHAT panel the subtitle promises, says what «Системная» resolves to right now, and labels its radio group. **Amended (review fixes):** the numeric lane gets its own class (as a second bare `.chatgoose-row-control` rule it clipped the auto-recap segment's «Полный»); the degraded accounts path carries an explicit 'unknown' state so no row contradicts its group caption; the «Системная» note is computed from the OS scheme, never from the document's resolved class; the catalog source shows the WHOLE normalized base URL (two hubs on one host collapsed into one line); `chatgoose-account-rows` names one element again; dead CSS/copy deleted, and the weakened persona-catalog test is a node-identity guarantee again |
 
 ## Entries
 
@@ -2031,6 +2031,40 @@ tone assertions, the readiness-step lookups point at «Что мешает», an
 `getSectionByTitle` helper accepts a pane head's `<h1>` as well as a card's
 `<h2>`.
 
+**E61 amendment — review fixes (2026-07-26).** Five findings, every one of them
+in what wave B MOVED rather than in what it wrote.
+
+The `host-access` deep-link anchor sits on a BLOCK now — the «Доступ к хосту»
+fact, its explanation and «Разрешить доступ» — not on the status row alone. The
+claim above («`CG-HUB-04` flashes the row that CONTAINS «Разрешить доступ»») was
+false as shipped: the button lived in the zone's shared action row, two siblings
+away, so the flash framed the diagnosis without the cure. The grant button rides
+its own line under the fact; «Проверить связь» stays the zone's only primary.
+
+«Что мешает» is back under `renderOnboarding`'s single-writer rule, like the
+readiness hero it was split from. The open-steps LIST left the hero for its own
+card, so hiding the hero stopped suppressing it — and a genuinely fresh install
+stated the same three setup steps twice, once with a CTA each and once in the
+amber card beside them. One function (`applyReadinessVisibility`) writes both
+flags; the list inside keeps painting either way, so it is right the moment the
+checklist retires. The test that asserted the duplicate was corrected, not worked
+around.
+
+Each «Статус» action answers in its OWN live region. «Проверить всё» moved into
+the pane head and left its only feedback element behind in «Поддержка», where the
+throttle message read as a verdict on «Скопировать отчёт» — and a later check
+silently wiped «Отчёт скопирован».
+
+Three CSS trailers. The pane head WRAPS: its side cluster is `flex: none`, so at
+~320px the title and the controls were pushed off the page. The <640px
+diagnostics row dropped the 46px lead column it kept from the deleted mono badge,
+which squeezed «Контракт SDK» into a third of the space it needs. And
+`.chatgoose-hub-srow`'s author `display: grid` finally has its author `[hidden]`
+guard — without it the «Выпущен» row stayed on screen, empty, on every signed-out
+install and after «Выйти». The stylesheet test's FIXED class list is part of that
+fix: it now names every class this stack hides with the IDL flag, so the next one
+is caught by the same net.
+
 **E62 (2026-07-26).** Wave C of the R3 polish — the five panes that were not
 «Статус» or Agency Hub. The owner picked the additions from the mockups: account
 chips on «Персоны», state groups on «Аккаунты», the chat-panel preview on «Вид»
@@ -2083,3 +2117,53 @@ button, «Системная» says which half is live right now (`resolveUiThem
 and this pane never called it, and the resolved class is watched so the note stays
 true when another tab or the OS flips it), and the three radios finally have a
 group name.
+
+**E62 amendment — review fixes (2026-07-26).** Six findings, plus one test that
+had been weakened instead of updated.
+
+The fixed numeric lane got its OWN class. It shipped as a second bare
+`.chatgoose-row-control` rule — same specificity, later wins, for every wearer of
+that class — and the auto-recap segment wears it too, so «Выкл / Короткий /
+Полный» was clamped into the 66px range track: «Полный» was neither visible nor
+clickable. `.chatgoose-row-control` is the generic inline-flex wrapper again;
+`.chatgoose-row-numeric` is the lane, and the clamp chip hangs off it.
+
+No account row may contradict the caption above it. State is a group CAPTION
+since this entry, and the degraded path (an older background with no
+`getAccountsView`) called every non-connected account 'never' while keeping its
+`lastSeenAt` — so a row could sit under «Сессий не было» and say «была вчера
+22:23», a verdict nothing established. The pane now carries a FOURTH state of its
+own, 'unknown', for an account the live snapshot says nothing about; a snapshot
+entry that exists but is disconnected is honestly 'seen'. The extra state never
+travels: `asAccountsView` still admits only the contract's three.
+
+«Системная» is described by `resolveUiTheme('system', …)`, not by the document's
+resolved theme class. Read from the class, the note said «сейчас — тёмная» with
+«Тёмная» explicitly picked — true of the page and false of the sentence it
+claimed to explain — and it went stale when the OS flipped under an explicit
+theme, because the class does not move then. It names the system out loud
+(«система сейчас — …») and listens to the OS query instead of the class.
+
+The catalog's source line shows the WHOLE normalized base URL.
+`normalizeAgencyHubBaseUrl` deliberately preserves a non-root path, so printing
+`new URL(...).host` collapsed two agencies on one host into one line. The
+credential-fingerprint half of `personaCatalogSource` still never reaches the
+screen, and the address WRAPS rather than pushing its card past a narrow window —
+an ellipsis would hide exactly the path that distinguishes them.
+
+`chatgoose-account-rows` names ONE element again — the table the `CG-FLOW-02`
+deep link selects with `querySelector`. The per-group row list wore it too, so
+the highlight landed on the right element only by DOM order; it is
+`chatgoose-account-group-rows` now, sharing the rule and not the name. Dead
+weight went with it: the `.chatgoose-persona-catrow` trio (the catalog row died
+when «Обновлён» became a plain fact line), `COPY.accounts.stateLive`,
+`COPY.hub.hostAccessLabel`/`hostAccessGranted`, and the ruleless
+`chatgoose-chip-count`.
+
+The persona-catalog test is a guarantee again. A node-identity assertion — that
+session hydration does not rebuild the catalog — had been softened to
+`toBeTruthy()` plus a dataset read that is true by construction. The catalog CARD
+is asserted by node identity, the persona ROW is asserted to repaint exactly once
+(the account labels it renders as chips only exist after the snapshot), and a
+second poll with unchanged labels is asserted to leave it alone — which is what
+the `labelsChanged` guard is for.

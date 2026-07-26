@@ -198,6 +198,41 @@ describe('«Персоны» pane', () => {
     expect(age?.hidden).toBe(true);
   });
 
+  it('names the hub the catalog came from by its WHOLE address', async () => {
+    // `normalizeAgencyHubBaseUrl` deliberately preserves a non-root path, so two
+    // agencies on one host differ only there. Printing `new URL(...).host`
+    // collapsed them into the same line — and the credential fingerprint half of
+    // `personaCatalogSource` must never reach the screen either.
+    const settings: Partial<Settings> = {
+      agencyHubBaseUrl: 'https://hub.example.test/agency-b',
+      agencyHubDeviceToken: 'device-x',
+    };
+    const source = personaCatalogSource({
+      agencyHubBaseUrl: 'https://hub.example.test/agency-b',
+      agencyHubApiKey: '',
+      agencyHubDeviceToken: 'device-x',
+    });
+    page = await mountOptionsPage({
+      settings,
+      state: {
+        personaCatalog: [],
+        personaCatalogSource: source,
+        personaCatalogFetchedAt: new Date(2026, 6, 25, 14, 5).toISOString(),
+      },
+    });
+
+    const sourceRow = Array.from(
+      page.document.querySelectorAll<HTMLElement>('.chatgoose-fact'),
+    ).find((row) => row.textContent?.startsWith(COPY.personas.catalogSourceLabel))!;
+    expect(sourceRow).toBeTruthy();
+    expect(sourceRow.querySelector('.chatgoose-fact-v')?.textContent)
+      .toBe('https://hub.example.test/agency-b');
+    // The hash half of «baseUrl|hash» is a credential fingerprint.
+    const fingerprint = source!.split('|')[1]!;
+    expect(fingerprint).toBeTruthy();
+    expect(page.document.body.textContent).not.toContain(fingerprint);
+  });
+
   it('marks a stale catalog with its age in days once it is older than 48h', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',

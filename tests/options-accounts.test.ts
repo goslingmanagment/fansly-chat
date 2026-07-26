@@ -349,7 +349,13 @@ describe('Options page account sections', () => {
       .querySelector<HTMLElement>('[data-account-mapping-row="mappedOffline"]')!;
     // A sleeping row wears NO pill — the mono fact line carries its state.
     expect(offlineRow.textContent).not.toContain('не активна');
-    expect(offlineRow.textContent).toContain(COPY.accounts.subNeverSeen);
+    // …and on the degraded path (no `getAccountsView` here) that state is
+    // «unknown», not «never»: the live snapshot has no entry for this account, so
+    // nothing established that a session never happened.
+    expect(offlineRow.closest('[data-account-group]')?.getAttribute('data-account-group'))
+      .toBe('unknown');
+    expect(offlineRow.textContent).toContain(COPY.accounts.subStateUnknown);
+    expect(offlineRow.textContent).not.toContain(COPY.accounts.subNeverSeen);
   });
 
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
@@ -365,6 +371,12 @@ describe('Options page account sections', () => {
 
     const personalityCard = getPersonasSection()
       .querySelector<HTMLElement>('[data-persona-key="p1"]')!;
+    // The catalog CARD — the node the whole «Каталог» block hangs off. Node
+    // identity is the point: a `toBeTruthy()` on a fresh lookup is satisfied by
+    // a full rebuild just as well as by no rebuild at all.
+    const catalogCard = getPersonasSection()
+      .querySelector<HTMLElement>('[data-role="persona-catalog"]')!
+      .closest<HTMLElement>('.chatgoose-panecard')!;
     const mappingsSection = getAccountsSection();
 
     expect(personalityCard.textContent).toContain('Closer');
@@ -392,12 +404,43 @@ describe('Options page account sections', () => {
       expect(mappingsSection.textContent).toContain(accountIdText('canonical'));
     });
 
-    // Session hydration must not rebuild the catalog CARD; the persona rows do
-    // repaint once the account labels land, because they render those labels as
-    // chips now (E62).
-    expect(getPersonasSection().querySelector('[data-persona-key="p1"]')).toBeTruthy();
-    expect(personalityCard.dataset.personaKey).toBe('p1');
+    // Session hydration must not rebuild the catalog CARD — same node, not a
+    // replacement that happens to answer to the same selector.
+    expect(
+      getPersonasSection()
+        .querySelector<HTMLElement>('[data-role="persona-catalog"]')!
+        .closest('.chatgoose-panecard'),
+    ).toBe(catalogCard);
+    // The persona ROW does repaint here, and for a reason: it renders the account
+    // labels as chips (E62), and those labels only exist once the snapshot has
+    // resolved the identity.
+    const hydratedPersonaRow = getPersonasSection()
+      .querySelector<HTMLElement>('[data-persona-key="p1"]')!;
+    expect(hydratedPersonaRow).not.toBe(personalityCard);
+    expect(hydratedPersonaRow.textContent).toContain('Closer');
     expect(currentState.personalities[0]?.name).toBe('Closer');
+
+    // …and ONLY for that reason. `renderAccountMappings` runs on every session
+    // re-poll; a poll that brings the SAME labels back must leave the persona
+    // rows untouched (the `labelsChanged` guard).
+    const rowBeforeRepoll = mappingsSection
+      .querySelector<HTMLElement>('[data-account-mapping-row="canonical"]')!;
+    vi.useFakeTimers();
+    // Past the 5s re-poll throttle — the only thing standing between a focus
+    // event and a second paint.
+    vi.setSystemTime(Date.now() + 10_000);
+    window.dispatchEvent(new dom.window.Event('focus'));
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    // The poll really happened (the account table was rebuilt)…
+    const rowAfterRepoll = mappingsSection
+      .querySelector<HTMLElement>('[data-account-mapping-row="canonical"]');
+    expect(rowAfterRepoll).toBeTruthy();
+    expect(rowAfterRepoll).not.toBe(rowBeforeRepoll);
+    // …and the persona catalog was not touched by it.
+    expect(getPersonasSection().querySelector('[data-persona-key="p1"]'))
+      .toBe(hydratedPersonaRow);
   });
 
   it('does not write a stale local migration over an identity rekey', async () => {
@@ -572,6 +615,46 @@ describe('Options page account sections', () => {
     expect(section.querySelectorAll('.chatgoose-theme-preview')).toHaveLength(3);
     // No reset-to-default affordance (owner ruling).
     expect(Array.from(section.querySelectorAll('button'))).toEqual([]);
+  });
+
+  it('keeps the auto-recap segment out of the numeric lane', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    // The 66px fixed range track belongs to the numeric rows. While the
+    // segmented control shared their class, the recap's three buttons were
+    // squeezed into that track and «Полный» could not be clicked.
+    const segment = document.querySelector<HTMLElement>('.chatgoose-segment')!;
+    expect(segment.querySelectorAll('.chatgoose-segment-btn')).toHaveLength(3);
+    const segmentWrapper = segment.parentElement!;
+    expect(segmentWrapper.classList.contains('chatgoose-row-control')).toBe(true);
+    expect(segmentWrapper.classList.contains('chatgoose-row-numeric')).toBe(false);
+
+    const numberInput = document.querySelector<HTMLInputElement>(
+      'input[type="number"][max="200"]',
+    )!;
+    const numericWrapper = numberInput.closest<HTMLElement>('.chatgoose-row-numeric')!;
+    expect(numericWrapper).toBeTruthy();
+    expect(numericWrapper.classList.contains('chatgoose-row-control')).toBe(false);
+    // The clamp chip hangs off that grid — it has to stay inside it.
+    expect(numericWrapper.querySelector('[data-role="clamp-note"]')).toBeTruthy();
+  });
+
+  it('reports what the SYSTEM resolves to, not what the page is wearing', async () => {
+    // The note explains «Системная». Reading it from the document's resolved
+    // theme class made it a note about the CHOICE: with «Тёмная» selected on a
+    // light OS it said «сейчас — тёмная» while claiming to describe what
+    // «Системная» would give. jsdom's matchMedia answers `matches: false`, i.e.
+    // a light OS — so this is exactly that case.
+    await loadOptionsPage({
+      state: makeState({ settings: { ...makeState().settings, uiTheme: 'dark' } }),
+      sessions: [],
+    });
+
+    // The page really is dark: the note is not just echoing the document.
+    expect(document.documentElement.classList.contains('chatgoose-theme-dark')).toBe(true);
+    const note = document.querySelector<HTMLElement>('[data-role="theme-resolved"]');
+    expect(note?.textContent).toBe(COPY.appearance.resolvedLight);
+    expect(note?.textContent).not.toBe(COPY.appearance.resolvedDark);
   });
 
   it('folds the sign-in form once a device token is active', async () => {
@@ -1779,8 +1862,8 @@ describe('Options «Аккаунты» pane', () => {
 
   it('degrades to the local view when the background has no getAccountsView', async () => {
     // An older background answers `undefined`. The pane must still list the known
-    // accounts — and must NOT claim a 'seen' state, a tab id or an observed page
-    // it cannot know without the operation.
+    // accounts — and must NOT claim a tab id or an observed page it cannot know
+    // without the operation.
     page = await mountOptionsPage({
       state: {
         personaCatalog: CATALOG,
@@ -1802,5 +1885,65 @@ describe('Options «Аккаунты» pane', () => {
     expect(row.textContent).toContain('Lora (@lora)');
     expect(page.document.querySelector('[data-account-focus-tab="acc-1"]')).toBeNull();
     expect(page.document.querySelector('[data-role="accounts-unattributed"]')).toBeNull();
+  });
+
+  it('never lets a degraded row contradict the caption above it', async () => {
+    // The state is a group CAPTION since E62. The degraded path used to call
+    // every non-connected account 'never' while keeping its `lastSeenAt`, so a
+    // row could sit under «Сессий не было» and say «была вчера 22:23» — a verdict
+    // the page cannot prove without the background's durable presence.
+    const yesterday = Date.now() - 26 * 60 * 60 * 1000;
+    page = await mountOptionsPage({
+      state: {
+        personaCatalog: CATALOG,
+        accountMappings: { 'acc-live': 'p1', 'acc-quiet': 'p1', 'acc-silent': 'p1' },
+        knownAccounts: ['acc-live', 'acc-quiet', 'acc-silent'],
+      },
+      sessions: [
+        {
+          legacyAccountId: 'acc-live',
+          resolvedAccountId: 'acc-live',
+          username: 'lora',
+          displayName: 'Lora',
+          connected: true,
+          lastSeenAt: Date.now(),
+        },
+        {
+          // Observed, but not connected right now: «Видели раньше» is provable.
+          legacyAccountId: 'acc-quiet',
+          resolvedAccountId: 'acc-quiet',
+          username: 'quiet',
+          displayName: 'Quiet',
+          connected: false,
+          lastSeenAt: yesterday,
+        },
+      ],
+    });
+
+    expect(accountRow('acc-live').dataset.accountState).toBe('live');
+
+    const quiet = accountRow('acc-quiet');
+    expect(quiet.dataset.accountState).toBe('seen');
+    expect(quiet.closest('[data-account-group]')?.textContent)
+      .toContain(COPY.accounts.groupSeen);
+    expect(quiet.textContent).toContain('вчера');
+
+    // No snapshot entry at all: the page has nothing to say, and says exactly
+    // that — in the caption AND in the row.
+    const silent = accountRow('acc-silent');
+    expect(silent.dataset.accountState).toBe('unknown');
+    expect(silent.closest('[data-account-group]')?.textContent)
+      .toContain(COPY.accounts.groupUnknown);
+    expect(silent.textContent).toContain(COPY.accounts.subStateUnknown);
+
+    // The invariant, stated once: every row's own fact line agrees with its
+    // group. A «была …» line under «Сессий не было» is the shape of the bug.
+    const neverGroup = page.document
+      .querySelector<HTMLElement>('[data-account-group="never"]');
+    expect(neverGroup).toBeNull();
+    for (const group of page.document.querySelectorAll<HTMLElement>('[data-account-group]')) {
+      if (group.dataset.accountGroup === 'never') continue;
+      expect(group.textContent).not.toContain(COPY.accounts.subNeverSeen);
+    }
   });
 });
