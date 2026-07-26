@@ -40,10 +40,9 @@ const HOTKEY_ACTION_NAMES: Record<HotkeyAction, string> = {
 };
 
 export const COPY = {
-  /** `<title>` of options.html — kept in sync with the static HTML. */
+  /** `<title>` of options.html — kept in sync with the static HTML, and pinned
+   * by tests/options-shell.test.ts so the claim cannot rot. */
   documentTitle: 'Настройки ChatGoose',
-  pageTitle: 'Настройки',
-  pageSubtitle: 'Генерация, Agency Hub, персоны и аккаунты Fansly — всё в одном месте.',
 
   /** Left rail: brand, section list, footer. */
   rail: {
@@ -72,16 +71,12 @@ export const COPY = {
     appearance: 'Вид',
   },
 
+  /** Only «Статус» takes its heading from here; every other pane owns its own
+   * title/subtitle inside its block below (the duplicate set that used to live
+   * here was never read). */
   sections: {
     statusTitle: 'Статус',
     statusHint: 'Что сейчас работает: Fansly, Hub, доступ, AI-квота и Spenders.',
-    personasTitle: 'Персоны',
-    accountsTitle: 'Аккаунты',
-    accountsHint: 'Fansly-аккаунты, которые видит расширение, и их персоны.',
-    generationTitle: 'Генерация',
-    generationHint: 'Сколько сообщений диалога уходит в контекст каждой фичи.',
-    appearanceTitle: 'Вид',
-    appearanceHint: 'Один семейный стиль, светлый и тёмный.',
   },
 
   hubSettings: {
@@ -89,19 +84,9 @@ export const COPY = {
       'Firefox выдаёт доступ к хосту целиком, а не по портам, поэтому {origin} покрывает указанный URL {url}.',
   },
 
-  hero: {
-    stepsPrefix: 'До работы —',
-    allGood: 'Всё работает',
-    expand: 'развернуть ▾',
-    step1: 'Agency Hub подключён',
-    step1Permission: 'Разреши доступ к Hub',
-    step2: 'Открой Fansly с аккаунтом модели',
-    step3: 'Назначь персону аккаунту',
-    step1Action: 'Войти',
-    step1PermissionAction: 'Разрешить доступ',
-    step2Action: 'Открыть fansly.com',
-    step3Action: 'К аккаунтам',
-  },
+  /* The `hero` block that lived here belonged to the health strip dismantled in
+     wave B (E59); it had no reader left and was deleted with the R3 frame. The
+     readiness headline speaks through `status.*` below. */
 
   status: {
     /** Pane headline + subline. */

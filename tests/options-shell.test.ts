@@ -305,4 +305,29 @@ describe('options cabinet shell', () => {
       );
     }
   });
+
+  it('COPY.documentTitle matches the static <title> it claims to mirror', () => {
+    // The dictionary says «kept in sync with the static HTML» and nothing used
+    // to enforce it (BL-003): the page never sets document.title at runtime, so
+    // a rename here would silently leave the tab speaking the old name.
+    const html = readFileSync(
+      new URL('../src/options/index.html', import.meta.url),
+      'utf8',
+    );
+    expect(html).toContain(`<title>${COPY.documentTitle}</title>`);
+  });
+
+  it('the shell fills the window and the rail stays pinned (E60)', () => {
+    // The frame is CSS-only, so this is where the R3 ruling is pinned: no width
+    // clamp on <body>, a sticky rail, and the reading column capped on the pane
+    // instead. A return to the 900px ribbon has to come through this test.
+    const styles = readFileSync(
+      new URL('../src/options/styles.css', import.meta.url),
+      'utf8',
+    );
+    const body = /\nbody \{([^}]*)\}/.exec(styles)?.[1] ?? '';
+    expect(body).not.toMatch(/max-width/);
+    expect(styles).toMatch(/\.chatgoose-cabinet-rail \{[^}]*position:\s*sticky/);
+    expect(styles).toMatch(/\.chatgoose-cabinet-pane \{[^}]*max-width:\s*1120px/);
+  });
 });
