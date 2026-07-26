@@ -111,6 +111,25 @@ describe('options «Agency Hub» pane', () => {
     expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenUnknown);
   });
 
+  it('takes the «Выпущен» row down with the token it belongs to', async () => {
+    // Half of the guarantee: the flag really is set with no token. The other
+    // half is CSS — `.chatgoose-hub-srow` carries an author `display: grid`,
+    // which beats the UA `[hidden]` rule, and without an author `[hidden]` guard
+    // this row stayed on screen (empty) on every signed-out install and after
+    // «Выйти». That guard is pinned by the stylesheet test in options-shell.
+    const page = await mountOptionsPage({
+      settings: { agencyHubBaseUrl: 'https://hub.example' },
+      sessions: [],
+    });
+
+    const issuedRow = Array.from(
+      detail(page, 'device-token').querySelectorAll<HTMLElement>('.chatgoose-hub-srow'),
+    ).find((row) => row.textContent?.includes(COPY.hub.deviceTokenIssuedLabel))!;
+    expect(issuedRow).toBeTruthy();
+    expect(issuedRow.hidden).toBe(true);
+    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
+  });
+
   it('fills the diagnostics card from the same reads the Статус rows use', async () => {
     const page = await signedInMount({
       runtime: {

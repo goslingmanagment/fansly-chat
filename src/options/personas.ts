@@ -1,7 +1,7 @@
 // Pure presentation helpers for the «Персоны» pane. Ported from the 2.0 P3
 // branch (3ef84d8:src/options/personas.ts) with ONE change: the catalog-date
 // formatter no longer bakes Russian strings in. Copy belongs to
-// `src/options/copy.ts` (the pane composes `COPY.personas.catalogUpdated`), so
+// `src/options/copy.ts` (the pane labels the value itself), so
 // this module stays a copy-free, DOM-free set of functions.
 
 import { BUNDLED_LORA_PERSONALITY_ID } from '../shared/personalities.js';
@@ -14,17 +14,37 @@ export interface PersonaRowView {
   builtin: boolean;
   archived: boolean;
   accountCount: number;
+  /** The accounts sitting on this persona, in mapping order. The pane held this
+   * map all along and threw the identities away (E62). */
+  accountIds: string[];
 }
 
 export type PersonaEmptyState = 'no-credentials' | 'awaiting-refresh' | 'empty-catalog';
+
+/** Group local account→persona mappings by persona key, keeping the account ids
+ * (the count is `.length`). */
+export function groupMappingsByPersona(
+  accountMappings: Record<string, string>,
+): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  for (const [accountId, key] of Object.entries(accountMappings)) {
+    const bucket = groups.get(key);
+    if (bucket) {
+      bucket.push(accountId);
+    } else {
+      groups.set(key, [accountId]);
+    }
+  }
+  return groups;
+}
 
 /** Count local account→persona mappings per persona key. */
 export function countMappingsByPersona(
   accountMappings: Record<string, string>,
 ): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const key of Object.values(accountMappings)) {
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+  for (const [key, ids] of groupMappingsByPersona(accountMappings)) {
+    counts.set(key, ids.length);
   }
   return counts;
 }
@@ -37,19 +57,20 @@ export function buildPersonaRowViews(
   catalog: readonly PersonaCatalogEntry[],
   accountMappings: Record<string, string>,
 ): PersonaRowView[] {
-  const counts = countMappingsByPersona(accountMappings);
+  const groups = groupMappingsByPersona(accountMappings);
   const views: PersonaRowView[] = [];
   for (const persona of catalog) {
-    const accountCount = counts.get(persona.key) ?? 0;
+    const accountIds = groups.get(persona.key) ?? [];
     const archived = persona.status === 'archived';
-    if (archived && accountCount === 0) continue;
+    if (archived && accountIds.length === 0) continue;
     views.push({
       key: persona.key,
       displayName: persona.displayName,
       version: persona.version,
       builtin: persona.key === BUNDLED_LORA_PERSONALITY_ID,
       archived,
-      accountCount,
+      accountCount: accountIds.length,
+      accountIds,
     });
   }
   return views;
@@ -91,7 +112,7 @@ export function classifyPersonaEmptyState(
  * display" — `classifyPersonaEmptyState` reads the same null as one of its two
  * not-loaded signals, but only there.
  *
- * Copy-free by design: the caller wraps this in `COPY.personas.catalogUpdated`
+ * Copy-free by design: the caller labels this value («Обновлён»)
  * (or falls back to `catalogNever`), so the wording lives in one dictionary.
  */
 export function formatCatalogChangedDate(fetchedAt: string | null): string | null {

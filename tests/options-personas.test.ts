@@ -167,7 +167,7 @@ describe('«Персоны» pane', () => {
     expect(emptyText()).toBe(COPY.personas.emptyUnknown);
     const catalogRow =
       page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
-    expect(catalogRow?.textContent).toContain(COPY.personas.catalogLabel);
+    expect(catalogRow?.textContent).toContain(COPY.personas.catalogUpdatedLabel);
     expect(catalogRow?.textContent).toContain(COPY.personas.catalogNever);
   });
 
@@ -188,12 +188,49 @@ describe('«Персоны» pane', () => {
     expect(emptyText()).toBe(COPY.personas.emptyConfirmed);
     const catalogRow =
       page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
-    expect(catalogRow?.textContent).toContain(
-      COPY.personas.catalogUpdated.replace('{date}', '25.07.2026 14:05'),
-    );
-    // Fresh catalog (< 48h): no staleness marker.
-    const age = catalogRow?.querySelector<HTMLElement>('.chatgoose-persona-catage');
+    // Label and value are separate nodes of the catalog card (E62): «Обновлён»
+    // is the key, the formatted date is the value.
+    expect(catalogRow?.textContent).toContain(COPY.personas.catalogUpdatedLabel);
+    expect(catalogRow?.textContent).toContain('25.07.2026 14:05');
+    // Fresh catalog (< 48h): no staleness marker. It rides the catalog card's
+    // head since E62, not the fact line.
+    const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
     expect(age?.hidden).toBe(true);
+  });
+
+  it('names the hub the catalog came from by its WHOLE address', async () => {
+    // `normalizeAgencyHubBaseUrl` deliberately preserves a non-root path, so two
+    // agencies on one host differ only there. Printing `new URL(...).host`
+    // collapsed them into the same line — and the credential fingerprint half of
+    // `personaCatalogSource` must never reach the screen either.
+    const settings: Partial<Settings> = {
+      agencyHubBaseUrl: 'https://hub.example.test/agency-b',
+      agencyHubDeviceToken: 'device-x',
+    };
+    const source = personaCatalogSource({
+      agencyHubBaseUrl: 'https://hub.example.test/agency-b',
+      agencyHubApiKey: '',
+      agencyHubDeviceToken: 'device-x',
+    });
+    page = await mountOptionsPage({
+      settings,
+      state: {
+        personaCatalog: [],
+        personaCatalogSource: source,
+        personaCatalogFetchedAt: new Date(2026, 6, 25, 14, 5).toISOString(),
+      },
+    });
+
+    const sourceRow = Array.from(
+      page.document.querySelectorAll<HTMLElement>('.chatgoose-fact'),
+    ).find((row) => row.textContent?.startsWith(COPY.personas.catalogSourceLabel))!;
+    expect(sourceRow).toBeTruthy();
+    expect(sourceRow.querySelector('.chatgoose-fact-v')?.textContent)
+      .toBe('https://hub.example.test/agency-b');
+    // The hash half of «baseUrl|hash» is a credential fingerprint.
+    const fingerprint = source!.split('|')[1]!;
+    expect(fingerprint).toBeTruthy();
+    expect(page.document.body.textContent).not.toContain(fingerprint);
   });
 
   it('marks a stale catalog with its age in days once it is older than 48h', async () => {
@@ -210,9 +247,7 @@ describe('«Персоны» pane', () => {
         personaCatalogFetchedAt: new Date(Date.now() - 11 * 86_400_000).toISOString(),
       },
     });
-    const age = page.document.querySelector<HTMLElement>(
-      '[data-role="persona-catalog"] .chatgoose-persona-catage',
-    );
+    const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
     expect(age?.hidden).toBe(false);
     expect(age?.textContent).toBe(COPY.personas.catalogAge.replace('{n}', '11'));
   });
