@@ -338,7 +338,13 @@ describe('Options page account sections', () => {
     expect(mappingsSection.textContent).not.toContain('stale');
     const activeRow = mappingsSection
       .querySelector<HTMLElement>('[data-account-mapping-row="active-resolved"]')!;
-    expect(activeRow.textContent).toContain(COPY.accounts.stateLive);
+    // The state is stated by the GROUP the row sits in (E62), not by a pill on
+    // every row.
+    expect(activeRow.closest('[data-account-group]')?.getAttribute('data-account-group'))
+      .toBe('live');
+    expect(
+      mappingsSection.querySelector<HTMLElement>('[data-account-group="live"]')?.textContent,
+    ).toContain(COPY.accounts.groupLive);
     const offlineRow = mappingsSection
       .querySelector<HTMLElement>('[data-account-mapping-row="mappedOffline"]')!;
     // A sleeping row wears NO pill — the mono fact line carries its state.
@@ -386,9 +392,11 @@ describe('Options page account sections', () => {
       expect(mappingsSection.textContent).toContain(accountIdText('canonical'));
     });
 
-    // Session hydration must not rebuild unrelated catalog UI.
-    expect(getPersonasSection()
-      .querySelector('[data-persona-key="p1"]')).toBe(personalityCard);
+    // Session hydration must not rebuild the catalog CARD; the persona rows do
+    // repaint once the account labels land, because they render those labels as
+    // chips now (E62).
+    expect(getPersonasSection().querySelector('[data-persona-key="p1"]')).toBeTruthy();
+    expect(personalityCard.dataset.personaKey).toBe('p1');
     expect(currentState.personalities[0]?.name).toBe('Closer');
   });
 
@@ -1275,8 +1283,9 @@ describe('Options page coach settings', () => {
     await loadOptionsPage({ state: makeState(), sessions: [] });
 
     const section = getSectionByTitle(COPY.generation.title);
+    // The captions are card titles since E62 — the group order is unchanged.
     expect(
-      Array.from(section.querySelectorAll<HTMLElement>('.chatgoose-group-cap'))
+      Array.from(section.querySelectorAll<HTMLElement>('.chatgoose-panecard-title'))
         .map((cap) => cap.textContent),
     ).toEqual([
       COPY.generation.groupWindows,

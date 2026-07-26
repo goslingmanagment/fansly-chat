@@ -890,9 +890,7 @@ input[type='checkbox'] {
   white-space: nowrap;
 }
 
-.chatgoose-row-hint-clamped {
-  color: var(--chatgoose-amber);
-}
+/* The amber range-hint variant died with the clamp CHIP (E62). */
 
 .chatgoose-row-control {
   display: inline-flex;
@@ -2144,3 +2142,210 @@ input[type='checkbox'] {
   display: grid;
   gap: 10px;
 }
+
+/* ── «Персоны»: which accounts sit on a persona (E62) ── */
+.chatgoose-persona-row {
+  grid-template-rows: auto auto;
+  row-gap: 8px;
+}
+
+.chatgoose-persona-mapped {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chatgoose-persona-mapped-cap {
+  font: 600 10.5px/1 var(--chatgoose-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+  margin-right: 2px;
+}
+
+/* The staleness marker rides the catalog card's head. */
+.chatgoose-panecard-head .chatgoose-persona-catage {
+  justify-self: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--chatgoose-amber-line);
+  border-radius: 999px;
+  background: var(--chatgoose-amber-bg);
+}
+
+.chatgoose-persona-catage[hidden] { display: none; }
+
+/* ── «Аккаунты»: groups by state (E62) ── */
+.chatgoose-account-group + .chatgoose-account-group {
+  margin-top: 16px;
+}
+
+.chatgoose-account-group-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font: 600 10.5px/1 var(--chatgoose-font-mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+}
+
+/* A counter chip in a pane head. */
+.chatgoose-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: 999px;
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The pane body when there is nothing to put beside the list. */
+.chatgoose-panegrid-single {
+  display: grid;
+  gap: 12px;
+  margin: 0 20px;
+}
+
+/* The id in the meta line must never be the thing that gets cut — the FACT tail
+   ellipsises instead (E62). */
+.chatgoose-account-sub .chatgoose-copy-id { flex: none; }
+
+/* ── «Хоткеи»: one column per group, names that wrap (E62) ── */
+.chatgoose-hotkeys {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 26px;
+}
+
+@media (max-width: 1040px) {
+  .chatgoose-hotkeys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .chatgoose-hotkeys { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A reference has to be readable: «Закрыть оверлей, доску или шпаргалку» used to
+   ellipsise at any window narrower than the old 900px frame. */
+.chatgoose-hotkey-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.chatgoose-hotkey-row {
+  align-items: baseline;
+  gap: 12px;
+}
+
+/* Reads as a key, still not as a button. */
+.chatgoose-kbd {
+  border-bottom-width: 2px;
+  background: var(--chatgoose-field);
+}
+
+/* ── «Вид»: the miniature carries the family's accent (E62) ── */
+.chatgoose-theme-preview { height: 88px; border-color: rgba(120, 115, 105, 0.35); }
+.chatgoose-theme-preview-btn { height: 11px; width: 38%; border-radius: 3px; background: #d97757; }
+.chatgoose-theme-preview-rail { width: 30%; }
+
+.chatgoose-theme-cards {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+/* ── «Вид»: the surface the subtitle actually promises ── */
+/* FIXED colours on purpose, like the theme miniatures: this is a picture of the
+   in-chat panel, not a themed element of this page. */
+.chatgoose-chat-preview {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(120, 115, 105, 0.3);
+  background: #faf9f5;
+}
+
+.chatgoose-chat-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f2f0e9;
+  border-bottom: 1px solid #e2dfd3;
+  color: #1f1e1d;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.chatgoose-chat-preview-tone {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #e8c3b3;
+  background: #f7e8e1;
+  color: #c2603f;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.chatgoose-chat-preview-body { display: grid; gap: 6px; padding: 10px; }
+.chatgoose-chat-preview-line { display: block; height: 5px; border-radius: 3px; background: #cfcaba; }
+.chatgoose-chat-preview-actions { display: flex; gap: 6px; margin-top: 4px; }
+.chatgoose-chat-preview-btn { display: block; height: 14px; width: 66px; border-radius: 5px; background: #d97757; }
+.chatgoose-chat-preview-btn-ghost {
+  width: 52px;
+  background: #e8e5da;
+  border: 1px solid #cfcaba;
+  box-sizing: border-box;
+}
+
+:root.chatgoose-theme-dark .chatgoose-chat-preview { background: #262420; border-color: rgba(200, 195, 185, 0.22); }
+:root.chatgoose-theme-dark .chatgoose-chat-preview-bar { background: #21201c; border-bottom-color: #38352e; color: #e9e6df; }
+:root.chatgoose-theme-dark .chatgoose-chat-preview-tone { border-color: #61412f; background: #3f2b21; color: #d97757; }
+:root.chatgoose-theme-dark .chatgoose-chat-preview-line { background: #4d4940; }
+:root.chatgoose-theme-dark .chatgoose-chat-preview-btn-ghost { background: #33302a; border-color: #4d4940; }
+
+/* ── «Генерация»: one numeric lane (E62) ── */
+/* Label · fixed range column · stepper — so ranges align with ranges and
+   steppers with steppers, whatever the digits. */
+.chatgoose-row-control {
+  display: grid;
+  grid-template-columns: 66px auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.chatgoose-row-hint {
+  display: grid;
+  gap: 1px;
+  justify-items: end;
+  text-align: right;
+}
+
+.chatgoose-row-hint-step { font-size: 10px; }
+
+/* The clamp notice is its own chip UNDER the row: it used to replace the range
+   for 2.6s, taking the bounds away exactly when they were being explained. */
+.chatgoose-row-clamped {
+  justify-self: end;
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--chatgoose-amber-line);
+  border-radius: 999px;
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.chatgoose-row-clamped[hidden] { display: none; }

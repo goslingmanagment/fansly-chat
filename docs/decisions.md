@@ -78,6 +78,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim. **Amended (post-campaign round 2):** the fence runs from the state of EVERY applied read (never a per-event flag the generation guard can discard) and invalidates this tab's pending credential write, while skipping the hub-check chain owned by this page's own custody RPC; the honest-outcome rule keys on the recorded issuing ADDRESS (`!meta.issuedFrom`), `alsoWrite` throws on a key the same write owns, `unavailable.fansly` starts TRUE, and the fence re-renders the sign-in meta line |
 | E60 | 2026-07-26 | Cabinet frame R3: the shell fills the window — no width clamp on `<body>` — with a sticky rail that owns one viewport and a reading column capped at 1120px on the pane itself; the page root's permanent 24px bottom padding moves into that pane. Supersedes the 900px ribbon chosen when #46 was reverted (owner ruling on the R3 mockups, 2026-07-26). Narrow windows collapse the rail (BL-003 п.1), disabled controls finally look disabled, and the save whisper speaks Russian |
 | E61 | 2026-07-26 | «Статус» and Agency Hub speak in WORDS: the mono badge column goes (it ran six vocabularies at once and its «—» meant four different things) and every row is dot · fixed label · fact · one right cell holding a detail OR an action. Each pane gets a HEAD (title, subline, its primary action) above cards that carry content only; «Статус» adds «Что мешает» — the open readiness steps with the button that closes each — plus a support card (version, storage schema, report) and cross-pane pointers. Hub loses its duplicated facts (host access and the check receipt were stated twice), gains the «Ядро» row it never had, un-nests its zones into four cards in two columns, fences «Выйти» inside the sign-in card, and stops printing a raw error code in a pill |
+| E62 | 2026-07-26 | The five remaining panes: «Персоны» name the accounts sitting on each persona (the map was in memory, only its size was printed) and repaint when a mapping changes; «Аккаунты» group rows by state with a caption + count each, so the per-row «в работе» pill goes; «Генерация» splits into two card columns with a fixed numeric lane, bounds from the shared constants and a step that matches the range (the deep window stepped by 1 across 100–3000), and the clamp notice becomes its own chip instead of eating the range hint; «Хоткеи» give each group its own column and let names wrap, with the detected platform stated in the head; «Вид» previews the IN-CHAT panel the subtitle promises, says what «Системная» resolves to right now, and labels its radio group |
 
 ## Entries
 
@@ -2029,3 +2030,56 @@ Tests were updated deliberately, not around: the badge assertions became fact +
 tone assertions, the readiness-step lookups point at «Что мешает», and the legacy
 `getSectionByTitle` helper accepts a pane head's `<h1>` as well as a card's
 `<h2>`.
+
+**E62 (2026-07-26).** Wave C of the R3 polish — the five panes that were not
+«Статус» or Agency Hub. The owner picked the additions from the mockups: account
+chips on «Персоны», state groups on «Аккаунты», the chat-panel preview on «Вид»
+(the «тратит квоту» marker for «Хоткеи» was NOT picked and is not built).
+
+«Персоны» held `state.accountMappings` — the whole account→persona map — and
+printed `аккаунтов · N`, throwing the identities away. A persona row now lists
+the accounts sitting on it as chips, labelled exactly as «Аккаунты» labels them:
+the accounts renderer is the single place that resolves a name, and it fills a
+shared index the persona rows read. The count also stopped going stale — a
+persona assignment writes ONLY the `accountMappings` key, which the storage
+listener did not watch, so the number stayed wrong until a reload (BL-005). The
+pane became two columns (the catalog left, its provenance and the archive right)
+and finally says WHICH hub the catalog came from — `personaCatalogSource` was in
+memory and shown nowhere. The catalog's staleness marker rides the card head, and
+the label/value pair no longer says «Каталог» twice.
+
+«Аккаунты» group by state — «В работе», «Видели раньше», «Сессий не было» — each
+with a caption and a count, and an empty group is not drawn. The per-row «в
+работе» pill goes with it: the group states it once for its whole block, and what
+stays on a row is only what carries a problem or an action («AI отключён», «к
+вкладке»). The live counter is a chip in the pane head; the two instructions that
+used to be glued onto it («персона назначается на аккаунт · ID копируется
+кликом») are the pane's subtitle. A row with no resolved name spells out the
+invitation («✎ подписать») instead of the id twice.
+
+«Генерация» splits into two card columns: the four context windows left, the
+coach and the service switch right — «Служебное» was a mono caption floating over
+a single row whose first- and last-child padding were both zeroed. The numeric
+lane is fixed-width, so ranges align with ranges and steppers with steppers. The
+bounds come from the SAME constants the storage clamp uses (they were string
+literals, free to drift in silence), and each input gets a step that matches its
+range: 5 for the 5–200 windows, 50 for the 100–3000 deep window, which stepped by
+1 — 2900 clicks from end to end. The clamp notice moved out of the range hint
+into its own amber chip under the row: it used to replace the bounds for 2.6s,
+with a colour change as the only signal that the slot had changed meaning, and
+its timer was never registered for cleanup.
+
+«Хоткеи» give each group its own column (the old split was eight rows against
+six, ragged at the bottom), let a name WRAP instead of ellipsising — a reference
+that cuts «Закрыть оверлей, доску или шпаргалку» is not a reference — and state
+the detected platform in the head, so a chatter comparing with a colleague's
+screenshot knows why the combos differ.
+
+«Вид» draws the surface its subtitle promises. The miniature drew the cabinet —
+the one surface the chatter is already looking at — so a second card previews the
+in-chat panel, in fixed colours like the theme miniatures (a preview of light
+must look light while the page is dark). The miniatures gained the family's clay
+button, «Системная» says which half is live right now (`resolveUiTheme` existed
+and this pane never called it, and the resolved class is watched so the note stays
+true when another tab or the OS flips it), and the three radios finally have a
+group name.

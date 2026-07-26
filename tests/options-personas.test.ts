@@ -167,7 +167,7 @@ describe('«Персоны» pane', () => {
     expect(emptyText()).toBe(COPY.personas.emptyUnknown);
     const catalogRow =
       page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
-    expect(catalogRow?.textContent).toContain(COPY.personas.catalogLabel);
+    expect(catalogRow?.textContent).toContain(COPY.personas.catalogUpdatedLabel);
     expect(catalogRow?.textContent).toContain(COPY.personas.catalogNever);
   });
 
@@ -188,11 +188,13 @@ describe('«Персоны» pane', () => {
     expect(emptyText()).toBe(COPY.personas.emptyConfirmed);
     const catalogRow =
       page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
-    expect(catalogRow?.textContent).toContain(
-      COPY.personas.catalogUpdated.replace('{date}', '25.07.2026 14:05'),
-    );
-    // Fresh catalog (< 48h): no staleness marker.
-    const age = catalogRow?.querySelector<HTMLElement>('.chatgoose-persona-catage');
+    // Label and value are separate nodes of the catalog card (E62): «Обновлён»
+    // is the key, the formatted date is the value.
+    expect(catalogRow?.textContent).toContain(COPY.personas.catalogUpdatedLabel);
+    expect(catalogRow?.textContent).toContain('25.07.2026 14:05');
+    // Fresh catalog (< 48h): no staleness marker. It rides the catalog card's
+    // head since E62, not the fact line.
+    const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
     expect(age?.hidden).toBe(true);
   });
 
@@ -210,9 +212,7 @@ describe('«Персоны» pane', () => {
         personaCatalogFetchedAt: new Date(Date.now() - 11 * 86_400_000).toISOString(),
       },
     });
-    const age = page.document.querySelector<HTMLElement>(
-      '[data-role="persona-catalog"] .chatgoose-persona-catage',
-    );
+    const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
     expect(age?.hidden).toBe(false);
     expect(age?.textContent).toBe(COPY.personas.catalogAge.replace('{n}', '11'));
   });
