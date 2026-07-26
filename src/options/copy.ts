@@ -100,6 +100,12 @@ export const COPY = {
     actionWordMany: 'действий',
     checkingTitle: 'Проверяем…',
     checkingSubtitle: 'Собираем состояние Hub, аккаунтов и квоты.',
+    /** Subline under the «Нужно N действий» headline. It used to repeat the
+     * pane's own subtitle word for word, one block below it. */
+    readinessRouteSub: 'Открытые шаги — справа, с кнопкой к каждому.',
+    /** The pane's promise, printed under its title (E61) — it used to be
+     * reachable only through the report button's tooltip. */
+    paneHonesty: 'Строки честные — «неизвестно» значит «неизвестно».',
     /** Names of the ACTIONABLE prerequisites the readiness aggregate counts.
      * Observational rows (quota, Spenders, activity) are deliberately absent —
      * an unknown quota is not a broken install. */
@@ -107,6 +113,24 @@ export const COPY = {
     stepAccess: 'разрешить доступ к хабу',
     stepFansly: 'открыть Fansly под аккаунтом модели',
     stepPersona: 'назначить персону аккаунту',
+    /** Every open step now carries the button that closes it; the amber chips
+     * these replace named the problem and offered nothing. */
+    stepHubAction: 'Подключить',
+    stepFanslyAction: 'К аккаунтам',
+    stepPersonaAction: 'К аккаунтам',
+    /** Right column of the pane. */
+    todoTitle: 'Что мешает',
+    supportTitle: 'Поддержка',
+    supportVersion: 'Расширение',
+    supportSchema: 'Схема хранения',
+    whereTitle: 'Куда смотреть',
+    whereHub: 'Ядро, доступ и вход',
+    whereHubLink: 'Agency Hub →',
+    whereAccounts: 'Аккаунты и персоны',
+    whereAccountsLink: 'Аккаунты →',
+    /** Header stamp: a check leaves a trace even when nothing changed. */
+    refreshedAt: 'обновлено {time}',
+    refreshedNever: 'ещё не обновляли',
     /** Row labels. */
     fanslyLabel: 'Fansly',
     hubLabel: 'Hub',
@@ -117,7 +141,9 @@ export const COPY = {
     contractLabel: 'Контракт',
     /** Honest-empty and unknown states. */
     fanslyEmpty: 'аккаунты не обнаружены — открой Fansly',
-    fanslyWorking: 'в работе:',
+    /** Carries the count the badge column used to: `{n}` accounts with a live
+     * session, then their handles. */
+    fanslyWorking: '{n} в работе — {handles}',
     fanslyUnavailable: 'живой статус недоступен',
     /** Capture age — what the settings page can honestly say about a session.
      * NOT «the chatter is on the tab»: tab attribution arrives in a later wave. */
@@ -135,11 +161,17 @@ export const COPY = {
     accessUnknown: 'состояние хаба неизвестно',
     accessRejected: 'credential отклонён хабом',
     accessGrantedFor: 'выдан для',
+    /** The Доступ row's own right-edge detail. The shared «· {n}» template it
+     * used to borrow from the Hub pane hung here with nothing to separate. */
+    accessPages: 'страниц ядра · {n}',
     /** Says the same two facts the old long line did (no generations yet ⇒
      * quota unknown) without word-for-word repeating `activityEmpty` one row
      * below. */
     aiEmpty: 'неизвестна до первой генерации',
-    aiByPageNote: 'по страницам · худшая первой',
+    /** The worst page's number, in the fact itself — the badge that used to
+     * carry it is gone, and «по страницам · худшая первой» was a legend, not a
+     * fact. The per-page ledger stays in the detail lines. */
+    aiWorst: 'худшая {page} · осталось {n}',
     aiRemaining: '{page} · осталось {n}',
     aiNoLimit: '{page} · лимит не сообщён',
     /** The pageless variant of `aiNoLimit` — the worst page's own fact line,
@@ -149,6 +181,9 @@ export const COPY = {
     aiNoLimitPageless: 'лимит не сообщён',
     aiExhausted: 'осталось 0 · сброс 00:00 UTC',
     activityEmpty: 'сегодня генераций не было',
+    /** The last accepted generation: when, which feature, which account. The
+     * clock time used to be the row's mono badge. */
+    activityLast: '{time} · {feature} · {account}',
     activityHubErrors: 'ошибки Hub за сегодня: {n}',
     spendersEmpty: 'доска ещё не открывалась — статус неизвестен',
     spendersFail: 'последняя сборка доски не удалась',
@@ -252,6 +287,10 @@ export const COPY = {
     connPillPending: 'сохраняем…',
     connPillTesting: 'проверяем…',
     connPillOk: 'есть',
+    /** Pills speak WORDS everywhere in the cabinet; a failed check used to put
+     * the raw registry code («CG-HUB-07») in the pill. The code stays — one line
+     * below, where the rest of the error already is. */
+    connPillFailed: 'нет связи',
     connIdleMeta: 'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
     connPendingMeta: 'Дописываем изменения настроек перед живой проверкой.',
     connTestingMeta: 'Проверяем доступность хаба, разрешение и credential.',
@@ -259,8 +298,10 @@ export const COPY = {
     identityLabel: 'Аккаунт',
     pagesLabel: 'Страницы ядра',
     pagesMore: 'и ещё {n}',
-    pagesCount: '· {n}',
     deviceTokenLabel: 'Device token',
+    /** Second row of the token block: when it was minted. Its own line, not a
+     * «·»-tail on the renewal note — the two are different facts. */
+    deviceTokenIssuedLabel: 'Выпущен',
     deviceTokenActive: 'активен',
     deviceTokenRenews: 'продлевается при использовании',
     deviceTokenIssued: 'выпущен {date}',
@@ -296,7 +337,9 @@ export const COPY = {
       'Не удалось стереть креды на этом устройстве — они могли остаться. Перезагрузи Настройки и повтори.',
     signOutHint:
       '«Выйти» стирает device token и legacy-ключ на этом устройстве; настройки и маппинги остаются.',
-    /** Diagnostics card. */
+    /** Diagnostics card. The «Ядро» row states what the pane is about and used
+     * to exist only on «Статус», though the health response is right here. */
+    coreLabel: 'Ядро',
     checkLabel: 'Проверка',
     checkSuccess: 'успех',
     checkFailure: 'ошибка',

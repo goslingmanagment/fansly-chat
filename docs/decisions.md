@@ -77,6 +77,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E58 | 2026-07-24 | Error registry cleanup: replay-only tombstones, producer-consistency gate, one lossless renderer, Russian chatter copy |
 | E59 | 2026-07-25 | Options 2.0 «Кабинет» frame: hash-routed panes built once and hidden (never re-mounted), a Russian COPY dictionary, locally bundled family fonts; new page state goes into operational storage.local keys — the settings blob stays v15 — and the changelog stays a web page. **Amended (wave B):** the hero health strip is dismantled into «Статус» rows; readiness aggregates ACTIONABLE prerequisites only; «Проверить всё» never touches getSessionsSnapshot; the support report is secret-free by construction; the Контракт line is debug-only in «Статус» and always visible in Hub diagnostics; every device-token custody mutation runs under one auth FIFO. **Amended (wave C):** account presence + local labels are two more operational keys (v16 migration cancelled) — presence uses a leading write with 30s coalescing and a second hook after identity resolution, labels are written only by `setAccountLabel`, and `rekeyAccountIdentity` carries both onto the canonical id; `getAccountsView` reports live/seen/never plus an unattributed-tabs aggregate and never re-attributes a tab after a worker restart; an archived mapping counts as unmapped; a confirmed-empty persona catalog now stamps `fetchedAt`; «Хоткеи» is a drift-proof read-only cheatsheet (which enables the full rail) and «Вид» is three preview cards on the existing save path. **Amended (wave D):** the first-run checklist is gated by a DURABLE `chatgoose:onboarding` flag (never live form state) with host access ordered BEFORE sign-in; `chatgoose:lastSeenVersion` drives a «нов.» dot on a rail link to the WEB changelog, pinned to `deploy.sh`'s `BASE_URL` and deliberately anchor-less until the E42 page is deployed; error surfaces deep-link through one `openOptions` operation that re-points the SINGLE options tab (never a second settings writer), routed by registry code, and the page explains the code from the registry and highlights its row once that row exists. **Amended (post-campaign):** the device-token metadata is custody-grade — token + `issuedFrom` commit in ONE `storage.set`, and a revoke 401/403 with no readable metadata reports `unreachable`, never `already-invalid`; a custody-key change on disk is applied by EVERY open options tab (a dirty legacy-key input keeps only its text); the async Hub diagnostics rows declare `data-deeplink-ready` like the accounts table; local «Статус» availability is derived from settlement AND parse validity (a fulfilled `undefined` is «недоступно», a genuinely empty reply is not); a failed Fansly read reaches the support report instead of a zero-account claim. **Amended (post-campaign round 2):** the fence runs from the state of EVERY applied read (never a per-event flag the generation guard can discard) and invalidates this tab's pending credential write, while skipping the hub-check chain owned by this page's own custody RPC; the honest-outcome rule keys on the recorded issuing ADDRESS (`!meta.issuedFrom`), `alsoWrite` throws on a key the same write owns, `unavailable.fansly` starts TRUE, and the fence re-renders the sign-in meta line |
 | E60 | 2026-07-26 | Cabinet frame R3: the shell fills the window — no width clamp on `<body>` — with a sticky rail that owns one viewport and a reading column capped at 1120px on the pane itself; the page root's permanent 24px bottom padding moves into that pane. Supersedes the 900px ribbon chosen when #46 was reverted (owner ruling on the R3 mockups, 2026-07-26). Narrow windows collapse the rail (BL-003 п.1), disabled controls finally look disabled, and the save whisper speaks Russian |
+| E61 | 2026-07-26 | «Статус» and Agency Hub speak in WORDS: the mono badge column goes (it ran six vocabularies at once and its «—» meant four different things) and every row is dot · fixed label · fact · one right cell holding a detail OR an action. Each pane gets a HEAD (title, subline, its primary action) above cards that carry content only; «Статус» adds «Что мешает» — the open readiness steps with the button that closes each — plus a support card (version, storage schema, report) and cross-pane pointers. Hub loses its duplicated facts (host access and the check receipt were stated twice), gains the «Ядро» row it never had, un-nests its zones into four cards in two columns, fences «Выйти» inside the sign-in card, and stops printing a raw error code in a pill |
 
 ## Entries
 
@@ -1965,3 +1966,66 @@ replaced, and seven `sections.*` keys duplicated titles the panes own themselves
 — every one of them verified unreferenced in `src/` and `tests/`.
 `COPY.documentTitle` claimed to mirror the static `<title>` with nothing
 enforcing it; a one-line test now pins the claim.
+
+**E61 (2026-07-26).** Wave B of the R3 polish: the two panes a chatter opens
+when something is wrong. Chosen from the «было/стало» mockups (variant С1).
+
+The mono badge column is gone from «Статус» AND from the Hub diagnostics. It
+spoke six vocabularies at once — cardinal counts, English state words
+(UP/AUTH/DRIFT/RAMPED/FLAG OFF), an HTTP status, a Russian phrase, a wall clock
+and an em dash — in a slot tuned with `tabular-nums` for numerals most of those
+were not. «—» alone meant «unknown», «not observed», «read failed» and «no cap
+reported», so a reader fell through to the fact text every time. Worse, the
+column did not actually align: every row is its own grid, so `minmax(60px, auto)`
+held the labels on one vertical only while the token stayed short — «НЕТ
+ДОСТУПА» shoved its row 40–60px right, which is the opposite of what #48's
+«Ровные колонки» promised. What the badge said now lives in the fact («1 в
+работе — …», «ядро отвечает», «худшая {page} · осталось {n}», «{time} · {feature}
+· {account}»), the tone still colours the dot, and the label sits in a FIXED
+column so the facts genuinely share one vertical. In the Hub diagnostics the
+badge was outright redundant: «OK» next to «успех», «0» next to «за сегодня 0».
+
+Row hairlines moved to `border-top` on every row but the first. The old
+`.chatgoose-status-row:last-of-type { border-bottom: 0 }` never matched anything
+— the section's last DIV was a hint, not a row — so a full-width line hung under
+the list, and a `:last-child` rewrite would still strand it above the hidden
+debug-only Контракт row.
+
+Panes now have a HEAD: title, subline, and the pane's own controls, above cards
+that carry content only. «Проверить всё» sits there with a stamp beside it
+(«обновлено HH:MM»), because a check that changed nothing used to be
+indistinguishable from a check that never ran. The readiness headline stopped
+being a card of its own and became the first block of the rows card — the two
+plates said one thing twice — and it dropped the version pill, which was
+positioned `top: 28px` for a card padded 16px and printed the version in a second
+format next to the rail footer's. The open steps became «Что мешает»: one row per
+step with the button that closes it, routed exactly where the first-run checklist
+routes. The support card states version + storage schema + «Скопировать отчёт»
+and shows the honesty clause as VISIBLE text (it had been demoted to a tooltip,
+invisible to touch and keyboard). Two cross-pane pointers close the cabinet's
+missing links.
+
+The Hub pane stops repeating itself. «Доступ к хосту» was rendered twice under
+the same label in two vocabularies; the diagnostics copy is deleted and the
+`host-access` deep-link anchor moved onto the «Подключение» row — so `CG-HUB-04`
+now flashes the row that CONTAINS «Разрешить доступ» instead of a read-only line
+in another zone. The check receipt keeps a short form in «Подключение» and the
+outcome form in «Диагностика» (summary and detail, no longer the same three
+tokens rearranged). A new «Ядро» row states health + DB latency — the response
+was already in hand and only «Статус» ever said it. The four zones became four
+cards in two columns: connection + sign-in (one flow) on the left, account +
+diagnostics on the right, so the pane no longer scrolls the rail away, and the
+washed card-inside-a-card nesting is gone with `.chatgoose-card`. «Выйти» is
+fenced at the bottom of the card that owns the credential, consequence left and
+button right. The device token states its state on one line and its provenance
+(«Выпущен») on the next instead of one «·»-joined sentence wrapping beside the
+pill. A failed check puts a WORD in the pill («нет связи») and the registry code
+in the mono receipt — pills speak words everywhere else in the cabinet. Core-page
+chips finally have a CSS rule (they had none and rendered edge to edge), and the
+«· {n}» template shared by two readers is split, so neither shows an orphan
+middot.
+
+Tests were updated deliberately, not around: the badge assertions became fact +
+tone assertions, the readiness-step lookups point at «Что мешает», and the legacy
+`getSectionByTitle` helper accepts a pane head's `<h1>` as well as a card's
+`<h2>`.

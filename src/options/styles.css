@@ -766,17 +766,20 @@ input[type='checkbox'] {
   }
 }
 
-.chatgoose-card-divider {
-  border-top: 1px solid var(--chatgoose-line);
-}
-
-/* ── Agency Hub zones (М2 layout) ── */
-/* «Доступ к хосту» / «Связь»: label · pill · mono receipt at the right edge. */
+/* ── Agency Hub zones ── */
+/* «Доступ к хосту» / «Связь»: label · pill · mono receipt at the right edge.
+   The label column is narrower than the М2 128px because the card now lives in
+   a grid column, and an 11px receipt beats one clipped from the left. */
 .chatgoose-hub-srow {
   display: grid;
-  grid-template-columns: 128px auto minmax(0, 1fr);
+  grid-template-columns: 110px auto minmax(0, 1fr);
   gap: 10px;
   align-items: center;
+  padding: 8px 0;
+}
+
+.chatgoose-hub-srow + .chatgoose-hub-srow {
+  border-top: 1px solid var(--chatgoose-line);
 }
 
 .chatgoose-hub-srow-label {
@@ -787,31 +790,40 @@ input[type='checkbox'] {
 .chatgoose-hub-srow-meta {
   justify-self: end;
   text-align: right;
-  font: 11.5px/1.4 var(--chatgoose-font-mono);
+  font: 11px/1.4 var(--chatgoose-font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--chatgoose-ink-low);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Diagnostics rows: the «Статус»-pane anatomy — token slot, label, fact, mono
-   detail at the right edge. Naked rows on the section card, no inner wash. */
+/* The token block reuses the same row shape; its second line is a plain fact
+   rather than a pill, so the middle cell simply holds text. */
+.chatgoose-hub-srow-fact {
+  color: var(--chatgoose-ink-mid);
+  font-size: 12.5px;
+}
+
+/* Diagnostics rows: label, fact, mono detail at the right edge. The mono badge
+   column they used to lead with is gone with the «Статус» one (E61) — «OK» next
+   to «успех» was the same word twice, and «0» next to «за сегодня 0» was the
+   same number twice. */
 .chatgoose-hub-diag {
   display: grid;
 }
 
 .chatgoose-hub-drow {
   display: grid;
-  grid-template-columns: 52px 118px minmax(0, 1fr) auto;
+  grid-template-columns: 116px minmax(0, 1fr) auto;
   column-gap: 12px;
-  align-items: center;
-  padding: 7px 0;
+  align-items: baseline;
+  padding: 8px 0;
 }
 
 .chatgoose-hub-drow + .chatgoose-hub-drow {
   border-top: 1px solid var(--chatgoose-line);
-}
-
-.chatgoose-hub-drow > .chatgoose-badge {
-  justify-self: start;
 }
 
 .chatgoose-hub-drow-label {
@@ -826,12 +838,23 @@ input[type='checkbox'] {
   text-overflow: ellipsis;
 }
 
+/* Two hashes do not fit one line next to a fact — the detail wraps instead of
+   squeezing the fact into a four-word column. */
 .chatgoose-hub-drow-det {
   justify-self: end;
   text-align: right;
-  font: 11.5px/1.4 var(--chatgoose-font-mono);
+  font: 11px/1.5 var(--chatgoose-font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--chatgoose-ink-low);
+  max-width: 210px;
+}
+
+/* Core-page chips had NO rule at all: `replaceChildren(...chips)` inserts them
+   without whitespace text nodes, so they rendered edge to edge. */
+.chatgoose-hub-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* Danger zone: sign-out fenced at the bottom of the pane. The `[hidden]` rule
@@ -849,11 +872,13 @@ input[type='checkbox'] {
   display: none;
 }
 
+/* Hint on the left, the danger button on the right — the fence reads as one
+   sentence with its consequence, not as a button with a caption under it. */
 .chatgoose-hub-danger-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 12px;
 }
 
 /* Quiet range hint beside a numeric input; doubles as the clamp notice. */
@@ -952,15 +977,10 @@ input[type='checkbox'] {
   color: var(--chatgoose-green);
 }
 
-/* Inner card: a quiet wash inside a section (personality/connection cards). */
-.chatgoose-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border-radius: var(--chatgoose-radius-card);
-  border: 1px solid var(--chatgoose-line);
-  background: var(--chatgoose-bg2);
-}
+/* `.chatgoose-card` (the quiet wash INSIDE a section) died with the Hub pane's
+   zone re-layout (E61): a zone is a card of its own now, and a washed box inside
+   an ivory card inside the pane read as boxes in boxes. `.chatgoose-card-actions`
+   below is a separate, still-used rule. */
 
 /* The `[hidden]` rule below MUST stay next to this one: an author `display`
    rule beats the UA `[hidden] { display: none }` (origin precedes specificity).
@@ -1058,22 +1078,189 @@ input[type='checkbox'] {
   color: var(--chatgoose-clay-ink);
 }
 
+/* ── Pane head: title, subline and the pane's own actions, ABOVE the cards ──
+   A pane has ONE title (E61); the cards below carry content only, and the freed
+   right side is where a counter and the primary action live. */
+.chatgoose-panehead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 22px 20px 16px;
+}
+
+.chatgoose-panehead-title {
+  margin: 0 0 3px;
+  font-family: var(--chatgoose-font-serif);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.chatgoose-panehead-sub {
+  color: var(--chatgoose-ink-mid);
+  font-size: 13.5px;
+  max-width: 640px;
+}
+
+.chatgoose-panehead-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding-top: 4px;
+}
+
+/* A quiet mono stamp in the head (last refresh, platform, …). */
+.chatgoose-panehead-stamp {
+  padding: 5px 9px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 999px;
+  background: var(--chatgoose-bg2);
+  color: var(--chatgoose-ink-low);
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Main column + quiet sidebar, collapsing to one column when the window stops
+   paying for two. */
+.chatgoose-panegrid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+  margin: 0 20px;
+  grid-template-columns: minmax(0, 1.95fr) minmax(0, 1fr);
+}
+
+.chatgoose-panegrid-even {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+@media (max-width: 1040px) {
+  .chatgoose-panegrid,
+  .chatgoose-panegrid-even {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.chatgoose-panecol {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+
+/* The section card, minus the outer margins the grid already owns. */
+.chatgoose-panecard {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 18px 20px;
+  border-radius: var(--chatgoose-radius-menu);
+  border: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow);
+}
+
+.chatgoose-panecard-quiet {
+  background: var(--chatgoose-bg2);
+  box-shadow: none;
+}
+
+.chatgoose-panecard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chatgoose-panecard-title {
+  font-family: var(--chatgoose-font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.chatgoose-panecard-note {
+  color: var(--chatgoose-ink-low);
+  font-size: 12px;
+}
+
+/* Label → value list (support facts, hub receipts): text left, mono right. */
+.chatgoose-facts {
+  display: grid;
+}
+
+.chatgoose-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--chatgoose-line);
+  font-size: 12.5px;
+}
+
+.chatgoose-facts .chatgoose-fact:first-child { padding-top: 0; }
+
+.chatgoose-facts .chatgoose-fact:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.chatgoose-fact-k { color: var(--chatgoose-ink-mid); }
+
+.chatgoose-fact-v {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--chatgoose-ink-low);
+  white-space: nowrap;
+}
+
+/* A pointer to another pane reads as a link, never as a value. */
+.chatgoose-fact-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--chatgoose-clay-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chatgoose-fact-link:hover { text-decoration: underline; }
+
+.chatgoose-fact-link:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+  border-radius: var(--chatgoose-radius-chip);
+}
+
 /* ── «Статус»: read-only state rows ── */
-/* The badge column is a fixed-minimum SLOT so the labels share one vertical;
-   the pill itself keeps its natural width via `justify-self` below. This is
-   NOT the reverted #46 treatment, which stretched the pills themselves to a
-   56px min-width (revert 4e31a3d). */
+/* One grid for every row: dot, a FIXED label column, the fact, and a right cell
+   holding EITHER a mono detail OR an inline action. The mono badge column this
+   replaced (E61) spoke six vocabularies at once and only held its vertical
+   while the token stayed short — «НЕТ ДОСТУПА» shoved its row 40–60px right. */
 .chatgoose-status-row {
   display: grid;
-  grid-template-columns: 10px minmax(60px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: 10px 96px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 8px 0;
-  border-bottom: 1px solid var(--chatgoose-line);
 }
 
-.chatgoose-status-row > .chatgoose-badge {
-  justify-self: start;
+/* The hairline sits on TOP of every row but the first, so a hidden row (the
+   debug-only Контракт) can never leave a dangling line under the list — the
+   `:last-of-type` rule it replaces matched nothing at all, and a `:last-child`
+   one would strand the border on the row above a hidden last row. */
+.chatgoose-status-row + .chatgoose-status-row {
+  border-top: 1px solid var(--chatgoose-line);
 }
 
 /* Author `display: grid` beats the UA `[hidden] { display: none }` rule
@@ -1083,8 +1270,8 @@ input[type='checkbox'] {
   display: none;
 }
 
-.chatgoose-status-row:last-of-type {
-  border-bottom: 0;
+.chatgoose-status-rows {
+  display: grid;
 }
 
 .chatgoose-status-dot {
@@ -1115,8 +1302,10 @@ input[type='checkbox'] {
 .chatgoose-status-fact {
   color: var(--chatgoose-ink-mid);
   font-size: 12.5px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Action and detail SHARE the right cell of the single-line row: every
@@ -1180,6 +1369,18 @@ input[type='checkbox'] {
   display: none;
 }
 
+/* The headline lives INSIDE the rows card now (E61) — one plate instead of two
+   stacked ones — so it drops the card chrome and keeps only its own type. */
+.chatgoose-readiness-inline {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  gap: 3px;
+}
+
 .chatgoose-readiness-heading {
   margin: 0;
   font-family: var(--chatgoose-font-serif);
@@ -1196,12 +1397,11 @@ input[type='checkbox'] {
   font-size: 13px;
 }
 
-/* Same origin trap as the pane and the card actions: the list is `hidden` while
+/* «Что мешает»: one row per open step, each with the button that closes it.
+   Same origin trap as the pane and the card actions: the list is `hidden` while
    nothing is open, and only an author-origin `[hidden]` rule actually hides it. */
 .chatgoose-readiness-open {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  display: grid;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1212,12 +1412,44 @@ input[type='checkbox'] {
 }
 
 .chatgoose-readiness-open li {
-  padding: 2px 8px;
-  border-radius: var(--chatgoose-radius-chip);
-  border: 1px solid var(--chatgoose-amber-line);
-  background: var(--chatgoose-amber-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
   color: var(--chatgoose-amber);
-  font-size: 12px;
+  font-size: 13px;
+}
+
+.chatgoose-readiness-open li + li {
+  border-top: 1px solid var(--chatgoose-amber-line);
+}
+
+.chatgoose-readiness-open li:first-child { padding-top: 0; }
+.chatgoose-readiness-open li:last-child { padding-bottom: 0; }
+
+/* The card the list sits in: amber, and present only while something is open. */
+.chatgoose-todo {
+  border-color: var(--chatgoose-amber-line);
+  background: var(--chatgoose-amber-bg);
+}
+
+.chatgoose-todo[hidden] {
+  display: none;
+}
+
+.chatgoose-todo .chatgoose-panecard-title { color: var(--chatgoose-amber); }
+
+.chatgoose-todo .chatgoose-button {
+  background: var(--chatgoose-bg1);
+  border-color: var(--chatgoose-amber-line);
+  color: var(--chatgoose-amber);
+}
+
+.chatgoose-todo .chatgoose-button:hover {
+  background: var(--chatgoose-amber);
+  border-color: var(--chatgoose-amber);
+  color: var(--chatgoose-bg1);
 }
 
 .chatgoose-cabinet-micro-ok { color: var(--chatgoose-green); }
@@ -1892,4 +2124,23 @@ input[type='checkbox'] {
     grid-template-columns: minmax(0, 1fr) auto;
     row-gap: 4px;
   }
+}
+
+/* A pane that lays out its own cards needs a container, not a card: no chrome,
+   just the pane's vertical rhythm. */
+.chatgoose-pane-plain {
+  display: block;
+  padding-bottom: 4px;
+}
+
+/* A diagnostics fact carries its own tone (the row has no dot). */
+.chatgoose-hub-drow-fact-amber { color: var(--chatgoose-amber); }
+.chatgoose-hub-drow-fact-bad { color: var(--chatgoose-bad); }
+
+/* A zone's body is a plain stack inside its card — the М2 layout nested a
+   washed `.chatgoose-card` inside the section card, so the pane read as boxes
+   in boxes in boxes (E61). */
+.chatgoose-zone-body {
+  display: grid;
+  gap: 10px;
 }

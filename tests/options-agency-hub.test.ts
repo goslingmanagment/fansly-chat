@@ -121,9 +121,14 @@ function installDom() {
 }
 
 function getSectionByTitle(title: string): HTMLElement {
-  const section = Array.from(document.querySelectorAll<HTMLElement>('section')).find(
-    (candidate) => candidate.querySelector('h2')?.textContent === title,
+  // A pane that lays out its own cards states its title in the pane HEAD (an
+  // <h1> above the cards, E61); the older single-card panes still carry an <h2>
+  // inside the card. Accept either, and return the block that owns the heading.
+  const heading = Array.from(document.querySelectorAll<HTMLElement>('h1, h2')).find(
+    (candidate) => candidate.textContent === title,
   );
+  const section = heading?.closest<HTMLElement>('section')
+    ?? (heading ? heading.closest<HTMLElement>('.chatgoose-cabinet-pane') : null);
   if (!section) {
     throw new Error(`Missing section: ${title}`);
   }
