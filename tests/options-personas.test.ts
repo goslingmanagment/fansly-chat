@@ -177,12 +177,19 @@ describe('«Персоны» pane', () => {
       agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
+    // Freshness is measured against the wall clock, so this fixture has to be
+    // relative: an absolute fetchedAt silently rots into a STALE catalog two
+    // days after it is written and takes the «no staleness marker» assertion
+    // below down with it. The literal date format is pinned by the
+    // formatCatalogChangedDate unit test above; here we only assert the pane
+    // shows the formatted value.
+    const fetchedAt = new Date(Date.now() - 6 * 3_600_000).toISOString();
     page = await mountOptionsPage({
       settings: HUB_SETTINGS,
       state: {
         personaCatalog: [],
         personaCatalogSource: source,
-        personaCatalogFetchedAt: new Date(2026, 6, 25, 14, 5).toISOString(),
+        personaCatalogFetchedAt: fetchedAt,
       },
     });
     expect(emptyText()).toBe(COPY.personas.emptyConfirmed);
@@ -191,7 +198,7 @@ describe('«Персоны» pane', () => {
     // Label and value are separate nodes of the catalog card (E62): «Обновлён»
     // is the key, the formatted date is the value.
     expect(catalogRow?.textContent).toContain(COPY.personas.catalogUpdatedLabel);
-    expect(catalogRow?.textContent).toContain('25.07.2026 14:05');
+    expect(catalogRow?.textContent).toContain(formatCatalogChangedDate(fetchedAt));
     // Fresh catalog (< 48h): no staleness marker. It rides the catalog card's
     // head since E62, not the fact line.
     const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
