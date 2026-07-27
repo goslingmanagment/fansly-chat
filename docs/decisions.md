@@ -2180,7 +2180,7 @@ This is a two-repo change by construction. The same marker is also emitted
 kernel-side by `prompts/transcript/normalize.ts` for archive-sourced transcripts,
 and its grammar is quoted VERBATIM inside the fast-reply, help-me, improve-draft
 and ping templates so the model knows what the tag means. If one side moved
-alone, the quoted grammar would stop describing the live tag. Core Decision #188
+alone, the quoted grammar would stop describing the live tag. Core Decision #189
 carries the kernel half (both emitters, all quotes, and the em dashes in the rest
 of the prompt prose); this change is its extension twin and the two ship together.
 
