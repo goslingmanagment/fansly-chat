@@ -191,11 +191,11 @@ function ppvSuffix(state: MediaState): string {
     case 'free':
       return '';
     case 'ppv-purchased':
-      return ` — PPV${formatPriceFragment(state.priceMills)}, purchased`;
+      return ` - PPV${formatPriceFragment(state.priceMills)}, purchased`;
     case 'ppv-not-purchased':
-      return ` — PPV${formatPriceFragment(state.priceMills)}, not purchased`;
+      return ` - PPV${formatPriceFragment(state.priceMills)}, not purchased`;
     case 'ppv-unknown':
-      return ` — PPV${formatPriceFragment(state.priceMills)}, unknown`;
+      return ` - PPV${formatPriceFragment(state.priceMills)}, unknown`;
   }
 }
 

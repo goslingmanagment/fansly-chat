@@ -1892,7 +1892,16 @@ describe('Options «Аккаунты» pane', () => {
     // every non-connected account 'never' while keeping its `lastSeenAt`, so a
     // row could sit under «Сессий не было» and say «была вчера 22:23» — a verdict
     // the page cannot prove without the background's durable presence.
-    const yesterday = Date.now() - 26 * 60 * 60 * 1000;
+    // «вчера» is decided by the LOCAL CALENDAR DAY (formatSeenWhen), not by an
+    // elapsed-hours threshold, so the fixture is pinned to that day: a fixed
+    // now-26h offset lands on the day BEFORE yesterday whenever the suite runs
+    // between midnight and 02:00, and the row then prints a date instead.
+    const yesterday = (() => {
+      const at = new Date();
+      at.setDate(at.getDate() - 1);
+      at.setHours(22, 23, 0, 0);
+      return at.getTime();
+    })();
     page = await mountOptionsPage({
       state: {
         personaCatalog: CATALOG,

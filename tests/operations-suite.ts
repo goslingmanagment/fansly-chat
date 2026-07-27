@@ -1479,7 +1479,7 @@ describe(`OperationCoordinator (${part})`, () => {
       expect.anything(),
     );
     expect(flattenUserBlocksFromStreamCall(kernelGateway)).toContain(
-      '[Video — PPV $33.00, not purchased]',
+      '[Video - PPV $33.00, not purchased]',
     );
   });
 
@@ -1512,7 +1512,7 @@ describe(`OperationCoordinator (${part})`, () => {
 
     expect(fanslyClient.verifyMediaPurchaseStates).not.toHaveBeenCalled();
     expect(flattenUserBlocksFromStreamCall(kernelGateway)).toContain(
-      '[Video — PPV $33.00, purchased]',
+      '[Video - PPV $33.00, purchased]',
     );
   });
 
@@ -1542,7 +1542,7 @@ describe(`OperationCoordinator (${part})`, () => {
 
     expect(fanslyClient.verifyMediaPurchaseStates).not.toHaveBeenCalled();
     expect(flattenUserBlocksFromStreamCall(kernelGateway)).toContain(
-      '[Video — PPV $33.00, unknown]',
+      '[Video - PPV $33.00, unknown]',
     );
   });
 
@@ -1572,7 +1572,7 @@ describe(`OperationCoordinator (${part})`, () => {
 
     expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
     expect(flattenUserBlocksFromStreamCall(kernelGateway)).toContain(
-      '[Video — PPV $33.00, unknown]',
+      '[Video - PPV $33.00, unknown]',
     );
   });
 
@@ -1615,8 +1615,8 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(verifiedRequests).toHaveLength(FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT);
     expect((verifiedRequests as Array<{ contentId: string }>).map(({ contentId }) => contentId))
       .toEqual(ids.slice(1).reverse());
-    expect(prompt).toContain('[Video — PPV $33.00, unknown] ppv 1');
-    expect(prompt).toContain('[Video — PPV $33.00, not purchased] ppv 11');
+    expect(prompt).toContain('[Video - PPV $33.00, unknown] ppv 1');
+    expect(prompt).toContain('[Video - PPV $33.00, not purchased] ppv 11');
   });
 
   it('includes the selected tone in fast-reply debug prompts and uncached user blocks', async () => {
