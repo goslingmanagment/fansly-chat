@@ -190,7 +190,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     const result = normalizeTranscript(pages, MODEL_ID, FAN_ID);
-    expect(result[0]!.labels).toContain('[Video — PPV $80.00, purchased]');
+    expect(result[0]!.labels).toContain('[Video - PPV $80.00, purchased]');
     expect(result[0]!.labels.join(' ')).not.toContain('locked');
     expect(result[0]!.labels.join(' ')).not.toContain('unknown');
   });
@@ -215,7 +215,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     const labels = normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels;
-    expect(labels).toContain('[Video — PPV $33.00, unknown]');
+    expect(labels).toContain('[Video - PPV $33.00, unknown]');
     expect(labels.join(' ')).not.toContain('purchased');
     expect(labels.join(' ')).not.toContain('locked');
   });
@@ -242,7 +242,7 @@ describe('normalizeTranscript', () => {
     const labels = normalizeTranscript(pages, MODEL_ID, FAN_ID, {
       checkedNotPurchasedSingleIds: ['media-ppv'],
     })[0]!.labels;
-    expect(labels).toContain('[Video — PPV $33.00, not purchased]');
+    expect(labels).toContain('[Video - PPV $33.00, not purchased]');
     expect(labels.join(' ')).not.toContain(', purchased]');
     expect(labels.join(' ')).not.toContain('unknown');
   });
@@ -264,7 +264,7 @@ describe('normalizeTranscript', () => {
     ];
     expect(normalizeTranscript(pages, MODEL_ID, null, {
       checkedNotPurchasedSingleIds: ['media-ppv'],
-    })[0]!.labels).toContain('[Video — PPV $33.00, unknown]');
+    })[0]!.labels).toContain('[Video - PPV $33.00, unknown]');
   });
 
   it('does not credit PPV singles from another fan\'s order', () => {
@@ -286,7 +286,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV $5.00, unknown]');
+      .toContain('[Video - PPV $5.00, unknown]');
   });
 
   it('does not credit a PPV single from a same-fan order on a different content id', () => {
@@ -308,7 +308,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV $5.00, unknown]');
+      .toContain('[Video - PPV $5.00, unknown]');
   });
 
   it('does not credit a single from a bundle order on the same id (type-mismatch is decisive)', () => {
@@ -330,7 +330,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV $5.00, unknown]');
+      .toContain('[Video - PPV $5.00, unknown]');
   });
 
   it('does not credit a PPV single from a generic type-less inline accountMediaId row', () => {
@@ -352,7 +352,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV $5.00, unknown]');
+      .toContain('[Video - PPV $5.00, unknown]');
   });
 
   it('treats PPV single as unknown when fanAccountId is null', () => {
@@ -375,7 +375,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, null)[0]!.labels)
-      .toContain('[Video — PPV $5.00, unknown]');
+      .toContain('[Video - PPV $5.00, unknown]');
   });
 
   it('aggregates fan orders across pages so a later page can credit an earlier-page attachment', () => {
@@ -400,7 +400,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV $5.00, purchased]');
+      .toContain('[Video - PPV $5.00, purchased]');
   });
 
   it('labels purchased PPV bundles with counts when the inline order matches by accountMediaId', () => {
@@ -431,7 +431,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Media Bundle: 2 Videos — PPV $20.00, purchased]');
+      .toContain('[Media Bundle: 2 Videos - PPV $20.00, purchased]');
   });
 
   it('credits a bundle purchase via the orderhistory `accountMediaBundleId` shape without type', () => {
@@ -453,7 +453,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Media Bundle — PPV $8.00, purchased]');
+      .toContain('[Media Bundle - PPV $8.00, purchased]');
   });
 
   it('labels a PPV bundle as not purchased only with exact checked verifier evidence', () => {
@@ -473,7 +473,7 @@ describe('normalizeTranscript', () => {
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID, {
       checkedNotPurchasedBundleIds: ['bundle-ppv'],
-    })[0]!.labels).toContain('[Media Bundle — PPV $8.00, not purchased]');
+    })[0]!.labels).toContain('[Media Bundle - PPV $8.00, not purchased]');
   });
 
   it('does not credit a single child purchase from a parent bundle order', () => {
@@ -495,7 +495,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Photo — PPV $5.00, unknown]');
+      .toContain('[Photo - PPV $5.00, unknown]');
   });
 
   it('handles a mixed message: PPV single (no fan order) + free bundle counts independently', () => {
@@ -541,7 +541,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels).toEqual([
-      '[Video — PPV $33.00, unknown]',
+      '[Video - PPV $33.00, unknown]',
       '[Media Bundle: 4 Photos, 1 Video]',
     ]);
   });
@@ -650,7 +650,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV $20.00, unknown]');
+      .toContain('[Video - PPV $20.00, unknown]');
   });
 
   it('still labels PPV state when metadata is malformed (no price suffix)', () => {
@@ -670,7 +670,7 @@ describe('normalizeTranscript', () => {
       }),
     ];
     expect(normalizeTranscript(pages, MODEL_ID, FAN_ID)[0]!.labels)
-      .toContain('[Video — PPV, unknown]');
+      .toContain('[Video - PPV, unknown]');
   });
 
   it('uses nested media.media.mimetype in preference to top-level mimetype', () => {

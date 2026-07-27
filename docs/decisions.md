@@ -2167,3 +2167,34 @@ is asserted by node identity, the persona ROW is asserted to repaint exactly onc
 (the account labels it renders as chips only exist after the snapshot), and a
 second poll with unchanged labels is asserted to leave it alone — which is what
 the `labelsChanged` guard is for.
+
+**E63 (2026-07-28).** The paid-attachment marker lost its em dash. `ppvSuffix`
+emitted `[Video — PPV $80.00, purchased]`, and that marker rides into EVERY
+generation, once per paid attachment in the transcript window, ahead of any
+instruction the kernel writes. An em dash is the classic AI tell in fan-facing
+chat, and a model mirrors the style of its own prompt, so the tell was being
+taught by our own live read. The grammar is now `[Video - PPV $80.00, purchased]`
+with a plain hyphen.
+
+This is a two-repo change by construction. The same marker is also emitted
+kernel-side by `prompts/transcript/normalize.ts` for archive-sourced transcripts,
+and its grammar is quoted VERBATIM inside the fast-reply, help-me, improve-draft
+and ping templates so the model knows what the tag means. If one side moved
+alone, the quoted grammar would stop describing the live tag. Core Decision #188
+carries the kernel half (both emitters, all quotes, and the em dashes in the rest
+of the prompt prose); this change is its extension twin and the two ship together.
+
+Nothing about purchase semantics moved: the same three states, the same listed
+price, the same fail-closed `unknown`. Only the separator changed.
+
+**E63 addendum — two clock-rotted tests.** Both were found by the gate, not by
+the change, and both asserted a calendar-relative UI string from a fixture that
+was not calendar-relative. `options-personas` pinned the catalog date to an
+absolute `2026-07-25 14:05` and asserted «no staleness marker (<48h)» — from
+2026-07-27 14:05 onward that fixture is stale and `main` went red with no commit
+behind it. `options-accounts` set `lastSeenAt` to `now - 26h` and asserted
+«вчера», but `formatSeenWhen` decides by LOCAL CALENDAR DAY: run the suite
+between midnight and 02:00 and 26 hours ago is the day before yesterday. Fixtures
+for a calendar-relative formatter are now built from the calendar (previous local
+day, fixed clock time), and the date-format literal is left to the formatter's
+own unit test.
