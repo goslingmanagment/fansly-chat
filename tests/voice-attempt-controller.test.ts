@@ -1324,7 +1324,12 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:scriptStart')).toHaveLength(0);
   });
 
-  it('revokes in-memory blob URLs when a new script generation replaces the attempt', async () => {
+  it('a tone preset never erases a completed paid take — regenerateScript no-ops', async () => {
+    // The old pin here EXPECTED the wipe (takes: [], blob revoked) — that was
+    // the bug, not the invariant: a completed take cost real synthesis
+    // characters and the kernel offers no take listing to recover a lost
+    // voiceNoteId. A different tone after synthesis goes through
+    // «+ Новый войс из черновика».
     const revokeBlobUrl = vi.fn();
     const { controller, port } = createController({
       uuids: [ATTEMPT_ID, TAKE_ID_1],
@@ -1349,20 +1354,18 @@ describe('VoiceAttemptController', () => {
       voiceNoteId: 42,
       bytes: new Uint8Array([1, 2]).buffer,
     });
+    const scriptStarts = messagesOfType(port, 'voice:scriptStart').length;
 
     await controller.regenerateScript('flirty');
-    expect(revokeBlobUrl).toHaveBeenCalledWith('blob:old-take');
-    expect(messagesOfType(port, 'voice:scriptStart').at(-1)).toMatchObject({
-      attemptId: ATTEMPT_ID,
-      isRegeneration: true,
-    });
+
+    expect(revokeBlobUrl).not.toHaveBeenCalledWith('blob:old-take');
+    expect(messagesOfType(port, 'voice:scriptStart')).toHaveLength(scriptStarts);
     expect(controller.getAttempt()).toMatchObject({
-      phase: 'generating',
-      takes: [],
-      selectedTakeId: null,
-      canonicalScript: null,
-      tone: 'flirty' satisfies ReplyTone,
+      phase: 'takes',
+      selectedTakeId: 42,
+      tone: 'none' satisfies ReplyTone,
     });
+    expect(controller.getAttempt()?.takes).toHaveLength(1);
   });
 
   it('revokes take blob URLs on panel close and re-mints them from retained bytes on reopen', async () => {

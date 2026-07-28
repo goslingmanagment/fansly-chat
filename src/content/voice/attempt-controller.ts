@@ -336,6 +336,16 @@ export class VoiceAttemptController {
     if (record.pendingCreate) {
       return;
     }
+    // Billable work at REST is protected the same way as work in flight: a
+    // finished take cost real synthesis characters, and this reset would wipe
+    // takes + revoke their audio with no recovery path (the kernel offers no
+    // take listing — a lost voiceNoteId is gone). A different tone after a
+    // synthesis goes through «+ Новый войс из черновика», never through a chip
+    // that silently discards paid audio. The panel disables the chips in this
+    // state; this guard is the controller-level backstop.
+    if (record.attempt.takes.length > 0) {
+      return;
+    }
     this.revokeRecordBlobUrls(record);
     record.attempt.phase = 'generating';
     record.attempt.script = '';
