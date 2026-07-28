@@ -606,9 +606,14 @@ export class ChatGooseContentApp {
       // deliberately NOT replicated: no operation is live on this path (a live
       // coach turn / recap chain returned above, and a live overlay feature
       // renders its own loading surface), and blindly clearing it here would
-      // touch state the idle coach beneath still owns.
+      // touch state the idle coach beneath still owns. The DEBUG viewer state
+      // is the exception: it belongs to the dismissed deep result, and leaving
+      // it behind lets a later cached model's «Open the real prompt» open the
+      // dismissed recap's prompt instead (codex review P2 on this PR).
       if (this.deepOverlayModel && this.coachOverlayModel) {
         this.deepOverlayModel = null;
+        this.activeDebugPrompt = null;
+        this.activeDebugEcho = null;
         this.resetNextReplyTone();
         this.renderAll();
         return;
