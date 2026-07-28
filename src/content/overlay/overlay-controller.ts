@@ -568,6 +568,14 @@ export class OverlayController {
     this.backdropEl?.classList.toggle('chatgoose-pass-through', this.passThrough);
   }
 
+  /** Re-focus the coach composer of an already-open coach view (spec §3
+   * "focus if open" — openCoach on an open session). No-op otherwise. */
+  focusCoachComposer(): void {
+    if (this.currentView?.kind === 'coach') {
+      this.currentView.composerTextarea.focus();
+    }
+  }
+
   private queueComposerFocus(): void {
     window.requestAnimationFrame(() => {
       focusActiveConversationTextarea();
@@ -1447,6 +1455,22 @@ export class OverlayController {
       emptyStateNode: null,
     };
     this.updateCoachView(view, model);
+    // Spec §3 "open or focus": the panel opens ready to type. Only on CREATE —
+    // updateCoachView re-renders must never steal focus mid-conversation.
+    // A coach view is also re-created when a covering deep overlay closes; there
+    // the auto-focus is welcome (coach just became the visible surface) but it
+    // must never yank focus out of something the chatter is already using INSIDE
+    // the overlay, so the guard runs at focus time, not at build time.
+    queueMicrotask(() => {
+      if (this.currentView !== view) {
+        return;
+      }
+      const active = document.activeElement;
+      if (active && active !== document.body && this.root.contains(active)) {
+        return;
+      }
+      view.composerTextarea.focus();
+    });
     return view;
   }
 

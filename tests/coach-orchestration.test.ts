@@ -697,6 +697,66 @@ describe('Coach orchestration', () => {
     expect(app.dispatchHotkey('fan-summary')).toBe(true);
   });
 
+  it('⌘⇧C on an unmapped account refuses by name instead of opening a doomed panel', async () => {
+    const app = await makeReadyApp();
+    app.tabState = readyState({ mappedPersonalityId: null });
+
+    // Still handled (⌘⇧C never falls through to a browser default)…
+    expect(app.dispatchHotkey('coach')).toBe(true);
+    // …but Coach is the only feature whose dispatch used to SKIP the shared
+    // precondition gate: it opened a live-looking panel whose first submit then
+    // failed in the background with a bare code. That opening WAS the bug.
+    expect(app.coachOverlayModel).toBeNull();
+    expect(app.activeCoachSession).toBeNull();
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-02');
+    expect(app.port.send).not.toHaveBeenCalled();
+  });
+
+  it('opening Coach puts the caret in the composer, and reopening re-focuses it (spec §3)', async () => {
+    const app = await makeReadyApp();
+
+    app.openCoach();
+    await flush();
+
+    const textarea = document.querySelector('.chatgoose-coach-input');
+    expect(textarea).not.toBeNull();
+    expect(document.activeElement).toBe(textarea);
+
+    // «open or focus»: the second ⌘⇧C on an already-open session re-renders in
+    // place (no view rebuild), so the focus has to be asked for explicitly.
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).not.toBe(textarea);
+
+    app.dispatchHotkey('coach');
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('a submit whose preconditions broke mid-session restores the question and the draft intent', async () => {
+    const app = await makeReadyApp();
+    draftHolder.value = 'мой черновик';
+    app.openCoach();
+    await flush();
+    app.handleCoachDraftIntentChange(true);
+    // The mapping is revoked while the panel stays open.
+    app.tabState = readyState({ mappedPersonalityId: null });
+    // The renderer clears the textarea BEFORE onCoachSubmit fires.
+    app.activeCoachSession.composerText = '';
+    (app.port.send as any).mockClear();
+
+    await app.submitCoachQuestion('вопрос, который нельзя потерять');
+
+    expect((app.port.send as any).mock.calls.some((call: any) =>
+      call[0]?.feature === 'coach-chat')).toBe(false);
+    // Refused BY NAME (CG-FLOW-02), and the question is back in the composer —
+    // both in the session and in the rendered model.
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-02');
+    expect(app.activeCoachSession.composerText).toBe('вопрос, который нельзя потерять');
+    expect(app.coachOverlayModel.sessionView.composerText).toBe('вопрос, который нельзя потерять');
+    // The turn never dispatched, so it never consumed the draft-read intent.
+    expect(app.activeCoachSession.draftIntent).toBe(true);
+    expect(app.coachOverlayModel.sessionView.draftIntent).toBe(true);
+  });
+
   // ─── Recap picker (spec §5) ──────────────────────────────────────────
 
   it('⌘⇧S opens the recap picker without starting a generation', async () => {

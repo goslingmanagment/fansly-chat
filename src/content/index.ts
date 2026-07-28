@@ -1960,6 +1960,9 @@ export class ChatGooseContentApp {
     if (this.activeFeature === 'coach-chat' || this.activeCoachSession) {
       this.rebuildCoachModel();
       this.renderSurfaces();
+      // The re-render reconciles the EXISTING coach view in place, so it never
+      // moves focus by itself — «focus if open» has to be asked for explicitly.
+      this.overlay.focusCoachComposer();
       return;
     }
     // Coach is a single active operation like any other (spec §3): another op in
@@ -1972,6 +1975,13 @@ export class ChatGooseContentApp {
     const groupId = this.currentGroupId;
     if (!accountId || !groupId) {
       this.showUserErrorToast(getErrorMessage('coach_fan_unresolved'));
+      return;
+    }
+    // Coach rides the same preconditions as every generation (hub transport,
+    // catalog, mapping, connection). The button bar already refuses for these
+    // reasons; the hotkey must not open a panel whose submit is doomed to a
+    // bare background error. ensureFeatureCanStart shows the reason itself.
+    if (!this.ensureFeatureCanStart('coach-chat')) {
       return;
     }
     // Opening Coach supersedes the standalone Recap dialog if it is up.
@@ -2146,6 +2156,17 @@ export class ChatGooseContentApp {
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       this.abortCoachSubmit(session, trimmed, opts);
       this.showUserErrorToast(getErrorMessage('another_operation'));
+      return;
+    }
+    // Submit-time backstop: the preconditions can break while the panel is open
+    // (mapping revoked, hub creds cleared, the conversation lost). Refusing HERE
+    // — before the auto-recap chain and before the dispatch — is what keeps the
+    // failure a named reason instead of a bare background error code.
+    if (!this.ensureFeatureCanStart('coach-chat')) {
+      // ensureFeatureCanStart already showed the reason toast. The renderer
+      // cleared the textarea before onCoachSubmit — put the question back
+      // exactly like the another_operation refusal above does.
+      this.abortCoachSubmit(session, trimmed, opts);
       return;
     }
 
