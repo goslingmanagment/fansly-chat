@@ -1305,6 +1305,7 @@ describe('VoicePanel — лента', () => {
       root.querySelector('.chatgoose-voice-error-title')?.textContent,
     ).toBe('CG-VOICE-11: Аудиофайл войса повреждён.');
 
+    harness!.sent.length = 0;
     buttonByText(root, 'Скачать аудио ещё раз — бесплатно')!.click();
     // The free re-read returns a fresh completed view (no errorCode), which
     // re-drives the audio fetch; the bytes then land.
@@ -1313,6 +1314,13 @@ describe('VoicePanel — лента', () => {
       attemptId,
       view: view({ state: 'completed', audioSha256: 'a'.repeat(64), audioBytesLen: 3 }),
     });
+    // The load-bearing link of the whole recovery: the fresh view must have
+    // RE-ISSUED the audio fetch (the in-flight guard was cleared by the audio
+    // error). Without this pin a regressed guard would leave the take dead
+    // while the suite stayed green (review finding on this PR).
+    expect(harness!.sent).toContainEqual(
+      expect.objectContaining({ type: 'voice:audioFetch', voiceNoteId: 1 }),
+    );
     await feed({ type: 'voice:audioBytes', attemptId, voiceNoteId: 1, bytes: new ArrayBuffer(3) });
 
     expect(textOf(root)).not.toContain('Скачать аудио ещё раз — бесплатно');
@@ -1320,6 +1328,31 @@ describe('VoicePanel — лента', () => {
     // The card that reported the failed download must not sit above a working
     // player — it names this take, and this take recovered.
     expect(root.querySelector('.chatgoose-voice-error')).toBeNull();
+  });
+
+  it('keeps a FRESH status error about an already-playable take on screen', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+    const { root } = harness!;
+    expect(root.querySelector('.chatgoose-voice-player')).not.toBeNull();
+
+    // A reconnect re-poll (or a flipped kernel retrieval switch) reports a
+    // status error about a take that ALREADY plays. Retirement keys on the
+    // dead→playable transition, so the pre-existing blob must NOT retire this
+    // fresh card on the next render — both PR reviews flagged exactly that.
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'status',
+      voiceNoteId: 1,
+      code: 'voice_retrieval_disabled',
+      message: 'retrieval disabled',
+      status: 403,
+    });
+
+    expect(root.querySelector('.chatgoose-voice-error')).not.toBeNull();
+    // The take itself stays playable — the card reports truth, not a wipe.
+    expect(root.querySelector('.chatgoose-voice-player')).not.toBeNull();
   });
 
   it('keeps a failed-audio card that names ANOTHER take when a sibling recovers', async () => {

@@ -266,6 +266,10 @@ export class VoicePanel {
   // true error about take A. null = the error is not take-scoped (script,
   // create, attach) and is therefore never auto-cleared by a take recovering.
   private lastErrorTakeId: number | null = null;
+  // Whether the named take was ALREADY playable when the error was recorded.
+  // Retirement keys on the dead→playable TRANSITION; a fresh status error
+  // about a playable take must survive the next render (see setPanelError).
+  private lastErrorTakeWasPlayable = false;
   // True while the студия overlay has adopted this panel's section nodes. It
   // keeps the лента-only script collapse from firing on the borrowed editor.
   private studioActive = false;
@@ -560,16 +564,31 @@ export class VoicePanel {
   private setPanelError(error: UserFacingError | null, takeId: number | null): void {
     this.lastError = error;
     this.lastErrorTakeId = error ? takeId : null;
+    // Snapshot playability AT RECORD TIME: retirement must key on the
+    // transition «was dead → became playable», not on the state «is playable».
+    // A status error reported about an ALREADY-playable take (a reconnect
+    // re-poll hitting a down kernel, a flipped retrieval switch) is fresh
+    // truth — a pre-existing blob must never retire it on the next render
+    // (both PR reviews flagged exactly this).
+    const take = this.lastErrorTakeId !== null
+      ? this.deps.controller.getAttempt()?.takes.find(
+          (candidate) => candidate.voiceNoteId === this.lastErrorTakeId,
+        )
+      : undefined;
+    this.lastErrorTakeWasPlayable = Boolean(
+      error && take && take.view.state === 'completed' && take.blobUrl,
+    );
   }
 
   /**
    * A free audio retry that actually worked must not leave its own error card
    * sitting above a now-playing take. Retire the card only when the take it
-   * names became playable — an error about ANOTHER take (or about the script,
-   * the create, or the attach) is still true and stays on screen.
+   * names BECAME playable after the error was recorded — an error about
+   * ANOTHER take, a panel-wide error, or a fresh error about an
+   * already-playable take is still true and stays on screen.
    */
   private retireRecoveredTakeError(attempt: VoiceAttempt | null): void {
-    if (this.lastErrorTakeId === null) {
+    if (this.lastErrorTakeId === null || this.lastErrorTakeWasPlayable) {
       return;
     }
     const take = attempt?.takes.find(
