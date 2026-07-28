@@ -1,5 +1,5 @@
 import { FEATURE_LABELS } from '../../shared/constants.js';
-import { toUserError } from '../../shared/errors.js';
+import { ChatGooseError, toUserError } from '../../shared/errors.js';
 import type {
   LlmSpendSummary,
   CompareInlineTabState,
@@ -15,6 +15,7 @@ import {
   formatSpendPrimary,
   formatSpendSecondary,
 } from '../spend-format.js';
+import { parseGroupIdFromPath } from '../route-watcher.js';
 import { insertIntoFanslyTextarea, copyToClipboard, focusActiveConversationTextarea } from '../textarea.js';
 import {
   createSplitContractNote,
@@ -742,6 +743,13 @@ export class InlinePanelController {
 
   private async insertPart(part: OverlayInsertPart): Promise<void> {
     try {
+      // LIVE route check (mirrors the overlay/coach guards): the polled route
+      // lags a chat switch by up to 500ms — never insert into a foreign chat.
+      const mintedGroupId = 'groupId' in this.model ? this.model.groupId : null;
+      if (mintedGroupId !== null &&
+        parseGroupIdFromPath(window.location.pathname) !== mintedGroupId) {
+        throw new ChatGooseError('chat_changed');
+      }
       await insertIntoFanslyTextarea(part.text);
       part.insertedOnce = true;
       part.insertedAt = Date.now();

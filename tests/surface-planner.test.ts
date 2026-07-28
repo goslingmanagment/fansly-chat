@@ -32,6 +32,7 @@ const completedReplyModel: CompletedOverlayViewModel = {
   feature: 'fast-reply',
   fanDisplayName: 'fan',
   operationId: 'op-2',
+  groupId: 'example',
   parts: [],
   rawText: '',
 };

@@ -2007,6 +2007,11 @@ export type OverlayViewModel =
       feature: FeatureType;
       fanDisplayName: string;
       operationId: string;
+      /** Conversation the result was minted for. Insert guards compare it
+       * against the LIVE URL (not the 500ms-polled route) so a click landing
+       * right after a chat switch can never put fan A's text into fan B's
+       * composer — the same check the coach draft path already runs. */
+      groupId: string;
       parts: OverlayInsertPart[];
       rawText: string;
       splitModeRequested?: boolean;
@@ -2022,6 +2027,8 @@ export type OverlayViewModel =
       feature: 'help-me';
       fanDisplayName: string;
       operationId: string;
+      /** Same insert guard as the reply variant — see its groupId doc. */
+      groupId: string;
       rawText: string;
       coaching: string | null;
       engagingParts: OverlayInsertPart[];

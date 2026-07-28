@@ -8,6 +8,7 @@ function createReplyModel(operationId: string): CompletedOverlayViewModel {
     feature: 'fast-reply',
     fanDisplayName: 'fan',
     operationId,
+    groupId: 'example',
     parts: [
       {
         id: 'part-1',
@@ -28,6 +29,7 @@ function createHelpMeModel(): CompletedOverlayViewModel {
     feature: 'help-me',
     fanDisplayName: 'fan',
     operationId: 'help-op',
+    groupId: 'example',
     rawText: 'raw',
     coaching: 'coach',
     engagingParts: [],

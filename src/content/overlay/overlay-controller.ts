@@ -587,6 +587,15 @@ export class OverlayController {
     options?: { autoPassThrough?: boolean },
   ): Promise<void> {
     try {
+      // LIVE route check (same guard the coach draft path runs below): the
+      // orchestrator's polled route lags a chat switch by up to 500ms, so a
+      // click landing in that window would put fan A's text into fan B's
+      // composer without this.
+      const mintedGroupId = 'groupId' in this.model ? this.model.groupId : null;
+      if (mintedGroupId !== null &&
+        parseGroupIdFromPath(window.location.pathname) !== mintedGroupId) {
+        throw new ChatGooseError('chat_changed');
+      }
       await insertIntoFanslyTextarea(part.text);
       part.insertedOnce = true;
       part.insertedAt = Date.now();
