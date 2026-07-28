@@ -597,6 +597,22 @@ export class ChatGooseContentApp {
         this.renderAll();
         return;
       }
+      // A completed deep result (e.g. a standalone recap started over an idle
+      // coach via ⌘⇧S) OUTRANKS the idle coach in the surface planner, so it is
+      // the surface the chatter actually sees. Esc must close what is visible —
+      // closing the invisible coach beneath it made the first Esc a no-op.
+      // Mirrors the tail's teardown for the deep surface: E24 — closing a
+      // surface disarms the armed tone. `clearOperationState(true)` is
+      // deliberately NOT replicated: no operation is live on this path (a live
+      // coach turn / recap chain returned above, and a live overlay feature
+      // renders its own loading surface), and blindly clearing it here would
+      // touch state the idle coach beneath still owns.
+      if (this.deepOverlayModel && this.coachOverlayModel) {
+        this.deepOverlayModel = null;
+        this.resetNextReplyTone();
+        this.renderAll();
+        return;
+      }
       // Idle coach close (Esc/backdrop while not streaming): retain the session
       // in the store for reopen (spec §3), just drop the overlay.
       if (this.coachOverlayModel) {
@@ -2980,7 +2996,11 @@ export class ChatGooseContentApp {
           void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
         }
         void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
-        if (personaChanged) {
+        if (personaChanged || accountChanged) {
+          // An account-only change (background resolving the canonical accountId,
+          // operations.ts refreshTabState('mapping:changed')) tears the coach
+          // state down above but used to skip this render — leaving the DEAD
+          // panel of the previous account on screen, scroll-lock included.
           this.renderSurfaces();
         }
         this.renderButtonBar();
