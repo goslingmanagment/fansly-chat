@@ -8058,6 +8058,7 @@ export declare const notificationsSettingsResponseSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
     dailyReportEnabled: z.ZodBoolean;
     syncFailureAlertsEnabled: z.ZodBoolean;
+    aiCriticalAlertsEnabled: z.ZodBoolean;
     reportHourUtc: z.ZodNumber;
     connectionStatus: z.ZodEnum<{
         connected: "connected";
@@ -8072,6 +8073,7 @@ export declare const notificationsSettingsUpdateBodySchema: z.ZodObject<{
     enabled: z.ZodOptional<z.ZodBoolean>;
     dailyReportEnabled: z.ZodOptional<z.ZodBoolean>;
     syncFailureAlertsEnabled: z.ZodOptional<z.ZodBoolean>;
+    aiCriticalAlertsEnabled: z.ZodOptional<z.ZodBoolean>;
     reportHourUtc: z.ZodOptional<z.ZodNumber>;
     botToken: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     chatId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -8112,6 +8114,8 @@ export declare const notificationsIncidentItemSchema: z.ZodObject<{
         ops_sampler_silent: "ops_sampler_silent";
         ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
         ofapi_link_stats_reconcile_failed: "ofapi_link_stats_reconcile_failed";
+        ai_provider_billing: "ai_provider_billing";
+        ai_provider_failed: "ai_provider_failed";
     }>;
     pageLabel: z.ZodNullable<z.ZodString>;
     platform: z.ZodNullable<z.ZodEnum<{
@@ -8129,6 +8133,16 @@ export declare const notificationsIncidentItemSchema: z.ZodObject<{
     errorCode: z.ZodNullable<z.ZodString>;
     errorSummary: z.ZodNullable<z.ZodString>;
     notificationCount: z.ZodNumber;
+    outboxState: z.ZodNullable<z.ZodEnum<{
+        pending: "pending";
+        leased: "leased";
+        delivered: "delivered";
+        suppressed: "suppressed";
+        exhausted: "exhausted";
+    }>>;
+    outboxAttemptCount: z.ZodNullable<z.ZodNumber>;
+    outboxLastError: z.ZodNullable<z.ZodString>;
+    outboxSuppressionReason: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
 export declare const notificationsIncidentsQuerySchema: z.ZodObject<{
     status: z.ZodOptional<z.ZodEnum<{
@@ -8153,6 +8167,8 @@ export declare const notificationsIncidentsQuerySchema: z.ZodObject<{
         ops_sampler_silent: "ops_sampler_silent";
         ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
         ofapi_link_stats_reconcile_failed: "ofapi_link_stats_reconcile_failed";
+        ai_provider_billing: "ai_provider_billing";
+        ai_provider_failed: "ai_provider_failed";
     }>>;
     pageLabel: z.ZodOptional<z.ZodString>;
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
@@ -8180,6 +8196,8 @@ export declare const notificationsIncidentsResponseSchema: z.ZodObject<{
             ops_sampler_silent: "ops_sampler_silent";
             ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
             ofapi_link_stats_reconcile_failed: "ofapi_link_stats_reconcile_failed";
+            ai_provider_billing: "ai_provider_billing";
+            ai_provider_failed: "ai_provider_failed";
         }>;
         pageLabel: z.ZodNullable<z.ZodString>;
         platform: z.ZodNullable<z.ZodEnum<{
@@ -8197,6 +8215,16 @@ export declare const notificationsIncidentsResponseSchema: z.ZodObject<{
         errorCode: z.ZodNullable<z.ZodString>;
         errorSummary: z.ZodNullable<z.ZodString>;
         notificationCount: z.ZodNumber;
+        outboxState: z.ZodNullable<z.ZodEnum<{
+            pending: "pending";
+            leased: "leased";
+            delivered: "delivered";
+            suppressed: "suppressed";
+            exhausted: "exhausted";
+        }>>;
+        outboxAttemptCount: z.ZodNullable<z.ZodNumber>;
+        outboxLastError: z.ZodNullable<z.ZodString>;
+        outboxSuppressionReason: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>>;
     total: z.ZodNumber;
 }, z.core.$strip>;
@@ -22214,6 +22242,7 @@ export declare const routeSchemas: {
                 enabled: z.ZodBoolean;
                 dailyReportEnabled: z.ZodBoolean;
                 syncFailureAlertsEnabled: z.ZodBoolean;
+                aiCriticalAlertsEnabled: z.ZodBoolean;
                 reportHourUtc: z.ZodNumber;
                 connectionStatus: z.ZodEnum<{
                     connected: "connected";
@@ -22246,6 +22275,7 @@ export declare const routeSchemas: {
             enabled: z.ZodOptional<z.ZodBoolean>;
             dailyReportEnabled: z.ZodOptional<z.ZodBoolean>;
             syncFailureAlertsEnabled: z.ZodOptional<z.ZodBoolean>;
+            aiCriticalAlertsEnabled: z.ZodOptional<z.ZodBoolean>;
             reportHourUtc: z.ZodOptional<z.ZodNumber>;
             botToken: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             chatId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -22268,6 +22298,7 @@ export declare const routeSchemas: {
                 enabled: z.ZodBoolean;
                 dailyReportEnabled: z.ZodBoolean;
                 syncFailureAlertsEnabled: z.ZodBoolean;
+                aiCriticalAlertsEnabled: z.ZodBoolean;
                 reportHourUtc: z.ZodNumber;
                 connectionStatus: z.ZodEnum<{
                     connected: "connected";
@@ -22377,6 +22408,8 @@ export declare const routeSchemas: {
                 ops_sampler_silent: "ops_sampler_silent";
                 ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
                 ofapi_link_stats_reconcile_failed: "ofapi_link_stats_reconcile_failed";
+                ai_provider_billing: "ai_provider_billing";
+                ai_provider_failed: "ai_provider_failed";
             }>>;
             pageLabel: z.ZodOptional<z.ZodString>;
             limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
@@ -22405,6 +22438,8 @@ export declare const routeSchemas: {
                         ops_sampler_silent: "ops_sampler_silent";
                         ofapi_chargebacks_reconcile_failed: "ofapi_chargebacks_reconcile_failed";
                         ofapi_link_stats_reconcile_failed: "ofapi_link_stats_reconcile_failed";
+                        ai_provider_billing: "ai_provider_billing";
+                        ai_provider_failed: "ai_provider_failed";
                     }>;
                     pageLabel: z.ZodNullable<z.ZodString>;
                     platform: z.ZodNullable<z.ZodEnum<{
@@ -22422,6 +22457,16 @@ export declare const routeSchemas: {
                     errorCode: z.ZodNullable<z.ZodString>;
                     errorSummary: z.ZodNullable<z.ZodString>;
                     notificationCount: z.ZodNumber;
+                    outboxState: z.ZodNullable<z.ZodEnum<{
+                        pending: "pending";
+                        leased: "leased";
+                        delivered: "delivered";
+                        suppressed: "suppressed";
+                        exhausted: "exhausted";
+                    }>>;
+                    outboxAttemptCount: z.ZodNullable<z.ZodNumber>;
+                    outboxLastError: z.ZodNullable<z.ZodString>;
+                    outboxSuppressionReason: z.ZodNullable<z.ZodString>;
                 }, z.core.$strip>>;
                 total: z.ZodNumber;
             }, z.core.$strip>;
