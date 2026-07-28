@@ -2198,3 +2198,21 @@ between midnight and 02:00 and 26 hours ago is the day before yesterday. Fixture
 for a calendar-relative formatter are now built from the calendar (previous local
 day, fixed clock time), and the date-format literal is left to the formatter's
 own unit test.
+
+**E64 (2026-07-29).** Stream-abort classification order is now normative:
+terminal error frame → abort → truncation. The vendored SDK swallows every
+exception once its abort signal fires (its final `.catch` returns on
+`abort.signal.aborted`), so an aborted SSE stream used to surface as
+`hub_stream_truncated` — the chatter read «Генерация оборвалась» (CG-HUB-16)
+for a LOCAL timeout, and `recordHubError` counted it into «Ошибки генераций
+(Hub)», blaming the kernel for the client's own clock. The gateway now captures
+the mapped terminal-frame error before throwing it, and after `handle.done`
+classifies in the fixed order above: a kernel error frame outranks the abort
+verdict (the SDK swallow must not eat what the kernel actually said), an abort
+re-raises as `AbortError` so `resolveAbortChatGooseError` maps armed timeouts
+to `timed_out`/CG-NET-02, and only a genuinely terminal-frame-less EOF remains
+CG-HUB-16. Fail-closed is unchanged: every non-`done` path still throws, no
+partial text is ever presented. Semantics that moved: CG-HUB-16 now means
+«поток оборвался БЕЗ аборта», and the daily Hub-error counter no longer grows
+on local timeouts. The order itself is pinned by the abort-classification
+tests in `tests/kernel-feature-gateway.test.ts`.
