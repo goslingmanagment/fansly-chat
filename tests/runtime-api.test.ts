@@ -4,11 +4,13 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   LAST_SEEN_VERSION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   STORAGE_SCHEMA_VERSION,
+  VOICE_CAPABILITY_BUDGET_MS,
 } from '../src/shared/constants.js';
 import { createUserError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
@@ -117,7 +119,7 @@ async function installRuntimeApiHarness(fanslyClient: {
   emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
   onAgencyHubReady?: () => void;
   voiceService?: {
-    resolveCapability: (tabId: number) => Promise<boolean>;
+    resolveCapabilityFast: (tabId: number, budgetMs: number) => Promise<boolean>;
   };
   voiceAttempts?: {
     load: (route: StoredVoiceAttemptRoute) => Promise<unknown[]>;
@@ -814,7 +816,7 @@ describe('runtime-api getPopupStatus', () => {
   it('surfaces the fail-closed voice-notes capability for the selected tab', async () => {
     mockStorage = createStorage();
     const voiceService = {
-      resolveCapability: vi.fn(async () => true),
+      resolveCapabilityFast: vi.fn(async () => true),
     };
     const { sessionStore, tabsQuery } = await installRuntimeApiHarness({
       getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
@@ -827,7 +829,65 @@ describe('runtime-api getPopupStatus', () => {
     const result = await onMessageListener?.({ type: 'getPopupStatus' });
 
     expect(result).toEqual(expect.objectContaining({ voiceNotesCapable: true }));
-    expect(voiceService.resolveCapability).toHaveBeenCalledWith(1);
+    expect(voiceService.resolveCapabilityFast).toHaveBeenCalledWith(
+      1,
+      VOICE_CAPABILITY_BUDGET_MS,
+    );
+  });
+
+  it('answers within the first-paint budget when the capability probe is slow', async () => {
+    // The popup used to await the whole cold probe (up to
+    // AGENCY_HUB_PREFETCH_TIMEOUT_MS = 5s) before painting anything at all.
+    // The budget answers fail-closed instead; the 🎙 hint catches up over the
+    // tab-state re-push the service fires when the probe lands.
+    mockStorage = createStorage();
+    const voiceService = {
+      // Stands in for the service's budget race: the underlying probe would
+      // need the full prefetch timeout, the budget answers before it.
+      resolveCapabilityFast: vi.fn(
+        (_tabId: number, budgetMs: number) =>
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(false), budgetMs);
+            setTimeout(() => resolve(true), AGENCY_HUB_PREFETCH_TIMEOUT_MS);
+          }),
+      ),
+    };
+    const { sessionStore, tabsQuery } = await installRuntimeApiHarness({
+      getAuthenticatedAccount: vi.fn(async () => ({ username: 'creator' })),
+    }, { voiceService });
+    sessionStore.registerCapture(1, makeCapture('active'));
+    tabsQuery.mockResolvedValue([
+      { id: 1, url: 'https://fansly.com/messages/active-group' },
+    ]);
+
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const pending = onMessageListener?.({ type: 'getPopupStatus' });
+      // The handler reaches the resolver through several storage/tabs task
+      // hops; step the clock in 1ms slices until it does.
+      for (
+        let i = 0;
+        i < 50 && voiceService.resolveCapabilityFast.mock.calls.length === 0;
+        i += 1
+      ) {
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(voiceService.resolveCapabilityFast).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(VOICE_CAPABILITY_BUDGET_MS);
+      await expect(pending).resolves.toEqual(
+        expect.objectContaining({ voiceNotesCapable: false }),
+      );
+      // The popup answered long before a cold probe could have.
+      expect(Date.now() - startedAt).toBeLessThan(AGENCY_HUB_PREFETCH_TIMEOUT_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(voiceService.resolveCapabilityFast).toHaveBeenCalledWith(
+      1,
+      VOICE_CAPABILITY_BUDGET_MS,
+    );
   });
 });
 

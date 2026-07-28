@@ -135,6 +135,10 @@ export interface VoiceServiceDependencies {
   tabContexts: Pick<TabContextStore, 'get' | 'getOrCreate' | 'setFan'>;
   storageCoordinator: Pick<StorageCoordinator, 'getState'>;
   voiceAttempts: Pick<VoiceAttemptRepository, 'assertPendingCreate'>;
+  /** Invoked when a capability probe finishes AFTER its first-paint budget
+   * already answered. The composition root wires it to a tab-state re-push;
+   * see `setOnCapabilityResolvedLate` for why a setter exists too. */
+  onCapabilityResolvedLate?: (tabId: number) => void;
   randomUUID?: () => string;
   now?: () => number;
 }
@@ -417,12 +421,25 @@ export class VoiceService {
   private readonly attachGrantsInFlight = new Set<string>();
   private readonly capabilityByPageLabel = new Map<string, CapabilityCacheEntry>();
   private readonly pageBindingByTabId = new Map<number, TabPageBinding>();
+  /** Single-flight budgeted probes: the popup and tab:init state assembly ask
+   * concurrently on a cold worker and must share ONE probe (and one late
+   * re-push), not race two identical Hub round-trips. */
+  private readonly fastCapabilityProbesByTab = new Map<number, Promise<boolean>>();
+  private onCapabilityResolvedLate: ((tabId: number) => void) | null;
   private readonly randomUUID: () => string;
   private readonly now: () => number;
 
   constructor(private readonly deps: VoiceServiceDependencies) {
     this.randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
     this.now = deps.now ?? (() => Date.now());
+    this.onCapabilityResolvedLate = deps.onCapabilityResolvedLate ?? null;
+  }
+
+  /** Composition-order escape hatch: the OperationCoordinator that owns the
+   * tab-state re-push is constructed AFTER this service, so the late-resolution
+   * callback cannot be a constructor dependency in the real background. */
+  setOnCapabilityResolvedLate(callback: (tabId: number) => void): void {
+    this.onCapabilityResolvedLate = callback;
   }
 
   /** Independent port lane: validated voice envelopes never enter
@@ -493,9 +510,80 @@ export class VoiceService {
     }
   }
 
-  /** Called by tab:init state assembly and storage-change refreshes. Any
-   * missing page row/capability or request error fails closed. */
+  /** Unbudgeted resolution: waits out the whole probe. Any missing page
+   * row/capability or request error fails closed. Every first-paint caller
+   * (tab:init state assembly, popup status) takes `resolveCapabilityFast`. */
   async resolveCapability(tabId: number): Promise<boolean> {
+    try {
+      return await this.probeCapability(tabId);
+    } catch {
+      return false;
+    }
+  }
+
+  /** First-paint variant. Returns the probe's verdict when it lands inside
+   * `budgetMs`; otherwise answers `false` — FAIL CLOSED, the budget can never
+   * invent a capability the kernel did not confirm — and lets the probe finish
+   * in the background. The probe must always run to completion: it resolves the
+   * session's canonical identity as a side effect (resolvePageForTab →
+   * getAuthenticatedAccount), and a late SUCCESS re-pushes tab state through
+   * `onCapabilityResolvedLate` so the corrected identity AND a late capability
+   * reach content without a reload. This changes WHEN the hint arrives, never
+   * WHETHER a paid call is allowed: the kernel re-checks every gate on POST. */
+  async resolveCapabilityFast(tabId: number, budgetMs: number): Promise<boolean> {
+    const pending = this.fastCapabilityProbesByTab.get(tabId);
+    if (pending) {
+      return await pending;
+    }
+    // Holder: `settle` must be able to clear a timer that is only scheduled
+    // after the race promise (and therefore after `settle`) exists.
+    const budget: { timer?: ReturnType<typeof globalThis.setTimeout> } = {};
+    let settled = false;
+    let settle!: (value: boolean) => void;
+    const race = new Promise<boolean>((resolve) => {
+      settle = (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        globalThis.clearTimeout(budget.timer);
+        resolve(value);
+      };
+    });
+    // Both outcomes settle from INSIDE their own branch. Reading `settled`
+    // after `await Promise.race(...)` would lose the late callback whenever the
+    // probe's continuation runs in the microtask gap after the budget fired.
+    void this.probeCapability(tabId).then(
+      (capable) => {
+        const budgetAlreadyAnswered = settled;
+        settle(capable);
+        // Drop the single-flight entry BEFORE the callback: the re-push it
+        // triggers re-enters resolveCapabilityFast and must get a fresh
+        // (cache-backed) answer, not this already-settled budget verdict.
+        this.fastCapabilityProbesByTab.delete(tabId);
+        if (budgetAlreadyAnswered) {
+          // A successful probe populated the 5-minute capability cache, so the
+          // refresh this triggers resolves from cache instead of re-probing —
+          // the callback cannot loop.
+          this.onCapabilityResolvedLate?.(tabId);
+        }
+      },
+      () => {
+        // A FAILED probe caches nothing. Firing the callback here would loop
+        // probe → refresh → probe, so a failure only ever fails closed.
+        settle(false);
+        this.fastCapabilityProbesByTab.delete(tabId);
+      },
+    );
+    budget.timer = globalThis.setTimeout(() => settle(false), budgetMs);
+    this.fastCapabilityProbesByTab.set(tabId, race);
+    return await race;
+  }
+
+  /** Throws on any probe failure so callers can tell "the kernel says this page
+   * has no voice notes" from "we could not ask". `resolveCapability` keeps
+   * collapsing both into the fail-closed `false`. */
+  private async probeCapability(tabId: number): Promise<boolean> {
     const controller = new AbortController();
     const timeout = globalThis.setTimeout(
       () => controller.abort(),
@@ -503,8 +591,6 @@ export class VoiceService {
     );
     try {
       return (await this.resolvePageForTab(tabId, controller.signal)).voiceNotesCapable;
-    } catch {
-      return false;
     } finally {
       globalThis.clearTimeout(timeout);
     }

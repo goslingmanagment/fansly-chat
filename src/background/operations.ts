@@ -830,6 +830,9 @@ export class OperationCoordinator {
     // identity as a side effect (resolvePageForTab → getAuthenticatedAccount),
     // and reading the session before it meant the returned state could carry
     // the legacy id even though the session had just learned the canonical one.
+    // The injected resolver is budgeted (composition root), so a cold probe no
+    // longer holds first paint; when it loses the race it re-pushes tab state
+    // afterwards, which is how the identity correction still lands.
     const voiceNotesCapable = await this.voiceCapabilityResolver?.(tabId) ?? false;
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId =

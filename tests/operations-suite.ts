@@ -1060,6 +1060,98 @@ describe(`OperationCoordinator (${part})`, () => {
     );
   });
 
+  it('re-pushes tab state with the identity a budgeted probe resolved late', async () => {
+    // Composition mirror of src/background/index.ts: the coordinator asks the
+    // BUDGETED resolver, so a cold probe no longer holds first paint — and the
+    // identity the probe resolves as a side effect (previously the reason the
+    // probe ran first and the whole state waited for it) still reaches content,
+    // now over the re-push the late success triggers.
+    const { VoiceService } = await import('../src/background/voice-service.js');
+    const settings = {
+      ...migrateState(mockStorage).settings,
+      agencyHubBaseUrl: 'http://localhost:3000',
+      agencyHubDeviceToken: 'device-token',
+    };
+    mockStorage.settings = stripSecretSettings(settings);
+    mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = settings.agencyHubDeviceToken;
+
+    const fanslyClient = buildFanslyClientMock();
+    let releaseIdentity!: () => void;
+    const identityGate = new Promise<void>((resolve) => {
+      releaseIdentity = resolve;
+    });
+    fanslyClient.getAuthenticatedAccount.mockImplementation(async (session: any) => {
+      await identityGate;
+      if (session) {
+        session.resolvedAccountId = 'resolved-1';
+        session.resolvedUsername = 'creator';
+        session.resolvedDisplayName = 'Creator';
+      }
+      return { id: 'resolved-1', username: 'creator', displayName: 'Creator' };
+    });
+
+    const { coordinator, port, sessionStore, storageCoordinator } =
+      await createCoordinatorHarness({ fanslyClient });
+    sessionStore.registerCapture(1, { ...SESSION_CAPTURE, accountId: 'legacy-1' });
+
+    const voiceService = new VoiceService({
+      kernelGateway: { streamFeature: vi.fn() } as never,
+      agencyHubClient: {
+        resolvePageForUsername: vi.fn(async () => ({
+          pageLabel: 'creator-fs',
+          voiceNotesCapable: true,
+        })),
+      } as never,
+      fanslyClient: fanslyClient as never,
+      sessionStore,
+      tabContexts: coordinator.tabContexts,
+      storageCoordinator,
+      voiceAttempts: { assertPendingCreate: vi.fn(async () => undefined) } as never,
+    });
+    const budgetMs = 20;
+    coordinator.setVoiceCapabilityResolver((tabId: number) =>
+      voiceService.resolveCapabilityFast(tabId, budgetMs),
+    );
+    voiceService.setOnCapabilityResolvedLate((tabId: number) => {
+      void coordinator.refreshTabState(tabId, 'tab:state');
+    });
+
+    const tabStates = () =>
+      postedMessages(port).filter((message) => message.type === 'tab:state');
+    const before = tabStates().length;
+
+    await coordinator.refreshTabState(1);
+
+    // First paint did not wait for the probe: fail-closed capability, and the
+    // identity is still the legacy one the session was captured with.
+    expect(tabStates()).toHaveLength(before + 1);
+    expect(tabStates().at(-1)).toEqual(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          accountId: 'legacy-1',
+          voiceNotesCapable: false,
+        }),
+      }),
+    );
+
+    releaseIdentity();
+    await vi.waitFor(() => {
+      expect(tabStates()).toHaveLength(before + 2);
+    });
+    expect(tabStates().at(-1)).toEqual(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          accountId: 'resolved-1',
+          voiceNotesCapable: true,
+        }),
+      }),
+    );
+
+    // The re-push resolved from the warm capability cache the successful probe
+    // wrote — one probe total, so the callback cannot loop.
+    expect(fanslyClient.getAuthenticatedAccount).toHaveBeenCalledTimes(1);
+  });
+
   it('drops a stale tab-state refresh that finishes after a newer one', async () => {
     const { coordinator, port } = await createCoordinatorHarness();
     const resolvers: Array<(capable: boolean) => void> = [];

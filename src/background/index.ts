@@ -20,6 +20,7 @@ import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 import { VoiceAttemptRepository } from './voice-attempt-store.js';
 import { VoiceService } from './voice-service.js';
+import { VOICE_CAPABILITY_BUDGET_MS } from '../shared/constants.js';
 import { readStorageState } from '../shared/storage.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
@@ -84,7 +85,18 @@ const coordinator = new OperationCoordinator(
   agencyHubClient,
   acceptanceReporter,
 );
-coordinator.setVoiceCapabilityResolver((tabId) => voiceService.resolveCapability(tabId));
+// First paint wins the race against a cold capability probe: tab:init state
+// assembly waits at most VOICE_CAPABILITY_BUDGET_MS and takes the fail-closed
+// `false` past it. The probe keeps running (it also resolves the session's
+// canonical identity), and its late success re-pushes tab state below.
+coordinator.setVoiceCapabilityResolver((tabId) =>
+  voiceService.resolveCapabilityFast(tabId, VOICE_CAPABILITY_BUDGET_MS),
+);
+// Wired AFTER the coordinator exists — voiceService is constructed before it,
+// so this cannot be a constructor dependency.
+voiceService.setOnCapabilityResolvedLate((tabId) => {
+  void coordinator.refreshTabState(tabId, 'tab:state');
+});
 
 browser.runtime.onConnect.addListener((port) => {
   coordinator.registerPort(port);
