@@ -587,6 +587,11 @@ export class VoicePanel {
     const wrap = el('div', 'chatgoose-voice-tones');
     const chips = el('div', 'chatgoose-voice-tones-chips');
     const pendingCreate = this.deps.controller.hasPendingCreate();
+    // A finished take is PAID work: a tone chip regenerates the script from
+    // scratch, wiping takes and revoking their audio with no recovery path.
+    // With takes on screen the chips lock and the hint points at the honest
+    // route — a new voice from the draft (the controller refuses too).
+    const hasTakes = attempt.takes.length > 0;
     for (const preset of TONE_PRESETS) {
       const chip = el('button', 'chatgoose-voice-tone', preset.label);
       chip.type = 'button';
@@ -594,9 +599,9 @@ export class VoicePanel {
       const active = attempt.tone === preset.tone;
       chip.setAttribute('aria-pressed', active ? 'true' : 'false');
       chip.classList.toggle('chatgoose-voice-tone-active', active);
-      chip.disabled = attempt.phase === 'generating' || pendingCreate;
+      chip.disabled = attempt.phase === 'generating' || pendingCreate || hasTakes;
       chip.addEventListener('click', () => {
-        if (this.deps.controller.hasPendingCreate()) {
+        if (this.deps.controller.hasPendingCreate() || hasTakes) {
           return;
         }
         this.lastError = null;
@@ -606,7 +611,11 @@ export class VoicePanel {
       chips.append(chip);
     }
     wrap.append(chips);
-    wrap.append(el('span', 'chatgoose-voice-tones-hint', 'пресеты бесплатны'));
+    wrap.append(el(
+      'span',
+      'chatgoose-voice-tones-hint',
+      hasTakes ? 'другой тон — через «Новый войс из черновика»' : 'пресеты бесплатны',
+    ));
     this.tonesSlot.replaceChildren(wrap);
   }
 

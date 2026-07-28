@@ -525,6 +525,22 @@ describe('OverlayController — coach chat mode', () => {
     expect(callbacks.onCoachRetry).toHaveBeenCalledWith('stuck', true);
   });
 
+  it('renders a deliberate cancel as «Остановлено вами.», never as a failure', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({ feedItems: [failedItem('later', 'cancelled', true)] }));
+
+    // The person stopped the stream themselves — the feed must not blame the
+    // turn («не получилось») nor leak the raw English token.
+    const error = requireElement<HTMLDivElement>('.chatgoose-coach-error');
+    expect(error.textContent).toBe('Остановлено вами.');
+    expect(error.textContent).not.toContain('cancelled');
+    // Retry stays: cancelling a stream must not burn the question.
+    expect(
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'))
+        .some((b) => b.textContent === 'Повторить'),
+    ).toBe(true);
+  });
+
   // ─── Recap step (spec §2.1/§6) ────────────────────────────────────────────
 
   it('renders recap steps with RU copy and updates status in place', () => {

@@ -778,6 +778,21 @@ describe('VoicePanel — лента', () => {
     ).toBe(true);
   });
 
+  it('locks tone presets once a paid take exists and points at «Новый войс»', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTake(attemptId);
+
+    // A completed take is paid work; a tone chip would regenerate the script
+    // and wipe it with no recovery path. The chips lock and the hint names
+    // the honest route instead of promising a free preset.
+    expect(
+      Array.from(harness!.root.querySelectorAll<HTMLButtonElement>('.chatgoose-voice-tone'))
+        .every((button) => button.disabled),
+    ).toBe(true);
+    expect(textOf(harness!.root)).toContain('другой тон — через «Новый войс из черновика»');
+    expect(textOf(harness!.root)).not.toContain('пресеты бесплатны');
+  });
+
   it('keeps a later indeterminate create on same-request recovery beside older takes', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);
