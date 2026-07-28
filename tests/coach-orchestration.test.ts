@@ -2323,3 +2323,95 @@ describe('Coach orchestration', () => {
     expect(app.coachSettingsSnapshot).toEqual({ coachHistoryLimit: 5, coachAutoRecap: 'short' });
   });
 });
+
+// A separate top-level describe (own DOM setup) so this block stays textually
+// clear of the other in-flight coach PRs that edit the suite above.
+describe('hotkeys under an open reference surface', () => {
+  beforeEach(() => {
+    mockStorageState = createStorageState();
+    recapStatusResponse = { full: null, short: null };
+    draftHolder.value = '';
+    installDom();
+  });
+
+  afterEach(() => {
+    (globalThis.window as Window | undefined)?.close?.();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** The one toast currently on screen, if any. */
+  function toastText(): string {
+    return document.querySelector('.chatgoose-toast')?.textContent ?? '';
+  }
+
+  const GATE_TOAST = 'Сначала закройте справку';
+
+  it('swallows a paid feature hotkey while the cheatsheet covers the result surface', async () => {
+    const app = await makeReadyApp();
+    app.startFeature = vi.fn();
+    app.cheatsheet.show();
+
+    // Handled (true) so the key never falls through to a browser default, but
+    // no generation starts: the loader and the result would render UNDER the
+    // sheet, so ⌘⇧E from an open cheatsheet used to spend quota blind.
+    expect(app.dispatchHotkey('fast-reply')).toBe(true);
+    expect(app.startFeature).not.toHaveBeenCalled();
+    expect(toastText()).toContain(GATE_TOAST);
+  });
+
+  it('swallows the app-action hotkeys (coach, recap) under an open spenders board', async () => {
+    const app = await makeReadyApp();
+    // Flip the controller's own open flag instead of show(): show() fires the
+    // background list request, which this suite has no fixture for.
+    app.board.open = true;
+
+    expect(app.dispatchHotkey('coach')).toBe(true);
+    expect(app.coachOverlayModel).toBeNull();
+    expect(app.dispatchHotkey('fan-summary')).toBe(true);
+    expect(app.recapPickerModel).toBeNull();
+    expect(toastText()).toContain(GATE_TOAST);
+  });
+
+  it('lets the reference surfaces close themselves while they are open', async () => {
+    const app = await makeReadyApp();
+
+    app.cheatsheet.show();
+    expect(app.dispatchHotkey('cheatsheet')).toBe(true);
+    expect(app.cheatsheet.isOpen()).toBe(false);
+    expect(toastText()).toBe('');
+
+    app.board.open = true;
+    expect(app.dispatchHotkey('spenders-board')).toBe(true);
+    expect(app.board.isOpen()).toBe(false);
+    expect(toastText()).toBe('');
+  });
+
+  it('lets CANCEL through so a running op under the sheet stays cancellable', async () => {
+    const app = await makeReadyApp();
+    app.startFeature('fast-reply', false);
+    const operationId = app.activeOperationId;
+    expect(operationId).toBeTruthy();
+
+    // The cheatsheet/board toggles have no busy-guard, so a paid op can already
+    // be running when the sheet opens. Swallowing ⌘⇧X here would trap the user
+    // with a running generation they cannot stop.
+    app.cheatsheet.show();
+    (app.port.send as any).mockClear();
+
+    expect(app.dispatchHotkey('cancel')).toBe(true);
+    expect(app.port.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'operation:cancel', operationId }),
+    );
+    expect(toastText()).not.toContain(GATE_TOAST);
+  });
+
+  it('leaves every hotkey untouched when no reference surface is open', async () => {
+    const app = await makeReadyApp();
+    app.startFeature = vi.fn();
+
+    expect(app.dispatchHotkey('fast-reply')).toBe(true);
+    expect(app.startFeature).toHaveBeenCalledWith('fast-reply', false);
+    expect(toastText()).toBe('');
+  });
+});

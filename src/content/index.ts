@@ -776,6 +776,21 @@ export class ChatGooseContentApp {
   }
 
   private dispatchHotkey(action: HotkeyAction): boolean {
+    // A reference surface (cheatsheet / spenders board) covers the result
+    // surfaces. Starting a paid generation under it spends quota blind — the
+    // loader and result render beneath the sheet. The surfaces' own toggles and
+    // CANCEL pass (an operation can already be running under the sheet);
+    // feature-starting actions are swallowed with an explanation.
+    const referenceSurfaceOpen = this.cheatsheet.isOpen() || this.board.isOpen();
+    if (
+      referenceSurfaceOpen &&
+      action !== 'cheatsheet' && action !== 'spenders-board' && action !== 'cancel'
+    ) {
+      this.toast.show('Сначала закройте справку (Esc) — панель ChatGoose под ней не видна.', {
+        tone: 'warning',
+      });
+      return true; // handled: never fall through to a browser default
+    }
     const feature = HOTKEY_FEATURE[action];
     if (feature) {
       if (!this.currentGroupId) return false;
