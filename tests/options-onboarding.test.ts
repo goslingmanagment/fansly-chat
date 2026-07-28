@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { COPY } from '../src/options/copy.js';
+import { AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
@@ -179,6 +180,107 @@ describe('options first-run onboarding', () => {
 
     expect(page.onboardingDismissals()).toBe(1);
     expect(card(page).hidden).toBe(true);
+  });
+
+  it('leaves step 2 «неизвестно» — not green, and with no login form to press — when the Hub is down', async () => {
+    // Step 2 used to be `identity?.ok === true`, i.e. two-state: a kernel that
+    // is merely unreachable read exactly like «never signed in», so a chatter
+    // holding a live device token was told to go log in again, forever.
+    //
+    // The credential arrives AFTER mount on purpose: `freshAtMount` stops
+    // reading «fresh» the moment one is stored, so a first run is by definition
+    // a page whose token lands while the checklist is up.
+    const page = await mountOptionsPage({
+      settings: { agencyHubBaseUrl: 'https://hub.example' },
+      sessions: [],
+      permissionGranted: true,
+      runtime: {
+        onboarding: FRESH,
+        health: { ok: false, reason: 'unreachable' },
+        identity: { ok: false, reason: 'unreachable' },
+      },
+    });
+    // Nothing stored yet: «Войти» is still true advice at this point.
+    expect(step(page, 'signIn').dataset.stepState).toBe('open');
+
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+        oldValue: '',
+        newValue: 'agency_hub_device_abc123',
+      },
+    });
+    await page.flushAsync();
+
+    expect(step(page, 'signIn').dataset.stepState).toBe('indeterminate');
+    // Not green: a check that never happened is not a pass.
+    expect(step(page, 'signIn').dataset.done).toBe('false');
+    expect(
+      page.document.querySelector<HTMLElement>('[data-onboarding-done="signIn"]')?.hidden,
+    ).toBe(true);
+    expect(
+      page.document.querySelector<HTMLElement>('[data-onboarding-unknown="signIn"]')?.hidden,
+    ).toBe(false);
+    // …and no CTA, because there is nothing for this chatter to do about it.
+    expect(
+      page.document.querySelector<HTMLElement>('[data-onboarding-action="signIn"]')?.hidden,
+    ).toBe(true);
+    // Step 3 is genuinely open, so the card is still up and nothing was stamped.
+    expect(card(page).hidden).toBe(false);
+    expect(page.onboardingDismissals()).toBe(0);
+  });
+
+  it('keeps the card while the Hub step is indeterminate — no durable stamp on an unknown', async () => {
+    // The stamp bar is strictly «every step done». A looser «nothing actionable»
+    // bar opened a real race (codex review P2): a STALE indeterminate identity
+    // plus a freshly-granted permission could durably dismiss the card before
+    // hydration, and a later fresh `unauthorized` could never bring it back —
+    // dismissedAt is forever. While the kernel is down the card stays, wearing
+    // the neutral badge; that unfinishable-checklist state is honest and ends
+    // the moment the kernel answers.
+    const page = await mountOptionsPage({
+      settings: { agencyHubBaseUrl: 'https://hub.example' },
+      state: {
+        accountMappings: { 'acc-1': 'p1' },
+        personaCatalog: [ACTIVE_PERSONA],
+        // The catalog belongs to the credential that is about to land: a stored
+        // catalog whose source does not match the live credential is hidden, so
+        // the persona step only closes once the token below arrives.
+        personaCatalogSource: personaCatalogSource({
+          agencyHubApiKey: '',
+          agencyHubBaseUrl: 'https://hub.example',
+          agencyHubDeviceToken: 'agency_hub_device_abc123',
+        }),
+      },
+      // Same shape as the all-green stamp test above: the session has to ARRIVE
+      // after the mount's storage read, or `knownAccounts` is already populated
+      // and the install never reads «fresh» in the first place.
+      sessions: arrivingSession,
+      permissionGranted: true,
+      runtime: {
+        onboarding: FRESH,
+        health: { ok: false, reason: 'unreachable' },
+        identity: { ok: false, reason: 'unreachable' },
+      },
+    });
+    expect(card(page).hidden).toBe(false);
+    expect(page.onboardingDismissals()).toBe(0);
+
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
+        oldValue: '',
+        newValue: 'agency_hub_device_abc123',
+      },
+    });
+    await page.flushAsync();
+
+    // Credential stored, kernel unreachable: the sign-in step is indeterminate,
+    // so NO durable stamp — the card survives for the moment the kernel answers.
+    expect(page.onboardingDismissals()).toBe(0);
+    expect(card(page).hidden).toBe(false);
+    // The «Статус» headline still refuses to claim readiness meanwhile.
+    const heroNode = page.document.querySelector<HTMLElement>('[data-readiness-hero="true"]');
+    expect(heroNode?.dataset.heroState).toBe('unknown');
+    expect(heroNode?.textContent).toContain(COPY.status.unknownTitle);
   });
 
   it('keeps the card when the durable stamp did not stick', async () => {

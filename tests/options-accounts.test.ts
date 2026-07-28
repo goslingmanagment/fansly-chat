@@ -1044,7 +1044,7 @@ describe('Options page settings and read-only personas', () => {
       expiresAt: Date.now() + 86_400_000,
     });
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain(COPY.hub.deviceTokenActive);
+      expect(document.body.textContent).toContain(COPY.hub.deviceTokenStored);
     });
 
     releaseFirstStorageSet?.();
@@ -1057,7 +1057,7 @@ describe('Options page settings and read-only personas', () => {
     await vi.waitFor(() => {
       expect(connectionTokens.at(-1)).toBe('device-token-new');
     });
-    expect(document.body.textContent).toContain(COPY.hub.deviceTokenActive);
+    expect(document.body.textContent).toContain(COPY.hub.deviceTokenStored);
   });
 
   it('re-tests the hub connection automatically after a successful sign-in', async () => {

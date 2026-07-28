@@ -716,6 +716,115 @@ describe('options «Статус» pane', () => {
     });
   });
 
+  describe('a Hub nobody could reach is «неизвестно», not «не подключено»', () => {
+    it('drops the «подключить» CTA for credentials that are already stored', async () => {
+      // The old two-state filter marked the hub step un-done on ANY non-ok
+      // identity, so a kernel that was merely down produced «подключить Agency
+      // Hub» — advice for a problem this chatter does not have — printed one
+      // line above the pane's own honest «ядро недоступно».
+      const page = await readyMount({
+        runtime: { health: { ok: false, reason: 'unreachable' }, identity: { ok: false, reason: 'unreachable' } },
+      });
+
+      const hub = todo(page).querySelector<HTMLElement>('[data-readiness-step="hub"]');
+      expect(hub?.dataset.readinessState).toBe('indeterminate');
+      expect(hub?.textContent).toContain(COPY.status.stepHubUnknown);
+      expect(todo(page).textContent).not.toContain(COPY.status.stepHub);
+      // No errand, so no button: an unverifiable step is a statement.
+      expect(todo(page).querySelector('[data-readiness-action="hub"]')).toBeNull();
+    });
+
+    it('never flips a DOWN Hub to «Готово к смене» — the worse lie the naive filter would tell', async () => {
+      // Simply DROPPING the unverifiable step leaves `open.length === 0` with
+      // every other prerequisite met, and the hero then declares «Hub на связи»
+      // about a Hub that never answered. Three states exist for exactly this:
+      // an indeterminate step is uncounted AND blocking.
+      const page = await readyMount({
+        runtime: { health: { ok: false, reason: 'unreachable' }, identity: { ok: false, reason: 'unreachable' } },
+      });
+
+      expect(hero(page).dataset.heroState).toBe('unknown');
+      expect(hero(page).textContent).toContain(COPY.status.unknownTitle);
+      expect(hero(page).textContent).not.toContain(COPY.status.readyTitle);
+      expect(hero(page).textContent).not.toContain(COPY.status.readySubtitle);
+      // …and the rail's «✓» answers to the same condition as the headline.
+      expect(
+        page.document.querySelector<HTMLElement>('[data-pane-micro="status"]')?.textContent,
+      ).toBe(COPY.rail.microSetup);
+      // The card stays on screen: an unverifiable prerequisite IS «что мешает».
+      expect(todo(page).hidden).toBe(false);
+    });
+
+    it('keeps the headline count to the steps that are really actionable', async () => {
+      // Hub unreachable AND no persona mapped: ONE action to take, and one line
+      // that cannot be checked. «Нужно 2 действия» would send the chatter after
+      // an errand that does not exist.
+      const page = await readyMount({
+        state: { knownAccounts: ['acc-1'], accountMappings: {}, personaCatalog: [ACTIVE_PERSONA] },
+        runtime: { health: HEALTH_UP, identity: { ok: false, reason: 'unreachable' } },
+      });
+
+      expect(hero(page).dataset.heroState).toBe('route');
+      expect(hero(page).textContent).toContain(COPY.status.actionNeededTitle);
+      // Both lines are listed; only the actionable one carries a button.
+      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(2);
+      expect(todo(page).querySelector('[data-readiness-action="persona"]')).not.toBeNull();
+      expect(todo(page).querySelector('[data-readiness-action="hub"]')).toBeNull();
+    });
+
+    it('keeps «подключить» when NOTHING is stored — an empty install is genuinely open', async () => {
+      // The pane turns a rejected/malformed runtime reply into `unreachable`
+      // too, so without the stored-credential precondition a transport hiccup on
+      // a blank install would read as «неизвестно» instead of «не подключено».
+      const page = await mountOptionsPage({
+        sessions: [LIVE_SESSION],
+        runtime: {
+          onboarding: { version: 1, dismissedAt: Date.parse('2026-07-01T10:00:00.000Z') },
+          identity: () => Promise.reject(new Error('runtime channel closed')),
+        },
+      });
+
+      const hub = todo(page).querySelector<HTMLElement>('[data-readiness-step="hub"]');
+      expect(hub?.dataset.readinessState).toBe('open');
+      expect(hub?.textContent).toContain(COPY.status.stepHub);
+      expect(todo(page).querySelector('[data-readiness-action="hub"]')).not.toBeNull();
+    });
+
+    it('keeps a REJECTED credential actionable — unauthorized is the chatter’s to fix', async () => {
+      const page = await readyMount({
+        runtime: { health: HEALTH_UP, identity: { ok: false, reason: 'unauthorized' } },
+      });
+
+      const hub = todo(page).querySelector<HTMLElement>('[data-readiness-step="hub"]');
+      expect(hub?.dataset.readinessState).toBe('open');
+      expect(hub?.textContent).toContain(COPY.status.stepHub);
+      expect(
+        todo(page).querySelector<HTMLButtonElement>('[data-readiness-action="hub"]')?.textContent,
+      ).toBe(COPY.status.stepHubAction);
+      expect(hero(page).dataset.heroState).toBe('route');
+    });
+
+    it('carries the unknown into the support report instead of dropping it', async () => {
+      // `[ ]` for an unverifiable step reads as «open» and sends support after a
+      // credential nobody had reason to doubt; a missing line reads as «fine».
+      const page = await readyMount({
+        runtime: { health: { ok: false, reason: 'unreachable' }, identity: { ok: false, reason: 'unreachable' } },
+      });
+
+      const writeText = vi.fn(async (_text: string) => undefined);
+      Object.defineProperty(page.window.navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      });
+      statusButton(page, COPY.status.copyReport).click();
+      await page.flushAsync();
+
+      const report = writeText.mock.calls[0]?.[0] as unknown as string;
+      expect(report).toContain(`[?] ${COPY.status.stepHubUnknown} (${COPY.common.unknown})`);
+      expect(report).not.toContain(`[ ] ${COPY.status.stepHub}`);
+    });
+  });
+
   describe('«Проверить всё»', () => {
     it('re-runs the hub and local reads but NEVER getSessionsSnapshot', async () => {
       const page = await readyMount();
