@@ -106,7 +106,7 @@ function createIdRow(
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.className = 'chatgoose-popup-copy';
-  copy.title = `Copy ${id}`;
+  copy.title = `Скопировать ${id}`;
   const value = document.createElement('span');
   value.className = name ? 'chatgoose-popup-kv-name' : 'chatgoose-popup-kv-value';
   value.textContent = shownText;
@@ -118,7 +118,7 @@ function createIdRow(
       ?.writeText(id)
       .then(() => {
         copy.classList.add('chatgoose-popup-copy-done');
-        value.textContent = 'Copied';
+        value.textContent = 'Скопировано';
         if (restoreTimer !== undefined) {
           clearTimeout(restoreTimer);
         }
@@ -142,13 +142,14 @@ function renderUnavailable(): void {
   title.className = 'chatgoose-popup-name';
 
   const message = document.createElement('div');
-  message.textContent = "Couldn't reach ChatGoose. Reopen this popup after it reconnects.";
+  message.textContent =
+    'Не удалось связаться с ChatGoose. Откройте попап заново после переподключения.';
   message.className = 'chatgoose-popup-sub';
 
   // This screen exists BECAUSE the runtime did not answer, so its button keeps
   // the native path: routing through a background operation here would be the
   // one thing we already know is broken.
-  const button = createButton('Open Settings');
+  const button = createButton('Открыть настройки');
   button.addEventListener('click', () => {
     void browser.runtime.openOptionsPage();
   });
@@ -182,21 +183,21 @@ async function render(): Promise<void> {
   pills.className = 'chatgoose-popup-pills';
   pills.append(
     status.connected
-      ? createStatusPill('ok', 'Fansly connected')
-      : createStatusPill('off', 'Fansly not connected'),
+      ? createStatusPill('ok', 'Fansly подключён')
+      : createStatusPill('off', 'Fansly не подключён'),
   );
   // The hub lane earns a pill only when it needs attention — a quiet popup
   // means everything is wired up.
   if (!status.hasApiKey) {
-    pills.append(createStatusPill('warn', 'Agency Hub not set up'));
+    pills.append(createStatusPill('warn', 'Agency Hub не настроен'));
   }
   title.append(eyebrow, name, pills);
 
   const panel = document.createElement('div');
   panel.className = 'chatgoose-popup-panel';
   panel.append(
-    createIdRow('Account', status.accountId, 'No account', status.accountName),
-    createIdRow('Conversation', status.groupId, 'No active chat', status.fanName),
+    createIdRow('Аккаунт', status.accountId, 'Нет аккаунта', status.accountName),
+    createIdRow('Диалог', status.groupId, 'Нет активного чата', status.fanName),
   );
 
   // Quota row: only when this UTC day produced an observation (a generation's
@@ -205,18 +206,18 @@ async function render(): Promise<void> {
   if (quota && (quota.exhausted || quota.remainingRequestsToday !== null)) {
     const quotaRow = document.createElement('div');
     quotaRow.className = 'chatgoose-popup-kv chatgoose-popup-quota';
-    quotaRow.append(createKvLabel('AI quota'));
+    quotaRow.append(createKvLabel('Квота AI'));
     if (quota.exhausted) {
       quotaRow.classList.add('chatgoose-popup-quota-exhausted');
       const value = document.createElement('span');
-      value.textContent = 'Used up — resets at 00:00 UTC';
+      value.textContent = 'Исчерпана — обновится в 00:00 UTC';
       quotaRow.append(value);
     } else {
       const value = document.createElement('span');
       const count = document.createElement('span');
       count.className = 'chatgoose-popup-quota-num';
       count.textContent = String(quota.remainingRequestsToday);
-      value.append(count, ' left today');
+      value.append(count, ' осталось сегодня');
       if ((quota.remainingRequestsToday ?? 0) <= 20) {
         quotaRow.classList.add('chatgoose-popup-quota-low');
       }
@@ -230,7 +231,7 @@ async function render(): Promise<void> {
   // be a second pagehide settings writer). A request that rejected — or answered
   // that it opened nothing — opened nothing, so the native fallback cannot
   // double-open anything.
-  const button = createButton('Open Settings');
+  const button = createButton('Открыть настройки');
   button.addEventListener('click', () => {
     void sendRuntimeRequest('openOptions', { pane: 'status' })
       // A resolved `{opened:false}` is a REFUSAL, not a success: the background

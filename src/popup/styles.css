@@ -217,7 +217,7 @@ body {
 }
 
 /* Copy affordance: the value itself is the button; the glyph whispers until
-   hover. Feedback swaps the text to "Copied" in green. */
+   hover. Feedback swaps the text to «Скопировано» in green. */
 .chatgoose-popup-copy {
   display: inline-flex;
   align-items: center;
