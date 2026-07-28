@@ -65,35 +65,35 @@ describe('Popup', () => {
       throw new Error('Could not establish connection');
     });
     await vi.waitFor(() => {
-      expect(rootText()).toContain("Couldn't reach ChatGoose");
-      expect(rootText()).toContain('Open Settings');
+      expect(rootText()).toContain('Не удалось связаться с ChatGoose');
+      expect(rootText()).toContain('Открыть настройки');
     });
   });
 
   it('shows the Fansly connection state as a pill', async () => {
     await loadPopup(async () => makeStatus({ connected: false }));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Fansly not connected');
+      expect(rootText()).toContain('Fansly не подключён');
     });
 
     await loadPopup(async () => makeStatus({ connected: true }));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Fansly connected');
-      expect(rootText()).not.toContain('Fansly not connected');
+      expect(rootText()).toContain('Fansly подключён');
+      expect(rootText()).not.toContain('Fansly не подключён');
     });
   });
 
   it('flags a missing Agency Hub configuration and stays quiet otherwise', async () => {
     await loadPopup(async () => makeStatus({ hasApiKey: false }));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Agency Hub not set up');
+      expect(rootText()).toContain('Agency Hub не настроен');
     });
 
     await loadPopup(async () => makeStatus({ hasApiKey: true }));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Fansly connected');
+      expect(rootText()).toContain('Fansly подключён');
     });
-    expect(rootText()).not.toContain('Agency Hub not set up');
+    expect(rootText()).not.toContain('Agency Hub не настроен');
   });
 
   it('opens Settings through the runtime on the normal path, natively on the fallback', async () => {
@@ -105,14 +105,14 @@ describe('Popup', () => {
         : makeStatus();
     await loadPopup(async (message) => openOptionsReply(message));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Open Settings');
+      expect(rootText()).toContain('Открыть настройки');
     });
     const runtime = (globalThis as unknown as {
       browser: { runtime: { sendMessage: ReturnType<typeof vi.fn>; openOptionsPage: ReturnType<typeof vi.fn> } };
     }).browser.runtime;
     const settingsButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-button'),
-    ).find((button) => button.textContent === 'Open Settings');
+    ).find((button) => button.textContent === 'Открыть настройки');
     settingsButton?.click();
     expect(runtime.sendMessage).toHaveBeenLastCalledWith({ type: 'openOptions', pane: 'status' });
     expect(runtime.openOptionsPage).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe('Popup', () => {
       throw new Error('Could not establish connection');
     });
     await vi.waitFor(() => {
-      expect(rootText()).toContain("Couldn't reach ChatGoose");
+      expect(rootText()).toContain('Не удалось связаться с ChatGoose');
     });
     const fallbackRuntime = (globalThis as unknown as {
       browser: { runtime: { openOptionsPage: ReturnType<typeof vi.fn> } };
@@ -141,13 +141,13 @@ describe('Popup', () => {
         : makeStatus(),
     );
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Open Settings');
+      expect(rootText()).toContain('Открыть настройки');
     });
     const runtime = (globalThis as unknown as {
       browser: { runtime: { openOptionsPage: ReturnType<typeof vi.fn> } };
     }).browser.runtime;
     Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-button'))
-      .find((button) => button.textContent === 'Open Settings')
+      .find((button) => button.textContent === 'Открыть настройки')
       ?.click();
 
     await vi.waitFor(() => {
@@ -166,15 +166,15 @@ describe('Popup', () => {
     await vi.waitFor(() => {
       expect(rootText()).toContain('7370…8720');
     });
-    expect(rootText()).toContain('No active chat');
+    expect(rootText()).toContain('Нет активного чата');
 
     const button = document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy');
-    expect(button?.title).toBe('Copy 737077689877278720');
+    expect(button?.title).toBe('Скопировать 737077689877278720');
     button?.click();
 
     expect(writeText).toHaveBeenCalledWith('737077689877278720');
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Copied');
+      expect(rootText()).toContain('Скопировано');
     });
   });
 
@@ -197,12 +197,12 @@ describe('Popup', () => {
     expect(rootText()).not.toContain('7370…8720');
 
     const button = document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy');
-    expect(button?.title).toBe('Copy 737077689877278720');
+    expect(button?.title).toBe('Скопировать 737077689877278720');
     button?.click();
 
     expect(writeText).toHaveBeenCalledWith('737077689877278720');
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Copied');
+      expect(rootText()).toContain('Скопировано');
     });
   });
 
@@ -218,9 +218,9 @@ describe('Popup', () => {
       }),
     );
     await vi.waitFor(() => {
-      expect(rootText()).toContain('AI quota');
+      expect(rootText()).toContain('Квота AI');
       expect(rootText()).toContain('494');
-      expect(rootText()).toContain('left today');
+      expect(rootText()).toContain('осталось сегодня');
     });
   });
 
@@ -236,7 +236,7 @@ describe('Popup', () => {
       }),
     );
     await vi.waitFor(() => {
-      expect(rootText()).toContain('resets at 00:00 UTC');
+      expect(rootText()).toContain('обновится в 00:00 UTC');
     });
   });
 });

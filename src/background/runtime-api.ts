@@ -458,7 +458,7 @@ export function registerRuntimeApi({
             mappedPersonaSource: null,
             compareCardCount: 0,
             compareDraftCount: 0,
-            accountLabel: 'Not connected',
+            accountLabel: 'Не подключено',
             accountName: null,
             fanName: null,
             aiQuota: null,
@@ -521,9 +521,12 @@ export function registerRuntimeApi({
           mappedPersonaSource,
           compareCardCount: compareDraftCount + (mappedPersonalityId ? 1 : 0),
           compareDraftCount,
+          // Popup-only headline. The persona name is DATA and stays verbatim;
+          // the two fallbacks are structural sentinels rendered straight to the
+          // chatter, so they speak Russian like the rest of the UI.
           accountLabel:
             mappedPersonalityName ??
-            (accountId ? 'Unmapped account' : 'Not connected'),
+            (accountId ? 'Аккаунт без персоны' : 'Не подключено'),
           accountName: formatSessionAccountName(session),
           // 'fan' is the operations-side placeholder when no real name
           // resolved — a placeholder is not a name.
