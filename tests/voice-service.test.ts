@@ -111,6 +111,7 @@ function createHarness(options: {
   getAccountNames?: FanslyClient['getAccountNames'];
   getState?: () => Promise<PersistedState>;
   assertPendingCreate?: () => Promise<void>;
+  onCapabilityResolvedLate?: (tabId: number) => void;
   now?: () => number;
   randomUUID?: () => string;
 } = {}) {
@@ -223,6 +224,7 @@ function createHarness(options: {
     tabContexts,
     storageCoordinator: { getState: vi.fn(options.getState ?? (async () => storageState())) },
     voiceAttempts: { assertPendingCreate },
+    onCapabilityResolvedLate: options.onCapabilityResolvedLate,
     randomUUID: vi.fn(options.randomUUID ?? (() => `attach-token-${(attachTokenCounter += 1)}`)),
     now: options.now,
   });
@@ -233,6 +235,7 @@ function createHarness(options: {
     fanslyClient,
     streamFeature,
     currentContext,
+    activeSession,
     assertPendingCreate,
     sent,
     emit: (message: BackgroundPortMessage) => sent.push(message),
@@ -1383,6 +1386,16 @@ describe('VoiceService capability', () => {
     expect(harness.hub.resolvePageForUsername).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps failing closed when the pages request errors on the budgeted path', async () => {
+    const harness = createHarness({
+      resolvePageForUsername: vi.fn(async () => {
+        throw new Error('pages unavailable');
+      }),
+    });
+
+    await expect(harness.service.resolveCapabilityFast(TAB_ID, 800)).resolves.toBe(false);
+  });
+
   it('bypasses a warm capability cache after the Hub credential changes', async () => {
     let currentState = storageState();
     const harness = createHarness({
@@ -1400,5 +1413,279 @@ describe('VoiceService capability', () => {
     await expect(harness.service.resolveCapability(TAB_ID)).resolves.toBe(true);
 
     expect(harness.hub.resolvePageForUsername).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** A probe whose completion the test controls: the budget race is then decided
+ * by explicit ordering instead of two clocks the test has to keep apart. */
+function controllableProbe(): {
+  resolvePageForUsername: AgencyHubClient['resolvePageForUsername'];
+  finish: (outcome: { capable: boolean } | { error: Error }) => void;
+} {
+  let settle: ((outcome: { capable: boolean } | { error: Error }) => void) | null = null;
+  return {
+    resolvePageForUsername: vi.fn<AgencyHubClient['resolvePageForUsername']>(
+      () => new Promise((resolve, reject) => {
+        settle = (outcome) => {
+          if ('error' in outcome) {
+            reject(outcome.error);
+            return;
+          }
+          resolve({ pageLabel: 'creator-fs', voiceNotesCapable: outcome.capable });
+        };
+      }),
+    ),
+    finish: (outcome) => {
+      if (!settle) {
+        throw new Error('the probe has not started yet');
+      }
+      settle(outcome);
+    },
+  };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+describe('VoiceService capability budget', () => {
+  const BUDGET_MS = 800;
+
+  it('returns the real verdict and clears the budget timer when the probe wins', async () => {
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+    });
+
+    vi.useFakeTimers();
+    try {
+      const fast = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      probe.finish({ capable: true });
+
+      await expect(fast).resolves.toBe(true);
+      // The budget timer (and the probe's own abort timer) are cleared the
+      // moment the probe wins — no stray timer keeps the MV3 worker's queue
+      // warm, and no second settle can flip an answered race.
+      expect(vi.getTimerCount()).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(BUDGET_MS * 2);
+      expect(late).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('answers false at the budget, then re-pushes when the slow probe succeeds', async () => {
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+    });
+
+    vi.useFakeTimers();
+    try {
+      const fast = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+
+      // FAIL CLOSED: the budget never claims a capability the kernel did not
+      // confirm. The kernel stays authoritative either way — it re-checks
+      // every gate on POST; this only moves WHEN the hint arrives.
+      await expect(fast).resolves.toBe(false);
+      expect(late).not.toHaveBeenCalled();
+
+      // The probe still runs to completion in the background: it also resolves
+      // the session's canonical identity, so losing the race must not cancel it.
+      probe.finish({ capable: true });
+      await flushMicrotasks();
+      expect(late).toHaveBeenCalledWith(TAB_ID);
+
+      // The re-push this callback triggers hits the warm capability cache the
+      // successful probe just wrote — that is why the callback cannot loop.
+      harness.hub.resolvePageForUsername.mockClear();
+      await expect(
+        harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS),
+      ).resolves.toBe(true);
+      expect(harness.hub.resolvePageForUsername).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-pushes after a late probe that says NO — the identity it resolved still matters', async () => {
+    // A callback fired only on a CHANGED verdict would drop the identity
+    // correction for every non-voice account (false == false), leaving content
+    // on the legacy account id until some unrelated refresh.
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+    });
+    // Mirrors the composition root: the coordinator that owns the re-push is
+    // constructed after the service, so the callback arrives via the setter.
+    harness.service.setOnCapabilityResolvedLate(late);
+
+    vi.useFakeTimers();
+    try {
+      const fast = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+      await expect(fast).resolves.toBe(false);
+
+      probe.finish({ capable: false });
+      await flushMicrotasks();
+      expect(late).toHaveBeenCalledWith(TAB_ID);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never re-pushes after a late probe FAILURE', async () => {
+    // A failure caches nothing, so a re-push would probe again and loop.
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+    });
+
+    vi.useFakeTimers();
+    try {
+      const fast = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+      await expect(fast).resolves.toBe(false);
+
+      probe.finish({ error: new Error('hub unreachable') });
+      await flushMicrotasks();
+      expect(late).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('DOES re-push after a late failure when the probe resolved the identity on the way down', async () => {
+    // The loop-prevention rule (failures never fire the callback) has one
+    // honest exception: the dying probe already resolved the session's
+    // canonical identity. Content must not sit on the legacy account id until
+    // an unrelated event. Loop-safe: the session memoizes its resolution, so
+    // the follow-up flight sees identityBefore === identityAfter and stays
+    // silent (codex review P2 on this PR).
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+    });
+    harness.activeSession.resolvedAccountId = null;
+
+    vi.useFakeTimers();
+    try {
+      const fast = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+      await expect(fast).resolves.toBe(false);
+
+      // The probe's identity side effect landed before the hub call died.
+      harness.activeSession.resolvedAccountId = 'creator-1';
+      probe.finish({ error: new Error('hub 500') });
+      await flushMicrotasks();
+      expect(late).toHaveBeenCalledWith(TAB_ID);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a joiner with a CHANGED hub source starts a fresh flight instead of riding the stale probe', async () => {
+    // After a base-URL/bearer change the in-flight probe describes the WRONG
+    // hub: joining it would post the old source's verdict with no late
+    // callback for the new one (codex review P2 on this PR). The single-flight
+    // entry carries the source fingerprint it was minted for.
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const settingsHolder = { bearer: 'device-token-A' };
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+      getState: async () => {
+        const state = storageState();
+        state.settings.agencyHubDeviceToken = settingsHolder.bearer;
+        return state;
+      },
+    });
+
+    vi.useFakeTimers();
+    try {
+      const first = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      expect(probe.resolvePageForUsername).toHaveBeenCalledTimes(1);
+
+      // The hub credential rotates while the first probe is still in flight.
+      settingsHolder.bearer = 'device-token-B';
+      const second = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      // NOT a join: the new source runs its own probe.
+      expect(probe.resolvePageForUsername).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+      await expect(first).resolves.toBe(false);
+      await expect(second).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('answers a warm capability cache without touching the Hub or the session', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS),
+    ).resolves.toBe(true);
+    harness.hub.resolvePageForUsername.mockClear();
+    vi.mocked(harness.fanslyClient.getAuthenticatedAccount).mockClear();
+
+    await expect(
+      harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS),
+    ).resolves.toBe(true);
+
+    expect(harness.hub.resolvePageForUsername).not.toHaveBeenCalled();
+    expect(harness.fanslyClient.getAuthenticatedAccount).not.toHaveBeenCalled();
+  });
+
+  it('shares ONE probe and ONE late re-push between concurrent callers', async () => {
+    // The popup status and tab:init state assembly ask at the same time on a
+    // cold worker; two identical Hub round-trips would be pure waste, and two
+    // late callbacks would double the tab-state churn.
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+    });
+
+    vi.useFakeTimers();
+    try {
+      const fromPopup = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      const fromTabInit = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+
+      await expect(fromPopup).resolves.toBe(false);
+      await expect(fromTabInit).resolves.toBe(false);
+
+      probe.finish({ capable: true });
+      await flushMicrotasks();
+
+      expect(harness.hub.resolvePageForUsername).toHaveBeenCalledTimes(1);
+      expect(late).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

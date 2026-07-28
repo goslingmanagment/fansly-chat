@@ -786,6 +786,13 @@ export interface OperationProgressPayload {
 export interface TabUiState {
   tabId: number;
   accountId: string | null;
+  /** Every id this state's accountId is KNOWN to alias (legacy + canonical of
+   * the same session). Content uses it to tell an identity REFINEMENT (the
+   * budgeted probe resolved the canonical id after the first push) from a real
+   * account switch — only the latter may tear down coach/voice/board state.
+   * Wiping a typed coach question over a legacy→canonical re-push was the
+   * review finding that minted this field. */
+  accountIdAliases?: string[];
   groupId: string | null;
   hasAvailableSummary: boolean;
   connected: boolean;

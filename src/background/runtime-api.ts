@@ -9,6 +9,7 @@ import {
   SPENDERS_BUILD_TIMEOUT_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_RESOLVE_TIMEOUT_MS,
+  VOICE_CAPABILITY_BUDGET_MS,
 } from '../shared/constants.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError, toUserError } from '../shared/errors.js';
@@ -222,8 +223,9 @@ export interface RuntimeApiDeps {
   emitToTab?: (tabId: number, message: SpendersBuildPayload) => void;
   /** A successful live test is a reliable signal to refresh the persona catalog. */
   onAgencyHubReady?: () => void | Promise<void>;
-  /** Fail-closed page capability resolver shared with tab:init state. */
-  voiceService?: Pick<VoiceService, 'resolveCapability'>;
+  /** Fail-closed page capability resolver shared with tab:init state. The
+   * popup takes the budgeted variant: a cold probe must not hold first paint. */
+  voiceService?: Pick<VoiceService, 'resolveCapabilityFast'>;
   /** Background-owned session repository for acknowledged voice custody. */
   voiceAttempts: Pick<VoiceAttemptRepository, 'load' | 'save' | 'remove'>;
 }
@@ -495,7 +497,13 @@ export function registerRuntimeApi({
           : null;
         const connected = Boolean(session?.connected);
         const compareDraftCount = getCompareDraftCount();
-        const voiceNotesCapable = await voiceService?.resolveCapability(tabId) ?? false;
+        // Budgeted: a cold capability probe used to hold the whole popup empty
+        // for up to AGENCY_HUB_PREFETCH_TIMEOUT_MS. Past the budget the hint is
+        // false (fail closed) and the finished probe re-pushes tab state.
+        const voiceNotesCapable = await voiceService?.resolveCapabilityFast(
+          tabId,
+          VOICE_CAPABILITY_BUDGET_MS,
+        ) ?? false;
 
         return {
           tabId,
