@@ -2042,7 +2042,12 @@ export class OverlayController {
 
     const error = document.createElement('div');
     error.className = 'chatgoose-coach-error';
-    error.textContent = `Не получилось закончить ответ (${item.errorCode}).`;
+    // A deliberate cancel is the USER's action, not a failure — naming it
+    // «не получилось» (with a raw English token on top) blames the panel for
+    // what the person just did. Kernel/internal codes keep the failure copy.
+    error.textContent = item.errorCode === 'cancelled'
+      ? 'Остановлено вами.'
+      : `Не получилось закончить ответ (${item.errorCode}).`;
     wrapper.append(error);
 
     if (item.retryable) {
