@@ -234,6 +234,13 @@ export const VOICE_SCRIPT_TIMEOUT_MS = QUICK_OPERATION_TIMEOUT_MS;
 export const VOICE_CREATE_TIMEOUT_MS = 30_000;
 /** Free status/audio reads are single-flight and manually retryable. */
 export const VOICE_RETRIEVAL_TIMEOUT_MS = 15_000;
+/** First-paint budget for the voice capability hint. The probe itself keeps
+ * the full AGENCY_HUB_PREFETCH_TIMEOUT_MS, but neither the popup nor the
+ * injected toolbar may wait that long for a cold one: past this budget the
+ * hint is reported fail-closed (false) and the finished probe re-pushes tab
+ * state. Purely a rendering deadline — the kernel re-checks every gate on
+ * POST, so a late hint never widens what is allowed. */
+export const VOICE_CAPABILITY_BUDGET_MS = 800;
 
 // ─── Earnings ────────────────────────────────────────────────────────────
 
