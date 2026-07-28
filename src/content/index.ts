@@ -2915,12 +2915,26 @@ export class ChatGooseContentApp {
       case 'settings:changed':
       case 'mapping:changed': {
         const personaChanged = this.personaIdentityChanged(message.state);
+        // An id that differs but ALIASES the previous one is an identity
+        // REFINEMENT: the background's budgeted capability probe resolved the
+        // canonical account id after the first push (legacy → canonical, same
+        // creator). Tearing coach/voice/board down for it wiped a typed coach
+        // question in the 0.8–5s cold-start window — the review finding that
+        // minted accountIdAliases. Only a REAL switch tears down.
+        const previousAccountId = this.tabState?.accountId ?? null;
+        const accountRefined = Boolean(
+          previousAccountId &&
+          previousAccountId !== message.state.accountId &&
+          (message.state.accountIdAliases ?? []).includes(previousAccountId),
+        );
         const accountChanged = Boolean(
-          this.tabState && this.tabState.accountId !== message.state.accountId,
+          this.tabState &&
+          previousAccountId !== message.state.accountId &&
+          !accountRefined,
         );
         if (
           message.type === 'settings:changed' ||
-          this.tabState?.accountId !== message.state.accountId
+          (previousAccountId !== message.state.accountId && !accountRefined)
         ) {
           this.boardContextGeneration += 1;
           this.board.invalidateContext();

@@ -235,6 +235,7 @@ function createHarness(options: {
     fanslyClient,
     streamFeature,
     currentContext,
+    activeSession,
     assertPendingCreate,
     sent,
     emit: (message: BackgroundPortMessage) => sent.push(message),
@@ -1564,6 +1565,77 @@ describe('VoiceService capability budget', () => {
       probe.finish({ error: new Error('hub unreachable') });
       await flushMicrotasks();
       expect(late).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('DOES re-push after a late failure when the probe resolved the identity on the way down', async () => {
+    // The loop-prevention rule (failures never fire the callback) has one
+    // honest exception: the dying probe already resolved the session's
+    // canonical identity. Content must not sit on the legacy account id until
+    // an unrelated event. Loop-safe: the session memoizes its resolution, so
+    // the follow-up flight sees identityBefore === identityAfter and stays
+    // silent (codex review P2 on this PR).
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+    });
+    harness.activeSession.resolvedAccountId = null;
+
+    vi.useFakeTimers();
+    try {
+      const fast = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+      await expect(fast).resolves.toBe(false);
+
+      // The probe's identity side effect landed before the hub call died.
+      harness.activeSession.resolvedAccountId = 'creator-1';
+      probe.finish({ error: new Error('hub 500') });
+      await flushMicrotasks();
+      expect(late).toHaveBeenCalledWith(TAB_ID);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a joiner with a CHANGED hub source starts a fresh flight instead of riding the stale probe', async () => {
+    // After a base-URL/bearer change the in-flight probe describes the WRONG
+    // hub: joining it would post the old source's verdict with no late
+    // callback for the new one (codex review P2 on this PR). The single-flight
+    // entry carries the source fingerprint it was minted for.
+    const late = vi.fn();
+    const probe = controllableProbe();
+    const settingsHolder = { bearer: 'device-token-A' };
+    const harness = createHarness({
+      resolvePageForUsername: probe.resolvePageForUsername,
+      onCapabilityResolvedLate: late,
+      getState: async () => {
+        const state = storageState();
+        state.settings.agencyHubDeviceToken = settingsHolder.bearer;
+        return state;
+      },
+    });
+
+    vi.useFakeTimers();
+    try {
+      const first = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      expect(probe.resolvePageForUsername).toHaveBeenCalledTimes(1);
+
+      // The hub credential rotates while the first probe is still in flight.
+      settingsHolder.bearer = 'device-token-B';
+      const second = harness.service.resolveCapabilityFast(TAB_ID, BUDGET_MS);
+      await flushMicrotasks();
+      // NOT a join: the new source runs its own probe.
+      expect(probe.resolvePageForUsername).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(BUDGET_MS);
+      await expect(first).resolves.toBe(false);
+      await expect(second).resolves.toBe(false);
     } finally {
       vi.useRealTimers();
     }

@@ -1142,6 +1142,10 @@ describe(`OperationCoordinator (${part})`, () => {
       expect.objectContaining({
         state: expect.objectContaining({
           accountId: 'resolved-1',
+          // The alias set links the two pushes: content uses it to read this
+          // flip as an identity REFINEMENT of the same creator, not an account
+          // switch — without it the re-push tore down an open coach.
+          accountIdAliases: expect.arrayContaining(['legacy-1', 'resolved-1']),
           voiceNotesCapable: true,
         }),
       }),

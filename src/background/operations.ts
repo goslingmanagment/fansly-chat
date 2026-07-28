@@ -839,6 +839,11 @@ export class OperationCoordinator {
       this.sessionStore.getAccountIdForTab(tabId) ?? context.accountId;
     const accountId = session?.resolvedAccountId ?? legacyAccountId;
     this.tabContexts.setAccount(tabId, accountId);
+    // Both ids of THIS session, so content can tell the budgeted-probe
+    // legacy→canonical refinement from a real account switch (see
+    // TabUiState.accountIdAliases).
+    const accountIdAliases = [legacyAccountId, session?.resolvedAccountId ?? null]
+      .filter((id): id is string => Boolean(id));
 
     const rawMappedPersonalityId = resolveMappedPersonalityId(
       storage.accountMappings,
@@ -862,6 +867,7 @@ export class OperationCoordinator {
     return {
       tabId,
       accountId,
+      accountIdAliases,
       groupId: context.groupId,
       hasAvailableSummary: hasAvailableFanSummary(
         storage,

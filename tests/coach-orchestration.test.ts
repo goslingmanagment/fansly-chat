@@ -1686,6 +1686,43 @@ describe('Coach orchestration', () => {
     });
   });
 
+  it('a legacy→canonical identity refinement keeps the open coach; a real switch resets it', async () => {
+    // The budgeted capability probe can resolve the canonical account id AFTER
+    // the first tab:state push, so a follow-up push flips accountId
+    // legacy→canonical for the SAME creator. Treating that as an account
+    // switch wiped an open coach (typed question included) in the 0.8–5s
+    // cold-start window — the review finding that minted accountIdAliases.
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    const before = app.activeCoachSession;
+    expect(before).not.toBeNull();
+
+    app.handlePortMessage({
+      type: 'tab:state',
+      state: readyState({
+        accountId: 'canonical-9',
+        accountIdAliases: ['account-1', 'canonical-9'],
+      }),
+    });
+    await flush();
+    // Refinement: same creator, sharper id — the open session survives intact.
+    expect(app.activeCoachSession).toBe(before);
+    expect(app.coachOverlayModel).not.toBeNull();
+
+    app.handlePortMessage({
+      type: 'tab:state',
+      state: readyState({
+        accountId: 'other-creator-2',
+        accountIdAliases: ['other-creator-2'],
+      }),
+    });
+    await flush();
+    // A REAL switch (no alias linkage) still tears the coach down — the
+    // cross-account safety rule is untouched.
+    expect(app.coachOverlayModel).toBeNull();
+  });
+
   it('a dispatched CANNED turn torn down by route change / disconnect leaves the composer empty (round 11)', async () => {
     const app = await makeReadyApp();
     app.openCoach();

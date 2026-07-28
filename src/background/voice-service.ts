@@ -423,8 +423,13 @@ export class VoiceService {
   private readonly pageBindingByTabId = new Map<number, TabPageBinding>();
   /** Single-flight budgeted probes: the popup and tab:init state assembly ask
    * concurrently on a cold worker and must share ONE probe (and one late
-   * re-push), not race two identical Hub round-trips. */
-  private readonly fastCapabilityProbesByTab = new Map<number, Promise<boolean>>();
+   * re-push), not race two identical Hub round-trips. Entries carry the hub
+   * source fingerprint they were minted for — a joiner with a DIFFERENT
+   * base URL/bearer starts a fresh flight instead of riding a stale one. */
+  private readonly fastCapabilityProbesByTab = new Map<
+    number,
+    { race: Promise<boolean>; sourceFingerprint: string }
+  >();
   private onCapabilityResolvedLate: ((tabId: number) => void) | null;
   private readonly randomUUID: () => string;
   private readonly now: () => number;
@@ -531,9 +536,16 @@ export class VoiceService {
    * reach content without a reload. This changes WHEN the hint arrives, never
    * WHETHER a paid call is allowed: the kernel re-checks every gate on POST. */
   async resolveCapabilityFast(tabId: number, budgetMs: number): Promise<boolean> {
+    // The single-flight entry is scoped to the CURRENT hub source: after a
+    // base-URL/bearer change a joiner must not ride a probe that captured the
+    // old settings — its verdict describes the wrong hub (codex review P2).
+    // getState is memoized, so this costs microtasks, not I/O.
+    const settings = (await this.deps.storageCoordinator.getState()).settings;
+    const sourceFingerprint =
+      `${normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl)}|${resolveHubBearer(settings)}`;
     const pending = this.fastCapabilityProbesByTab.get(tabId);
-    if (pending) {
-      return await pending;
+    if (pending && pending.sourceFingerprint === sourceFingerprint) {
+      return await pending.race;
     }
     // Holder: `settle` must be able to clear a timer that is only scheduled
     // after the race promise (and therefore after `settle`) exists.
@@ -550,6 +562,22 @@ export class VoiceService {
         resolve(value);
       };
     });
+    const entry = { race, sourceFingerprint };
+    // Identity snapshot BEFORE the probe: a late FAILURE normally must not fire
+    // the callback (nothing was cached — it would loop probe → refresh →
+    // probe), but when the dying probe already resolved the session's canonical
+    // identity, that correction must still reach content. The session memoizes
+    // its resolution, so the follow-up probe sees no further change and the
+    // loop terminates after exactly one refresh (codex review P2).
+    const identityBefore =
+      this.deps.sessionStore.getSessionForTab(tabId)?.resolvedAccountId ?? null;
+    const dropEntry = (): void => {
+      // Entry-aware delete: a stale-source flight finishing late must never
+      // evict the FRESH flight that replaced it under the same tabId.
+      if (this.fastCapabilityProbesByTab.get(tabId) === entry) {
+        this.fastCapabilityProbesByTab.delete(tabId);
+      }
+    };
     // Both outcomes settle from INSIDE their own branch. Reading `settled`
     // after `await Promise.race(...)` would lose the late callback whenever the
     // probe's continuation runs in the microtask gap after the budget fired.
@@ -560,7 +588,7 @@ export class VoiceService {
         // Drop the single-flight entry BEFORE the callback: the re-push it
         // triggers re-enters resolveCapabilityFast and must get a fresh
         // (cache-backed) answer, not this already-settled budget verdict.
-        this.fastCapabilityProbesByTab.delete(tabId);
+        dropEntry();
         if (budgetAlreadyAnswered) {
           // A successful probe populated the 5-minute capability cache, so the
           // refresh this triggers resolves from cache instead of re-probing —
@@ -569,14 +597,20 @@ export class VoiceService {
         }
       },
       () => {
-        // A FAILED probe caches nothing. Firing the callback here would loop
-        // probe → refresh → probe, so a failure only ever fails closed.
         settle(false);
-        this.fastCapabilityProbesByTab.delete(tabId);
+        dropEntry();
+        // See identityBefore: fail closed, EXCEPT when the probe resolved the
+        // canonical identity on its way down — push that correction through or
+        // content keeps the legacy account id until an unrelated event.
+        const identityAfter =
+          this.deps.sessionStore.getSessionForTab(tabId)?.resolvedAccountId ?? null;
+        if (identityAfter !== identityBefore) {
+          this.onCapabilityResolvedLate?.(tabId);
+        }
       },
     );
     budget.timer = globalThis.setTimeout(() => settle(false), budgetMs);
-    this.fastCapabilityProbesByTab.set(tabId, race);
+    this.fastCapabilityProbesByTab.set(tabId, entry);
     return await race;
   }
 
