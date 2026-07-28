@@ -850,11 +850,26 @@
 
 /* ─── Toast ──────────────────────────────────────────────────── */
 
+/* The ChatGoose stacking map (pinned by tests/styles-layering.test.ts):
+ *
+ *   2147483647  #chatgoose-toast-root         feedback, always on top
+ *   2147483646  #chatgoose-cheatsheet-root    reference sheet
+ *   2147483645  #chatgoose-overlay-root       ┐ same band: their relative
+ *   2147483645  #chatgoose-board-root         ├ order is DOM order, exactly
+ *   2147483645  #chatgoose-voice-studio-root  ┘ as it was before the re-band
+ *   2147483644  #chatgoose-launcher-root      floating $ launcher
+ *
+ * Toasts must be STRICTLY topmost: the overlay backdrop has
+ * `pointer-events: auto`, so a toast sharing or losing the band is both
+ * dimmed and unclickable — and some actions (Рекап ▾ → «Обновить переписку»)
+ * have the toast as their ONLY feedback. Root creation order matters here:
+ * the toast root is created earliest (content boot), every other root later,
+ * so at an equal z-index a later sibling would win — toast must never tie. */
 #chatgoose-toast-root {
   position: fixed;
   right: 16px;
   bottom: 16px;
-  z-index: 2147483645;
+  z-index: 2147483647;
   display: grid;
   gap: 8px;
   font-family: var(--chatgoose-font);
@@ -928,10 +943,12 @@
 
 /* ─── Overlay ────────────────────────────────────────────────── */
 
+/* Below the cheatsheet, above the launcher; ties with board/voice-studio by
+ * DOM order (see the stacking map at #chatgoose-toast-root). */
 #chatgoose-overlay-root {
   position: fixed;
   inset: 0;
-  z-index: 2147483646;
+  z-index: 2147483645;
   isolation: isolate;
   pointer-events: none;
 }
@@ -2251,10 +2268,12 @@ body.chatgoose-voice-studio-lock {
 
 /* ─── Hotkey cheatsheet (?) ──────────────────────────────────────────────── */
 
+/* Above every other surface, below the toasts (see the stacking map at
+ * #chatgoose-toast-root). */
 #chatgoose-cheatsheet-root {
   position: fixed;
   inset: 0;
-  z-index: 2147483647;
+  z-index: 2147483646;
   pointer-events: none;
 }
 
@@ -2341,10 +2360,12 @@ body.chatgoose-voice-studio-lock {
 
 /* ─── Spenders board ($ / ⌘⇧M) ───────────────────────────────────────────── */
 
+/* Same band as the overlay/voice studio — the tie is DOM order, unchanged by
+ * the re-band (see the stacking map at #chatgoose-toast-root). */
 #chatgoose-board-root {
   position: fixed;
   inset: 0;
-  z-index: 2147483646;
+  z-index: 2147483645;
   pointer-events: none;
 }
 
@@ -3377,7 +3398,7 @@ body.chatgoose-voice-studio-lock {
 #chatgoose-voice-studio-root {
   position: fixed;
   inset: 0;
-  z-index: 2147483646;
+  z-index: 2147483645;
   isolation: isolate;
   pointer-events: none;
 }
