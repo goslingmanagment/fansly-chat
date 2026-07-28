@@ -2324,6 +2324,13 @@ describe(`OperationCoordinator (${part})`, () => {
     ]);
     const kernelGateway = {
       isConfigured: vi.fn(() => true),
+      // Note in passing: every abort mock in this suite rejects with an
+      // AbortError on abort — which until the abort-classification fix
+      // CONTRADICTED the real gateway. The vendored SDK swallows aborts, so
+      // `handle.done` resolved and the gateway threw `hub_stream_truncated`
+      // (CG-HUB-16) instead. These mocks pinned the desired-but-false
+      // behaviour green; the gateway now matches them
+      // (`tests/kernel-feature-gateway.test.ts`, «abort classification»).
       streamFeature: vi.fn(
         (
           _settings: unknown,
