@@ -311,7 +311,24 @@ interface StatusReportModel {
      * stop at the row: the report still printed the zero-account claim. */
     fansly: boolean;
   };
-  readiness: Array<{ key: string; label: string; done: boolean }>;
+  readiness: ReadinessStep[];
+}
+
+/**
+ * A readiness prerequisite has THREE answers, not two. `open` means «this is
+ * really missing and here is the button»; `done` means «checked and satisfied».
+ * `indeterminate` is the third: the datum that would settle the step could not
+ * be read at all. A two-state model has to fold it into one of the lies — either
+ * «подключить Agency Hub» about credentials that are already stored, or (worse,
+ * if the step is simply dropped) «Готово к смене · Hub на связи» about a Hub
+ * that never answered.
+ */
+type ReadinessStepState = 'done' | 'open' | 'indeterminate';
+
+interface ReadinessStep {
+  key: string;
+  label: string;
+  state: ReadinessStepState;
 }
 
 /** A plain-text snapshot of this page for a support message. «Неизвестно» is
@@ -400,7 +417,15 @@ export function buildStatusReport(model: StatusReportModel): string {
 
   lines.push('');
   for (const step of model.readiness) {
-    lines.push(`[${step.done ? 'x' : ' '}] ${step.label}`);
+    // Three marks for three states. An unverifiable step used to print as `[ ]`
+    // — indistinguishable from a genuinely open one — which sent support after
+    // a credential nobody had reason to doubt. `[?]` + «неизвестно» keeps the
+    // pane's promise inside the snapshot too.
+    if (step.state === 'indeterminate') {
+      lines.push(`[?] ${step.label} (${unknown})`);
+      continue;
+    }
+    lines.push(`[${step.state === 'done' ? 'x' : ' '}] ${step.label}`);
   }
 
   return lines.join('\n');
@@ -710,7 +735,12 @@ async function render(): Promise<void> {
     hint: string,
     actionLabel: string,
     onAction: () => void,
-  ): { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement } => {
+  ): {
+    root: HTMLElement;
+    action: HTMLButtonElement;
+    done: HTMLElement;
+    unknown: HTMLElement;
+  } => {
     const item = document.createElement('li');
     item.className = 'chatgoose-onboarding-step';
     item.dataset.onboardingStep = key;
@@ -734,9 +764,14 @@ async function render(): Promise<void> {
     const done = createBadge(COPY.onboarding.stepDone, 'green');
     done.dataset.onboardingDone = key;
     done.hidden = true;
-    item.append(number, body, action, done);
+    // …and its NEUTRAL sibling for the third answer: the step could not be
+    // checked at all. Deliberately not green — an unread check is not a pass.
+    const unknown = createBadge(COPY.onboarding.stepUnknown, 'neutral');
+    unknown.dataset.onboardingUnknown = key;
+    unknown.hidden = true;
+    item.append(number, body, action, done, unknown);
     onboardingList.append(item);
-    return { root: item, action, done };
+    return { root: item, action, done, unknown };
   };
 
   // Step order per E41's own flow: the host permission comes BEFORE sign-in,
@@ -745,7 +780,7 @@ async function render(): Promise<void> {
   // into the failure).
   const onboardingSteps: Record<
     OnboardingStepKey,
-    { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement }
+    { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement; unknown: HTMLElement }
   > = {
     access: buildOnboardingStep(
       'access',
@@ -1964,10 +1999,14 @@ async function render(): Promise<void> {
       hubSignOutConfirmRow.hidden = true;
     }
 
+    // `hasToken` is a STRING check — it knows the token exists, never that the
+    // kernel still honours it. A revoked token is still a string (and it also
+    // shadows a working legacy key, `resolveHubBearer` prefers it), so the pill
+    // may only claim custody: «сохранён». Liveness is the «Доступ» row's word.
     setStatusPill(
       hubTokenPill,
       hasToken ? 'ok' : 'neutral',
-      hasToken ? COPY.hub.deviceTokenActive : COPY.hub.deviceTokenMissing,
+      hasToken ? COPY.hub.deviceTokenStored : COPY.hub.deviceTokenMissing,
     );
     // The renewal note belongs to the token's STATE (right edge of line one);
     // provenance is line two, and the «Выпущен» row disappears with the token.
@@ -2617,43 +2656,97 @@ async function render(): Promise<void> {
     return COPY.status.actionWordMany;
   };
 
+  /** Whether a hub credential is actually STORED for this install: a usable
+   * address plus a bearer (the device token, or the legacy chatter key). This
+   * is the precondition for calling the hub step «неизвестно» instead of
+   * «open» — with nothing stored, «подключить Agency Hub» is true advice and
+   * the step is genuinely open. Reads the PERSISTED settings on purpose: the
+   * identity check runs background-side against exactly those. */
+  const hubCredentialsStored = (): boolean =>
+    Boolean(normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl)) &&
+    Boolean(
+      state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim(),
+    );
+
+  /** The one place that decides what a failed identity read MEANS. `unreachable`
+   * and `no_permission` say nothing about the credential — the kernel is down,
+   * or this browser never granted the host permission — so with credentials on
+   * disk the honest answer is «проверить нельзя», not «подключить». A rejected
+   * credential (`unauthorized`) and a missing one (`no_credential`,
+   * `no_base_url`) stay open: those the chatter can actually fix.
+   *
+   * The pane also turns a rejected/malformed runtime reply into `unreachable`
+   * (see `hydrateHubStatusRows`) — which is precisely why the stored-credential
+   * precondition above is not optional: without it a transport hiccup on a
+   * blank install would read as «неизвестно» instead of «не подключено». */
+  const hubStepState = (): ReadinessStepState => {
+    const identity = statusModel.identity;
+    if (identity === null) return 'open';
+    if (identity.ok) return 'done';
+    const connectivityShaped =
+      identity.reason === 'unreachable' || identity.reason === 'no_permission';
+    return connectivityShaped && hubCredentialsStored() ? 'indeterminate' : 'open';
+  };
+
   /**
    * Readiness aggregate — ACTIONABLE prerequisites only (E41). An unknown AI
    * quota, an unopened Spenders board and a quiet day are OBSERVATIONS: they
    * describe the install, they do not block a shift, and they must never turn
    * the headline red.
    */
-  const buildReadiness = (): StatusReportModel['readiness'] => [
-    { key: 'hub', label: COPY.status.stepHub, done: statusModel.identity?.ok === true },
-    {
-      key: 'access',
-      label: COPY.status.stepAccess,
-      // Only a definite `false` is an open step; `null` means «not checked yet»
-      // (no hub address entered), which the hub step already covers.
-      done: hubPermissionGranted !== false,
-    },
-    { key: 'fansly', label: COPY.status.stepFansly, done: capturedAccountIds.length > 0 },
-    {
-      key: 'persona',
-      label: COPY.status.stepPersona,
-      done: capturedAccountIds.length > 0 &&
-        capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId)),
-    },
-  ];
+  const buildReadiness = (): StatusReportModel['readiness'] => {
+    const hubState = hubStepState();
+    return [
+      {
+        key: 'hub',
+        // An unverifiable step must not wear the CTA's phrasing: the line names
+        // what is actually true — nobody could check — and carries no button.
+        label: hubState === 'indeterminate' ? COPY.status.stepHubUnknown : COPY.status.stepHub,
+        state: hubState,
+      },
+      {
+        key: 'access',
+        label: COPY.status.stepAccess,
+        // Only a definite `false` is an open step; `null` means «not checked yet»
+        // (no hub address entered), which the hub step already covers.
+        state: hubPermissionGranted !== false ? 'done' : 'open',
+      },
+      {
+        key: 'fansly',
+        label: COPY.status.stepFansly,
+        state: capturedAccountIds.length > 0 ? 'done' : 'open',
+      },
+      {
+        key: 'persona',
+        label: COPY.status.stepPersona,
+        state: capturedAccountIds.length > 0 &&
+          capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId))
+          ? 'done'
+          : 'open',
+      },
+    ];
+  };
 
   /** The checklist is live: every step reads the same sources the «Статус» rows
    * do, so a step turns green the moment its state is genuinely satisfied — and
    * only then. Step 1 demands a granted permission (not merely «not refused»):
    * on a fresh install nothing has been granted yet, and the readiness row's
    * lenient `!== false` would show step 1 as done before anything happened. */
-  const onboardingStepStates = (): Record<OnboardingStepKey, boolean> => ({
+  const onboardingStepStates = (): Record<OnboardingStepKey, ReadinessStepState> => ({
     access: Boolean(normalizeAgencyHubBaseUrl(agencyHubUrlInput.value)) &&
-      hubPermissionGranted === true,
+      hubPermissionGranted === true
+      ? 'done'
+      : 'open',
     // A live identity read is the only proof a credential actually works —
-    // truer than «a token string exists in storage».
-    signIn: statusModel.identity?.ok === true,
+    // truer than «a token string exists in storage». But the READ can fail for
+    // reasons that are not this chatter's: the same three-state truth the
+    // readiness hub step uses applies here, or a down kernel leaves the
+    // checklist permanently unfinishable with a «Войти» nobody can satisfy.
+    signIn: hubStepState(),
     fansly: capturedAccountIds.length > 0 &&
-      capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId)),
+      capturedAccountIds.every((accountId) => isAccountPersonaMapped(accountId))
+      ? 'done'
+      : 'open',
   });
 
   /** True once the durable flag AND the mount snapshot agree this install has
@@ -2663,9 +2756,11 @@ async function render(): Promise<void> {
   /** One-shot guard around the durable stamp; re-armed if the write fails. */
   let onboardingStamping = false;
 
-  /** How many readiness steps were open at the last `refreshStatusView`. Kept
-   * here because the visibility of «Что мешает» is not that renderer's call. */
-  let openReadinessSteps = 0;
+  /** How many readiness steps «Что мешает» listed at the last
+   * `refreshStatusView` — open steps AND indeterminate ones, because an
+   * unverifiable prerequisite is exactly «что мешает» too. Kept here because the
+   * visibility of the card is not that renderer's call. */
+  let listedReadinessSteps = 0;
 
   /** The checklist, the readiness hero and «Что мешает» are ONE decision, and
    * this is its SINGLE writer: while the checklist is up it owns the three open
@@ -2676,7 +2771,7 @@ async function render(): Promise<void> {
    * moved out of it into its own card (E62). */
   const applyReadinessVisibility = (): void => {
     readinessHero.hidden = onboardingVisible;
-    statusTodoCard.hidden = onboardingVisible || openReadinessSteps === 0;
+    statusTodoCard.hidden = onboardingVisible || listedReadinessSteps === 0;
   };
 
   const renderOnboarding = (): void => {
@@ -2688,17 +2783,28 @@ async function render(): Promise<void> {
     const states = onboardingStepStates();
     for (const key of Object.keys(states) as OnboardingStepKey[]) {
       const step = onboardingSteps[key];
-      const done = states[key];
-      step.root.dataset.done = done ? 'true' : 'false';
-      step.action.hidden = done;
-      step.done.hidden = !done;
+      const state = states[key];
+      // `done` stays a strict claim: only a checked-and-satisfied step is green.
+      step.root.dataset.done = state === 'done' ? 'true' : 'false';
+      step.root.dataset.stepState = state;
+      // An unverifiable step has nothing to press — «Войти» would send a chatter
+      // who already holds a device token back through the login form over an
+      // outage that is not theirs. It gets the neutral «неизвестно» instead.
+      step.action.hidden = state !== 'open';
+      step.done.hidden = state !== 'done';
+      step.unknown.hidden = state !== 'indeterminate';
     }
     onboardingSection.hidden = false;
     applyReadinessVisibility();
-    if (!Object.values(states).every(Boolean) || onboardingStamping) {
+    if (Object.values(states).some((state) => state === 'open') || onboardingStamping) {
       return;
     }
-    // Every step is really done — stamp the durable flag and retire the card.
+    // Nothing OPEN is left — stamp the durable flag and retire the card. Note
+    // this is «no step is still actionable», not «every step is green»: a
+    // credential that is stored but unverifiable (the kernel is down) leaves the
+    // chatter nothing to do here, and a checklist nobody can finish is worse
+    // than none. The pane's own headline then says «Готовность неизвестна.» —
+    // the card retires without anyone claiming the install is ready.
     // Filling in the hub URL is NOT this moment (the v1 self-cancel bug).
     onboardingStamping = true;
     void sendRuntimeRequest('dismissOnboarding')
@@ -2707,8 +2813,9 @@ async function render(): Promise<void> {
         if (reply?.ok === true) {
           onboardingVisible = false;
           onboardingSection.hidden = true;
-          // Setup is over: the headline takes the card's place immediately —
-          // «Готово к смене.» is exactly what the chatter earned.
+          // Setup is over: the headline takes the card's place immediately, and
+          // it states whatever is actually true — «Готово к смене.» when every
+          // step was checked, «Готовность неизвестна.» when one could not be.
           applyReadinessVisibility();
           return;
         }
@@ -2889,7 +2996,7 @@ async function render(): Promise<void> {
       readinessSub.textContent = COPY.status.checkingSubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
-      openReadinessSteps = 0;
+      listedReadinessSteps = 0;
       applyReadinessVisibility();
       shell.setMicro('status', null);
       return;
@@ -2897,14 +3004,46 @@ async function render(): Promise<void> {
 
     const readiness = buildReadiness();
     statusModel.readiness = readiness;
-    const open = readiness.filter((step) => !step.done);
+    const open = readiness.filter((step) => step.state === 'open');
+    // Steps nobody could check. They are NOT counted as actions (there is no
+    // action) and they are NOT quietly dropped either — dropping them is how a
+    // dead kernel used to reach «Готово к смене · Hub на связи».
+    const indeterminate = readiness.filter((step) => step.state === 'indeterminate');
 
-    if (open.length === 0) {
+    /** One row of «Что мешает». Only an OPEN step earns a button: an
+     * indeterminate one is a statement, not an errand. */
+    const renderReadinessItem = (step: ReadinessStep): HTMLLIElement => {
+      const item = document.createElement('li');
+      item.dataset.readinessStep = step.key;
+      item.dataset.readinessState = step.state;
+      const text = document.createElement('span');
+      text.textContent = step.label;
+      item.append(text);
+      const cta = step.state === 'open' ? READINESS_STEP_ACTIONS[step.key] : undefined;
+      if (cta) {
+        const button = createButton(cta.label, true);
+        button.dataset.readinessAction = step.key;
+        button.addEventListener('click', () => navigateTo(cta.pane));
+        item.append(button);
+      }
+      return item;
+    };
+
+    if (open.length === 0 && indeterminate.length === 0) {
       readinessHero.dataset.heroState = 'ready';
       readinessHeading.textContent = COPY.status.readyTitle;
       readinessSub.textContent = COPY.status.readySubtitle;
       readinessOpen.replaceChildren();
       readinessOpen.hidden = true;
+    } else if (open.length === 0) {
+      // Nothing to DO, nothing to CLAIM. «Готово к смене» would assert «Hub на
+      // связи» about a Hub that never answered; «Нужно 1 действие» would invent
+      // an errand out of an outage. The third headline says what happened.
+      readinessHero.dataset.heroState = 'unknown';
+      readinessHeading.textContent = COPY.status.unknownTitle;
+      readinessSub.textContent = COPY.status.unknownSubtitle;
+      readinessOpen.replaceChildren(...indeterminate.map(renderReadinessItem));
+      readinessOpen.hidden = false;
     } else {
       readinessHero.dataset.heroState = 'route';
       readinessHeading.textContent = open.length === 1
@@ -2915,40 +3054,32 @@ async function render(): Promise<void> {
       // NOT `COPY.sections.statusHint` — that sentence is already the pane's
       // subline in the head, one block above.
       readinessSub.textContent = COPY.status.readinessRouteSub;
+      // Open steps first (they carry the buttons), the unverifiable ones after —
+      // present in the card, absent from the count.
       readinessOpen.replaceChildren(
-        ...open.map((step) => {
-          const item = document.createElement('li');
-          item.dataset.readinessStep = step.key;
-          const text = document.createElement('span');
-          text.textContent = step.label;
-          const cta = READINESS_STEP_ACTIONS[step.key];
-          item.append(text);
-          if (cta) {
-            const button = createButton(cta.label, true);
-            button.dataset.readinessAction = step.key;
-            button.addEventListener('click', () => navigateTo(cta.pane));
-            item.append(button);
-          }
-          return item;
-        }),
+        ...[...open, ...indeterminate].map(renderReadinessItem),
       );
       readinessOpen.hidden = false;
     }
     // The list itself always stays current — hidden, never stale, so it is
     // already right the moment the checklist retires. WHETHER it is on screen is
     // `applyReadinessVisibility`'s call, and only its.
-    openReadinessSteps = open.length;
+    listedReadinessSteps = open.length + indeterminate.length;
     applyReadinessVisibility();
 
     statusRefreshedTag.textContent = rowsRefreshedAt === 0
       ? COPY.status.refreshedNever
       : COPY.status.refreshedAt.replace('{time}', formatClockTime(rowsRefreshedAt));
 
+    // The rail's «✓» is the hero's verdict in one glyph, so it answers to the
+    // SAME condition: an unverifiable prerequisite withholds it exactly as it
+    // withholds «Готово к смене».
+    const allClear = open.length === 0 && indeterminate.length === 0;
     const micro = document.createElement('span');
-    micro.className = open.length === 0
+    micro.className = allClear
       ? 'chatgoose-cabinet-micro-ok'
       : 'chatgoose-cabinet-micro-setup';
-    micro.textContent = open.length === 0 ? COPY.rail.microOk : COPY.rail.microSetup;
+    micro.textContent = allClear ? COPY.rail.microOk : COPY.rail.microSetup;
     shell.setMicro('status', micro);
   };
 

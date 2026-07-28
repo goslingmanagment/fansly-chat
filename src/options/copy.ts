@@ -100,6 +100,13 @@ export const COPY = {
     actionWordMany: 'действий',
     checkingTitle: 'Проверяем…',
     checkingSubtitle: 'Собираем состояние Hub, аккаунтов и квоты.',
+    /** The verdict for «нечего делать, но и подтвердить нечем»: every open step
+     * is closed and at least one prerequisite could not be CHECKED. It is not
+     * «Проверяем…» (the check already finished and failed) and it is certainly
+     * not «Готово к смене» — that line claims «Hub на связи» about a Hub that
+     * never answered. */
+    unknownTitle: 'Готовность неизвестна.',
+    unknownSubtitle: 'Открытых шагов нет, но связь с Hub проверить не удалось.',
     /** Subline under the «Нужно N действий» headline. It used to repeat the
      * pane's own subtitle word for word, one block below it. */
     readinessRouteSub: 'Открытые шаги — справа, с кнопкой к каждому.',
@@ -110,6 +117,10 @@ export const COPY = {
      * Observational rows (quota, Spenders, activity) are deliberately absent —
      * an unknown quota is not a broken install. */
     stepHub: 'подключить Agency Hub',
+    /** The same step when the credentials ARE stored and the Hub simply did not
+     * answer: «подключить Agency Hub» would be advice for a problem this
+     * chatter does not have — nothing is missing, nobody could check. */
+    stepHubUnknown: 'Hub недоступен — подключение проверить нельзя',
     stepAccess: 'разрешить доступ к хабу',
     stepFansly: 'открыть Fansly под аккаунтом модели',
     stepPersona: 'назначить персону аккаунту',
@@ -244,8 +255,13 @@ export const COPY = {
     step3Action: 'К аккаунтам',
     /** Replaces a step's CTA once its state is genuinely satisfied. */
     stepDone: 'готово',
+    /** Replaces the CTA when the step can neither be closed nor confirmed: the
+     * credentials are stored, the Hub is not answering, and «Войти» would send
+     * a signed-in chatter back through the login form over someone else's
+     * outage. Not green — a check that never happened is not a pass. */
+    stepUnknown: 'неизвестно',
     hint:
-      'Генерация и тема работают локально уже сейчас — их можно настроить до подключения. Этот чеклист исчезнет, когда всё зелёное.',
+      'Генерация и тема работают локально уже сейчас — их можно настроить до подключения. Этот чеклист исчезнет, когда по шагам не останется дел.',
   },
 
   hub: {
@@ -302,7 +318,11 @@ export const COPY = {
     /** Second row of the token block: when it was minted. Its own line, not a
      * «·»-tail on the renewal note — the two are different facts. */
     deviceTokenIssuedLabel: 'Выпущен',
-    deviceTokenActive: 'активен',
+    /** Presence, not liveness. The pill is computed from a STRING in storage —
+     * a revoked token is still a string, so «активен» was a claim nothing here
+     * could back. Liveness lives one row below («Выпущен …») and in the
+     * identity-driven «Доступ» row. */
+    deviceTokenStored: 'сохранён',
     deviceTokenRenews: 'продлевается при использовании',
     deviceTokenIssued: 'выпущен {date}',
     deviceTokenUnknown: 'данные появятся после следующего входа',

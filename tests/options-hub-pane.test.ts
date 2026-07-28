@@ -222,7 +222,7 @@ describe('options «Agency Hub» pane', () => {
     await page.flushAsync();
 
     // The sign-in is real (the pane shows the live token)…
-    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
     // …and exactly one live test was run for it.
     expect(connectionTests() - before).toBe(1);
   });
@@ -317,7 +317,7 @@ describe('options «Agency Hub» pane', () => {
           agencyHubApiKey: 'legacy-SECRET',
         },
       });
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
       const keyInput = page.document.querySelector<HTMLInputElement>(
         'input[type="password"][autocomplete="off"]',
       );
@@ -335,7 +335,7 @@ describe('options «Agency Hub» pane', () => {
 
       // This document's own state followed the wipe…
       expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
-      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenActive);
+      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenStored);
       expect(keyInput?.value).toBe('');
       // …so there is nothing left to sign out of, and the sign-in form is back.
       expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
@@ -375,7 +375,7 @@ describe('options «Agency Hub» pane', () => {
       await page.flushAsync();
 
       // State followed the rotation, the pill is honest…
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
       // …but not one additional LOCAL connection test was fired by the fence.
       const testsAfter = page
         .sentRequestTypes()
@@ -396,7 +396,7 @@ describe('options «Agency Hub» pane', () => {
           agencyHubApiKey: 'legacy-SECRET',
         },
       });
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenActive);
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
 
       // Burst: the wipe, then an unrelated event in the same tick — the second
       // read wins the generation race.
@@ -413,7 +413,7 @@ describe('options «Agency Hub» pane', () => {
       await page.flushAsync();
 
       expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
-      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenActive);
+      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenStored);
       expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
     });
 
