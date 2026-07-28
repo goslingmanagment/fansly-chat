@@ -2796,16 +2796,19 @@ async function render(): Promise<void> {
     }
     onboardingSection.hidden = false;
     applyReadinessVisibility();
-    if (Object.values(states).some((state) => state === 'open') || onboardingStamping) {
+    if (Object.values(states).some((state) => state !== 'done') || onboardingStamping) {
       return;
     }
-    // Nothing OPEN is left — stamp the durable flag and retire the card. Note
-    // this is «no step is still actionable», not «every step is green»: a
-    // credential that is stored but unverifiable (the kernel is down) leaves the
-    // chatter nothing to do here, and a checklist nobody can finish is worse
-    // than none. The pane's own headline then says «Готовность неизвестна.» —
-    // the card retires without anyone claiming the install is ready.
-    // Filling in the hub URL is NOT this moment (the v1 self-cancel bug).
+    // EVERY step is green — stamp the durable flag and retire the card. The
+    // strict all-done bar (not «nothing actionable») is deliberate, twice over:
+    // it keeps the durable contract E59 documents (dismissedAt == every step
+    // completed), and it closes a race the looser bar opened — a STALE
+    // indeterminate identity combined with a freshly-granted permission could
+    // dismiss the card durably before hydration, and a subsequent fresh
+    // `unauthorized` could never bring it back (codex review P2 on this PR).
+    // While the kernel is down the card simply stays, wearing the neutral
+    // «проверить нельзя» badge — honest, and reversible the moment the kernel
+    // answers. Filling in the hub URL is NOT this moment (the v1 self-cancel bug).
     onboardingStamping = true;
     void sendRuntimeRequest('dismissOnboarding')
       .then((reply) => {

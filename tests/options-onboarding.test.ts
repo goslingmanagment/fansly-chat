@@ -229,12 +229,14 @@ describe('options first-run onboarding', () => {
     expect(page.onboardingDismissals()).toBe(0);
   });
 
-  it('retires the card when no step is OPEN, even though the Hub never answered', async () => {
-    // The stamp condition is «nothing left to do here», not «everything green»:
-    // holding a first-run checklist hostage to someone else's outage leaves a
-    // chatter with three lines, one badge and no button that changes anything.
-    // The «Статус» headline then says «Готовность неизвестна.» — the card
-    // retires without anyone claiming the install is ready.
+  it('keeps the card while the Hub step is indeterminate — no durable stamp on an unknown', async () => {
+    // The stamp bar is strictly «every step done». A looser «nothing actionable»
+    // bar opened a real race (codex review P2): a STALE indeterminate identity
+    // plus a freshly-granted permission could durably dismiss the card before
+    // hydration, and a later fresh `unauthorized` could never bring it back —
+    // dismissedAt is forever. While the kernel is down the card stays, wearing
+    // the neutral badge; that unfinishable-checklist state is honest and ends
+    // the moment the kernel answers.
     const page = await mountOptionsPage({
       settings: { agencyHubBaseUrl: 'https://hub.example' },
       state: {
@@ -271,9 +273,11 @@ describe('options first-run onboarding', () => {
     });
     await page.flushAsync();
 
-    expect(page.onboardingDismissals()).toBe(1);
-    expect(card(page).hidden).toBe(true);
-    // The headline that takes its place states the unknown instead of «Готово».
+    // Credential stored, kernel unreachable: the sign-in step is indeterminate,
+    // so NO durable stamp — the card survives for the moment the kernel answers.
+    expect(page.onboardingDismissals()).toBe(0);
+    expect(card(page).hidden).toBe(false);
+    // The «Статус» headline still refuses to claim readiness meanwhile.
     const heroNode = page.document.querySelector<HTMLElement>('[data-readiness-hero="true"]');
     expect(heroNode?.dataset.heroState).toBe('unknown');
     expect(heroNode?.textContent).toContain(COPY.status.unknownTitle);
