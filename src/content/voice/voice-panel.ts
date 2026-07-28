@@ -260,6 +260,16 @@ export class VoicePanel {
   private draftCleared = false;
   private pendingReconcile = false;
   private lastError: UserFacingError | null = null;
+  // Which take `lastError` is ABOUT, when it is about one at all. The panel has
+  // a single error slot, so status/audio failures of different takes collapse
+  // into `lastError`; without this id a recovered take B would erase a still
+  // true error about take A. null = the error is not take-scoped (script,
+  // create, attach) and is therefore never auto-cleared by a take recovering.
+  private lastErrorTakeId: number | null = null;
+  // Whether the named take was ALREADY playable when the error was recorded.
+  // Retirement keys on the dead→playable TRANSITION; a fresh status error
+  // about a playable take must survive the next render (see setPanelError).
+  private lastErrorTakeWasPlayable = false;
   // True while the студия overlay has adopted this panel's section nodes. It
   // keeps the лента-only script collapse from firing on the borrowed editor.
   private studioActive = false;
@@ -391,16 +401,17 @@ export class VoicePanel {
 
   handleError(message: VoicePanelErrorMessage): void {
     if (message.type === 'voice:scriptError') {
-      this.lastError = resolveVoiceError(message.code);
+      this.setPanelError(resolveVoiceError(message.code), null);
       this.render();
       return;
     }
     if (message.type === 'voice:attachRefuse') {
       this.attachPhase = 'idle';
       const mappedKey = ATTACH_REFUSAL_KEY[message.reason];
-      this.lastError = mappedKey
-        ? getErrorMessage(mappedKey)
-        : UNKNOWN_ATTACH_REFUSAL;
+      this.setPanelError(
+        mappedKey ? getErrorMessage(mappedKey) : UNKNOWN_ATTACH_REFUSAL,
+        null,
+      );
       this.render();
       return;
     }
@@ -411,15 +422,19 @@ export class VoicePanel {
         // Indeterminate create: the controller keeps the pending create for a
         // same-request recovery. Billing is unknown, so avoid a false verdict.
         this.pendingReconcile = true;
-        this.lastError = null;
+        this.setPanelError(null, null);
       } else {
         this.pendingReconcile = false;
-        this.lastError = resolveVoiceError(message.code, message.status);
+        this.setPanelError(resolveVoiceError(message.code, message.status), null);
       }
     } else {
       // status/audio: the failing take is already server-owned; surface the
-      // money-honest string (e.g. corrupt audio will not be attached).
-      this.lastError = resolveVoiceError(message.code, message.status);
+      // money-honest string (e.g. corrupt audio will not be attached). Bind it
+      // to that take so the card can retire when exactly that take recovers.
+      this.setPanelError(
+        resolveVoiceError(message.code, message.status),
+        message.voiceNoteId ?? null,
+      );
     }
     this.render();
   }
@@ -449,7 +464,7 @@ export class VoicePanel {
     const draft = this.deps.getDraftText();
     this.leftoverDraft = draft.trim() ? draft : null;
     this.draftCleared = false;
-    this.lastError = null;
+    this.setPanelError(null, null);
     // The native Upload modal opens on the file handoff below. If the студия is
     // still open, its fixed scrim (pointer-events auto) strands the modal — the
     // chatter can't reach it, and the 10s observation budget burns hesitation
@@ -500,6 +515,7 @@ export class VoicePanel {
     const attempt = this.deps.controller.getAttempt();
     this.pendingReconcile = this.deps.controller.hasPendingCreateNeedsReconcile();
 
+    this.retireRecoveredTakeError(attempt);
     this.editorWrap.classList.toggle('chatgoose-hidden', !attempt);
     this.renderError();
 
@@ -540,6 +556,49 @@ export class VoicePanel {
     this.renderAttach(attempt);
   }
 
+  /**
+   * The single writer for the panel-level error card. `takeId` is the take the
+   * error is ABOUT (status/audio failures) or null for panel-wide errors
+   * (script, create, attach) — see `lastErrorTakeId`.
+   */
+  private setPanelError(error: UserFacingError | null, takeId: number | null): void {
+    this.lastError = error;
+    this.lastErrorTakeId = error ? takeId : null;
+    // Snapshot playability AT RECORD TIME: retirement must key on the
+    // transition «was dead → became playable», not on the state «is playable».
+    // A status error reported about an ALREADY-playable take (a reconnect
+    // re-poll hitting a down kernel, a flipped retrieval switch) is fresh
+    // truth — a pre-existing blob must never retire it on the next render
+    // (both PR reviews flagged exactly this).
+    const take = this.lastErrorTakeId !== null
+      ? this.deps.controller.getAttempt()?.takes.find(
+          (candidate) => candidate.voiceNoteId === this.lastErrorTakeId,
+        )
+      : undefined;
+    this.lastErrorTakeWasPlayable = Boolean(
+      error && take && take.view.state === 'completed' && take.blobUrl,
+    );
+  }
+
+  /**
+   * A free audio retry that actually worked must not leave its own error card
+   * sitting above a now-playing take. Retire the card only when the take it
+   * names BECAME playable after the error was recorded — an error about
+   * ANOTHER take, a panel-wide error, or a fresh error about an
+   * already-playable take is still true and stays on screen.
+   */
+  private retireRecoveredTakeError(attempt: VoiceAttempt | null): void {
+    if (this.lastErrorTakeId === null || this.lastErrorTakeWasPlayable) {
+      return;
+    }
+    const take = attempt?.takes.find(
+      (candidate) => candidate.voiceNoteId === this.lastErrorTakeId,
+    );
+    if (take && take.view.state === 'completed' && take.blobUrl) {
+      this.setPanelError(null, null);
+    }
+  }
+
   private renderError(): void {
     if (!this.lastError) {
       this.errorSlot.replaceChildren();
@@ -565,7 +624,7 @@ export class VoicePanel {
     restore.type = 'button';
     restore.title = 'Вернуть исходник в скрипт';
     restore.addEventListener('click', () => {
-      this.lastError = null;
+      this.setPanelError(null, null);
       void this.deps.controller.restoreDraft();
     });
     row.append(restore);
@@ -604,7 +663,7 @@ export class VoicePanel {
         if (this.deps.controller.hasPendingCreate() || hasTakes) {
           return;
         }
-        this.lastError = null;
+        this.setPanelError(null, null);
         this.attachPhase = 'idle';
         void this.deps.controller.regenerateScript(preset.tone);
       });
@@ -866,7 +925,7 @@ export class VoicePanel {
    * a stale error card or attach-recovery view rendering over a fresh attempt
    * would misreport it. */
   private dispatchNewVoice(draft: string): void {
-    this.lastError = null;
+    this.setPanelError(null, null);
     this.attachPhase = 'idle';
     this.leftoverDraft = null;
     this.newVoiceConfirmOpen = false;
@@ -1396,7 +1455,15 @@ export class VoicePanel {
 
   private renderTakeRecovery(take: VoiceTake): HTMLElement | null {
     const state = take.view.state;
-    const needsFreeCheck = state === 'indeterminate' || (
+    // A completed take whose audio fetch failed (timeout, network, 403, sha
+    // mismatch) keeps state 'completed' with an errorCode and no blobUrl. The
+    // chatter already paid for it, so the recovery is the FREE status→audio
+    // chain, never a paid re-create: checkStatus re-reads the status, the
+    // controller re-drives fetchAudio on a completed view, and both in-flight
+    // guards were cleared by the error. Without this the row had zero controls
+    // and only a tab reload recovered it.
+    const audioMissing = state === 'completed' && !take.blobUrl && Boolean(take.view.errorCode);
+    const needsFreeCheck = audioMissing || state === 'indeterminate' || (
       (state === 'queued' || state === 'dispatched') && Boolean(take.view.errorCode)
     );
     const needsPaidRegen =
@@ -1411,7 +1478,9 @@ export class VoicePanel {
       const check = el(
         'button',
         'chatgoose-button chatgoose-button-secondary chatgoose-voice-check-status',
-        'Проверить статус — бесплатно',
+        audioMissing
+          ? 'Скачать аудио ещё раз — бесплатно'
+          : 'Проверить статус — бесплатно',
       );
       check.type = 'button';
       check.addEventListener('click', () => {
@@ -1478,7 +1547,7 @@ export class VoicePanel {
     attach.type = 'button';
     attach.disabled = !this.deps.controller.canAttachSelectedTake();
     attach.addEventListener('click', () => {
-      this.lastError = null;
+      this.setPanelError(null, null);
       // Re-probe synchronously at the human click. Production's probe also
       // verifies the real pathname, closing the route-watcher polling gap.
       if (!this.deps.probeComposer().ok) {
@@ -1625,19 +1694,19 @@ export class VoicePanel {
     if (this.deps.controller.hasPendingCreate()) {
       return;
     }
-    this.lastError = null;
+    this.setPanelError(null, null);
     const pending = start();
     // beginCreate claims pendingCreate synchronously, before its first await.
     // Render now so a second physical click cannot race the durable write.
     this.render();
     void pending.catch(() => {
-      this.lastError = getErrorMessage('unknown_error');
+      this.setPanelError(getErrorMessage('unknown_error'), null);
       this.render();
     });
   }
 
   private onEditorInput(): void {
-    this.lastError = null;
+    this.setPanelError(null, null);
     this.attachPhase = 'idle';
     void this.deps.controller.editScript(this.editorEl.value);
   }
