@@ -2592,8 +2592,17 @@ const notificationIncidentKindEnum = z.enum([
     "ops_sampler_silent",
     "ofapi_chargebacks_reconcile_failed",
     "ofapi_link_stats_reconcile_failed",
+    "ai_provider_billing",
+    "ai_provider_failed",
 ]);
 const notificationIncidentStatusEnum = z.enum(["open", "resolved"]);
+const notificationDeliveryOutboxStateEnum = z.enum([
+    "pending",
+    "leased",
+    "delivered",
+    "suppressed",
+    "exhausted",
+]);
 const deliveryKindEnum = z.enum([
     "test",
     "daily_report_scheduled",
@@ -2611,6 +2620,7 @@ export const notificationsSettingsResponseSchema = z.object({
     enabled: z.boolean(),
     dailyReportEnabled: z.boolean(),
     syncFailureAlertsEnabled: z.boolean(),
+    aiCriticalAlertsEnabled: z.boolean(),
     reportHourUtc: z.number().int().min(0).max(23),
     connectionStatus: notificationConnectionStatusEnum,
     lastMessageAt: isoTimestamp.nullable(),
@@ -2620,6 +2630,7 @@ export const notificationsSettingsUpdateBodySchema = z.object({
     enabled: z.boolean().optional(),
     dailyReportEnabled: z.boolean().optional(),
     syncFailureAlertsEnabled: z.boolean().optional(),
+    aiCriticalAlertsEnabled: z.boolean().optional(),
     reportHourUtc: z.number().int().min(0).max(23).optional(),
     botToken: telegramBotTokenSchema.nullable().optional(),
     chatId: telegramChatIdSchema.nullable().optional(),
@@ -2656,6 +2667,10 @@ export const notificationsIncidentItemSchema = z.object({
     errorCode: z.string().nullable(),
     errorSummary: z.string().nullable(),
     notificationCount: z.number().int(),
+    outboxState: notificationDeliveryOutboxStateEnum.nullable(),
+    outboxAttemptCount: z.number().int().nonnegative().nullable(),
+    outboxLastError: z.string().nullable(),
+    outboxSuppressionReason: z.string().nullable(),
 });
 export const notificationsIncidentsQuerySchema = z.object({
     status: notificationIncidentStatusEnum.optional(),
@@ -4832,7 +4847,8 @@ export const routeSchemas = {
             + "voice_source_invalid; 403 voice_disabled / voice_not_allowlisted; 409 "
             + "idempotency_mismatch (same id, different request) / voice_no_profile; 429 "
             + "voice_quota_denied; 503 voice_provider_unavailable (live flag on but "
-            + "ELEVENLABS_API_KEY unconfigured — set it and restart). A quota-denied "
+            + "ELEVENLABS_API_KEY or the complete SERVICE_EGRESS_PROXY_* tuple is "
+            + "unconfigured — set both and restart). A quota-denied "
             + "clientRequestId STAYS denied: every replay of it re-throws the same 429 "
             + "(never a 202 view), so a retry after quota exhaustion needs a FRESH "
             + "clientRequestId.",
