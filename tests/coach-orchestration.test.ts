@@ -567,6 +567,29 @@ describe('Coach orchestration', () => {
     expect(app.activeCoachSession).toBeNull();
   });
 
+  it('an account-only mapping change takes the dead coach panel OFF SCREEN, not just out of state', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    expect(document.querySelector('.chatgoose-coach')).not.toBeNull();
+    expect(document.body.classList.contains('chatgoose-scroll-lock')).toBe(true);
+
+    // The background resolving the canonical accountId refreshes with
+    // 'mapping:changed' and an UNCHANGED persona. The state teardown always ran,
+    // but the re-render was gated on `personaChanged` alone — so the previous
+    // account's DEAD panel stayed on screen, scroll-lock included. That gate WAS
+    // the bug: the store said closed while the chatter still saw the panel.
+    app.handlePortMessage({
+      type: 'mapping:changed',
+      state: readyState({ accountId: 'account-2' }),
+    });
+
+    expect(app.coachOverlayModel).toBeNull();
+    expect(app.activeCoachSession).toBeNull();
+    expect(document.querySelector('.chatgoose-coach')).toBeNull();
+    expect(document.body.classList.contains('chatgoose-scroll-lock')).toBe(false);
+  });
+
   it('persists live composer edits into the session (carry-forward 7)', async () => {
     const app = await makeReadyApp();
     app.openCoach();
@@ -1326,6 +1349,56 @@ describe('Coach orchestration', () => {
     expect(
       app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
     ).toBeNull();
+  });
+
+  it('Esc over a completed recap closes the RECAP first, then the idle coach beneath it', async () => {
+    const app = await makeReadyApp();
+    app.openCoach();
+    await flush();
+    // ⌘⇧S over an idle coach: the picker and the standalone recap it starts
+    // leave the coach session open, and a completed deep result OUTRANKS the
+    // idle coach in the surface planner — the recap is what the chatter sees.
+    app.openRecapPicker();
+    app.pickStandaloneRecap('full');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: app.activeOperationId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'full recap body',
+        parts: [],
+        summaryMeta: { generatedAt: 1, stale: false, cached: false },
+      },
+    });
+    expect(app.deepOverlayModel).not.toBeNull();
+    expect(app.coachOverlayModel).not.toBeNull();
+    // The recap, not the coach, occupies the overlay.
+    expect(document.querySelector('.chatgoose-coach')).toBeNull();
+
+    // E24 side effect the new branch must not drop: closing a surface disarms
+    // the armed tone (the old tail did it, so the new branch has to too).
+    app.armReplyTone('flirty');
+    expect(app.nextReplyTone).toBe('flirty');
+
+    // First Esc. The old ordering ran the idle-coach branch FIRST — it closed
+    // the INVISIBLE coach and re-rendered the very same recap, so Esc visibly
+    // did nothing. That ordering WAS the bug.
+    app.overlay.callbacks.onClose();
+
+    expect(app.deepOverlayModel).toBeNull();
+    expect(app.nextReplyTone).toBe('none');
+    expect(app.coachOverlayModel).not.toBeNull();
+    expect(app.activeCoachSession).not.toBeNull();
+    expect(document.querySelector('.chatgoose-coach')).not.toBeNull();
+
+    // Second Esc closes the now-visible coach (session retained for reopen).
+    app.overlay.callbacks.onClose();
+
+    expect(app.coachOverlayModel).toBeNull();
+    expect(app.activeCoachSession).toBeNull();
+    expect(document.querySelector('.chatgoose-coach')).toBeNull();
+    expect(document.body.classList.contains('chatgoose-scroll-lock')).toBe(false);
+    expect(app.coachStore.getOrCreate('account-1', 'group-1')).toBeDefined();
   });
 
   it('«Открыть последний» falls back full → short → toast on a cache miss', async () => {
