@@ -1248,6 +1248,139 @@ describe('VoicePanel — лента', () => {
     );
   });
 
+  /** Drive one PAID take (voiceNoteId 1) that the kernel completed but whose
+   * audio download failed — the dead row this suite used to leave unrecovered. */
+  async function toCompletedTakeWithFailedAudio(attemptId: string): Promise<void> {
+    await harness!.controller.generateTake();
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-2',
+      view: view({ state: 'queued' }),
+    });
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      view: view({ state: 'completed', audioSha256: 'a'.repeat(64), audioBytesLen: 3 }),
+    });
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'audio',
+      voiceNoteId: 1,
+      code: 'voice_artifact_corrupt',
+      message: 'raw',
+      status: 0,
+    });
+  }
+
+  it('offers a FREE audio retry on a paid take whose audio download failed', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTakeWithFailedAudio(attemptId);
+    const { root, sent } = harness!;
+
+    // The take stays 'completed' with an errorCode and no blobUrl. Until this
+    // fix renderTakeRecovery returned null for exactly that shape: the chatter
+    // had paid, saw «Вариант 1 · –:–» with zero controls, and could only
+    // recover by reloading the tab. That dead row WAS the bug.
+    expect(textOf(root)).toContain('Скачать аудио ещё раз — бесплатно');
+    expect(textOf(root)).not.toContain('Проверить статус — бесплатно');
+    // Money rule: a completed take is already paid for — recovery is the free
+    // status→audio chain and NEVER a paid re-create.
+    expect(root.querySelector('.chatgoose-voice-regenerate')).toBeNull();
+
+    sent.length = 0;
+    buttonByText(root, 'Скачать аудио ещё раз — бесплатно')!.click();
+    expect(sent).toContainEqual(
+      expect.objectContaining({ type: 'voice:noteStatus', voiceNoteId: 1 }),
+    );
+    expect(sent.some((message) => message.type === 'voice:noteCreate')).toBe(false);
+  });
+
+  it('retires the failed-audio card once the free retry delivers the audio', async () => {
+    const attemptId = await toScriptPhase();
+    await toCompletedTakeWithFailedAudio(attemptId);
+    const { root } = harness!;
+    expect(
+      root.querySelector('.chatgoose-voice-error-title')?.textContent,
+    ).toBe('CG-VOICE-11: Аудиофайл войса повреждён.');
+
+    buttonByText(root, 'Скачать аудио ещё раз — бесплатно')!.click();
+    // The free re-read returns a fresh completed view (no errorCode), which
+    // re-drives the audio fetch; the bytes then land.
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      view: view({ state: 'completed', audioSha256: 'a'.repeat(64), audioBytesLen: 3 }),
+    });
+    await feed({ type: 'voice:audioBytes', attemptId, voiceNoteId: 1, bytes: new ArrayBuffer(3) });
+
+    expect(textOf(root)).not.toContain('Скачать аудио ещё раз — бесплатно');
+    expect(root.querySelector('.chatgoose-voice-player')).not.toBeNull();
+    // The card that reported the failed download must not sit above a working
+    // player — it names this take, and this take recovered.
+    expect(root.querySelector('.chatgoose-voice-error')).toBeNull();
+  });
+
+  it('keeps a failed-audio card that names ANOTHER take when a sibling recovers', async () => {
+    const attemptId = await toScriptPhase();
+    await harness!.controller.generateTake();
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-2',
+      view: view({ state: 'queued' }),
+    });
+    await harness!.controller.generateAnotherTake();
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      clientRequestId: 'id-3',
+      view: view({
+        voiceNoteId: 2,
+        state: 'queued',
+        createdAt: '2026-01-01T00:00:01.000Z',
+      }),
+    });
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      view: view({ state: 'completed', audioSha256: 'a'.repeat(64), audioBytesLen: 3 }),
+    });
+    await feed({
+      type: 'voice:noteView',
+      attemptId,
+      view: view({
+        voiceNoteId: 2,
+        state: 'completed',
+        audioSha256: 'b'.repeat(64),
+        audioBytesLen: 3,
+        createdAt: '2026-01-01T00:00:01.000Z',
+      }),
+    });
+    // Take 1's audio download fails; take 2's bytes land right after.
+    await feed({
+      type: 'voice:noteError',
+      attemptId,
+      source: 'audio',
+      voiceNoteId: 1,
+      code: 'voice_artifact_corrupt',
+      message: 'raw',
+      status: 0,
+    });
+    await feed({ type: 'voice:audioBytes', attemptId, voiceNoteId: 2, bytes: new ArrayBuffer(3) });
+
+    const rows = Array.from(
+      harness!.root.querySelectorAll<HTMLElement>('.chatgoose-voice-take'),
+    );
+    expect(textOf(rows[0]!)).toContain('Скачать аудио ещё раз — бесплатно');
+    expect(rows[1]!.querySelector('.chatgoose-voice-player')).not.toBeNull();
+    // The panel has ONE error slot: the card is about take 1 and is still true.
+    expect(
+      harness!.root.querySelector('.chatgoose-voice-error-title')?.textContent,
+    ).toBe('CG-VOICE-11: Аудиофайл войса повреждён.');
+  });
+
   it('surfaces an indeterminate create as recovery of the same approved request', async () => {
     const attemptId = await toScriptPhase();
     await harness!.controller.generateTake();
