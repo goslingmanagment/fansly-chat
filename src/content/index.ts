@@ -28,7 +28,7 @@ import { VoiceStudio } from './voice/voice-studio.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
 import { BoardLauncher } from './spenders/board-launcher.js';
 import { SpendersBoardController } from './spenders/spenders-board-controller.js';
-import { startRouteWatcher } from './route-watcher.js';
+import { parseGroupIdFromPath, startRouteWatcher } from './route-watcher.js';
 import { captureScrollSnapshot, applyScrollCompensation } from './scroll-compensation.js';
 import {
   planSurfaces,
@@ -54,6 +54,7 @@ import {
   getCompareCardsFingerprintForPersonality,
 } from '../shared/compare-cards.js';
 import {
+  ChatGooseError,
   createUserError,
   formatUserFacingError,
   getErrorMessage,
@@ -283,6 +284,10 @@ export class ChatGooseContentApp {
   private tabState: TabUiState | null = null;
   private activeFeature: FeatureType | null = null;
   private activeOperationId: string | null = null;
+  /** Group the active operation was STARTED for — stamped into completed
+   * models so insert guards can compare against the live URL. `currentGroupId`
+   * is 500ms-poll-stale by design; this capture is not. */
+  private activeOperationGroupId: string | null = null;
   private activePersonaKey: string | null = null;
   private activePersonaDefinitionId: string | null = null;
   private activePersonaSource: string | null = null;
@@ -1337,6 +1342,9 @@ export class ChatGooseContentApp {
     this.activeProgress = null;
     this.activeFeature = feature;
     this.activeOperationId = operationId;
+    // Same tick as buildOperationStartPayload's `groupId: this.currentGroupId`,
+    // so the capture always matches the group the kernel request names.
+    this.activeOperationGroupId = this.currentGroupId;
     this.activePersonaKey = this.tabState?.mappedPersonalityId ?? null;
     this.activePersonaDefinitionId = this.tabState?.mappedPersonaDefinitionId ?? null;
     this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
@@ -3544,6 +3552,12 @@ export class ChatGooseContentApp {
     const nextText = model.parts[0]?.text ?? (model.rawText.trim() || model.rawText);
 
     try {
+      // LIVE route check (mirrors the coach draft guard): the polled
+      // currentGroupId can lag a chat switch by up to 500ms, and this path
+      // auto-inserts — never drop fan A's improved draft into fan B's composer.
+      if (parseGroupIdFromPath(window.location.pathname) !== model.groupId) {
+        throw new ChatGooseError('chat_changed');
+      }
       await insertIntoFanslyTextarea(nextText);
       const firstPart = model.parts[0];
       if (firstPart) {
@@ -3681,6 +3695,7 @@ export class ChatGooseContentApp {
           feature: 'help-me',
           fanDisplayName,
           operationId,
+          groupId: this.activeOperationGroupId ?? this.currentGroupId ?? '',
           rawText,
           coaching: parsed?.coaching ?? null,
           engagingParts: parsed?.engaging ? createParts(normalizeReplyParts(parsed.engaging)) : [],
@@ -3742,6 +3757,7 @@ export class ChatGooseContentApp {
       feature,
       fanDisplayName,
       operationId,
+      groupId: this.activeOperationGroupId ?? this.currentGroupId ?? '',
       parts: createParts(partTexts),
       rawText: partTexts.length > 0 ? rawText : '',
       splitModeRequested: Boolean(result.splitModeRequested),

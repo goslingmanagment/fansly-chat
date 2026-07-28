@@ -42,13 +42,15 @@ function createLoadingModel(
 
 function createReplyModel(
   parts: OverlayInsertPart[],
-  options?: { operationId?: string; llmSpend?: LlmSpendSummary },
+  options?: { operationId?: string; llmSpend?: LlmSpendSummary; groupId?: string },
 ): Extract<OverlayViewModel, { kind: 'reply' }> {
   return {
     kind: 'reply',
     feature: 'fast-reply',
     fanDisplayName: 'fan',
     operationId: options?.operationId ?? 'reply-op',
+    // Matches the suite's JSDOM /messages/example URL — see the insert guard.
+    groupId: options?.groupId ?? 'example',
     parts,
     rawText: parts.map((p) => p.text).join('\n'),
     splitModeRequested: false,
@@ -813,6 +815,30 @@ describe('InlinePanelController', () => {
     await vi.waitFor(() => {
       expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Second');
     });
+  });
+
+  it('refuses to insert a result minted for another chat — live URL wins', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    // JSDOM sits on /messages/example; the model was minted for another group —
+    // the ≤500ms post-switch window where the polled route still lags. The
+    // click must surface chat_changed instead of writing into the foreign chat.
+    controller.render(createReplyModel([createPart('Hey there!')], { groupId: 'other-fan' }));
+
+    const insertButton = controller.root.querySelector<HTMLButtonElement>(
+      '.chatgoose-card-actions .chatgoose-button',
+    );
+    expect(insertButton?.textContent).toBe('Insert');
+    insertButton!.click();
+
+    await vi.waitFor(() => {
+      expect(requireElement(controller.root, '.chatgoose-inline-error').textContent)
+        .toContain('Контекст переписки изменился');
+    });
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
   });
 
   it('Enter is ignored for hidden panel', async () => {
