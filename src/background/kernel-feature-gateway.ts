@@ -305,6 +305,13 @@ export function createKernelFeatureGateway(
       let text = '';
       let done = false;
       let personaDefinitionValidated = request.expectedPersonaDefinitionId === undefined;
+      // The vendored SDK swallows EVERY exception once its signal is aborted
+      // (`sdk-runtime.js`: `.catch((error) => { if (abort.signal.aborted) { return; } throw error; })`),
+      // so an abort racing the teardown would EAT the kernel's own terminal
+      // error frame and leave the classification below guessing from
+      // `done === false`. Capture the mapped frame error here so that verdict
+      // can outrank both the abort and the truncation ones.
+      let terminalFrameError: ChatGooseError | null = null;
 
       const refreshPersonaCatalog = (): void => {
         try {
@@ -321,7 +328,8 @@ export function createKernelFeatureGateway(
         // chat_changed, and before EOF collapses it into the generic
         // "ended without completing" truncation error.
         if (frame.type === 'error') {
-          throw createKernelErrorFrameError(frame);
+          terminalFrameError = createKernelErrorFrameError(frame);
+          throw terminalFrameError;
         }
         // The meta echo is the provenance barrier for the whole stream, not
         // only visible content. Debug/reasoning/usage/done callbacks can all
@@ -465,7 +473,27 @@ export function createKernelFeatureGateway(
         }
         throw mapped;
       }
+      // `handle.done` RESOLVED — which, thanks to the SDK's abort-swallow,
+      // also happens for an aborted stream and for a frame error thrown while
+      // the signal was already aborted. Classify in this exact order.
+      if (terminalFrameError !== null) {
+        // The kernel spoke: its terminal error frame outranks both the abort
+        // and the truncation verdicts — the SDK's abort-swallow must not eat
+        // it. The frame error is already mapped by `createKernelErrorFrameError`
+        // (which never mints chat_changed or hub_quota_exceeded), so throwing
+        // it here is equivalent to the rejection path's mapping above.
+        throw terminalFrameError;
+      }
       if (!done) {
+        if (signal.aborted) {
+          // The vendored SDK swallows aborts, so an aborted stream arrives
+          // here as a resolved handle with no terminal frame. Re-raise as
+          // AbortError so operation-utils maps it honestly (timed_out for an
+          // armed timeout, chat_changed for a user cancel) — a local timeout
+          // is NOT a truncated stream and NOT a Hub error, and must not grow
+          // the daily "Ошибки генераций (Hub)" CG-HUB-* counter.
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
         // Stream ended without the terminal frame — fail closed, never
         // present a possibly-truncated generation as complete.
         throw new ChatGooseError('hub_stream_truncated', {

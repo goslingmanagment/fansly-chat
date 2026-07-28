@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createKernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
 import type { KernelFeatureRequest } from '../src/background/kernel-feature-gateway.js';
 import { ChatGooseError } from '../src/shared/errors.js';
+import { resolveAbortChatGooseError } from '../src/background/operation-utils.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 
 const CLIENT_REQUEST_ID = '11111111-1111-4111-8111-111111111111';
@@ -652,5 +653,162 @@ describe('kernel feature gateway prompt echo', () => {
 
     expect(new Headers(calls[0]?.headers).get('x-kernel-ai-capabilities')).toBeNull();
     expect(echoes).toEqual([]);
+  });
+});
+
+// The abort classification. Proven with a live probe during the 2026-07-28
+// audit: the vendored SDK swallows EVERY exception once its own signal is
+// aborted (`vendor/kernel-sdk/dist/contracts/sdk-runtime.js`:
+// `.catch((error) => { if (abort.signal.aborted) { return; } throw error; })`),
+// so `handle.done` RESOLVES on abort. The gateway used to read that as
+// `hub_stream_truncated` (CG-HUB-16), which made every LLM-stage timeout
+// (llm-ttfb / llm-idle / llm-max-stream) say «Генерация оборвалась» instead of
+// «Время ожидания истекло» AND falsely grow the daily «Ошибки генераций (Hub)»
+// counter (ops-daily counts CG-HUB-* prefixes; CG-NET-02 is not counted).
+// What is pinned here is the ORDER: kernel terminal frame → abort → truncation.
+// Fail-closed is untouched: every non-`done` path still throws.
+describe('kernel feature gateway abort classification', () => {
+  /** A scripted SSE body that stays OPEN until the test closes it — the
+   * buffered `sseResponse` helper above completes before an abort could ever
+   * land. Mirrors real fetch: the body errors when the request signal aborts,
+   * while frames already parsed out of a delivered chunk are still dispatched
+   * (`parseSseStream` drains its whole buffer before the next `read()`) — that
+   * is exactly the teardown race the classification has to survive. */
+  function liveSseResponse(signal: AbortSignal | null | undefined): {
+    response: Response;
+    push: (...frames: object[]) => void;
+    close: () => void;
+  } {
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        controller = streamController;
+        signal?.addEventListener('abort', () => {
+          controller.error(new DOMException('The operation was aborted.', 'AbortError'));
+        }, { once: true });
+      },
+    });
+    return {
+      response: new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+      push: (...frames: object[]) => {
+        controller.enqueue(encoder.encode(
+          frames.map((frame) => `event: ai\ndata: ${JSON.stringify(frame)}\n\n`).join(''),
+        ));
+      },
+      close: () => controller.close(),
+    };
+  }
+
+  /** Wires the gateway to a live SSE body and aborts `cancel` from inside the
+   * first `onText` — the deterministic stand-in for an armed LLM timeout (or a
+   * chatter cancel) firing mid-stream. */
+  function startAgainstLiveStream(cancel: AbortController) {
+    let live: ReturnType<typeof liveSseResponse> | null = null;
+    const texts: string[] = [];
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      live = liveSseResponse(init?.signal);
+      return live.response;
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    const streamed = gateway.streamFeature(settings(), request(), {
+      onText: (text) => texts.push(text),
+    }, cancel.signal);
+    // The stream must not reject before the test inspects it.
+    const settled = streamed.then(() => null, (error: unknown) => error);
+    return {
+      texts,
+      settled,
+      ready: async (): Promise<ReturnType<typeof liveSseResponse>> => {
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+        return live!;
+      },
+    };
+  }
+
+  it('re-raises a mid-stream abort as AbortError, never as a truncated stream', async () => {
+    const cancel = new AbortController();
+    const { texts, settled, ready } = startAgainstLiveStream(cancel);
+    const live = await ready();
+
+    live.push(META, { type: 'content_delta', text: 'partial' });
+    await vi.waitFor(() => expect(texts).toEqual(['partial']));
+    cancel.abort();
+
+    const caught = await settled;
+    expect(caught).toBeInstanceOf(DOMException);
+    expect((caught as DOMException).name).toBe('AbortError');
+    expect(caught).not.toBeInstanceOf(ChatGooseError);
+    // The consequence this whole fix exists for: only a DOMException named
+    // AbortError reaches the honest mapping. An armed timeout becomes
+    // CG-NET-02 «Время ожидания истекло» — not a CG-HUB-* card, so the daily
+    // Hub-error counter stays untouched.
+    expect(resolveAbortChatGooseError(caught, {
+      active: true,
+      timeoutSignal: cancel.signal,
+    })?.key).toBe('timed_out');
+  });
+
+  it('still fails closed with hub_stream_truncated when the stream ends without done and without an abort', async () => {
+    const cancel = new AbortController();
+    const { texts, settled, ready } = startAgainstLiveStream(cancel);
+    const live = await ready();
+
+    live.push(META, { type: 'content_delta', text: 'partial' });
+    await vi.waitFor(() => expect(texts).toEqual(['partial']));
+    live.close();
+
+    const caught = await settled;
+    expect(cancel.signal.aborted).toBe(false);
+    expect(caught).toBeInstanceOf(ChatGooseError);
+    expect(caught).toMatchObject({ key: 'hub_stream_truncated', code: 'CG-HUB-16' });
+    expect((caught as ChatGooseError).message).toContain('without completing');
+  });
+
+  it('surfaces the kernel terminal error frame even when an abort races the teardown', async () => {
+    const cancel = new AbortController();
+    let live: ReturnType<typeof liveSseResponse> | null = null;
+    const texts: string[] = [];
+    const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+      live = liveSseResponse(init?.signal);
+      return live.response;
+    });
+    const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+    const streamed = gateway.streamFeature(settings(), request(), {
+      // Abort from inside the delta of the SAME chunk that carries the error
+      // frame: the signal is already aborted by the time the frame handler
+      // throws, so the SDK swallows the kernel's verdict. Before the capture
+      // this surfaced as a bare AbortError/CG-HUB-16 and the real cause (a
+      // dead page proxy) was lost.
+      onText: (text) => {
+        texts.push(text);
+        cancel.abort();
+      },
+    }, cancel.signal);
+    const settled = streamed.then(() => null, (error: unknown) => error);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    live!.push(
+      META,
+      { type: 'content_delta', text: 'partial' },
+      {
+        type: 'error',
+        code: 'provider_stream_failed',
+        message: 'Static kernel provider failure',
+        retryAfterMs: null,
+      },
+    );
+    live!.close();
+
+    const caught = await settled;
+    expect(cancel.signal.aborted).toBe(true);
+    expect(caught).toBeInstanceOf(ChatGooseError);
+    expect(caught).toMatchObject({ key: 'hub_provider_failed', code: 'CG-HUB-10' });
+    expect((caught as ChatGooseError).details?.responseSnippet)
+      .toBe('provider_stream_failed: Static kernel provider failure');
+    expect((caught as ChatGooseError).message).not.toContain('without completing');
   });
 });
