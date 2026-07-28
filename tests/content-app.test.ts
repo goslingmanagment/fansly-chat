@@ -823,6 +823,9 @@ describe('ChatGooseContentApp', () => {
         feature: 'improve-draft',
         fanDisplayName: 'alice',
         operationId: 'cached-improve-op',
+        // Matches the suite's /messages/group-1 URL — the insert guard
+        // compares the minted group against the live location.
+        groupId: 'group-1',
         parts: [
           {
             id: '0-improved',

@@ -60,6 +60,7 @@ function createReplyModel(
   options?: {
     llmSpend?: LlmSpendSummary;
     profiling?: OperationProfilingSnapshot;
+    groupId?: string;
   },
 ): Extract<OverlayViewModel, { kind: 'reply' }> {
   return {
@@ -67,6 +68,9 @@ function createReplyModel(
     feature: 'fast-reply',
     fanDisplayName: 'fan',
     operationId: 'reply-op',
+    // The suite's JSDOM lives on /messages/example — the guard compares this
+    // against the live URL, so the fixture matches by default.
+    groupId: options?.groupId ?? 'example',
     parts: [part],
     rawText: part.text,
     splitModeRequested: false,
@@ -97,6 +101,7 @@ function createHelpMeModel(
     feature: 'help-me',
     fanDisplayName: 'fan',
     operationId: 'help-op',
+    groupId: 'example',
     rawText: 'raw help',
     coaching: 'Be direct',
     engagingParts: [],
@@ -1197,6 +1202,32 @@ describe('OverlayController', () => {
     await vi.waitFor(() => {
       expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Hey there!');
     });
+  });
+
+  it('refuses to insert a result minted for another chat — live URL wins', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    // The suite's JSDOM sits on /messages/example. A model minted for another
+    // group is exactly the ≤500ms post-switch window where the polled route
+    // still shows the previous chat: the insert must refuse, not cross over.
+    controller.render(createReplyModel(createPart('Hey there!'), { groupId: 'other-fan' }));
+
+    const text = document.querySelector<HTMLElement>('.chatgoose-card-text-insertable');
+    expect(text).not.toBeNull();
+    text!.click();
+    await vi.waitFor(() => {
+      const errorEl = document.querySelector('.chatgoose-inline-error');
+      expect(errorEl).not.toBeNull();
+      expect(errorEl!.textContent).toContain('Контекст переписки изменился');
+    });
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
   });
 
   // ─── Enter-to-insert ─────────────────────────────────────────
