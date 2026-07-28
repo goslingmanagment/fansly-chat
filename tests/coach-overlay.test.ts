@@ -86,6 +86,12 @@ function failedItem(
   return { kind: 'failed-attempt', question, errorCode, retryable, includedDraft };
 }
 
+/** Let the renderer's queued focus microtask (createCoachView) run. */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector(selector);
   if (!element) {
@@ -406,6 +412,56 @@ describe('OverlayController — coach chat mode', () => {
     expect(cancel.classList.contains('chatgoose-hidden')).toBe(false);
     expect(cancel.textContent).toBe('Отменить');
     expect(requireElement<HTMLButtonElement>('.chatgoose-coach-send').textContent).toBe('Отправить');
+  });
+
+  // ─── Composer focus on open (spec §3 «open or focus») ─────────────────────
+
+  it('a freshly created coach view focuses the composer — the panel opens ready to type', async () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    // Before the microtask the panel is merely built; the focus is queued.
+    expect(document.activeElement).not.toBe(textarea);
+
+    await flushMicrotasks();
+
+    // The old behaviour — a coach panel that opened with the DOM focus still in
+    // the Fansly composer, so the next keystrokes went UNDER the overlay — WAS
+    // the bug, not a pin worth keeping.
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('an update re-render never steals focus back into the composer mid-conversation', async () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel());
+    await flushMicrotasks();
+
+    const trigger = requireElement<HTMLButtonElement>('.chatgoose-coach-recap-trigger');
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    controller.render(createCoachModel({ composerText: 'черновик вопроса' }));
+    await flushMicrotasks();
+
+    // Reconciled in place (no createCoachView) → nothing is queued at all.
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('a coach view re-created under a live in-overlay focus does not yank it away', async () => {
+    const { controller } = makeController();
+    // A deep result covering the coach (a recap opened over an idle coach): its
+    // close button lives in the SHELL header, so it survives the body swap.
+    controller.render(createRecapPickerModel());
+    const close = requireElement<HTMLButtonElement>('.chatgoose-close');
+    close.focus();
+    expect(document.activeElement).toBe(close);
+
+    // Closing the deep result re-creates the coach view (renderBody sees a
+    // non-coach current view and rebuilds).
+    controller.render(createCoachModel());
+    await flushMicrotasks();
+
+    expect(document.activeElement).toBe(close);
   });
 
   // ─── Draft attach checkbox (spec §5/§2.1) ─────────────────────────────────
