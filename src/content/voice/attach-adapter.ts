@@ -4,7 +4,18 @@ const COMPOSER_SELECTOR = 'app-group-message-input';
 const FILE_INPUT_SELECTOR = `${COMPOSER_SELECTOR} input[type="file"]`;
 const ATTACHMENT_PREVIEW_SELECTOR = 'waveform, .waveform';
 const ATTACHMENT_POLL_MS = 300;
-const ATTACHMENT_OBSERVATION_BUDGET_MS = 10_000;
+/**
+ * How long the adapter watches the composer for a new waveform before it calls
+ * the handoff 'uncertain'. This budget does NOT measure an upload: the waveform
+ * appears only after the human finds and clicks Upload in Fansly's own modal,
+ * so hesitation there spends the same seconds a slow long take does. Ten
+ * seconds turned both into «проверьте composer» plus a re-arm the chatter has
+ * to judge — and a re-arm after a late-landing attach is how a fan receives the
+ * voice note twice. Owner's call (2026-07-30): twenty. Waiting costs nothing
+ * while the modal is still open, and a preview that lands at fifteen seconds is
+ * now read as the confirmation it always was.
+ */
+export const ATTACHMENT_OBSERVATION_BUDGET_MS = 20_000;
 
 export type VoiceAttachOutcome = 'confirmed' | 'uncertain' | 'aborted';
 export type VoiceComposerProbe =
