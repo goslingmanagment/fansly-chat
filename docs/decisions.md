@@ -2216,3 +2216,22 @@ partial text is ever presented. Semantics that moved: CG-HUB-16 now means
 «поток оборвался БЕЗ аборта», and the daily Hub-error counter no longer grows
 on local timeouts. The order itself is pinned by the abort-classification
 tests in `tests/kernel-feature-gateway.test.ts`.
+
+**E65 (2026-07-30).** The voice-attach observation budget is twenty seconds,
+not ten (`ATTACHMENT_OBSERVATION_BUDGET_MS`, `src/content/voice/attach-adapter.ts`).
+The budget was read as «how long an upload takes», which it is not: the adapter
+hands the file to Fansly's own file input, Fansly opens ITS native Upload modal,
+and the waveform preview the adapter polls for appears only after the HUMAN
+clicks Upload inside that modal. So the clock also measures the chatter finding
+the modal, reading it, and deciding — and ten seconds regularly expired on an
+attach that then landed. The visible cost of expiring is not merely a soft hint:
+`uncertain` renders «Проверьте composer» plus a «Прикрепить ещё раз» button that
+mints a fresh token, so a late-landing attach invites a second one and the fan
+hears the same paid take twice. Twenty seconds is the owner's call; waiting is
+free while the modal is open. Unchanged: at-most-once token custody (a consumed
+token is never re-armed automatically), the honest three-way outcome
+(`confirmed`/`uncertain`/`aborted`), the softened leftover-draft prompt on
+`uncertain`, and the explicit human re-arm — none of this becomes an auto-retry.
+The new floor is pinned by «confirms a waveform that lands after the old
+ten-second window» in `tests/voice-attach-adapter.test.ts`, and the terminal-
+uncertain test now advances by the exported constant instead of a literal.

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
 import {
+  ATTACHMENT_OBSERVATION_BUDGET_MS,
   VoiceAttachAdapter,
   probeComposer,
 } from '../src/content/voice/attach-adapter.js';
@@ -136,7 +137,7 @@ describe('VoiceAttachAdapter', () => {
     adapter.arm('attach-token-2');
 
     const outcome = adapter.attach(input, file);
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(ATTACHMENT_OBSERVATION_BUDGET_MS);
 
     await expect(outcome).resolves.toBe('uncertain');
     await expect(adapter.attach(input, file)).rejects.toThrow(
@@ -152,6 +153,27 @@ describe('VoiceAttachAdapter', () => {
     }, { once: true });
     await expect(adapter.attach(input, file)).resolves.toBe('confirmed');
     expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('confirms a waveform that lands after the old ten-second window', async () => {
+    // The old pin WAS the bug this budget change fixes: the waveform appears
+    // only once the human clicks Upload in Fansly's own modal, so a chatter who
+    // took twelve seconds to get there was told «проверьте composer» about an
+    // attachment that had, in fact, landed — and the offered re-arm is how the
+    // fan hears the same voice note twice.
+    const { input } = appendComposer();
+    const adapter = new VoiceAttachAdapter(document, 'group-1');
+    const file = new File(['verified mp3 bytes'], 'voice-note.mp3', { type: 'audio/mpeg' });
+    adapter.arm('attach-token-late');
+
+    const outcome = adapter.attach(input, file);
+    await vi.advanceTimersByTimeAsync(15_000);
+    document.querySelector('app-group-message-input')?.append(
+      document.createElement('waveform'),
+    );
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expect(outcome).resolves.toBe('confirmed');
   });
 
   it('consumes but never dispatches a grant after the real pathname changes', async () => {
