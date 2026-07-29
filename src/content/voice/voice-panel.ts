@@ -467,7 +467,7 @@ export class VoicePanel {
     this.setPanelError(null, null);
     // The native Upload modal opens on the file handoff below. If the студия is
     // still open, its fixed scrim (pointer-events auto) strands the modal — the
-    // chatter can't reach it, and the 10s observation budget burns hesitation
+    // chatter can't reach it, and the observation budget burns hesitation
     // into an 'uncertain'. Fold the студия back into the лента FIRST, through
     // its own collapse path, so the shared nodes restore correctly and the
     // reopened лента carries the modal hint. No-op when already in the лента.
