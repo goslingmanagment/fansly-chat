@@ -14,7 +14,7 @@ ecosystem. This pass covers ONE project; the other two get their own
 passes. Your output is the reviewer's map of this territory — make it
 complete, precise, and factual.
 
-The project: /Users/dmitriy/code/chatgoose — ChatGoose, a browser
+The project: /Users/dmitriy/code/goose/fansly-ext — ChatGoose, a browser
 extension for Fansly. It works on top of the Fansly web app and talks to
 a backend server called core (documented in its own pass).
 
