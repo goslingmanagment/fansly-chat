@@ -6,7 +6,7 @@ to the Fansly interface.
 
 ## Current architecture
 
-ChatGoose is a client of the Agency Hub kernel in `../core`:
+ChatGoose is a client of the Agency Hub kernel in `../hub`:
 
 - Fansly conversation data is read live from the page DOM/API in the chatter's
   browser session. Credentials remain in memory and are not copied into the Hub.

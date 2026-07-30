@@ -4,11 +4,13 @@ Firefox extension (MV3, gecko ≥142) for OnlyFans-agency chatters working
 Fansly.com: it injects an AI assistant into the live Fansly DOM — reply
 generation, coaching, fan summaries, reactivation pings, a spenders board —
 plus quality-of-life chat tooling. It is a **kernel client**: the Agency Hub
-"core" (`~/code/core`) holds the vendor AI keys, assembles every prompt, and
+"core" (`~/code/goose/hub`) holds the vendor AI keys, assembles every prompt, and
 computes all money; this repo talks to Fansly's page DOM/API on one side and
 to the kernel's SDK + feature lane on the other. The OnlyFans sibling is the
-ChatGoose desktop app (`~/code/chatgoose_desktop_fable`) — separate repo,
-shared kernel.
+ChatGoose desktop app (`~/code/goose/of-desktop`) — separate repo,
+shared kernel. (Renamed 2026-07-30 under `~/code`: core → goose/hub,
+chatgoose → goose/fansly-ext, chatgoose_desktop_fable → goose/of-desktop;
+GitHub repo names unchanged.)
 
 **Current architecture:** kernel-only AI over the feature lane (SSE),
 device-token sign-in preferred, kernel-only spenders data, and per-key
@@ -27,7 +29,7 @@ and may be deleted only after device-token adoption is demonstrated (E9d).**
 | `docs/generated/` | Point-in-time code maps. Read each banner's snapshot SHA before relying on a claim or line number; they are supplemental, not current truth until regenerated. `REGENERATION-PROMPT.md` there is the re-runnable generator |
 | `SPEC_FINAL.md` | The original product spec — HISTORICAL (v1.3, pre-kernel): normative for product behavior/UX intent, wrong about architecture (it predates the kernel cutover — trust `docs/decisions.md` E2/E3 over it) |
 | `CHANGELOG.md` | Release history. The ignored local `TODO.md` is not a portable or authoritative worklist |
-| `~/code/core/docs/ai-gateway-contract.md` | Historical V1 raw-gateway contract. For the current feature-lane request shape, verify `src/background/kernel-feature-gateway.ts`, the vendored SDK, and core contracts; do not rely on the old prose contract |
+| `~/code/goose/hub/docs/ai-gateway-contract.md` | Historical V1 raw-gateway contract. For the current feature-lane request shape, verify `src/background/kernel-feature-gateway.ts`, the vendored SDK, and core contracts; do not rely on the old prose contract |
 
 ## Hard rules
 
@@ -68,8 +70,8 @@ and may be deleted only after device-token adoption is demonstrated (E9d).**
   `vendor/kernel-sdk` (dist + `kernel-sdk.vendor.json` recording the
   `contractHash`, SDK version, and the core commit it was cut from), linked as
   `@kernel/sdk` in package.json. **Never hand-edit anything under it.**
-- Re-vendor only when this extension needs new operations: in `~/code/core`,
-  run `node scripts/vendor-sdk.mjs ../chatgoose/vendor/kernel-sdk` (after
+- Re-vendor only when this extension needs new operations: in `~/code/goose/hub`,
+  run `node scripts/vendor-sdk.mjs ../fansly-ext/vendor/kernel-sdk` (after
   `pnpm contracts:generate` there), then commit the vendor directory here as
   its own change.
 - Two gates protect the pin (drill-proven 2026-07-07): the vendor test
