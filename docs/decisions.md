@@ -83,7 +83,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E67 | 2026-07-31 | R4 polish, owner-approved pane by pane from «было/стало» mockups. A fact is stated ONCE per screen (the live-check receipt, a persona's account count, an unnamed account's id, the «сессий не было» caption), a control exists only while it has something to do («Переподключить» on a granted permission, «Выпущен» with no provenance, the second line of a row with nothing left to say), the hub's columns are re-cut hub-left / me-right with «Проверить связь» in the card head, and two CSS defects are fixed: the counter field's 62px never applied (a `.chatgoose-row .chatgoose-input` rule outranks it) and the stepper shrank to a clipped «+» (`overflow: hidden` zeroes its min-content contribution). «Хоткеи» deliberately untouched — the 8/4/2 columns stay E62's call |
 | E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
-| E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip, drops those ids from the Fansly name sweep, and blocks the pointless inbox search — but a KNOWN `groupId` still opens, and the spend stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
+| E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
 
 ## Entries
 
@@ -2416,12 +2416,37 @@ become the same value, which is correct: neither is a reason to mark a row.
 Three behaviours change and one deliberately does not. A nameless deleted row
 reads «deleted account» instead of its id; it carries a muted, border-free
 «deleted» chip (a state, not an action — the dashed pill of «find chat» invites a
-click this row cannot answer); and opening it does nothing. But the early return
-sits AFTER the existing `if (entry.groupId)` branch, never before it: a fan can
-delete their account while the conversation stays in the creator's inbox, and the
-chatter must not lose the history of a spender who left. Deleted fans also stay
-in the ranking — they really did spend that money, and filtering them would stop
-the totals from adding up. The chip is not registered in `chatStateChips`, and
+click this row cannot answer); and opening it does nothing.
+
+That last one is scoped narrowly, and the scope is the point: THE CONVERSATION
+OUTLIVES THE ACCOUNT. The early return fires only when the row is ALSO
+unsearchable, and it sits after the existing `if (entry.groupId)` branch:
+
+```ts
+if (entry.deletedAt != null && !hasSearchTerm(entry)) return;
+```
+
+There are two independent ways a deleted fan's chat is still reachable, and both
+are preserved. An already-enumerated `groupId` opens directly — a fan can delete
+their account while the thread stays in the creator's inbox, and the chatter must
+not lose the history of a spender who left. And a deleted fan who kept a
+`username` or `displayName` still goes through the lazy inbox search: 29 of
+`lora-1`'s 238 deleted spenders carry a name, so the resolver has a real term for
+them, and deleted fans are by definition OLD — which makes their conversations
+the ones most likely to sit outside the enumerated 150-conversation map, exactly
+the case that search exists for. The unconditional return (the first version of
+this change) removed a capability that worked before it. `hasSearchTerm` mirrors
+the term `runtime-api`'s `resolveFanChat` builds (`username?.trim() ||
+displayName?.trim()`), so the board's decision to search and the resolver's
+ability to search cannot drift apart; `customName` is in neither, because the
+chatter's private label never travels to the platform (E25). The «deleted» chip's
+tooltip states that the conversation can still be opened whenever one of the two
+routes applies, so an openable row does not look inert. Both directions are
+pinned by tests that fail if the gate regresses either way.
+
+Deleted fans also stay in the ranking — they really did spend that money, and
+filtering them would stop the totals from adding up. The chip is not registered
+in `chatStateChips`, and
 `setChatState` returns early on `.chatgoose-board-row-gone`, because a repainted
 row re-registers its chip by class: a resolve started while the fan was still
 listed as alive could otherwise land afterwards and overwrite «deleted» with

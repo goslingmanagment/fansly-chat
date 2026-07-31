@@ -66,6 +66,13 @@ const NO_CHAT_TOOLTIP =
 const GONE_TOOLTIP =
   'This account no longer exists on Fansly. Its spend stays in the ranking.';
 
+// The account is gone, but its conversation is not: either it was already
+// enumerated, or a surviving name still gives the inbox search something to
+// search by. Without this line the row looks inert while it is in fact openable.
+const GONE_OPENABLE_TOOLTIP =
+  'This account no longer exists on Fansly. Its spend stays in the ranking, ' +
+  'and its conversation can still be opened.';
+
 /** One line per stream state. "source paused" used to stand for all three, so
  *  a chatter could not tell "the owner disabled the projection" from "this page
  *  was left out of the allowlist" from "this platform is unsupported" — and the
@@ -117,6 +124,16 @@ function entryName(entry: SpenderListEntry): string {
   const known = entry.customName || entry.displayName || entry.username;
   if (known) return known;
   return entry.deletedAt != null ? 'deleted account' : entry.fanAccountId;
+}
+
+/** Whether the lazy inbox search has anything to search BY. Mirrors the term
+ * the resolver builds in `runtime-api.ts` (`resolveFanChat`:
+ * `username?.trim() || displayName?.trim()`) so the board's decision to search
+ * and the resolver's ability to search cannot drift apart. `customName` is
+ * deliberately not part of it: the chatter's private label never travels to the
+ * platform (E25), and the request carries only these two fields. */
+function hasSearchTerm(entry: SpenderListEntry): boolean {
+  return Boolean(entry.username?.trim() || entry.displayName?.trim());
 }
 
 function relativeTime(builtAt: number): string {
@@ -899,7 +916,9 @@ export class SpendersBoardController {
       const gone = document.createElement('span');
       gone.className = 'chatgoose-board-row-chatstate chatgoose-board-row-gone';
       gone.textContent = 'deleted';
-      gone.title = GONE_TOOLTIP;
+      gone.title = entry.groupId !== null || hasSearchTerm(entry)
+        ? GONE_OPENABLE_TOOLTIP
+        : GONE_TOOLTIP;
       nameLine.append(gone);
     } else if (entry.groupId === null) {
       const chatState = document.createElement('span');
@@ -978,12 +997,15 @@ export class SpendersBoardController {
       this.deps.openChat(entry.groupId);
       return;
     }
-    // Deleted account: nothing to search for. With no username the resolver
-    // returns groupId:null without even issuing a request, which rendered as a
-    // misleading "not found". A conversation that WAS already enumerated still
-    // opens above — the inbox thread outlives the account, and the chatter must
-    // not lose the history of a spender who left.
-    if (entry.deletedAt != null) return;
+    // Deleted AND unsearchable: with neither name the resolver returns
+    // groupId:null without even issuing a request, which rendered as a
+    // misleading "not found". A deleted fan that still HAS a name keeps the
+    // lazy search — the inbox thread outlives the account (29 of lora-1's 238
+    // deleted spenders still carry a name), and deleted fans are by definition
+    // old, so their conversations are the ones most likely to sit outside the
+    // enumerated map, which is exactly what this search exists for. A
+    // conversation already enumerated opens above regardless.
+    if (entry.deletedAt != null && !hasSearchTerm(entry)) return;
     // E23 lazy resolve: one inbox search per open, one at a time.
     if (this.resolvingFanId !== null) return;
     const generation = ++this.resolveGeneration;
