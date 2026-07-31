@@ -1246,6 +1246,14 @@ export interface SpendersObservation {
   streamState: SpendersStreamState | null;
   outcome: 'ok' | 'fail';
   observedAt: number;
+  /** Page the verdict is about (see SpendersListResult.pageLabel). Optional:
+   * observations recorded before this field existed survive in session
+   * storage, so every reader must treat it as possibly absent. */
+  pageLabel?: string | null;
+  /** Newest projection observation the board saw (epoch ms), so the row can say
+   * how old the DATA is, not just when the board was last opened. Optional for
+   * the same reason — test with `typeof x === 'number'`, never `!== null`. */
+  builtAt?: number | null;
 }
 
 export interface SpendersListResult {
@@ -1265,6 +1273,12 @@ export interface SpendersListResult {
   /** When the extension assembled this list (epoch ms) — cache age; newest
    * projection observation is builtAt. */
   fetchedAt: number;
+  /** Hub page label this board was built for; null when the build failed
+   * before the label was resolved. Carried in the RESULT (not resolved at the
+   * observation site) because the observation is recorded in getList, ~300
+   * lines before the label exists — and because this way it survives both the
+   * session cache and a shared in-flight build. */
+  pageLabel: string | null;
 }
 
 export type SpendersListResponse =

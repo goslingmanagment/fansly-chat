@@ -82,6 +82,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E66 | 2026-07-31 | Voice concurrency: exact script-run identity; background per-attempt revision/CAS for save/remove; hidden recovered paid work joins the new-session warning; quota-denied replay remains indeterminate |
 | E67 | 2026-07-31 | R4 polish, owner-approved pane by pane from «было/стало» mockups. A fact is stated ONCE per screen (the live-check receipt, a persona's account count, an unnamed account's id, the «сессий не было» caption), a control exists only while it has something to do («Переподключить» on a granted permission, «Выпущен» with no provenance, the second line of a row with nothing left to say), the hub's columns are re-cut hub-left / me-right with «Проверить связь» in the card head, and two CSS defects are fixed: the counter field's 62px never applied (a `.chatgoose-row .chatgoose-input` rule outranks it) and the stepper shrank to a clipped «+» (`overflow: hidden` zeroes its min-content contribution). «Хоткеи» deliberately untouched — the 8/4/2 columns stay E62's call |
 | E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
+| E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 
 ## Entries
 
@@ -2333,3 +2334,53 @@ the Russian half of this fix lives in «Кабинет» and is recorded separat
 new strings are pinned by «names which feed stopped instead of one catch-all
 "source paused"» in `tests/spenders-board-controller.test.ts`; «source paused»
 had no test at all, which is how it survived.
+
+**E69 (2026-07-31).** The «Статус» Spenders row reports a STOPPED FEED, and it
+names which page stopped and how old the data is. `lora-1` sat outside
+`fanslyNewStreamPageAllowlist` from 2026-07-17 to 2026-07-31 while this row read
+«страница не в allowlist» — an ACCESS claim, about no page in particular, next
+to a board that kept drawing its 697 frozen rows. Reading is never gated here;
+only the projection's feed is. So the two gated states say «приток остановлен:
+проекция выключена в ядре» / «приток остановлен: страницы нет в allowlist ядра»,
+and the row grows detail lines: «страница {page}» and a three-bucket data age
+(свежие / N ч назад / N дн назад, `formatSpendersDataAge`). The same two lines
+are drawn for a FAILED observation — «сборка не удалась» about an unnamed page
+names nothing — and the support report carries both in its own technical
+register, since support receives that artefact instead of the screen.
+
+`pageLabel` rides `SpendersListResult`, not the observation site. `getList`
+records the observation ~300 lines before `buildFromKernel` resolves the label,
+and a session-cache hit or a shared in-flight build returns earlier still —
+carrying it in the result is what makes all three paths agree. `builtAt` was
+already there.
+
+The FAILURE path needs its own carrier, because a throw leaves no result to read:
+a mutable `SpendersBuildScope` is created in `getList`, filled in the moment the
+label resolves and again the moment the ranking lands, adopted from the cache on
+a cache hit and from the shared build by every late joiner. Nearly every real
+failure — a Hub 500 on the ranking request, a build timeout, `session_expired`
+during enrichment — happens well after the label is known, so writing a flat
+`null` there reproduced the very anonymous verdict this entry is about. Only a
+failure at `resolvePageLabelForUsername` genuinely has nothing to name, and it is
+the one case that still records both as null.
+
+Both new `SpendersObservation` fields are OPTIONAL, and every read of them is
+`typeof x === 'number'` / a truthiness test — never `!== null`. The type lives in
+`storage.session`, which survives an extension update, so records written before
+this change come back missing the fields, and `undefined !== null` is true. The
+failure mode of the strict form is worth stating exactly, because it is not the
+obvious one: `undefined` would pass the guard, `Date.now() - undefined` is NaN,
+and the formatter's own non-finite branch would then have answered «данные
+свежие» — a false claim of freshness stacked on top of a 13-day outage, which is
+strictly worse than visible garbage because nobody looks at it twice. So that
+branch now returns nothing at all rather than a bucket, and the caller drops the
+line. Both are pinned by tests, alongside the amber `not_allowlisted` branch that
+went 13 days uncovered.
+
+For the same reason the board's session cache normalises `pageLabel` on read:
+the key stays `spendersCacheV3` (the bump belongs to a later change), so within
+the TTL after an update an entry written without the field would otherwise enter
+the app as a `SpendersListResult` in a shape its own type forbids.
+
+Out of scope by construction: the board's own English header (its catch-all
+«source paused» is E68) and anything about deleted fans.
