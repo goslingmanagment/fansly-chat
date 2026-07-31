@@ -83,6 +83,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E67 | 2026-07-31 | R4 polish, owner-approved pane by pane from «было/стало» mockups. A fact is stated ONCE per screen (the live-check receipt, a persona's account count, an unnamed account's id, the «сессий не было» caption), a control exists only while it has something to do («Переподключить» on a granted permission, «Выпущен» with no provenance, the second line of a row with nothing left to say), the hub's columns are re-cut hub-left / me-right with «Проверить связь» in the card head, and two CSS defects are fixed: the counter field's 62px never applied (a `.chatgoose-row .chatgoose-input` rule outranks it) and the stepper shrank to a clipped «+» (`overflow: hidden` zeroes its min-content contribution). «Хоткеи» deliberately untouched — the 8/4/2 columns stay E62's call |
 | E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
+| E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip, drops those ids from the Fansly name sweep, and blocks the pointless inbox search — but a KNOWN `groupId` still opens, and the spend stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
 
 ## Entries
 
@@ -2380,7 +2381,65 @@ went 13 days uncovered.
 For the same reason the board's session cache normalises `pageLabel` on read:
 the key stays `spendersCacheV3` (the bump belongs to a later change), so within
 the TTL after an update an entry written without the field would otherwise enter
-the app as a `SpendersListResult` in a shape its own type forbids.
+the app as a `SpendersListResult` in a shape its own type forbids. *(Superseded
+in part by E70, which bumps the key to `spendersCacheV4`; the normalisation stays
+as belt and braces.)*
 
 Out of scope by construction: the board's own English header (its catch-all
 «source paused» is E68) and anything about deleted fans.
+
+**E70 (2026-07-31).** A fan who deleted their Fansly account LOOKS deleted on the
+board, and the extension stops asking Fansly about them. 209 of `lora-1`'s 697
+projection rows carry `deleted_detected_at` and have neither `username` nor
+`displayName`; the board rendered each as a bare numeric id — visually identical
+to a name that simply had not loaded yet — next to a «find chat» chip that could
+never resolve, because with no search term `resolveFanChat` returns
+`groupId: null` without issuing a request and the row then printed «not found».
+Meanwhile the name sweep re-requested all 209 dead ids on every build: Fansly
+does not return deleted accounts at all, and a negative answer is not cacheable,
+so those Fansly requests bought nothing. Kernel side, `entries[].deletedAt` (from
+`fans.deleted_detected_at`, cleared as soon as any sync sees a name again) now
+rides the `top-spenders` contract — chosen over the existing `pageDeletedFans`
+route, whose `limit ≤ 200` cap is already below the 209 rows this page has today.
+
+The field is `.optional()` in the contract and stays optional through the
+vendored SDK, because the kernel deploys separately from the extension. Every
+comparison in this repo is therefore `!= null`, never `!== null`: an older
+kernel, or any row that predates the field, yields `undefined`, and
+`undefined !== null` is true — the strict form would have marked EVERY row on the
+board as deleted. `agency-hub-client` normalises the absence to `null` at the
+boundary, so «this kernel does not report deletion» and «this fan is alive»
+become the same value, which is correct: neither is a reason to mark a row.
+
+Three behaviours change and one deliberately does not. A nameless deleted row
+reads «deleted account» instead of its id; it carries a muted, border-free
+«deleted» chip (a state, not an action — the dashed pill of «find chat» invites a
+click this row cannot answer); and opening it does nothing. But the early return
+sits AFTER the existing `if (entry.groupId)` branch, never before it: a fan can
+delete their account while the conversation stays in the creator's inbox, and the
+chatter must not lose the history of a spender who left. Deleted fans also stay
+in the ranking — they really did spend that money, and filtering them would stop
+the totals from adding up. The chip is not registered in `chatStateChips`, and
+`setChatState` returns early on `.chatgoose-board-row-gone`, because a repainted
+row re-registers its chip by class: a resolve started while the fan was still
+listed as alive could otherwise land afterwards and overwrite «deleted» with
+«not found». That race is pinned by a test that fails without the guard.
+
+The session cache key goes `spendersCacheV3` → `spendersCacheV4`. The whole
+result, `entries[]` included, lives in `storage.session`, which outlives an
+extension update by up to its TTL, and the read path normalises only the
+top-level `pageLabel` (E69) — not inside the rows. Without the bump a V3 row
+would have entered the board as a `SpenderListEntry` missing `deletedAt`, and
+every deleted fan would have kept its numeric id and its unanswerable chip for
+the rest of the session.
+
+`isSpendersListResult` in `src/shared/protocol.ts` gains BOTH fields, and the
+asymmetry between them is the point. `pageLabel` is checked as strictly required
+(`string | null`, present): it never leaves the extension — the only producer of
+`spenders:snapshot` is this same build's background — and E69 made it a required
+field, so leaving it unvalidated let a snapshot without it narrow to a type that
+promises it. That was a live unsoundness, fixed here rather than left for the
+next reader. `deletedAt` is accepted as absent OR `string | null` and rejected
+for any other type: it is the one field on this message whose origin is the
+kernel, where the contract declares it optional by design, and absent already
+means «alive» to every consumer.

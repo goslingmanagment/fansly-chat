@@ -789,6 +789,7 @@ describe('protocol boundary guards', () => {
         fanCount: 1,
         monthWindow: null,
         fetchedAt: 110,
+        pageLabel: 'creator-fs',
       },
     })).toBe(true);
 
@@ -801,6 +802,53 @@ describe('protocol boundary guards', () => {
         message: 'Unknown error.',
       },
     })).toBe(true);
+  });
+
+  it('validates deletedAt and pageLabel on a spenders snapshot (E70)', () => {
+    const snapshot = (
+      entryPatch: Record<string, unknown>,
+      resultPatch: Record<string, unknown> = {},
+    ) => ({
+      type: 'spenders:snapshot',
+      buildId: 'board-build-1',
+      result: {
+        entries: [{
+          fanAccountId: 'fan-1',
+          groupId: null,
+          customName: null,
+          displayName: null,
+          username: null,
+          lifetimeMills: 123_000,
+          lifetimeUsd: 123,
+          monthMills: null,
+          monthUsd: null,
+          ...entryPatch,
+        }],
+        builtAt: 100,
+        source: { streamState: 'ramped', lastSyncedAt: 90, consecutiveFailures: 0 },
+        fanCount: 1,
+        monthWindow: null,
+        fetchedAt: 110,
+        pageLabel: 'creator-fs',
+        ...resultPatch,
+      },
+    });
+
+    // `deletedAt` originates in the kernel, where the contract declares it
+    // optional so a client vendored against an older kernel still validates.
+    // Absent therefore stays legal and means "alive"; a wrong type does not.
+    expect(isBackgroundPortMessage(snapshot({}))).toBe(true);
+    expect(isBackgroundPortMessage(snapshot({ deletedAt: null }))).toBe(true);
+    expect(isBackgroundPortMessage(snapshot({ deletedAt: '2026-07-20T10:00:00.000Z' }))).toBe(true);
+    expect(isBackgroundPortMessage(snapshot({ deletedAt: 1_753_000_000_000 }))).toBe(false);
+    expect(isBackgroundPortMessage(snapshot({ deletedAt: {} }))).toBe(false);
+
+    // `pageLabel` never leaves the extension and E69 made it required, so the
+    // guard must actually check it — an unchecked field let a snapshot without
+    // it narrow to a type that promises it.
+    expect(isBackgroundPortMessage(snapshot({}, { pageLabel: null }))).toBe(true);
+    expect(isBackgroundPortMessage(snapshot({}, { pageLabel: undefined }))).toBe(false);
+    expect(isBackgroundPortMessage(snapshot({}, { pageLabel: 7 }))).toBe(false);
   });
 
   it('accepts every valid background-to-content voice message', () => {

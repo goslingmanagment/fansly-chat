@@ -202,12 +202,23 @@ function isSpendersListResult(value: unknown): boolean {
     isNumber(entry.lifetimeMills) &&
     isNumber(entry.lifetimeUsd) &&
     isNullableNumber(entry.monthMills) &&
-    isNullableNumber(entry.monthUsd));
+    isNullableNumber(entry.monthUsd) &&
+    // `deletedAt` is the one field here that originates in the kernel, where
+    // the contract declares it OPTIONAL so a client vendored against an older
+    // kernel still validates. Absent is therefore a legal shape and means
+    // "alive" (every consumer tests `!= null`); a wrong TYPE is a producer bug
+    // and is rejected.
+    (entry.deletedAt === undefined || isNullableString(entry.deletedAt)));
   return sourceOk && entriesOk &&
     isNullableNumber(value.builtAt) &&
     isNumber(value.fanCount) &&
     isNullableString(value.monthWindow) &&
-    isNumber(value.fetchedAt);
+    isNumber(value.fetchedAt) &&
+    // REQUIRED, unlike `deletedAt`: `pageLabel` never leaves the extension —
+    // the only producer of this message is this build's own background — and
+    // E69 made it a required field of `SpendersListResult`. Leaving it
+    // unchecked let a snapshot without it narrow to a type that promises it.
+    isNullableString(value.pageLabel);
 }
 
 function isTabRouteMessage(record: Record<string, unknown>): boolean {

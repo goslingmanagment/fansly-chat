@@ -18,6 +18,7 @@ function entry(
   lifetimeUsd: number,
   monthUsd: number | null = null,
   customName: string | null = null,
+  deletedAt: string | null = null,
 ): SpenderListEntry {
   return {
     fanAccountId,
@@ -29,6 +30,7 @@ function entry(
     lifetimeUsd,
     monthMills: monthUsd === null ? null : monthUsd * 1000,
     monthUsd,
+    deletedAt,
   };
 }
 
@@ -297,6 +299,122 @@ describe('SpendersBoardController', () => {
       ),
     );
     expect(openChat).not.toHaveBeenCalled();
+  });
+
+  // ── Deleted accounts (E70) ────────────────────────────────────────────────
+
+  it('labels a deleted nameless fan instead of printing its numeric id', async () => {
+    // 209 of lora-1's 697 rows are deleted accounts with no username and no
+    // display name. They used to render as a bare numeric id next to a "find
+    // chat" chip that could never resolve — indistinguishable from a name that
+    // simply had not loaded yet.
+    const result = makeResult({
+      entries: [
+        entry('7040000000000000', null, null, 900, null, null, '2026-07-20T10:00:00.000Z'),
+        entry('7050000000000000', null, null, 400),
+      ],
+      fanCount: 2,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+    );
+    await board.show();
+
+    const deletedRow = rows()[0]!;
+    expect(deletedRow.querySelector('.chatgoose-board-row-name')!.textContent)
+      .toBe('deleted account');
+    const goneChip = deletedRow.querySelector('.chatgoose-board-row-chatstate')!;
+    expect(goneChip.textContent).toBe('deleted');
+    expect(goneChip.classList.contains('chatgoose-board-row-gone')).toBe(true);
+
+    // A live nameless fan is unchanged: its id is still the best name we have
+    // and its chat is still findable.
+    const liveRow = rows()[1]!;
+    expect(liveRow.querySelector('.chatgoose-board-row-name')!.textContent)
+      .toBe('7050000000000000');
+    expect(liveRow.querySelector('.chatgoose-board-row-chatstate')!.textContent).toBe('find chat');
+  });
+
+  it('does not search the inbox for a deleted fan on click or Enter', async () => {
+    const resolveChat = vi.fn(
+      async (): Promise<ResolveFanChatResponse> => ({ ok: true, groupId: null }),
+    );
+    const result = makeResult({
+      entries: [entry('7040000000000000', null, null, 900, null, null, '2026-07-20T10:00:00.000Z')],
+      fanCount: 1,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }), resolveChat }),
+    );
+    await board.show();
+
+    rows()[0]!.click();
+    pressKey('j');
+    pressKey('Enter');
+    await Promise.resolve();
+
+    expect(resolveChat).not.toHaveBeenCalled();
+    expect(rows()[0]!.querySelector('.chatgoose-board-row-chatstate')!.textContent).toBe('deleted');
+  });
+
+  it('still opens the conversation of a deleted fan whose chat is known', async () => {
+    // The inbox thread outlives the account. Losing the history of a spender
+    // who left would be a worse bug than the one this labelling fixes.
+    const openChat = vi.fn();
+    const result = makeResult({
+      entries: [
+        entry('7040000000000000', 'group-gone', null, 900, null, null, '2026-07-20T10:00:00.000Z'),
+      ],
+      fanCount: 1,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }), openChat }),
+    );
+    await board.show();
+
+    rows()[0]!.click();
+
+    expect(openChat).toHaveBeenCalledWith('group-gone');
+  });
+
+  it('keeps the deleted chip when a resolve started before the repaint lands', async () => {
+    let settleResolve!: (response: ResolveFanChatResponse) => void;
+    const board = new SpendersBoardController(makeDeps({
+      fetchList: async () => await new Promise<SpendersListResponse>(() => {
+        // Held open: the board stays in its building state, so both snapshots
+        // below repaint the same build (which does NOT bump the resolve
+        // generation — this chip is the only thing standing in the way).
+      }),
+      resolveChat: async () => await new Promise<ResolveFanChatResponse>((resolve) => {
+        settleResolve = resolve;
+      }),
+    }));
+    void board.show();
+    const activeBuildId = (board as unknown as { activeBuildId: string }).activeBuildId;
+
+    board.setBuildSnapshot({
+      type: 'spenders:snapshot',
+      buildId: activeBuildId,
+      result: makeResult({ entries: [entry('fan-1', null, 'Alice', 900)], fanCount: 1 }),
+    });
+    rows()[0]!.click();
+    expect(document.querySelector('.chatgoose-board-row-chatstate')!.textContent).toBe('locating…');
+
+    board.setBuildSnapshot({
+      type: 'spenders:snapshot',
+      buildId: activeBuildId,
+      result: makeResult({
+        entries: [entry('fan-1', null, null, 900, null, null, '2026-07-20T10:00:00.000Z')],
+        fanCount: 1,
+      }),
+    });
+    expect(document.querySelector('.chatgoose-board-row-chatstate')!.textContent).toBe('deleted');
+
+    settleResolve({ ok: true, groupId: null });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.querySelector('.chatgoose-board-row-chatstate')!.textContent).toBe('deleted');
   });
 
   // ── Month-to-date column + NEW badge ──────────────────────────────────────
