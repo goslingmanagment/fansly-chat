@@ -106,9 +106,17 @@ describe('options «Agency Hub» pane', () => {
     expect(page.document.body.textContent).not.toContain('agency_hub_device_SECRET');
   });
 
-  it('says so honestly when a token predates the metadata record', async () => {
+  it('draws no «Выпущен» row for a token that predates the metadata record', async () => {
+    // E67: the row used to stay open to say «данные появятся после следующего
+    // входа» — a fact about the row, not about the token. No provenance, no row;
+    // the custody pill above it still states that a token IS stored.
     const page = await signedInMount();
-    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenUnknown);
+    const tokenBlock = detail(page, 'device-token');
+    const issuedRow = Array.from(
+      tokenBlock.querySelectorAll<HTMLElement>('.chatgoose-hub-srow'),
+    ).find((row) => row.textContent?.includes(COPY.hub.deviceTokenIssuedLabel))!;
+    expect(issuedRow.hidden).toBe(true);
+    expect(tokenBlock.textContent).toContain(COPY.hub.deviceTokenStored);
   });
 
   it('takes the «Выпущен» row down with the token it belongs to', async () => {
@@ -155,10 +163,15 @@ describe('options «Agency Hub» pane', () => {
     expect(detail(page, 'contract').textContent).toContain('e8f9973f2ac3');
     // Host access names the granted origin.
     expect(detail(page, 'host-access').textContent).toContain('hub.example');
-    // The check line carries outcome, duration and WHICH credential carried it.
-    expect(detail(page, 'check').textContent).toContain(COPY.hub.checkSuccess);
-    expect(detail(page, 'check').textContent).toContain('мс');
-    expect(detail(page, 'check').textContent).toContain(COPY.hub.checkViaDeviceToken);
+    // The live check is stated ONCE, in «Подключение» beside the button that
+    // produces it — outcome (the pill), then the receipt: clock, duration and
+    // WHICH credential carried it. E67 retired the diagnostics row that printed
+    // the same `lastConnectionCheck` a card away.
+    expect(page.document.querySelector('[data-hub-detail="check"]')).toBeNull();
+    const connRow = page.document.querySelector<HTMLElement>('[data-role="hub-connection"]')!;
+    expect(connRow.textContent).toContain(COPY.hub.connPillOk);
+    expect(connRow.textContent).toContain('мс');
+    expect(connRow.textContent).toContain(COPY.hub.checkViaDeviceToken);
     // 37 errors today with only 20 listed — say that the list is capped.
     expect(detail(page, 'errors').textContent).toContain(COPY.hub.errorsToday.replace('{n}', '37'));
     expect(detail(page, 'errors').textContent).toContain(COPY.hub.errorsCapped);

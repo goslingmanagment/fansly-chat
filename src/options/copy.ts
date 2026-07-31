@@ -310,8 +310,9 @@ export const COPY = {
     connIdleMeta: 'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
     connPendingMeta: 'Дописываем изменения настроек перед живой проверкой.',
     connTestingMeta: 'Проверяем доступность хаба, разрешение и credential.',
-    /** Account zone. */
-    identityLabel: 'Аккаунт',
+    /** Account zone. The row names what it holds — a login and a role. It used
+     * to repeat its own card's title («Аккаунт» → «Аккаунт») (E67). */
+    identityLabel: 'Логин',
     pagesLabel: 'Страницы ядра',
     pagesMore: 'и ещё {n}',
     deviceTokenLabel: 'Device token',
@@ -340,7 +341,6 @@ export const COPY = {
     tokenFallbackNote:
       'Вход по логину и паролю выпускает device token; запросы идут по нему, legacy API-ключ — запасной путь.',
     testConnection: 'Проверить связь',
-    reconnectAccess: 'Переподключить',
     reissueToken: 'Перевыпустить токен',
     signOut: 'Выйти…',
     signOutConfirm: 'Точно выйти?',
@@ -360,12 +360,11 @@ export const COPY = {
     /** Diagnostics card. The «Ядро» row states what the pane is about and used
      * to exist only on «Статус», though the health response is right here. */
     coreLabel: 'Ядро',
-    checkLabel: 'Проверка',
-    checkSuccess: 'успех',
-    checkFailure: 'ошибка',
+    /** The «Проверка» diagnostics ROW is gone (E67): it restated the «Связь»
+     * row's own receipt — one `lastConnectionCheck`, printed twice on one
+     * screen. What survives is the vocabulary the surviving row needs. */
     checkViaDeviceToken: 'через device token',
     checkViaLegacyKey: 'по legacy-ключу',
-    checkNever: 'ещё не проверяли',
     checkDuration: '{n} мс',
     /** The label and the bare «выдан» went with the diagnostics host-access row
      * (E61): «Подключение» already states that fact next to the button that
@@ -374,7 +373,9 @@ export const COPY = {
     contractLabel: 'Контракт SDK',
     contractMatches: 'совпадает с ядром',
     contractMismatch: 'не совпадает с ядром',
-    errorsLabel: 'Ошибки Hub',
+    /** The cabinet says «ядро»/«хаб», never «Hub» in a Russian row — and «Ядро»
+     * is the label one line above this one (E67). */
+    errorsLabel: 'Ошибки ядра',
     errorsToday: 'за сегодня: {n}',
     errorsLast: 'последняя {code} в {time}',
     errorsCapped: 'показаны последние 20',
@@ -399,7 +400,6 @@ export const COPY = {
     emptyAllArchived: 'Все персоны каталога в архиве.',
     builtInBadge: 'built-in',
     versionPrefix: 'v',
-    accountsCount: 'аккаунтов · {n}',
     statusActive: 'активна',
     statusArchived: 'архивная',
     archivedMapped: 'выбери замену',
@@ -411,11 +411,14 @@ export const COPY = {
     catalogRefresh: 'Проверить связь и обновить',
     catalogRefreshHint: 'Каталог перечитывается после успешной проверки связи с ядром.',
     /** Second line of a persona row: which accounts sit on it. The pane held the
-     * mapping and printed only its size (E62). */
-    mappedLabel: 'на ней',
+     * mapping and printed only its size (E62). The caption CARRIES that size now
+     * (E67): the right-edge «аккаунтов · 6» counted the very chips printed
+     * beside it — and unlike the hub's page chips, these are never truncated. */
+    mappedLabel: 'на ней · {n}',
     mappedEmpty: 'аккаунтов нет',
-    /** Right column of the pane. */
-    catalogCardTitle: 'Каталог',
+    /** Right column of the pane. «Каталог» twice on one screen — the list card is
+     * «Каталог ядра» — said nothing about what this card is FOR (E67). */
+    catalogCardTitle: 'Синхронизация',
     listCardTitle: 'Каталог ядра',
     catalogUpdatedLabel: 'Обновлён',
     catalogSourceLabel: 'Источник',
@@ -478,7 +481,9 @@ export const COPY = {
     whenToday: 'сегодня {time}',
     whenYesterday: 'вчера {time}',
     whenDate: '{date} в {time}',
-    subNeverSeen: 'сессий не было',
+    /** `subNeverSeen` («сессий не было») is gone from the ROWS (E67): it was the
+     * group caption repeated verbatim once per row. `groupNever` above is the one
+     * place that state is now stated. */
     /** The degraded row's fact line — it matches its group caption instead of
      * borrowing «сессий не было» from a state nobody established. */
     subStateUnknown: 'о прошлых сессиях этот браузер не знает',

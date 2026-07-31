@@ -286,7 +286,10 @@ describe('«Персоны» pane', () => {
     expect(row.textContent).toContain('Lora');
     expect(row.textContent).toContain(COPY.personas.builtInBadge);
     expect(row.textContent).toContain(`${COPY.personas.versionPrefix}4`);
-    expect(row.textContent).toContain(COPY.personas.accountsCount.replace('{n}', '2'));
+    // The count rides the chips' own caption since E67 — it used to sit at the
+    // row's right edge, counting the very chips printed beside it.
+    expect(row.querySelector('[data-role="persona-mapped"]')?.textContent)
+      .toContain(COPY.personas.mappedLabel.replace('{n}', '2'));
     expect(page.document.querySelector('[data-role="persona-empty"]')).toBeNull();
   });
 
