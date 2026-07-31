@@ -304,10 +304,10 @@ describe('SpendersBoardController', () => {
   // ── Deleted accounts (E70) ────────────────────────────────────────────────
 
   it('labels a deleted nameless fan instead of printing its numeric id', async () => {
-    // 209 of lora-1's 697 rows are deleted accounts with no username and no
-    // display name. They used to render as a bare numeric id next to a "find
-    // chat" chip that could never resolve — indistinguishable from a name that
-    // simply had not loaded yet.
+    // 238 of lora-1's 709 rows are deleted accounts, and 209 of those have
+    // neither username nor display name. They used to render as a bare numeric
+    // id next to a "find chat" chip that could never resolve — indistinguishable
+    // from a name that simply had not loaded yet.
     const result = makeResult({
       entries: [
         entry('7040000000000000', null, null, 900, null, null, '2026-07-20T10:00:00.000Z'),

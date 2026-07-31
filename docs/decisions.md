@@ -2389,18 +2389,20 @@ Out of scope by construction: the board's own English header (its catch-all
 «source paused» is E68) and anything about deleted fans.
 
 **E70 (2026-07-31).** A fan who deleted their Fansly account LOOKS deleted on the
-board, and the extension stops asking Fansly about them. 209 of `lora-1`'s 697
-projection rows carry `deleted_detected_at` and have neither `username` nor
-`displayName`; the board rendered each as a bare numeric id — visually identical
-to a name that simply had not loaded yet — next to a «find chat» chip that could
-never resolve, because with no search term `resolveFanChat` returns
-`groupId: null` without issuing a request and the row then printed «not found».
-Meanwhile the name sweep re-requested all 209 dead ids on every build: Fansly
-does not return deleted accounts at all, and a negative answer is not cacheable,
-so those Fansly requests bought nothing. Kernel side, `entries[].deletedAt` (from
+board, and the extension stops asking Fansly about them. Production numbers,
+read from the `lora-1` projection on 2026-07-31: 709 rows, of which 238 carry
+`deleted_detected_at`, and 209 of those 238 have neither `username` nor
+`displayName`. Those 209 rendered as a bare numeric id — visually identical to a
+name that simply had not loaded yet — next to a «find chat» chip that could never
+resolve, because with no search term `resolveFanChat` returns `groupId: null`
+without issuing a request and the row then printed «not found». Meanwhile the
+name sweep re-requested all 238 dead ids on every build: Fansly does not return
+deleted accounts at all, and a negative answer is not cacheable, so those Fansly
+requests bought nothing. Kernel side, `entries[].deletedAt` (from
 `fans.deleted_detected_at`, cleared as soon as any sync sees a name again) now
 rides the `top-spenders` contract — chosen over the existing `pageDeletedFans`
-route, whose `limit ≤ 200` cap is already below the 209 rows this page has today.
+route, whose `limit ≤ 200` cap is already below the 238 deleted fans this page
+has today.
 
 The field is `.optional()` in the contract and stays optional through the
 vendored SDK, because the kernel deploys separately from the extension. Every
@@ -2424,6 +2426,24 @@ the totals from adding up. The chip is not registered in `chatStateChips`, and
 row re-registers its chip by class: a resolve started while the fan was still
 listed as alive could otherwise land afterwards and overwrite «deleted» with
 «not found». That race is pinned by a test that fails without the guard.
+
+The sweep gate covers the NETWORK half of `resolveFanNames` only, and the split
+is load-bearing. That function does two things: it reads the durable
+`spendersNames` cache in `storage.local`, and it issues the `/account?ids=`
+batches. Filtering dead ids out before the call — the first version of this
+change — skipped both, and the cache is exactly where a chatter's own rename
+lives (E25 custom name, note type 12002, the name the team actually recognizes).
+So a renamed fan whom the kernel later marked deleted would have collapsed from
+«Max/Canada/45» to «deleted account» on the next build, while their spend stayed
+in the ranking: a large ANONYMOUS row where a familiar one used to be, which is
+worse than the numeric id this entry set out to remove. Platform names would have
+survived (the mapping prefers `entry.displayName ?? names?.displayName`), so the
+loss was specifically the most valuable name. Now every listed id gets its cache
+lookup and only the network-missing set is narrowed to non-deleted ids — a cache
+read costs no egress, so nothing about the Fansly saving changes. Ids outside
+that set are also kept out of the progress total and the sweep budget: the
+platform will never answer for them, so they are not «missing» in any useful
+sense. Pinned by a test that fails against the filtered-too-early version.
 
 The session cache key goes `spendersCacheV3` → `spendersCacheV4`. The whole
 result, `entries[]` included, lives in `storage.session`, which outlives an

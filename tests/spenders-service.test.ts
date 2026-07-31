@@ -631,7 +631,7 @@ describe('SpendersService (kernel source)', () => {
 
   it('never asks Fansly for a deleted account, and keeps it on the board (E70)', async () => {
     // Fansly does not return deleted accounts at all and the negative answer
-    // is not cacheable, so every build re-asked for all 209 of lora-1's dead
+    // is not cacheable, so every build re-asked for all 238 of lora-1's dead
     // ids to learn nothing. They still spent money, so they stay in the
     // ranking — only the request goes away.
     const { service, getAccountNames } = makeKernelHarness({
@@ -665,6 +665,59 @@ describe('SpendersService (kernel source)', () => {
       ['f-gone', '2026-07-20T10:00:00.000Z'],
       ['f-legacy', null],
     ]);
+  });
+
+  it('keeps a deleted fan\'s cached custom name — only the request is dropped (E70)', async () => {
+    // The sweep gate covers the NETWORK half only. `resolveFanNames` also reads
+    // the durable names cache, and that is where a chatter's own rename lives
+    // (E25 — the name the team actually recognizes). Gating the whole call
+    // would have collapsed a familiar big spender into an anonymous «deleted
+    // account» row the moment the kernel marked them deleted, while their spend
+    // stayed in the ranking. That is worse than the numeric id it replaced.
+    const store = new Map<string, unknown>([
+      ['spendersNames', {
+        'creator-1': {
+          savedAt: Date.now(),
+          byId: {
+            'f-gone': { customName: 'Max/Canada/45', displayName: null, username: null },
+          },
+        },
+      }],
+    ]);
+    const localArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', {
+      storage: {
+        local: localArea,
+        session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) },
+      },
+    });
+    const { service, getAccountNames } = makeKernelHarness({
+      accounts: [],
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 1,
+        source: RAMPED_SOURCE,
+        entries: [{
+          platformUserId: 'f-gone',
+          username: null,
+          displayName: null,
+          grossMills: 500_000,
+          deletedAt: '2026-07-20T10:00:00.000Z',
+        }],
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).not.toHaveBeenCalled();
+    expect(result.entries[0]!.customName).toBe('Max/Canada/45');
+    expect(result.entries[0]!.deletedAt).toBe('2026-07-20T10:00:00.000Z');
   });
 
   it('skips the sweep entirely when every listed fan is deleted (E70)', async () => {

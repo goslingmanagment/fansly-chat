@@ -932,18 +932,24 @@ export class SpendersService {
     // settled wrappers prevent a fast fatal outcome from becoming unhandled
     // while another best-effort source is still finishing.
     // Deleted accounts are never returned by /account?ids=, so asking again
-    // every build spends Fansly requests to learn nothing (209 of lora-1's 697
+    // every build spends Fansly requests to learn nothing (238 of lora-1's 709
     // rows are deleted) and the negative answer is not cacheable. The kernel
     // already knows they are gone; the board labels those rows instead.
     // `== null`, not `!== null`: a kernel that predates the field, and any row
     // that reached here without it, must count as ALIVE.
-    const sweepIds = lifetime.entries
-      .filter((entry) => entry.deletedAt == null)
-      .map((entry) => entry.platformUserId);
-    const namesOutcome = sweepIds.length === 0
+    // Only the NETWORK half is gated: every listed id, deleted included, still
+    // gets its cache lookup, or a fan the chatter renamed would lose that name
+    // the moment the kernel marked them deleted.
+    const sweepableIds = new Set(
+      lifetime.entries
+        .filter((entry) => entry.deletedAt == null)
+        .map((entry) => entry.platformUserId),
+    );
+    const namesOutcome = lifetime.entries.length === 0
       ? Promise.resolve({ ok: true as const, value: new Map<string, FanNames>() })
       : this.resolveFanNames(
-          sweepIds,
+          lifetime.entries.map((entry) => entry.platformUserId),
+          sweepableIds,
           session,
           signal,
           onProgress,
@@ -1053,9 +1059,16 @@ export class SpendersService {
   /** Names for the listed fans: session-cached first (6h TTL — renames are
    * rare), then ONE paced sweep for unknown ids only: no retry budget, an
    * inter-batch pause, and a hard wall-clock budget. Best-effort throughout:
-   * whatever the sweep did not reach stays on platform names. */
+   * whatever the sweep did not reach stays on platform names.
+   *
+   * `sweepableIds` gates the NETWORK half only. Every listed id is still looked
+   * up in the cache: a deleted fan the chatter had renamed (E25 custom name,
+   * the one the team recognizes) must keep that name on the board — dropping it
+   * would turn a familiar big spender into an anonymous «deleted account» row,
+   * which is worse than the id it replaced. */
   private async resolveFanNames(
     fanAccountIds: string[],
+    sweepableIds: ReadonlySet<string>,
     session: SessionTemplate,
     signal: AbortSignal,
     onProgress?: (progress: SpendersProgressPayload) => void,
@@ -1077,7 +1090,10 @@ export class SpendersService {
     }
 
     const cachedSize = cached === null ? 0 : Object.keys(cached.byId).length;
-    const missing = requestedIds.filter((id) => !namesById.has(id));
+    // Unknown AND askable. An id outside `sweepableIds` is not «missing» in any
+    // useful sense: the platform will never answer for it, so it must not enter
+    // a batch, consume the sweep budget, or inflate the progress total.
+    const missing = requestedIds.filter((id) => !namesById.has(id) && sweepableIds.has(id));
     if (missing.length === 0) {
       if (cachedSize > SPENDERS_NAMES_CACHE_MAX) {
         await updateNamesCache(cacheKey, requestedIds, namesById);
