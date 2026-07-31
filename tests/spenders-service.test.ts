@@ -259,6 +259,69 @@ describe('SpendersService (kernel source)', () => {
       .toMatchObject({ outcome: 'ok', streamState: 'ramped' });
   });
 
+  it('carries the page label into the result and the observation', async () => {
+    // The options row must be able to name the page a verdict is about. The
+    // label rides the RESULT because the observation is recorded in getList,
+    // long before (and, on a cache hit, entirely without) the resolve that
+    // produces it.
+    const { service, settings } = makeKernelHarness();
+    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.pageLabel).toBe('creator-fs');
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+      .toMatchObject({
+        pageLabel: 'creator-fs',
+        builtAt: Date.parse('2026-07-05T00:00:00.000Z'),
+      });
+  });
+
+  it('names the page on a build that failed AFTER the label was resolved', async () => {
+    // The case the row exists for. Nearly every real failure — a Hub 500 on the
+    // ranking request, a build timeout, session_expired during enrichment —
+    // happens long after resolvePageLabelForUsername succeeded, and an
+    // anonymous «сборка не удалась» is the verdict this task set out to kill.
+    const { service, settings, fetchTopSpenders } = makeKernelHarness();
+    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    fetchTopSpenders.mockRejectedValue(new ChatGooseError('hub_request_failed'));
+
+    await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
+
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+      .toMatchObject({ outcome: 'fail', streamState: null, pageLabel: 'creator-fs' });
+  });
+
+  it('keeps the projection age of a build that failed after the ranking landed', async () => {
+    // The ranking carries the projection's own freshness, so a failure in the
+    // optional enrichment that follows can still say how old the data was.
+    const { service, settings, listFanAccounts } = makeKernelHarness();
+    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    // session_expired is the one enrichment failure that is fatal to the build.
+    listFanAccounts.mockRejectedValue(new ChatGooseError('session_expired'));
+
+    await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
+
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+      .toMatchObject({
+        outcome: 'fail',
+        pageLabel: 'creator-fs',
+        builtAt: Date.parse('2026-07-05T00:00:00.000Z'),
+      });
+  });
+
+  it('records no page when the page-label resolution itself failed', async () => {
+    // The ONLY failure with genuinely nothing to name. Claiming a page here
+    // would be inventing one.
+    const { service, settings, kernelSource } = makeKernelHarness();
+    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    kernelSource.resolvePageLabelForUsername = vi.fn(async () => {
+      throw new ChatGooseError('hub_page_match_failed');
+    });
+    await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+      .toMatchObject({ outcome: 'fail', pageLabel: null, builtAt: null });
+  });
+
   it('records a failure observation when the board build throws', async () => {
     const { service, settings, kernelSource } = makeKernelHarness();
     const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
@@ -1234,6 +1297,38 @@ describe('SpendersService (kernel source)', () => {
     expect(result.entries).toHaveLength(3);
     expect(sessionArea.get).not.toHaveBeenCalledWith('spendersCacheV2');
     expect(store.get('spendersCacheV3')).toBeDefined();
+  });
+
+  it('normalises a session snapshot written before pageLabel existed', async () => {
+    // storage.session outlives an extension update, and the board cache keeps
+    // serving for its whole TTL afterwards. Without normalisation a
+    // SpendersListResult would enter the app missing a field its own type
+    // declares, and the options row would silently lose the page.
+    const store = new Map<string, unknown>();
+    const sessionArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', { storage: { session: sessionArea } });
+
+    const first = makeKernelHarness();
+    await first.service.getList(kernelSession(), new AbortController().signal);
+
+    // Rewrite the persisted entry into its pre-change shape — the key is taken
+    // from the store rather than reconstructed, so it cannot drift.
+    const all = store.get('spendersCacheV3') as Record<string, { result: Record<string, unknown> }>;
+    expect(Object.keys(all)).toHaveLength(1);
+    for (const entry of Object.values(all)) delete entry.result.pageLabel;
+    store.set('spendersCacheV3', all);
+
+    // "Restart": a fresh service instance serves the persisted snapshot.
+    const second = makeKernelHarness();
+    const result = await second.service.getList(kernelSession(), new AbortController().signal);
+
+    expect(second.fetchTopSpenders).not.toHaveBeenCalled();
+    expect(result.pageLabel).toBeNull();
   });
 
   it('serializes concurrent session-cache writes across creators', async () => {

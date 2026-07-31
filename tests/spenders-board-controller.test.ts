@@ -50,6 +50,7 @@ function makeResult(overrides: Partial<SpendersListResult> = {}): SpendersListRe
     fanCount: 4,
     monthWindow: null,
     fetchedAt: now,
+    pageLabel: 'creator-fs',
     ...overrides,
   };
 }

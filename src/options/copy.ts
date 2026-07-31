@@ -199,9 +199,20 @@ export const COPY = {
     spendersEmpty: 'доска ещё не открывалась — статус неизвестен',
     spendersFail: 'последняя сборка доски не удалась',
     spendersRamped: 'данные идут',
-    spendersFlagOff: 'проекция выключена',
-    spendersNotAllowlisted: 'страница не в allowlist',
+    /** «Приток остановлен», not «выключено»/«не в allowlist» alone: reading is
+     * never gated, so the board keeps drawing rows while nothing new arrives.
+     * The old wording read as a denial of ACCESS, which is why a page frozen
+     * for 13 days looked like a permissions question nobody had to act on. */
+    spendersFlagOff: 'приток остановлен: проекция выключена в ядре',
+    spendersNotAllowlisted: 'приток остановлен: страницы нет в allowlist ядра',
     spendersUnsupported: 'платформа не поддерживается',
+    /** Detail lines under the Spenders fact: WHICH page the verdict is about
+     * and how old the DATA is. Coarse buckets on purpose — the row answers
+     * «это ещё актуально», not «во сколько именно». */
+    spendersPageScope: 'страница {page}',
+    spendersDataFresh: 'данные свежие',
+    spendersDataHours: 'данные {n} ч назад',
+    spendersDataDays: 'данные {n} дн назад',
     /** A LOCAL read that REJECTED. Distinct from the honest-empty states above:
      * «сегодня генераций не было» and «доска ещё не открывалась» are claims
      * about the install, and a failed read has no right to make them. */
