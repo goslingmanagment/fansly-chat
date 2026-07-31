@@ -1219,6 +1219,13 @@ export interface SpenderListEntry {
   monthMills: number | null;
   /** Calendar-month-to-date gross spend, in USD (null = unknown). */
   monthUsd: number | null;
+  /** The kernel detected this account is gone from the platform (first
+   * detection time, ISO); null when the fan is alive OR when the kernel
+   * predates the field. Such a fan can never gain a name: Fansly does not
+   * return deleted accounts at all, so the name sweep must not keep asking.
+   * Read it with `!= null` — `!== null` is true for `undefined` and would
+   * paint every row of a pre-change payload as deleted. */
+  deletedAt: string | null;
 }
 
 /** Why the kernel's fan-earnings projection is (or is not) being fed for the

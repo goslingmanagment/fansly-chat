@@ -577,6 +577,9 @@ export class AgencyHubClient {
       username: string | null;
       displayName: string | null;
       grossMills: number;
+      /** ISO time the kernel first failed to find this account on Fansly;
+       * null = alive, or a kernel that predates the field. */
+      deletedAt: string | null;
     }>;
   }> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
@@ -611,6 +614,10 @@ export class AgencyHubClient {
           username: entry.username,
           displayName: entry.displayName,
           grossMills: entry.grossMills,
+          // `?? null` is mandatory, not defensive: the contract declares this
+          // field optional so a kernel deployed before it still validates, and
+          // the kernel ships separately from this extension.
+          deletedAt: entry.deletedAt ?? null,
         })),
       };
     } catch (error) {

@@ -204,6 +204,44 @@ describe('AgencyHubClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('reads a deleted fan as deleted and an old kernel silence as alive (E70)', async () => {
+    // `topSpendersPayload()` deliberately omits `deletedAt` — the contract
+    // declares it optional so a kernel deployed before it still validates, and
+    // the kernel ships separately from this extension. That silence must mean
+    // "alive", never "deleted".
+    const fetchMock = vi.fn(async () => jsonResponse({
+      ...topSpendersPayload(),
+      fanCount: 2,
+      entries: [
+        ...topSpendersPayload().entries,
+        {
+          platformUserId: 'fan-gone',
+          username: null,
+          displayName: null,
+          grossMills: 42_000,
+          netMills: null,
+          currency: 'USD',
+          observedAt: '2026-07-05T00:00:00.000Z',
+          deletedAt: '2026-07-20T10:00:00.000Z',
+        },
+      ],
+    }));
+    const client = new AgencyHubClient(fetchMock as typeof fetch);
+
+    const result = await client.fetchTopSpenders(
+      makeSettings(),
+      'creator-fs',
+      'lifetime',
+      1000,
+      new AbortController().signal,
+    );
+
+    expect(result.entries.map((entry) => entry.deletedAt)).toEqual([
+      null,
+      '2026-07-20T10:00:00.000Z',
+    ]);
+  });
+
   it('preserves top-spenders source health from the validated SDK response', async () => {
     const fetchMock = vi.fn(async (url: URL | string) => {
       const requestUrl = new URL(String(url));
@@ -236,6 +274,9 @@ describe('AgencyHubClient', () => {
           username: 'alice',
           displayName: 'Alice',
           grossMills: 123_000,
+          // The fixture carries no `deletedAt` (old-kernel shape) and the
+          // mapper normalises the absence to «alive» right here.
+          deletedAt: null,
         },
       ],
     });

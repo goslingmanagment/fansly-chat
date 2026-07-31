@@ -2648,6 +2648,13 @@ body.chatgoose-voice-studio-lock {
   white-space: nowrap;
 }
 
+/* The account is gone from the platform: a state, not an action. No border —
+   the dashed pill of "find chat" invites a click this row cannot answer. */
+.chatgoose-board-row-gone {
+  border-color: transparent;
+  opacity: 0.75;
+}
+
 .chatgoose-board-row-handle {
   font-size: 11px;
   color: var(--chatgoose-ink-low);
