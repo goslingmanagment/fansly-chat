@@ -88,6 +88,9 @@ interface KernelSpendersSnapshot {
     username: string | null;
     displayName: string | null;
     grossMills: number;
+    /** Optional here on purpose: the kernel declares it optional (it deploys
+     * separately), so a snapshot from an older kernel simply lacks it. */
+    deletedAt?: string | null;
   }>;
 }
 
@@ -207,9 +210,14 @@ const SPENDERS_MONTH_BUDGET_MS = 12_000;
 // 10-minute cache useful across restarts (dies with the browser session,
 // never syncs). Module memory is the fallback for unit tests/exotic builds —
 // mirrors quota-tracker's custody pattern.
-// V3 expands ranking coverage to 1000 and puts the requested bound in each
-// cache key. Old top-500 session entries deliberately miss after the upgrade.
-const SESSION_CACHE_STORAGE_KEY = 'spendersCacheV3';
+// V3 expanded ranking coverage to 1000 and put the requested bound in each
+// cache key. V4 adds `deletedAt` to every cached row: the whole result lives in
+// storage.session, which outlives an extension update by up to its TTL, and the
+// read path does not normalise inside `entries[]` — a V3 row would enter the
+// board as a `SpenderListEntry` without the field, and a deleted fan would keep
+// showing a bare numeric id and a "find chat" chip that can never resolve. Old
+// entries deliberately miss after the upgrade.
+const SESSION_CACHE_STORAGE_KEY = 'spendersCacheV4';
 
 // storage.session updates replace the whole aggregate object. Serialize every
 // mutation so two overlapping creator builds cannot both read the same
@@ -247,11 +255,11 @@ async function readSessionCache(key: string): Promise<CacheEntry | null> {
     ) {
       return null;
     }
-    // An entry written before `pageLabel` existed comes back without it, and
-    // this cache outlives an extension update by up to its whole TTL — so a
-    // `SpendersListResult` would enter the app in a shape its own type forbids
-    // and the options row would silently lose the page. Normalise on read
-    // rather than bump the key: the key bump belongs to a later change.
+    // Belt and braces on top of the V4 key bump, which is what actually keeps
+    // pre-`pageLabel` (and pre-`deletedAt`) entries out: storage.session is
+    // still foreign-shaped data, and a `SpendersListResult` without `pageLabel`
+    // would enter the app in a shape its own type forbids, silently costing the
+    // options row its page name.
     return {
       ...candidate,
       result: { ...candidate.result, pageLabel: candidate.result.pageLabel ?? null },
@@ -923,10 +931,25 @@ export class SpendersService {
     // Once the ranking exists, run all optional enrichment concurrently. The
     // settled wrappers prevent a fast fatal outcome from becoming unhandled
     // while another best-effort source is still finishing.
+    // Deleted accounts are never returned by /account?ids=, so asking again
+    // every build spends Fansly requests to learn nothing (238 of lora-1's 709
+    // rows are deleted) and the negative answer is not cacheable. The kernel
+    // already knows they are gone; the board labels those rows instead.
+    // `== null`, not `!== null`: a kernel that predates the field, and any row
+    // that reached here without it, must count as ALIVE.
+    // Only the NETWORK half is gated: every listed id, deleted included, still
+    // gets its cache lookup, or a fan the chatter renamed would lose that name
+    // the moment the kernel marked them deleted.
+    const sweepableIds = new Set(
+      lifetime.entries
+        .filter((entry) => entry.deletedAt == null)
+        .map((entry) => entry.platformUserId),
+    );
     const namesOutcome = lifetime.entries.length === 0
       ? Promise.resolve({ ok: true as const, value: new Map<string, FanNames>() })
       : this.resolveFanNames(
           lifetime.entries.map((entry) => entry.platformUserId),
+          sweepableIds,
           session,
           signal,
           onProgress,
@@ -993,6 +1016,10 @@ export class SpendersService {
         lifetimeUsd: entry.grossMills / 1000,
         monthMills,
         monthUsd: monthMills !== null ? monthMills / 1000 : null,
+        // `?? null` collapses "this kernel does not report deletion" and "this
+        // fan is alive" into the same value on purpose: both mean the board has
+        // no reason to mark the row.
+        deletedAt: entry.deletedAt ?? null,
       };
     });
 
@@ -1032,9 +1059,16 @@ export class SpendersService {
   /** Names for the listed fans: session-cached first (6h TTL — renames are
    * rare), then ONE paced sweep for unknown ids only: no retry budget, an
    * inter-batch pause, and a hard wall-clock budget. Best-effort throughout:
-   * whatever the sweep did not reach stays on platform names. */
+   * whatever the sweep did not reach stays on platform names.
+   *
+   * `sweepableIds` gates the NETWORK half only. Every listed id is still looked
+   * up in the cache: a deleted fan the chatter had renamed (E25 custom name,
+   * the one the team recognizes) must keep that name on the board — dropping it
+   * would turn a familiar big spender into an anonymous «deleted account» row,
+   * which is worse than the id it replaced. */
   private async resolveFanNames(
     fanAccountIds: string[],
+    sweepableIds: ReadonlySet<string>,
     session: SessionTemplate,
     signal: AbortSignal,
     onProgress?: (progress: SpendersProgressPayload) => void,
@@ -1056,7 +1090,10 @@ export class SpendersService {
     }
 
     const cachedSize = cached === null ? 0 : Object.keys(cached.byId).length;
-    const missing = requestedIds.filter((id) => !namesById.has(id));
+    // Unknown AND askable. An id outside `sweepableIds` is not «missing» in any
+    // useful sense: the platform will never answer for it, so it must not enter
+    // a batch, consume the sweep budget, or inflate the progress total.
+    const missing = requestedIds.filter((id) => !namesById.has(id) && sweepableIds.has(id));
     if (missing.length === 0) {
       if (cachedSize > SPENDERS_NAMES_CACHE_MAX) {
         await updateNamesCache(cacheKey, requestedIds, namesById);

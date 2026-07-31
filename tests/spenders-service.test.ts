@@ -83,6 +83,9 @@ interface KernelSnapshot {
     username: string | null;
     displayName: string | null;
     grossMills: number;
+    /** Optional exactly like the kernel contract: fixtures without it stand
+     * for a kernel deployed before the field existed. */
+    deletedAt?: string | null;
   }>;
 }
 
@@ -211,6 +214,9 @@ describe('SpendersService (kernel source)', () => {
         lifetimeUsd: 1078,
         monthMills: 120_000,
         monthUsd: 120,
+        // A kernel that does not report deletion says nothing, and nothing
+        // means alive.
+        deletedAt: null,
       },
       {
         fanAccountId: 'f2',
@@ -223,6 +229,7 @@ describe('SpendersService (kernel source)', () => {
         // In the month snapshot's window but absent from its entries = $0.
         monthMills: 0,
         monthUsd: 0,
+        deletedAt: null,
       },
       {
         // E23: the enumeration is a map, not a membership gate — a whale
@@ -236,6 +243,7 @@ describe('SpendersService (kernel source)', () => {
         lifetimeUsd: 500,
         monthMills: 500_000,
         monthUsd: 500,
+        deletedAt: null,
       },
     ]);
     // Snapshot honesty: the projection's freshest observation, not "now".
@@ -619,6 +627,121 @@ describe('SpendersService (kernel source)', () => {
     const result = await failing.service.getList(kernelSession(), new AbortController().signal);
     expect(result.entries).toHaveLength(3);
     expect(result.entries.every((entry) => entry.customName === null)).toBe(true);
+  });
+
+  it('never asks Fansly for a deleted account, and keeps it on the board (E70)', async () => {
+    // Fansly does not return deleted accounts at all and the negative answer
+    // is not cacheable, so every build re-asked for all 238 of lora-1's dead
+    // ids to learn nothing. They still spent money, so they stay in the
+    // ranking — only the request goes away.
+    const { service, getAccountNames } = makeKernelHarness({
+      accounts: [],
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 3,
+        source: RAMPED_SOURCE,
+        entries: [
+          { platformUserId: 'f-alive', username: null, displayName: null, grossMills: 900_000 },
+          {
+            platformUserId: 'f-gone',
+            username: null,
+            displayName: null,
+            grossMills: 500_000,
+            deletedAt: '2026-07-20T10:00:00.000Z',
+          },
+          // No `deletedAt` key at all — an older kernel. Must be swept.
+          { platformUserId: 'f-legacy', username: null, displayName: null, grossMills: 100_000 },
+        ],
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).toHaveBeenCalledTimes(1);
+    expect(getAccountNames.mock.calls[0]![0]).toEqual(['f-alive', 'f-legacy']);
+    expect(result.entries.map((entry) => [entry.fanAccountId, entry.deletedAt])).toEqual([
+      ['f-alive', null],
+      ['f-gone', '2026-07-20T10:00:00.000Z'],
+      ['f-legacy', null],
+    ]);
+  });
+
+  it('keeps a deleted fan\'s cached custom name — only the request is dropped (E70)', async () => {
+    // The sweep gate covers the NETWORK half only. `resolveFanNames` also reads
+    // the durable names cache, and that is where a chatter's own rename lives
+    // (E25 — the name the team actually recognizes). Gating the whole call
+    // would have collapsed a familiar big spender into an anonymous «deleted
+    // account» row the moment the kernel marked them deleted, while their spend
+    // stayed in the ranking. That is worse than the numeric id it replaced.
+    const store = new Map<string, unknown>([
+      ['spendersNames', {
+        'creator-1': {
+          savedAt: Date.now(),
+          byId: {
+            'f-gone': { customName: 'Max/Canada/45', displayName: null, username: null },
+          },
+        },
+      }],
+    ]);
+    const localArea = {
+      get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) store.set(key, value);
+      }),
+    };
+    vi.stubGlobal('browser', {
+      storage: {
+        local: localArea,
+        session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) },
+      },
+    });
+    const { service, getAccountNames } = makeKernelHarness({
+      accounts: [],
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 1,
+        source: RAMPED_SOURCE,
+        entries: [{
+          platformUserId: 'f-gone',
+          username: null,
+          displayName: null,
+          grossMills: 500_000,
+          deletedAt: '2026-07-20T10:00:00.000Z',
+        }],
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).not.toHaveBeenCalled();
+    expect(result.entries[0]!.customName).toBe('Max/Canada/45');
+    expect(result.entries[0]!.deletedAt).toBe('2026-07-20T10:00:00.000Z');
+  });
+
+  it('skips the sweep entirely when every listed fan is deleted (E70)', async () => {
+    const { service, getAccountNames } = makeKernelHarness({
+      accounts: [],
+      snapshot: {
+        builtAt: '2026-07-05T00:00:00.000Z',
+        fanCount: 1,
+        source: RAMPED_SOURCE,
+        entries: [{
+          platformUserId: 'f-gone',
+          username: null,
+          displayName: null,
+          grossMills: 500_000,
+          deletedAt: '2026-07-20T10:00:00.000Z',
+        }],
+      },
+      monthSnapshot: { builtAt: null, fanCount: 0, source: RAMPED_SOURCE, entries: [] },
+    });
+
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(getAccountNames).not.toHaveBeenCalled();
+    expect(result.entries).toHaveLength(1);
   });
 
   it('sweeps names without a retry budget (1.9.1 freeze fix)', async () => {
@@ -1259,25 +1382,31 @@ describe('SpendersService (kernel source)', () => {
     expect(second.fetchTopSpenders).toHaveBeenCalledTimes(2);
   });
 
-  it('ignores a fresh V2 top-500 session snapshot and writes a V3 result', async () => {
-    const store = new Map<string, unknown>([
-      ['spendersCacheV2', {
-        'creator-1|legacy': {
-          cachedAt: Date.now(),
-          result: {
-            entries: [],
-            builtAt: null,
-            source: {
-              streamState: 'ramped',
-              lastSyncedAt: null,
-              consecutiveFailures: 0,
-            },
-            fanCount: 500,
-            monthWindow: null,
-            fetchedAt: Date.now(),
+  it('ignores fresh pre-V4 session snapshots and writes a V4 result', async () => {
+    // Every key bump exists because the persisted rows lost a field the app's
+    // own types promise: V3 dropped the top-500 coverage assumption, V4 the
+    // rows written before `deletedAt` (which would have painted every deleted
+    // account as a live fan with a bare numeric id for the whole TTL).
+    const staleEntry = {
+      'creator-1|legacy': {
+        cachedAt: Date.now(),
+        result: {
+          entries: [],
+          builtAt: null,
+          source: {
+            streamState: 'ramped',
+            lastSyncedAt: null,
+            consecutiveFailures: 0,
           },
+          fanCount: 500,
+          monthWindow: null,
+          fetchedAt: Date.now(),
         },
-      }],
+      },
+    };
+    const store = new Map<string, unknown>([
+      ['spendersCacheV2', staleEntry],
+      ['spendersCacheV3', staleEntry],
     ]);
     const sessionArea = {
       get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
@@ -1296,7 +1425,8 @@ describe('SpendersService (kernel source)', () => {
     expect(harness.fetchTopSpenders).toHaveBeenCalledTimes(2);
     expect(result.entries).toHaveLength(3);
     expect(sessionArea.get).not.toHaveBeenCalledWith('spendersCacheV2');
-    expect(store.get('spendersCacheV3')).toBeDefined();
+    expect(sessionArea.get).not.toHaveBeenCalledWith('spendersCacheV3');
+    expect(store.get('spendersCacheV4')).toBeDefined();
   });
 
   it('normalises a session snapshot written before pageLabel existed', async () => {
@@ -1318,10 +1448,10 @@ describe('SpendersService (kernel source)', () => {
 
     // Rewrite the persisted entry into its pre-change shape — the key is taken
     // from the store rather than reconstructed, so it cannot drift.
-    const all = store.get('spendersCacheV3') as Record<string, { result: Record<string, unknown> }>;
+    const all = store.get('spendersCacheV4') as Record<string, { result: Record<string, unknown> }>;
     expect(Object.keys(all)).toHaveLength(1);
     for (const entry of Object.values(all)) delete entry.result.pageLabel;
-    store.set('spendersCacheV3', all);
+    store.set('spendersCacheV4', all);
 
     // "Restart": a fresh service instance serves the persisted snapshot.
     const second = makeKernelHarness();
@@ -1359,7 +1489,7 @@ describe('SpendersService (kernel source)', () => {
       ),
     ]);
 
-    const all = store.get('spendersCacheV3') as Record<string, unknown>;
+    const all = store.get('spendersCacheV4') as Record<string, unknown>;
     expect(Object.keys(all)).toHaveLength(2);
     expect(Object.keys(all).some((key) => key.startsWith('creator-a|'))).toBe(true);
     expect(Object.keys(all).some((key) => key.startsWith('creator-b|'))).toBe(true);
@@ -1456,7 +1586,7 @@ describe('SpendersService (kernel source)', () => {
     releaseLifetime();
     await oldBuildRejected;
 
-    expect(store.get('spendersCacheV3')).toEqual({});
+    expect(store.get('spendersCacheV4')).toEqual({});
     const restarted = makeKernelHarness();
     await restarted.service.getList(kernelSession(), new AbortController().signal);
     expect(restarted.fetchTopSpenders).toHaveBeenCalledTimes(2);
