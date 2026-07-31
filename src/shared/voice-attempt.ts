@@ -5,6 +5,7 @@ import type {
   ReplyTone,
   VoiceAttemptLoadResponse,
   VoiceAttemptMutationResponse,
+  VoiceAttemptSaveResponse,
   VoiceNoteState,
   VoiceNoteStatusView,
 } from './types.js';
@@ -61,11 +62,13 @@ export interface VoiceAttemptStoreSnapshot {
 
 export interface VoiceAttemptStoreEntry extends VoiceAttemptStoreSnapshot {
   savedAt: number;
+  revision: number;
 }
 
 export interface StoredVoiceAttemptEnvelope extends VoiceAttemptStoreSnapshot {
   version: 2;
   savedAt: number;
+  revision: number;
 }
 
 /** Process-neutral contract shared by the content facade and controller tests.
@@ -288,11 +291,17 @@ export function parseVoiceAttemptStoreSnapshot(
 export function parseStoredVoiceAttemptEnvelope(
   value: unknown,
 ): StoredVoiceAttemptEnvelope | null {
+  const revision = isRecord(value) && value.revision === undefined
+    ? 1
+    : isRecord(value) && Number.isSafeInteger(value.revision) && (value.revision as number) > 0
+      ? value.revision as number
+      : null;
   if (
     !isRecord(value) ||
     value.version !== 2 ||
     !Number.isFinite(value.savedAt) ||
-    (value.savedAt as number) < 0
+    (value.savedAt as number) < 0 ||
+    revision === null
   ) {
     return null;
   }
@@ -303,6 +312,7 @@ export function parseStoredVoiceAttemptEnvelope(
   return {
     version: 2,
     savedAt: value.savedAt as number,
+    revision,
     ...snapshot,
   };
 }
@@ -310,12 +320,22 @@ export function parseStoredVoiceAttemptEnvelope(
 export function parseVoiceAttemptStoreEntry(
   value: unknown,
 ): VoiceAttemptStoreEntry | null {
-  if (!isRecord(value) || !Number.isFinite(value.savedAt) || (value.savedAt as number) < 0) {
+  if (
+    !isRecord(value) ||
+    !Number.isFinite(value.savedAt) ||
+    (value.savedAt as number) < 0 ||
+    !Number.isSafeInteger(value.revision) ||
+    (value.revision as number) <= 0
+  ) {
     return null;
   }
   const snapshot = parseVoiceAttemptStoreSnapshot(value);
   return snapshot
-    ? { savedAt: value.savedAt as number, ...snapshot }
+    ? {
+        savedAt: value.savedAt as number,
+        revision: value.revision as number,
+        ...snapshot,
+      }
     : null;
 }
 
@@ -330,10 +350,12 @@ export function sameVoiceAttemptRecoveryRoute(
 export function serializeVoiceAttemptSnapshot(
   snapshot: VoiceAttemptStoreSnapshot,
   savedAt: number,
+  revision = 1,
 ): StoredVoiceAttemptEnvelope {
   return {
     version: 2,
     savedAt,
+    revision,
     conversationRef: snapshot.conversationRef,
     pendingCreate: snapshot.pendingCreate
       ? { ...snapshot.pendingCreate }
@@ -391,30 +413,49 @@ function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): 
     keys.every((key) => key in record);
 }
 
+function isVoiceAttemptRpcFailure(
+  value: Record<string, unknown>,
+): boolean {
+  return hasOnlyKeys(value, ['version', 'ok', 'error']) &&
+    (value.error === 'invalid_sender' || value.error === 'revision_conflict');
+}
+
 export function isVoiceAttemptLoadResponse(
   value: unknown,
 ): value is VoiceAttemptLoadResponse {
-  if (!isRecord(value) || value.version !== 1 || typeof value.ok !== 'boolean') {
+  if (!isRecord(value) || value.version !== 2 || typeof value.ok !== 'boolean') {
     return false;
   }
   if (value.ok === false) {
-    return hasOnlyKeys(value, ['version', 'ok', 'error']) &&
-      value.error === 'invalid_sender';
+    return isVoiceAttemptRpcFailure(value);
   }
   return hasOnlyKeys(value, ['version', 'ok', 'entries']) &&
     Array.isArray(value.entries) &&
     value.entries.every((entry) => parseVoiceAttemptStoreEntry(entry) !== null);
 }
 
-export function isVoiceAttemptMutationResponse(
+export function isVoiceAttemptSaveResponse(
   value: unknown,
-): value is VoiceAttemptMutationResponse {
-  if (!isRecord(value) || value.version !== 1 || typeof value.ok !== 'boolean') {
+): value is VoiceAttemptSaveResponse {
+  if (!isRecord(value) || value.version !== 2 || typeof value.ok !== 'boolean') {
     return false;
   }
   if (value.ok === false) {
-    return hasOnlyKeys(value, ['version', 'ok', 'error']) &&
-      value.error === 'invalid_sender';
+    return isVoiceAttemptRpcFailure(value);
+  }
+  return hasOnlyKeys(value, ['version', 'ok', 'revision']) &&
+    Number.isSafeInteger(value.revision) &&
+    (value.revision as number) > 0;
+}
+
+export function isVoiceAttemptMutationResponse(
+  value: unknown,
+): value is VoiceAttemptMutationResponse {
+  if (!isRecord(value) || value.version !== 2 || typeof value.ok !== 'boolean') {
+    return false;
+  }
+  if (value.ok === false) {
+    return isVoiceAttemptRpcFailure(value);
   }
   return hasOnlyKeys(value, ['version', 'ok']);
 }

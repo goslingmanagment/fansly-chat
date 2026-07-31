@@ -363,6 +363,79 @@ describe('VoiceService script runner', () => {
     ]);
   });
 
+  it('ignores late callbacks and cleanup from an aborted run replaced under the same attempt id', async () => {
+    type ScriptCallbacks = Parameters<KernelFeatureGateway['streamFeature']>[2];
+    let firstCallbacks!: ScriptCallbacks;
+    let secondCallbacks!: ScriptCallbacks;
+    let resolveFirst!: (script: string) => void;
+    let resolveSecond!: (script: string) => void;
+    let run = 0;
+    const harness = createHarness({
+      streamFeature: vi.fn(async (_settings, _request, callbacks) => {
+        run += 1;
+        if (run === 1) {
+          firstCallbacks = callbacks;
+          return await new Promise<string>((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        secondCallbacks = callbacks;
+        return await new Promise<string>((resolve) => {
+          resolveSecond = resolve;
+        });
+      }),
+    });
+    const request = {
+      type: 'voice:scriptStart' as const,
+      attemptId: ATTEMPT_ID,
+      draftText: 'Tell Alice about tonight',
+      replyTone: 'flirty' as const,
+    };
+
+    const first = harness.service.handleMessage(TAB_ID, request, harness.emit);
+    await vi.waitFor(() => expect(harness.streamFeature).toHaveBeenCalledTimes(1));
+    const second = harness.service.handleMessage(TAB_ID, request, harness.emit);
+    await vi.waitFor(() => expect(harness.streamFeature).toHaveBeenCalledTimes(2));
+
+    firstCallbacks.onText('OLD LATE DELTA');
+    firstCallbacks.onMeta?.({
+      requestId: 'generation-old',
+      clientRequestId: 'script-run-old',
+      model: 'voice-script-model',
+    });
+    resolveFirst('OLD LATE SCRIPT');
+    await first;
+
+    secondCallbacks.onText('fresh delta');
+    secondCallbacks.onMeta?.({
+      requestId: 'generation-fresh',
+      clientRequestId: 'script-run-fresh',
+      model: 'voice-script-model',
+    });
+    resolveSecond('fresh script');
+    await second;
+
+    expect(harness.sent).not.toContainEqual(expect.objectContaining({
+      type: 'voice:scriptDelta',
+      text: 'OLD LATE DELTA',
+    }));
+    expect(harness.sent).not.toContainEqual(expect.objectContaining({
+      type: 'voice:scriptComplete',
+      generationRef: 'generation-old',
+    }));
+    expect(harness.sent).toContainEqual({
+      type: 'voice:scriptDelta',
+      attemptId: ATTEMPT_ID,
+      text: 'fresh delta',
+    });
+    expect(harness.sent).toContainEqual(expect.objectContaining({
+      type: 'voice:scriptComplete',
+      attemptId: ATTEMPT_ID,
+      generationRef: 'generation-fresh',
+      script: 'fresh script',
+    }));
+  });
+
   it('honours an explicit regeneration marker after background worker restart', async () => {
     const harness = createHarness({ randomUUID: () => 'fresh-worker-script-run' });
 

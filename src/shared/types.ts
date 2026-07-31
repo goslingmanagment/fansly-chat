@@ -1037,7 +1037,7 @@ export interface RuntimeResponseMap {
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
   voiceAttemptLoad: VoiceAttemptLoadResponse;
-  voiceAttemptSave: VoiceAttemptMutationResponse;
+  voiceAttemptSave: VoiceAttemptSaveResponse;
   voiceAttemptRemove: VoiceAttemptMutationResponse;
 }
 
@@ -1047,30 +1047,40 @@ export interface VoiceAttemptLoadRequest {
 
 export interface VoiceAttemptSaveRequest {
   snapshot: VoiceAttemptStoreSnapshot;
+  expectedRevision: number;
 }
 
 export interface VoiceAttemptRemoveRequest {
   attemptId: string;
   route: StoredVoiceAttemptRoute;
+  expectedRevision: number;
 }
 
 export type VoiceAttemptRpcFailure = {
-  version: 1;
+  version: 2;
   ok: false;
-  error: 'invalid_sender';
+  error: 'invalid_sender' | 'revision_conflict';
 };
 
 export type VoiceAttemptLoadResponse =
   | {
-      version: 1;
+      version: 2;
       ok: true;
       entries: VoiceAttemptStoreEntry[];
     }
   | VoiceAttemptRpcFailure;
 
+export type VoiceAttemptSaveResponse =
+  | {
+      version: 2;
+      ok: true;
+      revision: number;
+    }
+  | VoiceAttemptRpcFailure;
+
 export type VoiceAttemptMutationResponse =
   | {
-      version: 1;
+      version: 2;
       ok: true;
     }
   | VoiceAttemptRpcFailure;

@@ -13,7 +13,6 @@ import {
 import type {
   PendingVoiceCreateExpectation,
   StoredVoiceAttemptRoute,
-  VoiceAttemptStoreContract,
   VoiceAttemptStoreEntry,
   VoiceAttemptStoreSnapshot,
 } from '../shared/voice-attempt.js';
@@ -37,16 +36,25 @@ export class VoiceAttemptCustodyMismatchError extends Error {
   }
 }
 
+/** A content lifecycle tried to mutate a snapshot that is no longer current.
+ * Callers fail closed and reload instead of replacing newer paid custody. */
+export class VoiceAttemptRevisionConflictError extends Error {
+  constructor() {
+    super('Voice-attempt custody revision no longer matches');
+    this.name = 'VoiceAttemptRevisionConflictError';
+  }
+}
+
 /**
  * Background-owned, session-ephemeral custody for paid voice attempts.
  *
  * There is intentionally no memory or storage.local fallback: an
  * acknowledged write must survive Firefox MV3 event-page teardown, and a
  * browser exit intentionally ends recovery. Every mutation is serialized by
- * its exact storage key, so a delayed older transition cannot overtake a newer
- * transition for the same attempt.
+ * its exact storage key and guarded by an expected revision, so a delayed older
+ * transition cannot replace newer custody for the same attempt.
  */
-export class VoiceAttemptRepository implements VoiceAttemptStoreContract {
+export class VoiceAttemptRepository {
   private readonly storage: VoiceAttemptStorageArea;
   private readonly now: () => number;
   private readonly writeTails = new Map<string, Promise<void>>();
@@ -56,37 +64,71 @@ export class VoiceAttemptRepository implements VoiceAttemptStoreContract {
     this.now = options.now ?? (() => Date.now());
   }
 
-  async save(snapshot: VoiceAttemptStoreSnapshot): Promise<void> {
-    const savedAt = this.now();
-    const envelope = serializeVoiceAttemptSnapshot(snapshot, savedAt);
-    const parsed = parseStoredVoiceAttemptEnvelope(envelope);
-    if (!parsed) {
+  async save(
+    snapshot: VoiceAttemptStoreSnapshot,
+    expectedRevision: number,
+  ): Promise<number> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new TypeError('Invalid voice-attempt revision');
+    }
+    const candidate = parseStoredVoiceAttemptEnvelope(
+      serializeVoiceAttemptSnapshot(snapshot, 0),
+    );
+    if (!candidate) {
       throw new TypeError('Invalid voice-attempt snapshot');
     }
-    const key = voiceAttemptStorageKey(parsed.attempt.attemptId);
-    await this.enqueueWrite(key, () => this.storage.set({ [key]: parsed }));
+    const key = voiceAttemptStorageKey(candidate.attempt.attemptId);
+    return await this.enqueueWrite(key, async () => {
+      const values = await this.storage.get(key);
+      const raw = values[key] as unknown;
+      const current = raw === undefined
+        ? null
+        : parseStoredVoiceAttemptEnvelope(raw);
+      if (
+        (raw !== undefined && (
+          !current ||
+          this.now() - current.savedAt >= VOICE_ATTEMPT_TTL_MS ||
+          !sameVoiceAttemptRecoveryRoute(
+            current.attempt.boundRoute,
+            candidate.attempt.boundRoute,
+          )
+        )) ||
+        (current?.revision ?? 0) !== expectedRevision
+      ) {
+        throw new VoiceAttemptRevisionConflictError();
+      }
+      const revision = expectedRevision + 1;
+      const envelope = serializeVoiceAttemptSnapshot(snapshot, this.now(), revision);
+      await this.storage.set({ [key]: envelope });
+      return revision;
+    });
   }
 
   async remove(
     attemptId: string,
-    expectedRoute?: StoredVoiceAttemptRoute,
+    expectedRoute: StoredVoiceAttemptRoute,
+    expectedRevision: number,
   ): Promise<void> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision <= 0) {
+      throw new TypeError('Invalid voice-attempt revision');
+    }
     const key = voiceAttemptStorageKey(attemptId);
     await this.enqueueWrite(key, async () => {
-      if (expectedRoute) {
-        const values = await this.storage.get(key);
-        const raw = values[key] as unknown;
-        if (raw === undefined) {
-          return;
-        }
-        const envelope = parseStoredVoiceAttemptEnvelope(raw);
-        if (
-          !envelope ||
-          envelope.attempt.attemptId !== attemptId ||
-          !sameVoiceAttemptRecoveryRoute(envelope.attempt.boundRoute, expectedRoute)
-        ) {
-          throw new VoiceAttemptCustodyMismatchError();
-        }
+      const values = await this.storage.get(key);
+      const raw = values[key] as unknown;
+      if (raw === undefined) {
+        return;
+      }
+      const envelope = parseStoredVoiceAttemptEnvelope(raw);
+      if (
+        !envelope ||
+        envelope.attempt.attemptId !== attemptId ||
+        !sameVoiceAttemptRecoveryRoute(envelope.attempt.boundRoute, expectedRoute)
+      ) {
+        throw new VoiceAttemptCustodyMismatchError();
+      }
+      if (envelope.revision !== expectedRevision) {
+        throw new VoiceAttemptRevisionConflictError();
       }
       await this.storage.remove(key);
     });
@@ -124,6 +166,7 @@ export class VoiceAttemptRepository implements VoiceAttemptStoreContract {
       }
       entries.push({
         savedAt: envelope.savedAt,
+        revision: envelope.revision,
         attempt: envelope.attempt,
         conversationRef: envelope.conversationRef,
         pendingCreate: envelope.pendingCreate,
@@ -134,7 +177,7 @@ export class VoiceAttemptRepository implements VoiceAttemptStoreContract {
     await Promise.all(
       removeKeys.map((key) => this.enqueueWrite(
         key,
-        () => this.storage.remove(key),
+        () => this.removeIfStillStale(key),
       )),
     );
     return entries.sort((left, right) => left.savedAt - right.savedAt);
@@ -144,34 +187,54 @@ export class VoiceAttemptRepository implements VoiceAttemptStoreContract {
     expected: PendingVoiceCreateExpectation,
   ): Promise<void> {
     const key = voiceAttemptStorageKey(expected.attemptId);
-    await this.waitForWrite(key);
-    const values = await this.storage.get(key);
-    const raw = values[key] as unknown;
-    const envelope = parseStoredVoiceAttemptEnvelope(raw);
-    if (
-      !envelope ||
-      this.now() - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS ||
-      !matchesPendingVoiceCreate(envelope, expected)
-    ) {
+    await this.enqueueWrite(key, async () => {
+      const values = await this.storage.get(key);
+      const raw = values[key] as unknown;
+      const envelope = parseStoredVoiceAttemptEnvelope(raw);
       if (
-        raw !== undefined &&
-        (!envelope || this.now() - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS)
+        !envelope ||
+        this.now() - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS ||
+        !matchesPendingVoiceCreate(envelope, expected)
       ) {
-        await this.enqueueWrite(key, () => this.storage.remove(key));
+        if (
+          raw !== undefined &&
+          (!envelope || this.now() - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS)
+        ) {
+          await this.storage.remove(key);
+        }
+        throw new VoiceAttemptCustodyMismatchError();
       }
-      throw new VoiceAttemptCustodyMismatchError();
-    }
+    });
   }
 
   private async waitForPendingWrites(): Promise<void> {
     await Promise.all([...this.writeTails.values()]);
   }
 
-  private async waitForWrite(key: string): Promise<void> {
-    await (this.writeTails.get(key) ?? Promise.resolve());
+  /** load() scans all session keys outside any one attempt's FIFO. Re-read
+   * inside the FIFO before cleanup so a concurrent CAS save that refreshed the
+   * row after the scan can never be deleted from an obsolete observation. */
+  private async removeIfStillStale(key: string): Promise<void> {
+    if (key.startsWith(VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX)) {
+      await this.storage.remove(key);
+      return;
+    }
+    const values = await this.storage.get(key);
+    const raw = values[key] as unknown;
+    if (raw === undefined) {
+      return;
+    }
+    const envelope = parseStoredVoiceAttemptEnvelope(raw);
+    if (
+      !envelope ||
+      key !== voiceAttemptStorageKey(envelope.attempt.attemptId) ||
+      this.now() - envelope.savedAt >= VOICE_ATTEMPT_TTL_MS
+    ) {
+      await this.storage.remove(key);
+    }
   }
 
-  private enqueueWrite(key: string, write: () => Promise<void>): Promise<void> {
+  private enqueueWrite<T>(key: string, write: () => Promise<T>): Promise<T> {
     const previous = this.writeTails.get(key) ?? Promise.resolve();
     const result = previous.then(write, write);
     const settled = result.then(

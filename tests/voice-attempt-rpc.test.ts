@@ -38,9 +38,9 @@ function snapshot(): VoiceAttemptStoreSnapshot {
   };
 }
 
-function installRuntime(response: unknown | (() => Promise<unknown>)) {
-  const sendMessage = vi.fn(async () => typeof response === 'function'
-    ? response()
+function installRuntime(response: unknown | ((message: unknown) => Promise<unknown>)) {
+  const sendMessage = vi.fn(async (message: unknown) => typeof response === 'function'
+    ? response(message)
     : response);
   (globalThis as Record<string, unknown>).browser = {
     runtime: { sendMessage },
@@ -75,20 +75,20 @@ describe('VoiceAttemptStore RPC facade', () => {
 
   it('requires versioned acknowledgements and preserves load/save/remove contract', async () => {
     const responses = [
-      { version: 1, ok: true },
+      { version: 2, ok: true, revision: 1 },
       {
-        version: 1,
+        version: 2,
         ok: true,
-        entries: [{ savedAt: 1_000, ...snapshot() }],
+        entries: [{ savedAt: 1_000, revision: 1, ...snapshot() }],
       },
-      { version: 1, ok: true },
+      { version: 2, ok: true },
     ];
     const sendMessage = installRuntime(async () => responses.shift());
     const store = new VoiceAttemptStore();
 
     await store.save(snapshot());
     await expect(store.load({ ...ROUTE, routeNonce: 99 })).resolves.toEqual([
-      { savedAt: 1_000, ...snapshot() },
+      { savedAt: 1_000, revision: 1, ...snapshot() },
     ]);
     await store.remove(ATTEMPT_ID);
 
@@ -96,6 +96,7 @@ describe('VoiceAttemptStore RPC facade', () => {
       [{
         type: 'voiceAttemptSave',
         snapshot: snapshot(),
+        expectedRevision: 0,
       }],
       [{
         type: 'voiceAttemptLoad',
@@ -106,6 +107,7 @@ describe('VoiceAttemptStore RPC facade', () => {
         attemptId: ATTEMPT_ID,
         // The latest loaded route is retained for sender/ownership validation.
         route: ROUTE,
+        expectedRevision: 1,
       }],
     ]);
   });
@@ -114,8 +116,8 @@ describe('VoiceAttemptStore RPC facade', () => {
     undefined,
     null,
     { ok: true },
-    { version: 2, ok: true, entries: [] },
-    { version: 1, ok: true, entries: [{ broken: true }] },
+    { version: 1, ok: true, entries: [] },
+    { version: 2, ok: true, entries: [{ broken: true }] },
   ])('fails closed on an unknown or invalid mixed-version response: %o', async (response) => {
     installRuntime(response);
     const store = new VoiceAttemptStore();
@@ -128,7 +130,7 @@ describe('VoiceAttemptStore RPC facade', () => {
   });
 
   it('fails closed when the background rejects the sender', async () => {
-    installRuntime({ version: 1, ok: false, error: 'invalid_sender' });
+    installRuntime({ version: 2, ok: false, error: 'invalid_sender' });
 
     await expect(new VoiceAttemptStore().load(ROUTE)).rejects.toMatchObject({
       code: 'rejected',
@@ -148,12 +150,64 @@ describe('VoiceAttemptStore RPC facade', () => {
   });
 
   it('does not permit an unacknowledged remove without an owned route', async () => {
-    const sendMessage = installRuntime({ version: 1, ok: true });
+    const sendMessage = installRuntime({ version: 2, ok: true });
     const store = new VoiceAttemptStore();
 
     await expect(store.remove(ATTEMPT_ID)).rejects.toMatchObject({
       code: 'reload_required',
     });
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('serializes same-tab saves and sends the acknowledged revision to each mutation', async () => {
+    let revision = 0;
+    const sendMessage = installRuntime(async (message: unknown) => {
+      const request = message as { type: string; expectedRevision: number };
+      expect(request.type).toBe('voiceAttemptSave');
+      expect(request.expectedRevision).toBe(revision);
+      revision += 1;
+      return { version: 2, ok: true, revision };
+    });
+    const store = new VoiceAttemptStore();
+
+    const first = store.save(snapshot());
+    const secondSnapshot = snapshot();
+    secondSnapshot.attempt.draftText = 'newer local transition';
+    const second = store.save(secondSnapshot);
+    await Promise.all([first, second]);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls.map(([message]) =>
+      (message as { expectedRevision: number }).expectedRevision)).toEqual([0, 1]);
+  });
+
+  it('fails closed when another tab wins the loaded revision', async () => {
+    let revision = 1;
+    const entry = { savedAt: 1_000, revision, ...snapshot() };
+    const sendMessage = installRuntime(async (message: unknown) => {
+      const request = message as {
+        type: string;
+        expectedRevision?: number;
+      };
+      if (request.type === 'voiceAttemptLoad') {
+        return { version: 2, ok: true, entries: [entry] };
+      }
+      if (request.type === 'voiceAttemptSave' && request.expectedRevision === revision) {
+        revision += 1;
+        return { version: 2, ok: true, revision };
+      }
+      return { version: 2, ok: false, error: 'revision_conflict' };
+    });
+    const firstTab = new VoiceAttemptStore();
+    const staleTab = new VoiceAttemptStore();
+    await firstTab.load(ROUTE);
+    await staleTab.load(ROUTE);
+
+    await firstTab.save(snapshot());
+    await expect(staleTab.save(snapshot())).rejects.toMatchObject({
+      name: 'VoiceAttemptCustodyError',
+      code: 'conflict',
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(4);
   });
 });
