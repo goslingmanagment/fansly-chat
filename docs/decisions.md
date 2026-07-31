@@ -81,6 +81,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E62 | 2026-07-26 | The five remaining panes: «Персоны» name the accounts sitting on each persona (the map was in memory, only its size was printed) and repaint when a mapping changes; «Аккаунты» group rows by state with a caption + count each, so the per-row «в работе» pill goes; «Генерация» splits into two card columns with a fixed numeric lane, bounds from the shared constants and a step that matches the range (the deep window stepped by 1 across 100–3000), and the clamp notice becomes its own chip instead of eating the range hint; «Хоткеи» give each group its own column and let names wrap, with the detected platform stated in the head; «Вид» previews the IN-CHAT panel the subtitle promises, says what «Системная» resolves to right now, and labels its radio group. **Amended (review fixes):** the numeric lane gets its own class (as a second bare `.chatgoose-row-control` rule it clipped the auto-recap segment's «Полный»); the degraded accounts path carries an explicit 'unknown' state so no row contradicts its group caption; the «Системная» note is computed from the OS scheme, never from the document's resolved class; the catalog source shows the WHOLE normalized base URL (two hubs on one host collapsed into one line); `chatgoose-account-rows` names one element again; dead CSS/copy deleted, and the weakened persona-catalog test is a node-identity guarantee again |
 | E66 | 2026-07-31 | Voice concurrency: exact script-run identity; background per-attempt revision/CAS for save/remove; hidden recovered paid work joins the new-session warning; quota-denied replay remains indeterminate |
 | E67 | 2026-07-31 | R4 polish, owner-approved pane by pane from «было/стало» mockups. A fact is stated ONCE per screen (the live-check receipt, a persona's account count, an unnamed account's id, the «сессий не было» caption), a control exists only while it has something to do («Переподключить» on a granted permission, «Выпущен» with no provenance, the second line of a row with nothing left to say), the hub's columns are re-cut hub-left / me-right with «Проверить связь» in the card head, and two CSS defects are fixed: the counter field's 62px never applied (a `.chatgoose-row .chatgoose-input` rule outranks it) and the stepper shrank to a clipped «+» (`overflow: hidden` zeroes its min-content contribution). «Хоткеи» deliberately untouched — the 8/4/2 columns stay E62's call |
+| E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
 
 ## Entries
 
@@ -2308,3 +2309,27 @@ right edge.
 *«Хоткеи» deliberately untouched.* The 8/4/2 columns leave a 237px ragged edge
 and were offered for the same treatment; the owner kept E62's «one group, one
 column». Recorded so the next reader does not re-litigate it.
+
+**E68 (2026-07-31).** The Spenders board header states WHICH feed stopped, not
+merely that something did. The meta line used to append a single «source paused»
+for every non-`ramped` `streamState`, so three different situations printed the
+same four characters: the owner turned the spender projection off in the Hub;
+this page was dropped from the Hub allowlist; the platform is unsupported
+altogether. Only the second is a chatter-visible incident with a known fix, and
+it is exactly the one that hid — `lora-1` sat out of the allowlist from
+2026-07-17 to 2026-07-31 while its board kept drawing thirteen-day-old rows under
+«source paused», and the matching amber row in «Кабинет» said «страница не в
+allowlist», which reads as an access denial rather than a stopped feed. One line
+per state now comes from `feedStateLabel` in
+`src/content/spenders/spenders-board-controller.ts`, a total switch over
+`SpendersStreamState` (so a future state cannot silently fall through to
+silence), and `ramped` returns `null` — a flowing feed says nothing about itself,
+leaving the existing failed-sync-attempts branch as the only thing that speaks.
+Unchanged on purpose: reading is NOT gated, so the rows stay on screen and the
+counts, freshness and «shown rows may be older» line are untouched; and the empty
+states in `metaLine` and `renderList` are left alone — they already distinguish
+all four cases. The board is English with inline literals (it has no copy module);
+the Russian half of this fix lives in «Кабинет» and is recorded separately. The
+new strings are pinned by «names which feed stopped instead of one catch-all
+"source paused"» in `tests/spenders-board-controller.test.ts`; «source paused»
+had no test at all, which is how it survived.

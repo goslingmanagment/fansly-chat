@@ -8,6 +8,7 @@ import type {
   SpenderListEntry,
   SpendersListResponse,
   SpendersListResult,
+  SpendersStreamState,
 } from '../src/shared/types.js';
 
 function entry(
@@ -829,6 +830,39 @@ describe('SpendersBoardController', () => {
     expect(firstChip.title).toBe('');
     expect(document.querySelector('.chatgoose-board-scope')).toBeNull();
     expect(searchInput().placeholder).toBe('Search fans…');
+  });
+
+  it('names which feed stopped instead of one catch-all "source paused"', async () => {
+    // "source paused" stood for three different states at once, so the board
+    // could not tell a disabled projection from a page left out of the
+    // allowlist. That ambiguity WAS the bug.
+    const subtitleFor = async (streamState: SpendersStreamState): Promise<string> => {
+      const result = makeResult({
+        source: { streamState, lastSyncedAt: Date.now(), consecutiveFailures: 0 },
+      });
+      const board = new SpendersBoardController(
+        makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+      );
+      await board.show();
+      const text = document.querySelector('.chatgoose-board-subtitle')?.textContent ?? '';
+      board.close();
+      return text;
+    };
+
+    const notAllowlisted = await subtitleFor('not_allowlisted');
+    expect(notAllowlisted).toContain('not updating: this page is not in the Hub allowlist');
+    expect(notAllowlisted).not.toContain('source paused');
+
+    const flagOff = await subtitleFor('flag_off');
+    expect(flagOff).toContain('not updating: spender projection is off in the Hub');
+    expect(flagOff).not.toContain('source paused');
+
+    const unsupported = await subtitleFor('unsupported_platform');
+    expect(unsupported).toContain('not updating: unsupported platform');
+    expect(unsupported).not.toContain('source paused');
+
+    // A ramped feed says nothing about itself — silence still means "flowing".
+    expect(await subtitleFor('ramped')).not.toContain('not updating');
   });
 
   // ── W9.3/A20: not-ramped page (builtAt null) ─────────────────────────────
