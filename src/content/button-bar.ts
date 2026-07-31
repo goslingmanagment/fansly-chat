@@ -205,36 +205,46 @@ export class ButtonBar {
     return hotkey ? `${label} (${hotkey.full})` : label;
   }
 
-  /** (Re)build a feature button's content: label, hover-only hotkey, and
-   *  optional loading spinner. */
+  /** Create a feature button's stable children once, then toggle only state.
+   * Streaming/progress renders must not replace label/keycap nodes. */
   private renderFeatureButton(
     button: HTMLButtonElement,
     feature: FeatureType,
     label: string,
     loading: boolean,
   ): void {
-    const labelSpan = document.createElement('span');
-    labelSpan.className = 'chatgoose-toolbar-label';
-    labelSpan.textContent = label;
-    button.replaceChildren(labelSpan);
+    let labelSpan = button.querySelector<HTMLElement>(':scope > .chatgoose-toolbar-label');
+    if (!labelSpan) {
+      labelSpan = document.createElement('span');
+      labelSpan.className = 'chatgoose-toolbar-label';
+      button.append(labelSpan);
+    }
+    if (labelSpan.textContent !== label) {
+      labelSpan.textContent = label;
+    }
     const hotkey = featureHotkeyLabel(feature, this.platform);
     if (hotkey) {
       button.setAttribute(
         'aria-keyshortcuts',
         `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${hotkey.short}`,
       );
-      const hotkeyBadge = makeKbd(hotkey.short, { decorative: true });
-      hotkeyBadge.classList.add('chatgoose-toolbar-hotkey');
-      button.append(hotkeyBadge);
+      if (!button.querySelector(':scope > .chatgoose-toolbar-hotkey')) {
+        const hotkeyBadge = makeKbd(hotkey.short, { decorative: true });
+        hotkeyBadge.classList.add('chatgoose-toolbar-hotkey');
+        button.append(hotkeyBadge);
+      }
     } else {
       button.removeAttribute('aria-keyshortcuts');
+      button.querySelector(':scope > .chatgoose-toolbar-hotkey')?.remove();
     }
     button.classList.toggle('chatgoose-toolbar-button-loading', loading);
-    if (loading) {
-      const spinner = document.createElement('span');
+    let spinner = button.querySelector<HTMLElement>(':scope > .chatgoose-spinner');
+    if (!spinner) {
+      spinner = document.createElement('span');
       spinner.className = 'chatgoose-spinner';
       button.append(spinner);
     }
+    spinner.classList.toggle('chatgoose-hidden', !loading);
   }
 
   /** (Re)build the fixed-width tone segments. The armed segment is expressed
@@ -247,10 +257,15 @@ export class ButtonBar {
       segment.disabled = disabled;
       segment.setAttribute('aria-checked', isActive ? 'true' : 'false');
       segment.classList.toggle('chatgoose-tone-seg-active', isActive);
-      const emoji = document.createElement('span');
-      emoji.className = 'chatgoose-tone-seg-emoji';
-      emoji.textContent = entry.emoji;
-      segment.replaceChildren(emoji);
+      let emoji = segment.querySelector<HTMLElement>(':scope > .chatgoose-tone-seg-emoji');
+      if (!emoji) {
+        emoji = document.createElement('span');
+        emoji.className = 'chatgoose-tone-seg-emoji';
+        segment.append(emoji);
+      }
+      if (emoji.textContent !== entry.emoji) {
+        emoji.textContent = entry.emoji;
+      }
     }
   }
 

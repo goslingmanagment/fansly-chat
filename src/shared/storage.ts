@@ -34,6 +34,7 @@ import { ensureLegacyPersonaSnapshot } from './persona-preservation.js';
 import {
   getInvalidSummaryCacheKeys,
   SummaryCacheStore,
+  type SummaryCacheKey,
 } from './summary-cache.js';
 import type {
   PersistedState,
@@ -62,6 +63,33 @@ export interface StorageRepairPlan {
 export interface StorageStateSnapshot {
   state: PersistedState;
   repair: StorageRepairPlan;
+}
+
+/**
+ * Fixed top-level keys owned by PersistedState. Operational stores deliberately
+ * stay outside this set: they have their own versions/FIFOs and must never be
+ * fed through migrateState.
+ *
+ * Dynamic summary keys are handled separately through isSummaryCacheKey.
+ */
+export const NORMALIZED_STORAGE_STATE_KEYS = [
+  'schemaVersion',
+  'settings',
+  'personalities',
+  'personaCatalog',
+  'personaCatalogSource',
+  'personaCatalogFetchedAt',
+  'accountMappings',
+  'accountAliases',
+  KNOWN_ACCOUNTS_KEY,
+  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  AGENCY_HUB_API_KEY_STORAGE_KEY,
+] as const;
+
+const normalizedStorageStateKeySet = new Set<string>(NORMALIZED_STORAGE_STATE_KEYS);
+
+export function isNormalizedStorageStateKey(key: string): boolean {
+  return normalizedStorageStateKeySet.has(key);
 }
 
 function materializeStorageState(raw: Record<string, unknown>): StorageStateSnapshot {
@@ -110,14 +138,52 @@ export async function readStorageStateSnapshot(): Promise<StorageStateSnapshot> 
   return materializeStorageState(raw);
 }
 
+export interface ReadStorageStateOptions {
+  /**
+   * Summary entries needed by this correctness fence. Ordinary settings/persona
+   * readers omit this so a large recap cache is not cloned on every fresh read.
+   */
+  summaryKeys?: readonly SummaryCacheKey[];
+}
+
 /**
  * Return the normalized local state without repairing storage. This is for
  * latency-sensitive readers that may run beside a background-owned identity
  * rekey: unlike loadStorageState(), it cannot write an older full-state
  * snapshot back over that reconciliation.
+ *
+ * A current, custody-normalized layout takes the narrow steady-state path.
+ * Older schemas and incomplete v13 custody layouts fall back to a full snapshot
+ * so migration still sees and preserves every dynamic summary entry.
  */
-export async function readStorageState(): Promise<PersistedState> {
-  return (await readStorageStateSnapshot()).state;
+export async function readStorageState(
+  options: ReadStorageStateOptions = {},
+): Promise<PersistedState> {
+  // Keep the preservation barrier ahead of both the narrow read and any
+  // migration fallback. Its first-ever call intentionally captures a full raw
+  // snapshot; later calls validate only the write-once evidence key.
+  await ensureLegacyPersonaSnapshot();
+  const keys = Array.from(new Set([
+    ...NORMALIZED_STORAGE_STATE_KEYS,
+    ...(options.summaryKeys ?? []),
+  ]));
+  const narrowSnapshot = materializeStorageState(
+    await browser.storage.local.get(keys),
+  );
+
+  if (
+    !narrowSnapshot.repair.persistState &&
+    !narrowSnapshot.repair.custodyLayoutNeedsRepair
+  ) {
+    return narrowSnapshot.state;
+  }
+
+  // Migration/custody fallback must see the whole raw layout. In particular,
+  // migrateState carries every summary:/summary-short: entry forward; using the
+  // narrow projection here would make a later fenced repair omit those caches.
+  return materializeStorageState(
+    await browser.storage.local.get(null),
+  ).state;
 }
 
 export async function loadStorageState(): Promise<PersistedState> {

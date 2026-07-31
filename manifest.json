@@ -33,6 +33,17 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content-chat.js",
+        "content.css"
+      ],
+      "matches": [
+        "*://fansly.com/*"
+      ]
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "ChatGoose",

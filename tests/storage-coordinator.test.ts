@@ -187,6 +187,7 @@ async function installStorageCoordinatorHarness(options?: {
     coordinator,
     storageGet,
     storageSet,
+    fullGetCount: () => fullGetCount,
     probeSetCount: () => probeSetCount,
     operationLog,
     enableProbeEvents: () => {
@@ -219,6 +220,33 @@ describe('StorageCoordinator', () => {
     expect(storageSet).not.toHaveBeenCalled();
   });
 
+  it('ignores operational storage events instead of re-normalizing PersistedState', async () => {
+    mockStorage = createStorage();
+    const { coordinator } = await installStorageCoordinatorHarness();
+    const before = await coordinator.getState();
+
+    coordinator.applyStorageChanges({
+      'chatgoose:opsDaily': {
+        oldValue: undefined,
+        newValue: { version: 1, day: '2026-07-31', hubFailures: 1 },
+      },
+      acceptanceSpool: {
+        oldValue: [],
+        newValue: [{ type: 'ai_acceptance' }],
+      },
+      'chatgoose:accountPresence': {
+        oldValue: undefined,
+        newValue: { version: 1, byAccount: { acc1: { lastSeenAt: 100 } } },
+      },
+    }, 'local');
+
+    const after = await coordinator.getState();
+    expect(after).toBe(before);
+    expect(after).not.toHaveProperty('chatgoose:opsDaily');
+    expect(after).not.toHaveProperty('acceptanceSpool');
+    expect(after).not.toHaveProperty('chatgoose:accountPresence');
+  });
+
   it('serializes concurrent known-account registrations without dropping entries', async () => {
     mockStorage = createStorage();
     const { coordinator, storageSet, releaseFirstSet } =
@@ -240,10 +268,10 @@ describe('StorageCoordinator', () => {
 
   it('replays storage changes that arrive while the initial snapshot is loading', async () => {
     mockStorage = createStorage();
-    const { coordinator, storageGet, releaseFirstGet } =
+    const { coordinator, fullGetCount, releaseFirstGet } =
       await installStorageCoordinatorHarness({ stallFirstGet: true });
     const loading = coordinator.getState();
-    await vi.waitFor(() => expect(storageGet).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fullGetCount()).toBe(1));
 
     const nextPersonalities = [
       { id: 'p1', name: 'Closer', content: 'new instructions', updatedAt: 2 },
@@ -406,10 +434,10 @@ describe('StorageCoordinator', () => {
       personalities: [{ id: 'p1', name: 'Closer', content: 'old instructions', updatedAt: 1 }],
       accountMappings: { acc1: 'p1' },
     });
-    const { coordinator, storageGet, releaseFirstGet } =
+    const { coordinator, fullGetCount, releaseFirstGet } =
       await installStorageCoordinatorHarness({ stallFirstGet: true });
     const loading = coordinator.getState();
-    await vi.waitFor(() => expect(storageGet).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fullGetCount()).toBe(1));
 
     const nextSettings = stripSecretSettings({
       ...createDefaultSettings(),
@@ -530,9 +558,10 @@ describe('StorageCoordinator', () => {
     await expect(coordinator.getState()).resolves.toMatchObject({
       accountMappings: nextMappings,
     });
-    // The preservation barrier performs its own snapshot read before the
-    // storage coordinator retries the full state read.
-    expect(storageGet).toHaveBeenCalledTimes(3);
+    // The preservation barrier checks its one durable evidence key before its
+    // one-time full capture; the coordinator then retries the failed full state
+    // read from a fresh snapshot.
+    expect(storageGet).toHaveBeenCalledTimes(4);
     expect(mockStorage.accountMappings).toEqual(nextMappings);
   });
 

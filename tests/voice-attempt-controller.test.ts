@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   decodeVoiceAudioDuration,
   VoiceAttemptController,
+  type VoiceAttempt,
   type VoiceAttemptControllerPort,
   type VoiceAttemptRoute,
 } from '../src/content/voice/attempt-controller.js';
@@ -122,6 +123,7 @@ describe('VoiceAttemptController', () => {
     revokeBlobUrl?: (url: string) => void;
     decodeAudioDuration?: (bytes: ArrayBuffer) => Promise<number | null>;
     blobUrlsInitiallySuspended?: boolean;
+    onChange?: (attempt: VoiceAttempt | null) => void;
     onError?: (message: Extract<BackgroundPortMessage, {
       type: 'voice:scriptError' | 'voice:noteError' | 'voice:attachRefuse';
     }>) => void;
@@ -140,6 +142,7 @@ describe('VoiceAttemptController', () => {
       revokeBlobUrl: options.revokeBlobUrl ?? vi.fn(),
       decodeAudioDuration: options.decodeAudioDuration ?? (async () => 2),
       blobUrlsInitiallySuspended: options.blobUrlsInitiallySuspended,
+      onChange: options.onChange,
       onError: options.onError,
       onAttachGrant: options.onAttachGrant,
     });
@@ -1152,6 +1155,60 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
   });
 
+  it('does not persist or notify for identical polled status views', async () => {
+    const onChange = vi.fn();
+    const save = vi.spyOn(attemptStore, 'save');
+    const { controller } = createController({
+      uuids: [ATTEMPT_ID, TAKE_ID_1],
+      onChange,
+    });
+    await controller.startScript('Draft', 'none');
+    await finishScript(controller, 'Voice script');
+    await controller.generateTake();
+    const queued = voiceView(42, 'queued');
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      clientRequestId: TAKE_ID_1,
+      view: queued,
+    });
+    const queuedRevision = attemptStore.snapshot(ATTEMPT_ID)?.revision;
+    save.mockClear();
+    onChange.mockClear();
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: { ...queued },
+    });
+
+    expect(save).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(attemptStore.snapshot(ATTEMPT_ID)?.revision).toBe(queuedRevision);
+
+    const dispatched = voiceView(42, 'dispatched');
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: dispatched,
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const dispatchedRevision = attemptStore.snapshot(ATTEMPT_ID)?.revision;
+    save.mockClear();
+    onChange.mockClear();
+
+    await controller.handleMessage({
+      type: 'voice:noteView',
+      attemptId: ATTEMPT_ID,
+      view: { ...dispatched },
+    });
+
+    expect(save).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(attemptStore.snapshot(ATTEMPT_ID)?.revision).toBe(dispatchedRevision);
+  });
+
   it('ignores stale status regressions and preserves completed audio custody', async () => {
     const { controller } = createController({
       uuids: [ATTEMPT_ID, TAKE_ID_1],
@@ -1263,9 +1320,12 @@ describe('VoiceAttemptController', () => {
     expect(messagesOfType(port, 'voice:noteStatus')).toHaveLength(2);
   });
 
-  it('retries an audio fetch whose response was lost with the disconnected port', async () => {
+  it('retries lost audio from an identical completed view without persisting or notifying', async () => {
+    const onChange = vi.fn();
+    const save = vi.spyOn(attemptStore, 'save');
     const { controller, port } = createController({
       uuids: [ATTEMPT_ID, TAKE_ID_1],
+      onChange,
     });
     await controller.startScript('Draft', 'none');
     await finishScript(controller, 'Voice script');
@@ -1285,6 +1345,8 @@ describe('VoiceAttemptController', () => {
     await controller.handlePortDisconnected();
     port.connected = true;
     await controller.handlePortReconnect();
+    save.mockClear();
+    onChange.mockClear();
     await controller.handleMessage({
       type: 'voice:noteView',
       attemptId: ATTEMPT_ID,
@@ -1292,6 +1354,8 @@ describe('VoiceAttemptController', () => {
     });
 
     expect(messagesOfType(port, 'voice:audioFetch')).toHaveLength(2);
+    expect(save).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('returns a dead live SSE to script phase on disconnect without replaying it', async () => {

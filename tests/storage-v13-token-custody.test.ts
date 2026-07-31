@@ -11,6 +11,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  LEGACY_PERSONA_SNAPSHOT_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import {
@@ -151,6 +152,114 @@ describe('v12 → v13 migration', () => {
     expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
     expect(mockStorage.settings).toHaveProperty('agencyHubDeviceToken', 'old-token');
     expect(fullStateWrites()).toEqual([]);
+  });
+});
+
+describe('narrow steady-state reads', () => {
+  const summaryOne = {
+    summary: 'first summary',
+    personalityId: 'p1',
+    personaDefinitionId: 'v1:persona-one-definition',
+    personalityUpdatedAt: 1,
+    personaCatalogSource: null,
+    generatedAt: 10,
+  };
+  const summaryTwo = {
+    ...summaryOne,
+    summary: 'second summary',
+    generatedAt: 20,
+  };
+
+  async function primeCurrentLayout(): Promise<void> {
+    mockStorage = serializePersistedState(migrateState({
+      ...v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION }),
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'current-token',
+      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'current-key',
+      'summary:g1': summaryOne,
+      'summary:g2': summaryTwo,
+    }));
+    // The first process read intentionally performs the write-once legacy
+    // preservation snapshot. Assertions below cover the subsequent steady
+    // state after that safety barrier has been established.
+    await storage.readStorageState();
+    vi.mocked(browser.storage.local.get).mockClear();
+  }
+
+  it('reads only normalized keys plus the requested summary on a current layout', async () => {
+    await primeCurrentLayout();
+
+    const state = await storage.readStorageState({
+      summaryKeys: ['summary:g1'],
+    });
+    const calls = vi.mocked(browser.storage.local.get).mock.calls;
+    const requestedKeys = calls.at(-1)?.[0];
+
+    expect(calls.some(([keys]) => keys === null || keys === undefined)).toBe(false);
+    expect(calls[0]?.[0]).toBe(LEGACY_PERSONA_SNAPSHOT_KEY);
+    expect(Array.isArray(requestedKeys)).toBe(true);
+    expect(requestedKeys).toEqual(expect.arrayContaining([
+      'schemaVersion',
+      'settings',
+      AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+      AGENCY_HUB_API_KEY_STORAGE_KEY,
+      'summary:g1',
+    ]));
+    expect(requestedKeys).not.toContain('summary:g2');
+    expect((state as unknown as Record<string, unknown>)['summary:g1']).toEqual(summaryOne);
+    expect((state as unknown as Record<string, unknown>)['summary:g2']).toBeUndefined();
+  });
+
+  it('falls back to a full snapshot for migration and preserves every summary', async () => {
+    await primeCurrentLayout();
+    mockStorage.schemaVersion = STORAGE_SCHEMA_VERSION - 1;
+
+    const state = await storage.readStorageState({
+      summaryKeys: ['summary:g1'],
+    });
+    const calls = vi.mocked(browser.storage.local.get).mock.calls;
+
+    expect(calls.some(([keys]) => Array.isArray(keys))).toBe(true);
+    expect(calls.some(([keys]) => keys === null)).toBe(true);
+    expect(state.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    expect((state as unknown as Record<string, unknown>)['summary:g1']).toEqual(summaryOne);
+    expect((state as unknown as Record<string, unknown>)['summary:g2']).toEqual(summaryTwo);
+  });
+
+  it('falls back to the full current-schema snapshot when custody layout needs repair', async () => {
+    mockStorage = {
+      ...v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION }),
+      'summary:g1': summaryOne,
+      'summary:g2': summaryTwo,
+    };
+    // Establish only the immutable preservation barrier; this read is
+    // deliberately non-mutating, so the legacy custody layout stays on disk.
+    await storage.readStorageState();
+    vi.mocked(browser.storage.local.get).mockClear();
+
+    const state = await storage.readStorageState({
+      summaryKeys: ['summary:g1'],
+    });
+    const calls = vi.mocked(browser.storage.local.get).mock.calls;
+
+    expect(calls.some(([keys]) => Array.isArray(keys))).toBe(true);
+    expect(calls.some(([keys]) => keys === null)).toBe(true);
+    expect(state.settings.agencyHubDeviceToken).toBe('old-token');
+    expect(state.settings.agencyHubApiKey).toBe('legacy-key');
+    expect((state as unknown as Record<string, unknown>)['summary:g2']).toEqual(summaryTwo);
+    expect(fullStateWrites()).toEqual([]);
+  });
+
+  it('fails on a future schema from the narrow read without cloning full storage', async () => {
+    await primeCurrentLayout();
+    mockStorage.schemaVersion = STORAGE_SCHEMA_VERSION + 1;
+
+    await expect(storage.readStorageState()).rejects.toThrow(
+      UnsupportedFutureStorageSchemaError,
+    );
+    expect(
+      vi.mocked(browser.storage.local.get).mock.calls
+        .some(([keys]) => keys === null || keys === undefined),
+    ).toBe(false);
   });
 });
 

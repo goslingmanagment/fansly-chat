@@ -1034,9 +1034,35 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(coordinator.tabContexts.get(1)?.accountId).toBe('resolved-1');
   });
 
+  it('skips the voice capability resolver outside a message group', async () => {
+    const { coordinator, port } = await createCoordinatorHarness();
+    const resolveVoiceCapability = vi.fn(async () => true);
+    coordinator.setVoiceCapabilityResolver(resolveVoiceCapability);
+
+    await coordinator.handlePortMessage(1, {
+      type: 'tab:init',
+      groupId: null,
+      routeNonce: 1,
+    });
+
+    expect(resolveVoiceCapability).not.toHaveBeenCalled();
+    expect(postedMessages(port)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tab:state',
+          state: expect.objectContaining({
+            groupId: null,
+            voiceNotesCapable: false,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('returns the identity resolved during the voice-capability probe in the same state', async () => {
     const { coordinator, sessionStore, port } = await createCoordinatorHarness();
     sessionStore.registerCapture(1, { ...SESSION_CAPTURE, accountId: 'legacy-1' });
+    coordinator.tabContexts.setRoute(1, 'group-1', 1);
     coordinator.setVoiceCapabilityResolver(async () => {
       const session = sessionStore.getSessionByAccount('legacy-1');
       if (session) {
@@ -1093,6 +1119,7 @@ describe(`OperationCoordinator (${part})`, () => {
     const { coordinator, port, sessionStore, storageCoordinator } =
       await createCoordinatorHarness({ fanslyClient });
     sessionStore.registerCapture(1, { ...SESSION_CAPTURE, accountId: 'legacy-1' });
+    coordinator.tabContexts.setRoute(1, 'group-1', 1);
 
     const voiceService = new VoiceService({
       kernelGateway: { streamFeature: vi.fn() } as never,
@@ -1158,6 +1185,7 @@ describe(`OperationCoordinator (${part})`, () => {
 
   it('drops a stale tab-state refresh that finishes after a newer one', async () => {
     const { coordinator, port } = await createCoordinatorHarness();
+    coordinator.tabContexts.setRoute(1, 'group-1', 1);
     const resolvers: Array<(capable: boolean) => void> = [];
     coordinator.setVoiceCapabilityResolver(
       () => new Promise<boolean>((resolve) => {
@@ -1191,6 +1219,7 @@ describe(`OperationCoordinator (${part})`, () => {
 
   it('escalates the message type when a settings:changed refresh is superseded', async () => {
     const { coordinator, port } = await createCoordinatorHarness();
+    coordinator.tabContexts.setRoute(1, 'group-1', 1);
     const resolvers: Array<(capable: boolean) => void> = [];
     coordinator.setVoiceCapabilityResolver(
       () => new Promise<boolean>((resolve) => {

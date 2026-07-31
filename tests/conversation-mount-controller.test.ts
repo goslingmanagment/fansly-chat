@@ -24,6 +24,20 @@ function buildConversationDom(): ActiveConversationDom {
   return { routeRoot, container, inputHost, inputParent, displayName: null };
 }
 
+function buildObservedConversationDom(): ActiveConversationDom {
+  const routeParent = document.createElement('div');
+  const routeRoot = document.createElement('div');
+  const container = document.createElement('div');
+  const inputParent = document.createElement('div');
+  const inputHost = document.createElement('div');
+  inputParent.append(inputHost);
+  container.append(inputParent);
+  routeRoot.append(container);
+  routeParent.append(routeRoot);
+  document.body.append(routeParent);
+  return { routeRoot, container, inputHost, inputParent, displayName: null };
+}
+
 describe('ConversationMountController', () => {
   beforeEach(() => {
     installDom();
@@ -63,6 +77,25 @@ describe('ConversationMountController', () => {
 
     expect(root.parentElement).toBe(conversation.inputParent);
     expect(root.nextSibling).toBe(conversation.inputHost);
+
+    controller.destroy();
+  });
+
+  it('ignores its own renders but still observes removal from the Fansly host', async () => {
+    const root = document.createElement('div');
+    const conversation = buildObservedConversationDom();
+    const controller = new ConversationMountController(root, () => conversation);
+
+    controller.setActiveRoute('group-1');
+    const scheduleSpy = vi.spyOn(window, 'setTimeout');
+
+    root.append(document.createElement('span'));
+    await Promise.resolve();
+    expect(scheduleSpy).not.toHaveBeenCalled();
+
+    root.remove();
+    await Promise.resolve();
+    expect(scheduleSpy).toHaveBeenCalledTimes(1);
 
     controller.destroy();
   });

@@ -1,7 +1,5 @@
-import popupStyles from './styles.css';
-import { sendRuntimeRequest } from '../shared/protocol.js';
-import { loadStorageState } from '../shared/storage.js';
-import { installUiTheme } from '../shared/theme.js';
+import { sendRuntimeRequest } from '../shared/runtime-request.js';
+import { installUiTheme, readUiThemeSetting } from '../shared/theme.js';
 import type { PopupStatus } from '../shared/types.js';
 
 const rootElement = document.getElementById('chatgoose-popup-root');
@@ -14,12 +12,6 @@ if (!(rootElement instanceof HTMLElement)) {
 const root = rootElement;
 
 const COPY_FEEDBACK_MS = 1400;
-
-function injectStyles(): void {
-  const style = document.createElement('style');
-  style.textContent = popupStyles;
-  document.head.append(style);
-}
 
 function createButton(label: string): HTMLButtonElement {
   const button = document.createElement('button');
@@ -250,10 +242,9 @@ async function render(): Promise<void> {
   root.append(createVersionTag(), title, panel, button);
 }
 
-injectStyles();
 // Theme must never block the popup: without readable settings it stays on
 // the light default.
-void loadStorageState()
-  .then((state) => installUiTheme(state.settings.uiTheme))
+void readUiThemeSetting()
+  .then((setting) => installUiTheme(setting))
   .catch(() => {});
 void render();

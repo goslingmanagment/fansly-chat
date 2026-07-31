@@ -34,6 +34,17 @@ export function applyUiTheme(setting: UiThemeSetting): void {
   document.documentElement.classList.toggle(THEME_DARK_CLASS, resolved === 'dark');
 }
 
+/** Read only the one setting needed before an extension surface paints.
+ * Theme boot must not hydrate/migrate the full persisted state (including a
+ * potentially large summary cache) merely to choose a CSS token set. */
+export async function readUiThemeSetting(): Promise<UiThemeSetting> {
+  const stored = await browser.storage.local.get('settings');
+  const candidate = (stored.settings as { uiTheme?: unknown } | undefined)?.uiTheme;
+  return candidate === 'light' || candidate === 'dark' || candidate === 'system'
+    ? candidate
+    : 'system';
+}
+
 /**
  * Applies the theme and keeps it applied: re-resolves when the OS scheme
  * flips (only meaningful for 'system') and when the stored setting changes.

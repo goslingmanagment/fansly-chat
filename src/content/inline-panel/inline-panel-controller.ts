@@ -56,12 +56,72 @@ interface LoadingViewState {
 }
 
 interface StaticViewState {
-  kind: 'reply' | 'error' | 'compare';
+  kind: 'reply' | 'error';
   operationId: string | null;
   root: HTMLElement;
 }
 
-type InlineViewState = LoadingViewState | StaticViewState;
+interface CompareTabButtonView {
+  button: HTMLButtonElement;
+  label: HTMLSpanElement;
+  labelText: Text;
+  currentBadge: HTMLSpanElement | null;
+  spinner: HTMLSpanElement | null;
+}
+
+interface CompareLoadingActiveView {
+  kind: 'loading';
+  cardId: string;
+  root: HTMLElement;
+  statusText: Text;
+  streamText: Text;
+}
+
+interface CompareStaticActiveView {
+  kind: 'reply' | 'error';
+  cardId: string;
+  root: HTMLElement;
+  renderKey: string;
+}
+
+type CompareActiveView = CompareLoadingActiveView | CompareStaticActiveView;
+
+interface CompareViewState {
+  kind: 'compare';
+  operationId: string | null;
+  tabsIdentity: CompareInlineTabState[];
+  root: HTMLElement;
+  waiting: HTMLDivElement;
+  waitingText: Text;
+  summary: HTMLDivElement;
+  summaryText: Text;
+  tabsRoot: HTMLDivElement;
+  tabButtons: Map<string, CompareTabButtonView>;
+  activeHost: HTMLDivElement;
+  activeViews: Map<string, CompareActiveView>;
+  actions: HTMLDivElement;
+  cancelButton: HTMLButtonElement;
+  rerunButton: HTMLButtonElement;
+}
+
+type InlineViewState = LoadingViewState | StaticViewState | CompareViewState;
+
+function reconcileChildren(parent: HTMLElement, desired: readonly Node[]): void {
+  let cursor = parent.firstChild;
+  for (const node of desired) {
+    if (cursor === node) {
+      cursor = cursor.nextSibling;
+      continue;
+    }
+    parent.insertBefore(node, cursor);
+  }
+
+  while (cursor) {
+    const next = cursor.nextSibling;
+    cursor.remove();
+    cursor = next;
+  }
+}
 
 function formatCompareSummary(tabs: CompareInlineTabState[]): string | null {
   const currentCount = tabs.filter((tab) => tab.source === 'current').length;
@@ -95,6 +155,7 @@ export class InlinePanelController {
   private inlineError: UserFacingError | null = null;
   private lastFocusedReplyOpId: string | null = null;
   private loadingStatusTimer: number | null = null;
+  private headerMetaSignature: string | null = null;
 
   constructor(private readonly callbacks: InlinePanelCallbacks) {
     this.root = document.createElement('div');
@@ -211,6 +272,13 @@ export class InlinePanelController {
   }
 
   hide(): void {
+    if (
+      this.model.kind === 'hidden' &&
+      this.currentView === null &&
+      this.root.classList.contains('chatgoose-hidden')
+    ) {
+      return;
+    }
     this.model = { kind: 'hidden' };
     this.currentView = null;
     this.inlineError = null;
@@ -231,15 +299,20 @@ export class InlinePanelController {
       return;
     }
 
+    if (
+      model.kind === 'compare' &&
+      this.currentView?.kind === 'compare' &&
+      this.canUpdateCompareView(this.currentView, model)
+    ) {
+      this.updateCompareView(this.currentView, model);
+      return;
+    }
+
     let view: InlineViewState;
     if (model.kind === 'loading') {
       view = this.createLoadingView(model);
     } else if (model.kind === 'compare') {
-      view = {
-        kind: 'compare',
-        operationId: model.operationId,
-        root: this.renderCompareBody(model),
-      };
+      view = this.createCompareView(model);
     } else if (model.kind === 'reply') {
       view = {
         kind: 'reply',
@@ -281,14 +354,20 @@ export class InlinePanelController {
       // Coach and the Recap start dialog never surface inline (overlay-only, spec
       // §10/§5) and carry no spend meta; guard so the widened OverlayViewModel
       // union typechecks here.
-      this.metaEl.replaceChildren();
+      if (this.headerMetaSignature !== null || this.metaEl.childNodes.length > 0) {
+        this.metaEl.replaceChildren();
+      }
+      this.headerMetaSignature = null;
       this.metaEl.classList.add('chatgoose-hidden');
       return;
     }
 
     const spend = model.llmSpend;
     if (!spend) {
-      this.metaEl.replaceChildren();
+      if (this.headerMetaSignature !== null || this.metaEl.childNodes.length > 0) {
+        this.metaEl.replaceChildren();
+      }
+      this.headerMetaSignature = null;
       this.metaEl.classList.add('chatgoose-hidden');
       return;
     }
@@ -298,11 +377,20 @@ export class InlinePanelController {
   }
 
   private setHeaderMetaContent(spend: LlmSpendSummary): void {
+    const primaryText = formatSpendPrimary(spend);
+    const secondaryText = formatSpendSecondary(spend);
+    const cacheEffect = formatCacheEffectInline(spend);
+    const signature = `${primaryText}\u0000${secondaryText}\u0000` +
+      `${cacheEffect?.kind ?? ''}\u0000${cacheEffect?.text ?? ''}`;
+    if (signature === this.headerMetaSignature) {
+      return;
+    }
+    this.headerMetaSignature = signature;
+
     const primary = document.createElement('div');
     primary.className = 'chatgoose-inline-panel-meta-primary';
-    primary.textContent = formatSpendPrimary(spend);
+    primary.textContent = primaryText;
 
-    const cacheEffect = formatCacheEffectInline(spend);
     if (cacheEffect) {
       primary.append(
         document.createTextNode(' · '),
@@ -315,7 +403,7 @@ export class InlinePanelController {
       );
     }
 
-    primary.title = formatSpendSecondary(spend);
+    primary.title = secondaryText;
     this.metaEl.replaceChildren(primary);
   }
 
@@ -501,91 +589,291 @@ export class InlinePanelController {
     return section;
   }
 
-  private renderCompareBody(model: CompareInlineViewModel): HTMLElement {
-    const section = document.createElement('div');
-    section.className = 'chatgoose-grid';
+  private canUpdateCompareView(
+    view: CompareViewState,
+    model: CompareInlineViewModel,
+  ): boolean {
+    if (view.operationId !== null && model.operationId !== null) {
+      return view.operationId === model.operationId;
+    }
+
+    // The terminal compare model deliberately drops operationId, but keeps the
+    // exact tabs array from the live model. That identity is the hand-off fence:
+    // it lets the last loading view become completed in place without treating a
+    // different cached completed Compare (also operationId=null) as the same run.
+    return view.tabsIdentity === model.tabs;
+  }
+
+  private createCompareView(model: CompareInlineViewModel): CompareViewState {
+    const root = document.createElement('div');
+    root.className = 'chatgoose-grid';
+
+    const waiting = document.createElement('div');
+    waiting.className = 'chatgoose-stream';
+    const waitingText = document.createTextNode('');
+    waiting.append(waitingText);
+
+    const summary = document.createElement('div');
+    summary.className = 'chatgoose-compare-summary';
+    const summaryText = document.createTextNode('');
+    summary.append(summaryText);
+
+    const tabsRoot = document.createElement('div');
+    tabsRoot.className = 'chatgoose-compare-tabs';
+
+    // This host is stable for the whole Compare operation. Switching cards or
+    // moving loading → reply/error replaces only its child view; streaming
+    // updates mutate the existing Text nodes below it.
+    const activeHost = document.createElement('div');
+    activeHost.className = 'chatgoose-compare-active';
+
+    const actions = document.createElement('div');
+    actions.className = 'chatgoose-card-actions';
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'chatgoose-button chatgoose-button-danger';
+    cancelButton.textContent = 'Cancel all';
+    cancelButton.addEventListener('click', () => {
+      if (this.model.kind === 'compare' && this.model.operationId) {
+        this.callbacks.onCancel(this.model.operationId);
+      }
+    });
+
+    const rerunButton = document.createElement('button');
+    rerunButton.type = 'button';
+    rerunButton.className = 'chatgoose-button';
+    rerunButton.textContent = 'Regenerate all';
+    rerunButton.addEventListener('click', () => this.callbacks.onCompareRerun());
+
+    const view: CompareViewState = {
+      kind: 'compare',
+      operationId: model.operationId,
+      tabsIdentity: model.tabs,
+      root,
+      waiting,
+      waitingText,
+      summary,
+      summaryText,
+      tabsRoot,
+      tabButtons: new Map(),
+      activeHost,
+      activeViews: new Map(),
+      actions,
+      cancelButton,
+      rerunButton,
+    };
+    this.updateCompareView(view, model);
+    return view;
+  }
+
+  private updateCompareView(
+    view: CompareViewState,
+    model: CompareInlineViewModel,
+  ): void {
+    view.operationId = model.operationId;
+    view.tabsIdentity = model.tabs;
 
     if (model.tabs.length === 0) {
-      const waiting = document.createElement('div');
-      waiting.className = 'chatgoose-stream';
-      waiting.textContent = model.progress?.message ?? 'Preparing compare…';
-      section.append(waiting);
-      return section;
+      const waiting = model.progress?.message ?? 'Preparing compare…';
+      if (view.waitingText.data !== waiting) {
+        view.waitingText.data = waiting;
+      }
+      this.updateCompareTabButtons(view, model.tabs, null);
+      this.updateCompareActiveView(view, model, null);
+      reconcileChildren(view.actions, []);
+      reconcileChildren(view.root, [view.waiting]);
+      return;
     }
-
-    const summaryText = formatCompareSummary(model.tabs);
-    if (summaryText) {
-      const summary = document.createElement('div');
-      summary.className = 'chatgoose-compare-summary';
-      summary.textContent = summaryText;
-      section.append(summary);
-    }
-
-    const tabs = document.createElement('div');
-    tabs.className = 'chatgoose-compare-tabs';
-    model.tabs.forEach((tab) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'chatgoose-compare-tab';
-      const isActive = tab.cardId === model.activeCardId;
-      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      if (isActive) {
-        button.classList.add('chatgoose-compare-tab-active');
-      }
-      button.addEventListener('click', () => this.callbacks.onCompareTabSelect(tab.cardId));
-
-      const label = document.createElement('span');
-      label.textContent = tab.label;
-      button.append(label);
-
-      if (tab.source === 'current') {
-        const badge = document.createElement('span');
-        badge.className = 'chatgoose-compare-tab-badge';
-        badge.textContent = 'Current';
-        button.append(badge);
-      }
-
-      if (tab.status === 'loading') {
-        const spinner = document.createElement('span');
-        spinner.className = 'chatgoose-spinner';
-        button.append(spinner);
-      }
-
-      tabs.append(button);
-    });
-    section.append(tabs);
 
     const activeTab =
       model.tabs.find((tab) => tab.cardId === model.activeCardId) ??
       model.tabs[0] ??
       null;
-    if (activeTab) {
-      section.append(this.renderCompareActiveTab(model, activeTab));
+    const effectiveActiveCardId = activeTab?.cardId ?? null;
+
+    const summary = formatCompareSummary(model.tabs);
+    if (summary !== null && view.summaryText.data !== summary) {
+      view.summaryText.data = summary;
     }
 
-    const actions = document.createElement('div');
-    actions.className = 'chatgoose-card-actions';
+    this.updateCompareTabButtons(view, model.tabs, effectiveActiveCardId);
+    this.updateCompareActiveView(view, model, activeTab);
+
+    const actionNodes: Node[] = [];
     if (model.canCancel && model.operationId) {
-      const cancel = document.createElement('button');
-      cancel.type = 'button';
-      cancel.className = 'chatgoose-button chatgoose-button-danger';
-      cancel.textContent = 'Cancel all';
-      cancel.addEventListener('click', () => this.callbacks.onCancel(model.operationId!));
-      actions.append(cancel);
+      actionNodes.push(view.cancelButton);
     }
     if (model.canRegenerate) {
-      const rerun = document.createElement('button');
-      rerun.type = 'button';
-      rerun.className = 'chatgoose-button';
-      rerun.textContent = 'Regenerate all';
-      rerun.addEventListener('click', () => this.callbacks.onCompareRerun());
-      actions.append(rerun);
+      actionNodes.push(view.rerunButton);
     }
-    if (actions.childElementCount > 0) {
-      section.append(actions);
+    reconcileChildren(view.actions, actionNodes);
+
+    const rootNodes: Node[] = [];
+    if (summary !== null) {
+      rootNodes.push(view.summary);
+    }
+    rootNodes.push(view.tabsRoot);
+    if (activeTab) {
+      rootNodes.push(view.activeHost);
+    }
+    if (actionNodes.length > 0) {
+      rootNodes.push(view.actions);
+    }
+    reconcileChildren(view.root, rootNodes);
+  }
+
+  private updateCompareTabButtons(
+    view: CompareViewState,
+    tabs: CompareInlineTabState[],
+    activeCardId: string | null,
+  ): void {
+    const liveIds = new Set(tabs.map((tab) => tab.cardId));
+    for (const [cardId, tabView] of view.tabButtons) {
+      if (!liveIds.has(cardId)) {
+        tabView.button.remove();
+        view.tabButtons.delete(cardId);
+        view.activeViews.delete(cardId);
+      }
     }
 
-    return section;
+    const desiredButtons: Node[] = [];
+    for (const tab of tabs) {
+      let tabView = view.tabButtons.get(tab.cardId);
+      if (!tabView) {
+        tabView = this.createCompareTabButton(tab.cardId);
+        view.tabButtons.set(tab.cardId, tabView);
+      }
+
+      if (tabView.labelText.data !== tab.label) {
+        tabView.labelText.data = tab.label;
+      }
+
+      if (tab.source === 'current' && !tabView.currentBadge) {
+        const badge = document.createElement('span');
+        badge.className = 'chatgoose-compare-tab-badge';
+        badge.textContent = 'Current';
+        tabView.currentBadge = badge;
+      } else if (tab.source !== 'current' && tabView.currentBadge) {
+        tabView.currentBadge = null;
+      }
+
+      if (tab.status === 'loading' && !tabView.spinner) {
+        const spinner = document.createElement('span');
+        spinner.className = 'chatgoose-spinner';
+        tabView.spinner = spinner;
+      } else if (tab.status !== 'loading' && tabView.spinner) {
+        tabView.spinner = null;
+      }
+
+      const isActive = tab.cardId === activeCardId;
+      tabView.button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      tabView.button.classList.toggle('chatgoose-compare-tab-active', isActive);
+      reconcileChildren(
+        tabView.button,
+        [
+          tabView.label,
+          ...(tabView.currentBadge ? [tabView.currentBadge] : []),
+          ...(tabView.spinner ? [tabView.spinner] : []),
+        ],
+      );
+      desiredButtons.push(tabView.button);
+    }
+
+    reconcileChildren(view.tabsRoot, desiredButtons);
+  }
+
+  private createCompareTabButton(cardId: string): CompareTabButtonView {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chatgoose-compare-tab';
+    button.addEventListener('click', () => this.callbacks.onCompareTabSelect(cardId));
+
+    const label = document.createElement('span');
+    const labelText = document.createTextNode('');
+    label.append(labelText);
+    button.append(label);
+
+    return {
+      button,
+      label,
+      labelText,
+      currentBadge: null,
+      spinner: null,
+    };
+  }
+
+  private updateCompareActiveView(
+    view: CompareViewState,
+    model: CompareInlineViewModel,
+    tab: CompareInlineTabState | null,
+  ): void {
+    if (!tab) {
+      reconcileChildren(view.activeHost, []);
+      return;
+    }
+
+    const activeView = view.activeViews.get(tab.cardId);
+    if (
+      tab.status === 'loading' &&
+      activeView?.kind === 'loading'
+    ) {
+      const status = model.progress?.message ?? 'Generating…';
+      const stream = tab.rawText || 'Waiting for AI…';
+      if (activeView.statusText.data !== status) {
+        activeView.statusText.data = status;
+      }
+      if (activeView.streamText.data !== stream) {
+        activeView.streamText.data = stream;
+      }
+      reconcileChildren(view.activeHost, [activeView.root]);
+      return;
+    }
+
+    const renderKey = this.compareStaticActiveRenderKey(tab);
+    if (
+      tab.status !== 'loading' &&
+      activeView?.kind === tab.status &&
+      activeView.renderKey === renderKey
+    ) {
+      reconcileChildren(view.activeHost, [activeView.root]);
+      return;
+    }
+
+    const root = this.renderCompareActiveTab(model, tab);
+    let nextView: CompareActiveView;
+    if (tab.status === 'loading') {
+      const status = root.querySelector('.chatgoose-overlay-status')?.firstChild;
+      const stream = root.querySelector('.chatgoose-stream-live')?.firstChild;
+      if (!(status instanceof Text) || !(stream instanceof Text)) {
+        throw new Error('Compare loading view is missing its text nodes');
+      }
+      nextView = {
+        kind: 'loading',
+        cardId: tab.cardId,
+        root,
+        statusText: status,
+        streamText: stream,
+      };
+    } else {
+      nextView = {
+        kind: tab.status,
+        cardId: tab.cardId,
+        root,
+        renderKey,
+      };
+    }
+
+    view.activeViews.set(tab.cardId, nextView);
+    reconcileChildren(view.activeHost, [root]);
+  }
+
+  private compareStaticActiveRenderKey(tab: CompareInlineTabState): string {
+    // Compare tabs are small, plain-data view models. A compact structural key
+    // is much cheaper than rebuilding completed cards whenever an *inactive*
+    // tab streams another chunk, while still repainting insert feedback, spend,
+    // split guidance, or an error change.
+    return JSON.stringify([tab, this.inlineError]);
   }
 
   private renderCompareActiveTab(

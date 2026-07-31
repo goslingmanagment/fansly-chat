@@ -196,6 +196,20 @@ function canApplyVoiceState(
   return true;
 }
 
+function sameVoiceNoteStatusView(
+  current: VoiceNoteStatusView,
+  next: VoiceNoteStatusView,
+): boolean {
+  return current.voiceNoteId === next.voiceNoteId &&
+    current.state === next.state &&
+    current.scriptChars === next.scriptChars &&
+    current.billed === next.billed &&
+    current.audioSha256 === next.audioSha256 &&
+    current.audioBytesLen === next.audioBytesLen &&
+    current.createdAt === next.createdAt &&
+    current.errorCode === next.errorCode;
+}
+
 function isVoiceMessageForAttempt(
   message: BackgroundPortMessage,
 ): message is Extract<BackgroundPortMessage, { attemptId: string }> {
@@ -955,6 +969,16 @@ export class VoiceAttemptController {
     let take = record.attempt.takes.find(({ voiceNoteId }) => voiceNoteId === view.voiceNoteId);
     if (take) {
       if (!canApplyVoiceState(take.view.state, view.state)) {
+        return;
+      }
+      if (sameVoiceNoteStatusView(take.view, view)) {
+        // Polling commonly returns the same queued/dispatched projection. It
+        // must not create a storage revision or repaint the panel. Completed
+        // recovery is the exception to the no-side-effect fast path: a lost
+        // audio response still needs to be re-requested for the same artifact.
+        if (view.state === 'completed') {
+          this.fetchAudio(record, take);
+        }
         return;
       }
       take.view = { ...view };

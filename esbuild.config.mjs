@@ -9,13 +9,18 @@ const watchMode = process.argv.includes('--watch');
 const promptsDir = path.join(root, 'prompts');
 const draftsDir = path.join(promptsDir, 'drafts');
 
-const entryPoints = {
+const pageEntryPoints = {
   background: path.join(root, 'src/background/index.ts'),
-  content: path.join(root, 'src/content/index.ts'),
   options: path.join(root, 'src/options/index.ts'),
   popup: path.join(root, 'src/popup/index.ts'),
   // E28: the extension-origin viewer for the kernel's assembled prompt.
   'debug-prompt': path.join(root, 'src/debug-prompt/index.ts'),
+};
+const contentBootstrapEntryPoints = {
+  content: path.join(root, 'src/content/bootstrap.ts'),
+};
+const contentAppEntryPoints = {
+  'content-chat': path.join(root, 'src/content/index.ts'),
 };
 
 function compareDraftNames(left, right) {
@@ -78,6 +83,10 @@ async function ensureStaticFiles() {
   await writeFile(path.join(outdir, 'popup.html'), popupHtml);
   await writeFile(path.join(outdir, 'debug-prompt.html'), debugPromptHtml);
   await writeFile(path.join(outdir, 'manifest.json'), manifest);
+  await cp(path.join(root, 'src/options/styles.css'), path.join(outdir, 'options.css'));
+  await cp(path.join(root, 'src/popup/styles.css'), path.join(outdir, 'popup.css'));
+  await cp(path.join(root, 'src/debug-prompt/styles.css'), path.join(outdir, 'debug-prompt.css'));
+  await cp(path.join(root, 'src/content/styles.css'), path.join(outdir, 'content.css'));
   await cp(path.join(root, 'icons'), path.join(outdir, 'icons'), { recursive: true });
   // Family fonts ride along instead of a Google Fonts CDN request: the
   // `@font-face` rules in options/popup styles resolve `url('fonts/…')`
@@ -89,23 +98,49 @@ async function buildOnce() {
   await rm(outdir, { recursive: true, force: true });
   await mkdir(outdir, { recursive: true });
 
-  await esbuild.build({
-    entryPoints,
+  const define = {
+    __CHATGOOSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  };
+  const common = {
     outdir,
     bundle: true,
-    format: 'iife',
     platform: 'browser',
     target: ['firefox128'],
     sourcemap: true,
+    // Production-safe minification without identifier mangling: less source for
+    // Firefox to parse while function/class names remain readable in mapped
+    // stacks. The same shape is used in watch builds so debug and release do not
+    // execute materially different JavaScript.
+    minifySyntax: true,
+    minifyWhitespace: true,
     loader: {
       '.md': 'text',
       '.css': 'text',
     },
-    define: {
-      __CHATGOOSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-    },
+    define,
     plugins: [modelCardDraftsPlugin()],
-  });
+  };
+
+  await Promise.all([
+    esbuild.build({
+      ...common,
+      entryPoints: pageEntryPoints,
+      format: 'iife',
+    }),
+    esbuild.build({
+      ...common,
+      entryPoints: contentBootstrapEntryPoints,
+      format: 'iife',
+    }),
+    // Firefox content scripts support dynamic import of moz-extension: URLs.
+    // The bootstrap remains a classic manifest script; this self-contained ESM
+    // is parsed only when a message route or a global ChatGoose action needs it.
+    esbuild.build({
+      ...common,
+      entryPoints: contentAppEntryPoints,
+      format: 'esm',
+    }),
+  ]);
 
   await ensureStaticFiles();
 }
@@ -114,35 +149,53 @@ if (!watchMode) {
   await buildOnce();
 } else {
   await buildOnce();
-  const ctx = await esbuild.context({
-    entryPoints,
+  const define = {
+    __CHATGOOSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  };
+  const staticCopyPlugin = {
+    name: 'chatgoose-static-copy',
+    setup(build) {
+      build.onEnd(async () => {
+        await ensureStaticFiles();
+      });
+    },
+  };
+  const common = {
     outdir,
     bundle: true,
-    format: 'iife',
     platform: 'browser',
     target: ['firefox128'],
     sourcemap: true,
+    minifySyntax: true,
+    minifyWhitespace: true,
     loader: {
       '.md': 'text',
       '.css': 'text',
     },
-    define: {
-      __CHATGOOSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-    },
-    plugins: [
-      modelCardDraftsPlugin(),
-      {
-        name: 'chatgoose-static-copy',
-        setup(build) {
-          build.onEnd(async () => {
-            await ensureStaticFiles();
-          });
-        },
-      },
-    ],
-  });
+    define,
+  };
+  const contexts = await Promise.all([
+    esbuild.context({
+      ...common,
+      entryPoints: pageEntryPoints,
+      format: 'iife',
+      plugins: [modelCardDraftsPlugin(), staticCopyPlugin],
+    }),
+    esbuild.context({
+      ...common,
+      entryPoints: contentBootstrapEntryPoints,
+      format: 'iife',
+      plugins: [modelCardDraftsPlugin()],
+    }),
+    esbuild.context({
+      ...common,
+      entryPoints: contentAppEntryPoints,
+      format: 'esm',
+      plugins: [modelCardDraftsPlugin()],
+    }),
+  ]);
 
-  await ctx.watch();
+  await Promise.all(contexts.map((context) => context.watch()));
   const watchTargets = [
     {
       watchPath: promptsDir,
@@ -156,6 +209,17 @@ if (!watchMode) {
         return typeof filename !== 'string' || filename.toLowerCase().endsWith('.md');
       },
     },
+    ...[
+      'src/options/styles.css',
+      'src/popup/styles.css',
+      'src/debug-prompt/styles.css',
+      'src/content/styles.css',
+    ].map((relativePath) => ({
+      watchPath: path.join(root, relativePath),
+      shouldRebuild() {
+        return true;
+      },
+    })),
   ].filter(({ watchPath }) => existsSync(watchPath));
 
   const watchers = watchTargets.map(({ watchPath, shouldRebuild }) =>
@@ -165,7 +229,7 @@ if (!watchMode) {
       }
 
       try {
-        await ctx.rebuild();
+        await Promise.all(contexts.map((context) => context.rebuild()));
       } catch (error) {
         console.error('Failed to rebuild compare drafts module', error);
       }
@@ -173,6 +237,9 @@ if (!watchMode) {
   );
   process.on('exit', () => {
     watchers.forEach((watcher) => watcher.close());
+    contexts.forEach((context) => {
+      void context.dispose();
+    });
   });
   console.log('Watching ChatGoose...');
 }

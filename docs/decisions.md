@@ -84,6 +84,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 | E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
+| E71 | 2026-07-31 | Performance by work elision: two-stage Fansly bootstrap + isolated MV3 keepalive, narrow storage reads, incremental rendering/Voice dedupe, safe minification |
 
 ## Entries
 
@@ -2488,3 +2489,45 @@ next reader. `deletedAt` is accepted as absent OR `string | null` and rejected
 for any other type: it is the one field on this message whose origin is the
 kernel, where the contract declares it optional by design, and absent already
 means «alive» to every consumer.
+
+**E71 (2026-07-31).** Performance work removes redundant local work; it does
+not take product shortcuts. The global Fansly match remains because ChatGoose
+must observe SPA navigation and expose its global actions, but the manifest now
+starts only a small classic bootstrap: theme, launcher/hotkeys and route
+watching. The full controller graph and `content.css` load as Fansly-scoped
+web-accessible assets only on a current message route or an explicit ChatGoose
+action. Live-path/route-nonce fences prevent a late import from creating the app
+after its chat was left; cold actions that depend on `tab:state` wait for the
+first snapshot; a visible manual Retry uses a fresh module URL so Firefox's
+cached rejected import cannot poison every retry.
+
+The bootstrap owns a separate reconnecting `chatgoose-bootstrap` port. This
+preserves the previous best-effort MV3 lifetime for the five-minute persona
+refresh before a chat opens without registering non-chat tabs in the operational
+coordinator or Voice service. After the full app starts successfully its
+`chatgoose-content` port takes over and the bootstrap port is retired. No host
+permission was added, and the lazy web-accessible assets remain scoped to
+`fansly.com`.
+
+Steady-state storage reads request the fixed `PersistedState` keys plus only the
+`summary:*` key needed by a specific correctness fence. An old schema or
+incomplete v13 credential-custody layout still falls back to the complete raw
+snapshot; the write-once persona-preservation barrier and future-schema
+fail-closed behavior remain ahead of that path. `storage.onChanged` ignores
+operational keys that own independent schemas/FIFOs while continuing to accept
+dynamic summary keys. Storage schema, migrations, recap caches, identity rekey
+and per-key credential custody are unchanged.
+
+Rendering keeps keyed DOM nodes and listeners, updating text/state only when
+data changes. Compare no longer repaints inactive cards, Coach streaming no
+longer rebuilds/parses the full model per chunk, Voice repaint notifications are
+coalesced through `requestAnimationFrame`, and an identical polled Voice status
+does not mint another custody revision/persist/repaint (a completed attempt
+without audio still retries the audio fetch). Scroll/layout measurements run
+only for a surface that will actually render. The build also enables syntax and
+whitespace minification without identifier mangling, keeps source maps, and
+serves extension-page/content CSS as static files.
+
+Unchanged: kernel contracts and prompt assembly, Fansly read/API cadence and
+egress, AI call/cost semantics, human-send and indeterminate-retry rules, and
+Voice at-most-once custody.

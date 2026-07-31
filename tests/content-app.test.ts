@@ -259,6 +259,62 @@ describe('ChatGooseContentApp', () => {
     vi.restoreAllMocks();
   });
 
+  it('waits for the first tab state before opening a cold Spenders board', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const toggle = vi.fn();
+    const invalidateContext = vi.fn();
+    app.boardController = {
+      toggle,
+      invalidateContext,
+      isOpen: () => false,
+    };
+    app.mappingBanner = { render: vi.fn(async () => undefined) };
+    app.renderButtonBar = vi.fn();
+
+    app.openSpendersBoard();
+    expect(toggle).not.toHaveBeenCalled();
+
+    app.handlePortMessage({ type: 'tab:state', state: readyState() });
+    await Promise.resolve();
+
+    expect(invalidateContext).toHaveBeenCalledTimes(1);
+    expect(toggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a cold conversation hotkey when navigation changed during startup', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    app.dispatchHotkey = vi.fn(() => true);
+    app.mappingBanner = { render: vi.fn(async () => undefined) };
+    app.renderButtonBar = vi.fn();
+
+    expect(app.dispatchBootstrapHotkey('fast-reply', 'group-1')).toBe(true);
+    window.history.replaceState({}, '', '/messages/group-2');
+    app.handlePortMessage({
+      type: 'tab:state',
+      state: readyState({ groupId: 'group-2' }),
+    });
+    await Promise.resolve();
+
+    expect(app.dispatchHotkey).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a cold conversation hotkey once when its route is still current', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    app.dispatchHotkey = vi.fn(() => true);
+    app.mappingBanner = { render: vi.fn(async () => undefined) };
+    app.renderButtonBar = vi.fn();
+
+    expect(app.dispatchBootstrapHotkey('fast-reply', 'group-1')).toBe(true);
+    app.handlePortMessage({ type: 'tab:state', state: readyState() });
+    await Promise.resolve();
+
+    expect(app.dispatchHotkey).toHaveBeenCalledTimes(1);
+    expect(app.dispatchHotkey).toHaveBeenCalledWith('fast-reply');
+  });
+
   it('boots a recoverable voice attempt before applying the empty-draft gate', async () => {
     mountConversationComposer('');
     const ChatGooseContentApp = await loadAppClass();

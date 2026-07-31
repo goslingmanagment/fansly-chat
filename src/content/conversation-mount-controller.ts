@@ -154,7 +154,17 @@ export class ConversationMountController {
 
     let pending = false;
     let callbackTimer: number | null = null;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((records) => {
+      // Rendering inside ChatGoose lives under the same broad Fansly subtree
+      // we must observe for Angular route/input replacement. Those internal
+      // child-list mutations cannot invalidate our anchor; root removal or a
+      // host replacement still targets an element outside the root and passes.
+      const hasExternalMutation = records.some(
+        ({ target }) => target !== this.root && !this.root.contains(target),
+      );
+      if (!hasExternalMutation) {
+        return;
+      }
       if (pending) {
         return;
       }

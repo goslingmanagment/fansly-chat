@@ -142,6 +142,25 @@ export async function ensureLegacyPersonaSnapshot(
   if (existingTask) return existingTask;
 
   const task = (async () => {
+    // A valid write-once snapshot is the overwhelmingly common steady state.
+    // Check that one key before asking WebExtension storage to clone the whole
+    // area. A new extension realm (content page/options/worker restart) has an
+    // empty WeakSet, but the durable evidence already on disk is sufficient to
+    // cross the barrier. If it is absent, the full raw read below still captures
+    // every legacy byte before any migration can write.
+    const preserved = await storage.get(LEGACY_PERSONA_SNAPSHOT_KEY);
+    const preservedSnapshot = preserved[LEGACY_PERSONA_SNAPSHOT_KEY];
+    if (isLegacyPersonaSnapshot(preservedSnapshot)) {
+      readyStorage.add(storage as object);
+      return preservedSnapshot;
+    }
+    if (
+      hasOwn(preserved, LEGACY_PERSONA_SNAPSHOT_KEY) &&
+      preservedSnapshot !== undefined
+    ) {
+      throw new InvalidLegacyPersonaSnapshotError();
+    }
+
     // One raw read captures source fields before migration/normalization can
     // write anything back. Empty strings and arbitrarily large drafts are
     // copied as-is; there is deliberately no trim or length limit here.

@@ -1,4 +1,3 @@
-import optionsStyles from './styles.css';
 import {
   appendAgencyHubMeta,
   buildAgencyHubConnectionSignature,
@@ -19,7 +18,6 @@ import {
   createVersionTag,
   debounce,
   factRow,
-  injectStyles,
   labeledField,
   setStatusPill,
   type BadgeTone,
@@ -82,7 +80,7 @@ import {
   ensureLegacyPersonaSnapshot,
   InvalidLegacyPersonaSnapshotError,
 } from '../shared/persona-preservation.js';
-import { sendRuntimeRequest } from '../shared/protocol.js';
+import { sendRuntimeRequest } from '../shared/runtime-request.js';
 import {
   loadStorageState,
   readStorageState,
@@ -5256,5 +5254,4 @@ async function render(): Promise<void> {
   }
 }
 
-injectStyles(optionsStyles);
 void render();

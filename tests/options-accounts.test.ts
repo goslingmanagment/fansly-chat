@@ -332,7 +332,10 @@ describe('Options page account sections', () => {
 
     const mappingsSection = getAccountsSection();
 
-    expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
+    // A fresh extension realm first checks the durable preservation key, then
+    // captures the full legacy source only when that key is absent. Both reads
+    // must finish before session discovery can own identity reconciliation.
+    expect(callOrder.slice(0, 3)).toEqual(['storage', 'storage', 'snapshot']);
     expect(mappingsSection.textContent).toContain(accountIdText('active-resolved'));
     expect(mappingsSection.textContent).toContain(accountIdText('mappedOffline'));
     expect(mappingsSection.textContent).not.toContain('stale');
@@ -384,7 +387,7 @@ describe('Options page account sections', () => {
     expect(personalityCard.textContent).toContain('Closer');
     expect(mappingsSection.dataset.sessionHydration).toBe('loading');
     expect(mappingsSection.textContent).toContain(COPY.accounts.loading);
-    expect(callOrder.slice(0, 2)).toEqual(['storage', 'snapshot']);
+    expect(callOrder.slice(0, 3)).toEqual(['storage', 'storage', 'snapshot']);
 
     // getSessionsSnapshot owns identity rekey/reconciliation in the real
     // background. Simulate that committed state immediately before its reply.

@@ -1,6 +1,9 @@
 import { resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { findActivePersona } from '../shared/persona-catalog.js';
-import { readStorageState } from '../shared/storage.js';
+import {
+  readStorageState,
+  type ReadStorageStateOptions,
+} from '../shared/storage.js';
 import type { PersistedState } from '../shared/types.js';
 
 /** Persona identity captured when a kernel request is assembled. */
@@ -35,8 +38,10 @@ export function isPersonaOperationIdentityCurrent(
  * storage.onChanged is dispatched, which is exactly the remap/version race
  * this fence must close.
  */
-export async function readFreshPersonaFenceState(): Promise<PersistedState> {
-  return readStorageState();
+export async function readFreshPersonaFenceState(
+  options: ReadStorageStateOptions = {},
+): Promise<PersistedState> {
+  return readStorageState(options);
 }
 
 export async function isFreshPersonaOperationIdentityCurrent(

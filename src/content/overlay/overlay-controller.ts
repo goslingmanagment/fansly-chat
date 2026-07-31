@@ -405,7 +405,7 @@ function sameCoachFeedItem(
 
 
 export class OverlayController {
-  private readonly root = ensureOverlayRoot();
+  private rootElement: HTMLElement | null = null;
   private model: OverlayViewModel = { kind: 'hidden' };
   private passThrough = false;
   private shellEl: HTMLDivElement | null = null;
@@ -468,6 +468,10 @@ export class OverlayController {
     });
   }
 
+  private get root(): HTMLElement {
+    return this.rootElement ??= ensureOverlayRoot();
+  }
+
   private handleDismiss(): void {
     if (this.model.kind === 'hidden') return;
     const mode = this.dismissMode;
@@ -500,6 +504,9 @@ export class OverlayController {
     let shellAction: 'mounted' | 'reused' | 'hidden' = 'reused';
     let bodyAction: 'none' | 'rebuild-body' | 'update-loading' | 'rebuild-coach' | 'update-coach' = 'none';
 
+    if (model.kind === 'hidden' && this.model.kind === 'hidden') {
+      return;
+    }
     this.model = model;
     if (model.kind === 'error') {
       this.inlineError = null;

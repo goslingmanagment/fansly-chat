@@ -58,6 +58,7 @@ import {
   getSummaryCacheEntry,
   hasAvailableFanSummary,
   isValidSummaryCacheEntry,
+  summaryCacheKey,
   type SummaryCacheMode,
 } from '../shared/summary-cache.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
@@ -833,7 +834,12 @@ export class OperationCoordinator {
     // The injected resolver is budgeted (composition root), so a cold probe no
     // longer holds first paint; when it loses the race it re-pushes tab state
     // afterwards, which is how the identity correction still lands.
-    const voiceNotesCapable = await this.voiceCapabilityResolver?.(tabId) ?? false;
+    // Voice is conversation-bound. A global Fansly tab has no attach route,
+    // so probing page identity/capability here only delays shell state and can
+    // wake the kernel path for a toolbar that is not mounted.
+    const voiceNotesCapable = context.groupId
+      ? await this.voiceCapabilityResolver?.(tabId) ?? false
+      : false;
     const session = this.sessionStore.getSessionForTab(tabId);
     const legacyAccountId =
       this.sessionStore.getAccountIdForTab(tabId) ?? context.accountId;
@@ -1380,7 +1386,9 @@ export class OperationCoordinator {
     )) {
       return false;
     }
-    const state = await readFreshPersonaFenceState();
+    const state = await readFreshPersonaFenceState({
+      summaryKeys: [summaryCacheKey(task.groupId)],
+    });
     if (!isPersonaOperationIdentityCurrent(state, task.personaIdentity)) {
       return false;
     }

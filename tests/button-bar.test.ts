@@ -19,6 +19,7 @@ function installDom() {
   vi.stubGlobal('HTMLElement', window.HTMLElement);
   vi.stubGlobal('HTMLDivElement', window.HTMLDivElement);
   vi.stubGlobal('HTMLButtonElement', window.HTMLButtonElement);
+  vi.stubGlobal('MutationObserver', window.MutationObserver);
   return dom;
 }
 
@@ -154,20 +155,45 @@ describe('ButtonBar toolbar visibility', () => {
     expect(split?.getAttribute('aria-keyshortcuts')).toBeNull();
   });
 
-  it('keeps the hover-only hotkey through the active loading spinner', () => {
+  it('keeps the hotkey and the same hidden spinner after loading ends', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), 'fast-reply', 'default', 'none', true, true, false);
 
     const reply = buttonByLabel(bar.root, 'Reply');
+    const spinner = reply?.querySelector('.chatgoose-spinner');
     expect(reply?.querySelector('.chatgoose-toolbar-hotkey')).not.toBeNull();
-    expect(reply?.querySelector('.chatgoose-spinner')).not.toBeNull();
+    expect(spinner).not.toBeNull();
+    expect(spinner?.classList.contains('chatgoose-hidden')).toBe(false);
     expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(true);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
-    expect(reply?.querySelector('.chatgoose-spinner')).toBeNull();
+    const idleSpinner = reply?.querySelector('.chatgoose-spinner');
+    expect(idleSpinner).toBe(spinner);
+    expect(idleSpinner?.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(reply?.querySelector('.chatgoose-toolbar-hotkey')).not.toBeNull();
     expect(reply?.classList.contains('chatgoose-toolbar-button-loading')).toBe(false);
+  });
+
+  it('does not mutate a feature button child list on an identical rerender', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+    const state = buildState();
+    bar.render(state, 'fast-reply', 'default', 'none', true, true, false);
+
+    const reply = buttonByLabel(bar.root, 'Reply')!;
+    const children = Array.from(reply.childNodes);
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((mutations) => records.push(...mutations));
+    observer.observe(reply, { childList: true, subtree: true });
+
+    bar.render(state, 'fast-reply', 'default', 'none', true, true, false);
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(Array.from(reply.childNodes)).toEqual(children);
+    expect(records).toHaveLength(0);
   });
 
   it('renders a Coach button after Recap that fires onCoachClick', () => {

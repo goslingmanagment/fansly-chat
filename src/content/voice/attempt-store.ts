@@ -1,4 +1,4 @@
-import { sendRuntimeRequest } from '../../shared/protocol.js';
+import { sendRuntimeRequest } from '../../shared/runtime-request.js';
 import {
   isVoiceAttemptLoadResponse,
   isVoiceAttemptMutationResponse,

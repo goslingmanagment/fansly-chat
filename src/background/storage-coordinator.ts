@@ -12,6 +12,7 @@ import {
   UnsupportedFutureStorageSchemaError,
 } from '../shared/migrations.js';
 import {
+  isNormalizedStorageStateKey,
   readStorageState,
   readStorageStateSnapshot,
   sanitizeSettings,
@@ -19,6 +20,8 @@ import {
 } from '../shared/storage.js';
 import {
   getSummaryCacheEntry,
+  isSummaryCacheKey,
+  summaryCacheKey,
   SummaryCacheStore,
   type SummaryCacheMode,
 } from '../shared/summary-cache.js';
@@ -120,20 +123,6 @@ function storageValuesEqual(left: unknown, right: unknown): boolean {
       storageValuesEqual(leftRecord[key], rightRecord[key]));
   }
   return false;
-}
-
-function isNormalizedStateKey(key: string): boolean {
-  return key === 'schemaVersion' ||
-    key === 'settings' ||
-    key === 'personalities' ||
-    key === 'personaCatalog' ||
-    key === 'personaCatalogSource' ||
-    key === 'personaCatalogFetchedAt' ||
-    key === 'accountMappings' ||
-    key === 'accountAliases' ||
-    key === KNOWN_ACCOUNTS_KEY ||
-    key === AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY ||
-    key === AGENCY_HUB_API_KEY_STORAGE_KEY;
 }
 
 function waitForStorageChangeDispatch(): Promise<void> {
@@ -314,6 +303,14 @@ export class StorageCoordinator {
       // Immutable preservation evidence is outside normalized runtime state.
       // Never buffer/replay its own startup write through the coordinator.
       if (key === LEGACY_PERSONA_SNAPSHOT_KEY) {
+        continue;
+      }
+      // E59 operational stores (presence, counters, labels, telemetry, etc.)
+      // own their own schemas and FIFO writers. They are not PersistedState,
+      // so feeding them through applyRawStoragePatch/migrateState only clones
+      // and re-normalizes the whole state without changing the coordinator.
+      // Dynamic recap keys remain part of the in-memory cache projection.
+      if (!isNormalizedStorageStateKey(key) && !isSummaryCacheKey(key)) {
         continue;
       }
       if (change.newValue === undefined) {
@@ -519,7 +516,8 @@ export class StorageCoordinator {
     mode: SummaryCacheMode = 'full',
   ): Promise<boolean> {
     return this.enqueueWrite(async () => {
-      const before = await readStorageState();
+      const key = summaryCacheKey(groupId, mode);
+      const before = await readStorageState({ summaryKeys: [key] });
       if (!isCurrent(before)) {
         return false;
       }
@@ -541,7 +539,7 @@ export class StorageCoordinator {
 
       await this.summaryCache.save(groupId, entry, mode);
 
-      const after = await readStorageState();
+      const after = await readStorageState({ summaryKeys: [key] });
       const committed = getSummaryCacheEntry(after, groupId, mode);
       return isCurrent(after) &&
         committed?.generatedAt === entry.generatedAt &&
@@ -742,7 +740,7 @@ export class StorageCoordinator {
     const removeKeys: string[] = [];
 
     for (const [key, patch] of finalByKey) {
-      if (isNormalizedStateKey(key)) {
+      if (isNormalizedStorageStateKey(key)) {
         if (Object.prototype.hasOwnProperty.call(normalized, key)) {
           setItems[key] = normalized[key];
         } else {

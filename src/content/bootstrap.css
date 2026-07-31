@@ -1,0 +1,100 @@
+:root {
+  --chatgoose-bg1: #faf9f5;
+  --chatgoose-ink: #26221d;
+  --chatgoose-line-strong: #cfcaba;
+  --chatgoose-clay: #d97757;
+  --chatgoose-green: #3a7d44;
+  --chatgoose-green-line: #c9dcc2;
+  --chatgoose-shadow: 0 2px 6px rgba(31, 30, 29, 0.05);
+  --chatgoose-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+:root.chatgoose-theme-dark {
+  --chatgoose-bg1: #262420;
+  --chatgoose-ink: #f4f0e7;
+  --chatgoose-line-strong: #4d4940;
+  --chatgoose-green: #54a263;
+  --chatgoose-green-line: #38583f;
+  --chatgoose-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#chatgoose-launcher-root {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 2147483644;
+  color-scheme: light;
+}
+
+:root.chatgoose-theme-dark #chatgoose-launcher-root {
+  color-scheme: dark;
+}
+
+.chatgoose-launcher {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-green);
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--chatgoose-font-mono);
+  cursor: pointer;
+  box-shadow: var(--chatgoose-shadow);
+  opacity: 0.55;
+  transition: opacity 150ms ease, transform 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-launcher:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+  border-color: var(--chatgoose-green-line);
+}
+
+.chatgoose-launcher:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+}
+
+#chatgoose-bootstrap-status {
+  position: fixed;
+  left: 66px;
+  bottom: 18px;
+  z-index: 2147483644;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 96px));
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: 9px;
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-ink);
+  box-shadow: var(--chatgoose-shadow);
+  font: 12px/1.35 var(--chatgoose-font-mono);
+}
+
+.chatgoose-bootstrap-retry {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid var(--chatgoose-green-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--chatgoose-green);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chatgoose-bootstrap-retry:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatgoose-launcher {
+    transition: none !important;
+  }
+}

@@ -1,16 +1,19 @@
-function ensureStyles(stylesText: string): void {
-  if (document.getElementById('chatgoose-style')) {
+function ensureStyles(stylesText: string, styleId: string): void {
+  if (document.getElementById(styleId)) {
     return;
   }
 
   const style = document.createElement('style');
-  style.id = 'chatgoose-style';
+  style.id = styleId;
   style.textContent = stylesText;
   document.head.append(style);
 }
 
-export function installContentStyles(stylesText: string): void {
-  ensureStyles(stylesText);
+export function installContentStyles(
+  stylesText: string,
+  styleId = 'chatgoose-style',
+): void {
+  ensureStyles(stylesText, styleId);
 }
 
 export function ensureOverlayRoot(): HTMLElement {

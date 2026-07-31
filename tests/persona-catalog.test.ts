@@ -174,6 +174,8 @@ describe('legacy persona preservation', () => {
 
     expect(afterRestart).toEqual(snapshot);
     expect(restartedWrites).toEqual([]);
+    expect(restarted.get).toHaveBeenCalledTimes(1);
+    expect(restarted.get).toHaveBeenCalledWith(LEGACY_PERSONA_SNAPSHOT_KEY);
     expect(JSON.stringify(afterRestart)).not.toContain('top-level-secret');
   });
 

@@ -9,8 +9,7 @@
 // from its own URL for the snapshot, and the background only answers a sender
 // whose origin AND path match this page.
 
-import debugPromptStyles from './styles.css';
-import { sendRuntimeRequest } from '../shared/protocol.js';
+import { sendRuntimeRequest } from '../shared/runtime-request.js';
 import type { DebugPromptSnapshotResponse } from '../shared/types.js';
 
 const CACHE_LABELS: Record<string, string> = {
@@ -18,12 +17,6 @@ const CACHE_LABELS: Record<string, string> = {
   '5m': 'cached 5m',
   none: 'not cached',
 };
-
-function injectStyles(): void {
-  const style = document.createElement('style');
-  style.textContent = debugPromptStyles;
-  document.head.append(style);
-}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -121,7 +114,6 @@ function render(root: HTMLElement, snapshot: DebugPromptSnapshotResponse): void 
 }
 
 async function main(): Promise<void> {
-  injectStyles();
   const root = document.getElementById('chatgoose-debug-root');
   if (!root) {
     return;

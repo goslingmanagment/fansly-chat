@@ -98,7 +98,18 @@ voiceService.setOnCapabilityResolvedLate((tabId) => {
   void coordinator.refreshTabState(tabId, 'tab:state');
 });
 
+const bootstrapKeepalivePorts = new Set<browser.runtime.Port>();
 browser.runtime.onConnect.addListener((port) => {
+  if (port.name === 'chatgoose-bootstrap') {
+    // The tiny global content shell preserves the historical MV3 lifetime for
+    // the five-minute persona refresh loop, but it has no operational protocol.
+    // Do not make non-chat tabs participate in tab-state/voice broadcasts.
+    bootstrapKeepalivePorts.add(port);
+    port.onDisconnect.addListener(() => {
+      bootstrapKeepalivePorts.delete(port);
+    });
+    return;
+  }
   coordinator.registerPort(port);
   voiceService.registerPort(port);
 });

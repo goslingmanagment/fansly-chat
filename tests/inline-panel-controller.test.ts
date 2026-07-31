@@ -607,6 +607,240 @@ describe('InlinePanelController', () => {
     expect(onCompareTabSelect).toHaveBeenCalledWith('draft');
   });
 
+  it('reuses the Compare shell, tabs, active host, and streaming Text for same-operation chunks', async () => {
+    const controller = createController();
+    document.body.append(controller.root);
+    const model = createCompareModel({ activeCardId: 'draft' });
+
+    controller.render(model);
+    const compareRoot = requireElement(
+      controller.root,
+      '.chatgoose-inline-panel-body > .chatgoose-grid',
+    );
+    const tabsRoot = requireElement(controller.root, '.chatgoose-compare-tabs');
+    const activeHost = requireElement(controller.root, '.chatgoose-compare-active');
+    const stream = requireElement(controller.root, '.chatgoose-stream-live');
+    const streamText = stream.firstChild;
+    const tabButtons = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-compare-tab'),
+    );
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((mutations) => records.push(...mutations));
+    observer.observe(compareRoot, { childList: true, subtree: true });
+
+    model.tabs[1]!.rawText = 'Hello from the draft';
+    model.progress = {
+      operationId: 'compare-op',
+      phase: 'generating',
+      message: 'Writing the draft…',
+    };
+    controller.render(model);
+    await Promise.resolve();
+    observer.disconnect();
+
+    expect(
+      requireElement(controller.root, '.chatgoose-inline-panel-body > .chatgoose-grid'),
+    ).toBe(compareRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-tabs')).toBe(tabsRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-active')).toBe(activeHost);
+    expect(requireElement(controller.root, '.chatgoose-stream-live')).toBe(stream);
+    expect(stream.firstChild).toBe(streamText);
+    expect(streamText).toBeInstanceOf(Text);
+    expect(streamText?.textContent).toBe('Hello from the draft');
+    expect(requireElement(controller.root, '.chatgoose-overlay-status').textContent).toBe(
+      'Writing the draft…',
+    );
+    expect(
+      Array.from(controller.root.querySelectorAll('.chatgoose-compare-tab')),
+    ).toEqual(tabButtons);
+    expect(records).toHaveLength(0);
+  });
+
+  it('keeps keyed Compare tabs and the active host while switching cards without duplicating listeners', () => {
+    const onCompareTabSelect = vi.fn();
+    const controller = createController({ onCompareTabSelect });
+    document.body.append(controller.root);
+    const model = createCompareModel();
+
+    controller.render(model);
+    const compareRoot = requireElement(
+      controller.root,
+      '.chatgoose-inline-panel-body > .chatgoose-grid',
+    );
+    const tabsRoot = requireElement(controller.root, '.chatgoose-compare-tabs');
+    const activeHost = requireElement(controller.root, '.chatgoose-compare-active');
+    const currentBody = activeHost.firstElementChild;
+    const [currentButton, draftButton] = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-compare-tab'),
+    );
+
+    model.activeCardId = 'draft';
+    controller.render(model);
+    const draftBody = activeHost.firstElementChild;
+    const draftStream = requireElement(controller.root, '.chatgoose-stream-live');
+    const draftStreamText = draftStream.firstChild;
+    controller.render(model);
+
+    expect(
+      requireElement(controller.root, '.chatgoose-inline-panel-body > .chatgoose-grid'),
+    ).toBe(compareRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-tabs')).toBe(tabsRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-active')).toBe(activeHost);
+    const updatedButtons = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-compare-tab'),
+    );
+    expect(updatedButtons[0]).toBe(currentButton);
+    expect(updatedButtons[1]).toBe(draftButton);
+    expect(currentButton?.getAttribute('aria-pressed')).toBe('false');
+    expect(draftButton?.getAttribute('aria-pressed')).toBe('true');
+    expect(activeHost.firstElementChild).toBe(draftBody);
+    expect(requireElement(controller.root, '.chatgoose-stream-live')).toBe(draftStream);
+    expect(draftStream.firstChild).toBe(draftStreamText);
+
+    model.activeCardId = 'current';
+    controller.render(model);
+    expect(activeHost.firstElementChild).toBe(currentBody);
+
+    // An inactive card may keep streaming. The visible completed body does not
+    // rebuild, and switching back revives the same loading Text node with the
+    // latest accumulated text.
+    model.tabs[1]!.rawText = 'Streaming while hidden';
+    controller.render(model);
+    expect(activeHost.firstElementChild).toBe(currentBody);
+    model.activeCardId = 'draft';
+    controller.render(model);
+    expect(activeHost.firstElementChild).toBe(draftBody);
+    expect(draftStream.firstChild).toBe(draftStreamText);
+    expect(draftStreamText?.textContent).toBe('Streaming while hidden');
+
+    draftButton?.click();
+    expect(onCompareTabSelect).toHaveBeenCalledTimes(1);
+    expect(onCompareTabSelect).toHaveBeenCalledWith('draft');
+  });
+
+  it('updates tab completion and terminal actions in place across the live-to-completed hand-off', () => {
+    const onCompareRerun = vi.fn();
+    const controller = createController({ onCompareRerun });
+    document.body.append(controller.root);
+    const model = createCompareModel({ activeCardId: 'draft' });
+
+    controller.render(model);
+    const compareRoot = requireElement(
+      controller.root,
+      '.chatgoose-inline-panel-body > .chatgoose-grid',
+    );
+    const tabsRoot = requireElement(controller.root, '.chatgoose-compare-tabs');
+    const activeHost = requireElement(controller.root, '.chatgoose-compare-active');
+    const actions = requireElement(controller.root, '.chatgoose-grid > .chatgoose-card-actions');
+    const draftButton = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-compare-tab'),
+    )[1]!;
+    expect(draftButton.querySelector('.chatgoose-spinner')).not.toBeNull();
+
+    const draft = model.tabs[1]!;
+    draft.status = 'reply';
+    draft.rawText = 'Finished draft';
+    draft.parts = [createPart('Finished draft')];
+    model.operationId = null;
+    model.progress = null;
+    model.canCancel = false;
+    model.canRegenerate = true;
+    controller.render(model);
+
+    expect(
+      requireElement(controller.root, '.chatgoose-inline-panel-body > .chatgoose-grid'),
+    ).toBe(compareRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-tabs')).toBe(tabsRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-active')).toBe(activeHost);
+    expect(requireElement(controller.root, '.chatgoose-grid > .chatgoose-card-actions')).toBe(
+      actions,
+    );
+    expect(
+      Array.from(controller.root.querySelectorAll('.chatgoose-compare-tab'))[1],
+    ).toBe(draftButton);
+    expect(draftButton.querySelector('.chatgoose-spinner')).toBeNull();
+    expect(requireElement(controller.root, '.chatgoose-card-text').textContent).toBe(
+      'Finished draft',
+    );
+    expect(
+      Array.from(actions.querySelectorAll('button')).some(
+        (button) => button.textContent === 'Cancel all',
+      ),
+    ).toBe(false);
+    const regenerate = Array.from(actions.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Regenerate all',
+    );
+    regenerate?.click();
+    expect(onCompareRerun).toHaveBeenCalledOnce();
+  });
+
+  it('updates an active Compare tab to error without recreating its shell or tab listener', () => {
+    const onCancel = vi.fn();
+    const controller = createController({ onCancel });
+    document.body.append(controller.root);
+    const model = createCompareModel({ activeCardId: 'draft' });
+
+    controller.render(model);
+    const compareRoot = requireElement(
+      controller.root,
+      '.chatgoose-inline-panel-body > .chatgoose-grid',
+    );
+    const activeHost = requireElement(controller.root, '.chatgoose-compare-active');
+    const draftButton = Array.from(
+      controller.root.querySelectorAll<HTMLButtonElement>('.chatgoose-compare-tab'),
+    )[1]!;
+    const cancel = Array.from(controller.root.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent === 'Cancel all',
+    )!;
+
+    const draft = model.tabs[1]!;
+    draft.status = 'error';
+    draft.error = {
+      key: 'unknown_error',
+      code: 'CG-APP-01',
+      message: 'Draft failed incrementally',
+    };
+    controller.render(model);
+    controller.render(model);
+
+    expect(
+      requireElement(controller.root, '.chatgoose-inline-panel-body > .chatgoose-grid'),
+    ).toBe(compareRoot);
+    expect(requireElement(controller.root, '.chatgoose-compare-active')).toBe(activeHost);
+    expect(
+      Array.from(controller.root.querySelectorAll('.chatgoose-compare-tab'))[1],
+    ).toBe(draftButton);
+    expect(draftButton.querySelector('.chatgoose-spinner')).toBeNull();
+    expect(requireElement(controller.root, '.chatgoose-inline-error').textContent).toContain(
+      'Draft failed incrementally',
+    );
+    expect(
+      Array.from(controller.root.querySelectorAll<HTMLButtonElement>('button')).find(
+        (button) => button.textContent === 'Cancel all',
+      ),
+    ).toBe(cancel);
+    cancel.click();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledWith('compare-op');
+  });
+
+  it('rebuilds the Compare body for a different live operation', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+
+    controller.render(createCompareModel({ operationId: 'compare-one' }));
+    const firstRoot = requireElement(
+      controller.root,
+      '.chatgoose-inline-panel-body > .chatgoose-grid',
+    );
+
+    controller.render(createCompareModel({ operationId: 'compare-two' }));
+
+    expect(
+      requireElement(controller.root, '.chatgoose-inline-panel-body > .chatgoose-grid'),
+    ).not.toBe(firstRoot);
+  });
+
   it('renders compare reply content for the active tab and supports regenerate all', () => {
     const onCompareRerun = vi.fn();
     const controller = createController({ onCompareRerun });

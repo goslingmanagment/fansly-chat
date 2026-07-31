@@ -1,4 +1,3 @@
-import contentStyles from './styles.css';
 import { ButtonBar } from './button-bar.js';
 import { formatCoachAgeMs } from '../shared/coach-format.js';
 import { isCoachTurnContext } from '../shared/protocol.js';
@@ -10,7 +9,6 @@ import {
 } from './coach-session.js';
 import { getActiveConversationDisplayName, getActiveConversationDom } from './conversation-dom.js';
 import { ConversationMountController } from './conversation-mount-controller.js';
-import { installContentStyles } from './dom-anchor.js';
 import { CompletedCompareCache } from './inline-panel/completed-compare-cache.js';
 import { InlinePanelController } from './inline-panel/inline-panel-controller.js';
 import { MappingBanner } from './mapping-banner.js';
@@ -47,7 +45,8 @@ import {
 import { createKeymap } from '../shared/keymap.js';
 import { COACH_RECAP_FRESH_MS, SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
 import { parseCoachDrafts } from '../shared/coach-draft.js';
-import { isRecapStatusResponse, sendRuntimeRequest } from '../shared/protocol.js';
+import { isRecapStatusResponse } from '../shared/protocol.js';
+import { sendRuntimeRequest } from '../shared/runtime-request.js';
 import { resolveOptionsRouteForCode } from '../shared/options-routes.js';
 import { projectDebugPromptEcho } from '../shared/kernel-context.js';
 import {
@@ -75,8 +74,7 @@ import {
   normalizeSingleReplyPart,
   normalizeVariantReplyParts,
 } from '../shared/reply-output.js';
-import { loadStorageState } from '../shared/storage.js';
-import { installUiTheme } from '../shared/theme.js';
+import { readStorageState } from '../shared/storage.js';
 import type {
   CoachAutoRecapOverride,
   CoachOverlayFeedItem,
@@ -113,6 +111,17 @@ function createParts(parts: string[]): OverlayInsertPart[] {
     insertedAt: null,
     insertedOnce: false,
   }));
+}
+
+function isGlobalHotkeyAction(action: HotkeyAction): boolean {
+  return action === 'spenders-board' || action === 'cheatsheet';
+}
+
+function hotkeyNeedsInitialTabState(action: HotkeyAction): boolean {
+  return HOTKEY_FEATURE[action] !== undefined ||
+    action === 'coach' ||
+    action === 'fan-summary' ||
+    action === 'spenders-board';
 }
 
 function resultPartTexts(
@@ -316,6 +325,7 @@ export class ChatGooseContentApp {
   private quickInlineVisible = false;
   private quickSurfaceEverOpened = false;
   private pendingLoadingFrame: number | null = null;
+  private voiceRenderFrame: number | null = null;
   private readonly suppressedTerminalOpIds = new Set<string>();
   private activeImproveDraftCacheKey: string | null = null;
   private observedDraftTextarea: HTMLTextAreaElement | null = null;
@@ -410,6 +420,11 @@ export class ChatGooseContentApp {
   // (a mere session-reference check cannot tell close/reopen apart — getOrCreate
   // returns the same object).
   private coachSettingsSnapshotGeneration = 0;
+  private resolveInitialTabState: (() => void) | null = null;
+  private readonly initialTabStateReady = new Promise<void>((resolve) => {
+    this.resolveInitialTabState = resolve;
+  });
+  private pendingInitialHotkeyGeneration = 0;
 
   private readonly handleDraftInput = (): void => {
     const nextHasDraftText = this.computeHasDraftText();
@@ -426,7 +441,7 @@ export class ChatGooseContentApp {
     }
   };
 
-  private readonly toast = new ToastController();
+  private toastController: ToastController | null = null;
   private readonly port = new PortClient({
     onMessage: (message) => this.handlePortMessage(message),
     onConnected: () => {
@@ -682,28 +697,41 @@ export class ChatGooseContentApp {
 
   private readonly hotkeyBindings = buildHotkeyBindings(detectLabelPlatform());
   private readonly keymap = createKeymap(this.hotkeyBindings);
-  private readonly cheatsheet = new CheatsheetController(this.hotkeyBindings);
-  private readonly board = new SpendersBoardController({
-    fetchList: (refresh, buildId) =>
-      sendRuntimeRequest('getSpendersList', { refresh, buildId }),
-    getContextKey: () => {
-      const accountId = this.tabState?.accountId;
-      return accountId ? `${accountId}:${this.boardContextGeneration}` : null;
-    },
-    openChat: (groupId) => this.openFanChat(groupId),
-    resolveChat: (entry) =>
-      sendRuntimeRequest('resolveFanChat', {
-        fanAccountId: entry.fanAccountId,
-        username: entry.username,
-        displayName: entry.displayName,
-      }),
-  });
+  private cheatsheetController: CheatsheetController | null = null;
+  private boardController: SpendersBoardController | null = null;
   private readonly launcher = new BoardLauncher(() => this.board.toggle());
 
   constructor() {
     this.root.id = 'chatgoose-root';
     this.root.append(this.inlinePanel.root, this.buttonBar.root, this.mappingBanner.root);
     this.mountController = new ConversationMountController(this.root);
+  }
+
+  private get toast(): ToastController {
+    return this.toastController ??= new ToastController();
+  }
+
+  private get cheatsheet(): CheatsheetController {
+    return this.cheatsheetController ??=
+      new CheatsheetController(this.hotkeyBindings);
+  }
+
+  private get board(): SpendersBoardController {
+    return this.boardController ??= new SpendersBoardController({
+      fetchList: (refresh, buildId) =>
+        sendRuntimeRequest('getSpendersList', { refresh, buildId }),
+      getContextKey: () => {
+        const accountId = this.tabState?.accountId;
+        return accountId ? `${accountId}:${this.boardContextGeneration}` : null;
+      },
+      openChat: (groupId) => this.openFanChat(groupId),
+      resolveChat: (entry) =>
+        sendRuntimeRequest('resolveFanChat', {
+          fanAccountId: entry.fanAccountId,
+          username: entry.username,
+          displayName: entry.displayName,
+        }),
+    });
   }
 
   private showUserErrorToast(
@@ -759,18 +787,58 @@ export class ChatGooseContentApp {
   }
 
   init(): void {
-    installContentStyles(contentStyles);
-    // Theme rides one class on <html>; resolved from settings + OS scheme,
-    // kept live via storage.onChanged / matchMedia inside installUiTheme.
-    // Never blocks boot: without readable settings it stays on the light
-    // default.
-    void loadStorageState()
-      .then((state) => installUiTheme(state.settings.uiTheme))
-      .catch(() => {});
     this.port.connect();
     startRouteWatcher((groupId) => this.handleRouteChange(groupId));
     this.installKeymap();
     this.launcher.mount();
+  }
+
+  openSpendersBoard(): void {
+    this.dispatchBootstrapHotkey(
+      'spenders-board',
+      parseGroupIdFromPath(window.location.pathname),
+    );
+  }
+
+  dispatchBootstrapHotkey(
+    action: HotkeyAction,
+    expectedGroupId: string | null,
+  ): boolean {
+    const generation = ++this.pendingInitialHotkeyGeneration;
+    const conversationBound = !isGlobalHotkeyAction(action);
+    if (conversationBound && expectedGroupId === null) {
+      return false;
+    }
+    if (hotkeyNeedsInitialTabState(action) && !this.tabState) {
+      void this.whenInitialTabStateReady().then(() => {
+        if (generation !== this.pendingInitialHotkeyGeneration) {
+          return;
+        }
+        if (
+          conversationBound &&
+          parseGroupIdFromPath(window.location.pathname) !== expectedGroupId
+        ) {
+          return;
+        }
+        this.dispatchHotkey(action);
+      });
+      return true;
+    }
+    if (
+      conversationBound &&
+      parseGroupIdFromPath(window.location.pathname) !== expectedGroupId
+    ) {
+      return false;
+    }
+    return this.dispatchHotkey(action);
+  }
+
+  /** Cold bootstrap actions that depend on account/persona state wait for the
+   * first authoritative background projection. Opening Board or firing a
+   * feature against the constructor's null state would otherwise flicker shut
+   * or silently discard the user's first click. */
+  whenInitialTabStateReady(): Promise<void> {
+    return this.tabState ? Promise.resolve() : this.initialTabStateReady;
   }
 
   // ─── Hotkeys ────────────────────────────────────────────────────────────
@@ -787,10 +855,11 @@ export class ChatGooseContentApp {
         inEditable: isEditableElement(document.activeElement),
       });
       if (action === null) return;
+      const expectedGroupId = parseGroupIdFromPath(window.location.pathname);
       // preventDefault only when we actually handle it, so an inapplicable
       // shortcut (e.g. an AI key with no conversation open) doesn't silently
       // swallow a browser default.
-      if (this.dispatchHotkey(action)) {
+      if (this.dispatchBootstrapHotkey(action, expectedGroupId)) {
         event.preventDefault();
       }
     });
@@ -802,7 +871,9 @@ export class ChatGooseContentApp {
     // loader and result render beneath the sheet. The surfaces' own toggles and
     // CANCEL pass (an operation can already be running under the sheet);
     // feature-starting actions are swallowed with an explanation.
-    const referenceSurfaceOpen = this.cheatsheet.isOpen() || this.board.isOpen();
+    const referenceSurfaceOpen =
+      (this.cheatsheetController?.isOpen() ?? false) ||
+      (this.boardController?.isOpen() ?? false);
     if (
       referenceSurfaceOpen &&
       action !== 'cheatsheet' && action !== 'spenders-board' && action !== 'cancel'
@@ -1079,7 +1150,7 @@ export class ChatGooseContentApp {
   // and the view disagreeing (which would also poison our route tracking),
   // the navigation is verified and falls back to a hard load.
   private openFanChat(groupId: string): void {
-    this.board.close();
+    this.boardController?.close();
     if (this.currentGroupId === groupId) return;
     const target = `/messages/${groupId}`;
     const before = getActiveConversationDom();
@@ -1139,26 +1210,34 @@ export class ChatGooseContentApp {
   private renderSurfaces(): void {
     this.cancelScheduledLoadingRender();
 
-    const scrollSnapshot = captureScrollSnapshot(this.root);
+    const plan = planSurfaces({
+      activeFeature: this.activeFeature,
+      activeLoadingModel: this.activeFeature
+        ? this.buildActiveLoadingModel()
+        : null,
+      activeRegenerableLoadingModel: this.activeFeature
+        ? this.buildActiveLoadingModel({ canRegenerate: true })
+        : null,
+      activeCompareModel: this.activeCompareModel,
+      comparePanelVisible: this.comparePanelVisible,
+      quickSurfaceMode: this.quickSurfaceMode,
+      quickInlineVisible: this.quickInlineVisible,
+      cachedInlineModel: this.getCachedInlineModelForCurrentState(),
+      deepOverlayModel: this.deepOverlayModel,
+      coachOverlayModel: this.coachOverlayModel,
+      coachRecapChainActive: this.coachRecapChain !== null,
+      recapPickerModel: this.recapPickerModel,
+    });
+    // Scroll compensation protects the Fansly conversation only when our
+    // inline surface can grow beside the composer. Body-level Overlay/Coach
+    // renders do not change this root; probing their every streaming frame
+    // forced two needless layouts of the large host subtree.
+    const scrollSnapshot =
+      plan.inline.kind === 'render'
+        ? captureScrollSnapshot(this.root)
+        : null;
     try {
-      this.applySurfacePlan(planSurfaces({
-        activeFeature: this.activeFeature,
-        activeLoadingModel: this.activeFeature
-          ? this.buildActiveLoadingModel()
-          : null,
-        activeRegenerableLoadingModel: this.activeFeature
-          ? this.buildActiveLoadingModel({ canRegenerate: true })
-          : null,
-        activeCompareModel: this.activeCompareModel,
-        comparePanelVisible: this.comparePanelVisible,
-        quickSurfaceMode: this.quickSurfaceMode,
-        quickInlineVisible: this.quickInlineVisible,
-        cachedInlineModel: this.getCachedInlineModelForCurrentState(),
-        deepOverlayModel: this.deepOverlayModel,
-        coachOverlayModel: this.coachOverlayModel,
-        coachRecapChainActive: this.coachRecapChain !== null,
-        recapPickerModel: this.recapPickerModel,
-      }));
+      this.applySurfacePlan(plan);
     } finally {
       applyScrollCompensation(this.root, scrollSnapshot);
     }
@@ -1702,7 +1781,7 @@ export class ChatGooseContentApp {
       // The panel is constructed hidden while boot/recovery runs. Late audio
       // may arrive in that window, so object URLs are minted only at open.
       blobUrlsInitiallySuspended: true,
-      onChange: () => this.voicePanel?.render(),
+      onChange: () => this.scheduleVoicePanelRender(),
       onError: (message) => this.voicePanel?.handleError(message),
       onAttachGrant: (message) => {
         const task = this.voicePanel?.handleAttachGrant(message);
@@ -1900,6 +1979,28 @@ export class ChatGooseContentApp {
     });
   }
 
+  private scheduleVoicePanelRender(): void {
+    if (this.voiceRenderFrame !== null) {
+      return;
+    }
+    const controller = this.voiceController;
+    this.voiceRenderFrame = window.requestAnimationFrame(() => {
+      this.voiceRenderFrame = null;
+      if (this.voiceController !== controller) {
+        return;
+      }
+      this.voicePanel?.render();
+    });
+  }
+
+  private cancelVoicePanelRender(): void {
+    if (this.voiceRenderFrame === null) {
+      return;
+    }
+    window.cancelAnimationFrame(this.voiceRenderFrame);
+    this.voiceRenderFrame = null;
+  }
+
   private closeVoicePanel(): void {
     // If the студия is open, fold its borrowed nodes back into the лента first
     // so the panel is whole before it hides (blob URLs are only suspended, not
@@ -1916,6 +2017,7 @@ export class ChatGooseContentApp {
   }
 
   private teardownVoice(): void {
+    this.cancelVoicePanelRender();
     this.voiceStudio?.destroy();
     this.voiceStudio = null;
     // Clear <audio src> + load() before the controller revokes blob URLs.
@@ -2162,7 +2264,7 @@ export class ChatGooseContentApp {
       // throwing render must not strand the lock the finally alone resets.
       this.rebuildCoachModel();
       this.renderAll();
-      ({ settings } = await loadStorageState());
+      ({ settings } = await readStorageState());
       const effectiveMode = resolveEffectiveAutoRecap(
         session.autoRecapOverride,
         settings.coachAutoRecap,
@@ -2924,7 +3026,7 @@ export class ChatGooseContentApp {
   private async refreshCoachSettingsSnapshot(generation: number): Promise<void> {
     let snapshot: CoachSettingsSnapshot;
     try {
-      const { settings } = await loadStorageState();
+      const { settings } = await readStorageState();
       snapshot = {
         coachHistoryLimit: settings.coachHistoryLimit,
         coachAutoRecap: settings.coachAutoRecap,
@@ -3013,7 +3115,7 @@ export class ChatGooseContentApp {
           (previousAccountId !== message.state.accountId && !accountRefined)
         ) {
           this.boardContextGeneration += 1;
-          this.board.invalidateContext();
+          this.boardController?.invalidateContext();
         }
         if (personaChanged) {
           this.clearPersonaBoundFeatureState();
@@ -3054,6 +3156,8 @@ export class ChatGooseContentApp {
           this.closeCoach();
         }
         this.tabState = message.state;
+        this.resolveInitialTabState?.();
+        this.resolveInitialTabState = null;
         // Coach UI settings snapshot (spec §7): a settings change may alter
         // coachHistoryLimit / coachAutoRecap while Coach is open — refresh the
         // snapshot so the menu label and memory divider stay current. ALL
@@ -3084,10 +3188,10 @@ export class ChatGooseContentApp {
         this.handleSummarySyncStatus(message);
         break;
       case 'spenders:progress':
-        this.board.setBuildProgress(message);
+        this.boardController?.setBuildProgress(message);
         break;
       case 'spenders:snapshot':
-        this.board.setBuildSnapshot(message);
+        this.boardController?.setBuildSnapshot(message);
         break;
       case 'operation:progress':
         this.handleProgress(message);
@@ -3264,12 +3368,18 @@ export class ChatGooseContentApp {
   private handleCompareChunk(
     message: Extract<BackgroundPortMessage, { type: 'compare:chunk' }>,
   ): void {
-    const tab = this.findCompareTab(message.operationId, message.cardId);
-    if (!tab) {
+    const model = this.activeCompareFor(message.operationId);
+    const tab = model?.tabs.find(({ cardId }) => cardId === message.cardId);
+    if (!model || !tab) {
       return;
     }
     tab.rawText += message.text;
-    this.scheduleLoadingRender();
+    // Parallel cards keep accumulating off-screen, but only the selected card
+    // can change the visible body. Completion/error still render every card so
+    // their tab status remains live.
+    if (model.activeCardId === message.cardId) {
+      this.scheduleLoadingRender();
+    }
   }
 
   private handleCompareCardComplete(
@@ -3428,7 +3538,10 @@ export class ChatGooseContentApp {
     // (carry-forward 6); the keyed coach renderer mutates only the pending node.
     if (this.activeFeature === 'coach-chat') {
       this.coachPendingAnswerText += text;
-      this.rebuildCoachModel();
+      if (this.coachOverlayModel?.kind === 'coach') {
+        this.coachOverlayModel.sessionView.pendingAnswerText =
+          this.coachPendingAnswerText;
+      }
       this.scheduleLoadingRender();
       return;
     }
@@ -3690,7 +3803,7 @@ export class ChatGooseContentApp {
       this.observedDraftTextarea?.addEventListener('input', this.handleDraftInput);
       this.observedDraftTextarea?.addEventListener('change', this.handleDraftInput);
     }
-    this.hasDraftText = this.computeHasDraftText();
+    this.hasDraftText = Boolean(textarea?.value.trim());
   }
 
   private async computeCompareFingerprint(): Promise<string | null> {
@@ -3698,7 +3811,7 @@ export class ChatGooseContentApp {
       return null;
     }
 
-    const storage = await loadStorageState();
+    const storage = await readStorageState();
     return getCompareCardsFingerprintForPersonality(
       storage,
       this.tabState.mappedPersonalityId,
@@ -3867,6 +3980,8 @@ export class ChatGooseContentApp {
   }
 }
 
-if (window.location.hostname.endsWith('fansly.com')) {
-  new ChatGooseContentApp().init();
+export function startContentApp(): ChatGooseContentApp {
+  const app = new ChatGooseContentApp();
+  app.init();
+  return app;
 }
