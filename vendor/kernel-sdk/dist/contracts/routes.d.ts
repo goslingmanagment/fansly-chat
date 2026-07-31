@@ -14163,6 +14163,7 @@ export declare const routeSchemas: {
                     netMills: z.ZodNullable<z.ZodNumber>;
                     currency: z.ZodString;
                     observedAt: z.ZodString;
+                    deletedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$strip>>;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
