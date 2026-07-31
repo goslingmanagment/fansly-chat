@@ -246,6 +246,10 @@ describe('options «Статус» pane', () => {
   });
 
   it('names the page even when the last board build failed', async () => {
+    // The producing side — that a real failure after label resolution actually
+    // records the page — is pinned in tests/spenders-service.test.ts («names the
+    // page on a build that failed AFTER the label was resolved»). This fixture
+    // would otherwise describe an observation the service never writes.
     const page = await readyMount({
       runtime: {
         health: HEALTH_UP,
@@ -265,6 +269,32 @@ describe('options «Статус» pane', () => {
     expect(spenders.textContent).toContain(COPY.status.spendersFail);
     expect(spenders.textContent).toContain('lora-3');
     // builtAt null: no age line invented for a build that produced nothing.
+    expect(spenders.querySelectorAll('.chatgoose-status-detail-line')).toHaveLength(1);
+  });
+
+  it('says nothing about the age rather than call a corrupt timestamp fresh', async () => {
+    // `typeof x === 'number'` admits NaN. Reporting «данные свежие» over a
+    // stalled feed is worse than visible garbage: nobody looks at it twice.
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        spenders: {
+          sourceIdentity: 'acc-1|https://hub.example|x',
+          streamState: 'not_allowlisted',
+          outcome: 'ok',
+          observedAt: Date.now(),
+          pageLabel: 'lora-1',
+          builtAt: Number.NaN,
+        },
+      },
+    });
+
+    const spenders = row(page, 'spenders');
+    expect(spenders.textContent).toContain('lora-1');
+    expect(spenders.textContent).not.toContain(COPY.status.spendersDataFresh);
+    expect(spenders.textContent).not.toContain('NaN');
+    // Only the page line survives.
     expect(spenders.querySelectorAll('.chatgoose-status-detail-line')).toHaveLength(1);
   });
 

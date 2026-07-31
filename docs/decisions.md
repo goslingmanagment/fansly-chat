@@ -2343,10 +2343,10 @@ to a board that kept drawing its 697 frozen rows. Reading is never gated here;
 only the projection's feed is. So the two gated states say «приток остановлен:
 проекция выключена в ядре» / «приток остановлен: страницы нет в allowlist ядра»,
 and the row grows detail lines: «страница {page}» and a three-bucket data age
-(свежие / N ч назад / N дн назад — `formatSpendersDataAge`, the pane's first
-relative-time formatter). Both lines are drawn for a FAILED observation too: a
-build that died in page resolution has no age to state, but «сборка не удалась»
-about an unnamed page names nothing.
+(свежие / N ч назад / N дн назад, `formatSpendersDataAge`). The same two lines
+are drawn for a FAILED observation — «сборка не удалась» about an unnamed page
+names nothing — and the support report carries both in its own technical
+register, since support receives that artefact instead of the screen.
 
 `pageLabel` rides `SpendersListResult`, not the observation site. `getList`
 records the observation ~300 lines before `buildFromKernel` resolves the label,
@@ -2354,13 +2354,33 @@ and a session-cache hit or a shared in-flight build returns earlier still —
 carrying it in the result is what makes all three paths agree. `builtAt` was
 already there.
 
+The FAILURE path needs its own carrier, because a throw leaves no result to read:
+a mutable `SpendersBuildScope` is created in `getList`, filled in the moment the
+label resolves and again the moment the ranking lands, adopted from the cache on
+a cache hit and from the shared build by every late joiner. Nearly every real
+failure — a Hub 500 on the ranking request, a build timeout, `session_expired`
+during enrichment — happens well after the label is known, so writing a flat
+`null` there reproduced the very anonymous verdict this entry is about. Only a
+failure at `resolvePageLabelForUsername` genuinely has nothing to name, and it is
+the one case that still records both as null.
+
 Both new `SpendersObservation` fields are OPTIONAL, and every read of them is
 `typeof x === 'number'` / a truthiness test — never `!== null`. The type lives in
 `storage.session`, which survives an extension update, so records written before
-this change come back missing the fields, and `undefined !== null` is true: the
-strict form would have printed «данные NaN дн назад» over an otherwise valid
-verdict. That case is pinned by its own test, alongside the amber
-`not_allowlisted` branch that went 13 days uncovered.
+this change come back missing the fields, and `undefined !== null` is true. The
+failure mode of the strict form is worth stating exactly, because it is not the
+obvious one: `undefined` would pass the guard, `Date.now() - undefined` is NaN,
+and the formatter's own non-finite branch would then have answered «данные
+свежие» — a false claim of freshness stacked on top of a 13-day outage, which is
+strictly worse than visible garbage because nobody looks at it twice. So that
+branch now returns nothing at all rather than a bucket, and the caller drops the
+line. Both are pinned by tests, alongside the amber `not_allowlisted` branch that
+went 13 days uncovered.
+
+For the same reason the board's session cache normalises `pageLabel` on read:
+the key stays `spendersCacheV3` (the bump belongs to a later change), so within
+the TTL after an update an entry written without the field would otherwise enter
+the app as a `SpendersListResult` in a shape its own type forbids.
 
 Out of scope by construction: the board's own English header (its catch-all
 «source paused» is E68) and anything about deleted fans.

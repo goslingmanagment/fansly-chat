@@ -255,11 +255,15 @@ function formatClockTime(at: number): string {
 }
 
 /** Coarse age for the Spenders row. Deliberately three buckets: the row
- * answers «is this data current», not «exactly when». Guards against a
- * non-finite timestamp from an old session-storage record. */
-function formatSpendersDataAge(builtAt: number): string {
+ * answers «is this data current», not «exactly when». Null when the age cannot
+ * be computed — `typeof x === 'number'` still admits NaN from a corrupt
+ * session-storage record, and «данные свежие» is the one answer such a record
+ * must never produce: a false claim of freshness over a stalled feed is worse
+ * than visible garbage, because nobody looks at it twice. */
+function formatSpendersDataAge(builtAt: number): string | null {
   const ageMs = Date.now() - builtAt;
-  if (!Number.isFinite(ageMs) || ageMs < 60 * 60 * 1000) return COPY.status.spendersDataFresh;
+  if (!Number.isFinite(ageMs)) return null;
+  if (ageMs < 60 * 60 * 1000) return COPY.status.spendersDataFresh;
   const hours = Math.floor(ageMs / (60 * 60 * 1000));
   if (hours < 24) return COPY.status.spendersDataHours.replace('{n}', String(hours));
   return COPY.status.spendersDataDays.replace('{n}', String(Math.floor(hours / 24)));
@@ -415,7 +419,17 @@ export function buildStatusReport(model: StatusReportModel): string {
       ? COPY.status.spendersUnavailable
       : model.spenders === null
         ? COPY.status.spendersEmpty
-        : `${model.spenders.outcome} · ${model.spenders.streamState ?? unknown}`
+        // The page and the projection age, in the same technical register the
+        // «Активность» line above uses. Support receives this artefact instead
+        // of the screen, so an anonymous «ok · not_allowlisted» is worst here.
+        : `${model.spenders.outcome} · ${model.spenders.streamState ?? unknown} · ${
+            model.spenders.pageLabel ?? unknown
+          } · ${
+            typeof model.spenders.builtAt === 'number' &&
+            Number.isFinite(model.spenders.builtAt)
+              ? new Date(model.spenders.builtAt).toISOString()
+              : unknown
+          }`
   }`);
 
   lines.push(`${COPY.status.contractLabel}: ${
@@ -3450,9 +3464,12 @@ async function render(): Promise<void> {
         spendersDetails.push(COPY.status.spendersPageScope.replace('{page}', spenders.pageLabel));
       }
       // typeof, not `!== null`: an observation stored before this field existed
-      // comes back as undefined, and `undefined !== null` is true.
+      // comes back as undefined, and `undefined !== null` is true — which would
+      // have reached the formatter with NaN and printed «данные свежие» over a
+      // stalled feed.
       if (typeof spenders.builtAt === 'number') {
-        spendersDetails.push(formatSpendersDataAge(spenders.builtAt));
+        const age = formatSpendersDataAge(spenders.builtAt);
+        if (age !== null) spendersDetails.push(age);
       }
       if (spendersDetails.length > 0) statusRows.spenders.setDetailLines(spendersDetails);
     }

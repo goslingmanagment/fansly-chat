@@ -98,6 +98,28 @@ interface BuiltSpendersResult {
   hasRequestedCoverage: boolean;
 }
 
+/** What a build has learned so far, for the observation `getList` records when
+ * the build THROWS and there is no result to read. Most failures happen well
+ * after the page label is resolved (a Hub 500 on the lifetime request, a build
+ * timeout, `session_expired` during enrichment), and an anonymous «сборка не
+ * удалась» is exactly the verdict this row exists to stop printing. Only a
+ * failure at (or before) `resolvePageLabelForUsername` leaves both null. */
+interface SpendersBuildScope {
+  pageLabel: string | null;
+  builtAt: number | null;
+}
+
+function newBuildScope(): SpendersBuildScope {
+  return { pageLabel: null, builtAt: null };
+}
+
+/** Copy what another scope (or a finished result) learned, never overwriting a
+ * known value with a null — a late joiner adopts the shared build's findings. */
+function adoptScope(target: SpendersBuildScope, source: SpendersBuildScope): void {
+  if (source.pageLabel !== null) target.pageLabel = source.pageLabel;
+  if (source.builtAt !== null) target.builtAt = source.builtAt;
+}
+
 function parseKernelTimestamp(value: string | null): number | null {
   if (value === null) return null;
   const parsed = Date.parse(value);
@@ -165,6 +187,9 @@ interface SpendersBuildSubscriber {
 interface InFlightBuild {
   controller: AbortController;
   promise: Promise<SpendersListResult>;
+  /** Filled by the running build; every waiter adopts it, so a tab that joined
+   * a shared build names the same page when that build fails. */
+  scope: SpendersBuildScope;
   subscribers: Set<SpendersBuildSubscriber>;
   latestProgress: SpendersProgressPayload | null;
   latestSnapshot: SpendersSnapshotPayload | null;
@@ -222,7 +247,15 @@ async function readSessionCache(key: string): Promise<CacheEntry | null> {
     ) {
       return null;
     }
-    return candidate;
+    // An entry written before `pageLabel` existed comes back without it, and
+    // this cache outlives an extension update by up to its whole TTL — so a
+    // `SpendersListResult` would enter the app in a shape its own type forbids
+    // and the options row would silently lose the page. Normalise on read
+    // rather than bump the key: the key bump belongs to a later change.
+    return {
+      ...candidate,
+      result: { ...candidate.result, pageLabel: candidate.result.pageLabel ?? null },
+    };
   } catch {
     return null;
   }
@@ -445,8 +478,11 @@ export class SpendersService {
           resolveHubBearer(settings),
         )}`
       : this.creatorKey(session);
+    // Filled in as the build learns; read only on the failure path, where there
+    // is no result to read the page off.
+    const scope = newBuildScope();
     try {
-      const result = await this.getListInternal(session, signal, settings, options);
+      const result = await this.getListInternal(session, signal, settings, scope, options);
       await recordSpendersObservation({
         sourceIdentity,
         streamState: result.source.streamState,
@@ -471,14 +507,17 @@ export class SpendersService {
       const isTimeoutAbort = isAbort &&
         reason instanceof DOMException && reason.message === SPENDERS_BUILD_TIMEOUT_REASON;
       if (!isAbort || isTimeoutAbort) {
-        // A build that threw has no page and no projection age to claim: the
-        // failure may well be the page-label resolution itself.
+        // Whatever the build got as far as learning. A failure after the page
+        // was resolved still knows its page, and «сборка не удалась» about no
+        // page in particular names nothing — that anonymous verdict is what
+        // this row exists to stop printing. Both stay null only when the
+        // resolve itself is what failed.
         await recordSpendersObservation({
           sourceIdentity,
           streamState: null,
           outcome: 'fail',
-          pageLabel: null,
-          builtAt: null,
+          pageLabel: scope.pageLabel,
+          builtAt: scope.builtAt,
         });
       }
       throw error;
@@ -489,6 +528,7 @@ export class SpendersService {
     session: SessionTemplate,
     signal: AbortSignal,
     settings: Settings | undefined,
+    scope: SpendersBuildScope,
     options?: {
       refresh?: boolean;
       onProgress?: (progress: SpendersProgressPayload) => void;
@@ -514,6 +554,10 @@ export class SpendersService {
         now - cached.cachedAt < SPENDERS_CACHE_TTL_MS &&
         isCacheableResult(cached.result)
       ) {
+        // Adopt BEFORE the abort check below: a build-timeout abort raised here
+        // is recorded as a real failure, and the cached board already knows
+        // which page it is about.
+        adoptScope(scope, cached.result);
         throwIfParentAborted(signal);
         return cached.result;
       }
@@ -526,6 +570,7 @@ export class SpendersService {
         now - persisted.cachedAt < SPENDERS_CACHE_TTL_MS &&
         isCacheableResult(persisted.result)
       ) {
+        adoptScope(scope, persisted.result);
         throwIfParentAborted(signal);
         this.cache.set(key, persisted);
         return persisted.result;
@@ -548,6 +593,7 @@ export class SpendersService {
           session,
           settings,
           AbortSignal.any([signal, controller.signal]),
+          scope,
           options,
         );
       } finally {
@@ -560,7 +606,7 @@ export class SpendersService {
       inFlight = this.startSharedBuild(key, generation, session, settings);
       this.inFlightByKey.set(key, inFlight);
     }
-    return await this.waitForSharedBuild(key, inFlight, signal, options);
+    return await this.waitForSharedBuild(key, inFlight, signal, scope, options);
   }
 
   private async runBuild(
@@ -569,6 +615,7 @@ export class SpendersService {
     session: SessionTemplate,
     settings: Settings,
     signal: AbortSignal,
+    scope: SpendersBuildScope,
     callbacks?: SpendersBuildSubscriber,
   ): Promise<SpendersListResult> {
     const buildSequence = ++this.buildSequence;
@@ -577,6 +624,7 @@ export class SpendersService {
       session,
       settings,
       signal,
+      scope,
       callbacks?.onProgress,
       callbacks?.onSnapshot,
     );
@@ -614,6 +662,7 @@ export class SpendersService {
     const build: InFlightBuild = {
       controller,
       promise: Promise.resolve(null as unknown as SpendersListResult),
+      scope: newBuildScope(),
       subscribers: new Set<SpendersBuildSubscriber>(),
       latestProgress: null,
       latestSnapshot: null,
@@ -650,6 +699,7 @@ export class SpendersService {
       session,
       settings,
       controller.signal,
+      build.scope,
       { onProgress: publishProgress, onSnapshot: publishSnapshot },
     )).finally(() => {
       build.settled = true;
@@ -665,6 +715,7 @@ export class SpendersService {
     key: string,
     build: InFlightBuild,
     signal: AbortSignal,
+    scope: SpendersBuildScope,
     subscriber: SpendersBuildSubscriber = {},
   ): Promise<SpendersListResult> {
     throwIfParentAborted(signal);
@@ -684,6 +735,10 @@ export class SpendersService {
       const cleanup = (): void => {
         if (finished) return;
         finished = true;
+        // Every terminal path for this waiter runs through here (resolved,
+        // rejected, or aborted), so a joiner reports the page the shared build
+        // resolved even though it never held the local that carries it.
+        adoptScope(scope, build.scope);
         signal.removeEventListener('abort', onAbort);
         build.subscribers.delete(subscriber);
         build.waiterCount = Math.max(0, build.waiterCount - 1);
@@ -781,6 +836,7 @@ export class SpendersService {
     session: SessionTemplate,
     settings: Settings,
     signal: AbortSignal,
+    scope: SpendersBuildScope,
     onProgress?: (progress: SpendersProgressPayload) => void,
     onSnapshot?: (snapshot: SpendersSnapshotPayload) => void,
   ): Promise<BuiltSpendersResult> {
@@ -794,6 +850,9 @@ export class SpendersService {
     if (!pageLabel) {
       throw new ChatGooseError('hub_page_match_failed');
     }
+    // From here on every failure knows its page. Nothing below this line may
+    // clear it — a build that got further learned more, not less.
+    scope.pageLabel = pageLabel;
 
     const monthWindow = monthWindowFor(Date.now());
     const chatMapController = new AbortController();
@@ -836,6 +895,10 @@ export class SpendersService {
       chatMapController.abort();
       throw error;
     }
+    // The projection's own freshness is known as soon as the ranking lands, so
+    // a failure in the optional enrichment that follows can still say how old
+    // the data was.
+    scope.builtAt = parseKernelTimestamp(lifetime.builtAt);
 
     // Lifetime is the only authoritative ranking. Publish it immediately with
     // honest unknowns for optional fields; month, direct-chat ids, and custom
