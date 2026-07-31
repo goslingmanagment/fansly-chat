@@ -304,6 +304,62 @@ describe('ChatGooseContentApp', () => {
     expect(calls).toEqual(['unload', 'hide', 'revoke']);
   });
 
+  it('tears down a stale-tab paid create on custody conflict before noteCreate and asks for reload', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sent: Array<{ type: string }> = [];
+    let revision = 0;
+    let conflict = false;
+    const runtimeSend = (globalThis as any).browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
+    runtimeSend.mockImplementation(async (request: { type: string }) => {
+      if (request.type !== 'voiceAttemptSave') {
+        throw new Error(`unexpected runtime request: ${request.type}`);
+      }
+      if (conflict) {
+        return { version: 2, ok: false, error: 'revision_conflict' };
+      }
+      revision += 1;
+      return { version: 2, ok: true, revision };
+    });
+    app.port.send = vi.fn((message: { type: string }) => {
+      sent.push(message);
+      return true;
+    });
+    app.tabState = readyState({
+      voiceNotesCapable: true,
+      accountId: 'account-1',
+      groupId: 'group-1',
+    });
+    app.currentGroupId = 'group-1';
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    app.createVoiceController();
+    const controller = app.voiceController;
+    await controller.startScript('Draft', 'none');
+    const attemptId = controller.getAttempt().attemptId;
+    await controller.handleMessage({
+      type: 'voice:scriptComplete',
+      attemptId,
+      script: 'Ready script',
+      generationRef: 'generation-1',
+      conversationRef: 'fan-1',
+      sourceFingerprint: 'https://hub.test|credential-hash',
+      pageLabel: 'creator-fs',
+    });
+
+    conflict = true;
+    await expect(controller.generateTake()).rejects.toMatchObject({
+      name: 'VoiceAttemptCustodyError',
+      code: 'conflict',
+    });
+
+    expect(sent.filter((message) => message.type === 'voice:noteCreate')).toHaveLength(0);
+    expect(app.voiceController).toBeNull();
+    expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
+      'Перезагрузите эту вкладку Fansly',
+    );
+  });
+
   it('shows a one-part Split warning on the default inline surface (E49)', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

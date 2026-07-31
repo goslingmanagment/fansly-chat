@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   VoiceAttemptCustodyMismatchError,
   VoiceAttemptRepository,
+  VoiceAttemptRevisionConflictError,
 } from '../src/background/voice-attempt-store.js';
 import {
   VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX,
@@ -143,7 +144,7 @@ describe('VoiceAttemptRepository', () => {
       storage: storage.area,
       now: () => 1_000,
     });
-    await writer.save(snapshot());
+    await writer.save(snapshot(), 0);
 
     const restarted = new VoiceAttemptRepository({
       storage: storage.area,
@@ -152,6 +153,7 @@ describe('VoiceAttemptRepository', () => {
     await expect(restarted.load({ ...ROUTE, routeNonce: 99 })).resolves.toEqual([
       expect.objectContaining({
         savedAt: 1_000,
+        revision: 1,
         pendingCreate: expect.objectContaining({
           clientRequestId: CLIENT_REQUEST_ID,
           sentOnce: true,
@@ -168,9 +170,11 @@ describe('VoiceAttemptRepository', () => {
     const expiredKey = voiceAttemptStorageKey(expiredId);
     const invalidKey = `${VOICE_ATTEMPT_SESSION_KEY_PREFIX}invalid`;
     const legacyKey = `${VOICE_ATTEMPT_LEGACY_SESSION_KEY_PREFIX}legacy`;
+    const revisionlessV2 = serializeVoiceAttemptSnapshot(snapshot(), now - 1);
+    delete (revisionlessV2 as Partial<typeof revisionlessV2>).revision;
     const storage = createStorageArea({
       unrelatedSessionKey: { keep: true },
-      [validKey]: serializeVoiceAttemptSnapshot(snapshot(), now - 1),
+      [validKey]: revisionlessV2,
       [expiredKey]: serializeVoiceAttemptSnapshot(
         snapshot({ attemptId: expiredId }),
         now - VOICE_ATTEMPT_TTL_MS,
@@ -183,7 +187,9 @@ describe('VoiceAttemptRepository', () => {
       now: () => now,
     });
 
-    await expect(repository.load(ROUTE)).resolves.toHaveLength(1);
+    await expect(repository.load(ROUTE)).resolves.toEqual([
+      expect.objectContaining({ revision: 1 }),
+    ]);
     expect(storage.data[validKey]).toBeDefined();
     expect(storage.data[expiredKey]).toBeUndefined();
     expect(storage.data[invalidKey]).toBeUndefined();
@@ -193,13 +199,58 @@ describe('VoiceAttemptRepository', () => {
     expect(storage.area.set).not.toHaveBeenCalled();
   });
 
+  it('does not let stale load cleanup delete a concurrently refreshed revision', async () => {
+    const key = voiceAttemptStorageKey(ATTEMPT_ID);
+    const storage = createStorageArea({
+      [key]: serializeVoiceAttemptSnapshot(snapshot({ sentOnce: false }), 0, 1),
+    });
+    let now = VOICE_ATTEMPT_TTL_MS - 1;
+    const repository = new VoiceAttemptRepository({
+      storage: storage.area,
+      now: () => now,
+    });
+    const baseGet = storage.area.get.getMockImplementation()!;
+    let releaseScan!: () => void;
+    const scanBlocked = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    let scanStarted!: () => void;
+    const observedScan = new Promise<void>((resolve) => {
+      scanStarted = resolve;
+    });
+    let blockScan = true;
+    storage.area.get.mockImplementation(async (keys) => {
+      const captured = await baseGet(keys);
+      if (blockScan && keys === null) {
+        blockScan = false;
+        scanStarted();
+        await scanBlocked;
+      }
+      return captured;
+    });
+
+    const staleLoad = repository.load(ROUTE);
+    await observedScan;
+    await repository.save(snapshot({ sentOnce: true }), 1);
+    now = VOICE_ATTEMPT_TTL_MS + 1;
+    releaseScan();
+    await staleLoad;
+
+    await expect(repository.load(ROUTE)).resolves.toEqual([
+      expect.objectContaining({
+        revision: 2,
+        pendingCreate: expect.objectContaining({ sentOnce: true }),
+      }),
+    ]);
+  });
+
   it('filters by exact account/group while deliberately ignoring routeNonce', async () => {
     const storage = createStorageArea();
     const repository = new VoiceAttemptRepository({
       storage: storage.area,
       now: () => 1_000,
     });
-    await repository.save(snapshot());
+    await repository.save(snapshot(), 0);
 
     await expect(repository.load({ ...ROUTE, routeNonce: 500 })).resolves.toHaveLength(1);
     await expect(repository.load({ ...ROUTE, accountId: 'creator-2' })).resolves.toEqual([]);
@@ -207,7 +258,7 @@ describe('VoiceAttemptRepository', () => {
     expect(storage.data[voiceAttemptStorageKey(ATTEMPT_ID)]).toBeDefined();
   });
 
-  it('serializes writes per attempt so a delayed older save cannot win', async () => {
+  it('serializes writes per attempt and rejects a second writer on the same revision', async () => {
     const storage = createStorageArea();
     let releaseFirst!: () => void;
     const firstBlocked = new Promise<void>((resolve) => {
@@ -227,16 +278,101 @@ describe('VoiceAttemptRepository', () => {
       storage: storage.area,
       now: () => 1_000,
     });
-    const older = repository.save(snapshot({ script: 'older' }));
-    const newer = repository.save(snapshot({ script: 'newer' }));
+    const first = repository.save(snapshot({ script: 'first' }), 0);
+    const stale = repository.save(snapshot({ script: 'stale' }), 0);
 
-    await Promise.resolve();
-    expect(storage.area.set).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(storage.area.set).toHaveBeenCalledTimes(1));
     releaseFirst();
-    await Promise.all([older, newer]);
+    await expect(first).resolves.toBe(1);
+    await expect(stale).rejects.toBeInstanceOf(VoiceAttemptRevisionConflictError);
 
     const loaded = await repository.load(ROUTE);
-    expect(loaded[0]?.pendingCreate?.script).toBe('newer');
+    expect(loaded[0]?.pendingCreate?.script).toBe('first');
+  });
+
+  it('does not let a stale full-envelope save erase newer paid custody', async () => {
+    const storage = createStorageArea();
+    const repository = new VoiceAttemptRepository({
+      storage: storage.area,
+      now: () => 1_000,
+    });
+    await repository.save(snapshot({ sentOnce: false }), 0);
+    const stale = (await repository.load(ROUTE))[0]!;
+
+    await repository.save(snapshot({ sentOnce: true }), stale.revision);
+    await expect(repository.save(
+      {
+        attempt: clone(stale.attempt),
+        conversationRef: stale.conversationRef,
+        pendingCreate: null,
+        burnedClientRequestIds: clone(stale.burnedClientRequestIds),
+      },
+      stale.revision,
+    )).rejects.toBeInstanceOf(VoiceAttemptRevisionConflictError);
+
+    await expect(repository.load(ROUTE)).resolves.toEqual([
+      expect.objectContaining({
+        pendingCreate: expect.objectContaining({ sentOnce: true }),
+      }),
+    ]);
+  });
+
+  it('does not let a stale remove delete a newer paid-custody revision', async () => {
+    const storage = createStorageArea();
+    const repository = new VoiceAttemptRepository({
+      storage: storage.area,
+      now: () => 1_000,
+    });
+    const firstRevision = await repository.save(snapshot({ sentOnce: false }), 0);
+    await repository.save(snapshot({ sentOnce: true }), firstRevision);
+
+    await expect(repository.remove(
+      ATTEMPT_ID,
+      ROUTE,
+      firstRevision,
+    )).rejects.toBeInstanceOf(VoiceAttemptRevisionConflictError);
+    await expect(repository.assertPendingCreate(expectation())).resolves.toBeUndefined();
+  });
+
+  it('keeps the paid-boundary assertion ahead of an already-queued stale save', async () => {
+    const storage = createStorageArea();
+    const repository = new VoiceAttemptRepository({
+      storage: storage.area,
+      now: () => 1_000,
+    });
+    const firstRevision = await repository.save(snapshot({ sentOnce: false }), 0);
+    await repository.save(snapshot({ sentOnce: true }), firstRevision);
+
+    const baseGet = storage.area.get.getMockImplementation()!;
+    let releaseAssertion!: () => void;
+    const assertionBlocked = new Promise<void>((resolve) => {
+      releaseAssertion = resolve;
+    });
+    let assertionReadStarted!: () => void;
+    const assertionRead = new Promise<void>((resolve) => {
+      assertionReadStarted = resolve;
+    });
+    let blockNextRead = true;
+    storage.area.get.mockImplementation(async (keys) => {
+      if (blockNextRead && keys === voiceAttemptStorageKey(ATTEMPT_ID)) {
+        blockNextRead = false;
+        assertionReadStarted();
+        await assertionBlocked;
+      }
+      return await baseGet(keys);
+    });
+
+    const assertion = repository.assertPendingCreate(expectation());
+    await assertionRead;
+    const staleSave = repository.save({
+      ...snapshot({ sentOnce: false }),
+      pendingCreate: null,
+    }, firstRevision);
+    releaseAssertion();
+
+    await expect(assertion).resolves.toBeUndefined();
+    await expect(staleSave).rejects.toBeInstanceOf(VoiceAttemptRevisionConflictError);
+    await expect(repository.assertPendingCreate(expectation())).resolves.toBeUndefined();
   });
 
   it('does not serialize unrelated attempt keys behind one another', async () => {
@@ -256,9 +392,9 @@ describe('VoiceAttemptRepository', () => {
       storage: storage.area,
       now: () => 1_000,
     });
-    const first = repository.save(snapshot());
+    const first = repository.save(snapshot(), 0);
     const otherId = '44444444-4444-4444-8444-444444444444';
-    await expect(repository.save(snapshot({ attemptId: otherId }))).resolves.toBeUndefined();
+    await expect(repository.save(snapshot({ attemptId: otherId }), 0)).resolves.toBe(1);
     expect(storage.data[voiceAttemptStorageKey(otherId)]).toBeDefined();
     releaseFirst();
     await first;
@@ -269,7 +405,7 @@ describe('VoiceAttemptRepository', () => {
     storage.area.set.mockRejectedValueOnce(new Error('session write rejected'));
     const repository = new VoiceAttemptRepository({ storage: storage.area });
 
-    await expect(repository.save(snapshot())).rejects.toThrow('session write rejected');
+    await expect(repository.save(snapshot(), 0)).rejects.toThrow('session write rejected');
     await expect(repository.load(ROUTE)).resolves.toEqual([]);
   });
 
@@ -279,7 +415,7 @@ describe('VoiceAttemptRepository', () => {
       storage: storage.area,
       now: () => 1_000,
     });
-    await repository.save(snapshot());
+    await repository.save(snapshot(), 0);
     await expect(repository.assertPendingCreate(expectation())).resolves.toBeUndefined();
 
     const mismatches: PendingVoiceCreateExpectation[] = [
@@ -307,12 +443,12 @@ describe('VoiceAttemptRepository', () => {
       storage: storage.area,
       now: () => now,
     });
-    await repository.save(snapshot({ sentOnce: false }));
+    await repository.save(snapshot({ sentOnce: false }), 0);
     await expect(repository.assertPendingCreate(expectation())).rejects.toBeInstanceOf(
       VoiceAttemptCustodyMismatchError,
     );
 
-    await repository.save(snapshot());
+    await repository.save(snapshot(), 1);
     now += VOICE_ATTEMPT_TTL_MS;
     await expect(repository.assertPendingCreate(expectation())).rejects.toBeInstanceOf(
       VoiceAttemptCustodyMismatchError,
@@ -326,15 +462,16 @@ describe('VoiceAttemptRepository', () => {
       storage: storage.area,
       now: () => 1_000,
     });
-    await repository.save(snapshot());
+    await repository.save(snapshot(), 0);
 
     await expect(repository.remove(
       ATTEMPT_ID,
       { ...ROUTE, groupId: 'group-2' },
+      1,
     )).rejects.toBeInstanceOf(VoiceAttemptCustodyMismatchError);
     expect(storage.data[voiceAttemptStorageKey(ATTEMPT_ID)]).toBeDefined();
 
-    await repository.remove(ATTEMPT_ID, { ...ROUTE, routeNonce: 999 });
+    await repository.remove(ATTEMPT_ID, { ...ROUTE, routeNonce: 999 }, 1);
     expect(storage.data[voiceAttemptStorageKey(ATTEMPT_ID)]).toBeUndefined();
     expect(storage.data.unrelatedSessionKey).toBe('keep');
   });

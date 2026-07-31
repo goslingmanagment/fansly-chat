@@ -125,11 +125,13 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({
       type: 'voiceAttemptSave',
       snapshot: VOICE_SNAPSHOT,
+      expectedRevision: 0,
     })).toBe('voiceAttemptSave');
     expect(getRuntimeRequestType({
       type: 'voiceAttemptRemove',
       attemptId: VOICE_SNAPSHOT.attempt.attemptId,
       route: VOICE_ROUTE,
+      expectedRevision: 1,
     })).toBe('voiceAttemptRemove');
     expect(
       getRuntimeRequestType({
@@ -174,11 +176,24 @@ describe('protocol boundary guards', () => {
         ...VOICE_SNAPSHOT,
         attempt: { ...VOICE_SNAPSHOT.attempt, boundRoute: null },
       },
+      expectedRevision: 0,
     })).toBeNull();
     expect(getRuntimeRequestType({
       type: 'voiceAttemptRemove',
       attemptId: '',
       route: VOICE_ROUTE,
+      expectedRevision: 1,
+    })).toBeNull();
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptSave',
+      snapshot: VOICE_SNAPSHOT,
+      expectedRevision: -1,
+    })).toBeNull();
+    expect(getRuntimeRequestType({
+      type: 'voiceAttemptRemove',
+      attemptId: VOICE_SNAPSHOT.attempt.attemptId,
+      route: VOICE_ROUTE,
+      expectedRevision: 0,
     })).toBeNull();
     expect(
       getRuntimeRequestType({

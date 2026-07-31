@@ -20,6 +20,7 @@ import {
   type VoiceAttemptController,
   type VoiceTake,
 } from './attempt-controller.js';
+import { VoiceAttemptCustodyError } from './attempt-store.js';
 import type { VoiceComposerProbe, VoiceAttachOutcome } from './attach-adapter.js';
 import { createUserErrorBlock } from '../ui/view-helpers.js';
 
@@ -625,7 +626,7 @@ export class VoicePanel {
     restore.title = 'Вернуть исходник в скрипт';
     restore.addEventListener('click', () => {
       this.setPanelError(null, null);
-      void this.deps.controller.restoreDraft();
+      this.runControllerTask(this.deps.controller.restoreDraft());
     });
     row.append(restore);
     this.sourceSlot.replaceChildren(row);
@@ -665,7 +666,7 @@ export class VoicePanel {
         }
         this.setPanelError(null, null);
         this.attachPhase = 'idle';
-        void this.deps.controller.regenerateScript(preset.tone);
+        this.runControllerTask(this.deps.controller.regenerateScript(preset.tone));
       });
       chips.append(chip);
     }
@@ -718,7 +719,7 @@ export class VoicePanel {
       );
       cancel.type = 'button';
       cancel.addEventListener('click', () => {
-        void this.deps.controller.cancelScript();
+        this.runControllerTask(this.deps.controller.cancelScript());
       });
       row.append(cancel);
       this.busySlot.replaceChildren(row);
@@ -763,7 +764,7 @@ export class VoicePanel {
     check.addEventListener('click', () => {
       // Re-issue the same idempotent create that the chatter already approved;
       // this never mints another take or silently changes the frozen payload.
-      void this.deps.controller.handlePortReconnect();
+      this.runControllerTask(this.deps.controller.handlePortReconnect());
     });
     block.append(check);
     this.reconcileSlot.replaceChildren(block);
@@ -934,20 +935,9 @@ export class VoicePanel {
   }
 
   private newVoiceNeedsConfirm(): boolean {
-    // Paid work at stake = completed-unattached takes, generating takes,
-    // indeterminate takes (recoverable via the free status check), and a
-    // pending/needs-reconcile create that has no visible take yet (review
-    // P1: the in-flight paid create's custody record must never be discarded
-    // without the warning).
-    const attempt = this.deps.controller.getAttempt();
-    const takesAtStake = Boolean(attempt?.takes.some((take) =>
-      (take.view.state === 'completed' && !take.attached) ||
-      take.view.state === 'queued' ||
-      take.view.state === 'dispatched' ||
-      take.view.state === 'indeterminate'));
-    return takesAtStake ||
-      this.deps.controller.hasPendingCreate() ||
-      this.deps.controller.hasPendingCreateNeedsReconcile();
+    // Boot may recover several matching attempts while the panel renders only
+    // the newest. The confirmation therefore covers hidden paid custody too.
+    return this.deps.controller.hasPaidWorkAtStake();
   }
 
   private newVoiceConfirmText(): string {
@@ -965,9 +955,7 @@ export class VoicePanel {
     if (generating) {
       parts.push('вариант ещё генерируется');
     }
-    const pendingPaid = this.deps.controller.hasPendingCreate() ||
-      this.deps.controller.hasPendingCreateNeedsReconcile() ||
-      (attempt?.takes.some((take) => take.view.state === 'indeterminate') ?? false);
+    const pendingPaid = this.deps.controller.hasPaidWorkAtStake();
     if (pendingPaid && parts.length === 0) {
       parts.push('оплаченная генерация не завершена');
     }
@@ -1021,7 +1009,7 @@ export class VoicePanel {
         const radio = el('input', 'chatgoose-voice-take-select');
         radio.type = 'radio';
         radio.addEventListener('change', () => {
-          void this.deps.controller.selectTake(voiceNoteId);
+          this.runControllerTask(this.deps.controller.selectTake(voiceNoteId));
         });
         handle.radio = radio;
         handle.radioSlot.replaceChildren(radio);
@@ -1708,6 +1696,17 @@ export class VoicePanel {
   private onEditorInput(): void {
     this.setPanelError(null, null);
     this.attachPhase = 'idle';
-    void this.deps.controller.editScript(this.editorEl.value);
+    this.runControllerTask(this.deps.controller.editScript(this.editorEl.value));
+  }
+
+  /** Custody failures synchronously notify the composition root, which tears
+   * this panel down and shows recovery guidance. This shared rejection sink
+   * keeps fire-and-forget UI actions from also leaking an unhandledrejection. */
+  private runControllerTask(task: Promise<unknown>): void {
+    void task.catch((error) => {
+      if (!(error instanceof VoiceAttemptCustodyError)) {
+        console.error('[ChatGoose][voice] panel action failed', error);
+      }
+    });
   }
 }

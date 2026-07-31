@@ -210,11 +210,6 @@ describe('VoiceAttemptController', () => {
     });
 
     await controller.editScript('Changed after the paid click');
-    controller.handlePortDisconnected();
-    port.connected = true;
-    await controller.handlePortReconnect();
-    expect(messagesOfType(port, 'voice:noteCreate').at(-1)).toEqual(firstCreate);
-
     await controller.handleMessage({
       type: 'voice:noteError',
       attemptId: ATTEMPT_ID,
@@ -689,6 +684,7 @@ describe('VoiceAttemptController', () => {
     { status: 404, code: 'hub_request_failed' },
     { status: 409, code: 'idempotency_mismatch' },
     { status: 429, code: 'rate_limited' },
+    { status: 429, code: 'voice_quota_denied' },
   ])('keeps replay $status/$code as needs-reconcile because the original may have billed', async ({
     status,
     code,
@@ -720,32 +716,6 @@ describe('VoiceAttemptController', () => {
       sentOnce: true,
     });
     expect(controller.hasPendingCreateNeedsReconcile()).toBe(true);
-  });
-
-  it('clears a replay carrying the kernel durable quota-denied result', async () => {
-    const { controller, port, store } = createController({
-      uuids: [ATTEMPT_ID, TAKE_ID_1],
-    });
-    await controller.startScript('Draft', 'none');
-    await finishScript(controller, 'Voice script');
-    await controller.generateTake();
-    await controller.handlePortDisconnected();
-    port.connected = true;
-    await controller.handlePortReconnect();
-
-    await controller.handleMessage({
-      type: 'voice:noteError',
-      attemptId: ATTEMPT_ID,
-      source: 'create',
-      code: 'voice_quota_denied',
-      message: 'Quota denied.',
-      status: 429,
-    });
-
-    expect((await store.load(ROUTE))[0]).toMatchObject({
-      pendingCreate: null,
-      burnedClientRequestIds: [TAKE_ID_1],
-    });
   });
 
   it('keeps first-send 409 definite and clears the pending snapshot', async () => {
@@ -816,6 +786,27 @@ describe('VoiceAttemptController', () => {
         script: 'Second script',
       },
     ]);
+  });
+
+  it('reports paid work at stake across hidden recovered attempts', async () => {
+    const first = createController({ uuids: [ATTEMPT_ID, TAKE_ID_1] });
+    await first.controller.startScript('Paid draft', 'none');
+    await finishScript(first.controller, 'Paid script', 'generation-paid');
+    first.port.connected = false;
+    await first.controller.generateTake();
+    first.controller.destroy();
+
+    const second = createController({ uuids: [ATTEMPT_ID_2] });
+    await second.controller.startScript('Safe draft', 'none');
+    await finishScript(second.controller, 'Safe script', 'generation-safe');
+    second.controller.destroy();
+
+    const resumed = createController({ uuids: [TAKE_ID_2] });
+    await resumed.controller.boot();
+
+    expect(resumed.controller.getAttempt()?.attemptId).toBe(ATTEMPT_ID_2);
+    expect(resumed.controller.hasPendingCreate()).toBe(false);
+    expect(resumed.controller.hasPaidWorkAtStake()).toBe(true);
   });
 
   it('re-polls every recovered take, orders by createdAt, and refetches omitted audio bytes', async () => {

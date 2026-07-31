@@ -55,7 +55,10 @@ import type { SpendersService } from './spenders-service.js';
 import type { StorageCoordinator } from './storage-coordinator.js';
 import type { TabContextStore } from './tab-context.js';
 import type { VoiceService } from './voice-service.js';
-import type { VoiceAttemptRepository } from './voice-attempt-store.js';
+import {
+  VoiceAttemptRevisionConflictError,
+  type VoiceAttemptRepository,
+} from './voice-attempt-store.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
 
@@ -384,14 +387,17 @@ export function registerRuntimeApi({
       if (requestType === 'voiceAttemptLoad') {
         const { route } = message as { route: StoredVoiceAttemptRoute };
         if (!voiceAttemptSender(sender, route, sessionStore, tabContexts)) {
-          return { version: 1, ok: false, error: 'invalid_sender' } as const;
+          return { version: 2, ok: false, error: 'invalid_sender' } as const;
         }
         const entries = await voiceAttempts.load(route);
-        return { version: 1, ok: true, entries } as const;
+        return { version: 2, ok: true, entries } as const;
       }
 
       if (requestType === 'voiceAttemptSave') {
-        const { snapshot } = message as { snapshot: VoiceAttemptStoreSnapshot };
+        const { snapshot, expectedRevision } = message as {
+          snapshot: VoiceAttemptStoreSnapshot;
+          expectedRevision: number;
+        };
         if (
           !voiceAttemptSender(
             sender,
@@ -400,22 +406,37 @@ export function registerRuntimeApi({
             tabContexts,
           )
         ) {
-          return { version: 1, ok: false, error: 'invalid_sender' } as const;
+          return { version: 2, ok: false, error: 'invalid_sender' } as const;
         }
-        await voiceAttempts.save(snapshot);
-        return { version: 1, ok: true } as const;
+        try {
+          const revision = await voiceAttempts.save(snapshot, expectedRevision);
+          return { version: 2, ok: true, revision } as const;
+        } catch (error) {
+          if (error instanceof VoiceAttemptRevisionConflictError) {
+            return { version: 2, ok: false, error: 'revision_conflict' } as const;
+          }
+          throw error;
+        }
       }
 
       if (requestType === 'voiceAttemptRemove') {
-        const { attemptId, route } = message as {
+        const { attemptId, route, expectedRevision } = message as {
           attemptId: string;
           route: StoredVoiceAttemptRoute;
+          expectedRevision: number;
         };
         if (!voiceAttemptSender(sender, route, sessionStore, tabContexts)) {
-          return { version: 1, ok: false, error: 'invalid_sender' } as const;
+          return { version: 2, ok: false, error: 'invalid_sender' } as const;
         }
-        await voiceAttempts.remove(attemptId, route);
-        return { version: 1, ok: true } as const;
+        try {
+          await voiceAttempts.remove(attemptId, route, expectedRevision);
+          return { version: 2, ok: true } as const;
+        } catch (error) {
+          if (error instanceof VoiceAttemptRevisionConflictError) {
+            return { version: 2, ok: false, error: 'revision_conflict' } as const;
+          }
+          throw error;
+        }
       }
 
       if (requestType === 'ensureStorageReady') {
