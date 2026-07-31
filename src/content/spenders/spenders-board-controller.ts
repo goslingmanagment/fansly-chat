@@ -28,6 +28,7 @@ import type {
   SpendersListResult,
   SpendersProgressPayload,
   SpendersSnapshotPayload,
+  SpendersStreamState,
   UserFacingError,
 } from '../../shared/types.js';
 import {
@@ -61,6 +62,24 @@ const FRESHNESS_TOOLTIP =
 
 const NO_CHAT_TOOLTIP =
   'A direct chat link is unavailable — opening will search the inbox for this fan.';
+
+/** One line per stream state. "source paused" used to stand for all three, so
+ *  a chatter could not tell "the owner disabled the projection" from "this page
+ *  was left out of the allowlist" from "this platform is unsupported" — and the
+ *  matching amber row in the options pane read like an access denial. Reading
+ *  is never gated: rows keep showing, they just stop being refreshed. */
+function feedStateLabel(state: SpendersStreamState): string | null {
+  switch (state) {
+    case 'ramped':
+      return null;
+    case 'flag_off':
+      return 'not updating: spender projection is off in the Hub';
+    case 'not_allowlisted':
+      return 'not updating: this page is not in the Hub allowlist';
+    case 'unsupported_platform':
+      return 'not updating: unsupported platform';
+  }
+}
 
 const SEARCH_RENDER_DELAY_MS = 150;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -408,8 +427,9 @@ export class SpendersBoardController {
       parts.push('shown rows may be older');
     }
     parts.push(`fetched ${relativeTime(result.fetchedAt)}`);
-    if (result.source.streamState !== 'ramped') {
-      parts.push('source paused');
+    const feedLabel = feedStateLabel(result.source.streamState);
+    if (feedLabel !== null) {
+      parts.push(feedLabel);
     } else if ((result.source.consecutiveFailures ?? 0) > 0) {
       parts.push(`${result.source.consecutiveFailures} failed sync attempt${result.source.consecutiveFailures === 1 ? '' : 's'}`);
     }
