@@ -432,7 +432,7 @@ export class ChatGooseContentApp {
     onConnected: () => {
       if (this.voiceController) {
         this.voiceReconnectPending = false;
-        void this.voiceController.handlePortReconnect();
+        this.runVoiceControllerTask(this.voiceController.handlePortReconnect());
       }
     },
     onDisconnected: () => {
@@ -459,7 +459,7 @@ export class ChatGooseContentApp {
       // attempt, just stop its polling and mark it for a reconnect handshake.
       if (this.voiceController) {
         this.voiceReconnectPending = true;
-        void this.voiceController.handlePortDisconnected();
+        this.runVoiceControllerTask(this.voiceController.handlePortDisconnected());
       }
       this.renderAll();
     },
@@ -1705,7 +1705,13 @@ export class ChatGooseContentApp {
       onChange: () => this.voicePanel?.render(),
       onError: (message) => this.voicePanel?.handleError(message),
       onAttachGrant: (message) => {
-        void this.voicePanel?.handleAttachGrant(message);
+        const task = this.voicePanel?.handleAttachGrant(message);
+        if (task) {
+          this.runVoiceControllerTask(task);
+        }
+      },
+      onCustodyFailure: (error) => {
+        this.handleVoiceFlowFailure(controller, error, 'runtime');
       },
     });
     this.voiceController = controller;
@@ -1844,7 +1850,7 @@ export class ChatGooseContentApp {
   private handleVoiceFlowFailure(
     controller: VoiceAttemptController,
     error: unknown,
-    stage: 'recovery' | 'start',
+    stage: 'recovery' | 'start' | 'runtime',
   ): void {
     console.error(`[ChatGoose][voice] ${stage} failed`, error);
     if (this.voiceController !== controller) {
@@ -1863,7 +1869,9 @@ export class ChatGooseContentApp {
           ? 'Не удалось подтвердить чат для войса — попробуйте ещё раз.'
           : error.code === 'unavailable'
             ? 'Фон расширения не ответил — попробуйте ещё раз через пару секунд.'
-            : 'Хранилище войса недоступно. Перезагрузите вкладку Fansly после обновления расширения.',
+            : error.code === 'conflict'
+              ? 'Войс изменился в другой вкладке. Перезагрузите эту вкладку Fansly, чтобы продолжить.'
+              : 'Хранилище войса недоступно. Перезагрузите вкладку Fansly после обновления расширения.',
         { tone: 'warning' },
       );
       return;
@@ -1879,6 +1887,17 @@ export class ChatGooseContentApp {
       'Не удалось начать войс. Проверьте подключение и попробуйте ещё раз.',
       { tone: 'warning' },
     );
+  }
+
+  /** Custody failures already reached handleVoiceFlowFailure synchronously.
+   * This shared sink prevents intentionally fire-and-forget Port/reconnect
+   * tasks from leaking rejected promises after teardown. */
+  private runVoiceControllerTask(task: Promise<unknown>): void {
+    void task.catch((error) => {
+      if (!(error instanceof VoiceAttemptCustodyError)) {
+        console.error('[ChatGoose][voice] controller task failed', error);
+      }
+    });
   }
 
   private closeVoicePanel(): void {
@@ -2965,7 +2984,7 @@ export class ChatGooseContentApp {
     // (the same idempotent create/status calls) from the persisted snapshot.
     if (this.voiceReconnectPending && this.voiceController) {
       this.voiceReconnectPending = false;
-      void this.voiceController.handlePortReconnect();
+      this.runVoiceControllerTask(this.voiceController.handlePortReconnect());
     }
     switch (message.type) {
       case 'tab:state':
@@ -3119,7 +3138,9 @@ export class ChatGooseContentApp {
       case 'voice:audioBytes':
       case 'voice:attachGrant':
       case 'voice:attachRefuse':
-        void this.voiceController?.handleMessage(message);
+        if (this.voiceController) {
+          this.runVoiceControllerTask(this.voiceController.handleMessage(message));
+        }
         break;
       default:
         break;

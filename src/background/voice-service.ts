@@ -790,7 +790,7 @@ export class VoiceService {
         {
           onText: (text) => {
             if (
-              this.isActiveScript(tabId, message.attemptId) &&
+              this.isCurrentScript(tabId, active) &&
               sameRoute(routeBinding, this.deps.tabContexts.get(tabId))
             ) {
               emit({ type: 'voice:scriptDelta', attemptId: message.attemptId, text });
@@ -807,7 +807,7 @@ export class VoiceService {
       );
 
       if (
-        !this.isActiveScript(tabId, message.attemptId) ||
+        !this.isCurrentScript(tabId, active) ||
         !sameRoute(routeBinding, this.deps.tabContexts.get(tabId))
       ) {
         return;
@@ -845,7 +845,7 @@ export class VoiceService {
         pageLabel: page.pageLabel,
       }).catch(() => undefined);
     } catch (error) {
-      if (!this.isActiveScript(tabId, message.attemptId)) {
+      if (!this.isCurrentScript(tabId, active)) {
         return;
       }
       const normalizedError = deadline.normalizeError(error);
@@ -869,7 +869,7 @@ export class VoiceService {
       ).catch(() => undefined);
     } finally {
       deadline.clear();
-      if (this.isActiveScript(tabId, message.attemptId)) {
+      if (this.isCurrentScript(tabId, active)) {
         this.activeScriptsByTabId.delete(tabId);
       }
     }
@@ -1429,12 +1429,12 @@ export class VoiceService {
     emit({ type: 'voice:attachRefuse', attemptId, reason });
   }
 
-  private isActiveScript(tabId: number, attemptId: string): boolean {
-    return this.activeScriptsByTabId.get(tabId)?.attemptId === attemptId;
+  private isCurrentScript(tabId: number, active: ActiveScript): boolean {
+    return this.activeScriptsByTabId.get(tabId) === active;
   }
 
   private cancelScript(tabId: number, attemptId: string): void {
-    if (this.isActiveScript(tabId, attemptId)) {
+    if (this.activeScriptsByTabId.get(tabId)?.attemptId === attemptId) {
       this.abortActiveScript(tabId);
     }
   }

@@ -19,8 +19,10 @@ export class MemoryVoiceAttemptStore implements VoiceAttemptStoreContract {
   constructor(private readonly now: () => number = () => Date.now()) {}
 
   async save(snapshot: VoiceAttemptStoreSnapshot): Promise<void> {
+    const revision = (this.entries.get(snapshot.attempt.attemptId)?.revision ?? 0) + 1;
     this.entries.set(snapshot.attempt.attemptId, {
       savedAt: this.now(),
+      revision,
       ...clone(snapshot),
     });
   }

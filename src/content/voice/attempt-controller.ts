@@ -6,6 +6,7 @@ import type {
   VoiceNoteStatusView,
 } from '../../shared/types.js';
 import {
+  VoiceAttemptCustodyError,
   VoiceAttemptStore,
   type StoredVoiceAttemptRoute,
   type VoiceAttemptStoreContract,
@@ -68,6 +69,10 @@ interface VoiceAttemptControllerOptions {
   onChange?: (attempt: VoiceAttempt | null) => void;
   onError?: (message: VoiceControllerErrorMessage) => void;
   onAttachGrant?: (message: VoiceAttachGrant) => void;
+  /** Persistence failures can surface from Port messages and UI actions whose
+   * promises are intentionally fire-and-forget. The composition root owns the
+   * one teardown/toast path for those custody failures. */
+  onCustodyFailure?: (error: VoiceAttemptCustodyError) => void;
 }
 
 interface RuntimeAttemptRecord {
@@ -213,6 +218,7 @@ export class VoiceAttemptController {
   private readonly onChange?: (attempt: VoiceAttempt | null) => void;
   private readonly onError?: (message: VoiceControllerErrorMessage) => void;
   private readonly onAttachGrant?: (message: VoiceAttachGrant) => void;
+  private readonly onCustodyFailure?: (error: VoiceAttemptCustodyError) => void;
   private readonly records = new Map<string, RuntimeAttemptRecord>();
   private readonly issuedClientRequestIds = new Set<string>();
   private readonly audioFetchesInFlight = new Set<string>();
@@ -237,6 +243,7 @@ export class VoiceAttemptController {
     this.onChange = options.onChange;
     this.onError = options.onError;
     this.onAttachGrant = options.onAttachGrant;
+    this.onCustodyFailure = options.onCustodyFailure;
   }
 
   getAttempt(): VoiceAttempt | null {
@@ -532,6 +539,19 @@ export class VoiceAttemptController {
       ? this.records.get(this.activeAttemptId)
       : undefined;
     return Boolean(record?.pendingCreate);
+  }
+
+  /** The new-from-draft confirmation protects every recovered record, not only
+   * the one currently rendered. Boot intentionally re-arms multiple matching
+   * attempts, so a hidden older record may still own paid work. */
+  hasPaidWorkAtStake(): boolean {
+    return Array.from(this.records.values()).some((record) =>
+      Boolean(record.pendingCreate) ||
+      record.attempt.takes.some((take) =>
+        (take.view.state === 'completed' && !take.attached) ||
+        take.view.state === 'queued' ||
+        take.view.state === 'dispatched' ||
+        take.view.state === 'indeterminate'));
   }
 
   async markAttached(voiceNoteId: number): Promise<void> {
@@ -1018,14 +1038,14 @@ export class VoiceAttemptController {
     } else if (record.pendingCreate) {
       const definitelyRejected = DEFINITE_CREATE_REJECTION_STATUSES.has(message.status) ||
         DEFINITE_CREATE_REJECTION_CODES.has(message.code);
-      const durablyUnbilled = message.code === 'voice_quota_denied';
       // Once an earlier dispatch may have reached the paid endpoint, a later
       // HTTP rejection describes only the replay. It cannot prove that the
-      // original attempt was unbilled. The kernel's durable quota-denied code
-      // is the sole exception: that id is permanently recorded as unbilled.
+      // original attempt was unbilled. Quota denial is no exception: Core no
+      // longer retains a durable denial row that could prove the earlier send
+      // lost the same-id race.
       if (
         definitelyRejected &&
-        (!record.currentCreateSendWasReplay || durablyUnbilled)
+        !record.currentCreateSendWasReplay
       ) {
         if (message.code === 'voice_quota_denied') {
           record.burnedClientRequestIds.add(record.pendingCreate.clientRequestId);
@@ -1206,7 +1226,14 @@ export class VoiceAttemptController {
   }
 
   private async persist(record: RuntimeAttemptRecord): Promise<void> {
-    await this.store.save(this.toStoreSnapshot(record));
+    try {
+      await this.store.save(this.toStoreSnapshot(record));
+    } catch (error) {
+      if (error instanceof VoiceAttemptCustodyError) {
+        this.onCustodyFailure?.(error);
+      }
+      throw error;
+    }
   }
 
   private toStoreSnapshot(record: RuntimeAttemptRecord): VoiceAttemptStoreSnapshot {

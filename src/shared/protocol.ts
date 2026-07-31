@@ -492,13 +492,17 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         ? 'voiceAttemptLoad'
         : null;
     case 'voiceAttemptSave':
-      return parseVoiceAttemptStoreSnapshot(message.snapshot) !== null
+      return parseVoiceAttemptStoreSnapshot(message.snapshot) !== null &&
+        Number.isSafeInteger(message.expectedRevision) &&
+        (message.expectedRevision as number) >= 0
         ? 'voiceAttemptSave'
         : null;
     case 'voiceAttemptRemove':
       return isString(message.attemptId) &&
         message.attemptId.trim().length > 0 &&
-        isStoredVoiceAttemptRoute(message.route)
+        isStoredVoiceAttemptRoute(message.route) &&
+        Number.isSafeInteger(message.expectedRevision) &&
+        (message.expectedRevision as number) > 0
         ? 'voiceAttemptRemove'
         : null;
     default:

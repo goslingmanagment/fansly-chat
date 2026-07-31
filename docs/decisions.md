@@ -79,6 +79,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E60 | 2026-07-26 | Cabinet frame R3: the shell fills the window — no width clamp on `<body>` — with a sticky rail that owns one viewport and a reading column capped at 1120px on the pane itself; the page root's permanent 24px bottom padding moves into that pane. Supersedes the 900px ribbon chosen when #46 was reverted (owner ruling on the R3 mockups, 2026-07-26). Narrow windows collapse the rail (BL-003 п.1), disabled controls finally look disabled, and the save whisper speaks Russian |
 | E61 | 2026-07-26 | «Статус» and Agency Hub speak in WORDS: the mono badge column goes (it ran six vocabularies at once and its «—» meant four different things) and every row is dot · fixed label · fact · one right cell holding a detail OR an action. Each pane gets a HEAD (title, subline, its primary action) above cards that carry content only; «Статус» adds «Что мешает» — the open readiness steps with the button that closes each — plus a support card (version, storage schema, report) and cross-pane pointers. Hub loses its duplicated facts (host access and the check receipt were stated twice), gains the «Ядро» row it never had, un-nests its zones into four cards in two columns, fences «Выйти» inside the sign-in card, and stops printing a raw error code in a pill. **Amended (review fixes):** the `host-access` deep-link anchor covers the fact AND «Разрешить доступ» (the claim was false — the button sat in a sibling action row); `renderOnboarding` is the single writer of «Что мешает» too, not only of the hero (a fresh install listed the same three steps twice); «Проверить всё» and «Скопировать отчёт» get one live region each; the pane head wraps at ~320px, the <640px diagnostics row drops the 46px column of the deleted badge, and `.chatgoose-hub-srow` gets the author `[hidden]` guard its `display: grid` needs |
 | E62 | 2026-07-26 | The five remaining panes: «Персоны» name the accounts sitting on each persona (the map was in memory, only its size was printed) and repaint when a mapping changes; «Аккаунты» group rows by state with a caption + count each, so the per-row «в работе» pill goes; «Генерация» splits into two card columns with a fixed numeric lane, bounds from the shared constants and a step that matches the range (the deep window stepped by 1 across 100–3000), and the clamp notice becomes its own chip instead of eating the range hint; «Хоткеи» give each group its own column and let names wrap, with the detected platform stated in the head; «Вид» previews the IN-CHAT panel the subtitle promises, says what «Системная» resolves to right now, and labels its radio group. **Amended (review fixes):** the numeric lane gets its own class (as a second bare `.chatgoose-row-control` rule it clipped the auto-recap segment's «Полный»); the degraded accounts path carries an explicit 'unknown' state so no row contradicts its group caption; the «Системная» note is computed from the OS scheme, never from the document's resolved class; the catalog source shows the WHOLE normalized base URL (two hubs on one host collapsed into one line); `chatgoose-account-rows` names one element again; dead CSS/copy deleted, and the weakened persona-catalog test is a node-identity guarantee again |
+| E66 | 2026-07-31 | Voice concurrency: exact script-run identity; background per-attempt revision/CAS for save/remove; hidden recovered paid work joins the new-session warning; quota-denied replay remains indeterminate |
 
 ## Entries
 
@@ -2235,3 +2236,16 @@ token is never re-armed automatically), the honest three-way outcome
 The new floor is pinned by «confirms a waveform that lands after the old
 ten-second window» in `tests/voice-attach-adapter.test.ts`, and the terminal-
 uncertain test now advances by the exported constant instead of a literal.
+
+**E66 (2026-07-31).** E52 still permits concurrent tabs, but not stale
+last-writer-wins custody. Voice V2 envelopes carry a monotonic revision
+(revision-less V2 adopts 1); runtime RPC v2 makes background `save`/`remove`
+compare it inside the per-attempt FIFO, while content serializes local writes
+and fails closed with reload guidance on conflict. The paid-create assertion
+joins that FIFO. There is no tab lease or `storage.local` schema bump, and
+account/group reload recovery still ignores routeNonce.
+
+Script callbacks/finally now require exact `ActiveScript` object identity, and
+the new-session warning covers paid work in every recovered record. Because Core
+no longer retains quota-denial rows, `voice_quota_denied` clears a definite
+first send but a replay after `sentOnce=true` remains `needs-reconcile`.

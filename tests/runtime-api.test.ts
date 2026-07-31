@@ -123,8 +123,15 @@ async function installRuntimeApiHarness(fanslyClient: {
   };
   voiceAttempts?: {
     load: (route: StoredVoiceAttemptRoute) => Promise<unknown[]>;
-    save: (snapshot: VoiceAttemptStoreSnapshot) => Promise<void>;
-    remove: (attemptId: string, route?: StoredVoiceAttemptRoute) => Promise<void>;
+    save: (
+      snapshot: VoiceAttemptStoreSnapshot,
+      expectedRevision: number,
+    ) => Promise<number>;
+    remove: (
+      attemptId: string,
+      route: StoredVoiceAttemptRoute,
+      expectedRevision: number,
+    ) => Promise<void>;
   };
   tabContexts?: TabContextStoreClass;
   storageCoordinator?: {
@@ -245,7 +252,7 @@ async function installRuntimeApiHarness(fanslyClient: {
   const tabContexts = options?.tabContexts ?? new TabContextStore();
   const voiceAttempts = options?.voiceAttempts ?? {
     load: vi.fn(async () => []),
-    save: vi.fn(async () => undefined),
+    save: vi.fn(async () => 1),
     remove: vi.fn(async () => undefined),
   };
   registerRuntimeApi({
@@ -439,8 +446,8 @@ describe('runtime-api voice-attempt custody RPC', () => {
   });
 
   it('acknowledges save only after the background repository commits', async () => {
-    let release!: () => void;
-    const committed = new Promise<void>((resolve) => {
+    let release!: (revision: number) => void;
+    const committed = new Promise<number>((resolve) => {
       release = resolve;
     });
     const voiceAttempts = {
@@ -463,17 +470,17 @@ describe('runtime-api voice-attempt custody RPC', () => {
 
     let settled = false;
     const pending = harness.send(
-      { type: 'voiceAttemptSave', snapshot: voiceSnapshot(route) },
+      { type: 'voiceAttemptSave', snapshot: voiceSnapshot(route), expectedRevision: 0 },
       { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' },
     ).finally(() => {
       settled = true;
     });
     await Promise.resolve();
     expect(settled).toBe(false);
-    release();
+    release(1);
 
-    await expect(pending).resolves.toEqual({ version: 1, ok: true });
-    expect(voiceAttempts.save).toHaveBeenCalledWith(voiceSnapshot(route));
+    await expect(pending).resolves.toEqual({ version: 2, ok: true, revision: 1 });
+    expect(voiceAttempts.save).toHaveBeenCalledWith(voiceSnapshot(route), 0);
   });
 
   it('routes load/save/remove through the one central listener', async () => {
@@ -482,10 +489,10 @@ describe('runtime-api voice-attempt custody RPC', () => {
       groupId: 'group-1',
       routeNonce: 3,
     };
-    const entry = { savedAt: 1_000, ...voiceSnapshot(route) };
+    const entry = { savedAt: 1_000, revision: 4, ...voiceSnapshot(route) };
     const voiceAttempts = {
       load: vi.fn(async () => [entry]),
-      save: vi.fn(async () => undefined),
+      save: vi.fn(async () => 1),
       remove: vi.fn(async () => undefined),
     };
     const harness = await installRuntimeApiHarness(
@@ -499,20 +506,22 @@ describe('runtime-api voice-attempt custody RPC', () => {
     await expect(harness.send(
       { type: 'voiceAttemptLoad', route },
       sender,
-    )).resolves.toEqual({ version: 1, ok: true, entries: [entry] });
+    )).resolves.toEqual({ version: 2, ok: true, entries: [entry] });
     await expect(harness.send(
       {
         type: 'voiceAttemptRemove',
         attemptId: entry.attempt.attemptId,
         route: { ...route, routeNonce: 99 },
+        expectedRevision: entry.revision,
       },
       sender,
-    )).resolves.toEqual({ version: 1, ok: true });
+    )).resolves.toEqual({ version: 2, ok: true });
 
     expect(voiceAttempts.load).toHaveBeenCalledWith(route);
     expect(voiceAttempts.remove).toHaveBeenCalledWith(
       entry.attempt.attemptId,
       { ...route, routeNonce: 99 },
+      entry.revision,
     );
   });
 
@@ -522,10 +531,10 @@ describe('runtime-api voice-attempt custody RPC', () => {
       groupId: 'group-1',
       routeNonce: 3,
     };
-    const entry = { savedAt: 1_000, ...voiceSnapshot(route) };
+    const entry = { savedAt: 1_000, revision: 1, ...voiceSnapshot(route) };
     const voiceAttempts = {
       load: vi.fn(async () => [entry]),
-      save: vi.fn(async () => undefined),
+      save: vi.fn(async () => 1),
       remove: vi.fn(async () => undefined),
     };
     const harness = await installRuntimeApiHarness(
@@ -548,7 +557,7 @@ describe('runtime-api voice-attempt custody RPC', () => {
     await expect(harness.send(
       { type: 'voiceAttemptLoad', route },
       sender,
-    )).resolves.toEqual({ version: 1, ok: true, entries: [entry] });
+    )).resolves.toEqual({ version: 2, ok: true, entries: [entry] });
     expect(voiceAttempts.load).toHaveBeenCalledWith(route);
   });
 
@@ -558,10 +567,10 @@ describe('runtime-api voice-attempt custody RPC', () => {
       groupId: 'group-1',
       routeNonce: 3,
     };
-    const entry = { savedAt: 1_000, ...voiceSnapshot(route) };
+    const entry = { savedAt: 1_000, revision: 1, ...voiceSnapshot(route) };
     const voiceAttempts = {
       load: vi.fn(async () => [entry]),
-      save: vi.fn(async () => undefined),
+      save: vi.fn(async () => 1),
       remove: vi.fn(async () => undefined),
     };
     const harness = await installRuntimeApiHarness(
@@ -581,7 +590,7 @@ describe('runtime-api voice-attempt custody RPC', () => {
     await expect(harness.send(
       { type: 'voiceAttemptLoad', route },
       sender,
-    )).resolves.toEqual({ version: 1, ok: true, entries: [entry] });
+    )).resolves.toEqual({ version: 2, ok: true, entries: [entry] });
     expect(voiceAttempts.load).toHaveBeenCalledWith(route);
   });
 
@@ -617,7 +626,7 @@ describe('runtime-api voice-attempt custody RPC', () => {
   ])('rejects an invalid content sender: $label', async ({ sender, route }) => {
     const voiceAttempts = {
       load: vi.fn(async () => []),
-      save: vi.fn(async () => undefined),
+      save: vi.fn(async () => 1),
       remove: vi.fn(async () => undefined),
     };
     const harness = await installRuntimeApiHarness(
@@ -632,7 +641,7 @@ describe('runtime-api voice-attempt custody RPC', () => {
       { type: 'voiceAttemptLoad', route },
       sender,
     )).resolves.toEqual({
-      version: 1,
+      version: 2,
       ok: false,
       error: 'invalid_sender',
     });
@@ -661,7 +670,7 @@ describe('runtime-api voice-attempt custody RPC', () => {
     harness.tabContexts.setRoute(5, 'group-1', 3);
 
     await expect(harness.send(
-      { type: 'voiceAttemptSave', snapshot: voiceSnapshot(route) },
+      { type: 'voiceAttemptSave', snapshot: voiceSnapshot(route), expectedRevision: 0 },
       { tab: { id: 5 }, url: 'https://fansly.com/messages/group-1' },
     )).rejects.toThrow('session storage rejected');
   });
