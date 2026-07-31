@@ -10,7 +10,7 @@ node scripts/vendor-sdk.mjs <path-to-this-directory>
 ```
 
 - Contract hash: `6e6f9d35590e11f03310695501f8ca241e97a3fb7f74defac288288d8bc867fa`
-- Core commit: `f139d8c89c45b3aa8f593d0a42e39830bfc62a1b`
+- Core commit: `9259626b765e7a8ac64d4d70d5612073a449cdb8`
 
 The contract hash is exported at runtime as `KERNEL_CONTRACT_HASH`; drift CI
 compares it against core@main (stage-20 §2). Distribution via git-tag installs
