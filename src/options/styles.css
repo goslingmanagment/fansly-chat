@@ -531,7 +531,12 @@ input[type='checkbox'] {
   min-width: 160px;
 }
 
-/* Counts are numbers — numbers are mono, centred inside their stepper. */
+/* Counts are numbers — numbers are mono, centred inside their stepper.
+   The selector is `.chatgoose-row .chatgoose-input-num`, not the bare class: the
+   `width: auto` rule above it wins on specificity (0,2,0 against 0,1,0), so the
+   62px this rule has always declared never actually applied — the field took the
+   UA default and pushed the «Глубокое окно» stepper past the card edge (E67). */
+.chatgoose-row .chatgoose-input-num,
 .chatgoose-input-num {
   width: 62px;
   border: 0;
@@ -822,6 +827,13 @@ input[type='checkbox'] {
 
 .chatgoose-hub-srow-actions:not(:empty) {
   padding-bottom: 8px;
+}
+
+/* The cure appears only while there is something to cure (E67): with access
+   granted, «Разрешить доступ» had nothing left to do. The author `display: flex`
+   above beats the UA `[hidden]` rule, so this guard is load-bearing. */
+.chatgoose-hub-srow-actions[hidden] {
+  display: none;
 }
 
 /* The token block reuses the same row shape; its second line is a plain fact
@@ -2175,6 +2187,30 @@ input[type='checkbox'] {
 .chatgoose-hub-drow-fact-amber { color: var(--chatgoose-amber); }
 .chatgoose-hub-drow-fact-bad { color: var(--chatgoose-bad); }
 
+/* ── One vertical rhythm across the hub pane (E67) ──
+   The «Аккаунт» card's rows are `.chatgoose-status-body` — a flex line with no
+   vertical padding of its own — so its two facts sat 4px apart while every other
+   fact row on the pane stepped 17–19px. They take the diagnostics row's padding
+   and hairline instead; the first row skips the top half because the card
+   already spends 12px under its head. */
+.chatgoose-hub-facts .chatgoose-status-body {
+  padding: 8px 0;
+}
+
+.chatgoose-hub-facts .chatgoose-status-body:first-child {
+  padding-top: 0;
+}
+
+.chatgoose-hub-facts .chatgoose-status-body + .chatgoose-status-body {
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+/* A card head stands the same height whether or not it carries an action, so the
+   first rows of two cards side by side start on one line. */
+.chatgoose-hub-zone .chatgoose-panecard-head {
+  min-height: 31px;
+}
+
 /* A zone's body is a plain stack inside its card — the М2 layout nested a
    washed `.chatgoose-card` inside the section card, so the pane read as boxes
    in boxes in boxes (E61). */
@@ -2222,16 +2258,49 @@ input[type='checkbox'] {
   margin-top: 16px;
 }
 
+/* Caption, then the count beside the word it counts (E67). `space-between` used
+   to fling that number at the card's right edge — ~850px from its caption on a
+   wide window, where a lone digit reads as anything but a group size. */
 .chatgoose-account-group-cap {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 8px;
   margin-bottom: 8px;
   font: 600 10.5px/1 var(--chatgoose-font-mono);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-account-group-cap [data-role='account-group-count']::before {
+  content: '· ';
+}
+
+/* A row with nothing to say on line two IS one line: no reserved second track,
+   and the select rides the action cluster — it keeps its own 220px lane there,
+   so the list's right edge stays one vertical (E67). */
+.chatgoose-account-row-1line {
+  grid-template-rows: auto;
+}
+
+.chatgoose-account-row-1line .chatgoose-select {
+  width: 220px;
+  flex: none;
+}
+
+/* An unnamed row's heading IS its id, so it wears the heading's weight while
+   staying the copy button it has to be. */
+.chatgoose-account-label-id {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--chatgoose-ink);
+  padding: 2px 6px;
+  margin-left: -6px;
+}
+
+.chatgoose-account-label-id:hover {
+  color: var(--chatgoose-ink);
 }
 
 /* A counter chip in a pane head. */
@@ -2364,6 +2433,12 @@ input[type='checkbox'] {
   grid-template-columns: 66px auto;
   gap: 12px;
   align-items: center;
+  /* Not shrinkable (E67). `.chatgoose-stepper` carries `overflow: hidden`, which
+     zeroes its min-content contribution — so flex was free to squeeze the −/+
+     buttons out of the row, and did: 143/166/169px against 109px for «Глубокое
+     окно», whose longer sublabel claimed the space. The labels yield instead;
+     they already carry `min-width: 0` and wrap. */
+  flex: none;
 }
 
 .chatgoose-row-numeric .chatgoose-row-hint {

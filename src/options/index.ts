@@ -1491,6 +1491,9 @@ async function render(): Promise<void> {
   );
 
   const agencyHubConnectionRow = hubStatusRow(COPY.hub.connLabel);
+  // The one place the live check is stated (E67) — named so a test can hold it
+  // to that, rather than to «whichever mono line comes first».
+  agencyHubConnectionRow.root.dataset.role = 'hub-connection';
   const agencyHubConnectionStatus = agencyHubConnectionRow.pill;
   const agencyHubConnectionMono = agencyHubConnectionRow.mono;
 
@@ -1529,6 +1532,15 @@ async function render(): Promise<void> {
    * must NOT re-run that chain, or every hub check would fire twice. */
   let ownCustodyWriteInFlight = false;
 
+  /** The live check's receipt, in ONE place: when · how long · which credential.
+   * Both «Связь» states print it — E67 deleted the «Проверка» diagnostics row
+   * that used to say the same three facts a card away. */
+  const connectionReceipt = (check: NonNullable<typeof lastConnectionCheck>): string => [
+    formatClockTime(check.at),
+    COPY.hub.checkDuration.replace('{n}', String(check.durationMs)),
+    check.viaDeviceToken ? COPY.hub.checkViaDeviceToken : COPY.hub.checkViaLegacyKey,
+  ].join(' · ');
+
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
     const hasInputs = hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken);
@@ -1557,13 +1569,7 @@ async function render(): Promise<void> {
         // The mono meta carries the receipt (when · how long · which
         // credential); a sentence would only restate the pill.
         agencyHubConnectionMono.textContent = lastConnectionCheck
-          ? [
-              formatClockTime(lastConnectionCheck.at),
-              COPY.hub.checkDuration.replace('{n}', String(lastConnectionCheck.durationMs)),
-              lastConnectionCheck.viaDeviceToken
-                ? COPY.hub.checkViaDeviceToken
-                : COPY.hub.checkViaLegacyKey,
-            ].join(' · ')
+          ? connectionReceipt(lastConnectionCheck)
           : (agencyHubConnectionFeedback.baseUrl || normalizedBaseUrl || '');
         agencyHubConnectionMeta.textContent = '';
         return;
@@ -1573,9 +1579,13 @@ async function render(): Promise<void> {
         // Pills speak WORDS across the whole cabinet («выдан», «есть»,
         // «активен») — the raw registry code used to land in this one (E61). It
         // keeps its place in the mono receipt at the right edge, right next to
-        // the sentence that explains it.
+        // the sentence that explains it. The receipt tail (when · how long ·
+        // which credential) rides along since E67 retired the «Проверка»
+        // diagnostics row that used to carry it for a failed check too.
         setStatusPill(agencyHubConnectionStatus, 'bad', COPY.hub.connPillFailed);
-        agencyHubConnectionMono.textContent = failedError.code;
+        agencyHubConnectionMono.textContent = lastConnectionCheck && !lastConnectionCheck.ok
+          ? `${failedError.code} · ${connectionReceipt(lastConnectionCheck)}`
+          : failedError.code;
         const technicalDetail = formatUserErrorTechnicalDetail(failedError);
         agencyHubConnectionMeta.textContent = [
           failedError.message,
@@ -1728,10 +1738,13 @@ async function render(): Promise<void> {
       agencyHubPermissionFeedback = null;
     }
 
-    agencyHubPermissionButton.textContent = permissionGranted
-      ? COPY.hub.reconnectAccess
-      : COPY.status.grantAccess;
+    // A granted permission has nothing left to fix, and «Переподключить» on a
+    // healthy row was a button whose press changed nothing (E67). The control
+    // appears exactly when the pill is not «выдан» — the same condition that
+    // makes the explanation sentence below it appear.
+    agencyHubPermissionButton.textContent = COPY.status.grantAccess;
     agencyHubPermissionButton.disabled = !originPattern;
+    agencyHubPermissionActions.hidden = permissionGranted;
 
     // Every branch writes the same three slots: the pill word, the mono meta at
     // the right edge (origin — only when granted), and the sentence line below
@@ -2010,11 +2023,16 @@ async function render(): Promise<void> {
     );
     // The renewal note belongs to the token's STATE (right edge of line one);
     // provenance is line two, and the «Выпущен» row disappears with the token.
+    // It also disappears when there is no provenance to state (E67): a token
+    // issued before the metadata existed used to hold a whole row open to say
+    // «данные появятся после следующего входа», which is a fact about the row,
+    // not about the token. No date, no row — the row returns the moment a
+    // sign-in records one.
     hubTokenRenews.textContent = hasToken ? COPY.hub.deviceTokenRenews : '';
-    hubTokenIssuedRow.hidden = !hasToken;
-    if (!hasToken) {
+    hubTokenIssuedRow.hidden = !hasToken || deviceTokenMeta === null;
+    if (!hasToken || !deviceTokenMeta) {
       hubTokenMeta.textContent = '';
-    } else if (deviceTokenMeta) {
+    } else {
       hubTokenMeta.textContent = [
         `${deviceTokenMeta.keyPrefix}…`,
         COPY.hub.deviceTokenIssued.replace(
@@ -2022,10 +2040,6 @@ async function render(): Promise<void> {
           new Date(deviceTokenMeta.issuedAt).toLocaleDateString(),
         ),
       ].join(' · ');
-    } else {
-      // A token issued before this version has no recorded metadata. Say that
-      // instead of inventing a date.
-      hubTokenMeta.textContent = COPY.hub.deviceTokenUnknown;
     }
 
     // The danger zone exists only while it has something to say: a sign-out to
@@ -2315,7 +2329,9 @@ async function render(): Promise<void> {
   hubPagesChips.className = 'chatgoose-hub-chips';
   hubPagesRow.root.append(hubPagesChips);
   const hubConnectionCard = document.createElement('div');
-  hubConnectionCard.className = 'chatgoose-zone-body';
+  // `chatgoose-hub-facts` opts these two rows into the pane's fact-row rhythm
+  // (E67): padding and a hairline, like every other fact row on the pane.
+  hubConnectionCard.className = 'chatgoose-zone-body chatgoose-hub-facts';
   hubConnectionCard.append(hubIdentityRow.root, hubPagesRow.root);
 
   // ── Diagnostics rows: the «Статус»-pane anatomy — token · label · fact ·
@@ -2369,13 +2385,9 @@ async function render(): Promise<void> {
     };
   };
 
-  // «Проверка» is deliberately SYNC: its value is complete from in-page state on
-  // the very first paint — either the last live test or the honest «проверка не
-  // выполнялась» — so it is never a placeholder waiting on a read.
   // «Ядро» — the health the pane is actually about. Both facts already reach the
   // page for the «Статус» rows; the hub pane simply never said them (E61).
   const hubCoreRow = hubDiagRow(COPY.hub.coreLabel, 'core', 'async');
-  const hubCheckRow = hubDiagRow(COPY.hub.checkLabel, 'check');
   const hubContractRow = hubDiagRow(COPY.hub.contractLabel, 'contract', 'async');
   const hubErrorsRow = hubDiagRow(COPY.hub.errorsLabel, 'errors', 'async');
   const hubFanSummaryRow = hubDiagRow(COPY.hub.fanSummaryLabel, 'fan-summary', 'async');
@@ -2383,12 +2395,15 @@ async function render(): Promise<void> {
   // «Подключение», next to the button that fixes it. That block carries the
   // `host-access` deep-link anchor, so the anchor moved with the fact — a
   // CG-HUB-04 link highlights the fact, its explanation AND «Разрешить доступ».
+  // «Проверка» is not here either (E67), for the same reason one level up: it
+  // printed `lastConnectionCheck` — outcome, credential, clock, duration — which
+  // the «Связь» row of «Подключение» already carries, beside the button that
+  // produces it. One check, said once.
   const hubDiagnosticsCard = document.createElement('div');
   hubDiagnosticsCard.className = 'chatgoose-hub-diag';
   hubDiagnosticsCard.dataset.hubDiagnostics = 'true';
   hubDiagnosticsCard.append(
     hubCoreRow.root,
-    hubCheckRow.root,
     hubContractRow.root,
     hubErrorsRow.root,
     hubFanSummaryRow.root,
@@ -2399,22 +2414,27 @@ async function render(): Promise<void> {
   const hubBaseUrlField = labeledField(COPY.hub.baseUrlLabel, agencyHubUrlInput);
   hubBaseUrlField.dataset.hubField = 'base-url';
 
-  // Address, host access and the live test share one fate — one card.
+  // Address, host access and the live test share one fate — one card. «Проверить
+  // связь» is NOT in this stack: since E67 it rides the card HEAD, where the
+  // «Вход» card already keeps «Перевыпустить токен» — one action pattern per
+  // pane, and the card stops growing a button-height tail below its last row.
   agencyHubConnectCard.append(
     hubBaseUrlField,
     agencyHubHostAccessBlock,
     agencyHubConnectionRow.root,
     agencyHubConnectionMeta,
-    agencyHubActionRow,
   );
 
-  // ── Pane layout (E61): four zone CARDS in two columns — connection and
-  // sign-in on the left (they are one flow), account and diagnostics on the
-  // right. The zones used to be uppercase captions над a card inside a card, and
-  // the pane was the only one long enough to scroll the rail away.
+  // ── Pane layout (E61, columns re-cut in E67): four zone CARDS in two columns.
+  // LEFT is everything about the hub — its address, whether we can reach it, and
+  // how the core itself is doing. RIGHT is everything about ME — who is signed
+  // in and with what credential. The E61 cut (connection+sign-in / account+
+  // diagnostics) left the right column ~200px short of the left one on a signed-
+  // in install, and put the two cards a chatter compares — «Связь» and
+  // «Диагностика» — in different columns.
   const hubZoneCard = (title: string, body: HTMLElement, action?: HTMLElement): HTMLElement => {
     const card = document.createElement('div');
-    card.className = 'chatgoose-panecard';
+    card.className = 'chatgoose-panecard chatgoose-hub-zone';
     const head = document.createElement('div');
     head.className = 'chatgoose-panecard-head';
     const titleNode = document.createElement('span');
@@ -2437,12 +2457,12 @@ async function render(): Promise<void> {
   // bottom edge — not to the pane, below everything else.
   hubSignInWrap.append(hubDangerZone);
   hubLeftCol.append(
-    hubZoneCard(COPY.hub.zoneConnection, agencyHubConnectCard),
-    hubZoneCard(COPY.hub.zoneSignIn, hubSignInWrap, hubTokenActions),
+    hubZoneCard(COPY.hub.zoneConnection, agencyHubConnectCard, agencyHubActionRow),
+    hubZoneCard(COPY.hub.zoneDiagnostics, hubDiagnosticsCard),
   );
   hubRightCol.append(
     hubZoneCard(COPY.hub.zoneAccount, hubConnectionCard),
-    hubZoneCard(COPY.hub.zoneDiagnostics, hubDiagnosticsCard),
+    hubZoneCard(COPY.hub.zoneSignIn, hubSignInWrap, hubTokenActions),
   );
   hubGrid.append(hubLeftCol, hubRightCol);
   agencyHubSection.append(hubHead.root, hubGrid);
@@ -2896,24 +2916,8 @@ async function render(): Promise<void> {
     // address currently in the field.
     markHubRowHydrated({ root: agencyHubHostAccessBlock }, hubPermissionChecked);
 
-    // Проверка — when, outcome, how long, and which credential carried it.
-    if (!lastConnectionCheck) {
-      hubCheckRow.set({ tone: 'neutral', fact: COPY.hub.checkNever });
-    } else {
-      const via = lastConnectionCheck.viaDeviceToken
-        ? COPY.hub.checkViaDeviceToken
-        : COPY.hub.checkViaLegacyKey;
-      hubCheckRow.set({
-        tone: lastConnectionCheck.ok ? 'green' : 'bad',
-        fact: lastConnectionCheck.ok
-          ? `${COPY.hub.checkSuccess} · ${via}`
-          : `${COPY.hub.checkFailure}${lastConnectionCheck.code ? ` ${lastConnectionCheck.code}` : ''} · ${via}`,
-        detail: [
-          formatClockTime(lastConnectionCheck.at),
-          COPY.hub.checkDuration.replace('{n}', String(lastConnectionCheck.durationMs)),
-        ].join(' · '),
-      });
-    }
+    // The live check has no row of its own here (E67) — `renderAgencyHubConnection
+    // State` prints it in «Подключение», outcome and receipt together.
 
     // Контракт SDK — ALWAYS visible here (the Статус row stays debug-only), and
     // it wears the same MATCH/DRIFT badge as the «Статус» pane's row.
@@ -3955,17 +3959,13 @@ async function render(): Promise<void> {
       head.append(
         createBadge(`${COPY.personas.versionPrefix}${view.version}`, 'neutral', true),
       );
-      // Right cluster (М2 anatomy): the mono count, and for an archived-but-
-      // still-mapped persona the one useful instruction next to it.
+      // Right cluster: only what asks for an ACTION. The mono «аккаунтов · N»
+      // that used to lead it counted the very chips printed on the line below —
+      // and those chips are never truncated, so the number restated what was
+      // already fully on screen. The count moved into the chips' own caption
+      // (E67), which frees this cluster for the archived instruction alone.
       const side = document.createElement('span');
       side.className = 'chatgoose-persona-side';
-      const count = document.createElement('span');
-      count.className = 'chatgoose-persona-count';
-      count.textContent = COPY.personas.accountsCount.replace(
-        '{n}',
-        String(view.accountCount),
-      );
-      side.append(count);
       if (view.archived) {
         // Only reachable while a mapping still points at it — amber, because the
         // one useful instruction is «pick a replacement».
@@ -3980,7 +3980,7 @@ async function render(): Promise<void> {
       const mappedLabel = document.createElement('span');
       mappedLabel.className = 'chatgoose-persona-mapped-cap';
       mappedLabel.textContent = view.accountIds.length > 0
-        ? COPY.personas.mappedLabel
+        ? COPY.personas.mappedLabel.replace('{n}', String(view.accountCount))
         : COPY.personas.mappedEmpty;
       mapped.append(mappedLabel);
       for (const accountId of view.accountIds) {
@@ -4103,7 +4103,11 @@ async function render(): Promise<void> {
   const personaArchiveCard = document.createElement('div');
   personaArchiveCard.className = 'chatgoose-panecard chatgoose-panecard-quiet';
   personaArchiveCard.append(preservationFold);
-  personasSideCol.append(personaCatalogCard, personaArchiveCard);
+  // The archive is about PERSONAS, so it stands under the persona list, not
+  // under the sync card (E67). It also evens the columns: with a small catalog
+  // the main column used to run out ~120px before the side one.
+  personasMainCol.append(personaArchiveCard);
+  personasSideCol.append(personaCatalogCard);
   personasGrid.append(personasMainCol, personasSideCol);
   personalitiesSection.append(personasHead.root, personasGrid);
 
@@ -4683,6 +4687,9 @@ async function render(): Promise<void> {
       const captionCount = document.createElement('span');
       captionCount.dataset.role = 'account-group-count';
       captionCount.textContent = String(rows.filter((row) => row.state === state).length);
+      // The count sits beside the word it counts (E67). `space-between` used to
+      // fling it to the card's right edge — ~850px from its caption on a wide
+      // window, where a lone digit reads as anything but a group size.
       caption.append(captionText, captionCount);
       const list = document.createElement('div');
       // NOT `chatgoose-account-rows`: that class is the TABLE's, and it is what
@@ -4711,20 +4718,26 @@ async function render(): Promise<void> {
 
       const head = document.createElement('div');
       head.className = 'chatgoose-account-head';
-      const labelNode = document.createElement('span');
-      labelNode.className = 'chatgoose-account-label';
-      labelNode.textContent = view.label;
+      // No name resolved and no label: the heading IS the id (E62). Since E67 it
+      // is the FULL id and it is the copy button — the row used to print the
+      // shortened id as its heading and the full one again on the line below,
+      // the same number twice. A named row is untouched: name above, id below.
+      const unnamed = !view.localLabel && view.label === shortenAccountId(accountId);
+      const labelNode = unnamed
+        ? createCopyableId(accountId)
+        : document.createElement('span');
+      labelNode.classList.add('chatgoose-account-label');
       if (view.localLabel) {
         // Say WHOSE name this is — a local label must never be mistaken for the
         // model's real Fansly handle.
+        labelNode.textContent = view.label;
         labelNode.title = COPY.accounts.renameLocalTitle;
         labelNode.dataset.accountLocalLabel = 'true';
-      } else if (view.label === shortenAccountId(accountId)) {
-        // No name resolved and no label: the heading IS the id, so render it as
-        // data rather than as a name — and the rename affordance beside it says
-        // what to do about that (E62).
-        labelNode.classList.add('chatgoose-mono');
+      } else if (unnamed) {
+        labelNode.classList.add('chatgoose-mono', 'chatgoose-account-label-id');
         labelNode.dataset.accountUnnamed = 'true';
+      } else {
+        labelNode.textContent = view.label;
       }
       head.append(labelNode);
 
@@ -4808,33 +4821,53 @@ async function render(): Promise<void> {
       });
       head.append(labelInput);
 
-      const sub = document.createElement('div');
-      sub.className = 'chatgoose-account-sub';
-      sub.append(createCopyableId(accountId));
-      const subSep = document.createElement('span');
-      subSep.className = 'chatgoose-account-sub-sep';
-      subSep.setAttribute('aria-hidden', 'true');
-      subSep.textContent = '·';
-      sub.append(subSep);
       // The fact line must never contradict the caption above it: an 'unknown'
       // row says it knows nothing rather than borrowing «сессий не было».
+      //
+      // A row in the «Сессий не было» group says NOTHING here (E67): its state
+      // fact was that caption, word for word, once per row. The 'unknown' group
+      // keeps its line — «о прошлых сессиях этот браузер не знает» explains the
+      // caption rather than repeating it — and «в работе» / «видели раньше» keep
+      // theirs because they add a fact (which tab, and when).
+      const stateFact = isLive
+        ? COPY.accounts.subTabActive
+        : view.lastSeenAt !== null
+          ? COPY.accounts.subSeenAt.replace('{when}', formatSeenWhen(view.lastSeenAt))
+          : view.state === 'unknown'
+            ? COPY.accounts.subStateUnknown
+            : null;
       const facts: string[] = [
-        isLive
-          ? COPY.accounts.subTabActive
-          : view.lastSeenAt !== null
-            ? COPY.accounts.subSeenAt.replace('{when}', formatSeenWhen(view.lastSeenAt))
-            : view.state === 'unknown'
-              ? COPY.accounts.subStateUnknown
-              : COPY.accounts.subNeverSeen,
+        ...(stateFact === null ? [] : [stateFact]),
+        ...(view.observedPage
+          ? [COPY.accounts.corePage.replace('{page}', view.observedPage)]
+          : []),
       ];
-      if (view.observedPage) {
-        facts.push(COPY.accounts.corePage.replace('{page}', view.observedPage));
+
+      const sub = document.createElement('div');
+      sub.className = 'chatgoose-account-sub';
+      // The id lives on ONE line per row: the heading when the row has no name,
+      // this line otherwise.
+      if (!unnamed) {
+        sub.append(createCopyableId(accountId));
+        if (facts.length > 0) {
+          const subSep = document.createElement('span');
+          subSep.className = 'chatgoose-account-sub-sep';
+          subSep.setAttribute('aria-hidden', 'true');
+          subSep.textContent = '·';
+          sub.append(subSep);
+        }
       }
-      const factsNode = document.createElement('span');
-      factsNode.className = 'chatgoose-account-facts';
-      factsNode.dataset.role = 'account-facts';
-      factsNode.textContent = facts.join(' · ');
-      sub.append(factsNode);
+      if (facts.length > 0) {
+        const factsNode = document.createElement('span');
+        factsNode.className = 'chatgoose-account-facts';
+        factsNode.dataset.role = 'account-facts';
+        factsNode.textContent = facts.join(' · ');
+        sub.append(factsNode);
+      }
+      // Nothing left for line two — an unnamed, never-seen account with no page
+      // observed. The row IS one line then, and the persona select joins the
+      // action cluster rather than floating beside a hole.
+      const oneLine = sub.childElementCount === 0;
 
       const select = document.createElement('select');
       select.className = 'chatgoose-select';
@@ -4915,7 +4948,13 @@ async function render(): Promise<void> {
         actions.append(focusTab);
       }
 
-      row.append(dot, head, actions, sub, select);
+      if (oneLine) {
+        row.classList.add('chatgoose-account-row-1line');
+        actions.append(select);
+        row.append(dot, head, actions);
+      } else {
+        row.append(dot, head, actions, sub, select);
+      }
       groupFor(view.state).append(row);
     });
 

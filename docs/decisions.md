@@ -80,6 +80,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E61 | 2026-07-26 | «Статус» and Agency Hub speak in WORDS: the mono badge column goes (it ran six vocabularies at once and its «—» meant four different things) and every row is dot · fixed label · fact · one right cell holding a detail OR an action. Each pane gets a HEAD (title, subline, its primary action) above cards that carry content only; «Статус» adds «Что мешает» — the open readiness steps with the button that closes each — plus a support card (version, storage schema, report) and cross-pane pointers. Hub loses its duplicated facts (host access and the check receipt were stated twice), gains the «Ядро» row it never had, un-nests its zones into four cards in two columns, fences «Выйти» inside the sign-in card, and stops printing a raw error code in a pill. **Amended (review fixes):** the `host-access` deep-link anchor covers the fact AND «Разрешить доступ» (the claim was false — the button sat in a sibling action row); `renderOnboarding` is the single writer of «Что мешает» too, not only of the hero (a fresh install listed the same three steps twice); «Проверить всё» and «Скопировать отчёт» get one live region each; the pane head wraps at ~320px, the <640px diagnostics row drops the 46px column of the deleted badge, and `.chatgoose-hub-srow` gets the author `[hidden]` guard its `display: grid` needs |
 | E62 | 2026-07-26 | The five remaining panes: «Персоны» name the accounts sitting on each persona (the map was in memory, only its size was printed) and repaint when a mapping changes; «Аккаунты» group rows by state with a caption + count each, so the per-row «в работе» pill goes; «Генерация» splits into two card columns with a fixed numeric lane, bounds from the shared constants and a step that matches the range (the deep window stepped by 1 across 100–3000), and the clamp notice becomes its own chip instead of eating the range hint; «Хоткеи» give each group its own column and let names wrap, with the detected platform stated in the head; «Вид» previews the IN-CHAT panel the subtitle promises, says what «Системная» resolves to right now, and labels its radio group. **Amended (review fixes):** the numeric lane gets its own class (as a second bare `.chatgoose-row-control` rule it clipped the auto-recap segment's «Полный»); the degraded accounts path carries an explicit 'unknown' state so no row contradicts its group caption; the «Системная» note is computed from the OS scheme, never from the document's resolved class; the catalog source shows the WHOLE normalized base URL (two hubs on one host collapsed into one line); `chatgoose-account-rows` names one element again; dead CSS/copy deleted, and the weakened persona-catalog test is a node-identity guarantee again |
 | E66 | 2026-07-31 | Voice concurrency: exact script-run identity; background per-attempt revision/CAS for save/remove; hidden recovered paid work joins the new-session warning; quota-denied replay remains indeterminate |
+| E67 | 2026-07-31 | R4 polish, owner-approved pane by pane from «было/стало» mockups. A fact is stated ONCE per screen (the live-check receipt, a persona's account count, an unnamed account's id, the «сессий не было» caption), a control exists only while it has something to do («Переподключить» on a granted permission, «Выпущен» with no provenance, the second line of a row with nothing left to say), the hub's columns are re-cut hub-left / me-right with «Проверить связь» in the card head, and two CSS defects are fixed: the counter field's 62px never applied (a `.chatgoose-row .chatgoose-input` rule outranks it) and the stepper shrank to a clipped «+» (`overflow: hidden` zeroes its min-content contribution). «Хоткеи» deliberately untouched — the 8/4/2 columns stay E62's call |
 
 ## Entries
 
@@ -2249,3 +2250,61 @@ Script callbacks/finally now require exact `ActiveScript` object identity, and
 the new-session warning covers paid work in every recovered record. Because Core
 no longer retains quota-denial rows, `voice_quota_denied` clears a definite
 first send but a replay after `sentOnce=true` remains `needs-reconcile`.
+
+**E67 (2026-07-31).** R4 polish of the cabinet, approved pane by pane from
+«было/стало» mockups rendered against the live stylesheet. One principle runs
+through it: **a fact is stated once, and a control exists only while it has
+something to do.**
+
+*Agency Hub.* The «Проверка» diagnostics row is gone — it printed the same
+`lastConnectionCheck` (outcome, credential, clock, duration) that «Связь» already
+carries in «Подключение», beside the button that produces it; the failed state's
+mono line grew the receipt tail so nothing is lost when a check fails.
+«Переподключить» is retired: with access granted it changed nothing, so the
+action row now appears exactly when the pill is not «выдан» (its `[hidden]` guard
+is load-bearing — the author `display: flex` beats the UA rule). «Проверить
+связь» moved into the card head, where «Перевыпустить токен» already sits — one
+action pattern per pane. The columns are re-cut: LEFT is the hub (address, reach,
+core health), RIGHT is me (who signed in, with what) — the E61 cut left the right
+column ~200px short and split the two cards a chatter compares. The identity row
+is «Логин», not a second «Аккаунт»; «Ошибки Hub» is «Ошибки ядра» (the cabinet
+says ядро/хаб, and «Ядро» is the label one line above); «Выпущен» is not drawn
+when there is no provenance to state — «данные появятся после следующего входа»
+was a fact about the row. Finally the pane has ONE vertical rhythm: the identity
+rows stepped 4px against 17–19px everywhere else because `.chatgoose-status-body`
+carries no vertical padding, so they take the diagnostics row's padding and
+hairline, and a card head stands 31px whether or not it holds a button.
+
+*Персоны.* «Каталог» beside «Каталог ядра» said nothing about what the card is
+for — it is «Синхронизация». The mono «аккаунтов · N» at a row's right edge
+counted the very chips printed below it (never truncated, unlike the hub's page
+chips), so the count moved into the chips' own caption: «на ней · N». The local
+archive stands under the persona list, where it belongs by subject, and the
+columns stop ending ~120px apart on a small catalog.
+
+*Аккаунты.* A group caption and its count sit together; `space-between` used to
+fling the number ~850px to the card edge, where a lone digit reads as anything
+but a group size. An unnamed row printed its id twice — shortened as the heading,
+full on the line below; the heading IS the full id now and IS the copy button,
+and the line below drops it. A row in «Сессий не было» no longer repeats that
+caption verbatim, so an unnamed never-seen account with no observed page has
+nothing left for line two: such a row renders as ONE line with the persona select
+joining the action cluster (it keeps its 220px lane, so the list's right edge
+stays one vertical). Named rows are untouched. Two rejected alternatives, for the
+record: «без подписи» as the heading made three rows indistinguishable, and
+keeping the fact line left a two-line row with a hole.
+
+*Генерация.* Two CSS defects, one symptom (a clipped «+» on «Глубокое окно»).
+`.chatgoose-row .chatgoose-input { width: auto }` (0,2,0) outranks
+`.chatgoose-input-num { width: 62px }` (0,1,0), so the declared width never
+applied and the field took the UA default; and `.chatgoose-stepper` carries
+`overflow: hidden`, which zeroes its min-content contribution, so flex was free
+to squeeze the −/+ buttons out of the row and did — measured 143/166/169px
+against 109px for the row whose sublabel is longest. The width is restored at
+matching specificity and the numeric lane is `flex: none`; the labels yield, as
+their `min-width: 0` always intended. All four steppers now stand at 124px on one
+right edge.
+
+*«Хоткеи» deliberately untouched.* The 8/4/2 columns leave a 237px ragged edge
+and were offered for the same treatment; the owner kept E62's «one group, one
+column». Recorded so the next reader does not re-litigate it.

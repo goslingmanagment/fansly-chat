@@ -355,7 +355,9 @@ describe('Options page account sections', () => {
     expect(offlineRow.closest('[data-account-group]')?.getAttribute('data-account-group'))
       .toBe('unknown');
     expect(offlineRow.textContent).toContain(COPY.accounts.subStateUnknown);
-    expect(offlineRow.textContent).not.toContain(COPY.accounts.subNeverSeen);
+    // Since E67 that state is worded in exactly one place — the group caption —
+    // and this row belongs to a different group.
+    expect(offlineRow.textContent).not.toContain(COPY.accounts.groupNever);
   });
 
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
@@ -1703,10 +1705,13 @@ describe('Options «Аккаунты» pane', () => {
     ]);
 
     // «вкладка активна» only where a session actually is; the rest say when they
-    // were last seen, or admit there was never one.
+    // were last seen. A never-seen row says nothing on its own line — since E67
+    // its state is the group caption's job, and it is IN that group.
     expect(accountRow('acc-live').textContent).toContain(COPY.accounts.subTabActive);
     expect(accountRow('acc-new').textContent).not.toContain(COPY.accounts.subTabActive);
-    expect(accountRow('acc-never').textContent).toContain(COPY.accounts.subNeverSeen);
+    expect(accountRow('acc-never').querySelector('[data-role="account-facts"]')).toBeNull();
+    expect(accountRow('acc-never').closest('[data-account-group]')?.getAttribute('data-account-group'))
+      .toBe('never');
     // The subtitle counts what is LIVE, not what is known.
     expect(
       page.document.querySelector<HTMLElement>('[data-role="accounts-subtitle"]')?.textContent,
@@ -1947,12 +1952,14 @@ describe('Options «Аккаунты» pane', () => {
 
     // The invariant, stated once: every row's own fact line agrees with its
     // group. A «была …» line under «Сессий не было» is the shape of the bug.
+    // Here nothing established a never-seen state, so that group must not exist —
+    // and since E67 the wording lives only in a caption, so no other group may
+    // carry it either.
     const neverGroup = page.document
       .querySelector<HTMLElement>('[data-account-group="never"]');
     expect(neverGroup).toBeNull();
     for (const group of page.document.querySelectorAll<HTMLElement>('[data-account-group]')) {
-      if (group.dataset.accountGroup === 'never') continue;
-      expect(group.textContent).not.toContain(COPY.accounts.subNeverSeen);
+      expect(group.textContent).not.toContain(COPY.accounts.groupNever);
     }
   });
 });
