@@ -170,6 +170,104 @@ describe('options «Статус» pane', () => {
     expect(row(page, 'spenders').textContent).toContain(COPY.status.spendersRamped);
   });
 
+  it('names the page and the age of the data when the feed has stopped', async () => {
+    // The state that hid a 13-day outage: the row said «страница не в
+    // allowlist» — an ACCESS claim about an unnamed page, with no hint that
+    // the numbers on the board had stopped moving. Nothing in it asked to be
+    // acted on.
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        spenders: {
+          sourceIdentity: 'acc-1|https://hub.example|x',
+          streamState: 'not_allowlisted',
+          outcome: 'ok',
+          observedAt: Date.now(),
+          pageLabel: 'lora-1',
+          builtAt: Date.now() - 13 * 24 * 60 * 60 * 1000,
+        },
+      },
+    });
+
+    const spenders = row(page, 'spenders');
+    expect(spenders.dataset.tone).toBe('amber');
+    expect(spenders.textContent).toContain(COPY.status.spendersNotAllowlisted);
+    expect(spenders.textContent).toContain('lora-1');
+    expect(spenders.textContent).toContain('13 дн назад');
+    // «Доступ» is the OTHER row's subject; reading is never gated here.
+    expect(spenders.textContent).not.toContain('доступ');
+  });
+
+  it('says a disabled projection stopped the feed, not that access was refused', async () => {
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        spenders: {
+          sourceIdentity: 'acc-1|https://hub.example|x',
+          streamState: 'flag_off',
+          outcome: 'ok',
+          observedAt: Date.now(),
+          pageLabel: 'lora-2',
+          builtAt: Date.now() - 90 * 60 * 1000,
+        },
+      },
+    });
+
+    const spenders = row(page, 'spenders');
+    expect(spenders.textContent).toContain(COPY.status.spendersFlagOff);
+    expect(spenders.textContent).toContain('lora-2');
+    expect(spenders.textContent).toContain('данные 1 ч назад');
+  });
+
+  it('survives an observation recorded before the page/age fields existed', async () => {
+    // Observations live in storage.session and outlive an extension update, so
+    // the two fields come back `undefined`. `!== null` on either would have
+    // printed «данные NaN дн назад» over a perfectly valid verdict.
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        spenders: {
+          sourceIdentity: 'acc-1|https://hub.example|x',
+          streamState: 'ramped',
+          outcome: 'ok',
+          observedAt: Date.now(),
+        },
+      },
+    });
+
+    const spenders = row(page, 'spenders');
+    expect(spenders.textContent).toContain(COPY.status.spendersRamped);
+    expect(spenders.textContent).not.toContain('NaN');
+    expect(spenders.textContent).not.toContain('undefined');
+    expect(spenders.querySelectorAll('.chatgoose-status-detail-line')).toHaveLength(0);
+  });
+
+  it('names the page even when the last board build failed', async () => {
+    const page = await readyMount({
+      runtime: {
+        health: HEALTH_UP,
+        identity: IDENTITY_AUTH,
+        spenders: {
+          sourceIdentity: 'acc-1|https://hub.example|x',
+          streamState: null,
+          outcome: 'fail',
+          observedAt: Date.now(),
+          pageLabel: 'lora-3',
+          builtAt: null,
+        },
+      },
+    });
+
+    const spenders = row(page, 'spenders');
+    expect(spenders.textContent).toContain(COPY.status.spendersFail);
+    expect(spenders.textContent).toContain('lora-3');
+    // builtAt null: no age line invented for a build that produced nothing.
+    expect(spenders.querySelectorAll('.chatgoose-status-detail-line')).toHaveLength(1);
+  });
+
   it('is honest about unknowns instead of inventing verdicts', async () => {
     const page = await mountOptionsPage({ sessions: [] });
 

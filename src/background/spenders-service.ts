@@ -451,6 +451,10 @@ export class SpendersService {
         sourceIdentity,
         streamState: result.source.streamState,
         outcome: 'ok',
+        // Both ride the RESULT, so a cache hit and a shared in-flight build
+        // record the same page and the same projection age a fresh build does.
+        pageLabel: result.pageLabel,
+        builtAt: result.builtAt,
       });
       return result;
     } catch (error) {
@@ -467,7 +471,15 @@ export class SpendersService {
       const isTimeoutAbort = isAbort &&
         reason instanceof DOMException && reason.message === SPENDERS_BUILD_TIMEOUT_REASON;
       if (!isAbort || isTimeoutAbort) {
-        await recordSpendersObservation({ sourceIdentity, streamState: null, outcome: 'fail' });
+        // A build that threw has no page and no projection age to claim: the
+        // failure may well be the page-label resolution itself.
+        await recordSpendersObservation({
+          sourceIdentity,
+          streamState: null,
+          outcome: 'fail',
+          pageLabel: null,
+          builtAt: null,
+        });
       }
       throw error;
     }
@@ -834,6 +846,7 @@ export class SpendersService {
       monthWindow,
       new Map(),
       new Map(),
+      pageLabel,
     );
     onSnapshot?.({ type: 'spenders:snapshot', result: preliminary.result });
 
@@ -874,6 +887,7 @@ export class SpendersService {
       monthWindow,
       groupByFanId,
       resolvedNames.value,
+      pageLabel,
     );
   }
 
@@ -883,6 +897,7 @@ export class SpendersService {
     monthWindow: string,
     groupByFanId: ReadonlyMap<string, string>,
     namesByFanId: ReadonlyMap<string, FanNames>,
+    pageLabel: string,
   ): BuiltSpendersResult {
     // Source health distinguishes a successful empty month from an unramped
     // stream. Even when usable, entries may be a bounded top-N subset: only
@@ -934,6 +949,10 @@ export class SpendersService {
         fanCount: lifetime.fanCount,
         monthWindow: monthReady ? monthWindow : null,
         fetchedAt: Date.now(),
+        // Which page this board is about. The options row names it, so an
+        // «приток остановлен» verdict cannot be read as a claim about some
+        // other creator the same browser also opened.
+        pageLabel,
       },
       // A compatible old Core can return only 500 for the requested 1000.
       // Do not pin that truncated recovery result for ten minutes after Core

@@ -254,6 +254,17 @@ function formatClockTime(at: number): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+/** Coarse age for the Spenders row. Deliberately three buckets: the row
+ * answers «is this data current», not «exactly when». Guards against a
+ * non-finite timestamp from an old session-storage record. */
+function formatSpendersDataAge(builtAt: number): string {
+  const ageMs = Date.now() - builtAt;
+  if (!Number.isFinite(ageMs) || ageMs < 60 * 60 * 1000) return COPY.status.spendersDataFresh;
+  const hours = Math.floor(ageMs / (60 * 60 * 1000));
+  if (hours < 24) return COPY.status.spendersDataHours.replace('{n}', String(hours));
+  return COPY.status.spendersDataDays.replace('{n}', String(Math.floor(hours / 24)));
+}
+
 function isSameLocalDay(left: Date, right: Date): boolean {
   return left.getFullYear() === right.getFullYear() &&
     left.getMonth() === right.getMonth() &&
@@ -3427,6 +3438,23 @@ async function render(): Promise<void> {
           ? byState[spenders.streamState]
           : { tone: 'neutral', fact: COPY.status.spendersEmpty },
       );
+    }
+
+    // The fact says WHAT the projection is doing; these say WHICH page it is
+    // about and how old the data is. Both are stated for a failed observation
+    // too — «сборка не удалась» without a page names nothing. No manual
+    // clearing: `set()` above already emptied the detail slot.
+    if (spenders) {
+      const spendersDetails: string[] = [];
+      if (spenders.pageLabel) {
+        spendersDetails.push(COPY.status.spendersPageScope.replace('{page}', spenders.pageLabel));
+      }
+      // typeof, not `!== null`: an observation stored before this field existed
+      // comes back as undefined, and `undefined !== null` is true.
+      if (typeof spenders.builtAt === 'number') {
+        spendersDetails.push(formatSpendersDataAge(spenders.builtAt));
+      }
+      if (spendersDetails.length > 0) statusRows.spenders.setDetailLines(spendersDetails);
     }
 
     rowsRefreshedAt = Date.now();

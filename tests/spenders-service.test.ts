@@ -259,6 +259,36 @@ describe('SpendersService (kernel source)', () => {
       .toMatchObject({ outcome: 'ok', streamState: 'ramped' });
   });
 
+  it('carries the page label into the result and the observation', async () => {
+    // The options row must be able to name the page a verdict is about. The
+    // label rides the RESULT because the observation is recorded in getList,
+    // long before (and, on a cache hit, entirely without) the resolve that
+    // produces it.
+    const { service, settings } = makeKernelHarness();
+    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const result = await service.getList(kernelSession(), new AbortController().signal);
+
+    expect(result.pageLabel).toBe('creator-fs');
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+      .toMatchObject({
+        pageLabel: 'creator-fs',
+        builtAt: Date.parse('2026-07-05T00:00:00.000Z'),
+      });
+  });
+
+  it('records a failed board with no page and no data age to claim', async () => {
+    // The failure may BE the page-label resolution, so the row must not print
+    // a page or an age it cannot stand behind.
+    const { service, settings, kernelSource } = makeKernelHarness();
+    const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    kernelSource.resolvePageLabelForUsername = vi.fn(async () => {
+      throw new ChatGooseError('hub_page_match_failed');
+    });
+    await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+      .toMatchObject({ outcome: 'fail', pageLabel: null, builtAt: null });
+  });
+
   it('records a failure observation when the board build throws', async () => {
     const { service, settings, kernelSource } = makeKernelHarness();
     const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
