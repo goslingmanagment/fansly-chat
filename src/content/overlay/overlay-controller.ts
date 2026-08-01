@@ -21,6 +21,7 @@ import type {
   UserFacingError,
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
+import { COACH_SITUATION_DRAFT_CAPTIONS } from '../coach-copy.js';
 import { parseGroupIdFromPath } from '../route-watcher.js';
 import {
   renderCoachingBlocks,
@@ -104,7 +105,7 @@ interface OverlayCallbacks {
   /** Retry a failed/cancelled turn — replays its question (spec §8). `includedDraft`
    * is the failed attempt's honest sent-flag; Retry re-reads the live draft when
    * true (spec §5). */
-  onCoachRetry?: (question: string, includedDraft: boolean) => void;
+  onCoachRetry?: (question: string, includedDraft: boolean, preset?: true) => void;
   /** Live composer edits, so the orchestrator can persist `composerText`
    * across close/switch (spec §3 "unsent question survives close/switch").
    * Optional: the renderer never depends on it for its own correctness. */
@@ -394,7 +395,8 @@ function sameCoachFeedItem(
       previous.question === next.question &&
       previous.errorCode === next.errorCode &&
       previous.retryable === next.retryable &&
-      previous.includedDraft === next.includedDraft
+      previous.includedDraft === next.includedDraft &&
+      previous.preset === next.preset
     );
   }
   if (previous.kind === 'recap-step' && next.kind === 'recap-step') {
@@ -1992,17 +1994,28 @@ export class OverlayController {
     if (item.answerProse) {
       const answer = document.createElement('div');
       answer.className = 'chatgoose-coach-answer';
-      // textContent ONLY — the T5 parser neutralises column-0 fences but not
-      // every CommonMark form; textContent moots the whole injection class.
-      answer.textContent = item.answerProse;
+      // E79 / Core #204: preset advice shares E77's structured Help blocks.
+      // Unlabelled ordinary Coach prose keeps the current text-only fallback.
+      const structured = renderCoachingBlocks(item.answerProse);
+      if (structured) {
+        answer.append(structured);
+      } else {
+        // textContent ONLY: model text never reaches innerHTML.
+        answer.textContent = item.answerProse;
+      }
       wrapper.append(answer);
     }
 
     if (item.drafts.length > 0) {
       const drafts = document.createElement('div');
       drafts.className = 'chatgoose-parts chatgoose-coach-drafts';
-      for (const draft of item.drafts) {
-        drafts.append(this.createCoachDraftCard(item.operationId, item.generationRef, draft));
+      for (const [position, draft] of item.drafts.entries()) {
+        const caption = item.preset && item.drafts.length === 2
+          ? COACH_SITUATION_DRAFT_CAPTIONS[position]
+          : undefined;
+        drafts.append(
+          this.createCoachDraftCard(item.operationId, item.generationRef, draft, caption),
+        );
       }
       wrapper.append(drafts);
     }
@@ -2091,7 +2104,7 @@ export class OverlayController {
       actions.className = 'chatgoose-coach-failed-actions';
       actions.append(
         this.createCoachButton('Повторить', 'chatgoose-button-secondary', () =>
-          this.callbacks.onCoachRetry?.(item.question, item.includedDraft),
+          this.callbacks.onCoachRetry?.(item.question, item.includedDraft, item.preset),
         ),
       );
       wrapper.append(actions);
@@ -2290,14 +2303,18 @@ export class OverlayController {
     exchangeOperationId: string,
     generationRef: string | undefined,
     draft: CoachOverlayDraft,
+    caption?: string,
   ): HTMLElement {
     const card = document.createElement('div');
     card.className = 'chatgoose-card chatgoose-coach-draft';
 
     const title = document.createElement('div');
-    // Mono micro-caps «ЧЕРНОВИК» (spec §2.1); text stays «Черновик» — CSS caps it.
+    // Mono micro-caps: ordinary turns say «Черновик»; the situation
+    // preset may supply one of its two positional captions.
     title.className = 'chatgoose-card-title chatgoose-coach-draft-title';
-    title.textContent = draft.index === 0 ? 'Черновик' : `Черновик ${draft.index + 1}`;
+    title.textContent = caption ?? (
+      draft.index === 0 ? 'Черновик' : `Черновик ${draft.index + 1}`
+    );
 
     const text = document.createElement('div');
     text.className = 'chatgoose-card-text';

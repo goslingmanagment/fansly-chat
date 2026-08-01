@@ -1473,6 +1473,8 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   replyTone?: ReplyTone;
   /** coach-chat: the chatter's live question for this turn. */
   chatterQuestion?: string;
+  /** coach-chat: ask the kernel to substitute its pinned situation question. */
+  coachPreset?: 'situation';
   /** coach-chat: prior turns replayed as dialog memory (answers projected). */
   coachHistory?: CoachHistoryEntry[];
   /** coach-chat: 'short' | 'full' on THIS (content→background) wire. The
@@ -1903,11 +1905,12 @@ export interface CoachOverlayDraft {
 }
 
 /** Per-turn context provenance for a completed coach exchange (spec §8.2), shown
- * in the collapsed «Отправлено коучу…» line. Counts-only / typed — it follows
+ * in the collapsed «Отправлено коучу…» line. Typed and minimized, it follows
  * E28's declassification rule (no raw kernel payload passthrough): the transcript
  * figures describe what the BROWSER sent pre-budget, and `attachedRecaps` is the
  * kernel's post-attach report carrying only each slot's age in ms (never the raw
- * generated-at string or body). */
+ * generated-at string or body); only a preset's canonical question is retained
+ * for faithful coachHistory replay. */
 export interface CoachTurnContext {
   /** Kept transcript message count shipped to the kernel this turn. */
   sentMessageCount: number;
@@ -1921,6 +1924,10 @@ export interface CoachTurnContext {
     full: { ageMs: number } | null;
     short: { ageMs: number } | null;
   };
+  /** Kernel-owned canonical question substituted for a preset turn. The
+   * content session stores it for faithful coachHistory replay while showing
+   * the shorter chatter-facing preset label. */
+  presetQuestion?: string;
 }
 
 /** A rendered coach feed item — the overlay projection of the content-side
@@ -1943,6 +1950,8 @@ export type CoachOverlayFeedItem =
       question: string;
       answerProse: string;
       drafts: CoachOverlayDraft[];
+      /** Situation preset exchange: controls display copy only. */
+      preset?: true;
       /** The kernel's post-attach turn context (spec §8.2). Absent when the
        * background predates the field (old-background tolerance) → the collapsed
        * «Отправлено коучу…» line is not rendered. */
@@ -1956,6 +1965,8 @@ export type CoachOverlayFeedItem =
       /** Whether the failed turn actually SENT a draft (spec §5): drives Retry's
        * live-draft re-read (a stale draft is never resent from memory). */
       includedDraft: boolean;
+      /** Retry must dispatch the preset again, never its display label. */
+      preset?: true;
     }
   | {
       kind: 'recap-step';

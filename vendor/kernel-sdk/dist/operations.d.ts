@@ -291,6 +291,78 @@ export declare const kernelOperations: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/pages/:pageLabel/verify";
     };
+    readonly agentCapabilities: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/capabilities";
+    };
+    readonly agentCoverage: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/coverage";
+    };
+    readonly agentDatasetQuery: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/pages/:pageLabel/datasets/:dataset/query";
+    };
+    readonly agentHydrationRequestCreate: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/pages/:pageLabel/threads/:conversationRef/hydration-requests";
+    };
+    readonly agentHydrationRequestDecide: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/hydration-requests/:requestRef/decision";
+    };
+    readonly agentHydrationRequestGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/hydration-requests/:requestRef";
+    };
+    readonly agentHydrationRequestList: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/hydration-requests";
+    };
+    readonly agentKeyCreate: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/keys";
+    };
+    readonly agentKeyList: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/keys";
+    };
+    readonly agentKeyRevoke: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/keys/:id/revoke";
+    };
+    readonly agentObservationPayload: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/observations/:observationRef/payload";
+    };
+    readonly agentObservations: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/observations";
+    };
+    readonly agentPerson: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/people/:platform/:platformUserId";
+    };
+    readonly agentPersonTimeline: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/people/:platform/:platformUserId/timeline";
+    };
+    readonly agentResolve: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/resolve";
+    };
+    readonly agentSearchMessages: {
+        readonly method: "POST";
+        readonly path: "/api/v1/agent/search/messages";
+    };
+    readonly agentThreadMessages: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/pages/:pageLabel/threads/:conversationRef/messages";
+    };
+    readonly agentThreads: {
+        readonly method: "GET";
+        readonly path: "/api/v1/agent/threads";
+    };
     readonly aiFeatureStream: {
         readonly method: "POST";
         readonly path: "/api/v1/ai/features/:feature";

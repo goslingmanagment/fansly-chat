@@ -38,9 +38,11 @@ export type HotkeyAction =
   | 'cheatsheet';
 
 /**
- * AI feature actions map 1:1 to a FeatureType; the rest are app actions.
+ * Most AI feature actions map 1:1 to a FeatureType; the rest are app actions.
+ * `help-me` stays mapped so the Help button and H key share one discoverable
+ * identity, but dispatch reroutes it to Coach's situation preset (E79).
  * `coach` and `fan-summary` are APP actions (not entries here): `⌘⇧C` opens the
- * Coach chat and `⌘⇧S` opens the recap picker — neither starts a generation
+ * Coach chat and `⌘⇧S` opens the recap picker, neither starts a generation
  * directly. `dispatchHotkey` routes anything absent from this map as an app
  * action (arms wired in the Coach extension phase Task 10).
  */
@@ -82,7 +84,7 @@ interface HotkeyDef {
 const AI_HOTKEYS: readonly HotkeyDef[] = [
   { action: 'fast-reply', letter: 'e', description: 'Fast Reply' },
   { action: 'improve-draft', letter: 'f', description: 'Fix — polish the draft' },
-  { action: 'help-me', letter: 'h', description: 'Help Me (coaching)' },
+  { action: 'help-me', letter: 'h', description: 'Разбор ситуации в Coach: что происходит и что делать дальше' },
   { action: 'hi-greeting', letter: 'g', description: 'Hi — greeting openers' },
   { action: 'ping', letter: 'd', description: 'Ping — reactivation message' },
   { action: 'fan-summary', letter: 's', description: 'Recap — open the recap picker (full / short / last)' },

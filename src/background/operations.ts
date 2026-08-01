@@ -2753,6 +2753,9 @@ export class OperationCoordinator {
         ...(payload.feature === 'coach-chat' && payload.chatterQuestion !== undefined
           ? { chatterQuestion: payload.chatterQuestion }
           : {}),
+        ...(payload.feature === 'coach-chat' && payload.coachPreset !== undefined
+          ? { preset: payload.coachPreset }
+          : {}),
         ...(payload.feature === 'coach-chat' && payload.coachHistory !== undefined
           ? { coachHistory: payload.coachHistory }
           : {}),
@@ -2819,6 +2822,7 @@ export class OperationCoordinator {
       // carry the honest post-attach recap provenance (the callback used to
       // discard it). Undefined until/unless the meta frame reports it.
       let attachedRecaps: KernelFeatureAttachedRecaps | undefined;
+      let presetQuestion: string | undefined;
       const actualModelName = (): string => actualModel;
       startStage('llm-ttfb', 'Wait for AI TTFB');
       profiler.log(`Waiting for ${actualModelName()}`);
@@ -2931,6 +2935,7 @@ export class OperationCoordinator {
           clientRequestId: string;
           model: string;
           attachedRecaps?: KernelFeatureAttachedRecaps;
+          presetQuestion?: string;
         }) => {
           // The kernel names the model (client model config died with the
           // vendor lane); requestId is the generation ref — the acceptance
@@ -2940,6 +2945,9 @@ export class OperationCoordinator {
           // §8.2) — retained for the collapsed «Отправлено коучу…» line.
           if (meta.attachedRecaps !== undefined) {
             attachedRecaps = meta.attachedRecaps;
+          }
+          if (meta.presetQuestion !== undefined) {
+            presetQuestion = meta.presetQuestion;
           }
           this.rememberAcceptanceContext(payload.operationId, {
             operationId: payload.operationId,
@@ -3244,7 +3252,8 @@ export class OperationCoordinator {
         this.acceptanceContexts.get(payload.operationId)?.requestId;
       // coach-chat turn context (spec §8.2): kept-count + coverage the BROWSER
       // sent (pre-budget) plus the recap slots Core actually attached, each with
-      // its age. Counts-only projection (E28) — never the raw meta payload.
+      // its age, plus Core #204's canonical preset question when present. Typed
+      // projection (E28), never the raw meta payload.
       const turnContext =
         payload.feature === 'coach-chat'
           ? {
@@ -3265,6 +3274,7 @@ export class OperationCoordinator {
                     },
                   }
                 : {}),
+              ...(presetQuestion !== undefined ? { presetQuestion } : {}),
             }
           : undefined;
       this.sendComplete(tabId, {

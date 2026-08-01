@@ -127,7 +127,7 @@ describe('kernel feature gateway', () => {
       .toBe('Bearer agency_hub_device_x');
   });
 
-  it('threads the coach body fields: fanRef, chatterQuestion, coachHistory, transcriptCoverage', async () => {
+  it('threads coach body fields and returns presetQuestion from meta', async () => {
     const calls: Array<{ init: RequestInit | undefined }> = [];
     const attachedRecaps = {
       full: { generatedAt: '2026-07-19T12:00:00.000Z', ageMs: 60_000 },
@@ -136,7 +136,12 @@ describe('kernel feature gateway', () => {
     const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
       calls.push({ init });
       return sseResponse([
-        { ...META, feature: 'coach-chat', attachedRecaps },
+        {
+          ...META,
+          feature: 'coach-chat',
+          attachedRecaps,
+          presetQuestion: 'Разбери текущую ситуацию',
+        },
         { type: 'content_delta', text: 'ok' },
         { type: 'done', stopReason: 'end_turn' },
       ]);
@@ -147,7 +152,7 @@ describe('kernel feature gateway', () => {
       feature: 'coach-chat',
       conversationRef: 'group-1',
       fanRef: 'fan-1',
-      chatterQuestion: 'how do I sell this?',
+      preset: 'situation',
       coachHistory: [{ question: 'earlier?', answer: 'earlier advice' }],
       clientContext: {
         transcript: '[10:00] Fan: hey',
@@ -166,13 +171,17 @@ describe('kernel feature gateway', () => {
     expect(body).toMatchObject({
       conversationRef: 'group-1',
       fanRef: 'fan-1',
-      chatterQuestion: 'how do I sell this?',
+      preset: 'situation',
       coachHistory: [{ question: 'earlier?', answer: 'earlier advice' }],
       clientContext: { transcriptCoverage: 'full-history' },
     });
     // summaryMode is coach-irrelevant and must not leak onto a coach body.
     expect(body).not.toHaveProperty('summaryMode');
-    expect(metas).toEqual([expect.objectContaining({ attachedRecaps })]);
+    expect(body).not.toHaveProperty('chatterQuestion');
+    expect(metas).toEqual([expect.objectContaining({
+      attachedRecaps,
+      presetQuestion: 'Разбери текущую ситуацию',
+    })]);
   });
 
   it('threads bounded ping silence context onto the SDK request body', async () => {

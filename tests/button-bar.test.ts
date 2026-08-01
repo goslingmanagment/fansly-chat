@@ -360,7 +360,9 @@ describe('ButtonBar toolbar visibility', () => {
     expect(labels).toContain('Compare');
     expect(labels).toContain('Reopen');
     expect(buttonByLabel(bar.root, 'Reopen')?.classList.contains('chatgoose-hidden')).toBe(true);
-    expect(hintFor(buttonByLabel(bar.root, 'Help')).body).toContain('Разбор');
+    expect(hintFor(buttonByLabel(bar.root, 'Help')).body).toContain(
+      'Разбор ситуации в Coach: что происходит и что делать дальше',
+    );
     expect(hintFor(buttonByLabel(bar.root, 'Review')).body).toContain('Оценка');
     expect(hintFor(buttonByLabel(bar.root, 'Compare')).body).toContain('Сравнивает');
   });

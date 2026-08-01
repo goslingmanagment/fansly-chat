@@ -6528,6 +6528,21 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(fanslyClient.getMessagePage).not.toHaveBeenCalled();
   });
 
+  it('forwards coachPreset to the kernel as preset without chatterQuestion', async () => {
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'Preset advice.',
+    });
+
+    await coordinator.startOperation(1, coachStart({
+      coachPreset: 'situation',
+      chatterQuestion: undefined,
+    }));
+
+    const request = kernelGateway.streamFeature.mock.calls[0]?.[1];
+    expect(request).toMatchObject({ feature: 'coach-chat', preset: 'situation' });
+    expect(request).not.toHaveProperty('chatterQuestion');
+  });
+
   it('P2-bio: a coach request carries the fan bio when account.about is present', async () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getAccountNames.mockResolvedValue([
@@ -6934,7 +6949,7 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(complete?.generationRef).toBe('gen-ref-123');
   });
 
-  it('operation:complete carries a floored, counts-only turnContext for coach (review P2)', async () => {
+  it('operation:complete carries floored recap ages and presetQuestion for coach', async () => {
     const kernelGateway = {
       isConfigured: vi.fn(() => true),
       streamFeature: vi.fn(async (
@@ -6953,6 +6968,7 @@ describe(`OperationCoordinator (${part})`, () => {
           // validator rejects non-integers, and a rejected complete would drop
           // the whole paid answer).
           attachedRecaps: { full: { generatedAt: '2026-07-01T00:00:00Z', ageMs: 1000.7 }, short: null },
+          presetQuestion: 'Разбери ситуацию',
         });
         callbacks.onText?.('Advice');
         return 'Advice';
@@ -6968,13 +6984,15 @@ describe(`OperationCoordinator (${part})`, () => {
     );
     const turnContext = complete?.turnContext;
     expect(turnContext).toBeDefined();
-    // Counts-only exact shape (E28): no extra keys at any level.
+    // Exact typed shape (E28): no extra keys at any level.
     expect(Object.keys(turnContext!).sort()).toEqual([
       'attachedRecaps',
+      'presetQuestion',
       'sentMessageCount',
       'transcriptCoverage',
     ]);
     expect(turnContext!.attachedRecaps).toEqual({ full: { ageMs: 1000 }, short: null });
+    expect(turnContext!.presetQuestion).toBe('Разбери ситуацию');
     expect(Number.isInteger(turnContext!.sentMessageCount)).toBe(true);
     expect(['full-history', 'window']).toContain(turnContext!.transcriptCoverage);
   });

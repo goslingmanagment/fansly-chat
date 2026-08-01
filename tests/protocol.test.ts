@@ -336,6 +336,19 @@ describe('protocol boundary guards', () => {
     ).toBe(true);
   });
 
+  it('accepts only the situation coachPreset literal on operation:start', () => {
+    const base = {
+      type: 'operation:start',
+      operationId: 'op-coach-preset',
+      feature: 'coach-chat',
+      groupId: 'group-1',
+      routeNonce: 3,
+      domFanDisplayName: 'Alice',
+    };
+    expect(isContentPortMessage({ ...base, coachPreset: 'situation' })).toBe(true);
+    expect(isContentPortMessage({ ...base, coachPreset: 'anything-else' })).toBe(false);
+  });
+
   it('accepts viewCachedOnly on a fan-summary operation:start; rejects a non-boolean', () => {
     const base = {
       type: 'operation:start',
@@ -458,8 +471,16 @@ describe('protocol boundary guards', () => {
         sentMessageCount: 42,
         transcriptCoverage: 'window',
         attachedRecaps: { full: { ageMs: 1000 }, short: null },
+        presetQuestion: 'Разбери текущую ситуацию',
       }),
     ).toBe(true);
+    expect(
+      isCoachTurnContext({
+        sentMessageCount: 42,
+        transcriptCoverage: 'window',
+        presetQuestion: 42,
+      }),
+    ).toBe(false);
 
     // Invalid shapes — E28 declassification boundary: exact keys at every
     // level, non-negative integer counts.
