@@ -2756,3 +2756,11 @@ Review, and the recap. The serif document body deliberately stays: the
 recap is read as a dossier, Help/Review are scanned as working cards —
 unification lives in the headers and accents, not in flattening the two
 reading modes into one.
+
+**Amended (owner feedback 2026-08-02):** inside the dense serif document the
+10px ink-low section headers drowned between paragraphs («заголовки будто бы
+теряются»). Recap headers regain the hairline separator and top padding the
+old md-h2 provided (except the strategy card, which owns its frame; a
+first-child section keeps no separator), one step of size (11px), and the
+mid ink. The overlay Review/Help headers keep the lighter treatment: their
+sans bodies do not swallow the header. CSS-only, scoped to `.chatgoose-md`.

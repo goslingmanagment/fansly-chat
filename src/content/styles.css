@@ -1983,15 +1983,38 @@ ol.chatgoose-md-list {
 
 /* E78: recap sections join the analysis header language while the serif
    document body stays; the strategy/next-move card switches to the working
-   sans voice the other "what to do" surfaces use. */
+   sans voice the other "what to do" surfaces use.
+   Amended (owner feedback 2026-08-02): inside the dense serif document the
+   10px ink-low header drowned between paragraphs, so recap headers regain
+   the hairline separator + air the old md-h2 provided, one step of size,
+   and the mid ink. The overlay Review/Help headers keep their lighter
+   treatment — their sans bodies do not swallow the header. */
 .chatgoose-md .chatgoose-analysis-sec {
   gap: 6px;
 }
 
+.chatgoose-md .chatgoose-md-sec:not(.chatgoose-analysis-card-move) {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-md .chatgoose-md-sec:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
 .chatgoose-md .chatgoose-analysis-card-move {
+  margin-top: 10px;
   font-family: var(--chatgoose-font);
   font-size: 14px;
   line-height: 1.55;
+}
+
+.chatgoose-md .chatgoose-analysis-h {
+  font-size: 11px;
+  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-analysis-b {
