@@ -350,6 +350,30 @@ describe('CoachSessionStore — draft intent + transcript epoch + turnContext', 
     expect(item?.includedDraft).toBe(true);
   });
 
+  it('retains the preset marker on completed and failed turns', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acc', 'grp');
+    store.beginPending(session, 'Разбор ситуации', 'op-1', false, false, true);
+    const failed = store.recordFailedAttempt(
+      session,
+      'op-1',
+      'Разбор ситуации',
+      'cancelled',
+      true,
+    );
+    expect(failed?.preset).toBe(true);
+
+    store.beginPending(session, 'Разбор ситуации', 'op-2', false, false, true);
+    const exchange = store.commitExchange(session, {
+      operationId: 'op-2',
+      generationRef: 'gen-2',
+      question: 'Канонический вопрос ядра',
+      answerRaw: 'Ответ',
+      preset: true,
+    });
+    expect(exchange).toMatchObject({ preset: true, question: 'Канонический вопрос ядра' });
+  });
+
   it('commitExchange retains the turnContext (spec §8.2), and omits it when absent', () => {
     const store = makeStore();
     const session = store.getOrCreate('acc', 'grp');

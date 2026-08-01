@@ -499,6 +499,57 @@ describe('OverlayController — coach chat mode', () => {
 
   // ─── Draft cards (spec §2.1/§6) ───────────────────────────────────────────
 
+  it('renders labeled coach advice as analysis blocks and falls back to plain text', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({
+      feedItems: [exchangeItem(
+        'structured',
+        'q',
+        'СИТУАЦИЯ: Фан тёплый.\nСЛЕДУЮЩИЙ ХОД: Ответить лично.',
+      )],
+    }));
+    expect(document.querySelector('.chatgoose-coach-answer .chatgoose-analysis')).not.toBeNull();
+
+    controller.render(createCoachModel({
+      feedItems: [exchangeItem('plain', 'q', 'Plain coach advice')],
+    }));
+    const answer = requireElement<HTMLDivElement>('.chatgoose-coach-answer');
+    expect(answer.querySelector('.chatgoose-analysis')).toBeNull();
+    expect(answer.textContent).toBe('Plain coach advice');
+  });
+
+  it('captions exactly two preset drafts positionally and keeps other counts generic', () => {
+    const { controller } = makeController();
+    controller.render(createCoachModel({
+      feedItems: [{
+        kind: 'exchange',
+        operationId: 'preset-two',
+        question: 'Разбор ситуации',
+        answerProse: 'advice',
+        preset: true,
+        drafts: [
+          { text: 'Safe', index: 0 },
+          { text: 'Flirty', index: 1 },
+        ],
+      }],
+    }));
+    expect(Array.from(document.querySelectorAll('.chatgoose-coach-draft-title')).map(
+      (node) => node.textContent,
+    )).toEqual(['Спокойный', 'Флирт']);
+
+    controller.render(createCoachModel({
+      feedItems: [{
+        kind: 'exchange',
+        operationId: 'preset-one',
+        question: 'Разбор ситуации',
+        answerProse: 'advice',
+        preset: true,
+        drafts: [{ text: 'Only one', index: 0 }],
+      }],
+    }));
+    expect(requireElement('.chatgoose-coach-draft-title').textContent).toBe('Черновик');
+  });
+
   it('renders draft cards with RU copy and per-card generationRef attribution', async () => {
     const { controller, callbacks } = makeController();
     controller.render(
@@ -578,7 +629,31 @@ describe('OverlayController — coach chat mode', () => {
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'),
     ).find((b) => b.textContent === 'Повторить')!;
     retry.click();
-    expect(callbacks.onCoachRetry).toHaveBeenCalledWith('stuck', true);
+    expect(callbacks.onCoachRetry).toHaveBeenCalledWith('stuck', true, undefined);
+  });
+
+  it('forwards the preset marker from a failed attempt Retry', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel({
+      feedItems: [{
+        kind: 'failed-attempt',
+        question: 'Разбор ситуации',
+        errorCode: 'CG-API-01',
+        retryable: true,
+        includedDraft: false,
+        preset: true,
+      }],
+    }));
+
+    const retry = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-failed button'),
+    ).find((button) => button.textContent === 'Повторить')!;
+    retry.click();
+    expect(callbacks.onCoachRetry).toHaveBeenCalledWith(
+      'Разбор ситуации',
+      false,
+      true,
+    );
   });
 
   it('renders a deliberate cancel as «Остановлено вами.», never as a failure', () => {

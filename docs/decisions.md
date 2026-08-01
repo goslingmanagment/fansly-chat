@@ -92,6 +92,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E76 | 2026-08-01 | Action bar restores direct Help, Review, and Compare buttons; cached Compare gets contextual Reopen |
 | E77 | 2026-08-01 | Help coaching and Review evaluation render the kernel #201 block labels as structured sections (display-only parser, plain-card fallback) |
 | E78 | 2026-08-01 | The recap (fan-summary) joins the E77 analysis language: known section headings become dotted mono headers, strategy/next-move gets the clay card, money/quote decoration shared; unknown headings keep the old look |
+| E79 | 2026-08-02 | Help routes into Coach as the kernel-owned `situation` preset: one-click analysis keeps follow-ups, real-question history, structured advice, and two positional draft captions; standalone help-me stays for cached and older-client results |
 
 ## Entries
 
@@ -2764,3 +2765,20 @@ old md-h2 provided (except the strategy card, which owns its frame; a
 first-child section keeps no separator), one step of size (11px), and the
 mid ink. The overlay Review/Help headers keep the lighter treatment: their
 sans bodies do not swallow the header. CSS-only, scoped to `.chatgoose-md`.
+
+**E79 (2026-08-02).** Help is now the zero-typing entry point into Coach,
+following Core Decision #204. A toolbar click, H hotkey, or rerun of a cached
+Help result opens Coach and dispatches `coachPreset: 'situation'` without a
+client-authored `chatterQuestion`. The kernel returns its substituted canonical
+question as `presetQuestion`; the extension stores that text in coach history
+while the feed keeps the shorter label «Разбор ситуации». Preset turns use the
+ordinary single-operation, auto-recap, cancellation, retry, acceptance, and
+human-only insert lifecycle.
+
+Coach answers now reuse E77's four-block situational renderer when its labels
+parse, with the existing plain-text fallback otherwise. Exactly two drafts on
+a preset exchange receive positional captions «Спокойный» and «Флирт»;
+every other draft count keeps the ordinary titles. The standalone `help-me`
+protocol, parser, cached-result view, and kernel route remain intact for older
+clients and already-cached results. Physical cleanup is deferred until the
+desktop app's `help-me` usage has been checked.

@@ -222,6 +222,100 @@ describe('Coach orchestration', () => {
     expect(app.activeFeature).toBeNull();
   });
 
+  it('routes the Help button and H hotkey to a coach preset, never help-me', async () => {
+    for (const dispatch of ['button', 'hotkey'] as const) {
+      const app = await makeReadyApp();
+      if (dispatch === 'button') {
+        app.buttonBar.callbacks.onFeatureClick('help-me');
+      } else {
+        expect(app.dispatchHotkey('help-me')).toBe(true);
+      }
+      await flush();
+
+      const starts = (app.port.send as any).mock.calls
+        .map((call: any) => call[0])
+        .filter((message: any) => message?.type === 'operation:start');
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({
+        feature: 'coach-chat',
+        coachPreset: 'situation',
+      });
+      expect(starts[0]).not.toHaveProperty('chatterQuestion');
+      expect(starts.some((message: any) => message.feature === 'help-me')).toBe(false);
+      expect(app.activeCoachSession.pending).toMatchObject({
+        question: 'Разбор ситуации',
+        preset: true,
+      });
+    }
+  });
+
+  it('routes cached Help rerun to a fresh coach preset turn', async () => {
+    const app = await makeReadyApp();
+
+    app.overlay.callbacks.onRerun('help-me');
+    await flush();
+
+    const payload = lastSent(app);
+    expect(payload).toMatchObject({ feature: 'coach-chat', coachPreset: 'situation' });
+    expect(payload).not.toHaveProperty('chatterQuestion');
+  });
+
+  it('stores the kernel presetQuestion for replay while keeping the short feed label', async () => {
+    const app = await makeReadyApp();
+    app.openCoachPreset();
+    await flush();
+    const operationId = pendingOpId(app);
+    const canonical = 'Разбери текущую ситуацию и дай два варианта.';
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'Advice', parts: [] },
+      generationRef: 'gen-preset',
+      turnContext: {
+        sentMessageCount: 10,
+        transcriptCoverage: 'window',
+        presetQuestion: canonical,
+      },
+    });
+
+    expect(app.activeCoachSession.completedExchanges[0]).toMatchObject({
+      question: canonical,
+      preset: true,
+    });
+    expect(app.coachOverlayModel.sessionView.feedItems[0]).toMatchObject({
+      question: 'Разбор ситуации',
+      preset: true,
+    });
+
+    (app.port.send as any).mockClear();
+    await app.submitCoachQuestion('follow up');
+    expect(lastSent(app).coachHistory).toEqual([{ question: canonical, answer: 'Advice' }]);
+  });
+
+  it('retries a failed preset as a preset, never as the display label', async () => {
+    const app = await makeReadyApp();
+    app.openCoachPreset();
+    await flush();
+    const operationId = pendingOpId(app);
+    app.handleOperationError({
+      type: 'operation:error',
+      operationId,
+      error: { code: 'CG-AI-01', message: 'nope' },
+    });
+    const failed = app.activeCoachSession.feedItems.find(
+      (item: any) => item.kind === 'failed-attempt',
+    );
+    expect(failed).toMatchObject({ preset: true, question: 'Разбор ситуации' });
+
+    (app.port.send as any).mockClear();
+    await app.handleCoachRetry(failed.question, failed.includedDraft, failed.preset);
+    const retry = lastSent(app);
+    expect(retry).toMatchObject({ feature: 'coach-chat', coachPreset: 'situation' });
+    expect(retry).not.toHaveProperty('chatterQuestion');
+  });
+
   it('scopes both Coach and standalone recap-status reads to the mapped persona definition', async () => {
     const app = await makeReadyApp();
     const sendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
@@ -299,6 +393,7 @@ describe('Coach orchestration', () => {
       coachHistory: [],
       coachSessionId: app.activeCoachSession.sessionId,
     });
+    expect(payload).not.toHaveProperty('coachPreset');
     // Carry-forward 2: the session id must ride the payload (not a per-tab key).
     expect(typeof payload.coachSessionId).toBe('string');
     expect(payload.coachSessionId.length).toBeGreaterThan(0);
@@ -905,6 +1000,33 @@ describe('Coach orchestration', () => {
     await flush();
     expect(step.status).toBe('done');
     expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', chatterQuestion: 'how do I sell this?' });
+  });
+
+  it('preserves the Help preset through the ordinary auto-recap chain', async () => {
+    const app = await makeReadyApp();
+    (mockStorageState.settings as Record<string, unknown>).coachAutoRecap = 'full';
+    recapStatusResponse = { full: staleSlot(), short: null };
+
+    app.openCoachPreset();
+    await flush();
+    expect(app.coachRecapChain).toMatchObject({
+      pendingQuestion: 'Разбор ситуации',
+      preset: true,
+    });
+    expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', forceRegenerate: true });
+
+    const recapOpId = app.coachRecapChain.operationId;
+    (app.port.send as any).mockClear();
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: recapOpId,
+      fanDisplayName: 'alice',
+      result: { rawText: 'fresh recap', parts: [] },
+    });
+    await flush();
+
+    expect(lastSent(app)).toMatchObject({ feature: 'coach-chat', coachPreset: 'situation' });
+    expect(lastSent(app)).not.toHaveProperty('chatterQuestion');
   });
 
   it('auto-recap mode matching: short is satisfied by a fresh FULL recap (no chain)', async () => {

@@ -49,6 +49,8 @@ export interface CoachExchange {
    * background op→ref map dies with the worker, so the ref lives here). */
   readonly generationRef: string;
   readonly question: string;
+  /** Situation preset exchange: display the short label, replay `question`. */
+  readonly preset?: true;
   readonly answerRaw: string;
   /** Parsed on completion; never parsed from a failed attempt (spec §3). */
   readonly drafts: readonly CoachDraft[];
@@ -80,6 +82,8 @@ export interface CoachFailedAttemptFeedItem {
   /** Whether the failed turn actually SENT a draft (spec §5). Retry re-reads the
    * CURRENT live draft when this is true (a stale draft is never resent). */
   includedDraft: boolean;
+  /** Retry dispatches the preset again instead of sending the display label. */
+  preset?: true;
 }
 
 /** A visible recap run inside the coach feed (spec §3/§5). `status` transitions
@@ -116,6 +120,8 @@ export interface CoachAttempt {
    * the composer only for composer-typed turns — a canned chip/Retry string
    * must never be parked there. */
   fromComposer: boolean;
+  /** Situation preset turn, whose visible question is only a placeholder. */
+  preset?: true;
 }
 
 export interface CoachSession {
@@ -159,6 +165,8 @@ export interface CoachCommitInput {
   generationRef: string;
   question: string;
   answerRaw: string;
+  /** Situation preset exchange: display marker, not model input. */
+  preset?: true;
   /** The kernel's post-attach turn context (spec §8.2), if the background sent
    * it; retained verbatim on the exchange. */
   turnContext?: CoachTurnContext;
@@ -178,6 +186,7 @@ export interface CoachSessionStore {
     operationId: string,
     includedDraft: boolean,
     fromComposer: boolean,
+    preset?: true,
   ): CoachAttempt;
   /** Drops the in-flight marker (cancel with nothing recorded, or supersession). */
   clearPending(session: CoachSession): void;
@@ -282,13 +291,14 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       return session;
     },
 
-    beginPending(session, question, operationId, includedDraft, fromComposer) {
+    beginPending(session, question, operationId, includedDraft, fromComposer, preset) {
       const attempt: CoachAttempt = {
         operationId,
         question,
         startedAt: now(),
         includedDraft,
         fromComposer,
+        ...(preset ? { preset } : {}),
       };
       session.pending = attempt;
       return attempt;
@@ -304,6 +314,7 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
         operationId: input.operationId,
         generationRef: input.generationRef,
         question: input.question,
+        ...(input.preset ? { preset: input.preset } : {}),
         answerRaw: input.answerRaw,
         drafts,
         completedAt: now(),
@@ -339,6 +350,7 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
         retryable,
         // «sent», not «requested»: honest flag from the dispatched attempt (§5).
         includedDraft: session.pending.includedDraft,
+        ...(session.pending.preset ? { preset: session.pending.preset } : {}),
       };
       session.feedItems.push(item);
       // A failed/cancelled turn ends the in-flight attempt.

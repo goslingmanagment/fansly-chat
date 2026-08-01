@@ -240,6 +240,10 @@ function isOptionalSummaryMode(record: Record<string, unknown>): boolean {
     (isString(record.summaryMode) && SUMMARY_MODES.has(record.summaryMode as 'short' | 'full'));
 }
 
+function isOptionalCoachPreset(record: Record<string, unknown>): boolean {
+  return record.coachPreset === undefined || record.coachPreset === 'situation';
+}
+
 function isOperationStartMessage(record: Record<string, unknown>): boolean {
   return hasOperationId(record) &&
     isOperationFeatureType(record.feature) &&
@@ -250,6 +254,7 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalReplyMode(record) &&
     isOptionalReplyTone(record) &&
     isOptionalString(record, 'chatterQuestion') &&
+    isOptionalCoachPreset(record) &&
     isOptionalCoachHistory(record) &&
     isOptionalSummaryMode(record) &&
     isOptionalString(record, 'coachSessionId') &&
@@ -257,7 +262,7 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalBoolean(record, 'viewCachedOnly');
 }
 
-/** coach-chat operation:complete turn context (spec §8.2). Counts-only shape —
+/** coach-chat operation:complete turn context (spec §8.2). Typed, minimized shape —
  * an extra field or a wrong type is a producer bug on a DOM-adjacent projection
  * (E28), so validate exactly rather than pass through. */
 /** Exported for the consumption-site sanitizer (closing round): an INVALID
@@ -271,11 +276,14 @@ export function isCoachTurnContext(value: unknown): value is CoachTurnContext {
   }
   // attachedRecaps is OPTIONAL (round 12): absent = «kernel did not report»,
   // distinct from a reported empty attach — when present, exact-keyed as before.
-  const keySignature = Object.keys(value).sort().join(',');
-  if (
-    keySignature !== 'attachedRecaps,sentMessageCount,transcriptCoverage' &&
-    keySignature !== 'sentMessageCount,transcriptCoverage'
-  ) {
+  const keys = Object.keys(value);
+  const allowedKeys = new Set([
+    'attachedRecaps',
+    'presetQuestion',
+    'sentMessageCount',
+    'transcriptCoverage',
+  ]);
+  if (keys.some((key) => !allowedKeys.has(key))) {
     return false;
   }
   // Exact keys + non-negative integers at EVERY level (review P1): this
@@ -295,7 +303,8 @@ export function isCoachTurnContext(value: unknown): value is CoachTurnContext {
       slotOk(recaps.short));
   return countOk(value.sentMessageCount) &&
     (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
-    recapsOk;
+    recapsOk &&
+    isOptionalString(value, 'presetQuestion');
 }
 
 function isVoiceNoteStatusView(value: unknown): boolean {

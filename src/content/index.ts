@@ -1,4 +1,5 @@
 import { ButtonBar } from './button-bar.js';
+import { COACH_SITUATION_PRESET_LABEL } from './coach-copy.js';
 import { formatCoachAgeMs } from '../shared/coach-format.js';
 import { isCoachTurnContext } from '../shared/protocol.js';
 import { COACH_DRAFT_ATTACH_ENABLED, coachDraftAttachAllowed } from '../shared/coach-draft-gate.js';
@@ -284,6 +285,8 @@ interface CoachSubmitOpts {
   /** False for canned sources (chips, Retry, chain resubmits): a rejected
    * canned submit must never be written into the composer (review round 8). */
   fromComposer?: boolean;
+  /** Dispatch the kernel-owned situation preset with no chatterQuestion. */
+  preset?: true;
 }
 
 export class ChatGooseContentApp {
@@ -384,6 +387,8 @@ export class ChatGooseContentApp {
          * chain resubmit must keep the original origin, or a post-recap
          * rejection silently eats the chatter's own text. */
         fromComposer: boolean;
+        /** Preserve a Help preset through an automatic recap step. */
+        preset: boolean;
       }
     | null = null;
   // Synchronous re-entrancy guard for submitCoachQuestion across its settings
@@ -481,10 +486,14 @@ export class ChatGooseContentApp {
   });
   private readonly buttonBar = new ButtonBar({
     onFeatureClick: (feature) => {
-      // The Recap button opens the start dialog (spec §5/§10), not an instant
-      // generation; every other feature button starts its op directly.
+      // Recap opens its picker; Help opens Coach and starts the situation preset.
+      // The remaining feature buttons start their operation directly.
       if (feature === 'fan-summary') {
         this.openRecapPicker();
+        return;
+      }
+      if (feature === 'help-me') {
+        this.openCoachPreset();
         return;
       }
       this.startFeature(feature, false);
@@ -554,7 +563,11 @@ export class ChatGooseContentApp {
     },
     onRerun: (feature) => {
       this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
-      this.startFeature(feature, true);
+      if (feature === 'help-me') {
+        this.openCoachPreset();
+      } else {
+        this.startFeature(feature, true);
+      }
     },
     onCompareRerun: () => {
       this.completedCompareCache.clear(this.currentGroupId);
@@ -672,7 +685,11 @@ export class ChatGooseContentApp {
     },
     onRerun: (feature) => {
       this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
-      this.startFeature(feature, true);
+      if (feature === 'help-me') {
+        this.openCoachPreset();
+      } else {
+        this.startFeature(feature, true);
+      }
     },
     onCollapse: () => {
       this.quickSurfaceMode = 'inline';
@@ -685,8 +702,8 @@ export class ChatGooseContentApp {
     onCoachNewDialog: () => this.resetCoachSession(),
     onCoachRecap: (mode) => this.handleCoachRecap(mode),
     onCoachSetAutoRecap: (override) => this.setCoachAutoRecapOverride(override),
-    onCoachRetry: (question, includedDraft) => {
-      void this.handleCoachRetry(question, includedDraft);
+    onCoachRetry: (question, includedDraft, preset) => {
+      void this.handleCoachRetry(question, includedDraft, preset);
     },
     onCoachComposerInput: (text) => this.handleCoachComposerInput(text),
     onCoachDraftIntentChange: (intent) => this.handleCoachDraftIntentChange(intent),
@@ -886,7 +903,11 @@ export class ChatGooseContentApp {
     const feature = HOTKEY_FEATURE[action];
     if (feature) {
       if (!this.currentGroupId) return false;
-      this.startFeature(feature, false);
+      if (feature === 'help-me') {
+        this.openCoachPreset();
+      } else {
+        this.startFeature(feature, false);
+      }
       return true;
     }
     switch (action) {
@@ -1537,6 +1558,12 @@ export class ChatGooseContentApp {
   // ─── Feature Lifecycle ──────────────────────────────────────────────
 
   private startFeature(feature: FeatureType, forceRegenerate: boolean): void {
+    // Defensive routing fence: every production caller handles Help explicitly,
+    // and a future generic caller still must not revive standalone generation.
+    if (feature === 'help-me') {
+      this.openCoachPreset();
+      return;
+    }
     if (this.activeFeature === feature) {
       if (usesInlineFeatureSurface(feature) && !featureRequiresDraft(feature)) {
         if (
@@ -2181,6 +2208,22 @@ export class ChatGooseContentApp {
     void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
   }
 
+  /** Help is a zero-typing Coach turn. The canonical question stays in the
+   * kernel (Core Decision #204); this client sends only the preset literal. */
+  private openCoachPreset(): void {
+    this.openCoach();
+    if (
+      !this.activeCoachSession ||
+      this.activeFeature ||
+      this.activeCompareModel?.operationId ||
+      this.coachRecapChain ||
+      this.coachSubmitPreflights.has(this.activeCoachSession)
+    ) {
+      return;
+    }
+    void this.submitCoachQuestion('', { preset: true, fromComposer: false });
+  }
+
   /** Drop the coach overlay while RETAINING the store session for reopen (spec
    * §3). This does NOT itself tear down a streaming coach turn or a recap-chain
    * op — every caller must have already cancelled/suppressed any live op first
@@ -2231,7 +2274,7 @@ export class ChatGooseContentApp {
     if (!session) {
       return;
     }
-    const trimmed = question.trim();
+    const trimmed = opts?.preset ? COACH_SITUATION_PRESET_LABEL : question.trim();
     if (!trimmed) {
       return;
     }
@@ -2339,7 +2382,15 @@ export class ChatGooseContentApp {
     if (!session.autoRecapAttempted && effectiveMode !== 'off') {
       session.autoRecapAttempted = true;
       if (!hasFreshMatchingRecap(session.recapStatus, effectiveMode, settings.deepMessageCount)) {
-        this.startCoachRecapChain(session, effectiveMode, 'auto', trimmed, opts?.forceDraftRead ?? false, opts?.fromComposer !== false);
+        this.startCoachRecapChain(
+          session,
+          effectiveMode,
+          'auto',
+          trimmed,
+          opts?.forceDraftRead ?? false,
+          opts?.fromComposer !== false,
+          opts?.preset ?? false,
+        );
         return;
       }
     }
@@ -2351,6 +2402,7 @@ export class ChatGooseContentApp {
       settings.coachHistoryLimit,
       opts?.forceDraftRead ?? false,
       opts?.fromComposer !== false,
+      opts?.preset ?? false,
     );
   }
 
@@ -2370,6 +2422,7 @@ export class ChatGooseContentApp {
     coachHistoryLimit: number,
     forceDraftRead: boolean,
     fromComposer: boolean,
+    preset: boolean,
   ): void {
     // Live draft read (spec §5): once, right before dispatch. `getActive…` is
     // synchronous, so nothing can mutate the composer between this read and the
@@ -2392,7 +2445,14 @@ export class ChatGooseContentApp {
     this.activePersonaSource = this.tabState?.mappedPersonaSource ?? null;
     this.activeFanDisplayName = getActiveConversationDisplayName() ?? 'fan';
     this.lastFeature = 'coach-chat';
-    this.coachStore.beginPending(session, trimmed, operationId, includedDraft, fromComposer);
+    this.coachStore.beginPending(
+      session,
+      trimmed,
+      operationId,
+      includedDraft,
+      fromComposer,
+      preset ? true : undefined,
+    );
     this.coachPendingAnswerText = '';
     this.rebuildCoachModel();
     this.renderAll();
@@ -2407,7 +2467,9 @@ export class ChatGooseContentApp {
       routeNonce: this.routeNonce,
       domFanDisplayName,
       forceRegenerate: false,
-      chatterQuestion: trimmed,
+      ...(preset
+        ? { coachPreset: 'situation' as const }
+        : { chatterQuestion: trimmed }),
       coachHistory,
       // Carry-forward 2: the session id keys the background transcript cache; a
       // per-tab fallback would lose «Новый диалог» reseed isolation.
@@ -2450,8 +2512,16 @@ export class ChatGooseContentApp {
    * failed attempt had actually SENT a draft, Retry re-reads the CURRENT live
    * draft (spec §5): empty now → proceed without; a stale draft is never resent
    * from memory. */
-  private async handleCoachRetry(question: string, includedDraft: boolean): Promise<void> {
-    await this.submitCoachQuestion(question, { forceDraftRead: includedDraft, fromComposer: false });
+  private async handleCoachRetry(
+    question: string,
+    includedDraft: boolean,
+    preset?: true,
+  ): Promise<void> {
+    await this.submitCoachQuestion(question, {
+      forceDraftRead: includedDraft,
+      fromComposer: false,
+      ...(preset ? { preset } : {}),
+    });
   }
 
   /** «Новый диалог» (spec §3): reset the open session in place — new sessionId
@@ -2504,7 +2574,7 @@ export class ChatGooseContentApp {
     if (!session) {
       return;
     }
-    this.startCoachRecapChain(session, mode, 'explicit', null, false, false);
+    this.startCoachRecapChain(session, mode, 'explicit', null, false, false, false);
   }
 
   /** Set the per-session auto-recap override from the «Рекап ▾» menu radio group
@@ -2571,6 +2641,7 @@ export class ChatGooseContentApp {
     pendingQuestion: string | null,
     forceDraftRead: boolean,
     fromComposer: boolean,
+    preset: boolean,
   ): void {
     if (this.activeFeature || this.activeCompareModel?.operationId || this.coachRecapChain) {
       this.showUserErrorToast(getErrorMessage('another_operation'));
@@ -2598,7 +2669,16 @@ export class ChatGooseContentApp {
     const domFanDisplayName = getActiveConversationDisplayName();
     // Set the chain BEFORE initializeFeatureOperation so its renderSurfaces keeps
     // the coach overlay on top (the running step is already in the feed).
-    this.coachRecapChain = { operationId, session, step, origin, pendingQuestion, forceDraftRead, fromComposer };
+    this.coachRecapChain = {
+      operationId,
+      session,
+      step,
+      origin,
+      pendingQuestion,
+      forceDraftRead,
+      fromComposer,
+      preset,
+    };
     this.initializeFeatureOperation('fan-summary', operationId, domFanDisplayName, undefined);
     this.rebuildCoachModel();
     // Recap refresh bypasses the summary/overlay caches (spec §5): forceRegenerate.
@@ -2661,7 +2741,11 @@ export class ChatGooseContentApp {
     this.renderAll();
     if (chain.origin === 'auto' && chain.pendingQuestion && chain.session === this.activeCoachSession) {
       // autoRecapAttempted is already set, so this submit sends a plain turn.
-      void this.submitCoachQuestion(chain.pendingQuestion, { forceDraftRead: chain.forceDraftRead, fromComposer: chain.fromComposer });
+      void this.submitCoachQuestion(chain.pendingQuestion, {
+        forceDraftRead: chain.forceDraftRead,
+        fromComposer: chain.fromComposer,
+        ...(chain.preset ? { preset: true } : {}),
+      });
     }
   }
 
@@ -2680,7 +2764,7 @@ export class ChatGooseContentApp {
     }
     const errorKey = message.error?.key ?? 'unknown_error';
     const classification = classifyRecapChainFailure(errorKey);
-    const { origin, pendingQuestion, session, step, forceDraftRead, fromComposer } = chain;
+    const { origin, pendingQuestion, session, step, forceDraftRead, fromComposer, preset } = chain;
     step.status = 'failed';
     this.coachRecapChain = null;
     this.clearCoachOperationState();
@@ -2707,7 +2791,11 @@ export class ChatGooseContentApp {
       this.rebuildCoachModel();
       this.renderAll();
       if (session === this.activeCoachSession) {
-        void this.submitCoachQuestion(pendingQuestion, { forceDraftRead, fromComposer });
+        void this.submitCoachQuestion(pendingQuestion, {
+          forceDraftRead,
+          fromComposer,
+          ...(preset ? { preset: true } : {}),
+        });
       }
       return;
     }
@@ -2783,6 +2871,7 @@ export class ChatGooseContentApp {
       return;
     }
     const question = session.pending.question;
+    const preset = session.pending.preset;
     const answerRaw = message.result.rawText;
     if (answerRaw.trim().length === 0) {
       this.coachStore.recordFailedAttempt(session, operationId, question, 'ai_output_unusable', true);
@@ -2790,8 +2879,14 @@ export class ChatGooseContentApp {
       this.coachStore.commitExchange(session, {
         operationId,
         generationRef: message.generationRef ?? '',
-        question,
+        // A preset's display label is never replayed to the model. Core #204
+        // returns the exact substituted question in meta for session history.
+        question:
+          preset && isCoachTurnContext(message.turnContext) && message.turnContext.presetQuestion
+            ? message.turnContext.presetQuestion
+            : question,
         answerRaw,
+        ...(preset ? { preset } : {}),
         // Post-attach turn context (spec §8.2); absent from an old background →
         // the collapsed «Отправлено коучу…» line is simply not rendered. An
         // INVALID shape degrades the same way (closing round): validating it in
@@ -2924,7 +3019,8 @@ export class ChatGooseContentApp {
           operationId: exchange.operationId,
           // Correlation fallback for draft acceptance after SW restart (P2).
           ...(exchange.generationRef ? { generationRef: exchange.generationRef } : {}),
-          question: exchange.question,
+          question: exchange.preset ? COACH_SITUATION_PRESET_LABEL : exchange.question,
+          ...(exchange.preset ? { preset: exchange.preset } : {}),
           answerProse: prose,
           drafts: exchange.drafts.map((draft) => ({ text: draft.text, index: draft.index })),
           // Collapsed «Отправлено коучу…» line (spec §8.2); absent → no line.
@@ -2938,6 +3034,7 @@ export class ChatGooseContentApp {
           errorCode: item.errorCode,
           retryable: item.retryable,
           includedDraft: item.includedDraft,
+          ...(item.preset ? { preset: item.preset } : {}),
         };
       }
       return {

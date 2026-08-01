@@ -34,6 +34,12 @@ describe('buildHotkeyBindings', () => {
     expect(new Set(combos).size).toBe(combos.length);
   });
 
+  it('describes H as the Coach situation analysis', () => {
+    expect(mac.find((binding) => binding.action === 'help-me')?.description).toBe(
+      'Разбор ситуации в Coach: что происходит и что делать дальше',
+    );
+  });
+
   it('covers every AI feature exactly once', () => {
     const featureActions = mac
       .map((b) => HOTKEY_FEATURE[b.action])

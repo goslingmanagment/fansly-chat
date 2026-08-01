@@ -62,6 +62,8 @@ export interface KernelFeatureRequest {
   /** coach-chat: the chatter's live question for this turn (kernel requires it
    * for coach-chat, rejects it elsewhere). */
   chatterQuestion?: string;
+  /** coach-chat: kernel-owned canned question, per Core Decision #204. */
+  preset?: 'situation';
   /** coach-chat: prior completed exchanges replayed as dialog memory. */
   coachHistory?: KernelCoachHistoryEntry[];
   /** fan-summary: sent ONLY as 'short' (a full run omits it — an old kernel
@@ -114,6 +116,7 @@ export interface KernelFeatureCallbacks {
     model: string;
     personaDefinitionId?: string;
     attachedRecaps?: KernelFeatureAttachedRecaps;
+    presetQuestion?: string;
   }) => void;
   onUsage?: (usage: KernelFeatureUsage) => void;
   onReasoningDelta?: (text: string) => void;
@@ -370,6 +373,9 @@ export function createKernelFeatureGateway(
               ...(frame.attachedRecaps !== undefined
                 ? { attachedRecaps: frame.attachedRecaps }
                 : {}),
+              ...(frame.presetQuestion !== undefined
+                ? { presetQuestion: frame.presetQuestion }
+                : {}),
             });
             return;
           case 'content_delta':
@@ -423,6 +429,7 @@ export function createKernelFeatureGateway(
             ...(request.chatterQuestion !== undefined
               ? { chatterQuestion: request.chatterQuestion }
               : {}),
+            ...(request.preset !== undefined ? { preset: request.preset } : {}),
             ...(request.coachHistory !== undefined
               ? { coachHistory: request.coachHistory }
               : {}),
