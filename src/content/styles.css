@@ -157,20 +157,6 @@
   flex: 1;
 }
 
-.chatgoose-pill {
-  border: 1px solid var(--chatgoose-line);
-  background: var(--chatgoose-bg2);
-  color: var(--chatgoose-ink-mid);
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.02em;
-}
-
 /* ─── Base Button ────────────────────────────────────────────── */
 
 .chatgoose-button {
@@ -212,23 +198,20 @@
   color: var(--chatgoose-bad);
 }
 
-/* ─── Personality Pill ───────────────────────────────────────── */
-
-.chatgoose-personality {
-  align-self: center;
-  color: var(--chatgoose-ink-mid);
-}
-
 /* ─── Toolbar Layout ─────────────────────────────────────────── */
 
+/* Density (E71): the row lost the persona pill and then gave the rest of the
+   savings back to the actions — gap 6→5, side padding 10→8. Together with the
+   button/segment trims below this is what takes the bar from 716px to 597px,
+   i.e. from "scrolls on the measured composer" to "fits it". */
 .chatgoose-toolbar {
   align-items: center;
   justify-content: flex-start;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 5px;
+  padding: 8px 8px;
   border-radius: var(--chatgoose-radius-card);
   background: var(--chatgoose-bg1);
   border-color: var(--chatgoose-line);
@@ -250,24 +233,29 @@
   min-width: 0;
 }
 
-.chatgoose-toolbar-pill {
+/* The bar's stand-in for a mapping banner that cannot render: shown only when
+   no Fansly account was detected (E71). Amber, not the neutral pill it
+   replaced — it is a problem, not a label. */
+.chatgoose-toolbar-warn {
   min-height: 30px;
   padding: 0 12px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--chatgoose-amber-line);
   border-radius: 999px;
-  border-color: var(--chatgoose-line);
-  background: var(--chatgoose-bg2);
-  color: var(--chatgoose-ink-mid);
-  font-family: var(--chatgoose-font-mono);
-  font-size: 10.5px;
+  background: var(--chatgoose-amber-bg);
+  color: var(--chatgoose-amber);
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .chatgoose-toolbar-button {
   position: relative;
   min-height: 30px;
-  padding: 0 11px;
+  padding: 0 9px;
   flex: 0 0 auto;
   border-color: var(--chatgoose-line);
   background: var(--chatgoose-bg2);
@@ -285,14 +273,14 @@
 
 .chatgoose-toolbar-button-summary {
   position: relative;
-  padding-right: 20px;
+  padding-right: 18px;
 }
 
 .chatgoose-toolbar-button-summary-ready::after {
   content: '';
   position: absolute;
   top: 6px;
-  right: 7px;
+  right: 6px;
   width: 7px;
   height: 7px;
   border-radius: 999px;
@@ -440,7 +428,7 @@
   flex: 0 0 auto;
   background: var(--chatgoose-line-strong);
   opacity: 0.6;
-  margin: 0 2px;
+  margin: 0 1px;
 }
 
 /* Recap opens the right-hand "about the fan" cluster (Recap + persona): its
@@ -449,13 +437,6 @@
    the free space between them, stranding Recap mid-bar on wide composers. */
 .chatgoose-toolbar-right-start {
   margin-left: auto;
-}
-
-/* ─── Personality (right cluster tail) ─────────────────────── */
-
-.chatgoose-toolbar-personality-end {
-  max-width: 100%;
-  flex: 0 0 auto;
 }
 
 /* ─── Tone groove: sunken radio track of Reply OPTIONS (E24) ─────────────────
@@ -477,8 +458,8 @@
 
 .chatgoose-tone-seg {
   min-height: 22px;
-  min-width: 30px;
-  padding: 0 7px;
+  min-width: 27px;
+  padding: 0 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

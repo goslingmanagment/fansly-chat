@@ -449,7 +449,87 @@ describe('ButtonBar improve draft state', () => {
     expect(buttonByLabel(bar.root, 'Fix')?.disabled).toBe(true);
   });
 
-  it('orders Reply through Recap, Coach, personality, then Voice', () => {
+  // ─── E71: the persona pill left the bar ──────────────────────────────────
+
+  it('renders no persona pill and names the persona on Reply instead', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    expect(bar.root.textContent).not.toContain('Closer');
+    const reply = bar.root.querySelector<HTMLButtonElement>(
+      '.chatgoose-toolbar-button-primary',
+    )!;
+    const hotkey = featureHotkeyLabel('fast-reply', detectLabelPlatform());
+    expect(reply.title).toBe(`Reply as Closer (${hotkey!.full})`);
+  });
+
+  it('drops the persona from Reply’s tooltip when nothing is mapped', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(
+      buildState({ mappedPersonalityId: null, mappedPersonalityName: null }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+
+    const reply = bar.root.querySelector<HTMLButtonElement>(
+      '.chatgoose-toolbar-button-primary',
+    )!;
+    const hotkey = featureHotkeyLabel('fast-reply', detectLabelPlatform());
+    expect(reply.title).toBe(`Reply (${hotkey!.full})`);
+  });
+
+  it('stays quiet about an unmapped account — the mapping banner covers it', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(
+      buildState({ mappedPersonalityId: null, mappedPersonalityName: null }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+
+    const warn = bar.root.querySelector('.chatgoose-toolbar-warn')!;
+    expect(warn.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
+  it('warns in the bar when no Fansly account was detected', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    // No accountId ⇒ MappingBanner.render() returns early, so the bar is the
+    // only surface that can say why every button is dead.
+    bar.render(
+      buildState({
+        accountId: null,
+        mappedPersonalityId: null,
+        mappedPersonalityName: null,
+      }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+
+    const warn = bar.root.querySelector('.chatgoose-toolbar-warn')!;
+    expect(warn.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(warn.textContent).toBe('Аккаунт не определён');
+  });
+
+  it('orders Reply through Recap, Coach, the account warning, then Voice', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -470,8 +550,8 @@ describe('ButtonBar improve draft state', () => {
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
     const recapIndex = children.findIndex((child) => labelOf(child) === 'Recap');
     const coachIndex = children.findIndex((child) => labelOf(child) === 'Coach');
-    const personalityIndex = children.findIndex((child) =>
-      child.classList.contains('chatgoose-toolbar-personality-end'),
+    const warningIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-toolbar-warn'),
     );
     const voiceIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-voice'),
@@ -487,8 +567,8 @@ describe('ButtonBar improve draft state', () => {
     expect(recapIndex).toBe(pingIndex + 1);
     // Coach joins the fan-side cluster right after Recap (spec §10).
     expect(coachIndex).toBe(recapIndex + 1);
-    expect(personalityIndex).toBe(coachIndex + 1);
-    expect(voiceIndex).toBe(personalityIndex + 1);
+    expect(warningIndex).toBe(coachIndex + 1);
+    expect(voiceIndex).toBe(warningIndex + 1);
 
     // Meaning-groups are seamed with hairlines, and Recap opens the
     // right-pinned cluster.
@@ -516,20 +596,23 @@ describe('ButtonBar right-pin invariant (real stylesheet)', () => {
   // narrow windows where both margins collapse to zero. jsdom computes the
   // cascade (not layout), which is exactly what broke, so pin the cascade:
   // Recap is the single toolbar child whose margin-left resolves to auto.
+  // The pill itself is gone since E71; the warning chip that replaced it sits
+  // in the same tail position and must not reintroduce the second pin.
   it('gives Recap the only auto left margin in the toolbar row', () => {
     installContentStyles(contentStyles);
     const bar = makeBar();
     document.body.append(bar.root);
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
+    bar.render(buildState({ accountId: null }), null, 'default', 'none', true, false, false);
 
     const recap = buttonByLabel(bar.root, 'Recap')!;
-    const persona = bar.root.querySelector('.chatgoose-toolbar-personality-end')!;
+    const warn = bar.root.querySelector('.chatgoose-toolbar-warn')!;
     const autoPinned = Array.from(bar.root.children).filter(
       (child) => window.getComputedStyle(child).marginLeft === 'auto',
     );
 
+    expect(warn.classList.contains('chatgoose-hidden')).toBe(false);
     expect(window.getComputedStyle(recap).marginLeft).toBe('auto');
-    expect(window.getComputedStyle(persona).marginLeft).not.toBe('auto');
+    expect(window.getComputedStyle(warn).marginLeft).not.toBe('auto');
     expect(autoPinned).toEqual([recap]);
   });
 });
