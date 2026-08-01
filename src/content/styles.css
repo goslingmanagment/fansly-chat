@@ -1922,6 +1922,148 @@ ol.chatgoose-md-list {
   color: var(--chatgoose-ink-mid);
 }
 
+/* ─── Analysis blocks (E77: Help coaching + Review evaluation) ───────────
+   Structured rendering of the kernel #201 block labels. The serif fix block
+   deliberately reuses the coach-draft idiom: serif on the draft background
+   means "text meant for the fan". */
+
+.chatgoose-analysis {
+  display: grid;
+  gap: 14px;
+}
+
+.chatgoose-analysis-sec {
+  display: grid;
+  gap: 7px;
+}
+
+.chatgoose-analysis-card-verdict,
+.chatgoose-analysis-card-move {
+  background: var(--chatgoose-clay-bg);
+  border: 1px solid var(--chatgoose-clay-line);
+  border-radius: 12px;
+  padding: 13px 14px;
+}
+
+.chatgoose-analysis-card-verdict > .chatgoose-analysis-b {
+  font-size: 15px;
+}
+
+.chatgoose-analysis-card-works {
+  background: var(--chatgoose-green-bg);
+  border: 1px solid var(--chatgoose-green-line);
+  border-radius: 11px;
+  padding: 11px 13px;
+}
+
+.chatgoose-analysis-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-analysis-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.chatgoose-analysis-dot-clay { background: var(--chatgoose-clay-ink); }
+.chatgoose-analysis-dot-green { background: var(--chatgoose-green); }
+.chatgoose-analysis-dot-amber { background: var(--chatgoose-amber); }
+.chatgoose-analysis-dot-bad { background: var(--chatgoose-bad); }
+
+.chatgoose-analysis-b {
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-analysis-quote {
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-analysis-money {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.93em;
+  font-weight: 600;
+}
+
+.chatgoose-analysis-item {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 11px;
+  padding: 12px;
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-analysis-item-n {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--chatgoose-radius-chip);
+  margin-top: 1px;
+}
+
+.chatgoose-analysis-item-n-bad {
+  background: var(--chatgoose-clay-bg);
+  border: 1px solid var(--chatgoose-clay-line);
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-analysis-item-n-plain {
+  background: var(--chatgoose-bg3);
+  border: 1px solid var(--chatgoose-line-strong);
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-analysis-item-body {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.chatgoose-analysis-fix {
+  border: 1px dashed var(--chatgoose-clay-line);
+  background: var(--chatgoose-draft-bg);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+}
+
+.chatgoose-analysis-fix-label {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-analysis-fix-text {
+  font-family: var(--chatgoose-font-serif);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 /* ─── Errors ─────────────────────────────────────────────────── */
 
 .chatgoose-inline-error {
