@@ -85,6 +85,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 | E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
 | E71 | 2026-07-31 | Performance by work elision: two-stage Fansly bootstrap + isolated MV3 keepalive, narrow storage reads, incremental rendering/Voice dedupe, safe minification |
+| E72 | 2026-08-01 | Action bar restores direct Help, Review, and Compare buttons; cached Compare gets contextual Reopen |
 
 ## Entries
 
@@ -2531,3 +2532,12 @@ serves extension-page/content CSS as static files.
 Unchanged: kernel contracts and prompt assembly, Fansly read/API cadence and
 egress, AI call/cost semantics, human-send and indeterminate-retry rules, and
 Voice at-most-once custody.
+
+**E72 (2026-08-01).** The owner reverses E24's visibility choice for the
+implemented secondary actions: Help, Review, and Compare return as direct
+buttons in the action bar. A completed Compare result also exposes Reopen in
+the same row while that result is restorable; without a cached result the
+button remains hidden because it has no valid action. Existing prerequisites,
+hotkeys, generation behavior, result surfaces, ordering of the Reply options,
+Coach, persona, and Voice controls, and the horizontal overflow behavior are
+unchanged. No storage, protocol, kernel, prompt, retry, or send semantics move.

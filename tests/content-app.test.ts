@@ -1744,11 +1744,11 @@ describe('ChatGooseContentApp', () => {
 
     const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
       .find((button) => button.textContent === 'Reopen');
-    expect(reopenButton).toBeUndefined();
+    expect(reopenButton?.classList.contains('chatgoose-hidden')).toBe(false);
 
-    await app.reopenCompletedCompare();
+    reopenButton?.click();
+    await vi.waitFor(() => expect(app.comparePanelVisible).toBe(true));
 
-    expect(app.comparePanelVisible).toBe(true);
     expect(app.inlinePanel.root.querySelector('.chatgoose-compare-tab')?.textContent).toContain('Closer (current)');
   });
 
@@ -1777,16 +1777,16 @@ describe('ChatGooseContentApp', () => {
     const buttonBarRoot = app.buttonBar.root as HTMLElement;
     const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
       .find((button) => button.textContent === 'Reopen');
-    expect(reopenButton).toBeUndefined();
+    expect(reopenButton?.classList.contains('chatgoose-hidden')).toBe(false);
 
-    await app.reopenCompletedCompare();
+    reopenButton?.click();
+    await vi.waitFor(() => expect(app.completedCompareCache.get('group-1')).toBeNull());
 
     expect(app.comparePanelVisible).toBe(false);
-    expect(app.completedCompareCache.get('group-1')).toBeNull();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('Saved compare is outdated. Run Compare again.');
   });
 
-  it('closing a completed compare hides the panel and preserves the cache while compare stays hidden', async () => {
+  it('closing a completed compare hides the panel, preserves the cache, and exposes Reopen', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
 
@@ -1823,7 +1823,7 @@ describe('ChatGooseContentApp', () => {
     expect(app.comparePanelVisible).toBe(false);
     expect(app.activeCompareModel).toBeNull();
     expect(app.completedCompareCache.get('group-1')).not.toBeNull();
-    expect(reopenButton).toBeUndefined();
+    expect(reopenButton?.classList.contains('chatgoose-hidden')).toBe(false);
   });
 
   it('port disconnect resets all surfaces and state', async () => {

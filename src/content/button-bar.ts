@@ -14,6 +14,8 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'improve-draft', label: 'Fix' },
   { feature: 'hi-greeting', label: 'Hi' },
   { feature: 'ping', label: 'Ping' },
+  { feature: 'help-me', label: 'Help' },
+  { feature: 'chat-review', label: 'Review' },
   // 'Recap' names the dossier the chatter gets, not the scanning process.
   { feature: 'fan-summary', label: 'Recap' },
 ];
@@ -105,6 +107,8 @@ export class ButtonBar {
     const fixButton = this.buttons.get('improve-draft')!;
     const hiButton = this.buttons.get('hi-greeting')!;
     const pingButton = this.buttons.get('ping')!;
+    const helpButton = this.buttons.get('help-me')!;
+    const reviewButton = this.buttons.get('chat-review')!;
     const summaryButton = this.buttons.get('fan-summary')!;
     // Recap carries a "ready" dot when a cached summary can be opened, and
     // opens the right-hand "about the fan" cluster (margin-left: auto).
@@ -181,7 +185,8 @@ export class ButtonBar {
     // Bar v2 order (E24): the Reply cluster (trigger + tone groove + Split
     // flag), then draft tools, then situational openers, then — pinned right —
     // the "about the fan" side (Recap + persona). Hairline seams mark the
-    // group boundaries. Help / Review / Compare stay implemented but hidden.
+    // group boundaries. Every implemented action has a direct entry point;
+    // Reopen appears only while a completed Compare result can be restored.
     this.root.append(
       replyButton,
       this.toneTrack,
@@ -191,6 +196,10 @@ export class ButtonBar {
       makeSeparator(),
       hiButton,
       pingButton,
+      helpButton,
+      reviewButton,
+      compareButton,
+      this.compareRestoreButton,
       summaryButton,
       // Coach sits in the "about the fan" cluster, right after Recap (spec §10).
       this.coachButton,
@@ -276,7 +285,7 @@ export class ButtonBar {
     nextReplyTone: ReplyTone,
     hasDraftText: boolean,
     activeLoading = false,
-    _showCompareRestore = false,
+    showCompareRestore = false,
   ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatgoose-hidden', !hasState);
@@ -317,8 +326,8 @@ export class ButtonBar {
     const compareActive = activeAction === 'compare';
     compareButton.disabled =
       Boolean(activeAction && !compareActive) || disableCompareForPrereqs;
-    this.compareRestoreButton.classList.add('chatgoose-hidden');
-    this.compareRestoreButton.disabled = true;
+    this.compareRestoreButton.classList.toggle('chatgoose-hidden', !showCompareRestore);
+    this.compareRestoreButton.disabled = Boolean(activeAction);
 
     // Coach: enabled once its prereqs are met (it needs a mapped persona + key +
     // connection to generate). A streaming coach turn reports as

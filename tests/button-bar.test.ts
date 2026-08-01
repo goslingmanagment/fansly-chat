@@ -96,7 +96,7 @@ describe('ButtonBar toolbar visibility', () => {
     vi.restoreAllMocks();
   });
 
-  it('keeps Compare out of the toolbar even when compare cards are available', () => {
+  it('renders Compare in the toolbar and enables it when compare cards are available', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -105,7 +105,8 @@ describe('ButtonBar toolbar visibility', () => {
     const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Compare');
 
-    expect(compare).toBeUndefined();
+    expect(compare).toBeDefined();
+    expect(compare?.disabled).toBe(false);
   });
 
   it('renders Recap as a row button (no overflow ⋯ menu)', () => {
@@ -280,7 +281,7 @@ describe('ButtonBar toolbar visibility', () => {
     expect(voiceSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Help, Review, and Compare out of the toolbar', () => {
+  it('renders Help, Review, Compare, and the contextual Reopen entry', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -289,10 +290,26 @@ describe('ButtonBar toolbar visibility', () => {
     const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .map(labelOf);
 
-    expect(labels).not.toContain('Help');
-    expect(labels).not.toContain('Review');
-    expect(labels).not.toContain('Compare');
-    expect(labels).not.toContain('Reopen');
+    expect(labels).toContain('Help');
+    expect(labels).toContain('Review');
+    expect(labels).toContain('Compare');
+    expect(labels).toContain('Reopen');
+    expect(buttonByLabel(bar.root, 'Reopen')?.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
+  it('shows Reopen only when a completed Compare can be restored', () => {
+    const onCompareRestoreClick = vi.fn();
+    const bar = makeBar({ onCompareRestoreClick });
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, true);
+
+    const reopen = buttonByLabel(bar.root, 'Reopen');
+    expect(reopen?.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(reopen?.disabled).toBe(false);
+
+    reopen?.click();
+    expect(onCompareRestoreClick).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -475,7 +492,7 @@ describe('ButtonBar improve draft state', () => {
     expect(buttonByLabel(bar.root, 'Fix')?.disabled).toBe(true);
   });
 
-  it('orders Reply through Recap, Coach, personality, then Voice', () => {
+  it('orders every toolbar action before Recap, Coach, personality, then Voice', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -494,6 +511,10 @@ describe('ButtonBar improve draft state', () => {
     const fixIndex = children.findIndex((child) => labelOf(child) === 'Fix');
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
+    const helpIndex = children.findIndex((child) => labelOf(child) === 'Help');
+    const reviewIndex = children.findIndex((child) => labelOf(child) === 'Review');
+    const compareIndex = children.findIndex((child) => labelOf(child) === 'Compare');
+    const reopenIndex = children.findIndex((child) => labelOf(child) === 'Reopen');
     const recapIndex = children.findIndex((child) => labelOf(child) === 'Recap');
     const coachIndex = children.findIndex((child) => labelOf(child) === 'Coach');
     const personalityIndex = children.findIndex((child) =>
@@ -510,7 +531,11 @@ describe('ButtonBar improve draft state', () => {
     expect(fixIndex).toBeGreaterThan(splitIndex);
     expect(hiIndex).toBeGreaterThan(fixIndex);
     expect(pingIndex).toBe(hiIndex + 1);
-    expect(recapIndex).toBe(pingIndex + 1);
+    expect(helpIndex).toBe(pingIndex + 1);
+    expect(reviewIndex).toBe(helpIndex + 1);
+    expect(compareIndex).toBe(reviewIndex + 1);
+    expect(reopenIndex).toBe(compareIndex + 1);
+    expect(recapIndex).toBe(reopenIndex + 1);
     // Coach joins the fan-side cluster right after Recap (spec §10).
     expect(coachIndex).toBe(recapIndex + 1);
     expect(personalityIndex).toBe(coachIndex + 1);
