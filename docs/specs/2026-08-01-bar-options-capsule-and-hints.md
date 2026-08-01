@@ -133,10 +133,12 @@ the bar, positioned `fixed` from the anchor's `getBoundingClientRect()`.
 
 ### Timing
 
-- Show after **400ms** of hover; hide immediately.
-- While a hint is already open, moving to another control swaps content with no
-  delay (standard tooltip-group behaviour), resetting to 400ms after 300ms with
-  nothing hovered.
+- Show after **1000ms** of holding still; hide immediately. (Shipped at 400ms
+  and raised after the owner used it: crossing the bar to reach Reply passes
+  over three or four controls, and they all spoke.)
+- While a hint is already open, moving to another control re-arms on a shorter
+  **250ms** dwell — not instantly, or a sweep machine-guns the row — returning
+  to the full second 300ms after the last hint hides.
 - Also shows on `:focus-visible`, so keyboard users get the same copy.
 
 ### Disabled controls

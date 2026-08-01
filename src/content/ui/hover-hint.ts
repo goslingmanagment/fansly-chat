@@ -26,10 +26,18 @@ export interface HoverHintText {
   body: string;
 }
 
-/** Dwell before the first hint of a group appears. */
-const SHOW_DELAY_MS = 400;
-/** After the last hint hides, another one still opens instantly for this long —
- *  the standard tooltip-group behaviour, so sweeping the row does not stutter. */
+// Timings are tuned for a bar the chatter crosses with the mouse all day: on
+// the way to Reply the pointer passes over three or four other controls, and at
+// the original 400ms + instant-swap they all fired in sequence. A hint must be
+// something you ASK for by holding still, not something the row throws at you.
+
+/** Hold this long on a control before its hint appears. */
+const SHOW_DELAY_MS = 1000;
+/** Moving to another control while a hint is open re-arms with this shorter
+ *  dwell instead of swapping instantly: comparing two controls stays quick,
+ *  sweeping the row does not machine-gun hints. */
+const SWAP_DELAY_MS = 250;
+/** How long after hiding the shorter dwell still applies. */
 const GROUP_GRACE_MS = 300;
 /** Keep-out from the viewport edges when clamping. */
 const VIEWPORT_MARGIN = 8;
@@ -147,14 +155,11 @@ export class HoverHintController {
     }
     this.pending = hit;
     this.clearShowTimer();
-    if (this.groupActive) {
-      this.show(hit);
-      return;
-    }
+    const delay = this.groupActive || this.shownFor ? SWAP_DELAY_MS : SHOW_DELAY_MS;
     this.showTimer = setTimeout(() => {
       this.showTimer = null;
       this.show(hit);
-    }, SHOW_DELAY_MS);
+    }, delay);
   };
 
   private readonly onPointerLeave = (): void => this.hide();

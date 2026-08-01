@@ -75,44 +75,59 @@ describe('HoverHintController', () => {
     vi.unstubAllGlobals();
   });
 
-  it('waits out the dwell before the first hint appears', () => {
+  it('needs a full second of holding still before the first hint appears', () => {
     hover(container, 10, 210);
     expect(visibleText()).toBeNull();
 
-    vi.advanceTimersByTime(399);
+    vi.advanceTimersByTime(999);
     expect(visibleText()).toBeNull();
 
     vi.advanceTimersByTime(1);
     expect(visibleText()).toEqual({ title: 'Reply', body: 'Ответ на переписку' });
   });
 
-  it('swaps to the next control with no dwell while a hint is open', () => {
+  it('does not fire for a pointer merely crossing the row', () => {
+    // The way to Reply passes over its neighbours; none of them may speak.
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(120);
+    hover(container, 50, 210);
+    vi.advanceTimersByTime(120);
+    hover(container, 500, 500);
+    vi.advanceTimersByTime(2000);
+    expect(visibleText()).toBeNull();
+  });
+
+  it('re-arms on a shorter dwell while a hint is open', () => {
+    hover(container, 10, 210);
+    vi.advanceTimersByTime(1000);
     expect(visibleText()?.title).toBe('Reply');
 
     hover(container, 50, 210);
-    // No timer advance: sweeping the row must not stutter.
+    // Not instant — a sweep past the neighbour must not flash its hint…
+    expect(visibleText()?.title).toBe('Reply');
+    vi.advanceTimersByTime(250);
+    // …but deliberately comparing two controls stays quick.
     expect(visibleText()?.title).toBe('Fix');
   });
 
-  it('restores the dwell once the group grace has lapsed', () => {
+  it('restores the full dwell once the group grace has lapsed', () => {
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     hover(container, 500, 500); // off every anchor — hides
     expect(visibleText()).toBeNull();
 
     vi.advanceTimersByTime(300); // grace over
     hover(container, 50, 210);
+    vi.advanceTimersByTime(250);
     expect(visibleText()).toBeNull();
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(750);
     expect(visibleText()?.title).toBe('Fix');
   });
 
   it('hides on pointer leave, on Escape and on scroll', () => {
     const open = () => {
       hover(container, 10, 210);
-      vi.advanceTimersByTime(400);
+      vi.advanceTimersByTime(1000);
     };
 
     open();
@@ -132,20 +147,20 @@ describe('HoverHintController', () => {
 
   it('opens above the anchor, and flips below only when there is no room', () => {
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     expect(layer()?.classList.contains('chatgoose-hint-below')).toBe(false);
 
     hints.hide();
     // An anchor hugging the top edge cannot host a bubble above it.
     placeAt(first, { left: 0, right: 30, top: 2, bottom: 32, width: 30, height: 30 });
     hover(container, 10, 10);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     expect(layer()?.classList.contains('chatgoose-hint-below')).toBe(true);
   });
 
   it('describes the control it is open for, and stops when it closes', () => {
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     const layerId = layer()?.id;
     expect(layerId).toBeTruthy();
     expect(first.getAttribute('aria-describedby')).toBe(layerId);
@@ -157,7 +172,7 @@ describe('HoverHintController', () => {
   it('skips anchors that are hidden or unrendered', () => {
     first.classList.add('chatgoose-hidden');
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     expect(visibleText()).toBeNull();
   });
 
@@ -171,14 +186,14 @@ describe('HoverHintController', () => {
 
   it('leaves no layer behind and goes quiet after destroy', () => {
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     expect(layer()).not.toBeNull();
 
     hints.destroy();
     expect(layer()).toBeNull();
 
     hover(container, 10, 210);
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1000);
     expect(layer()).toBeNull();
   });
 });
