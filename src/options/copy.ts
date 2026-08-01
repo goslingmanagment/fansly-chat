@@ -574,6 +574,8 @@ export const COPY = {
     chatCardTitle: 'Панель в чате',
     chatCardNote: 'Тема применяется сразу во всех вкладках Fansly и в попапе — перезагружать ничего не нужно.',
     chatToneChip: 'тон · flirty',
+    toolbarHintsTitle: 'Подсказки при наведении',
+    toolbarHintsHint: 'Показывать объяснения кнопок после секундной паузы.',
     systemTitle: 'Системная',
     systemHint: 'следует за ОС',
     lightTitle: 'Светлая',

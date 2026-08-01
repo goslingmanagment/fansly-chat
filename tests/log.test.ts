@@ -121,6 +121,7 @@ describe('isDebugEnabled', () => {
       debugMode: true,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
     })).toBe(true);
@@ -138,6 +139,7 @@ describe('isDebugEnabled', () => {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
     })).toBe(false);

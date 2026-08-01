@@ -1,6 +1,6 @@
 # Action bar — the Reply options capsule, and hover hints for the whole row
 
-Date: 2026-08-01 · Status: DRAFT, awaiting owner review · Scope: fansly-ext only
+Date: 2026-08-01 · Status: IMPLEMENTED · Scope: fansly-ext only
 (no kernel, no contract change) · Builds on: E71 (density pass, persona pill
 removed), E72 (Recap corner badge + second density pass — uncommitted on branch
 `ui/recap-badge-width` at the time of writing).
@@ -20,6 +20,7 @@ script, composer width 605px derived from E71's screenshot).
 | 5 | Hover hints | A new in-house hint component, applied to **every control in the bar**, replacing the native `title` on those controls |
 | 6 | Hotkey | `⌘⇧L` on macOS, `Alt+Shift+L` elsewhere — `L` for spLit, free and outside Firefox's reserved ⌘⇧ set (R/T/P/B/A) |
 | 7 | Corner keycap | Stays on the feature buttons — it is instant and teaches the key, so their hints do NOT repeat the combo. The capsule's cells (4 tones + Split) are 24px and cannot host a keycap, so THEIR hints carry the combo as the second line |
+| 8 | Can hints be disabled | Yes. «Вид» owns a default-on «Подсказки при наведении» switch; off suppresses both pointer and keyboard-focus bubbles without removing accessible names or hotkey metadata |
 
 Rejected, with reasons, so they are not re-proposed:
 
@@ -141,6 +142,17 @@ the bar, positioned `fixed` from the anchor's `getBoundingClientRect()`.
   to the full second 300ms after the last hint hides.
 - Also shows on `:focus-visible`, so keyboard users get the same copy.
 
+### Preference
+
+The custom explanatory layer is default-on for new and upgraded installs, but
+can be disabled under «Вид». This is storage schema v16's
+`showToolbarHints` boolean. It travels in `TabUiState`, so changing the switch
+re-renders already-open Fansly tabs; disabling synchronously hides an open hint,
+cancels a pending dwell, clears `aria-describedby`, and ends the short group
+grace. A missing field on `TabUiState` means enabled during an old-background /
+new-content overlap. The control's own accessible name and
+`aria-keyshortcuts` remain regardless of this preference.
+
 ### Disabled controls
 
 The most confusing state is a greyed-out control (`Fix` without a draft, the
@@ -186,6 +198,8 @@ second line unchanged.
   work (§5) and are the only place explaining why.
 - **Operation running**: Split disabled like the tones; the hotkey is a no-op
   through the existing guard in `toggleNextFastReplyMode`.
+- **Hints disabled**: no pointer or focus bubble is rendered; enabling the
+  preference again starts with the full 1000ms dwell.
 - **Split armed, kernel returns one part**: unchanged — E49's violation note
   ("expected at least 2 messages") still fires. Nothing in this spec touches the
   request or the result contract.
@@ -211,9 +225,12 @@ New coverage:
 - `aria-checked` and the armed class follow `nextReplyMode`.
 - Clicking still fires `onReplyModeToggle`; the hotkey fires the same path.
 - The cheatsheet and Options pane list the new key.
-- Hint component: opens after the delay, swaps without delay, flips when the
+- Hint component: opens after the delay, swaps after the shorter dwell, flips when the
   anchor is near the top, is removed on detach, and does not double up with a
   native `title`.
+- Hint preference: v16 defaults it on and preserves an explicit opt-out; the
+  Options switch persists through the existing save path; the bar applies the
+  value live and disabling closes/cancels the hint layer.
 
 Width invariance (armed == unarmed) cannot be asserted in jsdom — it is a
 visual check on the bench, recorded here so nobody assumes a test covers it.

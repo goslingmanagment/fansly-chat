@@ -52,6 +52,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
       ...overrides,

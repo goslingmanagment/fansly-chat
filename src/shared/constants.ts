@@ -7,7 +7,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 15;
+export const STORAGE_SCHEMA_VERSION = 16;
 /** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 /** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
@@ -312,6 +312,7 @@ export const DEFAULT_SETTINGS: Settings = {
   debugMode: false,
   promptCachingEnabled: true,
   uiTheme: 'system',
+  showToolbarHints: true,
   coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
   coachAutoRecap: 'off',
 };

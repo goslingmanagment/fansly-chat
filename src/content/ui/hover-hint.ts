@@ -64,6 +64,7 @@ export class HoverHintController {
   private showTimer: ReturnType<typeof setTimeout> | null = null;
   private groupTimer: ReturnType<typeof setTimeout> | null = null;
   private groupActive = false;
+  private enabled = true;
   private pending: HTMLElement | null = null;
   private shownFor: HTMLElement | null = null;
 
@@ -130,6 +131,21 @@ export class HoverHintController {
     return this.shownFor !== null;
   }
 
+  /** Enable/disable the whole explanatory layer. Disabling is synchronous: an
+   * already-open hint and any pending dwell disappear before this returns. */
+  setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) {
+      return;
+    }
+    this.enabled = enabled;
+    if (enabled) {
+      return;
+    }
+    this.hide();
+    this.clearGroupTimer();
+    this.groupActive = false;
+  }
+
   hide(): void {
     this.clearShowTimer();
     this.pending = null;
@@ -144,6 +160,9 @@ export class HoverHintController {
   }
 
   private readonly onPointerMove = (event: Event): void => {
+    if (!this.enabled) {
+      return;
+    }
     const pointer = event as PointerEvent;
     const hit = this.hitTest(pointer.clientX, pointer.clientY);
     if (!hit) {
@@ -176,6 +195,9 @@ export class HoverHintController {
   // (no dwell — focus is already deliberate) and announces it via
   // aria-describedby.
   private readonly onFocus = (event: Event): void => {
+    if (!this.enabled) {
+      return;
+    }
     const target = event.target as HTMLElement | null;
     if (target) {
       this.show(target);
@@ -202,6 +224,9 @@ export class HoverHintController {
   }
 
   private show(element: HTMLElement): void {
+    if (!this.enabled) {
+      return;
+    }
     const entry = this.anchors.find((anchor) => anchor.element === element);
     const text = entry?.text() ?? null;
     if (!text) {

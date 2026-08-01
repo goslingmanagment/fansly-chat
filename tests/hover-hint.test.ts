@@ -184,6 +184,40 @@ describe('HoverHintController', () => {
     expect(visibleText()).toBeNull();
   });
 
+  it('stays silent while disabled and starts with the full dwell when re-enabled', () => {
+    hints.setEnabled(false);
+
+    hover(container, 10, 210);
+    vi.advanceTimersByTime(2000);
+    first.dispatchEvent(new dom.window.Event('focus'));
+    expect(visibleText()).toBeNull();
+
+    hints.setEnabled(true);
+    hover(container, 10, 210);
+    vi.advanceTimersByTime(999);
+    expect(visibleText()).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(visibleText()?.title).toBe('Reply');
+  });
+
+  it('closes an open hint and cancels a pending dwell as soon as it is disabled', () => {
+    hover(container, 10, 210);
+    vi.advanceTimersByTime(500);
+    hints.setEnabled(false);
+    vi.advanceTimersByTime(1000);
+    expect(visibleText()).toBeNull();
+
+    hints.setEnabled(true);
+    hover(container, 10, 210);
+    vi.advanceTimersByTime(1000);
+    expect(visibleText()?.title).toBe('Reply');
+    expect(first.hasAttribute('aria-describedby')).toBe(true);
+
+    hints.setEnabled(false);
+    expect(visibleText()).toBeNull();
+    expect(first.hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('leaves no layer behind and goes quiet after destroy', () => {
     hover(container, 10, 210);
     vi.advanceTimersByTime(1000);

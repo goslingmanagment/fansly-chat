@@ -174,6 +174,51 @@ describe('ButtonBar toolbar visibility', () => {
     );
   });
 
+  it('applies the toolbar-hint preference live without removing control metadata', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(
+      buildState({ showToolbarHints: false }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+    const reply = buttonByLabel(bar.root, 'Reply');
+    reply?.dispatchEvent(new window.Event('focus'));
+    expect(document.querySelector('.chatgoose-hint')).toBeNull();
+    expect(labelOf(reply!)).toBe('Reply');
+    expect(reply?.getAttribute('aria-keyshortcuts')).toBeTruthy();
+
+    bar.render(
+      buildState({ showToolbarHints: true }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+    reply?.dispatchEvent(new window.Event('focus'));
+    expect(hintFor(reply).title).toBe('Reply');
+
+    bar.render(
+      buildState({ showToolbarHints: false }),
+      null,
+      'default',
+      'none',
+      true,
+      false,
+      false,
+    );
+    expect(document.querySelector('.chatgoose-hint')?.classList.contains('chatgoose-hidden'))
+      .toBe(true);
+    expect(reply?.hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('keeps the hover-only hotkey through the active loading spinner', () => {
     const bar = makeBar();
     document.body.append(bar.root);

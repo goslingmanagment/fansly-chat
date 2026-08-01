@@ -193,6 +193,23 @@ describe('migrateState', () => {
     expect(junk.settings.uiTheme).toBe('system');
   });
 
+  it('adds the v16 toolbar-hint preference default-on and preserves an explicit opt-out', () => {
+    const legacy = migrateState({
+      schemaVersion: 15,
+      settings: { uiTheme: 'dark' },
+    });
+    expect(legacy.settings.showToolbarHints).toBe(true);
+
+    const optedOut = migrateState({
+      schemaVersion: 15,
+      settings: { showToolbarHints: false },
+    });
+    expect(optedOut.settings.showToolbarHints).toBe(false);
+    expect(
+      migrateState(optedOut as unknown as Record<string, unknown>).settings.showToolbarHints,
+    ).toBe(false);
+  });
+
   it('seeds pingMessageCount from quickMessageCount when migrating legacy settings', () => {
     const result = migrateState({
       schemaVersion: 4,
@@ -469,6 +486,11 @@ describe('sanitizeSettings', () => {
     expect(
       storage.sanitizeSettings({ uiTheme: 'neon' as unknown as 'dark' }).uiTheme,
     ).toBe('system');
+  });
+
+  it('defaults toolbar hints on while preserving an explicit disabled value', () => {
+    expect(storage.sanitizeSettings({}).showToolbarHints).toBe(true);
+    expect(storage.sanitizeSettings({ showToolbarHints: false }).showToolbarHints).toBe(false);
   });
 
   it('clamps coachHistoryLimit within [1, 20]', () => {

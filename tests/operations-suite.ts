@@ -1055,7 +1055,25 @@ describe(`OperationCoordinator (${part})`, () => {
         state: expect.objectContaining({
           accountId: 'resolved-1',
           voiceNotesCapable: true,
+          showToolbarHints: true,
         }),
+      }),
+    );
+  });
+
+  it('carries an explicit toolbar-hint opt-out into tab state', async () => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      showToolbarHints: false,
+    };
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.refreshTabState(1);
+
+    expect(postedMessages(port).at(-1)).toEqual(
+      expect.objectContaining({
+        type: 'tab:state',
+        state: expect.objectContaining({ showToolbarHints: false }),
       }),
     );
   });

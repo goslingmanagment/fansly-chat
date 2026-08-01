@@ -18,6 +18,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
     },

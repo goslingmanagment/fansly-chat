@@ -87,6 +87,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E71 | 2026-08-01 | The action bar drops the persona pill and tightens its density: 716px of content on a ~605px composer was scrolling Reply — the primary action — off the left edge. The persona NAME moves to Reply’s own tooltip, «Unmapped» defers to the mapping banner already open under the bar, and only the one state with no other surface («no Fansly account detected») keeps a chip. Gap 6→5, side padding 10→8, button padding 11→9, tone segment 30→27: measured 716 → 597px |
 | E72 | 2026-08-01 | Recap's ready dot moves to a corner badge, freeing the 9px reserve that made it the row's widest chip with an off-centre label; width stays state-independent so the dot never reflows the bar (E27's rule). Second density pass — gap 5→4, button padding 9→8, tone segment 27→24 with padding 5→4, groove gap 2→1, seam margins dropped: measured 594 → 542px, headroom on the ~605px composer 8px → ~63px. Split stays labelled (icon-only was measured at −34px and declined, E24) |
 | E73 | 2026-08-01 | Split moves into the Reply options capsule as a fifth cell behind a seam, loses its word, gains ⌘⇧L: `supportsReplyMode` is true for `fast-reply` alone, so it is an option, not an action (amends E24). A checkbox among radios is kept legible by FORM — armed tone rises, armed Split is pressed in — and the capsule is a plain container so the `radiogroup` role can stay on the inner track. 542 → 507px, though the icon-only variant measured 509px, so structure decided it, not pixels. Losing the word forced real hover hints for the whole bar, replacing the native `title`: rendered outside the `overflow-x: auto` bar, hover hit-tested on the container so DISABLED controls still explain themselves |
+| E74 | 2026-08-01 | Owner feedback on E73: first hover dwell rises 400→1000ms and within-group swaps use a 250ms dwell (300ms grace), so crossing the row does not fire hints. Storage v16 adds default-on `showToolbarHints` under «Вид»; off suppresses pointer/focus bubbles live, immediately closes/cancels one in flight, and leaves accessible names + hotkeys intact |
 
 ## Entries
 
@@ -2618,3 +2619,25 @@ without hover lives in `aria-label`/`aria-keyshortcuts`, and the open hint is
 announced through `aria-describedby`. Not touched: what Split SENDS (E49's
 one-part violation note stands), its stickiness, and the tone groove's own
 behaviour.
+
+**E74 (2026-08-01).** Real-use feedback amends E73's hint timing and makes the
+explanatory layer optional. The initial custom dwell shipped at 400ms, and once
+one bubble was open the next anchor replaced it immediately. Crossing a compact
+507px row therefore made controls speak before the chatter had stopped on one.
+The first dwell is now **1000ms**; movement within an active hint group re-arms
+on **250ms**, rather than swapping instantly, and the group returns to the full
+dwell **300ms** after its last hint hides. Pointer movement resets the pending
+anchor, so merely travelling across the row produces no bubble.
+
+Storage schema **v16** adds `settings.showToolbarHints`, default-on for both new
+and upgraded installs so E73 remains discoverable. «Вид» exposes it as
+«Подсказки при наведении» through the existing serialized Settings
+writer. `OperationCoordinator` carries the sanitized value in `TabUiState`, so
+the ordinary settings-change refresh updates every open Fansly tab. Turning it
+off is synchronous at the bar: an open hint hides, a pending dwell and group
+grace are cancelled, and `aria-describedby` is removed. Pointer and focus
+bubbles both stay silent while disabled; accessible names and
+`aria-keyshortcuts` remain on the controls. A missing `TabUiState` field means
+enabled, preserving behaviour during the brief old-background/new-content
+overlap of an extension update. No kernel, contract, generation, send, or
+Fansly-egress path changes.

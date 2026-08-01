@@ -397,6 +397,9 @@ export class ButtonBar {
   ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatgoose-hidden', !hasState);
+    // Optional on the port shape for a brief old-background/new-content overlap
+    // during an extension update. Missing means the v16 default: enabled.
+    this.hints.setEnabled(state?.showToolbarHints !== false);
     // Hints read these instead of taking their own copy of the render inputs;
     // set before the early return so a stateless bar still explains itself.
     this.lastState = state;

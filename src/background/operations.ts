@@ -878,6 +878,7 @@ export class OperationCoordinator {
       // Stage 32: readiness = kernel lane configured (hub transport up).
       hasApiKey: this.kernelGateway.isConfigured(storage.settings),
       voiceNotesCapable,
+      showToolbarHints: storage.settings.showToolbarHints,
       hasPersonalities: getActivePersonaCatalog(storage.personaCatalog).length > 0,
       mappedPersonalityId,
       mappedPersonalityName,
