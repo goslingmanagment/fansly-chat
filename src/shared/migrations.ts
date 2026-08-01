@@ -27,6 +27,7 @@ export function createDefaultSettings(): Settings {
     debugMode: false,
     promptCachingEnabled: true,
     uiTheme: 'system',
+    showToolbarHints: true,
     coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
     coachAutoRecap: 'off',
   };
@@ -74,6 +75,8 @@ function migrateSettingsRecord(
   // transform (bumpLegacyDeepMessageCountDefault, keyed on the incoming
   // record's version) so a user-modified value survives; here we only default
   // the two new fields.
+  // v16: showToolbarHints ADDED, default-on so upgrading keeps the explanatory
+  // layer until the chatter explicitly disables it in «Вид».
   return {
     agencyHubBaseUrl:
       typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
@@ -101,6 +104,7 @@ function migrateSettingsRecord(
       raw?.uiTheme === 'light' || raw?.uiTheme === 'dark' || raw?.uiTheme === 'system'
         ? raw.uiTheme
         : defaults.uiTheme,
+    showToolbarHints: Boolean(raw?.showToolbarHints ?? defaults.showToolbarHints),
     coachHistoryLimit: Number(raw?.coachHistoryLimit ?? defaults.coachHistoryLimit),
     coachAutoRecap:
       raw?.coachAutoRecap === 'short' ||

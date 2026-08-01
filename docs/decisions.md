@@ -84,8 +84,12 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 | E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
-| E71 | 2026-07-31 | Performance by work elision: two-stage Fansly bootstrap + isolated MV3 keepalive, narrow storage reads, incremental rendering/Voice dedupe, safe minification |
-| E72 | 2026-08-01 | Action bar restores direct Help, Review, and Compare buttons; cached Compare gets contextual Reopen |
+| E71 | 2026-08-01 | The action bar drops the persona pill and tightens its density: 716px of content on a ~605px composer was scrolling Reply — the primary action — off the left edge. The persona NAME moves to Reply’s own tooltip, «Unmapped» defers to the mapping banner already open under the bar, and only the one state with no other surface («no Fansly account detected») keeps a chip. Gap 6→5, side padding 10→8, button padding 11→9, tone segment 30→27: measured 716 → 597px |
+| E72 | 2026-08-01 | Recap's ready dot moves to a corner badge, freeing the 9px reserve that made it the row's widest chip with an off-centre label; width stays state-independent so the dot never reflows the bar (E27's rule). Second density pass — gap 5→4, button padding 9→8, tone segment 27→24 with padding 5→4, groove gap 2→1, seam margins dropped: measured 594 → 542px, headroom on the ~605px composer 8px → ~63px. Split stays labelled (icon-only was measured at −34px and declined, E24) |
+| E73 | 2026-08-01 | Split moves into the Reply options capsule as a fifth cell behind a seam, loses its word, gains ⌘⇧L: `supportsReplyMode` is true for `fast-reply` alone, so it is an option, not an action (amends E24). A checkbox among radios is kept legible by FORM — armed tone rises, armed Split is pressed in — and the capsule is a plain container so the `radiogroup` role can stay on the inner track. 542 → 507px, though the icon-only variant measured 509px, so structure decided it, not pixels. Losing the word forced real hover hints for the whole bar, replacing the native `title`: rendered outside the `overflow-x: auto` bar, hover hit-tested on the container so DISABLED controls still explain themselves |
+| E74 | 2026-08-01 | Owner feedback on E73: first hover dwell rises 400→1000ms and within-group swaps use a 250ms dwell (300ms grace), so crossing the row does not fire hints. Storage v16 adds default-on `showToolbarHints` under «Вид»; off suppresses pointer/focus bubbles live, immediately closes/cancels one in flight, and leaves accessible names + hotkeys intact |
+| E75 | 2026-08-01 | Performance by work elision: two-stage Fansly bootstrap + isolated MV3 keepalive, narrow storage reads, incremental rendering/Voice dedupe, safe minification |
+| E76 | 2026-08-01 | Action bar restores direct Help, Review, and Compare buttons; cached Compare gets contextual Reopen |
 
 ## Entries
 
@@ -2491,7 +2495,156 @@ for any other type: it is the one field on this message whose origin is the
 kernel, where the contract declares it optional by design, and absent already
 means «alive» to every consumer.
 
-**E71 (2026-07-31).** Performance work removes redundant local work; it does
+**E71 (2026-08-01).** The action bar drops the persona pill and tightens its
+density. The trigger was a screenshot: on the chatter's composer the bar was
+scrolled sideways, `Reply` — the primary action — sat off the left edge, and the
+first thing visible was the middle of the tone groove. Measured on a faithful
+DOM specimen of the real geometry, the row needed **716px** of content against
+a composer of **~605px** (derived from the screenshot: a 1210px crop at
+retina ×2). Nothing was broken; there was simply more bar than composer.
+
+**The pill carried three facts, and each one had a better home than 60px of the
+row.** (a) The persona NAME (`Lora`) is something the chatter already knows —
+they opened this account — so it moves to `Reply`'s own tooltip
+(«Reply as Lora (⌘⇧R)»), the one control whose output the name actually
+describes. (b) `Unmapped` repeated, word for word, the mapping banner that is
+open directly under the bar in exactly that state, with a persona picker in it:
+one fact, one place (E67), so the bar stops saying it. (c) `Not connected` — no
+Fansly accountId — is the one state with NO second surface: `MappingBanner.render`
+returns early without an accountId, so the bar would sit fully disabled and
+silent about why. That case, and only that case, keeps a chip
+(`.chatgoose-toolbar-warn`, amber — a problem, not a label). The pill was the
+right idea in the wrong place: it paid its width on every message to be useful
+on almost none.
+
+**The rest of the savings came from density, not from removing controls.** Row
+gap 6→5, bar side padding 10→8, button padding 11→9, tone segment min-width
+30→27 with padding 7→5, seam margin 2→1, and the Recap ready-dot inset trimmed
+to match its new padding. Together with the pill: **716 → 597px**, i.e. the
+measured composer now fits with the bar in one row and no scroll. No control
+was moved, collapsed into an overflow menu, or turned into an icon — the E24
+meaning-groups, the visible four-tone groove (E24/E27) and the single right-pin
+on Recap all stand exactly as they were.
+
+**The remaining margin is 8px, and that is a known limit, not an oversight.** A
+chatter on a laptop or with Fansly's right sidebar open will still scroll. Two
+further options were mocked and measured against this same bench: wrapping to a
+second row instead of scrolling (never hides Reply, costs ~38px of feed height),
+and moving tone + Split into a pocket under Reply (fits from 432px, but takes
+the four tones off the surface, against E24). Both were shown to the owner and
+deliberately NOT taken now — this change is the uncontroversial half. If the
+scroll comes back on a real composer, the wrap variant is the next step and
+needs no new design work.
+
+Tombstones: `.chatgoose-pill` (content only — the options/popup rule of the same
+name is untouched), `.chatgoose-personality`, `.chatgoose-toolbar-pill` and
+`.chatgoose-toolbar-personality-end` are deleted; they had no other consumer
+once the pill left. `TabUiState.mappedPersonalityName` is unchanged and still
+read — it just renders into a tooltip instead of a chip. The button-bar suite
+pins the new shape: no persona text in the bar, the name present in Reply's
+title (and absent when nothing is mapped), the chip hidden for an unmapped
+account and shown when there is no accountId, and — with the warning visible —
+Recap still the single toolbar child whose `margin-left` resolves to `auto`.
+
+**E72 (2026-08-01).** The Recap "ready" dot becomes a corner badge, and the bar
+takes a second density pass. E71 left the row 8px inside the measured composer —
+too thin a margin to survive a laptop or an open Fansly sidebar, which E71 itself
+recorded as a known limit. The trigger this time was the button, not the row: at
+`padding-right: 18px` against the row's 9px, Recap was **9px wider than every
+other chip and its label sat visibly off-centre** — a permanent reserve for a dot
+that only renders when `hasAvailableSummary`, i.e. empty in the common state. The
+dot now sits at `top/right: 3px`, ABOVE the label's cap height, so the reserve is
+gone and the padding is symmetric again. Width stays state-independent (measured
+identical with and without the dot): the dot appearing must never reflow a bar
+that is one chip away from scrolling — the same rule E27 set for the tone groove.
+
+**The rest is padding and gap only.** Row gap 5→4, button padding 9→8, tone
+segment min-width 27→24 with padding 5→4, groove gap 2→1, and the seam margins
+dropped (the row gap already spaced them — their own margins were doubling it).
+On the same DOM bench that E71 used, `main` measures **594px** and this change
+**542px**; against the ~605px composer the headroom goes from 8px to ~63px.
+Nothing left the row: no label shortened, no control collapsed, and the E24
+meaning-groups, the four-tone groove and Recap's single right-pin all stand.
+
+Rejected, measured, on the owner's call: making Split icon-only saves a further
+**34px** — the largest single win left in the row — but spends the word on a
+control E24 deliberately gave a LABELLED checkbox to distinguish it from the
+tone radio. The groove (107px after this change) remains the row's widest item
+and the place to look if the scroll ever returns; folding Split into it as a
+fifth segment is worth ~39px and is the same E24 trade, not taken.
+
+**E73 (2026-08-01).** Split moves INSIDE the Reply options capsule, trades its
+word for a square, and gains `⌘⇧L`; every control in the bar gets a real hover
+hint. The trigger was the same screenshot habit as E71/E72 — the owner asking
+what a 63px chip was buying — but the answer turned out to be structural, not
+metric: `supportsReplyMode` is true for `fast-reply` ALONE, so Split is an
+option of one button exactly like a tone, while it rendered as a raised chip,
+i.e. as an action. E24's own rule ("actions are raised chips, options lie in the
+sunken groove") puts it in the capsule; E24 kept it out because a checkbox among
+radios could read as a fifth tone. **That objection is answered by form, not by
+placement: an armed tone RISES as a light thumb, an armed Split is pressed INTO
+the groove.** Two physics in one capsule; a hairline seam marks the boundary.
+Width is state-independent in both, so arming still never reflows the row (E27).
+
+The capsule is a new plain container: a checkbox cannot live inside a
+`radiogroup`, so `.chatgoose-reply-options` carries the sunken styling and the
+role stays on the inner `.chatgoose-tone-track`. Hiding now happens on the
+capsule — hiding the track alone would strand the seam and the Split cell in an
+empty pill. Split is `role="checkbox"` + `aria-checked` (was a button with
+`aria-pressed`).
+
+Measured on the E71/E72 bench: 542 → 507px, against a ~605px composer. The
+icon-only variant that keeps the chip where it is was also measured — 509px, two
+pixels apart — so the pixels did NOT decide this; the row simply has one fewer
+free-standing element and one honest home for Reply's options.
+
+**Losing the word forced the hints, and the hints are the larger half of the
+change.** Every bar control used the native `title`: in Firefox a ~1s OS box,
+unstyleable, unplaceable — no way to teach a row to a new chatter. The new
+component renders OUTSIDE the bar (`overflow-x: auto` would clip a bubble drawn
+inside it) and hit-tests hover on the CONTAINER rather than listening per
+button, because disabled controls do not dispatch pointer events and the states
+that most need explaining — `Fix` with an empty composer, the whole row with no
+persona — are exactly the disabled ones. Bodies are thunks, so a hint reports
+the CURRENT state. The combo is not repeated where a corner keycap already shows
+it; the capsule's 24px cells have no keycap, so theirs carry it.
+
+Hotkey letter `l` (spLit) — Firefox reserves ⌘⇧ R/T/P/B/A, and a test now pins
+both facts (not reserved, not colliding with a bound letter). The cheatsheet and
+the Options hotkeys pane render from the same table, and both are TOTAL records,
+so the new action could not be added without being named in Russian for the UI.
+
+Tombstones: `.chatgoose-toolbar-flag`, `.chatgoose-toolbar-flag-active` and
+their `::before` are deleted — Split was their only consumer. The native
+`title` is gone from every bar control; anything that must stay reachable
+without hover lives in `aria-label`/`aria-keyshortcuts`, and the open hint is
+announced through `aria-describedby`. Not touched: what Split SENDS (E49's
+one-part violation note stands), its stickiness, and the tone groove's own
+behaviour.
+
+**E74 (2026-08-01).** Real-use feedback amends E73's hint timing and makes the
+explanatory layer optional. The initial custom dwell shipped at 400ms, and once
+one bubble was open the next anchor replaced it immediately. Crossing a compact
+507px row therefore made controls speak before the chatter had stopped on one.
+The first dwell is now **1000ms**; movement within an active hint group re-arms
+on **250ms**, rather than swapping instantly, and the group returns to the full
+dwell **300ms** after its last hint hides. Pointer movement resets the pending
+anchor, so merely travelling across the row produces no bubble.
+
+Storage schema **v16** adds `settings.showToolbarHints`, default-on for both new
+and upgraded installs so E73 remains discoverable. «Вид» exposes it as
+«Подсказки при наведении» through the existing serialized Settings
+writer. `OperationCoordinator` carries the sanitized value in `TabUiState`, so
+the ordinary settings-change refresh updates every open Fansly tab. Turning it
+off is synchronous at the bar: an open hint hides, a pending dwell and group
+grace are cancelled, and `aria-describedby` is removed. Pointer and focus
+bubbles both stay silent while disabled; accessible names and
+`aria-keyshortcuts` remain on the controls. A missing `TabUiState` field means
+enabled, preserving behaviour during the brief old-background/new-content
+overlap of an extension update. No kernel, contract, generation, send, or
+Fansly-egress path changes.
+
+**E75 (2026-08-01).** Performance work removes redundant local work; it does
 not take product shortcuts. The global Fansly match remains because ChatGoose
 must observe SPA navigation and expose its global actions, but the manifest now
 starts only a small classic bootstrap: theme, launcher/hotkeys and route
@@ -2533,11 +2686,12 @@ Unchanged: kernel contracts and prompt assembly, Fansly read/API cadence and
 egress, AI call/cost semantics, human-send and indeterminate-retry rules, and
 Voice at-most-once custody.
 
-**E72 (2026-08-01).** The owner reverses E24's visibility choice for the
+**E76 (2026-08-01).** The owner reverses E24's visibility choice for the
 implemented secondary actions: Help, Review, and Compare return as direct
 buttons in the action bar. A completed Compare result also exposes Reopen in
 the same row while that result is restorable; without a cached result the
 button remains hidden because it has no valid action. Existing prerequisites,
-hotkeys, generation behavior, result surfaces, ordering of the Reply options,
-Coach, persona, and Voice controls, and the horizontal overflow behavior are
-unchanged. No storage, protocol, kernel, prompt, retry, or send semantics move.
+hotkeys, generation behavior, result surfaces, the Reply options capsule,
+Coach, account-warning and Voice controls, and horizontal overflow behavior
+are unchanged. No storage, protocol, kernel, prompt, retry, or send semantics
+move.

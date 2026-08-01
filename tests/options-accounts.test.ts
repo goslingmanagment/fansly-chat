@@ -73,6 +73,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       debugMode: false,
       promptCachingEnabled: true,
       uiTheme: 'system',
+      showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
     },
@@ -620,6 +621,29 @@ describe('Options page account sections', () => {
     expect(section.querySelectorAll('.chatgoose-theme-preview')).toHaveLength(3);
     // No reset-to-default affordance (owner ruling).
     expect(Array.from(section.querySelectorAll('button'))).toEqual([]);
+  });
+
+  it('renders and saves the toolbar-hint switch in the appearance pane', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const section = getSectionByTitle(COPY.appearance.title);
+    const toggle = section.querySelector<HTMLInputElement>(
+      '[data-role="toolbar-hints-toggle"]',
+    )!;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.closest('.chatgoose-row')?.textContent).toContain(
+      COPY.appearance.toolbarHintsTitle,
+    );
+    expect(toggle.closest('.chatgoose-row')?.textContent).toContain(
+      COPY.appearance.toolbarHintsHint,
+    );
+
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(currentState.settings.showToolbarHints).toBe(false);
+    }, { timeout: 2000 });
   });
 
   it('keeps the auto-recap segment out of the numeric lane', async () => {

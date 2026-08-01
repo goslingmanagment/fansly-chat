@@ -893,6 +893,9 @@ export class ChatGooseContentApp {
       case 'cycle-tone':
         this.cycleNextReplyTone();
         return true;
+      case 'toggle-split':
+        this.toggleNextFastReplyMode();
+        return true;
       case 'cancel':
         this.cancelActiveOperation();
         return true;

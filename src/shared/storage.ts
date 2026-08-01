@@ -249,6 +249,7 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
       input.uiTheme === 'light' || input.uiTheme === 'dark' || input.uiTheme === 'system'
         ? input.uiTheme
         : defaults.uiTheme,
+    showToolbarHints: Boolean(input.showToolbarHints ?? defaults.showToolbarHints),
     coachHistoryLimit: Math.min(
       COACH_HISTORY_LIMIT_MAX,
       Math.max(COACH_HISTORY_LIMIT_MIN, coachHistory),

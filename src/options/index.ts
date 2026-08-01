@@ -1021,7 +1021,38 @@ async function render(): Promise<void> {
   const chatPreviewNote = document.createElement('div');
   chatPreviewNote.className = 'chatgoose-status-hint';
   chatPreviewNote.textContent = COPY.appearance.chatCardNote;
-  chatPreviewCard.append(chatPreviewHead, chatPreview, chatPreviewNote);
+
+  // The explanatory layer is useful while learning the row, but it must be a
+  // preference once the controls are muscle memory. Keep the checkbox itself
+  // as the control; the family switch is presentation only.
+  const toolbarHintsInput = document.createElement('input');
+  toolbarHintsInput.type = 'checkbox';
+  toolbarHintsInput.checked = state.settings.showToolbarHints;
+  toolbarHintsInput.dataset.role = 'toolbar-hints-toggle';
+  const toolbarHintsSwitch = document.createElement('span');
+  toolbarHintsSwitch.className = 'chatgoose-switch';
+  const toolbarHintsTrack = document.createElement('span');
+  toolbarHintsTrack.className = 'chatgoose-switch-track';
+  toolbarHintsSwitch.append(toolbarHintsInput, toolbarHintsTrack);
+  const toolbarHintsRow = document.createElement('label');
+  toolbarHintsRow.className = 'chatgoose-row chatgoose-toolbar-hints-row';
+  const toolbarHintsLabels = document.createElement('span');
+  toolbarHintsLabels.className = 'chatgoose-row-labels';
+  const toolbarHintsTitle = document.createElement('span');
+  toolbarHintsTitle.className = 'chatgoose-row-label';
+  toolbarHintsTitle.textContent = COPY.appearance.toolbarHintsTitle;
+  const toolbarHintsHint = document.createElement('span');
+  toolbarHintsHint.className = 'chatgoose-row-sub';
+  toolbarHintsHint.textContent = COPY.appearance.toolbarHintsHint;
+  toolbarHintsLabels.append(toolbarHintsTitle, toolbarHintsHint);
+  toolbarHintsRow.append(toolbarHintsLabels, toolbarHintsSwitch);
+
+  chatPreviewCard.append(
+    chatPreviewHead,
+    chatPreview,
+    chatPreviewNote,
+    toolbarHintsRow,
+  );
 
   appearanceGrid.append(themeCard, chatPreviewCard);
   appearanceSection.append(appearanceHead.root, appearanceGrid);
@@ -3555,6 +3586,7 @@ async function render(): Promise<void> {
   let agencyHubApiKeyDirty = false;
   const settingsFormSignature = (): string => JSON.stringify([
     getSelectedTheme(),
+    toolbarHintsInput.checked,
     agencyHubUrlInput.value,
     agencyHubKeyInput.value,
     quickInput.value,
@@ -3568,6 +3600,7 @@ async function render(): Promise<void> {
   const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
     const patch: Partial<Settings> = {
       uiTheme: getSelectedTheme(),
+      showToolbarHints: toolbarHintsInput.checked,
       agencyHubBaseUrl: agencyHubUrlInput.value,
       quickMessageCount: Number(quickInput.value),
       pingMessageCount: Number(pingInput.value),
@@ -3689,6 +3722,9 @@ async function render(): Promise<void> {
         updateCoachRecapSegment();
         updateCoachRecapWarning();
       }
+      if (document.activeElement !== toolbarHintsInput) {
+        toolbarHintsInput.checked = mergedSettings.showToolbarHints;
+      }
 
       const hubSignature = buildAgencyHubConnectionSignature(
         mergedSettings.agencyHubBaseUrl,
@@ -3785,6 +3821,7 @@ async function render(): Promise<void> {
 
   [
     ...themeRadios,
+    toolbarHintsInput,
     agencyHubUrlInput,
     agencyHubKeyInput,
     quickInput,

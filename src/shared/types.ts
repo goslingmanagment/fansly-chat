@@ -35,6 +35,8 @@ export interface Settings {
   debugMode: boolean;
   promptCachingEnabled: boolean;
   uiTheme: UiThemeSetting;
+  /** Whether the action bar shows its custom explanatory hover/focus hints. */
+  showToolbarHints: boolean;
   /** Coach: how many prior coach turns are retained/replayed (clamped [1,20]). */
   coachHistoryLimit: number;
   /** Coach: whether an automatic recap runs, and at what depth. */
@@ -800,6 +802,9 @@ export interface TabUiState {
   hasApiKey: boolean;
   /** Fail-closed hint from the assigned Agency Hub page. */
   voiceNotesCapable: boolean;
+  /** Optional for a brief old-background/new-content overlap during updates;
+   * absence keeps the default-on behaviour. */
+  showToolbarHints?: boolean;
   modelProviderByFeature?: Partial<Record<ModelSelectableFeatureType, 'anthropic' | 'openrouter'>>;
   apiKeyReadyByFeature?: Partial<Record<ModelSelectableFeatureType, boolean>>;
   hasPersonalities: boolean;

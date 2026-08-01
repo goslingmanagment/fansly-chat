@@ -102,6 +102,12 @@ describe('Spenders invalidation policy', () => {
     expect(shouldInvalidateSpendersForStorageChanges({
       settings: change(baseSettings, { ...baseSettings, uiTheme: 'dark' }),
     }, 'local')).toBe(false);
+    expect(shouldInvalidateSpendersForStorageChanges({
+      settings: change(baseSettings, { ...baseSettings, showToolbarHints: false }),
+    }, 'local')).toBe(false);
+    expect(tabRefreshMessageForStorageChanges({
+      settings: change(baseSettings, { ...baseSettings, showToolbarHints: false }),
+    }, 'local')).toBe('mapping:changed');
   });
 
   it('invalidates for a changed Hub source URL but not equivalent normalization', () => {
