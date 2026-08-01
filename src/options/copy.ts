@@ -34,6 +34,7 @@ const HOTKEY_ACTION_NAMES: Record<HotkeyAction, string> = {
   coach: 'Коуч-панель',
   'chat-review': 'Оценка чата',
   'cycle-tone': 'Сменить тон',
+  'toggle-split': 'Ответ серией',
   cancel: 'Отменить генерацию',
   'spenders-board': 'Доска Spenders',
   cheatsheet: 'Шпаргалка хоткеев',

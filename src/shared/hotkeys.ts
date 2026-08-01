@@ -32,6 +32,7 @@ export type HotkeyAction =
   | 'coach'
   | 'chat-review'
   | 'cycle-tone'
+  | 'toggle-split'
   | 'cancel'
   | 'spenders-board'
   | 'cheatsheet';
@@ -88,6 +89,9 @@ const AI_HOTKEYS: readonly HotkeyDef[] = [
   { action: 'coach', letter: 'c', description: 'Coach — ask the AI anything about this fan' },
   { action: 'chat-review', letter: 'v', description: 'Chat review — rate this chat' },
   { action: 'cycle-tone', letter: 'o', description: 'Cycle tone (casual / flirty / upsell / horny)' },
+  // 'l' for spLit. The Split cell is 24px and cannot host a corner keycap, so
+  // this table is the only place the combo is discoverable besides its hint.
+  { action: 'toggle-split', letter: 'l', description: 'Split — reply as 2–3 messages' },
   { action: 'cancel', letter: 'x', description: 'Cancel running AI operation' },
   { action: 'spenders-board', letter: 'm', description: 'Spenders — board of top spenders' },
 ];

@@ -107,11 +107,19 @@ export class ButtonBar {
   // keeps a chip.
   private readonly accountWarning: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
-  // Split — multi-message reply mode (preferSplit). A checkbox-style flag,
-  // ORTHOGONAL to the tone radio (a flirty reply can also be split), hence
-  // its own form: square dot, outside the tone groove. Sticky until toggled
-  // off (E24) — it no longer silently resets after each generation.
+  // Split — multi-message reply mode (preferSplit). Sticky until toggled off
+  // (E24). It lives INSIDE the options capsule since E73: `supportsReplyMode`
+  // is true for `fast-reply` alone, so Split is an option of one button exactly
+  // like a tone, and E24's own rule — actions are raised chips, options lie in
+  // the sunken groove — puts it there. E24 kept it outside because a checkbox
+  // among radios could read as a fifth tone; that is answered by the FORM, not
+  // by the placement: an armed tone rises as a thumb, an armed Split is pressed
+  // INTO the groove. Two physics, not two icons.
   private readonly replyModeToggle: HTMLButtonElement;
+  // The visual capsule. It cannot be the radiogroup itself — a checkbox inside
+  // a radiogroup is an a11y violation — so the sunken styling lives here and
+  // the radio semantics stay on the inner track.
+  private readonly replyOptions: HTMLElement;
   private readonly toneTrack: HTMLElement;
   private readonly toneSegments = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
@@ -173,9 +181,14 @@ export class ButtonBar {
 
     this.replyModeToggle = document.createElement('button');
     this.replyModeToggle.type = 'button';
-    this.replyModeToggle.className = 'chatgoose-button chatgoose-toolbar-flag';
-    this.replyModeToggle.textContent = 'Split';
-    this.replyModeToggle.setAttribute('aria-pressed', 'false');
+    this.replyModeToggle.className = 'chatgoose-tone-seg chatgoose-split-seg';
+    this.replyModeToggle.setAttribute('role', 'checkbox');
+    this.replyModeToggle.setAttribute('aria-checked', 'false');
+    this.replyModeToggle.setAttribute('aria-label', 'Split reply into 2–3 messages');
+    this.replyModeToggle.setAttribute(
+      'aria-keyshortcuts',
+      `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+L`,
+    );
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
     this.coachButton = document.createElement('button');
@@ -222,14 +235,23 @@ export class ButtonBar {
     }
     this.renderToneSegments('none', false);
 
+    // The capsule: radio track, hairline seam, checkbox cell. The seam is the
+    // only thing separating two different control kinds inside one pill, so it
+    // is not decoration — do not drop it when tightening the row.
+    this.replyOptions = document.createElement('div');
+    this.replyOptions.className = 'chatgoose-reply-options';
+    const optionsSeam = document.createElement('span');
+    optionsSeam.className = 'chatgoose-options-seam';
+    optionsSeam.setAttribute('aria-hidden', 'true');
+    this.replyOptions.append(this.toneTrack, optionsSeam, this.replyModeToggle);
+
     // Bar v2 order (E24): the Reply cluster (trigger + tone groove + Split
     // flag), then draft tools, then situational openers, then — pinned right —
     // the "about the fan" side (Recap + Coach). Hairline seams mark the group
     // boundaries. Help / Review / Compare stay implemented but hidden.
     this.root.append(
       replyButton,
-      this.toneTrack,
-      this.replyModeToggle,
+      this.replyOptions,
       makeSeparator(),
       fixButton,
       makeSeparator(),
@@ -279,7 +301,10 @@ export class ButtonBar {
 
     this.hints.register(this.replyModeToggle, () => ({
       title: 'Split',
-      body: SPLIT_HINT,
+      // The cell traded its word for a square (E73), so this hint and the
+      // combo are the whole of its discoverability — the cell is 24px and has
+      // nowhere to put a corner keycap.
+      body: `${SPLIT_HINT} · ${comboLabel('L', this.platform)}`,
     }));
 
     this.hints.register(this.coachButton, () => ({
@@ -431,19 +456,21 @@ export class ButtonBar {
       coachActive && activeLoading,
     );
 
-    // ─── Split (reply-mode flag) ──────────────────────────────────────────────
+    // ─── Split (reply-mode checkbox) ──────────────────────────────────────────
+    // Width is identical armed and idle: the bar is one chip away from
+    // scrolling, so arming anything must never reflow the row (E27).
     const splitArmed = nextReplyMode === 'preferSplit';
     this.replyModeToggle.disabled = Boolean(activeAction) || !state.connected || !state.hasApiKey;
-    this.replyModeToggle.setAttribute('aria-pressed', splitArmed ? 'true' : 'false');
-    this.replyModeToggle.classList.toggle('chatgoose-toolbar-flag-active', splitArmed);
+    this.replyModeToggle.setAttribute('aria-checked', splitArmed ? 'true' : 'false');
+    this.replyModeToggle.classList.toggle('chatgoose-split-seg-active', splitArmed);
 
-    // ─── Tone groove ──────────────────────────────────────────────────────────
-    // Hide the groove (and the Split flag rides the same rule) when there's
-    // nothing to reply with (not connected / no key); when connected but
-    // unmapped, keep it visible-but-disabled so it tracks Reply's own state.
+    // ─── Options capsule ──────────────────────────────────────────────────────
+    // Hide the whole capsule (tones AND Split) when there's nothing to reply
+    // with (not connected / no key); when connected but unmapped, keep it
+    // visible-but-disabled so it tracks Reply's own state. Hiding the inner
+    // track alone would leave the seam and the Split cell in an empty pill.
     const hideToneTrack = !state.connected || !state.hasApiKey;
-    this.toneTrack.classList.toggle('chatgoose-hidden', hideToneTrack);
-    this.replyModeToggle.classList.toggle('chatgoose-hidden', hideToneTrack);
+    this.replyOptions.classList.toggle('chatgoose-hidden', hideToneTrack);
     this.renderToneSegments(
       nextReplyTone,
       Boolean(activeAction) || disableForPrereqs,

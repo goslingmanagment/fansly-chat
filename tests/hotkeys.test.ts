@@ -59,6 +59,7 @@ describe('buildHotkeyBindings', () => {
     expect(actions.has('spenders-board')).toBe(true);
     expect(actions.has('cheatsheet')).toBe(true);
     expect(actions.has('cycle-tone')).toBe(true);
+    expect(actions.has('toggle-split')).toBe(true);
     expect(actions.has('cancel')).toBe(true);
     // coach + fan-summary are hotkey actions but NOT in HOTKEY_FEATURE (app
     // actions: Coach chat / recap picker; dispatch arms land in Task 10).
@@ -66,6 +67,17 @@ describe('buildHotkeyBindings', () => {
     expect(HOTKEY_FEATURE.coach).toBeUndefined();
     expect(actions.has('fan-summary')).toBe(true);
     expect(HOTKEY_FEATURE['fan-summary']).toBeUndefined();
+  });
+
+  it('binds Split to a letter Firefox has not reserved on ⌘⇧', () => {
+    const split = mac.find((b) => b.action === 'toggle-split')!;
+    const letter = split.combo.split('+').pop()!;
+    // Firefox owns ⌘⇧ R/T/P/B/A (hard reload, reopen tab, private window,
+    // bookmarks bar, add-ons) — a content script cannot preventDefault those.
+    expect(['r', 't', 'p', 'b', 'a']).not.toContain(letter.toLowerCase());
+    // …and it must not collide with a key we already bound.
+    const letters = mac.map((b) => b.combo.split('+').pop()!.toLowerCase());
+    expect(new Set(letters).size).toBe(letters.length);
   });
 
   it('resolves a real keypress through the assembled keymap', () => {

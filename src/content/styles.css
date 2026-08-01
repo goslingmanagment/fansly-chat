@@ -335,39 +335,6 @@
   color: var(--chatgoose-clay-ink);
 }
 
-/* Split — the one checkbox in the bar. A square dot marks it as an
-   INDEPENDENT flag (a flirty reply can also be split), a different form
-   from the tone radio groove on purpose (E24). */
-.chatgoose-toolbar-flag {
-  min-height: 28px;
-  padding: 0 10px 0 8px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-color: var(--chatgoose-line);
-  background: transparent;
-  border-radius: 999px;
-  color: var(--chatgoose-ink-mid);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-  box-shadow: none;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.chatgoose-toolbar-flag::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 2.5px;
-  border: 1.5px solid var(--chatgoose-line-strong);
-  background: transparent;
-  transition: background 150ms ease, border-color 150ms ease;
-}
-
 /* Loading spinner overlays the dimmed label instead of flowing after it:
    the button keeps its width, so the toolbar never reflows mid-generation. */
 .chatgoose-toolbar-button .chatgoose-spinner {
@@ -404,28 +371,6 @@
 .chatgoose-toolbar-button:focus-visible .chatgoose-toolbar-hotkey {
   opacity: 1;
   transform: translateY(0) scale(1);
-}
-
-.chatgoose-toolbar-flag:hover:not(:disabled) {
-  background: var(--chatgoose-bg2);
-  border-color: var(--chatgoose-clay-line);
-  color: var(--chatgoose-ink);
-}
-
-.chatgoose-toolbar-flag-active {
-  background: var(--chatgoose-clay-bg);
-  border-color: var(--chatgoose-clay-line);
-  color: var(--chatgoose-clay-ink);
-}
-
-.chatgoose-toolbar-flag-active::before {
-  background: var(--chatgoose-clay);
-  border-color: var(--chatgoose-clay);
-}
-
-.chatgoose-toolbar-flag:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 /* Hairline seams between the bar's meaning-groups (E24). The row gap alone
@@ -505,21 +450,67 @@
   border-top: 1px solid var(--chatgoose-line);
 }
 
-/* ─── Tone groove: sunken radio track of Reply OPTIONS (E24) ─────────────────
+/* ─── Options capsule: the sunken groove of Reply's OPTIONS (E24, E73) ───────
    Actions are raised chips; options lie in a sunken groove pressed against
    Reply. Segments are emoji glyphs (the chatters' own language — precedent:
    the Spenders tier chips); the armed one surfaces as a light thumb without
-   changing width, so the narrow composer never shifts or starts scrolling. */
-.chatgoose-tone-track {
+   changing width, so the narrow composer never shifts or starts scrolling.
+   The capsule holds two DIFFERENT control kinds — a radio track of tones and
+   one checkbox (Split) — so the sunken styling lives here, on a plain
+   container, and the `radiogroup` role stays on the inner track alone. */
+.chatgoose-reply-options {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
   padding: 3px;
   flex: 0 0 auto;
   background: var(--chatgoose-bg3);
   border: 1px solid var(--chatgoose-line);
   border-radius: 999px;
   box-shadow: inset 0 1px 2px rgba(31, 30, 29, 0.07);
+}
+
+.chatgoose-tone-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* The seam is the only thing telling a chatter that what follows is a
+   different KIND of control, not a fifth tone. It is structure, not trim. */
+.chatgoose-options-seam {
+  width: 1px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0 3px;
+  background: var(--chatgoose-line-strong);
+  opacity: 0.7;
+}
+
+/* Split: same box as a tone cell, square glyph instead of an emoji. Armed, it
+   is pressed INTO the groove while an armed tone RISES out of it — the press
+   is what keeps a checkbox from reading as a fifth radio (E73). */
+.chatgoose-split-seg::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 2.5px;
+  border: 1.5px solid var(--chatgoose-line-strong);
+  background: transparent;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-split-seg-active {
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  box-shadow: inset 0 1px 3px rgba(31, 30, 29, 0.32);
+  filter: none;
+  opacity: 1;
+}
+
+.chatgoose-split-seg-active::before {
+  background: var(--chatgoose-clay);
+  border-color: var(--chatgoose-clay);
 }
 
 /* Segment box is sized to the emoji itself (~16px at 14px/em) plus a hair of
