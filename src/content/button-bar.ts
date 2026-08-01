@@ -68,7 +68,19 @@ function makeSeparator(): HTMLElement {
 export class ButtonBar {
   readonly root: HTMLElement;
   private readonly platform = detectLabelPlatform();
-  private readonly personalityLabel: HTMLElement;
+  // Until E71 the bar's right end carried a persona pill showing one of
+  // «Lora» / «Unmapped» / «Not connected». The NAME is something the chatter
+  // already knows — they opened this account — and «Unmapped» repeated, word
+  // for word, the mapping banner that is open directly under the bar in that
+  // very state. Both left, and their ~60px went back to the actions; the
+  // persona name stays reachable on Reply's own tooltip, where it answers the
+  // question it actually belongs to (who is this reply written as?).
+  //
+  // One state had no second home: with no Fansly accountId the mapping banner
+  // does not render at all (`MappingBanner.render` returns early), so the bar
+  // would sit fully disabled and silent. That case — and only that case —
+  // keeps a chip.
+  private readonly accountWarning: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
   // Split — multi-message reply mode (preferSplit). A checkbox-style flag,
   // ORTHOGONAL to the tone radio (a flirty reply can also be split), hence
@@ -146,8 +158,11 @@ export class ButtonBar {
     this.coachButton.title = `Coach — ask the AI about this fan (${comboLabel('C', this.platform)})`;
     this.coachButton.addEventListener('click', () => this.callbacks.onCoachClick());
 
-    this.personalityLabel = document.createElement('div');
-    this.personalityLabel.className = 'chatgoose-pill chatgoose-personality chatgoose-toolbar-pill chatgoose-toolbar-personality-end';
+    this.accountWarning = document.createElement('div');
+    this.accountWarning.className = 'chatgoose-toolbar-warn chatgoose-hidden';
+    this.accountWarning.textContent = 'Аккаунт не определён';
+    this.accountWarning.title =
+      'Расширение не видит, в каком аккаунте Fansly открыт этот чат — перезагрузите страницу Fansly';
 
     this.voiceButton = document.createElement('button');
     this.voiceButton.type = 'button';
@@ -180,8 +195,8 @@ export class ButtonBar {
 
     // Bar v2 order (E24): the Reply cluster (trigger + tone groove + Split
     // flag), then draft tools, then situational openers, then — pinned right —
-    // the "about the fan" side (Recap + persona). Hairline seams mark the
-    // group boundaries. Help / Review / Compare stay implemented but hidden.
+    // the "about the fan" side (Recap + Coach). Hairline seams mark the group
+    // boundaries. Help / Review / Compare stay implemented but hidden.
     this.root.append(
       replyButton,
       this.toneTrack,
@@ -194,7 +209,9 @@ export class ButtonBar {
       summaryButton,
       // Coach sits in the "about the fan" cluster, right after Recap (spec §10).
       this.coachButton,
-      this.personalityLabel,
+      // Normally hidden (E71) — it only stands in for a bar that cannot say
+      // why it is dead.
+      this.accountWarning,
       this.voiceButton,
     );
   }
@@ -269,8 +286,19 @@ export class ButtonBar {
       return;
     }
 
-    const label = state.mappedPersonalityName ?? (state.accountId ? 'Unmapped' : 'Not connected');
-    this.personalityLabel.textContent = label;
+    // The persona name rides Reply's own tooltip since E71 — the one control
+    // whose output the name actually describes.
+    const replyButton = this.buttons.get('fast-reply')!;
+    const replyHotkey = featureHotkeyLabel('fast-reply', this.platform);
+    const replyLabel = state.mappedPersonalityName
+      ? `Reply as ${state.mappedPersonalityName}`
+      : 'Reply';
+    replyButton.title = replyHotkey ? `${replyLabel} (${replyHotkey.full})` : replyLabel;
+
+    // The only bad state nothing else reports: no Fansly account detected, so
+    // the mapping banner stays unrendered and every button is disabled with no
+    // reason given (E71). Every other bad state has the banner under the bar.
+    this.accountWarning.classList.toggle('chatgoose-hidden', Boolean(state.accountId));
 
     const disableForPrereqs =
       !state.connected || !state.hasApiKey || !state.hasPersonalities || !state.mappedPersonalityId;
