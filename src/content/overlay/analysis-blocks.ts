@@ -114,11 +114,13 @@ function splitSections(raw: string, specs: readonly SectionSpec[]): ParsedBlocks
 // ─── Inline decoration ────────────────────────────────────────────────────
 
 /** Transcript quotes get the clay tint, money amounts the mono face. A money
- * amount inside a quote stays part of the quote (earliest match wins). */
+ * amount inside a quote stays part of the quote (earliest match wins).
+ * Shared with the recap renderer (E78) — one decoration language across the
+ * analysis surfaces. */
 const INLINE_DECOR_RE =
   /("[^"\n]{2,200}"|“[^”\n]{2,200}”)|(\$\d+(?:[.,]\d+)?(?:\/[а-яёa-z]+)?)/giu;
 
-function appendDecorated(parent: HTMLElement, text: string): void {
+export function decorateInline(parent: HTMLElement, text: string): void {
   let last = 0;
   for (const match of text.matchAll(INLINE_DECOR_RE)) {
     const index = match.index ?? 0;
@@ -208,7 +210,7 @@ function buildHeader(display: string, dotClass: string): HTMLElement {
 function buildBody(text: string): HTMLElement {
   const body = document.createElement('div');
   body.className = 'chatgoose-analysis-b';
-  appendDecorated(body, text);
+  decorateInline(body, text);
   return body;
 }
 

@@ -1979,6 +1979,20 @@ ol.chatgoose-md-list {
 .chatgoose-analysis-dot-green { background: var(--chatgoose-green); }
 .chatgoose-analysis-dot-amber { background: var(--chatgoose-amber); }
 .chatgoose-analysis-dot-bad { background: var(--chatgoose-bad); }
+.chatgoose-analysis-dot-neutral { background: var(--chatgoose-line-strong); }
+
+/* E78: recap sections join the analysis header language while the serif
+   document body stays; the strategy/next-move card switches to the working
+   sans voice the other "what to do" surfaces use. */
+.chatgoose-md .chatgoose-analysis-sec {
+  gap: 6px;
+}
+
+.chatgoose-md .chatgoose-analysis-card-move {
+  font-family: var(--chatgoose-font);
+  font-size: 14px;
+  line-height: 1.55;
+}
 
 .chatgoose-analysis-b {
   font-size: 14px;

@@ -834,9 +834,12 @@ describe('OverlayController', () => {
 
     const body = requireElement<HTMLDivElement>('.chatgoose-stream.chatgoose-md');
     expect(body.querySelector('.chatgoose-md-h1')?.textContent).toBe('ПРОФИЛЬ ФАНАТА: Michael');
-    expect(body.querySelector('.chatgoose-md-h2')?.textContent).toBe('1. ДОСЬЕ');
-    expect(body.querySelector('.chatgoose-md-label')?.textContent).toBe('Имя:');
-    expect(body.querySelectorAll('ul.chatgoose-md-list li')).toHaveLength(2);
+    // E78: «ДОСЬЕ» is a known recap section — it renders as a dotted
+    // analysis header (number dropped), and its blocks live inside.
+    const section = body.querySelector('.chatgoose-analysis-sec');
+    expect(section?.querySelector('.chatgoose-analysis-h')?.textContent).toBe('Досье');
+    expect(section?.querySelector('.chatgoose-md-label')?.textContent).toBe('Имя:');
+    expect(section?.querySelectorAll('ul.chatgoose-md-list li')).toHaveLength(2);
     expect(body.textContent).not.toContain('#');
   });
 
