@@ -22,6 +22,11 @@ import type {
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
 import { parseGroupIdFromPath } from '../route-watcher.js';
+import {
+  renderCoachingBlocks,
+  renderReviewEvaluation,
+  renderReviewRecommendations,
+} from './analysis-blocks.js';
 import { renderSummaryMarkdown } from './summary-markdown.js';
 import {
   formatLlmCostSummary,
@@ -2556,16 +2561,26 @@ export class OverlayController {
       section.append(this.renderProfilingCard(model.profiling, 'summary'));
     }
 
-    const coaching = document.createElement('div');
-    coaching.className = 'chatgoose-card';
-    const coachingTitle = document.createElement('div');
-    coachingTitle.className = 'chatgoose-card-title';
-    coachingTitle.textContent = 'Coaching';
-    const coachingText = document.createElement('div');
-    coachingText.className = 'chatgoose-card-text';
-    coachingText.textContent = model.coaching ?? model.rawText;
-    coaching.append(coachingTitle, coachingText);
-    section.append(coaching);
+    // E77: since kernel #201 the coaching text carries pinned block labels
+    // (СИТУАЦИЯ/ЧТО УПУЩЕНО/СЛЕДУЮЩИЙ ХОД/РИСК) — render them as sections;
+    // an unlabeled text (old cache, format slip) keeps the plain card.
+    const structuredCoaching = model.coaching
+      ? renderCoachingBlocks(model.coaching)
+      : null;
+    if (structuredCoaching) {
+      section.append(structuredCoaching);
+    } else {
+      const coaching = document.createElement('div');
+      coaching.className = 'chatgoose-card';
+      const coachingTitle = document.createElement('div');
+      coachingTitle.className = 'chatgoose-card-title';
+      coachingTitle.textContent = 'Coaching';
+      const coachingText = document.createElement('div');
+      coachingText.className = 'chatgoose-card-text';
+      coachingText.textContent = model.coaching ?? model.rawText;
+      coaching.append(coachingTitle, coachingText);
+      section.append(coaching);
+    }
 
     const suggestions = document.createElement('div');
     suggestions.className = 'chatgoose-parts';
@@ -2707,7 +2722,17 @@ export class OverlayController {
     }
 
     if (model.reviewMeta && !model.reviewMeta.parseFallback) {
-      if (model.reviewMeta.evaluation) {
+      // E77: since kernel #201 the evaluation carries pinned block labels
+      // (ВЕРДИКТ/ДЕНЬГИ/ПЕРСОНА/ОШИБКИ/ЧТО РАБОТАЕТ) — render them as
+      // sections. Recommendations follow the evaluation's format so a
+      // pre-#201 result never renders half-old, half-new.
+      const structuredEvaluation = model.reviewMeta.evaluation
+        ? renderReviewEvaluation(model.reviewMeta.evaluation)
+        : null;
+
+      if (structuredEvaluation) {
+        section.append(structuredEvaluation);
+      } else if (model.reviewMeta.evaluation) {
         const evalSection = document.createElement('div');
         evalSection.className = 'chatgoose-card';
         const evalTitle = document.createElement('div');
@@ -2721,16 +2746,20 @@ export class OverlayController {
       }
 
       if (model.reviewMeta.recommendations) {
-        const recSection = document.createElement('div');
-        recSection.className = 'chatgoose-card';
-        const recTitle = document.createElement('div');
-        recTitle.className = 'chatgoose-card-title';
-        recTitle.textContent = 'Recommendations';
-        const recText = document.createElement('div');
-        recText.className = 'chatgoose-card-text';
-        recText.textContent = model.reviewMeta.recommendations;
-        recSection.append(recTitle, recText);
-        section.append(recSection);
+        if (structuredEvaluation) {
+          section.append(renderReviewRecommendations(model.reviewMeta.recommendations));
+        } else {
+          const recSection = document.createElement('div');
+          recSection.className = 'chatgoose-card';
+          const recTitle = document.createElement('div');
+          recTitle.className = 'chatgoose-card-title';
+          recTitle.textContent = 'Recommendations';
+          const recText = document.createElement('div');
+          recText.className = 'chatgoose-card-text';
+          recText.textContent = model.reviewMeta.recommendations;
+          recSection.append(recTitle, recText);
+          section.append(recSection);
+        }
       }
     } else if (model.feature === 'fan-summary' && model.rawText.trim()) {
       const body = document.createElement('div');

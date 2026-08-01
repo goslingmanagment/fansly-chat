@@ -90,6 +90,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E74 | 2026-08-01 | Owner feedback on E73: first hover dwell rises 400→1000ms and within-group swaps use a 250ms dwell (300ms grace), so crossing the row does not fire hints. Storage v16 adds default-on `showToolbarHints` under «Вид»; off suppresses pointer/focus bubbles live, immediately closes/cancels one in flight, and leaves accessible names + hotkeys intact |
 | E75 | 2026-08-01 | Performance by work elision: two-stage Fansly bootstrap + isolated MV3 keepalive, narrow storage reads, incremental rendering/Voice dedupe, safe minification |
 | E76 | 2026-08-01 | Action bar restores direct Help, Review, and Compare buttons; cached Compare gets contextual Reopen |
+| E77 | 2026-08-01 | Help coaching and Review evaluation render the kernel #201 block labels as structured sections (display-only parser, plain-card fallback) |
 
 ## Entries
 
@@ -2695,3 +2696,34 @@ hotkeys, generation behavior, result surfaces, the Reply options capsule,
 Coach, account-warning and Voice controls, and horizontal overflow behavior
 are unchanged. No storage, protocol, kernel, prompt, retry, or send semantics
 move.
+
+### E77 — Help/Review results render the #201 blocks as structured sections (2026-08-01)
+
+Owner feedback on the freshly deployed kernel Decision #201 output: the
+content became dense and Russian, but the overlay still showed it as one
+plain-text wall, so the important parts (the verdict, the money read, the
+ready-to-send fixes) were invisible. Approved via a Было/Макс/Спокойный
+mockup: the «Макс» variant with upright (non-italic) quote styling.
+
+`src/content/overlay/analysis-blocks.ts` parses the labels the kernel prompt
+now pins (Review evaluation: ВЕРДИКТ/ДЕНЬГИ/ПЕРСОНА/ОШИБКИ/ЧТО РАБОТАЕТ;
+Help coaching: СИТУАЦИЯ/ЧТО УПУЩЕНО/СЛЕДУЮЩИЙ ХОД/РИСК) into headed
+sections: verdict and next-move tinted clay, «что работает» green, mistakes
+and recommendations split on `1.`-numbered items, and the «Как надо было:»
+tail of a mistake rendered as a serif block on the draft background — the
+existing coach-draft idiom for "text meant for the fan" (outer quotes
+stripped only when a single pair wraps the whole message; the marker is NOT
+line-anchored because real output puts it mid-sentence). Inline decoration
+tints double-quoted transcript quotes clay and sets $-amounts in the mono
+face; a money amount inside a quote stays part of the quote.
+
+DISPLAY-ONLY by construction: parsing happens at render time; the stored
+result, copy text, XML wire parsing, and acceptance flows keep the raw
+string. Every entry point requires at least two labels (one accidental
+«РИСК:» inside prose must not flip the layout) and returns null otherwise,
+falling back to the previous plain card — which is exactly what pre-#201
+cached results and format slips get. Recommendations follow the evaluation's
+format (structured only when the evaluation parsed) so one result never
+renders half-old, half-new. Model text is untrusted remote input: every node
+is built with createElement/textContent, never innerHTML (same doctrine as
+summary-markdown.ts). No storage, protocol, kernel, or prompt change.
