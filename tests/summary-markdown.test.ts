@@ -19,17 +19,65 @@ describe('renderSummaryMarkdown', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders headings as leveled blocks without the # markers', () => {
-    const host = render('# ПРОФИЛЬ ФАНАТА: Michael\n\n## 1. ДОСЬЕ\n\n### Детали');
+  it('renders unknown headings as leveled blocks without the # markers', () => {
+    // «1. ИСТОРИЯ» is deliberately NOT a known recap section (those become
+    // dotted analysis headers since E78, covered below).
+    const host = render('# ПРОФИЛЬ ФАНАТА: Michael\n\n## 1. ИСТОРИЯ\n\n### Детали');
 
     const h1 = host.querySelector('.chatgoose-md-h1');
     const h2 = host.querySelector('.chatgoose-md-h2');
     const h3 = host.querySelector('.chatgoose-md-h3');
     expect(h1?.textContent).toBe('ПРОФИЛЬ ФАНАТА: Michael');
-    expect(h2?.textContent).toBe('1. ДОСЬЕ');
+    expect(h2?.textContent).toBe('1. ИСТОРИЯ');
     expect(h3?.textContent).toBe('Детали');
     expect(h1?.getAttribute('role')).toBe('heading');
     expect(host.textContent).not.toContain('#');
+  });
+
+  describe('recap section unification (E78)', () => {
+    it('turns a known EN section heading into a dotted analysis section holding its blocks', () => {
+      const host = render('## 1. WHO\n\nЗовут Abdullah.\n\n- деталь');
+      const section = host.querySelector('.chatgoose-analysis-sec');
+      expect(section).not.toBeNull();
+      const header = section!.querySelector('.chatgoose-analysis-h');
+      expect(header?.textContent).toBe('Кто');
+      expect(header?.querySelector('.chatgoose-analysis-dot-neutral')).not.toBeNull();
+      // The paragraph and the list live INSIDE the section.
+      expect(section!.querySelector('.chatgoose-md-p')?.textContent).toBe('Зовут Abdullah.');
+      expect(section!.querySelector('.chatgoose-md-list')).not.toBeNull();
+      expect(host.querySelector('.chatgoose-md-h2')).toBeNull();
+    });
+
+    it('marks money sections green and decorates amounts and quotes in the body', () => {
+      const host = render('## 2. SPEND PATTERN\n\nAll-time gross: $3663. Сказал "thatts alot".');
+      const header = host.querySelector('.chatgoose-analysis-h');
+      expect(header?.textContent).toBe('Траты');
+      expect(header?.querySelector('.chatgoose-analysis-dot-green')).not.toBeNull();
+      expect(host.querySelector('.chatgoose-analysis-money')?.textContent).toBe('$3663');
+      expect(host.querySelector('.chatgoose-analysis-quote')?.textContent).toBe('"thatts alot"');
+    });
+
+    it('gives the strategy section the clay card, RU headings included', () => {
+      const host = render('## СТРАТЕГИЯ\n\nЖдать пика и предложить кастом.');
+      const section = host.querySelector('.chatgoose-analysis-card-move');
+      expect(section).not.toBeNull();
+      expect(section!.querySelector('.chatgoose-analysis-h')?.textContent).toBe('Стратегия');
+    });
+
+    it('closes the section on an unknown top heading and keeps ### inside it', () => {
+      const host = render(
+        '## WHO\n\nвнутри\n\n### Детали\n\nтоже внутри\n\n## ЧТО-ТО ЕЩЁ\n\nснаружи',
+      );
+      const section = host.querySelector('.chatgoose-analysis-sec')!;
+      expect(section.querySelector('.chatgoose-md-h3')?.textContent).toBe('Детали');
+      const paragraphs = Array.from(section.querySelectorAll('.chatgoose-md-p')).map(
+        (p) => p.textContent,
+      );
+      expect(paragraphs).toEqual(['внутри', 'тоже внутри']);
+      // The unknown heading and its paragraph render at the top level.
+      expect(host.querySelector('.chatgoose-md-h2')?.textContent).toBe('ЧТО-ТО ЕЩЁ');
+      expect(section.textContent).not.toContain('снаружи');
+    });
   });
 
   it('splits blank-line paragraphs and joins hard-wrapped lines', () => {

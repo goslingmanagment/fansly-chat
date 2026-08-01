@@ -91,6 +91,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E75 | 2026-08-01 | Performance by work elision: two-stage Fansly bootstrap + isolated MV3 keepalive, narrow storage reads, incremental rendering/Voice dedupe, safe minification |
 | E76 | 2026-08-01 | Action bar restores direct Help, Review, and Compare buttons; cached Compare gets contextual Reopen |
 | E77 | 2026-08-01 | Help coaching and Review evaluation render the kernel #201 block labels as structured sections (display-only parser, plain-card fallback) |
+| E78 | 2026-08-01 | The recap (fan-summary) joins the E77 analysis language: known section headings become dotted mono headers, strategy/next-move gets the clay card, money/quote decoration shared; unknown headings keep the old look |
 
 ## Entries
 
@@ -2727,3 +2728,31 @@ format (structured only when the evaluation parsed) so one result never
 renders half-old, half-new. Model text is untrusted remote input: every node
 is built with createElement/textContent, never innerHTML (same doctrine as
 summary-markdown.ts). No storage, protocol, kernel, or prompt change.
+
+### E78 — The recap joins the shared analysis language (2026-08-01)
+
+Owner follow-up on E77: «кстати смотри там еще есть фан саммари, может
+как-то объединить эт дело? привести к одному виду какому-то». Approved via
+the same mockup (recap section added to the Было/Финал states).
+
+`summary-markdown.ts` now recognizes the section names the kernel templates
+pin (short recap EN: WHO / SPEND PATTERN / TRIGGERS / BOUNDARIES / ACTIVE
+THREADS / NEXT MOVE; full recap RU with EN originals: ДОСЬЕ …​ СТРАТЕГИЯ)
+after stripping the leading «N.» and a trailing colon. A known heading opens
+a section container styled with the E77 header language: mono caps + a
+semantic dot (money sections green, triggers amber, boundaries red, neutral
+grey), and the strategy/next-move section gets the clay «what to do» card —
+the same visual promise as СЛЕДУЮЩИЙ ХОД in Help — with its body switched
+from the document serif to the working sans voice. Following blocks land
+inside the open section; an unknown top-level heading closes it (so a recap
+the model structured its own way degrades to exactly the previous look),
+while `###` subheadings stay inside. Section numbers are dropped and the
+short recap's English names display in Russian; the kernel prompts are NOT
+touched — this is the same display-only doctrine as E77, createElement/
+textContent throughout. The E77 inline decorator (`decorateInline`, now
+exported from analysis-blocks.ts) runs over recap paragraphs, bullets, and
+labels too, so money amounts and fan quotes read identically across Help,
+Review, and the recap. The serif document body deliberately stays: the
+recap is read as a dossier, Help/Review are scanned as working cards —
+unification lives in the headers and accents, not in flattening the two
+reading modes into one.
