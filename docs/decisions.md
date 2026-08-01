@@ -85,6 +85,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 | E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
 | E71 | 2026-08-01 | The action bar drops the persona pill and tightens its density: 716px of content on a ~605px composer was scrolling Reply — the primary action — off the left edge. The persona NAME moves to Reply’s own tooltip, «Unmapped» defers to the mapping banner already open under the bar, and only the one state with no other surface («no Fansly account detected») keeps a chip. Gap 6→5, side padding 10→8, button padding 11→9, tone segment 30→27: measured 716 → 597px |
+| E72 | 2026-08-01 | Recap's ready dot moves to a corner badge, freeing the 9px reserve that made it the row's widest chip with an off-centre label; width stays state-independent so the dot never reflows the bar (E27's rule). Second density pass — gap 5→4, button padding 9→8, tone segment 27→24 with padding 5→4, groove gap 2→1, seam margins dropped: measured 594 → 542px, headroom on the ~605px composer 8px → ~63px. Split stays labelled (icon-only was measured at −34px and declined, E24) |
 
 ## Entries
 
@@ -2540,3 +2541,30 @@ pins the new shape: no persona text in the bar, the name present in Reply's
 title (and absent when nothing is mapped), the chip hidden for an unmapped
 account and shown when there is no accountId, and — with the warning visible —
 Recap still the single toolbar child whose `margin-left` resolves to `auto`.
+
+**E72 (2026-08-01).** The Recap "ready" dot becomes a corner badge, and the bar
+takes a second density pass. E71 left the row 8px inside the measured composer —
+too thin a margin to survive a laptop or an open Fansly sidebar, which E71 itself
+recorded as a known limit. The trigger this time was the button, not the row: at
+`padding-right: 18px` against the row's 9px, Recap was **9px wider than every
+other chip and its label sat visibly off-centre** — a permanent reserve for a dot
+that only renders when `hasAvailableSummary`, i.e. empty in the common state. The
+dot now sits at `top/right: 3px`, ABOVE the label's cap height, so the reserve is
+gone and the padding is symmetric again. Width stays state-independent (measured
+identical with and without the dot): the dot appearing must never reflow a bar
+that is one chip away from scrolling — the same rule E27 set for the tone groove.
+
+**The rest is padding and gap only.** Row gap 5→4, button padding 9→8, tone
+segment min-width 27→24 with padding 5→4, groove gap 2→1, and the seam margins
+dropped (the row gap already spaced them — their own margins were doubling it).
+On the same DOM bench that E71 used, `main` measures **594px** and this change
+**542px**; against the ~605px composer the headroom goes from 8px to ~63px.
+Nothing left the row: no label shortened, no control collapsed, and the E24
+meaning-groups, the four-tone groove and Recap's single right-pin all stand.
+
+Rejected, measured, on the owner's call: making Split icon-only saves a further
+**34px** — the largest single win left in the row — but spends the word on a
+control E24 deliberately gave a LABELLED checkbox to distinguish it from the
+tone radio. The groove (107px after this change) remains the row's widest item
+and the place to look if the scroll ever returns; folding Split into it as a
+fifth segment is worth ~39px and is the same E24 trade, not taken.
