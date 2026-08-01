@@ -203,14 +203,17 @@
 /* Density (E71): the row lost the persona pill and then gave the rest of the
    savings back to the actions — gap 6→5, side padding 10→8. Together with the
    button/segment trims below this is what takes the bar from 716px to 597px,
-   i.e. from "scrolls on the measured composer" to "fits it". */
+   i.e. from "scrolls on the measured composer" to "fits it".
+   Second pass: gap 5→4, button padding 9→8, tone segments 27→24, seam margins
+   dropped, plus Recap's freed dot reserve — measured 594px → 542px. Every trim
+   here is padding/gap only: nothing leaves the row, no label shortens. */
 .chatgoose-toolbar {
   align-items: center;
   justify-content: flex-start;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  gap: 5px;
+  gap: 4px;
   padding: 8px 8px;
   border-radius: var(--chatgoose-radius-card);
   background: var(--chatgoose-bg1);
@@ -255,7 +258,7 @@
 .chatgoose-toolbar-button {
   position: relative;
   min-height: 30px;
-  padding: 0 9px;
+  padding: 0 8px;
   flex: 0 0 auto;
   border-color: var(--chatgoose-line);
   background: var(--chatgoose-bg2);
@@ -271,18 +274,22 @@
   box-shadow: none;
 }
 
+/* Recap's "ready" dot is a CORNER badge, not an inline marker: it sits above
+   the label's cap height, so the button keeps the row's normal symmetric
+   padding instead of reserving 9px that stayed empty whenever no summary was
+   cached (E71 follow-up). Width is still state-independent — the dot appearing
+   must never reflow the bar in a narrow composer. */
 .chatgoose-toolbar-button-summary {
   position: relative;
-  padding-right: 18px;
 }
 
 .chatgoose-toolbar-button-summary-ready::after {
   content: '';
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 7px;
-  height: 7px;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
   background: var(--chatgoose-online);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--chatgoose-online) 18%, transparent);
@@ -328,39 +335,6 @@
   color: var(--chatgoose-clay-ink);
 }
 
-/* Split — the one checkbox in the bar. A square dot marks it as an
-   INDEPENDENT flag (a flirty reply can also be split), a different form
-   from the tone radio groove on purpose (E24). */
-.chatgoose-toolbar-flag {
-  min-height: 28px;
-  padding: 0 10px 0 8px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-color: var(--chatgoose-line);
-  background: transparent;
-  border-radius: 999px;
-  color: var(--chatgoose-ink-mid);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-  box-shadow: none;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.chatgoose-toolbar-flag::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 2.5px;
-  border: 1.5px solid var(--chatgoose-line-strong);
-  background: transparent;
-  transition: background 150ms ease, border-color 150ms ease;
-}
-
 /* Loading spinner overlays the dimmed label instead of flowing after it:
    the button keeps its width, so the toolbar never reflows mid-generation. */
 .chatgoose-toolbar-button .chatgoose-spinner {
@@ -399,36 +373,14 @@
   transform: translateY(0) scale(1);
 }
 
-.chatgoose-toolbar-flag:hover:not(:disabled) {
-  background: var(--chatgoose-bg2);
-  border-color: var(--chatgoose-clay-line);
-  color: var(--chatgoose-ink);
-}
-
-.chatgoose-toolbar-flag-active {
-  background: var(--chatgoose-clay-bg);
-  border-color: var(--chatgoose-clay-line);
-  color: var(--chatgoose-clay-ink);
-}
-
-.chatgoose-toolbar-flag-active::before {
-  background: var(--chatgoose-clay);
-  border-color: var(--chatgoose-clay);
-}
-
-.chatgoose-toolbar-flag:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-/* Hairline seams between the bar's meaning-groups (E24). */
+/* Hairline seams between the bar's meaning-groups (E24). The row gap alone
+   spaces them — their own margins were doubling it. */
 .chatgoose-toolbar-sep {
   width: 1px;
   height: 18px;
   flex: 0 0 auto;
   background: var(--chatgoose-line-strong);
   opacity: 0.6;
-  margin: 0 1px;
 }
 
 /* Recap opens the right-hand "about the fan" cluster (Recap + persona): its
@@ -439,15 +391,76 @@
   margin-left: auto;
 }
 
-/* ─── Tone groove: sunken radio track of Reply OPTIONS (E24) ─────────────────
+/* ─── Hover hint ─────────────────────────────────────────────────────────────
+   Names a bar control and explains it in one sentence. Rendered OUTSIDE the bar
+   and positioned `fixed`: the bar is `overflow-x: auto`, which would clip a
+   bubble drawn inside it. Sits one band BELOW the modal surfaces (cheatsheet
+   2147483646, overlays …645/…644) — a hint must never cover a dialog — and
+   never takes the pointer, so it cannot swallow a click aimed at the row. */
+.chatgoose-hint {
+  position: fixed;
+  z-index: 2147483643;
+  max-width: 268px;
+  padding: 8px 10px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-menu);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow-pop);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font);
+  pointer-events: none;
+}
+
+.chatgoose-hint-title {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.chatgoose-hint-body {
+  margin-top: 3px;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+/* The arrow tracks the anchor's centre even when the bubble was clamped to the
+   viewport edge — `--chatgoose-hint-arrow` is written by the controller. */
+.chatgoose-hint::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: var(--chatgoose-hint-arrow, 50%);
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  margin-top: -5px;
+  transform: rotate(45deg);
+  border-right: 1px solid var(--chatgoose-line);
+  border-bottom: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-hint-below::after {
+  top: 0;
+  margin-top: -3px;
+  border: none;
+  border-left: 1px solid var(--chatgoose-line);
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+/* ─── Options capsule: the sunken groove of Reply's OPTIONS (E24, E73) ───────
    Actions are raised chips; options lie in a sunken groove pressed against
    Reply. Segments are emoji glyphs (the chatters' own language — precedent:
    the Spenders tier chips); the armed one surfaces as a light thumb without
-   changing width, so the narrow composer never shifts or starts scrolling. */
-.chatgoose-tone-track {
+   changing width, so the narrow composer never shifts or starts scrolling.
+   The capsule holds two DIFFERENT control kinds — a radio track of tones and
+   one checkbox (Split) — so the sunken styling lives here, on a plain
+   container, and the `radiogroup` role stays on the inner track alone. */
+.chatgoose-reply-options {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
   padding: 3px;
   flex: 0 0 auto;
   background: var(--chatgoose-bg3);
@@ -456,10 +469,56 @@
   box-shadow: inset 0 1px 2px rgba(31, 30, 29, 0.07);
 }
 
+.chatgoose-tone-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* The seam is the only thing telling a chatter that what follows is a
+   different KIND of control, not a fifth tone. It is structure, not trim. */
+.chatgoose-options-seam {
+  width: 1px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0 3px;
+  background: var(--chatgoose-line-strong);
+  opacity: 0.7;
+}
+
+/* Split: same box as a tone cell, square glyph instead of an emoji. Armed, it
+   is pressed INTO the groove while an armed tone RISES out of it — the press
+   is what keeps a checkbox from reading as a fifth radio (E73). */
+.chatgoose-split-seg::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 2.5px;
+  border: 1.5px solid var(--chatgoose-line-strong);
+  background: transparent;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.chatgoose-split-seg-active {
+  background: var(--chatgoose-clay-bg);
+  border-color: var(--chatgoose-clay-line);
+  box-shadow: inset 0 1px 3px rgba(31, 30, 29, 0.32);
+  filter: none;
+  opacity: 1;
+}
+
+.chatgoose-split-seg-active::before {
+  background: var(--chatgoose-clay);
+  border-color: var(--chatgoose-clay);
+}
+
+/* Segment box is sized to the emoji itself (~16px at 14px/em) plus a hair of
+   air — the groove is the row's single widest item, so slack here is expensive. */
 .chatgoose-tone-seg {
   min-height: 22px;
-  min-width: 27px;
-  padding: 0 5px;
+  min-width: 24px;
+  padding: 0 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

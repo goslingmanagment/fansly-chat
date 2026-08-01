@@ -85,6 +85,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 | E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
 | E71 | 2026-08-01 | The action bar drops the persona pill and tightens its density: 716px of content on a ~605px composer was scrolling Reply — the primary action — off the left edge. The persona NAME moves to Reply’s own tooltip, «Unmapped» defers to the mapping banner already open under the bar, and only the one state with no other surface («no Fansly account detected») keeps a chip. Gap 6→5, side padding 10→8, button padding 11→9, tone segment 30→27: measured 716 → 597px |
+| E72 | 2026-08-01 | Recap's ready dot moves to a corner badge, freeing the 9px reserve that made it the row's widest chip with an off-centre label; width stays state-independent so the dot never reflows the bar (E27's rule). Second density pass — gap 5→4, button padding 9→8, tone segment 27→24 with padding 5→4, groove gap 2→1, seam margins dropped: measured 594 → 542px, headroom on the ~605px composer 8px → ~63px. Split stays labelled (icon-only was measured at −34px and declined, E24) |
+| E73 | 2026-08-01 | Split moves into the Reply options capsule as a fifth cell behind a seam, loses its word, gains ⌘⇧L: `supportsReplyMode` is true for `fast-reply` alone, so it is an option, not an action (amends E24). A checkbox among radios is kept legible by FORM — armed tone rises, armed Split is pressed in — and the capsule is a plain container so the `radiogroup` role can stay on the inner track. 542 → 507px, though the icon-only variant measured 509px, so structure decided it, not pixels. Losing the word forced real hover hints for the whole bar, replacing the native `title`: rendered outside the `overflow-x: auto` bar, hover hit-tested on the container so DISABLED controls still explain themselves |
 
 ## Entries
 
@@ -2540,3 +2542,79 @@ pins the new shape: no persona text in the bar, the name present in Reply's
 title (and absent when nothing is mapped), the chip hidden for an unmapped
 account and shown when there is no accountId, and — with the warning visible —
 Recap still the single toolbar child whose `margin-left` resolves to `auto`.
+
+**E72 (2026-08-01).** The Recap "ready" dot becomes a corner badge, and the bar
+takes a second density pass. E71 left the row 8px inside the measured composer —
+too thin a margin to survive a laptop or an open Fansly sidebar, which E71 itself
+recorded as a known limit. The trigger this time was the button, not the row: at
+`padding-right: 18px` against the row's 9px, Recap was **9px wider than every
+other chip and its label sat visibly off-centre** — a permanent reserve for a dot
+that only renders when `hasAvailableSummary`, i.e. empty in the common state. The
+dot now sits at `top/right: 3px`, ABOVE the label's cap height, so the reserve is
+gone and the padding is symmetric again. Width stays state-independent (measured
+identical with and without the dot): the dot appearing must never reflow a bar
+that is one chip away from scrolling — the same rule E27 set for the tone groove.
+
+**The rest is padding and gap only.** Row gap 5→4, button padding 9→8, tone
+segment min-width 27→24 with padding 5→4, groove gap 2→1, and the seam margins
+dropped (the row gap already spaced them — their own margins were doubling it).
+On the same DOM bench that E71 used, `main` measures **594px** and this change
+**542px**; against the ~605px composer the headroom goes from 8px to ~63px.
+Nothing left the row: no label shortened, no control collapsed, and the E24
+meaning-groups, the four-tone groove and Recap's single right-pin all stand.
+
+Rejected, measured, on the owner's call: making Split icon-only saves a further
+**34px** — the largest single win left in the row — but spends the word on a
+control E24 deliberately gave a LABELLED checkbox to distinguish it from the
+tone radio. The groove (107px after this change) remains the row's widest item
+and the place to look if the scroll ever returns; folding Split into it as a
+fifth segment is worth ~39px and is the same E24 trade, not taken.
+
+**E73 (2026-08-01).** Split moves INSIDE the Reply options capsule, trades its
+word for a square, and gains `⌘⇧L`; every control in the bar gets a real hover
+hint. The trigger was the same screenshot habit as E71/E72 — the owner asking
+what a 63px chip was buying — but the answer turned out to be structural, not
+metric: `supportsReplyMode` is true for `fast-reply` ALONE, so Split is an
+option of one button exactly like a tone, while it rendered as a raised chip,
+i.e. as an action. E24's own rule ("actions are raised chips, options lie in the
+sunken groove") puts it in the capsule; E24 kept it out because a checkbox among
+radios could read as a fifth tone. **That objection is answered by form, not by
+placement: an armed tone RISES as a light thumb, an armed Split is pressed INTO
+the groove.** Two physics in one capsule; a hairline seam marks the boundary.
+Width is state-independent in both, so arming still never reflows the row (E27).
+
+The capsule is a new plain container: a checkbox cannot live inside a
+`radiogroup`, so `.chatgoose-reply-options` carries the sunken styling and the
+role stays on the inner `.chatgoose-tone-track`. Hiding now happens on the
+capsule — hiding the track alone would strand the seam and the Split cell in an
+empty pill. Split is `role="checkbox"` + `aria-checked` (was a button with
+`aria-pressed`).
+
+Measured on the E71/E72 bench: 542 → 507px, against a ~605px composer. The
+icon-only variant that keeps the chip where it is was also measured — 509px, two
+pixels apart — so the pixels did NOT decide this; the row simply has one fewer
+free-standing element and one honest home for Reply's options.
+
+**Losing the word forced the hints, and the hints are the larger half of the
+change.** Every bar control used the native `title`: in Firefox a ~1s OS box,
+unstyleable, unplaceable — no way to teach a row to a new chatter. The new
+component renders OUTSIDE the bar (`overflow-x: auto` would clip a bubble drawn
+inside it) and hit-tests hover on the CONTAINER rather than listening per
+button, because disabled controls do not dispatch pointer events and the states
+that most need explaining — `Fix` with an empty composer, the whole row with no
+persona — are exactly the disabled ones. Bodies are thunks, so a hint reports
+the CURRENT state. The combo is not repeated where a corner keycap already shows
+it; the capsule's 24px cells have no keycap, so theirs carry it.
+
+Hotkey letter `l` (spLit) — Firefox reserves ⌘⇧ R/T/P/B/A, and a test now pins
+both facts (not reserved, not colliding with a bound letter). The cheatsheet and
+the Options hotkeys pane render from the same table, and both are TOTAL records,
+so the new action could not be added without being named in Russian for the UI.
+
+Tombstones: `.chatgoose-toolbar-flag`, `.chatgoose-toolbar-flag-active` and
+their `::before` are deleted — Split was their only consumer. The native
+`title` is gone from every bar control; anything that must stay reachable
+without hover lives in `aria-label`/`aria-keyshortcuts`, and the open hint is
+announced through `aria-describedby`. Not touched: what Split SENDS (E49's
+one-part violation note stands), its stickiness, and the tone groove's own
+behaviour.

@@ -33,6 +33,7 @@ const ACTION_GROUPS: Record<HotkeyAction, HotkeyGroup> = {
   'hi-greeting': 'generation',
   ping: 'generation',
   'cycle-tone': 'generation',
+  'toggle-split': 'generation',
   cancel: 'generation',
   'fan-summary': 'panels',
   coach: 'panels',

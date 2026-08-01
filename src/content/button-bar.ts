@@ -1,8 +1,33 @@
 import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/types.js';
 import { comboLabel, detectLabelPlatform, featureHotkeyLabel } from '../shared/hotkeys.js';
 import { makeKbd } from './ui/kbd.js';
+import { HoverHintController } from './ui/hover-hint.js';
 
 type ToolbarAction = FeatureType | 'compare';
+
+// One sentence per control, in Russian — the bar's labels stay English, the
+// EXPLANATION is in the chatters' own language. The combo is deliberately
+// absent here: these controls carry a corner keycap that shows it on the same
+// hover (spec §5, decision 7). Anything state-dependent (why a button is grey,
+// whether a recap is already cached) is appended by the thunks in
+// `registerHints`, not stored here.
+const FEATURE_HINTS: Record<FeatureType, string> = {
+  'fast-reply': 'Ответ на текущую переписку — с учётом персоны и выбранного тона',
+  'improve-draft': 'Переписывает ТВОЙ черновик — не сочиняет новый',
+  'hi-greeting': 'Заходы для первого сообщения новому фану',
+  ping: 'Сообщение, чтобы расшевелить замолчавшего фана',
+  'fan-summary': 'Досье по фану: кто он, на что тратил, о чём уже говорили',
+  'help-me': 'Разбор ситуации в чате — что делать дальше',
+  'chat-review': 'Оценка переписки: что сработало, что нет',
+  'coach-chat': 'Спросить ИИ про этого фана своими словами',
+  'voice-script': 'Текст для голосовой заметки',
+};
+
+/** Controls that are not `FeatureType` entries but still need explaining. */
+const VOICE_HINT = 'Голосовая заметка на текущем черновике';
+const SPLIT_HINT = 'Ответ придёт серией из 2–3 сообщений. Отправлять руками, по одному';
+const ACCOUNT_WARNING_HINT =
+  'Расширение не видит, в каком аккаунте Fansly открыт этот чат — перезагрузите страницу Fansly';
 
 // Buttons rendered directly in the bar row — all as plain labelled buttons
 // (Recap included; no overflow ⋯ menu). Bar v2 (E24) groups by meaning:
@@ -82,11 +107,19 @@ export class ButtonBar {
   // keeps a chip.
   private readonly accountWarning: HTMLElement;
   private readonly compareRestoreButton!: HTMLButtonElement;
-  // Split — multi-message reply mode (preferSplit). A checkbox-style flag,
-  // ORTHOGONAL to the tone radio (a flirty reply can also be split), hence
-  // its own form: square dot, outside the tone groove. Sticky until toggled
-  // off (E24) — it no longer silently resets after each generation.
+  // Split — multi-message reply mode (preferSplit). Sticky until toggled off
+  // (E24). It lives INSIDE the options capsule since E73: `supportsReplyMode`
+  // is true for `fast-reply` alone, so Split is an option of one button exactly
+  // like a tone, and E24's own rule — actions are raised chips, options lie in
+  // the sunken groove — puts it there. E24 kept it outside because a checkbox
+  // among radios could read as a fifth tone; that is answered by the FORM, not
+  // by the placement: an armed tone rises as a thumb, an armed Split is pressed
+  // INTO the groove. Two physics, not two icons.
   private readonly replyModeToggle: HTMLButtonElement;
+  // The visual capsule. It cannot be the radiogroup itself — a checkbox inside
+  // a radiogroup is an a11y violation — so the sunken styling lives here and
+  // the radio semantics stay on the inner track.
+  private readonly replyOptions: HTMLElement;
   private readonly toneTrack: HTMLElement;
   private readonly toneSegments = new Map<Exclude<ReplyTone, 'none'>, HTMLButtonElement>();
   private readonly buttons = new Map<ToolbarAction, HTMLButtonElement>();
@@ -96,6 +129,14 @@ export class ButtonBar {
   // Coach opens the chat overlay (spec §3). It is NOT a TOOLBAR_FEATURES entry —
   // clicking it starts no generation — so it lives outside the feature map.
   private readonly coachButton: HTMLButtonElement;
+  // Hover hints replace the native `title` on every control of the row: the
+  // Firefox tooltip is a ~1s OS box that cannot be styled or placed, and the
+  // states that most need explaining are the disabled ones it never reaches.
+  private readonly hints = new HoverHintController();
+  // Hint bodies are state-aware (why Fix is grey, whether a recap is cached),
+  // so the last render's inputs are kept for the thunks to read.
+  private lastState: TabUiState | null = null;
+  private lastHasDraftText = false;
 
   constructor(private readonly callbacks: ButtonBarCallbacks) {
     this.root = document.createElement('div');
@@ -107,7 +148,6 @@ export class ButtonBar {
       button.type = 'button';
       button.className = 'chatgoose-button chatgoose-toolbar-button';
       this.renderFeatureButton(button, entry.feature, entry.label, false);
-      button.title = this.featureTitle(entry.feature, entry.label);
       button.addEventListener('click', () => this.callbacks.onFeatureClick(entry.feature));
       this.buttons.set(entry.feature, button);
     }
@@ -141,11 +181,14 @@ export class ButtonBar {
 
     this.replyModeToggle = document.createElement('button');
     this.replyModeToggle.type = 'button';
-    this.replyModeToggle.className = 'chatgoose-button chatgoose-toolbar-flag';
-    this.replyModeToggle.textContent = 'Split';
-    this.replyModeToggle.setAttribute('aria-pressed', 'false');
-    this.replyModeToggle.title =
-      'Ответ серией из 2–3 сообщений — переключатель, действует пока включён';
+    this.replyModeToggle.className = 'chatgoose-tone-seg chatgoose-split-seg';
+    this.replyModeToggle.setAttribute('role', 'checkbox');
+    this.replyModeToggle.setAttribute('aria-checked', 'false');
+    this.replyModeToggle.setAttribute('aria-label', 'Split reply into 2–3 messages');
+    this.replyModeToggle.setAttribute(
+      'aria-keyshortcuts',
+      `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+L`,
+    );
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
     this.coachButton = document.createElement('button');
@@ -155,21 +198,21 @@ export class ButtonBar {
     coachLabel.className = 'chatgoose-toolbar-label';
     coachLabel.textContent = 'Coach';
     this.coachButton.append(coachLabel);
-    this.coachButton.title = `Coach — ask the AI about this fan (${comboLabel('C', this.platform)})`;
+    this.coachButton.setAttribute(
+      'aria-keyshortcuts',
+      `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+C`,
+    );
     this.coachButton.addEventListener('click', () => this.callbacks.onCoachClick());
 
     this.accountWarning = document.createElement('div');
     this.accountWarning.className = 'chatgoose-toolbar-warn chatgoose-hidden';
     this.accountWarning.textContent = 'Аккаунт не определён';
-    this.accountWarning.title =
-      'Расширение не видит, в каком аккаунте Fansly открыт этот чат — перезагрузите страницу Fansly';
 
     this.voiceButton = document.createElement('button');
     this.voiceButton.type = 'button';
     this.voiceButton.className =
       'chatgoose-button chatgoose-toolbar-button chatgoose-toolbar-voice chatgoose-hidden';
     this.voiceButton.textContent = '🎙';
-    this.voiceButton.title = 'Войс — голосовая заметка на текущем черновике';
     this.voiceButton.setAttribute('aria-label', 'Voice note');
     this.voiceButton.addEventListener('click', () => this.callbacks.onVoiceClick());
 
@@ -186,12 +229,21 @@ export class ButtonBar {
       segment.setAttribute('role', 'radio');
       segment.setAttribute('aria-checked', 'false');
       segment.setAttribute('aria-label', `${entry.word} tone`);
-      segment.title = `${entry.hint} · клик армирует следующий Reply · ${toneCombo} циклирует`;
       segment.addEventListener('click', () => this.callbacks.onToneSelect(entry.tone));
       this.toneSegments.set(entry.tone, segment);
       this.toneTrack.append(segment);
     }
     this.renderToneSegments('none', false);
+
+    // The capsule: radio track, hairline seam, checkbox cell. The seam is the
+    // only thing separating two different control kinds inside one pill, so it
+    // is not decoration — do not drop it when tightening the row.
+    this.replyOptions = document.createElement('div');
+    this.replyOptions.className = 'chatgoose-reply-options';
+    const optionsSeam = document.createElement('span');
+    optionsSeam.className = 'chatgoose-options-seam';
+    optionsSeam.setAttribute('aria-hidden', 'true');
+    this.replyOptions.append(this.toneTrack, optionsSeam, this.replyModeToggle);
 
     // Bar v2 order (E24): the Reply cluster (trigger + tone groove + Split
     // flag), then draft tools, then situational openers, then — pinned right —
@@ -199,8 +251,7 @@ export class ButtonBar {
     // boundaries. Help / Review / Compare stay implemented but hidden.
     this.root.append(
       replyButton,
-      this.toneTrack,
-      this.replyModeToggle,
+      this.replyOptions,
       makeSeparator(),
       fixButton,
       makeSeparator(),
@@ -214,12 +265,76 @@ export class ButtonBar {
       this.accountWarning,
       this.voiceButton,
     );
+
+    this.registerHints(toneCombo);
+    this.hints.attach(this.root);
   }
 
-  /** The hover tooltip for a feature button: label plus the full combo. */
-  private featureTitle(feature: FeatureType, label: string): string {
-    const hotkey = featureHotkeyLabel(feature, this.platform);
-    return hotkey ? `${label} (${hotkey.full})` : label;
+  /** Tear the hint layer and its listeners down. The bar itself is
+   *  app-lifetime, so nothing in the content app calls this — tests do, and it
+   *  keeps the component honest about owning what it appends to the page. */
+  destroy(): void {
+    this.hints.destroy();
+  }
+
+  /** One hint per control. Every body is a thunk so it can read the LAST
+   *  render's state — a hint that cannot say "greyed out because the composer
+   *  is empty" is exactly the hint a chatter needed. */
+  private registerHints(toneCombo: string): void {
+    for (const entry of TOOLBAR_FEATURES) {
+      const button = this.buttons.get(entry.feature)!;
+      this.hints.register(button, () => ({
+        title: entry.label,
+        body: this.featureHintBody(entry.feature),
+      }));
+    }
+
+    for (const entry of TONE_OPTIONS) {
+      const segment = this.toneSegments.get(entry.tone)!;
+      this.hints.register(segment, () => ({
+        title: `${entry.emoji} ${entry.word}`,
+        // Tone cells are 24px — no room for a corner keycap, so the combo that
+        // cycles them rides the hint (spec §5, decision 7).
+        body: `${entry.hint} · клик армирует следующий Reply · ${toneCombo} циклирует`,
+      }));
+    }
+
+    this.hints.register(this.replyModeToggle, () => ({
+      title: 'Split',
+      // The cell traded its word for a square (E73), so this hint and the
+      // combo are the whole of its discoverability — the cell is 24px and has
+      // nowhere to put a corner keycap.
+      body: `${SPLIT_HINT} · ${comboLabel('L', this.platform)}`,
+    }));
+
+    this.hints.register(this.coachButton, () => ({
+      title: 'Coach',
+      // Coach is not a TOOLBAR_FEATURES entry, so it has no corner keycap of
+      // its own — its combo lives here.
+      body: `${FEATURE_HINTS['coach-chat']} · ${comboLabel('C', this.platform)}`,
+    }));
+
+    this.hints.register(this.voiceButton, () => ({ title: 'Voice', body: VOICE_HINT }));
+
+    this.hints.register(this.accountWarning, () => ({
+      title: 'Аккаунт не определён',
+      body: ACCOUNT_WARNING_HINT,
+    }));
+  }
+
+  /** The state-dependent tail of a feature button's hint. */
+  private featureHintBody(feature: FeatureType): string {
+    const base = FEATURE_HINTS[feature];
+    if (feature === 'improve-draft' && !this.lastHasDraftText) {
+      return `${base} · Сейчас недоступен: в поле нет текста`;
+    }
+    if (feature === 'fast-reply' && this.lastState?.mappedPersonalityName) {
+      return `Ответ от имени «${this.lastState.mappedPersonalityName}» — с учётом выбранного тона`;
+    }
+    if (feature === 'fan-summary' && this.lastState?.hasAvailableSummary) {
+      return `${base} · Готовый рекап можно открыть сразу`;
+    }
+    return base;
   }
 
   /** (Re)build a feature button's content: label, hover-only hotkey, and
@@ -282,18 +397,16 @@ export class ButtonBar {
   ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatgoose-hidden', !hasState);
+    // Hints read these instead of taking their own copy of the render inputs;
+    // set before the early return so a stateless bar still explains itself.
+    this.lastState = state;
+    this.lastHasDraftText = hasDraftText;
     if (!state) {
       return;
     }
 
-    // The persona name rides Reply's own tooltip since E71 — the one control
-    // whose output the name actually describes.
-    const replyButton = this.buttons.get('fast-reply')!;
-    const replyHotkey = featureHotkeyLabel('fast-reply', this.platform);
-    const replyLabel = state.mappedPersonalityName
-      ? `Reply as ${state.mappedPersonalityName}`
-      : 'Reply';
-    replyButton.title = replyHotkey ? `${replyLabel} (${replyHotkey.full})` : replyLabel;
+    // The persona name rides Reply's own HINT since E71 (a tooltip until the
+    // hints landed) — the one control whose output the name actually describes.
 
     // The only bad state nothing else reports: no Fansly account detected, so
     // the mapping banner stays unrendered and every button is disabled with no
@@ -316,15 +429,13 @@ export class ButtonBar {
       this.renderFeatureButton(button, entry.feature, entry.label, isActive && activeLoading);
     }
 
-    // Recap shows a "ready" dot + tooltip when a cached summary can be opened.
+    // Recap shows a "ready" dot when a cached summary can be opened; the hint
+    // says so in words (`featureHintBody`).
     const summaryButton = this.buttons.get('fan-summary')!;
     summaryButton.classList.toggle(
       'chatgoose-toolbar-button-summary-ready',
       state.hasAvailableSummary,
     );
-    summaryButton.title = state.hasAvailableSummary
-      ? 'Recap ready to open'
-      : this.featureTitle('fan-summary', 'Recap');
 
     const compareButton = this.buttons.get('compare')!;
     const compareActive = activeAction === 'compare';
@@ -345,19 +456,21 @@ export class ButtonBar {
       coachActive && activeLoading,
     );
 
-    // ─── Split (reply-mode flag) ──────────────────────────────────────────────
+    // ─── Split (reply-mode checkbox) ──────────────────────────────────────────
+    // Width is identical armed and idle: the bar is one chip away from
+    // scrolling, so arming anything must never reflow the row (E27).
     const splitArmed = nextReplyMode === 'preferSplit';
     this.replyModeToggle.disabled = Boolean(activeAction) || !state.connected || !state.hasApiKey;
-    this.replyModeToggle.setAttribute('aria-pressed', splitArmed ? 'true' : 'false');
-    this.replyModeToggle.classList.toggle('chatgoose-toolbar-flag-active', splitArmed);
+    this.replyModeToggle.setAttribute('aria-checked', splitArmed ? 'true' : 'false');
+    this.replyModeToggle.classList.toggle('chatgoose-split-seg-active', splitArmed);
 
-    // ─── Tone groove ──────────────────────────────────────────────────────────
-    // Hide the groove (and the Split flag rides the same rule) when there's
-    // nothing to reply with (not connected / no key); when connected but
-    // unmapped, keep it visible-but-disabled so it tracks Reply's own state.
+    // ─── Options capsule ──────────────────────────────────────────────────────
+    // Hide the whole capsule (tones AND Split) when there's nothing to reply
+    // with (not connected / no key); when connected but unmapped, keep it
+    // visible-but-disabled so it tracks Reply's own state. Hiding the inner
+    // track alone would leave the seam and the Split cell in an empty pill.
     const hideToneTrack = !state.connected || !state.hasApiKey;
-    this.toneTrack.classList.toggle('chatgoose-hidden', hideToneTrack);
-    this.replyModeToggle.classList.toggle('chatgoose-hidden', hideToneTrack);
+    this.replyOptions.classList.toggle('chatgoose-hidden', hideToneTrack);
     this.renderToneSegments(
       nextReplyTone,
       Boolean(activeAction) || disableForPrereqs,

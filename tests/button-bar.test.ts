@@ -54,17 +54,33 @@ function buttonByLabel(root: ParentNode, label: string): HTMLButtonElement | und
 }
 
 function splitFlag(root: ParentNode): HTMLButtonElement | null {
-  return root.querySelector<HTMLButtonElement>('.chatgoose-toolbar-flag');
+  return root.querySelector<HTMLButtonElement>('.chatgoose-split-seg');
 }
 
 function toneSegments(root: ParentNode): HTMLButtonElement[] {
-  return Array.from(root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-seg'));
+  // Split shares the cell geometry class, so exclude it: these helpers are
+  // about the four TONES.
+  return Array.from(
+    root.querySelectorAll<HTMLButtonElement>('.chatgoose-tone-seg:not(.chatgoose-split-seg)'),
+  );
 }
 
 function toneSegment(root: ParentNode, emoji: string): HTMLButtonElement | undefined {
   return toneSegments(root).find((segment) =>
     segment.querySelector('.chatgoose-tone-seg-emoji')?.textContent === emoji,
   );
+}
+
+/** Open a control's hover hint and read it. Focus shows it with no dwell, which
+ *  keeps these assertions free of fake timers; the hover path has its own
+ *  tests in `hover-hint.test.ts`. */
+function hintFor(element: Element | null | undefined): { title: string; body: string } {
+  element?.dispatchEvent(new window.Event('focus'));
+  const layer = document.querySelector('.chatgoose-hint');
+  return {
+    title: layer?.querySelector('.chatgoose-hint-title')?.textContent ?? '',
+    body: layer?.querySelector('.chatgoose-hint-body')?.textContent ?? '',
+  };
 }
 
 const noop = () => undefined;
@@ -131,7 +147,10 @@ describe('ButtonBar toolbar visibility', () => {
     const replyChip = reply?.querySelector('.chatgoose-toolbar-hotkey');
     expect(replyChip?.textContent).toBe(replyHotkey.short);
     expect(replyChip?.getAttribute('aria-hidden')).toBe('true');
-    expect(reply?.title).toContain(replyHotkey.full);
+    // The combo lives on the keycap, so the hint does NOT repeat it — it
+    // spends its two lines on explaining the control instead.
+    expect(reply?.title).toBe('');
+    expect(hintFor(reply).body).not.toContain(replyHotkey.full);
     expect(reply?.getAttribute('aria-keyshortcuts')).toBe(
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
@@ -146,12 +165,13 @@ describe('ButtonBar toolbar visibility', () => {
     expect(recap?.querySelector('.chatgoose-toolbar-hotkey')).toBeNull();
     expect(recap?.getAttribute('aria-keyshortcuts')).toBeNull();
 
-    // The Split reply-mode flag is a labelled pill with no bound key — no chip,
-    // no keyshortcuts.
+    // The Split cell is 24px: no room for a keycap chip, so the combo is
+    // exposed as metadata only and spelled out in the hint.
     const split = splitFlag(bar.root);
-    expect(split?.textContent).toBe('Split');
     expect(split?.querySelector('.chatgoose-kbd')).toBeNull();
-    expect(split?.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(split?.getAttribute('aria-keyshortcuts')).toBe(
+      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+L`,
+    );
   });
 
   it('keeps the hover-only hotkey through the active loading spinner', () => {
@@ -209,7 +229,7 @@ describe('ButtonBar toolbar visibility', () => {
 
     const recap = buttonByLabel(bar.root, 'Recap');
     expect(recap?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
-    expect(recap?.title).toContain('Recap ready to open');
+    expect(hintFor(recap).body).toContain('Готовый рекап');
   });
 
   it('hides the 🎙 Voice button unless the page is voice-capable', () => {
@@ -293,11 +313,14 @@ describe('ButtonBar tone groove (E24)', () => {
       .toEqual(['😌', '😏', '💰', '🔥']);
     // Idle segments carry the glyph only — no word.
     expect(bar.root.querySelector('.chatgoose-tone-seg-word')).toBeNull();
-    // Hover hint is Russian and mentions the cycle combo.
-    expect(toneSegment(bar.root, '😏')?.title).toContain('Флирт');
-    expect(toneSegment(bar.root, '💰')?.title).toContain('продажа');
-    expect(toneSegment(bar.root, '😌')?.title).toContain('дружеский');
-    expect(toneSegment(bar.root, '🔥')?.title).toContain('Горячо');
+    // Hover hint is Russian and — these cells being too small for a keycap —
+    // carries the cycle combo itself.
+    expect(hintFor(toneSegment(bar.root, '😏')).body).toContain('Флирт');
+    expect(hintFor(toneSegment(bar.root, '💰')).body).toContain('продажа');
+    expect(hintFor(toneSegment(bar.root, '😌')).body).toContain('дружеский');
+    const spicy = hintFor(toneSegment(bar.root, '🔥'));
+    expect(spicy.body).toContain('Горячо');
+    expect(spicy.body).toContain('циклирует');
   });
 
   it('the armed segment surfaces as a fixed-width thumb without adding a word', () => {
@@ -362,19 +385,20 @@ describe('ButtonBar tone groove (E24)', () => {
     expect(toneSegments(bar.root).every((segment) => segment.disabled)).toBe(true);
   });
 
-  it('hides the groove and the Split flag when not connected', () => {
+  it('hides the whole options capsule when not connected', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState({ connected: false }), null, 'default', 'none', true, false, false);
 
-    const track = bar.root.querySelector('.chatgoose-tone-track');
-    expect(track?.classList.contains('chatgoose-hidden')).toBe(true);
-    expect(splitFlag(bar.root)?.classList.contains('chatgoose-hidden')).toBe(true);
+    // Hiding the inner track alone would strand the seam and the Split cell in
+    // an empty pill, so the capsule is what carries the class.
+    const capsule = bar.root.querySelector('.chatgoose-reply-options');
+    expect(capsule?.classList.contains('chatgoose-hidden')).toBe(true);
   });
 });
 
-describe('ButtonBar Split flag', () => {
+describe('ButtonBar Split cell (E73)', () => {
   beforeEach(() => {
     installDom();
   });
@@ -384,30 +408,51 @@ describe('ButtonBar Split flag', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders a labelled Split flag, unpressed by default', () => {
+  it('sits inside the capsule but OUTSIDE the radio group, as a checkbox', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+
+    const capsule = bar.root.querySelector('.chatgoose-reply-options')!;
+    const track = capsule.querySelector('.chatgoose-tone-track')!;
+    const split = splitFlag(bar.root)!;
+    // A checkbox inside a radiogroup is an a11y violation — the capsule holds
+    // both, the role stays on the inner track.
+    expect(track.getAttribute('role')).toBe('radiogroup');
+    expect(capsule.contains(split)).toBe(true);
+    expect(track.contains(split)).toBe(false);
+    expect(split.getAttribute('role')).toBe('checkbox');
+    // The word is gone; the hint and the combo carry it now.
+    expect(split.textContent).toBe('');
+    expect(split.getAttribute('aria-label')).toContain('Split');
+    expect(split.getAttribute('aria-keyshortcuts')).toMatch(/\+Shift\+L$/);
+    expect(hintFor(split).body).toContain('2–3 сообщений');
+  });
+
+  it('renders unchecked by default', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'default', 'none', true, false, false);
 
     const split = splitFlag(bar.root)!;
-    expect(split.textContent).toBe('Split');
-    expect(split.getAttribute('aria-pressed')).toBe('false');
-    expect(split.classList.contains('chatgoose-toolbar-flag-active')).toBe(false);
+    expect(split.getAttribute('aria-checked')).toBe('false');
+    expect(split.classList.contains('chatgoose-split-seg-active')).toBe(false);
   });
 
-  it('reflects an armed Split mode with aria-pressed and the active style', () => {
+  it('reflects an armed Split mode with aria-checked and the pressed style', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
     bar.render(buildState(), null, 'preferSplit', 'none', true, false, false);
 
     const split = splitFlag(bar.root)!;
-    expect(split.getAttribute('aria-pressed')).toBe('true');
-    expect(split.classList.contains('chatgoose-toolbar-flag-active')).toBe(true);
+    expect(split.getAttribute('aria-checked')).toBe('true');
+    expect(split.classList.contains('chatgoose-split-seg-active')).toBe(true);
   });
 
-  it('clicking the Split flag fires onReplyModeToggle', () => {
+  it('clicking the Split cell fires onReplyModeToggle', () => {
     const toggleSpy = vi.fn();
     const bar = makeBar({ onReplyModeToggle: toggleSpy });
     document.body.append(bar.root);
@@ -418,7 +463,7 @@ describe('ButtonBar Split flag', () => {
     expect(toggleSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('disables the Split flag during an active operation and when not connected', () => {
+  it('disables the Split cell during an active operation and when not connected', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -461,11 +506,10 @@ describe('ButtonBar improve draft state', () => {
     const reply = bar.root.querySelector<HTMLButtonElement>(
       '.chatgoose-toolbar-button-primary',
     )!;
-    const hotkey = featureHotkeyLabel('fast-reply', detectLabelPlatform());
-    expect(reply.title).toBe(`Reply as Closer (${hotkey!.full})`);
+    expect(hintFor(reply).body).toContain('«Closer»');
   });
 
-  it('drops the persona from Reply’s tooltip when nothing is mapped', () => {
+  it('drops the persona from Reply’s hint when nothing is mapped', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -482,8 +526,24 @@ describe('ButtonBar improve draft state', () => {
     const reply = bar.root.querySelector<HTMLButtonElement>(
       '.chatgoose-toolbar-button-primary',
     )!;
-    const hotkey = featureHotkeyLabel('fast-reply', detectLabelPlatform());
-    expect(reply.title).toBe(`Reply (${hotkey!.full})`);
+    const body = hintFor(reply).body;
+    expect(body).not.toContain('Closer');
+    expect(body).toContain('с учётом персоны');
+  });
+
+  it('explains a greyed-out Fix instead of leaving it silent', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    // Disabled controls are exactly the ones a chatter needs explained, and the
+    // native tooltip never reached them.
+    bar.render(buildState(), null, 'default', 'none', false, false, false);
+    const fix = buttonByLabel(bar.root, 'Fix')!;
+    expect(fix.disabled).toBe(true);
+    expect(hintFor(fix).body).toContain('в поле нет текста');
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+    expect(hintFor(fix).body).not.toContain('в поле нет текста');
   });
 
   it('stays quiet about an unmapped account — the mapping banner covers it', () => {
@@ -539,11 +599,8 @@ describe('ButtonBar improve draft state', () => {
     const replyIndex = children.findIndex((child) =>
       child.classList.contains('chatgoose-toolbar-button-primary'),
     );
-    const toneIndex = children.findIndex((child) =>
-      child.classList.contains('chatgoose-tone-track'),
-    );
-    const splitIndex = children.findIndex((child) =>
-      child.classList.contains('chatgoose-toolbar-flag'),
+    const optionsIndex = children.findIndex((child) =>
+      child.classList.contains('chatgoose-reply-options'),
     );
     const fixIndex = children.findIndex((child) => labelOf(child) === 'Fix');
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
@@ -559,9 +616,9 @@ describe('ButtonBar improve draft state', () => {
 
     // Reply cluster (trigger + options) → draft tool → openers → fan side.
     expect(replyIndex).toBe(0);
-    expect(toneIndex).toBe(replyIndex + 1);
-    expect(splitIndex).toBe(toneIndex + 1);
-    expect(fixIndex).toBeGreaterThan(splitIndex);
+    // One capsule now, not a track plus a free-standing flag (E73).
+    expect(optionsIndex).toBe(replyIndex + 1);
+    expect(fixIndex).toBeGreaterThan(optionsIndex);
     expect(hiIndex).toBeGreaterThan(fixIndex);
     expect(pingIndex).toBe(hiIndex + 1);
     expect(recapIndex).toBe(pingIndex + 1);
