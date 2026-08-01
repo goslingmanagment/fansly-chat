@@ -446,6 +446,65 @@
   margin-left: auto;
 }
 
+/* ─── Hover hint ─────────────────────────────────────────────────────────────
+   Names a bar control and explains it in one sentence. Rendered OUTSIDE the bar
+   and positioned `fixed`: the bar is `overflow-x: auto`, which would clip a
+   bubble drawn inside it. Sits one band BELOW the modal surfaces (cheatsheet
+   2147483646, overlays …645/…644) — a hint must never cover a dialog — and
+   never takes the pointer, so it cannot swallow a click aimed at the row. */
+.chatgoose-hint {
+  position: fixed;
+  z-index: 2147483643;
+  max-width: 268px;
+  padding: 8px 10px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-menu);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow-pop);
+  color: var(--chatgoose-ink);
+  font-family: var(--chatgoose-font);
+  pointer-events: none;
+}
+
+.chatgoose-hint-title {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.chatgoose-hint-body {
+  margin-top: 3px;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+/* The arrow tracks the anchor's centre even when the bubble was clamped to the
+   viewport edge — `--chatgoose-hint-arrow` is written by the controller. */
+.chatgoose-hint::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: var(--chatgoose-hint-arrow, 50%);
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  margin-top: -5px;
+  transform: rotate(45deg);
+  border-right: 1px solid var(--chatgoose-line);
+  border-bottom: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-hint-below::after {
+  top: 0;
+  margin-top: -3px;
+  border: none;
+  border-left: 1px solid var(--chatgoose-line);
+  border-top: 1px solid var(--chatgoose-line);
+}
+
 /* ─── Tone groove: sunken radio track of Reply OPTIONS (E24) ─────────────────
    Actions are raised chips; options lie in a sunken groove pressed against
    Reply. Segments are emoji glyphs (the chatters' own language — precedent:

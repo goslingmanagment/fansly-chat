@@ -67,6 +67,18 @@ function toneSegment(root: ParentNode, emoji: string): HTMLButtonElement | undef
   );
 }
 
+/** Open a control's hover hint and read it. Focus shows it with no dwell, which
+ *  keeps these assertions free of fake timers; the hover path has its own
+ *  tests in `hover-hint.test.ts`. */
+function hintFor(element: Element | null | undefined): { title: string; body: string } {
+  element?.dispatchEvent(new window.Event('focus'));
+  const layer = document.querySelector('.chatgoose-hint');
+  return {
+    title: layer?.querySelector('.chatgoose-hint-title')?.textContent ?? '',
+    body: layer?.querySelector('.chatgoose-hint-body')?.textContent ?? '',
+  };
+}
+
 const noop = () => undefined;
 function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> = {}) {
   return new ButtonBar({
@@ -131,7 +143,10 @@ describe('ButtonBar toolbar visibility', () => {
     const replyChip = reply?.querySelector('.chatgoose-toolbar-hotkey');
     expect(replyChip?.textContent).toBe(replyHotkey.short);
     expect(replyChip?.getAttribute('aria-hidden')).toBe('true');
-    expect(reply?.title).toContain(replyHotkey.full);
+    // The combo lives on the keycap, so the hint does NOT repeat it — it
+    // spends its two lines on explaining the control instead.
+    expect(reply?.title).toBe('');
+    expect(hintFor(reply).body).not.toContain(replyHotkey.full);
     expect(reply?.getAttribute('aria-keyshortcuts')).toBe(
       `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
     );
@@ -209,7 +224,7 @@ describe('ButtonBar toolbar visibility', () => {
 
     const recap = buttonByLabel(bar.root, 'Recap');
     expect(recap?.classList.contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
-    expect(recap?.title).toContain('Recap ready to open');
+    expect(hintFor(recap).body).toContain('Готовый рекап');
   });
 
   it('hides the 🎙 Voice button unless the page is voice-capable', () => {
@@ -293,11 +308,14 @@ describe('ButtonBar tone groove (E24)', () => {
       .toEqual(['😌', '😏', '💰', '🔥']);
     // Idle segments carry the glyph only — no word.
     expect(bar.root.querySelector('.chatgoose-tone-seg-word')).toBeNull();
-    // Hover hint is Russian and mentions the cycle combo.
-    expect(toneSegment(bar.root, '😏')?.title).toContain('Флирт');
-    expect(toneSegment(bar.root, '💰')?.title).toContain('продажа');
-    expect(toneSegment(bar.root, '😌')?.title).toContain('дружеский');
-    expect(toneSegment(bar.root, '🔥')?.title).toContain('Горячо');
+    // Hover hint is Russian and — these cells being too small for a keycap —
+    // carries the cycle combo itself.
+    expect(hintFor(toneSegment(bar.root, '😏')).body).toContain('Флирт');
+    expect(hintFor(toneSegment(bar.root, '💰')).body).toContain('продажа');
+    expect(hintFor(toneSegment(bar.root, '😌')).body).toContain('дружеский');
+    const spicy = hintFor(toneSegment(bar.root, '🔥'));
+    expect(spicy.body).toContain('Горячо');
+    expect(spicy.body).toContain('циклирует');
   });
 
   it('the armed segment surfaces as a fixed-width thumb without adding a word', () => {
@@ -461,11 +479,10 @@ describe('ButtonBar improve draft state', () => {
     const reply = bar.root.querySelector<HTMLButtonElement>(
       '.chatgoose-toolbar-button-primary',
     )!;
-    const hotkey = featureHotkeyLabel('fast-reply', detectLabelPlatform());
-    expect(reply.title).toBe(`Reply as Closer (${hotkey!.full})`);
+    expect(hintFor(reply).body).toContain('«Closer»');
   });
 
-  it('drops the persona from Reply’s tooltip when nothing is mapped', () => {
+  it('drops the persona from Reply’s hint when nothing is mapped', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -482,8 +499,24 @@ describe('ButtonBar improve draft state', () => {
     const reply = bar.root.querySelector<HTMLButtonElement>(
       '.chatgoose-toolbar-button-primary',
     )!;
-    const hotkey = featureHotkeyLabel('fast-reply', detectLabelPlatform());
-    expect(reply.title).toBe(`Reply (${hotkey!.full})`);
+    const body = hintFor(reply).body;
+    expect(body).not.toContain('Closer');
+    expect(body).toContain('с учётом персоны');
+  });
+
+  it('explains a greyed-out Fix instead of leaving it silent', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    // Disabled controls are exactly the ones a chatter needs explained, and the
+    // native tooltip never reached them.
+    bar.render(buildState(), null, 'default', 'none', false, false, false);
+    const fix = buttonByLabel(bar.root, 'Fix')!;
+    expect(fix.disabled).toBe(true);
+    expect(hintFor(fix).body).toContain('в поле нет текста');
+
+    bar.render(buildState(), null, 'default', 'none', true, false, false);
+    expect(hintFor(fix).body).not.toContain('в поле нет текста');
   });
 
   it('stays quiet about an unmapped account — the mapping banner covers it', () => {
