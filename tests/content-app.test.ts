@@ -1454,7 +1454,9 @@ describe('ChatGooseContentApp', () => {
 
     expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saved');
     expect(
-      app.completedOverlayCache.get('group-1', 'fan-summary', overlayIdentity()).summaryMeta.syncStatus.state,
+      app.completedOverlayCache.get(
+        'group-1', 'fan-summary', overlayIdentity(), 'recap-full',
+      ).summaryMeta.syncStatus.state,
     ).toBe('saved');
 
     app.deepOverlayModel = null;
@@ -1463,6 +1465,62 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(app.deepOverlayModel.summaryMeta.syncStatus.state).toBe('saved');
+  });
+
+  it('never applies a full-dossier sync update to a short recap with the same timestamp', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+
+    app.port.send = vi.fn(() => true);
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.activeFeature = 'fan-summary';
+    app.activeOperationId = 'full-op';
+    app.activeFanDisplayName = 'alice';
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'full-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Full recap',
+        summaryMeta: {
+          generatedAt: 2000,
+          stale: false,
+          cached: false,
+          syncStatus: { state: 'saving', generatedAt: 2000, updatedAt: 2000 },
+        },
+      },
+    });
+
+    app.startStandaloneRecap('short');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: app.activeOperationId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'Short recap',
+        summaryMeta: { generatedAt: 2000, stale: false, cached: false },
+      },
+    });
+    app.handlePortMessage({
+      type: 'summary:syncStatus',
+      groupId: 'group-1',
+      generatedAt: 2000,
+      syncStatus: {
+        state: 'saved',
+        generatedAt: 2000,
+        baseUrl: 'http://hub.test',
+        pageLabel: 'creator-fs',
+        syncedAt: 2100,
+        updatedAt: 2100,
+      },
+    });
+
+    expect(app.deepOverlayModel.recapMode).toBe('short');
+    expect(app.deepOverlayModel.summaryMeta.syncStatus).toBeUndefined();
+    expect(app.completedOverlayCache.get(
+      'group-1', 'fan-summary', overlayIdentity(), 'recap-full',
+    ).summaryMeta.syncStatus.state).toBe('saved');
   });
 
   it('shows a coded toast when Fan Summary Hub sync fails after completion', async () => {

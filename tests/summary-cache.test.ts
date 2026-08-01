@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectSummaryCacheEntries,
+  getAvailableFanSummaryModes,
   getInvalidSummaryCacheKeys,
   getOldestSummaryCacheKeys,
   getSummaryCacheEvictionKeys,
@@ -353,7 +354,7 @@ describe('summary cache mode-qualified keys (short recap)', () => {
     expect(getSummaryCacheEntry(storage, 'group-1', 'short')?.summary).toBe('SHORT');
   });
 
-  it('a short entry alone never satisfies hasAvailableFanSummary (full-only)', () => {
+  it('a valid short entry alone satisfies recap availability', () => {
     const storage = {
       personaCatalog: [{
         key: 'p1',
@@ -365,10 +366,18 @@ describe('summary cache mode-qualified keys (short recap)', () => {
       personaCatalogSource: 'source-a',
       'summary-short:group-1': validEntry,
     } as unknown as PersistedState;
-    expect(hasAvailableFanSummary(storage, 'group-1', 'p1')).toBe(false);
+    expect(getAvailableFanSummaryModes(storage, 'group-1', 'p1')).toEqual({
+      full: false,
+      short: true,
+    });
+    expect(hasAvailableFanSummary(storage, 'group-1', 'p1')).toBe(true);
 
-    // The same body under the FULL key does satisfy it.
+    // A full recap continues to satisfy the same size-agnostic UI signal.
     const withFull = { ...storage, 'summary:group-1': validEntry } as unknown as PersistedState;
+    expect(getAvailableFanSummaryModes(withFull, 'group-1', 'p1')).toEqual({
+      full: true,
+      short: true,
+    });
     expect(hasAvailableFanSummary(withFull, 'group-1', 'p1')).toBe(true);
   });
 

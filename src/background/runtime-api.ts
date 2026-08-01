@@ -18,7 +18,7 @@ import {
   isAgencyHubConnectionTestSettings,
   isObjectRecord,
 } from '../shared/protocol.js';
-import { hasAvailableFanSummary } from '../shared/summary-cache.js';
+import { getAvailableFanSummaryModes } from '../shared/summary-cache.js';
 import { logWarn } from '../shared/log.js';
 import { findActivePersona, getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { readStorageState, saveSettings } from '../shared/storage.js';
@@ -470,6 +470,7 @@ export function registerRuntimeApi({
             accountId: null,
             groupId: null,
             hasAvailableSummary: false,
+            availableRecaps: { full: false, short: false },
             connected: false,
             hasApiKey: false,
             voiceNotesCapable: false,
@@ -518,6 +519,11 @@ export function registerRuntimeApi({
           : null;
         const connected = Boolean(session?.connected);
         const compareDraftCount = getCompareDraftCount();
+        const availableRecaps = getAvailableFanSummaryModes(
+          state,
+          displayGroupId,
+          mappedPersonalityId,
+        );
         // Budgeted: a cold capability probe used to hold the whole popup empty
         // for up to AGENCY_HUB_PREFETCH_TIMEOUT_MS. Past the budget the hint is
         // false (fail closed) and the finished probe re-pushes tab state.
@@ -530,11 +536,8 @@ export function registerRuntimeApi({
           tabId,
           accountId,
           groupId: displayGroupId,
-          hasAvailableSummary: hasAvailableFanSummary(
-            state,
-            displayGroupId,
-            mappedPersonalityId,
-          ),
+          hasAvailableSummary: availableRecaps.full || availableRecaps.short,
+          availableRecaps,
           connected,
           // Stage 32: readiness = kernel lane configured (hub transport up).
           hasApiKey: Boolean(

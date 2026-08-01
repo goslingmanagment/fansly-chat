@@ -3,6 +3,7 @@ import { normalizeAgencyHubSummarySyncMetadata } from './agency-hub.js';
 import type {
   AgencyHubSummarySyncMetadata,
   PersistedState,
+  RecapAvailability,
   SummaryCacheEntry,
 } from './types.js';
 import { findActivePersona } from './persona-catalog.js';
@@ -326,28 +327,43 @@ export function isValidSummaryCacheEntry(
   );
 }
 
+export function getAvailableFanSummaryModes(
+  storage: PersistedState,
+  groupId: string | null,
+  mappedPersonalityId: string | null,
+): RecapAvailability {
+  if (!groupId || !mappedPersonalityId) {
+    return { full: false, short: false };
+  }
+
+  const personality = findActivePersona(storage.personaCatalog, mappedPersonalityId);
+  if (!personality) {
+    return { full: false, short: false };
+  }
+
+  const hasValidEntry = (mode: SummaryCacheMode): boolean =>
+    isValidSummaryCacheEntry(
+      getSummaryCacheEntry(storage, groupId, mode),
+      personality.key,
+      personality.definitionId,
+      storage.personaCatalogSource,
+      // Stage 32: models are kernel config — 'kernel' is the cache model pin.
+      'kernel',
+    );
+
+  return {
+    full: hasValidEntry('full'),
+    short: hasValidEntry('short'),
+  };
+}
+
+/** Compatibility aggregate used by old UI callers. Prefer the exact slots from
+ * {@link getAvailableFanSummaryModes} when mode identity matters. */
 export function hasAvailableFanSummary(
   storage: PersistedState,
   groupId: string | null,
   mappedPersonalityId: string | null,
 ): boolean {
-  if (!groupId || !mappedPersonalityId) {
-    return false;
-  }
-
-  const personality = findActivePersona(storage.personaCatalog, mappedPersonalityId);
-  if (!personality) {
-    return false;
-  }
-
-  const summaryEntry = getSummaryCacheEntry(storage, groupId);
-
-  // Stage 32: models are kernel config — 'kernel' is the cache model pin.
-  return isValidSummaryCacheEntry(
-    summaryEntry,
-    personality.key,
-    personality.definitionId,
-    storage.personaCatalogSource,
-    'kernel',
-  );
+  const available = getAvailableFanSummaryModes(storage, groupId, mappedPersonalityId);
+  return available.full || available.short;
 }

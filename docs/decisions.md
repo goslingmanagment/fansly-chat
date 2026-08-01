@@ -94,6 +94,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E78 | 2026-08-01 | The recap (fan-summary) joins the E77 analysis language: known section headings become dotted mono headers, strategy/next-move gets the clay card, money/quote decoration shared; unknown headings keep the old look |
 | E79 | 2026-08-02 | Help routes into Coach as the kernel-owned `situation` preset: one-click analysis keeps follow-ups, real-question history, structured advice, and two positional draft captions; standalone help-me stays for cached and older-client results |
 | E80 | 2026-08-02 | The Help button leaves the toolbar (owner ruling, supersedes E79's button-stays default and E76's Help restoration): Help's home is INSIDE Coach — a clay preset chip in the empty state and leading the follow-up row; hotkey H stays as the fast path |
+| E81 | 2026-08-02 | Coach waits become narrated (stage progress + elapsed counter in the pending bubble), debugMode gains coach surfaces (live stage log, timings/tokens footer, per-turn «Промпт» opener, failure log), analysis headers unify on the recap treatment, and coach answers with model markdown render as structural blocks |
+| E82 | 2026-08-02 | Full and short Recap remain independent end-to-end: exact two-slot UI availability + two completed-surface slots; either lights the ready dot, Refresh preserves size, and short remains excluded only from the single full Hub dossier |
 
 ## Entries
 
@@ -2848,3 +2850,29 @@ path byte-for-byte. Display-only: the stored raw answer, wire history,
 draft parsing, and copy flows are untouched, and the createElement/
 textContent injection contract still holds (the old «never becomes HTML»
 test now pins exactly that against structural rendering).
+
+**E82 (2026-08-02).** Owner feedback corrects the Recap storage/UI model: full
+and short are independent results, not two values collapsed into one
+`hasAvailableSummary` bit. They were already persisted correctly at both durable
+layers: the extension uses `summary:<group>` + `summary-short:<group>`, and the
+kernel generation archive records/selects separate `full` + `short` rows for
+Coach/recap-status. The missing separation was above those stores.
+
+`TabUiState.availableRecaps` now carries the two validated local slots; the old
+boolean remains as a derived compatibility aggregate for an update overlap.
+The ready dot answers "is either slot openable?" and therefore lights for short
+too. Completed overlay surfaces also get bounded `recap-full` / `recap-short`
+slots, so showing one never overwrites the other, and Refresh carries the
+rendered result's mode instead of silently turning a short refresh into full.
+A successfully persisted standalone or Coach recap projects only its own slot
+immediately; a completed-but-unpersisted result remains visible for that run but
+does not light the reopenable-result dot. Tab/popup reconstruction derives both
+slots from validated durable storage after reload.
+
+The Hub distinction remains intentional and precise: short is stored in the
+kernel's two-slot generation archive, but it does not overwrite the separate
+single `fan_profiles` dossier that other features consume as the durable full
+profile. Consequently a short-only ready state never enters the full-dossier
+retry path. No storage migration, SDK change, AI call semantics, or extra Fansly
+egress is required. Suppressed/stale terminal operations still cannot update
+either current-chat slot.

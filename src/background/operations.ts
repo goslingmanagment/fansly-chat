@@ -55,8 +55,8 @@ import {
   normalizeVariantReplyParts,
 } from '../shared/reply-output.js';
 import {
+  getAvailableFanSummaryModes,
   getSummaryCacheEntry,
-  hasAvailableFanSummary,
   isValidSummaryCacheEntry,
   summaryCacheKey,
   type SummaryCacheMode,
@@ -594,7 +594,7 @@ export class OperationCoordinator {
       type: postType,
       state,
     } satisfies TabStatePayload);
-    if (state.hasAvailableSummary) {
+    if (state.availableRecaps?.full ?? state.hasAvailableSummary) {
       // Core #136: the kernel injects the HUB copy of a ready Scan into other
       // features' prompts — so an unsaved local summary gets an opportunistic
       // re-push here, not only when the chatter reopens Scan.
@@ -870,17 +870,19 @@ export class OperationCoordinator {
       ? storage.personaCatalogSource
       : null;
     const compareDraftCount = getCompareDraftCount();
+    const availableRecaps = getAvailableFanSummaryModes(
+      storage,
+      context.groupId,
+      mappedPersonalityId,
+    );
 
     return {
       tabId,
       accountId,
       accountIdAliases,
       groupId: context.groupId,
-      hasAvailableSummary: hasAvailableFanSummary(
-        storage,
-        context.groupId,
-        mappedPersonalityId,
-      ),
+      hasAvailableSummary: availableRecaps.full || availableRecaps.short,
+      availableRecaps,
       connected: Boolean(session?.connected),
       // Stage 32: readiness = kernel lane configured (hub transport up).
       hasApiKey: this.kernelGateway.isConfigured(storage.settings),
@@ -925,9 +927,9 @@ export class OperationCoordinator {
     // this opportunistic re-push must ALSO refuse it so a stale/truncated body is
     // never (re)written to the fan_profiles dossier the kernel injects into other
     // prompts. It self-heals only via a fresh trusted regeneration, whose own
-    // sync path overwrites the Hub copy. (The caller already gates on
-    // hasAvailableSummary, which is false for untrusted entries — this is the
-    // explicit local invariant.)
+    // sync path overwrites the Hub copy. (The caller already gates on the exact
+    // full slot — a short-only recap must not enter the dossier-sync path — and
+    // this is the explicit local invariant after a cache-swap race.)
     if (cached.trustedTerminal !== true) {
       return;
     }
@@ -2017,6 +2019,7 @@ export class OperationCoordinator {
               generatedAt: cachedSummary.generatedAt,
               stale: false,
               cached: true,
+              storedLocally: true,
               transcriptCoverage: cachedSummary.transcriptCoverage,
               keptCount: cachedSummary.keptCount,
             },
@@ -2085,6 +2088,7 @@ export class OperationCoordinator {
             generatedAt: cachedSummary.generatedAt,
             stale: false,
             cached: true,
+            storedLocally: true,
             syncStatus,
             transcriptCoverage: cachedSummary.transcriptCoverage,
             keptCount: cachedSummary.keptCount,
@@ -3177,6 +3181,7 @@ export class OperationCoordinator {
             generatedAt,
             stale: false,
             cached: false,
+            storedLocally: shouldCacheSummary,
             transcriptCoverage: computedTranscriptCoverage,
             keptCount: keptMessageCount,
           };
@@ -3223,6 +3228,7 @@ export class OperationCoordinator {
             generatedAt,
             stale: false,
             cached: false,
+            storedLocally: shouldCacheSummary,
             syncStatus: initialSyncStatus,
             transcriptCoverage: computedTranscriptCoverage,
             keptCount: keptMessageCount,

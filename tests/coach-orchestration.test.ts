@@ -768,6 +768,8 @@ describe('Coach orchestration', () => {
     await flush();
     expect(step.status).toBe('done');
     expect(app.coachRecapChain).toBeNull();
+    expect(app.tabState.hasAvailableSummary).toBe(true);
+    expect(app.tabState.availableRecaps).toEqual({ full: false, short: true });
     // No coach-chat op followed the explicit refresh.
     expect((app.port.send as any).mock.calls.every((c: any) => c[0].feature !== 'coach-chat')).toBe(true);
   });
@@ -1354,7 +1356,7 @@ describe('Coach orchestration', () => {
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('CG-FLOW-04');
   });
 
-  it('P2: a standalone SHORT recap does not mark a full summary available or cache it', async () => {
+  it('a standalone SHORT recap marks its exact availability and overlay slot', async () => {
     const app = await makeReadyApp();
     app.openRecapPicker();
     app.pickStandaloneRecap('short');
@@ -1371,12 +1373,55 @@ describe('Coach orchestration', () => {
       },
     });
 
-    // Shown once, but NOT marked available and NOT cached under fan-summary.
+    // Shown once, advertised by the ready dot, and retained in its own bounded
+    // short slot rather than replacing the full surface.
     expect(app.deepOverlayModel).not.toBeNull();
-    expect(app.tabState.hasAvailableSummary).toBeFalsy();
+    expect(app.tabState.hasAvailableSummary).toBe(true);
+    expect(app.tabState.availableRecaps).toEqual({ full: false, short: true });
     expect(
-      app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
-    ).toBeNull();
+      app.buttonBar.buttons.get('fan-summary').classList
+        .contains('chatgoose-toolbar-button-summary-ready'),
+    ).toBe(true);
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fan-summary',
+      app.overlayCacheIdentity(null),
+      'recap-short',
+    )?.rawText).toBe('short recap body');
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fan-summary',
+      app.overlayCacheIdentity(null),
+      'recap-full',
+    )).toBeNull();
+  });
+
+  it('does not advertise an unpersisted recap as reopenable', async () => {
+    const app = await makeReadyApp();
+    app.openRecapPicker();
+    app.pickStandaloneRecap('short');
+
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: app.activeOperationId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'visible but enrichment-unverified recap',
+        parts: [],
+        summaryMeta: {
+          generatedAt: 1,
+          stale: false,
+          cached: false,
+          storedLocally: false,
+        },
+      },
+    });
+
+    expect(app.deepOverlayModel.rawText).toContain('enrichment-unverified');
+    expect(app.tabState.availableRecaps).toBeUndefined();
+    expect(app.tabState.hasAvailableSummary).toBe(false);
+    expect(app.buttonBar.buttons.get('fan-summary').classList
+      .contains('chatgoose-toolbar-button-summary-ready')).toBe(false);
   });
 
   it('P2 control: a standalone FULL recap DOES mark availability + cache', async () => {
@@ -1397,9 +1442,83 @@ describe('Coach orchestration', () => {
     });
 
     expect(app.tabState.hasAvailableSummary).toBe(true);
-    expect(
-      app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
-    ).not.toBeNull();
+    expect(app.tabState.availableRecaps).toEqual({ full: true, short: false });
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fan-summary',
+      app.overlayCacheIdentity(null),
+      'recap-full',
+    )).not.toBeNull();
+  });
+
+  it('keeps completed full and short recaps side by side for the same fan', async () => {
+    const app = await makeReadyApp();
+
+    app.openRecapPicker();
+    app.pickStandaloneRecap('full');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: app.activeOperationId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'full recap body',
+        parts: [],
+        summaryMeta: { generatedAt: 1, stale: false, cached: false },
+      },
+    });
+
+    app.openRecapPicker();
+    app.pickStandaloneRecap('short');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: app.activeOperationId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'short recap body',
+        parts: [],
+        summaryMeta: { generatedAt: 2, stale: false, cached: false },
+      },
+    });
+
+    expect(app.tabState.availableRecaps).toEqual({ full: true, short: true });
+    const identity = app.overlayCacheIdentity(null);
+    expect(app.completedOverlayCache.get(
+      'group-1', 'fan-summary', identity, 'recap-full',
+    )?.rawText).toBe('full recap body');
+    expect(app.completedOverlayCache.get(
+      'group-1', 'fan-summary', identity, 'recap-short',
+    )?.rawText).toBe('short recap body');
+  });
+
+  it('Refresh on a short recap regenerates short and keeps both last-good slots', async () => {
+    const app = await makeReadyApp();
+    app.openRecapPicker();
+    app.pickStandaloneRecap('short');
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: app.activeOperationId,
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'short recap body',
+        parts: [],
+        summaryMeta: { generatedAt: 2, stale: false, cached: false },
+      },
+    });
+    (app.port.send as any).mockClear();
+
+    const refresh = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Refresh');
+    expect(refresh).toBeDefined();
+    refresh?.click();
+
+    expect(lastSent(app)).toMatchObject({
+      feature: 'fan-summary',
+      forceRegenerate: true,
+      summaryMode: 'short',
+    });
+    expect(app.completedOverlayCache.get(
+      'group-1', 'fan-summary', app.overlayCacheIdentity(null), 'recap-short',
+    )?.rawText).toBe('short recap body');
   });
 
   it('P2: coach draft acceptance carries the exchange generationRef', async () => {
@@ -1519,8 +1638,8 @@ describe('Coach orchestration', () => {
     app.overlay.callbacks.onClose();
     expect(app.suppressedTerminalOpIds.has(recapOpId)).toBe(true);
 
-    // The escaped completion is suppressed — it never reaches the full-summary
-    // availability/cache path (the P2-short-cache side door is closed).
+    // The escaped completion is suppressed — it never reaches recap
+    // availability or the full-overlay-cache path.
     app.handleComplete({
       type: 'operation:complete',
       operationId: recapOpId,
@@ -1528,9 +1647,12 @@ describe('Coach orchestration', () => {
       result: { rawText: 'short body', parts: [], summaryMeta: { generatedAt: 1, stale: false, cached: false } },
     });
     expect(app.tabState.hasAvailableSummary).toBeFalsy();
-    expect(
-      app.completedOverlayCache.get('group-1', 'fan-summary', app.overlayCacheIdentity(null)),
-    ).toBeNull();
+    expect(app.completedOverlayCache.get(
+      'group-1',
+      'fan-summary',
+      app.overlayCacheIdentity(null),
+      'recap-short',
+    )).toBeNull();
   });
 
   it('Esc over a completed recap closes the RECAP first, then the idle coach beneath it', async () => {
