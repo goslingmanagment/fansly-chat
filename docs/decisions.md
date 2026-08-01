@@ -84,6 +84,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E68 | 2026-07-31 | The Spenders board header names WHICH feed stopped: `feedStateLabel` maps each `SpendersStreamState` to its own line («not updating: …» — projection off in the Hub / page not in the Hub allowlist / unsupported platform), replacing the catch-all «source paused» that collapsed all three into one unactionable phrase. Reading is never gated — rows keep showing, they just stop being refreshed |
 | E69 | 2026-07-31 | The «Статус» Spenders row states a STOPPED FEED, not a refused access, and names the page + the age of the data; `pageLabel` rides `SpendersListResult`, the two observation fields are optional and read with `typeof` |
 | E70 | 2026-07-31 | Deleted fans look deleted: kernel `entries[].deletedAt` (optional in the contract, compared with `!= null` everywhere) labels the row «deleted account» + a muted «deleted» chip and drops those ids from the Fansly name SWEEP — but not from the durable name cache, so a chatter's rename survives. The conversation outlives the account: a known `groupId` opens, a deleted fan who kept a name still gets the inbox search, and only an unsearchable row returns early; the spend always stays in the ranking. Session cache key → `spendersCacheV4`; the port guard now validates `deletedAt` (absent = alive) and the `pageLabel` E69 left unchecked |
+| E71 | 2026-08-01 | The action bar drops the persona pill and tightens its density: 716px of content on a ~605px composer was scrolling Reply — the primary action — off the left edge. The persona NAME moves to Reply’s own tooltip, «Unmapped» defers to the mapping banner already open under the bar, and only the one state with no other surface («no Fansly account detected») keeps a chip. Gap 6→5, side padding 10→8, button padding 11→9, tone segment 30→27: measured 716 → 597px |
 
 ## Entries
 
@@ -2488,3 +2489,54 @@ next reader. `deletedAt` is accepted as absent OR `string | null` and rejected
 for any other type: it is the one field on this message whose origin is the
 kernel, where the contract declares it optional by design, and absent already
 means «alive» to every consumer.
+
+**E71 (2026-08-01).** The action bar drops the persona pill and tightens its
+density. The trigger was a screenshot: on the chatter's composer the bar was
+scrolled sideways, `Reply` — the primary action — sat off the left edge, and the
+first thing visible was the middle of the tone groove. Measured on a faithful
+DOM specimen of the real geometry, the row needed **716px** of content against
+a composer of **~605px** (derived from the screenshot: a 1210px crop at
+retina ×2). Nothing was broken; there was simply more bar than composer.
+
+**The pill carried three facts, and each one had a better home than 60px of the
+row.** (a) The persona NAME (`Lora`) is something the chatter already knows —
+they opened this account — so it moves to `Reply`'s own tooltip
+(«Reply as Lora (⌘⇧R)»), the one control whose output the name actually
+describes. (b) `Unmapped` repeated, word for word, the mapping banner that is
+open directly under the bar in exactly that state, with a persona picker in it:
+one fact, one place (E67), so the bar stops saying it. (c) `Not connected` — no
+Fansly accountId — is the one state with NO second surface: `MappingBanner.render`
+returns early without an accountId, so the bar would sit fully disabled and
+silent about why. That case, and only that case, keeps a chip
+(`.chatgoose-toolbar-warn`, amber — a problem, not a label). The pill was the
+right idea in the wrong place: it paid its width on every message to be useful
+on almost none.
+
+**The rest of the savings came from density, not from removing controls.** Row
+gap 6→5, bar side padding 10→8, button padding 11→9, tone segment min-width
+30→27 with padding 7→5, seam margin 2→1, and the Recap ready-dot inset trimmed
+to match its new padding. Together with the pill: **716 → 597px**, i.e. the
+measured composer now fits with the bar in one row and no scroll. No control
+was moved, collapsed into an overflow menu, or turned into an icon — the E24
+meaning-groups, the visible four-tone groove (E24/E27) and the single right-pin
+on Recap all stand exactly as they were.
+
+**The remaining margin is 8px, and that is a known limit, not an oversight.** A
+chatter on a laptop or with Fansly's right sidebar open will still scroll. Two
+further options were mocked and measured against this same bench: wrapping to a
+second row instead of scrolling (never hides Reply, costs ~38px of feed height),
+and moving tone + Split into a pocket under Reply (fits from 432px, but takes
+the four tones off the surface, against E24). Both were shown to the owner and
+deliberately NOT taken now — this change is the uncontroversial half. If the
+scroll comes back on a real composer, the wrap variant is the next step and
+needs no new design work.
+
+Tombstones: `.chatgoose-pill` (content only — the options/popup rule of the same
+name is untouched), `.chatgoose-personality`, `.chatgoose-toolbar-pill` and
+`.chatgoose-toolbar-personality-end` are deleted; they had no other consumer
+once the pill left. `TabUiState.mappedPersonalityName` is unchanged and still
+read — it just renders into a tooltip instead of a chip. The button-bar suite
+pins the new shape: no persona text in the bar, the name present in Reply's
+title (and absent when nothing is mapped), the chip hidden for an unmapped
+account and shown when there is no accountId, and — with the warning visible —
+Recap still the single toolbar child whose `margin-left` resolves to `auto`.
