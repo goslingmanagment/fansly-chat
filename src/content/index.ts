@@ -699,6 +699,7 @@ export class ChatGooseContentApp {
     onCoachSubmit: (question, origin) => {
       void this.submitCoachQuestion(question, { fromComposer: origin !== 'canned' });
     },
+    onCoachPreset: () => this.openCoachPreset(),
     onCoachNewDialog: () => this.resetCoachSession(),
     onCoachRecap: (mode) => this.handleCoachRecap(mode),
     onCoachSetAutoRecap: (override) => this.setCoachAutoRecapOverride(override),

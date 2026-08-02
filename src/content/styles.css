@@ -1476,6 +1476,20 @@
   text-align: left;
 }
 
+/* E80: the preset chip is Coach's own Help entry — clay-accented so the
+   zero-typing path reads as the primary move of the empty state. */
+.chatgoose-coach-preset-chip {
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+  font-weight: 600;
+}
+
+.chatgoose-coach-preset-chip:hover {
+  border-color: var(--chatgoose-clay-ink);
+  background: var(--chatgoose-clay-soft);
+}
+
 .chatgoose-coach-hint {
   font-size: 12px;
   text-align: left;

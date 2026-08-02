@@ -93,6 +93,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E77 | 2026-08-01 | Help coaching and Review evaluation render the kernel #201 block labels as structured sections (display-only parser, plain-card fallback) |
 | E78 | 2026-08-01 | The recap (fan-summary) joins the E77 analysis language: known section headings become dotted mono headers, strategy/next-move gets the clay card, money/quote decoration shared; unknown headings keep the old look |
 | E79 | 2026-08-02 | Help routes into Coach as the kernel-owned `situation` preset: one-click analysis keeps follow-ups, real-question history, structured advice, and two positional draft captions; standalone help-me stays for cached and older-client results |
+| E80 | 2026-08-02 | The Help button leaves the toolbar (owner ruling, supersedes E79's button-stays default and E76's Help restoration): Help's home is INSIDE Coach — a clay preset chip in the empty state and leading the follow-up row; hotkey H stays as the fast path |
 
 ## Entries
 
@@ -2782,3 +2783,16 @@ every other draft count keeps the ordinary titles. The standalone `help-me`
 protocol, parser, cached-result view, and kernel route remain intact for older
 clients and already-cached results. Physical cleanup is deferred until the
 desktop app's `help-me` usage has been checked.
+
+**E80 (2026-08-02).** The Help toolbar button is REMOVED (owner ruling on the
+first E79 build: «мы же влили хелп в коача чтобы кнопки не было этой»). This
+supersedes E79's spec default («the toolbar Help button stays») and the Help
+part of E76's button restoration. Help's home is now INSIDE Coach: a
+clay-accented «Разбор ситуации» chip sits in the empty state above the
+prefill hints and leads the follow-up chips row mid-session; both DISPATCH
+the kernel-owned situation preset (unlike the prefill hints around them, they
+never touch the composer). The chip shares the hint class so the submit
+preflight lock covers it. Hotkey H stays as the fast path (openCoachPreset),
+and the Rerun of a cached standalone Help result still routes there; the
+FEATURE_HINTS entry survives only to satisfy Record<FeatureType>. Review and
+Compare keep their bar positions: Review now follows Ping directly.
