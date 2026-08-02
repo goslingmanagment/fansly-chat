@@ -346,7 +346,7 @@ describe('ButtonBar toolbar visibility', () => {
     expect(voiceSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('renders Help, Review, Compare, and the contextual Reopen entry', () => {
+  it('renders Review, Compare, and the contextual Reopen entry; Help left the bar (E80)', () => {
     const bar = makeBar();
     document.body.append(bar.root);
 
@@ -355,14 +355,12 @@ describe('ButtonBar toolbar visibility', () => {
     const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
       .map(labelOf);
 
-    expect(labels).toContain('Help');
+    // E80: Help lives inside Coach (preset chip); the bar has no Help button.
+    expect(labels).not.toContain('Help');
     expect(labels).toContain('Review');
     expect(labels).toContain('Compare');
     expect(labels).toContain('Reopen');
     expect(buttonByLabel(bar.root, 'Reopen')?.classList.contains('chatgoose-hidden')).toBe(true);
-    expect(hintFor(buttonByLabel(bar.root, 'Help')).body).toContain(
-      'Разбор ситуации в Coach: что происходит и что делать дальше',
-    );
     expect(hintFor(buttonByLabel(bar.root, 'Review')).body).toContain('Оценка');
     expect(hintFor(buttonByLabel(bar.root, 'Compare')).body).toContain('Сравнивает');
   });
@@ -699,7 +697,6 @@ describe('ButtonBar improve draft state', () => {
     const fixIndex = children.findIndex((child) => labelOf(child) === 'Fix');
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
-    const helpIndex = children.findIndex((child) => labelOf(child) === 'Help');
     const reviewIndex = children.findIndex((child) => labelOf(child) === 'Review');
     const compareIndex = children.findIndex((child) => labelOf(child) === 'Compare');
     const reopenIndex = children.findIndex((child) => labelOf(child) === 'Reopen');
@@ -719,8 +716,8 @@ describe('ButtonBar improve draft state', () => {
     expect(fixIndex).toBeGreaterThan(optionsIndex);
     expect(hiIndex).toBeGreaterThan(fixIndex);
     expect(pingIndex).toBe(hiIndex + 1);
-    expect(helpIndex).toBe(pingIndex + 1);
-    expect(reviewIndex).toBe(helpIndex + 1);
+    // E80: Review follows Ping directly — the bar has no Help button.
+    expect(reviewIndex).toBe(pingIndex + 1);
     expect(compareIndex).toBe(reviewIndex + 1);
     expect(reopenIndex).toBe(compareIndex + 1);
     expect(recapIndex).toBe(reopenIndex + 1);

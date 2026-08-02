@@ -142,6 +142,7 @@ function makeController(overrides?: Partial<ConstructorParameters<typeof Overlay
     onCollapse: vi.fn(),
     onAcceptance: vi.fn(),
     onCoachSubmit: vi.fn(),
+    onCoachPreset: vi.fn(),
     onCoachNewDialog: vi.fn(),
     onCoachRecap: vi.fn(),
     onCoachSetAutoRecap: vi.fn(),
@@ -212,7 +213,26 @@ describe('OverlayController — coach chat mode', () => {
       document.querySelectorAll<HTMLDivElement>('.chatgoose-coach-empty-group-label'),
     ).map((el) => el.textContent);
     expect(groupLabels).toEqual(['Продать', 'Вернуть', 'Понять']);
-    expect(document.querySelectorAll('.chatgoose-coach-hint')).toHaveLength(9);
+    // 9 prefill hints + the E80 preset chip (it shares the hint class so the
+    // preflight lock covers it).
+    expect(document.querySelectorAll('.chatgoose-coach-hint')).toHaveLength(10);
+    expect(
+      document.querySelectorAll('.chatgoose-coach-hint.chatgoose-coach-preset-chip'),
+    ).toHaveLength(1);
+  });
+
+  it('the empty-state preset chip dispatches the situation preset, not a prefill (E80)', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+    const chip = requireElement<HTMLButtonElement>(
+      '.chatgoose-coach-hint.chatgoose-coach-preset-chip',
+    );
+    expect(chip.textContent).toBe('Разбор ситуации');
+    chip.click();
+    expect(callbacks.onCoachPreset).toHaveBeenCalledTimes(1);
+    expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    expect(textarea.value).toBe('');
   });
 
   it('a hint click prefills the composer (existing mechanism), never submits', () => {
@@ -835,7 +855,8 @@ describe('OverlayController — coach chat mode', () => {
     const chips = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-followup-chip'),
     ).map((c) => c.textContent);
-    expect(chips).toEqual(['Другой вариант', 'Сделай короче', 'А если откажет?']);
+    // E80: the preset chip leads the row and dispatches, not submits text.
+    expect(chips).toEqual(['Разбор ситуации', 'Другой вариант', 'Сделай короче', 'А если откажет?']);
 
     const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
     Array.from(document.querySelectorAll<HTMLButtonElement>('.chatgoose-coach-followup-chip'))

@@ -14,10 +14,11 @@ type ToolbarAction = FeatureType | 'compare';
 const FEATURE_HINTS: Record<FeatureType, string> = {
   'fast-reply': 'Ответ на текущую переписку — с учётом персоны и выбранного тона',
   'improve-draft': 'Переписывает ТВОЙ черновик — не сочиняет новый',
+  // Кнопки в баре больше нет (E80) — запись остаётся ради Record<FeatureType>.
+  'help-me': 'Разбор ситуации в Coach: что происходит и что делать дальше',
   'hi-greeting': 'Заходы для первого сообщения новому фану',
   ping: 'Сообщение, чтобы расшевелить замолчавшего фана',
   'fan-summary': 'Досье по фану: кто он, на что тратил, о чём уже говорили',
-  'help-me': 'Разбор ситуации в Coach: что происходит и что делать дальше',
   'chat-review': 'Оценка переписки: что сработало, что нет',
   'coach-chat': 'Спросить ИИ про этого фана своими словами',
   'voice-script': 'Текст для голосовой заметки',
@@ -41,7 +42,6 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
   { feature: 'improve-draft', label: 'Fix' },
   { feature: 'hi-greeting', label: 'Hi' },
   { feature: 'ping', label: 'Ping' },
-  { feature: 'help-me', label: 'Help' },
   { feature: 'chat-review', label: 'Review' },
   // 'Recap' names the dossier the chatter gets, not the scanning process.
   { feature: 'fan-summary', label: 'Recap' },
@@ -161,7 +161,6 @@ export class ButtonBar {
     const fixButton = this.buttons.get('improve-draft')!;
     const hiButton = this.buttons.get('hi-greeting')!;
     const pingButton = this.buttons.get('ping')!;
-    const helpButton = this.buttons.get('help-me')!;
     const reviewButton = this.buttons.get('chat-review')!;
     const summaryButton = this.buttons.get('fan-summary')!;
     // Recap carries a "ready" dot when a cached summary can be opened, and
@@ -264,7 +263,6 @@ export class ButtonBar {
       makeSeparator(),
       hiButton,
       pingButton,
-      helpButton,
       reviewButton,
       compareButton,
       this.compareRestoreButton,

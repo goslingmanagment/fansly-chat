@@ -21,7 +21,7 @@ import type {
   UserFacingError,
 } from '../../shared/types.js';
 import { ensureOverlayRoot } from '../dom-anchor.js';
-import { COACH_SITUATION_DRAFT_CAPTIONS } from '../coach-copy.js';
+import { COACH_SITUATION_DRAFT_CAPTIONS, COACH_SITUATION_PRESET_LABEL } from '../coach-copy.js';
 import { parseGroupIdFromPath } from '../route-watcher.js';
 import {
   renderCoachingBlocks,
@@ -91,6 +91,8 @@ interface OverlayCallbacks {
   /** `origin` distinguishes a composer-typed question from a canned one (chip)
    * — a rejected canned submit must NOT be restored into the composer. */
   onCoachSubmit?: (question: string, origin?: 'composer' | 'canned') => void;
+  /** E80: the situation preset chip inside Coach (Help's new home). */
+  onCoachPreset?: () => void;
   /** «New dialog» — clears the session (the orchestrator confirms if non-empty). */
   onCoachNewDialog?: () => void;
   /** Explicit recap refresh from within coach (short/full, spec §5). */
@@ -2179,6 +2181,16 @@ export class OverlayController {
     context.textContent = 'Контекст подтянется сам: переписка, траты, рекап, персона модели';
     empty.append(context);
 
+    // E80: Help lives INSIDE Coach now — the preset chip is the zero-typing
+    // entry point. It DISPATCHES the kernel-owned situation turn (unlike the
+    // hint chips below, which only prefill the composer).
+    const preset = this.createCoachButton(
+      COACH_SITUATION_PRESET_LABEL,
+      'chatgoose-coach-hint chatgoose-coach-preset-chip',
+      () => this.callbacks.onCoachPreset?.(),
+    );
+    empty.append(preset);
+
     // 9 hints in three labeled columns (spec §6); a click prefills the composer.
     const groups = document.createElement('div');
     groups.className = 'chatgoose-coach-empty-groups';
@@ -2219,6 +2231,14 @@ export class OverlayController {
   private createCoachFollowups(): HTMLDivElement {
     const wrap = document.createElement('div');
     wrap.className = 'chatgoose-coach-followups';
+    // E80: the situation preset is always one chip away mid-session too.
+    wrap.append(
+      this.createCoachButton(
+        COACH_SITUATION_PRESET_LABEL,
+        'chatgoose-coach-followup-chip chatgoose-coach-preset-chip',
+        () => this.callbacks.onCoachPreset?.(),
+      ),
+    );
     for (const chip of COACH_FOLLOWUP_CHIPS) {
       wrap.append(
         this.createCoachButton(chip, 'chatgoose-coach-followup-chip', () => {
