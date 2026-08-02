@@ -5,6 +5,15 @@ import { HoverHintController } from './ui/hover-hint.js';
 
 type ToolbarAction = FeatureType | 'compare';
 
+function hasAvailableRecap(state: TabUiState | null): boolean {
+  if (!state) {
+    return false;
+  }
+  return state.availableRecaps
+    ? state.availableRecaps.full || state.availableRecaps.short
+    : state.hasAvailableSummary;
+}
+
 // One sentence per control, in Russian — the bar's labels stay English, the
 // EXPLANATION is in the chatters' own language. The combo is deliberately
 // absent here: these controls carry a corner keycap that shows it on the same
@@ -350,7 +359,7 @@ export class ButtonBar {
     if (feature === 'fast-reply' && this.lastState?.mappedPersonalityName) {
       return `Ответ от имени «${this.lastState.mappedPersonalityName}» — с учётом выбранного тона`;
     }
-    if (feature === 'fan-summary' && this.lastState?.hasAvailableSummary) {
+    if (feature === 'fan-summary' && hasAvailableRecap(this.lastState)) {
       return `${base} · Готовый рекап можно открыть сразу`;
     }
     return base;
@@ -471,7 +480,7 @@ export class ButtonBar {
     const summaryButton = this.buttons.get('fan-summary')!;
     summaryButton.classList.toggle(
       'chatgoose-toolbar-button-summary-ready',
-      state.hasAvailableSummary,
+      hasAvailableRecap(state),
     );
 
     const compareButton = this.buttons.get('compare')!;

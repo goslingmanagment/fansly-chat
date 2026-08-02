@@ -12,6 +12,10 @@ export interface CompletedOverlayCacheIdentity {
   variantKey: string | null;
 }
 
+/** Most features retain one last completed surface. Recap is the exception:
+ * full and short are independent products and must never replace each other. */
+export type CompletedOverlayCacheSlot = 'default' | 'recap-full' | 'recap-short';
+
 function sameIdentity(
   left: CompletedOverlayCacheIdentity,
   right: CompletedOverlayCacheIdentity,
@@ -24,7 +28,10 @@ function sameIdentity(
 
 export class CompletedOverlayCache {
   private activeGroupId: string | null = null;
-  private readonly completedByFeature = new Map<FeatureType, CompletedOverlayEntry>();
+  private readonly completedByFeature = new Map<
+    FeatureType,
+    Map<CompletedOverlayCacheSlot, CompletedOverlayEntry>
+  >();
 
   setActiveGroup(groupId: string | null): void {
     if (this.activeGroupId === groupId) {
@@ -39,12 +46,13 @@ export class CompletedOverlayCache {
     groupId: string | null,
     feature: FeatureType,
     identity: CompletedOverlayCacheIdentity,
+    slot: CompletedOverlayCacheSlot = 'default',
   ): CompletedOverlayViewModel | null {
     if (!groupId || this.activeGroupId !== groupId) {
       return null;
     }
 
-    const entry = this.completedByFeature.get(feature);
+    const entry = this.completedByFeature.get(feature)?.get(slot);
     if (!entry) {
       return null;
     }
@@ -61,13 +69,19 @@ export class CompletedOverlayCache {
     feature: FeatureType,
     model: CompletedOverlayViewModel,
     identity: CompletedOverlayCacheIdentity,
+    slot: CompletedOverlayCacheSlot = 'default',
   ): void {
     if (!groupId) {
       return;
     }
 
     this.setActiveGroup(groupId);
-    this.completedByFeature.set(feature, {
+    let slots = this.completedByFeature.get(feature);
+    if (!slots) {
+      slots = new Map();
+      this.completedByFeature.set(feature, slots);
+    }
+    slots.set(slot, {
       identity: { ...identity },
       model,
     });

@@ -39,6 +39,20 @@ function createHelpMeModel(): CompletedOverlayViewModel {
   };
 }
 
+function createSummaryModel(
+  operationId: string,
+  recapMode: 'full' | 'short',
+): CompletedOverlayViewModel {
+  return {
+    kind: 'readOnly',
+    feature: 'fan-summary',
+    fanDisplayName: 'fan',
+    operationId,
+    rawText: `${recapMode} recap`,
+    recapMode,
+  };
+}
+
 const PERSONA_V1 = {
   personaKey: 'persona-a',
   personaDefinitionId: 'v1:persona-a-definition',
@@ -78,6 +92,19 @@ describe('CompletedOverlayCache', () => {
 
     expect(cache.get('group-1', 'fast-reply', PERSONA_V1)).toBe(reply);
     expect(cache.get('group-1', 'help-me', PERSONA_V1)).toBe(helpMe);
+  });
+
+  it('keeps full and short recap surfaces in independent bounded slots', () => {
+    const cache = new CompletedOverlayCache();
+    const full = createSummaryModel('full-op', 'full');
+    const short = createSummaryModel('short-op', 'short');
+
+    cache.set('group-1', 'fan-summary', full, PERSONA_V1, 'recap-full');
+    cache.set('group-1', 'fan-summary', short, PERSONA_V1, 'recap-short');
+
+    expect(cache.get('group-1', 'fan-summary', PERSONA_V1, 'recap-full')).toBe(full);
+    expect(cache.get('group-1', 'fan-summary', PERSONA_V1, 'recap-short')).toBe(short);
+    expect(cache.get('group-1', 'fan-summary', PERSONA_V1)).toBeNull();
   });
 
   it('clears cached results when the active group changes', () => {

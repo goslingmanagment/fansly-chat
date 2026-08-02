@@ -19,6 +19,7 @@ import { MappingBanner } from './mapping-banner.js';
 import {
   CompletedOverlayCache,
   type CompletedOverlayCacheIdentity,
+  type CompletedOverlayCacheSlot,
 } from './overlay/completed-overlay-cache.js';
 import { OverlayController } from './overlay/overlay-controller.js';
 import { PortClient } from './port-client.js';
@@ -118,6 +119,12 @@ function createParts(parts: string[]): OverlayInsertPart[] {
   }));
 }
 
+type RecapMode = 'full' | 'short';
+
+function recapOverlayCacheSlot(mode: RecapMode): CompletedOverlayCacheSlot {
+  return mode === 'short' ? 'recap-short' : 'recap-full';
+}
+
 function isGlobalHotkeyAction(action: HotkeyAction): boolean {
   return action === 'spenders-board' || action === 'cheatsheet';
 }
@@ -163,6 +170,7 @@ function applyFanSummarySyncStatus(
     !model ||
     model.kind !== 'readOnly' ||
     model.feature !== 'fan-summary' ||
+    model.recapMode === 'short' ||
     model.summaryMeta?.generatedAt !== generatedAt
   ) {
     return false;
@@ -410,10 +418,10 @@ export class ChatGooseContentApp {
   // decision awaits the latest read, so stale status cannot trigger duplicate
   // generation while fresher metadata is in flight.
   private coachRecapStatusRead: { session: CoachSession; promise: Promise<void> } | null = null;
-  // The summaryMode of the ACTIVE fan-summary op (standalone recap /
-  // «Открыть последний»), or null for a plain full run. A 'short' result must
-  // never enter the full summary availability/overlay caches (P2-short-cache).
-  private activeSummaryMode: 'short' | 'full' | null = null;
+  // The size of the ACTIVE fan-summary op (standalone recap / «Открыть
+  // последний»), or null for a legacy/plain full run. Completed full and short
+  // results occupy independent availability + display-cache slots.
+  private activeSummaryMode: RecapMode | null = null;
   // «Открыть последний»: the OTHER recap size to try once if the current
   // view-cached-only op 404s with no_saved_recap (the local cache may hold one
   // size but not the other), or null when there is nothing left to fall back to.
@@ -565,14 +573,7 @@ export class ChatGooseContentApp {
       this.clearOperationState(true);
       this.renderAll();
     },
-    onRerun: (feature) => {
-      this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
-      if (feature === 'help-me') {
-        this.openCoachPreset();
-      } else {
-        this.startFeature(feature, true);
-      }
-    },
+    onRerun: (feature) => this.rerunFeature(feature),
     onCompareRerun: () => {
       this.completedCompareCache.clear(this.currentGroupId);
       void this.startCompare(true);
@@ -687,14 +688,7 @@ export class ChatGooseContentApp {
       this.resetNextReplyTone();
       this.renderAll();
     },
-    onRerun: (feature) => {
-      this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
-      if (feature === 'help-me') {
-        this.openCoachPreset();
-      } else {
-        this.startFeature(feature, true);
-      }
-    },
+    onRerun: (feature, recapMode) => this.rerunFeature(feature, recapMode),
     onCollapse: () => {
       this.quickSurfaceMode = 'inline';
       this.quickInlineVisible = true;
@@ -1438,6 +1432,23 @@ export class ChatGooseContentApp {
     return this.tabState?.hasApiKey ?? false;
   }
 
+  /** Refresh keeps recap size identity. Full and short retain separate last-good
+   * surfaces while the replacement runs; every other feature keeps the legacy
+   * single-slot clear-before-rerun behavior. */
+  private rerunFeature(feature: FeatureType, recapMode?: RecapMode): void {
+    if (feature === 'fan-summary') {
+      this.startStandaloneRecap(recapMode ?? 'full');
+      return;
+    }
+    this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
+    // E79: a cached standalone Help result reruns as Coach's situation preset.
+    if (feature === 'help-me') {
+      this.openCoachPreset();
+      return;
+    }
+    this.startFeature(feature, true);
+  }
+
   private buildOperationStartPayload(
     feature: FeatureType,
     operationId: string,
@@ -1497,7 +1508,8 @@ export class ChatGooseContentApp {
     this.overlayRawText = '';
     this.activeImproveDraftCacheKey = improveDraftCacheKey ?? null;
     // Default to a full-summary run; standalone short/«Открыть последний» set
-    // this to 'short' AFTER init so their results bypass the full caches (P2).
+    // this AFTER init so completion selects the matching availability/display
+    // slot and Refresh can preserve the exact size.
     this.activeSummaryMode = null;
     this.comparePanelVisible = false;
 
@@ -1611,6 +1623,7 @@ export class ChatGooseContentApp {
             this.currentGroupId,
             feature,
             this.overlayCacheIdentity(improveDraftCacheKey),
+            feature === 'fan-summary' ? recapOverlayCacheSlot('full') : 'default',
           )
         : null;
     if (cachedResult) {
@@ -2115,7 +2128,7 @@ export class ChatGooseContentApp {
         // its terminal message so the previous fan's result is neither shown
         // over the new conversation nor cached/marked under the new group.
         // handleComplete/handleOperationError consume suppressed terminal ids
-        // before touching the cache or hasAvailableSummary.
+        // before touching either completed cache or recap-availability slot.
         this.suppressTerminalOperation(this.activeOperationId);
         this.clearOperationState(true);
         this.overlayRawText = '';
@@ -2722,7 +2735,10 @@ export class ChatGooseContentApp {
   /** A recap step completed (spec §5): mark it done, refresh the recap status so
    * the just-generated recap shows, then — for an auto chain — auto-submit the
    * held question. */
-  private handleCoachRecapChainComplete(operationId: string): void {
+  private handleCoachRecapChainComplete(
+    message: Extract<BackgroundPortMessage, { type: 'operation:complete' }>,
+  ): void {
+    const { operationId } = message;
     const chain = this.coachRecapChain;
     if (!chain || chain.operationId !== operationId) {
       this.clearCoachOperationState();
@@ -2734,6 +2750,12 @@ export class ChatGooseContentApp {
     // recap opportunity even if the following metadata GET is unavailable.
     // Otherwise an immediate first question can pay for the same recap twice.
     chain.session.autoRecapAttempted = true;
+    // A successful full OR short recap makes the toolbar's ready badge honest:
+    // the badge means there is something cached to open, not specifically a
+    // Hub-synced full dossier.
+    if (message.result.summaryMeta?.storedLocally !== false) {
+      this.markRecapAvailable(chain.step.mode);
+    }
     this.coachRecapChain = null;
     this.clearCoachOperationState();
     if (chain.session === this.activeCoachSession) {
@@ -3432,6 +3454,7 @@ export class ChatGooseContentApp {
       this.currentGroupId,
       'fan-summary',
       this.overlayCacheIdentity(null),
+      recapOverlayCacheSlot('full'),
     );
     const updatedCachedModel = applyFanSummarySyncStatus(
       cachedModel,
@@ -3766,7 +3789,7 @@ export class ChatGooseContentApp {
     // A coach recap step (spec §5): resolve the chain (mark done, maybe chain the
     // held question) — the fan-summary result NEVER renders as a deep overlay.
     if (this.coachRecapChain?.operationId === message.operationId) {
-      this.handleCoachRecapChainComplete(message.operationId);
+      this.handleCoachRecapChainComplete(message);
       return;
     }
 
@@ -3778,6 +3801,8 @@ export class ChatGooseContentApp {
     }
 
     const feature = this.activeFeature;
+    const recapMode: RecapMode | null =
+      feature === 'fan-summary' ? this.activeSummaryMode ?? 'full' : null;
     const rawText = message.result.rawText;
     this.overlayRawText = rawText;
     const completedModel = this.buildCompletedOverlayModel(
@@ -3788,36 +3813,26 @@ export class ChatGooseContentApp {
       getMessageLlmSpend(message) ?? this.activeLlmSpend ?? undefined,
       message.profiling ?? this.activeProfiling ?? undefined,
     );
-    // A SHORT recap (spec §5) shares the fan-summary feature but is a transient
-    // view: it must NOT mark a full summary available nor land in the full
-    // overlay cache (else a later Recap-ready dot / cached-inline restore would
-    // show SHORT text as if it were the full recap). It still renders once via
-    // deepOverlayModel below (P2-short-cache).
-    const isShortSummary = feature === 'fan-summary' && this.activeSummaryMode === 'short';
     // A served view-cached recap ends any pending open-last fallback.
-    if (feature === 'fan-summary') {
+    if (recapMode) {
       this.viewLastFallbackMode = null;
+      if (message.result.summaryMeta?.storedLocally !== false) {
+        this.markRecapAvailable(recapMode);
+      }
     }
-    if (feature === 'fan-summary' && !isShortSummary && this.tabState) {
-      this.tabState = {
-        ...this.tabState,
-        hasAvailableSummary: true,
-      };
-    }
-    if (!isShortSummary) {
-      const improveDraftCacheKey = this.activeImproveDraftCacheKey;
-      this.completedOverlayCache.set(
-        this.currentGroupId,
-        feature,
-        completedModel,
-        this.overlayCacheIdentity(
-          featureRequiresDraft(feature) ? improveDraftCacheKey : null,
-          this.activePersonaKey ?? this.tabState?.mappedPersonalityId ?? null,
-          this.activePersonaDefinitionId ?? this.tabState?.mappedPersonaDefinitionId ?? null,
-          this.activePersonaSource ?? this.tabState?.mappedPersonaSource ?? null,
-        ),
-      );
-    }
+    const improveDraftCacheKey = this.activeImproveDraftCacheKey;
+    this.completedOverlayCache.set(
+      this.currentGroupId,
+      feature,
+      completedModel,
+      this.overlayCacheIdentity(
+        featureRequiresDraft(feature) ? improveDraftCacheKey : null,
+        this.activePersonaKey ?? this.tabState?.mappedPersonalityId ?? null,
+        this.activePersonaDefinitionId ?? this.tabState?.mappedPersonaDefinitionId ?? null,
+        this.activePersonaSource ?? this.tabState?.mappedPersonaSource ?? null,
+      ),
+      recapMode ? recapOverlayCacheSlot(recapMode) : 'default',
+    );
 
     this.presentCompletedFeature(feature, completedModel);
   }
@@ -3891,6 +3906,29 @@ export class ChatGooseContentApp {
   }
 
   // ─── State Helpers ──────────────────────────────────────────────────
+
+  /** Project a successful recap into the exact local slot immediately. The
+   * legacy aggregate remains for old background/content overlap; before the
+   * slot field existed that aggregate was full-only, so it is the safe fallback
+   * when upgrading an already-open tab. */
+  private markRecapAvailable(mode: RecapMode): void {
+    if (!this.tabState) {
+      return;
+    }
+    const current = this.tabState.availableRecaps ?? {
+      full: this.tabState.hasAvailableSummary,
+      short: false,
+    };
+    const availableRecaps = {
+      ...current,
+      [mode]: true,
+    };
+    this.tabState = {
+      ...this.tabState,
+      hasAvailableSummary: true,
+      availableRecaps,
+    };
+  }
 
   private suppressTerminalOperation(operationId: string | null): void {
     if (operationId) {
@@ -4106,6 +4144,7 @@ export class ChatGooseContentApp {
           fanDisplayName,
           operationId,
           rawText,
+          recapMode: this.activeSummaryMode ?? 'full',
           summaryMeta: result.summaryMeta,
           debugPrompt: this.activeDebugPrompt ?? undefined,
           debugEcho: this.activeDebugEcho ?? undefined,

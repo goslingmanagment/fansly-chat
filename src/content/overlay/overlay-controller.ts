@@ -77,7 +77,7 @@ interface OverlayRenderOptions {
 interface OverlayCallbacks {
   onClose: () => void;
   onCancel: (operationId: string) => void;
-  onRerun: (feature: FeatureType) => void;
+  onRerun: (feature: FeatureType, recapMode?: 'full' | 'short') => void;
   onCollapse: () => void;
   /** Stage 32 Task 5: chatter took a suggestion (acceptance telemetry).
    * `generationRef` (coach only) is the correlation fallback for acceptance
@@ -3058,6 +3058,7 @@ export class OverlayController {
         model.feature === 'fan-summary'
           ? model.summaryMeta?.syncStatus
           : undefined,
+        model.recapMode,
       ),
     );
     return section;
@@ -3093,6 +3094,7 @@ export class OverlayController {
     rerunActionLabel: OverlayRerunActionLabel | undefined,
     copyText?: string | null,
     syncStatus?: FanSummarySyncStatus,
+    recapMode?: 'full' | 'short',
   ): HTMLElement {
     const actions = document.createElement('div');
     actions.className = 'chatgoose-overlay-actions';
@@ -3106,7 +3108,13 @@ export class OverlayController {
       rerun.type = 'button';
       rerun.className = 'chatgoose-button';
       rerun.textContent = rerunActionLabel;
-      rerun.addEventListener('click', () => this.callbacks.onRerun(feature));
+      rerun.addEventListener('click', () => {
+        if (recapMode) {
+          this.callbacks.onRerun(feature, recapMode);
+        } else {
+          this.callbacks.onRerun(feature);
+        }
+      });
       actions.append(rerun);
     }
 

@@ -108,6 +108,10 @@ export interface FanSummaryMeta {
   generatedAt: number;
   stale: boolean;
   cached: boolean;
+  /** Whether this exact result is reopenable from the validated local cache.
+   * Missing means legacy producer; consumers retain the former optimistic
+   * behavior during an update overlap. */
+  storedLocally?: boolean;
   syncStatus?: FanSummarySyncStatus;
   /** Recap coverage of the generated summary (spec §5/§6): 'full-history' when
    * the provider reached the oldest edge with no window/char trimming, else
@@ -789,6 +793,12 @@ export interface OperationProgressPayload {
 
 // ─── Tab UI State ────────────────────────────────────────────────────────
 
+/** Independently validated local recap slots for the active fan/persona. */
+export interface RecapAvailability {
+  full: boolean;
+  short: boolean;
+}
+
 export interface TabUiState {
   tabId: number;
   accountId: string | null;
@@ -800,7 +810,12 @@ export interface TabUiState {
    * review finding that minted this field. */
   accountIdAliases?: string[];
   groupId: string | null;
+  /** Compatibility aggregate for old content/background overlap. New code
+   * derives this as `availableRecaps.full || availableRecaps.short`. */
   hasAvailableSummary: boolean;
+  /** Exact local slots. Optional only because an already-open content script
+   * can briefly receive state from the previous background during an update. */
+  availableRecaps?: RecapAvailability;
   connected: boolean;
   /** Legacy field name; true means the Agency Hub AI transport is configured. */
   hasApiKey: boolean;
@@ -2138,6 +2153,8 @@ export type OverlayViewModel =
       fanDisplayName: string;
       operationId: string;
       rawText: string;
+      /** Keeps full/short identity through display-cache restore and Refresh. */
+      recapMode?: 'full' | 'short';
       summaryMeta?: FanSummaryMeta;
       reviewMeta?: {
         rating: number | null;

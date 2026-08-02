@@ -304,6 +304,19 @@ describe('ButtonBar toolbar visibility', () => {
     expect(hintFor(recap).body).toContain('Готовый рекап');
   });
 
+  it('derives the Recap marker from the exact short slot, not the legacy aggregate', () => {
+    const bar = makeBar();
+    document.body.append(bar.root);
+
+    bar.render(buildState({
+      hasAvailableSummary: false,
+      availableRecaps: { full: false, short: true },
+    }), null, 'default', 'none', true, false, false);
+
+    expect(buttonByLabel(bar.root, 'Recap')?.classList
+      .contains('chatgoose-toolbar-button-summary-ready')).toBe(true);
+  });
+
   it('hides the 🎙 Voice button unless the page is voice-capable', () => {
     const bar = makeBar();
     document.body.append(bar.root);

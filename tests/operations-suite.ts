@@ -638,10 +638,32 @@ describe(`OperationCoordinator (${part})`, () => {
           state: expect.objectContaining({
             groupId: 'group-1',
             hasAvailableSummary: true,
+            availableRecaps: { full: true, short: false },
           }),
         }),
       ]),
     );
+  });
+
+  it('marks tab state when only a valid short recap is available locally', async () => {
+    mockStorage['summary-short:group-1'] = mockStorage['summary:group-1'];
+    delete mockStorage['summary:group-1'];
+    const { coordinator, port } = await createCoordinatorHarness();
+
+    await coordinator.handlePortMessage(1, {
+      type: 'tab:init',
+      groupId: 'group-1',
+      routeNonce: 1,
+    });
+
+    expect(postedMessages(port)).toContainEqual(expect.objectContaining({
+      type: 'tab:state',
+      state: expect.objectContaining({
+        groupId: 'group-1',
+        hasAvailableSummary: true,
+        availableRecaps: { full: false, short: true },
+      }),
+    }));
   });
 
   it('accepts valid content messages through the registered port listener', async () => {
@@ -822,6 +844,31 @@ describe(`OperationCoordinator (${part})`, () => {
 
       await tabInit(coordinator, 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
+    });
+
+    it('never treats a short-only recap as a full Hub dossier to re-push', async () => {
+      hubConfiguredSettings();
+      mockStorage['summary-short:group-1'] = mockStorage['summary:group-1'];
+      delete mockStorage['summary:group-1'];
+      const agencyHubClient = retryHubClient({
+        status: 'pushed',
+        reason: 'pushed',
+        baseUrl: 'http://localhost:3000',
+        pageLabel: 'creator-fs',
+      });
+      const { coordinator, port } = await createCoordinatorHarness({ agencyHubClient });
+
+      await tabInit(coordinator, 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(postedMessages(port)).toContainEqual(expect.objectContaining({
+        type: 'tab:state',
+        state: expect.objectContaining({
+          availableRecaps: { full: false, short: true },
+          hasAvailableSummary: true,
+        }),
+      }));
       expect(agencyHubClient.pushFanProfile).not.toHaveBeenCalled();
     });
 
@@ -6821,6 +6868,12 @@ describe(`OperationCoordinator (${part})`, () => {
     });
     expect((mockStorage['summary:group-1'] as SummaryCacheEntry).summary).toBe('Old summary');
     expect(enqueueSpy).not.toHaveBeenCalled();
+    const generated = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+        message.type === 'operation:complete' &&
+        message.operationId === 'short-recap-op',
+    );
+    expect(generated?.result.summaryMeta?.storedLocally).toBe(true);
 
     await coordinator.startOperation(1, {
       type: 'operation:start',
@@ -6840,6 +6893,7 @@ describe(`OperationCoordinator (${part})`, () => {
     );
     expect(cacheHit?.result.summaryMeta).toMatchObject({
       cached: true,
+      storedLocally: true,
       transcriptCoverage: 'window',
       keptCount: 300,
     });
