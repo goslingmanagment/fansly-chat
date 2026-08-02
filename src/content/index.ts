@@ -1,6 +1,9 @@
 import { ButtonBar } from './button-bar.js';
 import { COACH_SITUATION_PRESET_LABEL } from './coach-copy.js';
-import { formatCoachAgeMs } from '../shared/coach-format.js';
+import {
+  formatCoachAgeMs,
+  formatCoachWaitStatus,
+} from '../shared/coach-format.js';
 import { isCoachTurnContext } from '../shared/protocol.js';
 import { COACH_DRAFT_ATTACH_ENABLED, coachDraftAttachAllowed } from '../shared/coach-draft-gate.js';
 import {
@@ -81,6 +84,7 @@ import type {
   CoachOverlayFeedItem,
   CoachRecapStatusView,
   CoachSettingsSnapshot,
+  CoachTurnDebug,
   DebugPromptEchoStatus,
   LlmSpendSummary,
   BackgroundPortMessage,
@@ -593,8 +597,8 @@ export class ChatGooseContentApp {
         ...(generationRef ? { generationRef } : {}),
       });
     },
-    onOpenDebugPrompt: () => {
-      void this.openDebugPromptViewer();
+    onOpenDebugPrompt: (viewerToken?: string) => {
+      void this.openDebugPromptViewer(viewerToken);
     },
     onClose: () => {
       // Esc/backdrop over the recap start dialog just cancels it (spec §5) — no
@@ -2874,8 +2878,23 @@ export class ChatGooseContentApp {
     const question = session.pending.question;
     const preset = session.pending.preset;
     const answerRaw = message.result.rawText;
+    // E81: debug provenance for the turn — priced spend + pipeline profile off
+    // the complete payload, plus the E28 echo status accumulated mid-stream.
+    // All three exist only while debugMode is on; captured BEFORE the op-state
+    // clear below releases the echo/profiling markers.
+    const debug = this.buildCoachTurnDebug(
+      message.llmSpend,
+      message.profiling ?? this.activeProfiling ?? undefined,
+    );
     if (answerRaw.trim().length === 0) {
-      this.coachStore.recordFailedAttempt(session, operationId, question, 'ai_output_unusable', true);
+      this.coachStore.recordFailedAttempt(
+        session,
+        operationId,
+        question,
+        'ai_output_unusable',
+        true,
+        debug?.profiling,
+      );
     } else {
       this.coachStore.commitExchange(session, {
         operationId,
@@ -2894,11 +2913,33 @@ export class ChatGooseContentApp {
         // the message conjunction dropped the whole paid complete over a purely
         // presentational field — E28 holds by ignoring, not by rejecting.
         ...(isCoachTurnContext(message.turnContext) ? { turnContext: message.turnContext } : {}),
+        ...(debug !== undefined ? { debug } : {}),
       });
     }
     this.clearCoachOperationState();
     this.rebuildCoachModel();
     this.renderAll();
+  }
+
+  /** Assemble a coach turn's debug provenance (E81), or undefined when the
+   * turn ran without debugMode. The profiling snapshot is the debug key: it is
+   * attached to terminals only while the profiler is enabled, whereas llmSpend
+   * flows regardless — so its presence alone must NOT decorate a non-debug
+   * feed. The echo token stays in this heap object (E28): display wiring only
+   * ever hands it to the runtime `openDebugPrompt` call, never to the DOM. */
+  private buildCoachTurnDebug(
+    llmSpend: LlmSpendSummary | undefined,
+    profiling: OperationProfilingSnapshot | undefined,
+  ): CoachTurnDebug | undefined {
+    if (profiling === undefined) {
+      return undefined;
+    }
+    const promptEcho = this.activeDebugEcho ?? undefined;
+    return {
+      profiling,
+      ...(llmSpend !== undefined ? { llmSpend } : {}),
+      ...(promptEcho !== undefined ? { promptEcho } : {}),
+    };
   }
 
   /** A coach turn failed: surface it as an in-feed failed-attempt (spec §3/§8,
@@ -2919,7 +2960,10 @@ export class ChatGooseContentApp {
     }
     const question = session.pending.question;
     const errorCode = message.error?.code ?? 'unknown_error';
-    this.coachStore.recordFailedAttempt(session, operationId, question, errorCode, true);
+    // E81: with debugMode on, retain the pipeline profile on the failed item —
+    // the collapsed «Отладка» log shows WHERE the turn died.
+    const profiling = message.profiling ?? this.activeProfiling ?? undefined;
+    this.coachStore.recordFailedAttempt(session, operationId, question, errorCode, true, profiling);
     this.clearCoachOperationState();
     this.rebuildCoachModel();
     this.renderAll();
@@ -3026,6 +3070,9 @@ export class ChatGooseContentApp {
           drafts: exchange.drafts.map((draft) => ({ text: draft.text, index: draft.index })),
           // Collapsed «Отправлено коучу…» line (spec §8.2); absent → no line.
           ...(exchange.turnContext !== undefined ? { turnContext: exchange.turnContext } : {}),
+          // Debug provenance (E81): the SAME object as the store's — the
+          // renderer's rebuild decision relies on reference stability.
+          ...(exchange.debug !== undefined ? { debug: exchange.debug } : {}),
         };
       }
       if (item.kind === 'failed-attempt') {
@@ -3036,6 +3083,7 @@ export class ChatGooseContentApp {
           retryable: item.retryable,
           includedDraft: item.includedDraft,
           ...(item.preset ? { preset: item.preset } : {}),
+          ...(item.profiling !== undefined ? { profiling: item.profiling } : {}),
         };
       }
       return {
@@ -3047,6 +3095,12 @@ export class ChatGooseContentApp {
       };
     });
     const streaming = Boolean(session.pending);
+    // E81: progress is trusted only when it belongs to the live pending op —
+    // a stale frame from a superseded turn must not caption the new one.
+    const pendingProgress =
+      session.pending && this.activeProgress?.operationId === session.pending.operationId
+        ? this.activeProgress
+        : null;
     // "Busy" also covers a running recap step for THIS session (spec §5): the
     // composer locks and the whole chain is cancellable via the top-level op.
     const chainOpId =
@@ -3063,6 +3117,21 @@ export class ChatGooseContentApp {
         feedItems,
         pendingQuestion: session.pending?.question,
         pendingAnswerText: streaming ? this.coachPendingAnswerText : undefined,
+        // E81: wait narration + elapsed anchor + (debug-only) live stage log
+        // for the pending bubble.
+        ...(session.pending
+          ? {
+              pendingWaitLabel: formatCoachWaitStatus(
+                pendingProgress?.stageKey,
+                pendingProgress?.currentPage,
+                pendingProgress?.targetPages,
+              ),
+              pendingStartedAt: session.pending.startedAt,
+              ...(pendingProgress?.profiling !== undefined
+                ? { pendingProfiling: pendingProgress.profiling }
+                : {}),
+            }
+          : {}),
         recapStatusLine: formatCoachRecapStatusLine(session.recapStatus),
         composerText: session.composerText,
         composerEnabled: !busy,
@@ -3410,6 +3479,11 @@ export class ChatGooseContentApp {
     }
     this.activeProfiling = message.profiling ?? null;
     this.activeProgress = message;
+    // E81: a coach turn narrates its wait in the pending bubble — fold the
+    // fresh stage into the coach model before the scheduled paint.
+    if (this.activeCoachSession?.pending?.operationId === message.operationId) {
+      this.rebuildCoachModel();
+    }
     this.scheduleLoadingRender();
   }
 
@@ -3609,15 +3683,22 @@ export class ChatGooseContentApp {
     this.scheduleLoadingRender();
   }
 
-  private async openDebugPromptViewer(): Promise<void> {
-    const echo = this.activeDebugEcho;
-    if (echo?.state !== 'available') {
+  private async openDebugPromptViewer(viewerToken?: string): Promise<void> {
+    // E81: a coach exchange passes ITS turn's token (the feed outlives the
+    // active-op echo marker); the loading/completed surfaces keep the
+    // active-op default.
+    const token =
+      viewerToken ??
+      (this.activeDebugEcho?.state === 'available'
+        ? this.activeDebugEcho.viewerToken
+        : undefined);
+    if (token === undefined) {
       return;
     }
     try {
       await browser.runtime.sendMessage({
         type: 'openDebugPrompt',
-        viewerToken: echo.viewerToken,
+        viewerToken: token,
       });
     } catch {
       // The worker restarted and dropped the snapshot; the panel already says

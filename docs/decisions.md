@@ -2796,3 +2796,55 @@ preflight lock covers it. Hotkey H stays as the fast path (openCoachPreset),
 and the Rerun of a cached standalone Help result still routes there; the
 FEATURE_HINTS entry survives only to satisfy Record<FeatureType>. Review and
 Compare keep their bar positions: Review now follows Ping directly.
+
+**E81 (2026-08-02).** Owner feedback on the Coach panel, approved via a
+«Было/Стало» mockup: the wait is opaque («не в кайф ждать непонятно че
+происходит»), debug mode gives the coach nothing, section headers drown in
+Help/Review the same way they did in the recap, and answers that arrive with
+model-volunteered markdown render raw asterisks. Four display-only changes,
+one decision:
+
+1. *Wait narration.* The background already walks explicit profiler stages;
+the coach pending bubble now narrates them. `operation:progress` grows an
+optional `stageKey` (the stage that just STARTED), which coach-chat always
+sends — a handful of tiny frames per turn; every other feature keeps the
+debug-only cadence, and the quick-window seed reports page counts for coach
+like deep features do. Content folds the live stage into the coach model
+(`pendingWaitLabel` via `formatCoachWaitStatus` — three chatter-sized
+phases: «Читаю переписку… n/k стр.» → «Собираю контекст…» → «Жду ответ
+ядра…», unknown stages calmly bucket as context) plus a ticking elapsed
+counter anchored at dispatch (`formatCoachWaitElapsed`, «47 с» → «1:23»).
+The first streamed token swaps the wait row for the answer bubble — a class
+flip on two nodes built once, preserving the streaming-mutates-only-a-text-
+node discipline. A stale progress frame from a superseded op never captions
+the live turn.
+
+2. *Debug surfaces in the coach feed* (all keyed to debugMode via the
+profiling snapshot's presence — llmSpend flows regardless and must not
+decorate a non-debug feed). While pending: a collapsed «Отладка» `<details>`
+with the live profiler log (open state survives updates; rows replaced).
+On commit: the exchange retains a frozen `CoachTurnDebug` {profiling,
+llmSpend, promptEcho} rendered as a mono footer — total/TTFB timings,
+tokens/cost, and «Промпт ↗» opening the E28 viewer with THAT turn's token
+(the feed outlives the active-op echo marker, so `onOpenDebugPrompt` learned
+an optional per-exchange token; tokens stay in heap objects and this call,
+never in the DOM — E28 holds). On failure: the profiler log on the
+failed-attempt item shows where the turn died. Debug objects are
+reference-stable per turn; the keyed renderer compares them by identity.
+
+3. *Analysis headers unified* (amends E78's amendment): the recap's
+strengthened header treatment — 11px, mid ink, hairline separator above
+each following section — is promoted to the base `.chatgoose-analysis`
+classes, so Help/Review read identically; tinted verdict/move/works cards
+keep their own frames instead of a separator. CSS-only.
+
+4. *Coach markdown.* Coach answers whose prose carries model-volunteered
+markdown (`**bold**`, bold-only lines, dash lists, `#` headings) render as
+blocks through `renderCoachProse` — the recap's structural builder reused
+with recap-section styling OFF (a known section name must stay a plain
+subheading in a 13px chat bubble, never a dotted card), and a line that is
+one bold span promoted to a subheading. Plain prose keeps the raw pre-wrap
+path byte-for-byte. Display-only: the stored raw answer, wire history,
+draft parsing, and copy flows are untouched, and the createElement/
+textContent injection contract still holds (the old «never becomes HTML»
+test now pins exactly that against structural rendering).

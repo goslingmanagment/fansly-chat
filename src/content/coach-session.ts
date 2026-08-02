@@ -25,6 +25,8 @@ import type {
   CoachAutoRecapOverride,
   CoachHistoryEntry,
   CoachTurnContext,
+  CoachTurnDebug,
+  OperationProfilingSnapshot,
   RecapStatusResponse,
 } from '../shared/types.js';
 
@@ -59,6 +61,10 @@ export interface CoachExchange {
    * collapsed «Отправлено коучу…» line. Absent when the background predated the
    * field (old-background tolerance). */
   readonly turnContext?: CoachTurnContext;
+  /** Debug provenance (E81): captured only when debugMode was on during the
+   * turn. One frozen object whose identity is shared with the overlay
+   * projection — display-only; never serialized to the wire. */
+  readonly debug?: CoachTurnDebug;
 }
 
 /** The feed's reference to a committed exchange: the live `CoachExchange` object
@@ -84,6 +90,9 @@ export interface CoachFailedAttemptFeedItem {
   includedDraft: boolean;
   /** Retry dispatches the preset again instead of sending the display label. */
   preset?: true;
+  /** Pipeline profile of the failed turn (E81, debugMode only): the collapsed
+   * «Отладка» log showing where the turn died. Display-only. */
+  profiling?: OperationProfilingSnapshot;
 }
 
 /** A visible recap run inside the coach feed (spec §3/§5). `status` transitions
@@ -170,6 +179,9 @@ export interface CoachCommitInput {
   /** The kernel's post-attach turn context (spec §8.2), if the background sent
    * it; retained verbatim on the exchange. */
   turnContext?: CoachTurnContext;
+  /** Debug provenance (E81), captured by the orchestrator at completion when
+   * debugMode was on; retained verbatim on the exchange. */
+  debug?: CoachTurnDebug;
 }
 
 export interface CoachSessionStore {
@@ -205,6 +217,7 @@ export interface CoachSessionStore {
     question: string,
     errorCode: string,
     retryable: boolean,
+    profiling?: OperationProfilingSnapshot,
   ): CoachFailedAttemptFeedItem | null;
   /** Set the draft-attach intent (spec §5). */
   setDraftIntent(session: CoachSession, intent: boolean): void;
@@ -319,6 +332,7 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
         drafts,
         completedAt: now(),
         ...(input.turnContext !== undefined ? { turnContext: input.turnContext } : {}),
+        ...(input.debug !== undefined ? { debug: input.debug } : {}),
       };
       session.completedExchanges.push(exchange);
       // Hard in-memory cap: trim oldest whole exchanges from the wire list only.
@@ -333,7 +347,7 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
       return exchange;
     },
 
-    recordFailedAttempt(session, operationId, question, errorCode, retryable) {
+    recordFailedAttempt(session, operationId, question, errorCode, retryable, profiling) {
       // Guard on the live pending marker. A terminal failure that arrives after
       // its attempt was cancelled-and-retried (or otherwise superseded) is stale:
       // the chatter has already moved on, so recording a `failed-attempt` for the
@@ -351,6 +365,7 @@ export function createCoachSessionStore(deps: CoachSessionStoreDeps = {}): Coach
         // «sent», not «requested»: honest flag from the dispatched attempt (§5).
         includedDraft: session.pending.includedDraft,
         ...(session.pending.preset ? { preset: session.pending.preset } : {}),
+        ...(profiling !== undefined ? { profiling } : {}),
       };
       session.feedItems.push(item);
       // A failed/cancelled turn ends the in-flight attempt.

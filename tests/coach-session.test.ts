@@ -405,3 +405,43 @@ describe('CoachSessionStore — draft intent + transcript epoch + turnContext', 
     expect(plain.turnContext).toBeUndefined();
   });
 });
+
+describe('CoachSessionStore — debug provenance (E81)', () => {
+  it('commitExchange retains the debug object BY IDENTITY; absent stays absent', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acct', 'group');
+    const debug = {
+      profiling: { elapsedMs: 1000, activeLabel: null, logEntries: [], stages: [] },
+    };
+    const withDebug = store.commitExchange(session, {
+      operationId: 'op-1',
+      generationRef: 'gen-1',
+      question: 'q1',
+      answerRaw: 'a1',
+      debug,
+    });
+    expect(withDebug.debug).toBe(debug);
+
+    const withoutDebug = store.commitExchange(session, {
+      operationId: 'op-2',
+      generationRef: 'gen-2',
+      question: 'q2',
+      answerRaw: 'a2',
+    });
+    expect('debug' in withoutDebug).toBe(false);
+  });
+
+  it('recordFailedAttempt retains the profiling snapshot on the feed item', () => {
+    const store = makeStore();
+    const session = store.getOrCreate('acct', 'group');
+    const profiling = { elapsedMs: 900, activeLabel: null, logEntries: [], stages: [] };
+    store.beginPending(session, 'q', 'op-1', false, true);
+    const item = store.recordFailedAttempt(session, 'op-1', 'q', 'CG-AI-01', true, profiling);
+    expect(item?.profiling).toBe(profiling);
+
+    store.beginPending(session, 'q2', 'op-2', false, true);
+    const bare = store.recordFailedAttempt(session, 'op-2', 'q2', 'CG-AI-01', true);
+    expect(bare).not.toBeNull();
+    expect(bare && 'profiling' in bare).toBe(false);
+  });
+});
