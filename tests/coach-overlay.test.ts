@@ -26,6 +26,9 @@ import {
 import type {
   CoachOverlayFeedItem,
   CoachOverlaySessionView,
+  CoachTurnDebug,
+  LlmSpendSummary,
+  OperationProfilingSnapshot,
   OverlayViewModel,
   RecapStatusResponse,
 } from '../src/shared/types.js';
@@ -82,8 +85,57 @@ function failedItem(
   errorCode: string,
   retryable: boolean,
   includedDraft = false,
+  profiling?: OperationProfilingSnapshot,
 ): CoachOverlayFeedItem {
-  return { kind: 'failed-attempt', question, errorCode, retryable, includedDraft };
+  return {
+    kind: 'failed-attempt',
+    question,
+    errorCode,
+    retryable,
+    includedDraft,
+    ...(profiling !== undefined ? { profiling } : {}),
+  };
+}
+
+// ─── E81 debug fixtures ────────────────────────────────────────────────────
+
+function profilingFixture(): OperationProfilingSnapshot {
+  return {
+    elapsedMs: 18_400,
+    activeLabel: null,
+    logEntries: [
+      { elapsedMs: 0, message: 'Resolve account identity' },
+      { elapsedMs: 2_400, message: 'Load messages' },
+      { elapsedMs: 3_000, message: 'Wait for AI TTFB' },
+    ],
+    stages: [
+      {
+        key: 'llm-ttfb',
+        label: 'Wait for AI TTFB',
+        status: 'completed',
+        startedElapsedMs: 3_000,
+        endedElapsedMs: 9_200,
+        durationMs: 6_200,
+      },
+    ],
+  };
+}
+
+function spendFixture(): LlmSpendSummary {
+  return {
+    totalTokens: 1_240,
+    inputTokens: 1_000,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 240,
+    totalUsd: 0.04,
+    uncachedUsd: 0.04,
+    cacheEffectUsd: 0,
+    cacheEffectKind: 'neutral',
+    cacheWriteUsd: 0,
+    cacheReadUsd: 0,
+    approximate: false,
+  };
 }
 
 /** Let the renderer's queued focus microtask (createCoachView) run. */
@@ -947,6 +999,137 @@ describe('OverlayController — coach chat mode', () => {
     expect(records).toHaveLength(0);
   });
 
+  // ─── Wait narration + debug surfaces (E81) ────────────────────────────────
+
+  it('narrates the wait before the first token, then flips to the streamed answer', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        operationId: 'op-wait',
+        pendingQuestion: 'q',
+        pendingWaitLabel: 'Читаю переписку… 2/4 стр.',
+        pendingStartedAt: Date.now(),
+        composerEnabled: false,
+      }),
+    );
+    const wait = requireElement<HTMLDivElement>('.chatgoose-coach-wait');
+    expect(wait.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(wait.textContent).toContain('Читаю переписку… 2/4 стр.');
+    const answer = requireElement<HTMLDivElement>('.chatgoose-coach-pending .chatgoose-coach-answer');
+    expect(answer.classList.contains('chatgoose-hidden')).toBe(true);
+
+    // Stage advances in place — same wait node, new label.
+    controller.render(
+      createCoachModel({
+        operationId: 'op-wait',
+        pendingQuestion: 'q',
+        pendingWaitLabel: 'Жду ответ ядра…',
+        pendingStartedAt: Date.now(),
+        composerEnabled: false,
+      }),
+    );
+    expect(requireElement<HTMLDivElement>('.chatgoose-coach-wait')).toBe(wait);
+    expect(wait.textContent).toContain('Жду ответ ядра…');
+
+    // First token: wait row out, answer in — a class flip, not a rebuild.
+    controller.render(
+      createCoachModel({
+        operationId: 'op-wait',
+        pendingQuestion: 'q',
+        pendingAnswerText: 'Смотри,',
+        pendingStartedAt: Date.now(),
+        composerEnabled: false,
+      }),
+    );
+    expect(wait.classList.contains('chatgoose-hidden')).toBe(true);
+    expect(answer.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(answer.textContent).toBe('Смотри,');
+  });
+
+  it('renders the live «Отладка» stage log under the pending bubble and keeps its open state', () => {
+    const { controller } = makeController();
+    const model = (log: OperationProfilingSnapshot) =>
+      createCoachModel({
+        operationId: 'op-dbg',
+        pendingQuestion: 'q',
+        pendingWaitLabel: 'Собираю контекст…',
+        pendingStartedAt: Date.now(),
+        pendingProfiling: log,
+        composerEnabled: false,
+      });
+    controller.render(model(profilingFixture()));
+    const details = requireElement<HTMLDetailsElement>('.chatgoose-coach-pending .chatgoose-coach-debug');
+    expect(details.open).toBe(false);
+    expect(details.querySelectorAll('.chatgoose-profiling-entry')).toHaveLength(3);
+
+    details.open = true;
+    const grown = profilingFixture();
+    grown.logEntries.push({ elapsedMs: 9_200, message: 'Stream AI response' });
+    controller.render(model(grown));
+    const sameDetails = requireElement<HTMLDetailsElement>('.chatgoose-coach-pending .chatgoose-coach-debug');
+    expect(sameDetails).toBe(details);
+    expect(sameDetails.open).toBe(true);
+    expect(sameDetails.querySelectorAll('.chatgoose-profiling-entry')).toHaveLength(4);
+  });
+
+  it('renders no wait/debug surfaces for a pending turn without E81 model fields', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        operationId: 'op-old',
+        pendingQuestion: 'q',
+        pendingAnswerText: 'partial',
+        composerEnabled: false,
+      }),
+    );
+    expect(document.querySelector('.chatgoose-coach-debug')).toBeNull();
+    const wait = requireElement<HTMLDivElement>('.chatgoose-coach-wait');
+    expect(wait.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
+  it('a debug-carrying exchange shows the timings/tokens footer and opens ITS prompt token', () => {
+    const onOpenDebugPrompt = vi.fn();
+    const { controller } = makeController({ onOpenDebugPrompt });
+    const debug: CoachTurnDebug = {
+      profiling: profilingFixture(),
+      llmSpend: spendFixture(),
+      promptEcho: {
+        state: 'available',
+        viewerToken: 'tok-x1',
+        kernelContext: { dossier: null, transcript: null, otherKeys: [] },
+      },
+    };
+    controller.render(
+      createCoachModel({
+        feedItems: [{ ...exchangeItem('x1', 'q', 'a'), debug } as CoachOverlayFeedItem],
+      }),
+    );
+    const footer = requireElement<HTMLDivElement>('.chatgoose-coach-debug-footer');
+    expect(footer.textContent).toContain('18.4s · ttfb 6.2s');
+    expect(footer.textContent).toContain('1.2k tok · $0.0400');
+
+    requireElement<HTMLButtonElement>('.chatgoose-coach-debug-prompt').click();
+    expect(onOpenDebugPrompt).toHaveBeenCalledWith('tok-x1');
+    // The token must never leak into the DOM the Fansly page can read (E28).
+    expect(document.body.innerHTML).not.toContain('tok-x1');
+  });
+
+  it('an exchange without debug provenance renders no footer; a failed attempt with profiling gets the log', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({
+        feedItems: [
+          exchangeItem('x1', 'q', 'a'),
+          failedItem('q2', 'CG-AI-01', true, false, profilingFixture()),
+        ],
+      }),
+    );
+    expect(document.querySelector('.chatgoose-coach-debug-footer')).toBeNull();
+    const failed = requireElement<HTMLDivElement>('.chatgoose-coach-failed');
+    expect(failed.querySelector('.chatgoose-coach-debug')).not.toBeNull();
+    expect(failed.querySelectorAll('.chatgoose-profiling-entry')).toHaveLength(3);
+  });
+
   it('Esc while streaming cancels the turn and stays open; Esc while idle closes', () => {
     const { controller, callbacks } = makeController();
     controller.render(
@@ -1014,14 +1197,41 @@ describe('OverlayController — coach chat mode', () => {
     expect(feed.scrollTop).toBe(40);
   });
 
-  it('renders coach prose via textContent so markdown/backticks never become HTML', () => {
+  it('renders model markdown as structural blocks, never as parsed HTML (E81)', () => {
     const { controller } = makeController();
     controller.render(
-      createCoachModel({ feedItems: [exchangeItem('x1', 'q', 'Try **this** and `that`')] }),
+      createCoachModel({
+        feedItems: [
+          exchangeItem(
+            'x1',
+            'q',
+            'Интро <img src=x onerror=alert(1)>\n\n**Конкретные вещи**\n\n- Первое **важное**\n- Второе',
+          ),
+        ],
+      }),
     );
     const answer = requireElement<HTMLDivElement>('.chatgoose-coach-answer');
-    expect(answer.querySelector('strong')).toBeNull();
-    expect(answer.textContent).toBe('Try **this** and `that`');
+    // Markdown the model volunteered becomes structure…
+    expect(answer.classList.contains('chatgoose-md')).toBe(true);
+    const heading = answer.querySelector('.chatgoose-md-h3');
+    expect(heading?.textContent).toBe('Конкретные вещи');
+    expect(answer.querySelectorAll('.chatgoose-md-list li')).toHaveLength(2);
+    expect(answer.querySelector('li strong')?.textContent).toBe('важное');
+    // …but raw HTML in the prose NEVER becomes elements (createElement/
+    // textContent only — the injection contract this test always pinned).
+    expect(answer.querySelector('img')).toBeNull();
+    expect(answer.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('keeps plain prose on the raw pre-wrap text path (no markdown, no blocks)', () => {
+    const { controller } = makeController();
+    controller.render(
+      createCoachModel({ feedItems: [exchangeItem('x1', 'q', 'Просто текст.\n\nВторой абзац.')] }),
+    );
+    const answer = requireElement<HTMLDivElement>('.chatgoose-coach-answer');
+    expect(answer.classList.contains('chatgoose-md')).toBe(false);
+    expect(answer.childElementCount).toBe(0);
+    expect(answer.textContent).toBe('Просто текст.\n\nВторой абзац.');
   });
 
   it('gives the coach panel its own scroll ownership (feed scrolls, panel does not)', () => {

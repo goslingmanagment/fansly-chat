@@ -781,6 +781,10 @@ export interface OperationProgressPayload {
   retryAtMs?: number;
   llmSpend?: LlmSpendSummary;
   profiling?: OperationProfilingSnapshot;
+  /** The profiler stage that just STARTED (E81). Finer-grained than `phase`
+   * and always sent for coach-chat (other features report it only in debug),
+   * so the coach pending bubble can narrate the wait. */
+  stageKey?: OperationProfilingStageKey;
 }
 
 // ─── Tab UI State ────────────────────────────────────────────────────────
@@ -1930,11 +1934,26 @@ export interface CoachTurnContext {
   presetQuestion?: string;
 }
 
+/** Debug provenance captured for a coach turn while debugMode was on (E81):
+ * the pipeline profile, the priced spend, and the E28 echo status whose
+ * viewer token unlocks the real prompt on the extension-origin page. One
+ * frozen object per turn, shared by identity between the session store and
+ * the overlay projection — the renderer relies on that reference stability
+ * for its rebuild decision. The token stays in the content script's heap
+ * (E28): it must never land in a DOM attribute the page could read. */
+export interface CoachTurnDebug {
+  llmSpend?: LlmSpendSummary;
+  profiling?: OperationProfilingSnapshot;
+  promptEcho?: DebugPromptEchoStatus;
+}
+
 /** A rendered coach feed item — the overlay projection of the content-side
  * `CoachFeedItem` (spec §3 "Session state model"). Exchanges are keyed by their
  * own `operationId`; failed-attempt / recap-step items by feed index. Prose is
- * ALWAYS the draft-stripped text and is rendered via `textContent` (never
- * markdown/innerHTML) — the draft fences are already lifted into `drafts`. */
+ * ALWAYS the draft-stripped text, built structurally via createElement /
+ * textContent — never innerHTML (E81 renders model-volunteered markdown as
+ * blocks through the same structural builder the recap uses) — the draft
+ * fences are already lifted into `drafts`. */
 export type CoachOverlayFeedItem =
   | {
       kind: 'exchange';
@@ -1956,6 +1975,9 @@ export type CoachOverlayFeedItem =
        * background predates the field (old-background tolerance) → the collapsed
        * «Отправлено коучу…» line is not rendered. */
       turnContext?: CoachTurnContext;
+      /** Debug provenance (E81); present only when debugMode was on during the
+       * turn → the timings/tokens footer with the «Промпт» opener. */
+      debug?: CoachTurnDebug;
     }
   | {
       kind: 'failed-attempt';
@@ -1967,6 +1989,9 @@ export type CoachOverlayFeedItem =
       includedDraft: boolean;
       /** Retry must dispatch the preset again, never its display label. */
       preset?: true;
+      /** Pipeline profile of the failed turn (E81, debugMode only): shows WHERE
+       * the turn died. Reference-stable per item (renderer rebuild contract). */
+      profiling?: OperationProfilingSnapshot;
     }
   | {
       kind: 'recap-step';
@@ -2014,6 +2039,18 @@ export interface CoachOverlaySessionView {
   /** The in-flight answer streamed so far (draft fences are lifted only on
    * commit, so this is raw prose); rendered via textContent. */
   pendingAnswerText?: string;
+  /** Live wait-status copy for the pending turn (E81), derived from the
+   * background's stage progress («Читаю переписку… 2/4 стр.» → «Собираю
+   * контекст…» → «Жду ответ ядра…»). Absent → the generic fallback. Shown
+   * only until the first streamed token replaces it. */
+  pendingWaitLabel?: string;
+  /** Dispatch timestamp of the pending turn (E81) — drives the renderer's
+   * ticking elapsed counter next to the wait label. */
+  pendingStartedAt?: number;
+  /** Live pipeline profile of the pending turn (E81). Present only while
+   * debugMode is on (snapshots ride progress messages only then) → the
+   * collapsed «Отладка» stage log under the wait status. */
+  pendingProfiling?: OperationProfilingSnapshot;
   /** Recap freshness line (spec §2.1/§5), structured for label/value styling. */
   recapStatusLine: CoachRecapStatusView;
   /** Unsent composer text for restore-on-reopen (spec §3). */

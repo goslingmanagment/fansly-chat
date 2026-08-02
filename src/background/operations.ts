@@ -85,6 +85,7 @@ import type {
   FeatureType,
   FeatureResult,
   OperationPhase,
+  OperationProfilingStageKey,
   OperationProgressPayload,
   OperationStartPayload,
   PingSegment,
@@ -1731,6 +1732,7 @@ export class OperationCoordinator {
       let progressTargetPages: number | undefined;
       let progressStatusCode: string | undefined;
       let progressRetryAtMs: number | undefined;
+      let progressStageKey: OperationProfilingStageKey | undefined;
 
       type OperationProgressUpdate = {
         phase?: OperationPhase;
@@ -1739,6 +1741,7 @@ export class OperationCoordinator {
         targetPages?: number | undefined;
         statusCode?: string | undefined;
         retryAtMs?: number | undefined;
+        stageKey?: OperationProfilingStageKey | undefined;
       };
 
       const sendOperationProgress = (updates?: OperationProgressUpdate): void => {
@@ -1761,6 +1764,9 @@ export class OperationCoordinator {
           if ('retryAtMs' in updates) {
             progressRetryAtMs = updates.retryAtMs;
           }
+          if ('stageKey' in updates && updates.stageKey) {
+            progressStageKey = updates.stageKey;
+          }
         }
 
         this.sendProgress(
@@ -1774,6 +1780,7 @@ export class OperationCoordinator {
             targetPages: progressTargetPages,
             statusCode: progressStatusCode,
             retryAtMs: progressRetryAtMs,
+            ...(progressStageKey !== undefined ? { stageKey: progressStageKey } : {}),
           },
           active.llmSpend ?? undefined,
           profiler,
@@ -1786,6 +1793,11 @@ export class OperationCoordinator {
         }
         sendOperationProgress(updates);
       };
+
+      // E81: coach narrates its wait in the pending bubble, so its stage
+      // boundaries always ship as progress (a handful of tiny frames per turn);
+      // every other feature keeps the debug-only cadence.
+      const reportStageProgress = payload.feature === 'coach-chat';
 
       // E28: the echo's fate for this operation. Carries the counts projection
       // and an opaque viewer token — never a byte of the assembled prompt, which
@@ -1810,7 +1822,11 @@ export class OperationCoordinator {
       ): void => {
         profiler.startStage(key, label, detail);
         profiler.log(label);
-        sendDebugProgress(progressUpdates);
+        if (reportStageProgress) {
+          sendOperationProgress({ ...(progressUpdates ?? {}), stageKey: key });
+        } else {
+          sendDebugProgress(progressUpdates);
+        }
       };
 
       const completeStage = (
@@ -2142,7 +2158,7 @@ export class OperationCoordinator {
       profiler.log(`Requested ${effectiveMessageCount} messages`);
       sendDebugProgress();
       const shouldReportMessageProgress =
-        profiler.enabled || isDeepFeature(payload.feature);
+        profiler.enabled || isDeepFeature(payload.feature) || reportStageProgress;
       const messageProgress: ((progress: MessageLoadProgress) => void) | undefined =
         shouldReportMessageProgress
           ? (progress) => {
@@ -2155,6 +2171,17 @@ export class OperationCoordinator {
                   currentPage: progress.currentPage,
                   targetPages: progress.targetPages,
                   message: `Loading messages… ${progress.currentPage}/${progress.targetPages} pages`,
+                });
+                return;
+              }
+              // E81: coach's quick-window seed narrates its pages in the
+              // pending bubble (RU copy is built content-side from the counts).
+              if (reportStageProgress) {
+                sendOperationProgress({
+                  phase: 'loading-messages',
+                  currentPage: progress.currentPage,
+                  targetPages: progress.targetPages,
+                  stageKey: 'load-messages',
                 });
                 return;
               }
@@ -2866,7 +2893,11 @@ export class OperationCoordinator {
           profiler.completeStage('llm-ttfb', ttfbDetail);
           profiler.startStage('llm-stream', 'Stream AI response');
           profiler.log(`Stream ${actualModelName()} response`);
-          sendDebugProgress();
+          if (reportStageProgress) {
+            sendOperationProgress({ stageKey: 'llm-stream' });
+          } else {
+            sendDebugProgress();
+          }
           return true;
         }
         resetLlmIdleTimeout();

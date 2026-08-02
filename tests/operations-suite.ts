@@ -6543,6 +6543,30 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(request).not.toHaveProperty('chatterQuestion');
   });
 
+  it('coach narrates its stages: progress frames carry stageKey WITHOUT debug (E81)', async () => {
+    const { coordinator, port } = await createCoordinatorHarness({
+      anthropicRawText: 'Here is some coaching advice.',
+    });
+
+    await coordinator.startOperation(1, coachStart());
+
+    const progressMessages = postedMessages(port).filter(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:progress' }> =>
+        message.type === 'operation:progress',
+    );
+    const stageKeys = progressMessages
+      .map((message) => message.stageKey)
+      .filter((key): key is NonNullable<typeof key> => key !== undefined);
+    // The three chatter-visible phases must all be narrated, in pipeline order…
+    expect(stageKeys.indexOf('load-messages')).toBeGreaterThanOrEqual(0);
+    expect(stageKeys.indexOf('prompt-build')).toBeGreaterThan(stageKeys.indexOf('load-messages'));
+    expect(stageKeys.indexOf('llm-ttfb')).toBeGreaterThan(stageKeys.indexOf('prompt-build'));
+    // …and stage narration must NOT drag the debug-only profiling along.
+    for (const message of progressMessages) {
+      expect(message).not.toHaveProperty('profiling');
+    }
+  });
+
   it('P2-bio: a coach request carries the fan bio when account.about is present', async () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getAccountNames.mockResolvedValue([

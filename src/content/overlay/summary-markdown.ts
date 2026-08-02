@@ -112,7 +112,17 @@ function appendParagraphInline(parent: HTMLElement, text: string): void {
   appendInline(parent, text);
 }
 
-export function renderSummaryMarkdown(raw: string): DocumentFragment {
+export function renderSummaryMarkdown(
+  raw: string,
+  options?: {
+    /** E81: the coach feed reuses this renderer for free-form answers, where
+     * a heading that happens to spell a known recap section name must stay a
+     * plain subheading — a dotted section / tinted card belongs to the recap
+     * document, not to a 13px chat bubble. */
+    recapSections?: boolean;
+  },
+): DocumentFragment {
+  const recapSections = options?.recapSections ?? true;
   const fragment = document.createDocumentFragment();
   const lines = raw.replaceAll('\r\n', '\n').split('\n');
 
@@ -170,7 +180,7 @@ export function renderSummaryMarkdown(raw: string): DocumentFragment {
 
       // E78: a known section heading opens a dotted analysis section; the
       // strategy/next-move section carries the clay "what to do" card.
-      const style = recapSectionStyle(text);
+      const style = recapSections ? recapSectionStyle(text) : null;
       if (style) {
         const section = document.createElement('div');
         section.className = `chatgoose-analysis-sec chatgoose-md-sec${
@@ -232,4 +242,33 @@ export function renderSummaryMarkdown(raw: string): DocumentFragment {
   flushParagraph();
   flushList();
   return fragment;
+}
+
+// ─── Coach answer prose (E81) ────────────────────────────────────────────
+// The coach's free-form answers sometimes arrive with markdown the model
+// chose on its own — `**Заголовок**` lines, inline bold, dash lists. The
+// coach feed used to render them raw (asterisks and all). This entry point
+// reuses the block machinery above for DISPLAY only: the stored answer, the
+// wire history, and draft parsing all keep the raw string.
+
+/** A line that is nothing but one bold span (an optional trailing colon
+ * allowed) — the model's section header idiom. Promoted to `###` so the
+ * block renderer gives it heading weight instead of a bold paragraph. */
+const BOLD_LINE_RE = /^[ \t]*\*\*([^*\n]+)\*\*[ \t]*:?[ \t]*$/gm;
+
+/** Markdown the coach renderer reacts to. Plain prose (the common case)
+ * must NOT match: block rendering would collapse the model's blank-line
+ * rhythm for zero visual gain, so it keeps the pre-wrap text path. */
+const COACH_MARKDOWN_RE = /\*\*[^*\n]+\*\*|^#{1,4}[ \t]+\S|^[ \t]*[-*•][ \t]+\S/m;
+
+/** Render coach answer prose as blocks, or null when it carries no markdown
+ * (callers then keep the plain textContent path). Same safety contract as
+ * the rest of this module: createElement/textContent only. */
+export function renderCoachProse(raw: string): DocumentFragment | null {
+  if (!COACH_MARKDOWN_RE.test(raw)) {
+    return null;
+  }
+  return renderSummaryMarkdown(raw.replace(BOLD_LINE_RE, '### $1'), {
+    recapSections: false,
+  });
 }

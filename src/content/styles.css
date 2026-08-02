@@ -1267,6 +1267,125 @@
   animation: chatgoose-caret-blink 1s step-end infinite;
 }
 
+/* E81: a coach answer that volunteered markdown renders as blocks — the
+   .chatgoose-md grid replaces pre-wrap (explicit: both classes sit on the
+   same element, so source order must not decide). Headings scale down to
+   the bubble's 13px voice; the h2 mono-caps treatment stays but drops the
+   recap's hairline (a chat bubble has no document rhythm to separate). */
+.chatgoose-coach-answer.chatgoose-md {
+  white-space: normal;
+  gap: 8px;
+}
+
+.chatgoose-coach-answer .chatgoose-md-h1 {
+  font-size: 14px;
+}
+
+.chatgoose-coach-answer .chatgoose-md-h2 {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.chatgoose-coach-answer .chatgoose-md-h3 {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* ─── Coach wait narration + debug surfaces (E81) ─────────────────────── */
+
+/* The pre-first-token status row: same bubble geometry as the answer it
+   swaps with, muted voice, mono elapsed counter, the family caret. */
+.chatgoose-coach-wait {
+  align-self: flex-start;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--chatgoose-bg2);
+  font-size: 12.5px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-coach-wait-label::after {
+  content: '▍';
+  margin-left: 1px;
+  animation: chatgoose-caret-blink 1s step-end infinite;
+}
+
+.chatgoose-coach-wait-elapsed {
+  font-family: var(--chatgoose-font-mono);
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapsed «Отладка» stage log — the turncontext-line disclosure idiom. */
+.chatgoose-coach-debug {
+  align-self: flex-start;
+  max-width: 92%;
+  font-size: 11px;
+  color: var(--chatgoose-ink-low);
+}
+
+.chatgoose-coach-debug-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.chatgoose-coach-debug-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chatgoose-coach-debug-summary::before {
+  content: '▶ ';
+  font-size: 8px;
+}
+
+.chatgoose-coach-debug[open] .chatgoose-coach-debug-summary::before {
+  content: '▼ ';
+}
+
+.chatgoose-coach-debug-log {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--chatgoose-bg2);
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+/* Completed exchange's one-line debug footer: mono timings/tokens + the
+   «Промпт» opener (E28 viewer page). */
+.chatgoose-coach-debug-footer {
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  color: var(--chatgoose-ink-low);
+  font-variant-numeric: tabular-nums;
+}
+
+.chatgoose-coach-debug-prompt {
+  appearance: none;
+  border: none;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--chatgoose-clay-ink);
+  border-bottom: 1px dotted var(--chatgoose-clay-line);
+  cursor: pointer;
+}
+
+.chatgoose-coach-debug-prompt:hover {
+  color: var(--chatgoose-clay-deep);
+}
+
 .chatgoose-coach-drafts {
   margin-top: 2px;
 }
@@ -1975,11 +2094,24 @@ ol.chatgoose-md-list {
   align-items: center;
   gap: 7px;
   font-family: var(--chatgoose-font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: var(--chatgoose-ink-low);
+  color: var(--chatgoose-ink-mid);
+}
+
+/* E81: the recap's amended header treatment (one step of size, the mid ink,
+   a hairline above each following section) becomes the base analysis
+   language — the overlay Help/Review headers drowned the same way the recap
+   ones did. Tinted cards keep their own frames instead of a separator. */
+.chatgoose-analysis
+  > .chatgoose-analysis-sec:not(:first-child):not(.chatgoose-analysis-card-verdict):not(
+    .chatgoose-analysis-card-move
+  ):not(.chatgoose-analysis-card-works) {
+  margin-top: 4px;
+  padding-top: 13px;
+  border-top: 1px solid var(--chatgoose-line);
 }
 
 .chatgoose-analysis-dot {
@@ -1997,12 +2129,9 @@ ol.chatgoose-md-list {
 
 /* E78: recap sections join the analysis header language while the serif
    document body stays; the strategy/next-move card switches to the working
-   sans voice the other "what to do" surfaces use.
-   Amended (owner feedback 2026-08-02): inside the dense serif document the
-   10px ink-low header drowned between paragraphs, so recap headers regain
-   the hairline separator + air the old md-h2 provided, one step of size,
-   and the mid ink. The overlay Review/Help headers keep their lighter
-   treatment — their sans bodies do not swallow the header. */
+   sans voice the other "what to do" surfaces use. The header
+   size/ink/separator amendment that started here was promoted to the base
+   analysis classes (E81) — only the recap-specific spacing remains below. */
 .chatgoose-md .chatgoose-analysis-sec {
   gap: 6px;
 }
@@ -2024,11 +2153,6 @@ ol.chatgoose-md-list {
   font-family: var(--chatgoose-font);
   font-size: 14px;
   line-height: 1.55;
-}
-
-.chatgoose-md .chatgoose-analysis-h {
-  font-size: 11px;
-  color: var(--chatgoose-ink-mid);
 }
 
 .chatgoose-analysis-b {

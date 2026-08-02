@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
-import { renderSummaryMarkdown } from '../src/content/overlay/summary-markdown';
+import { renderCoachProse, renderSummaryMarkdown } from '../src/content/overlay/summary-markdown';
 
 function render(raw: string): HTMLElement {
   const host = document.createElement('div');
@@ -134,5 +134,60 @@ describe('renderSummaryMarkdown', () => {
     expect(host.querySelector('img')).toBeNull();
     expect(host.querySelector('script')).toBeNull();
     expect(host.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+});
+
+describe('renderCoachProse — coach answers with volunteered markdown (E81)', () => {
+  beforeEach(() => {
+    const { window } = new JSDOM('<!doctype html><html><body></body></html>');
+    vi.stubGlobal('document', window.document);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function renderCoach(raw: string): HTMLElement | null {
+    const fragment = renderCoachProse(raw);
+    if (fragment === null) {
+      return null;
+    }
+    const host = document.createElement('div');
+    host.append(fragment);
+    return host;
+  }
+
+  it('returns null for plain prose — the caller keeps the pre-wrap text path', () => {
+    expect(renderCoach('Просто совет.\n\nВторой абзац без разметки.')).toBeNull();
+    // A lone asterisk pair spanning lines is not inline bold.
+    expect(renderCoach('Оценка: 4*. Или 5*.')).toBeNull();
+  });
+
+  it('promotes a line that is one bold span to a subheading; keeps inline bold inline', () => {
+    const host = renderCoach(
+      'Интро.\n\n**Граница между собой и персонажем**\n\nЛора — это **роль**.',
+    );
+    expect(host).not.toBeNull();
+    const heading = host!.querySelector('.chatgoose-md-h3');
+    expect(heading?.textContent).toBe('Граница между собой и персонажем');
+    expect(host!.querySelector('.chatgoose-md-p strong')?.textContent).toBe('роль');
+    expect(host!.textContent).not.toContain('**');
+  });
+
+  it('renders dash lists as real lists', () => {
+    const host = renderCoach('**Конкретные вещи**\n\n- Не чаттить бесконечно.\n- Иметь своё вне работы.');
+    expect(host!.querySelectorAll('ul.chatgoose-md-list li')).toHaveLength(2);
+  });
+
+  it('never opens a recap section for a known heading name — a chat bubble has no dotted cards', () => {
+    const host = renderCoach('**Стратегия**\n\nИграть, не оправдываться.');
+    expect(host!.querySelector('.chatgoose-analysis-sec')).toBeNull();
+    expect(host!.querySelector('.chatgoose-md-h3')?.textContent).toBe('Стратегия');
+  });
+
+  it('never interprets coach text as HTML', () => {
+    const host = renderCoach('**Заголовок**\n\n<img src=x onerror=alert(1)>');
+    expect(host!.querySelector('img')).toBeNull();
+    expect(host!.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 });

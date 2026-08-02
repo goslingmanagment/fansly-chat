@@ -1,5 +1,8 @@
 import { COACH_QUESTION_MAX_CHARS } from '../../shared/constants.js';
-import { formatCoachAgeMs } from '../../shared/coach-format.js';
+import {
+  formatCoachAgeMs,
+  formatCoachWaitElapsed,
+} from '../../shared/coach-format.js';
 import { ChatGooseError, toUserError } from '../../shared/errors.js';
 import type {
   CoachAutoRecapOverride,
@@ -8,6 +11,7 @@ import type {
   CoachOverlaySessionView,
   CoachRecapStatusView,
   CoachTurnContext,
+  CoachTurnDebug,
   DebugPromptEchoStatus,
   LlmSpendSummary,
   LlmUsageMetrics,
@@ -28,10 +32,11 @@ import {
   renderReviewEvaluation,
   renderReviewRecommendations,
 } from './analysis-blocks.js';
-import { renderSummaryMarkdown } from './summary-markdown.js';
+import { renderCoachProse, renderSummaryMarkdown } from './summary-markdown.js';
 import {
   formatLlmCostSummary,
   formatCacheEffectInline,
+  formatCompactTokens,
   formatModelCostLabel,
   formatModelUsageLabel,
   formatSpendPrimary,
@@ -83,10 +88,11 @@ interface OverlayCallbacks {
     partIndex: number,
     generationRef?: string,
   ) => void;
-  /** E28: open the kernel's real prompt on the extension's own page. The token
-   * stays with the caller — this surface never learns it, so it cannot leak it
-   * into the Fansly DOM it renders into. */
-  onOpenDebugPrompt?: () => void;
+  /** E28: open the kernel's real prompt on the extension's own page. Without a
+   * token the caller resolves the ACTIVE op's echo; a coach exchange passes its
+   * own turn's token (E81 — the feed outlives the active-op marker). Tokens
+   * live only in heap-held models and this call — never in the DOM. */
+  onOpenDebugPrompt?: (viewerToken?: string) => void;
   /** Coach chat (spec §3). Optional so non-coach constructions stay valid. */
   /** `origin` distinguishes a composer-typed question from a canned one (chip)
    * — a rejected canned submit must NOT be restored into the composer. */
@@ -198,6 +204,18 @@ interface CoachViewState {
   /** The ONLY node mutated as stream chunks arrive. */
   pendingAnswerTextNode: Text | null;
   pendingQuestion: string | null;
+  /** E81 wait narration: the pre-first-token status row (label + elapsed) and
+   * the streaming answer bubble it swaps with once text arrives. */
+  pendingWaitEl: HTMLElement | null;
+  pendingWaitLabelNode: Text | null;
+  pendingWaitElapsedNode: Text | null;
+  pendingAnswerEl: HTMLElement | null;
+  /** Dispatch timestamp anchoring the ticking elapsed counter. */
+  pendingStartedAt: number | null;
+  /** E81 debug: the collapsed «Отладка» stage log under the wait row
+   * (debugMode only); `pendingDebugLogEl` is the replaceable rows host. */
+  pendingDebugEl: HTMLDetailsElement | null;
+  pendingDebugLogEl: HTMLDivElement | null;
   emptyStateNode: HTMLElement | null;
 }
 
@@ -390,7 +408,9 @@ function sameCoachFeedItem(
     return false;
   }
   if (previous.kind === 'exchange' && next.kind === 'exchange') {
-    return previous.operationId === next.operationId;
+    // `debug` is attached at commit and reference-stable afterwards (E81), so
+    // identity — not deep equality — is the correct cheap comparison.
+    return previous.operationId === next.operationId && previous.debug === next.debug;
   }
   if (previous.kind === 'failed-attempt' && next.kind === 'failed-attempt') {
     return (
@@ -398,7 +418,9 @@ function sameCoachFeedItem(
       previous.errorCode === next.errorCode &&
       previous.retryable === next.retryable &&
       previous.includedDraft === next.includedDraft &&
-      previous.preset === next.preset
+      previous.preset === next.preset &&
+      // Reference-stable per item (E81), same contract as exchange.debug.
+      previous.profiling === next.profiling
     );
   }
   if (previous.kind === 'recap-step' && next.kind === 'recap-step') {
@@ -430,6 +452,10 @@ export class OverlayController {
   private debugPromptOpen = false;
   private debugPromptOperationId: string | null = null;
   private loadingElapsedTimer: number | null = null;
+  /** E81: 1s tick for the coach pending bubble's elapsed counter. Started with
+   * the wait row, cleared when the pending node leaves or the view is torn
+   * down — the same lifecycle discipline as `loadingElapsedTimer`. */
+  private coachWaitTimer: number | null = null;
   private dismissMode: OverlayDismissMode = 'close';
   private renderTraceEnabledFromStorage: boolean | null = null;
   private lastFocusedReplyOpId: string | null = null;
@@ -606,6 +632,14 @@ export class OverlayController {
     this.loadingElapsedTimer = null;
   }
 
+  private clearCoachWaitTimer(): void {
+    if (this.coachWaitTimer === null) {
+      return;
+    }
+    window.clearInterval(this.coachWaitTimer);
+    this.coachWaitTimer = null;
+  }
+
   private async insertPart(
     part: OverlayInsertPart,
     options?: { autoPassThrough?: boolean },
@@ -731,10 +765,12 @@ export class OverlayController {
     return true;
   }
 
-  /** Drop a discarded coach view's document-level menu listener (review P2). */
+  /** Drop a discarded coach view's document-level menu listener (review P2)
+   * and its elapsed-counter interval (E81). */
   private disposeCoachView(): void {
     if (this.currentView?.kind === 'coach') {
       this.currentView.recapMenu.dispose();
+      this.clearCoachWaitTimer();
     }
   }
 
@@ -835,9 +871,12 @@ export class OverlayController {
         this.updateCoachView(this.currentView, model);
         return 'update-coach';
       }
+      // Dispose the OLD view BEFORE creating the new one: createCoachView may
+      // start the shared coach wait timer (E81), which a late dispose of the
+      // discarded view would then kill.
+      this.disposeCoachView();
       const view = this.createCoachView(model);
       this.bodyEl.replaceChildren(view.root);
-      this.disposeCoachView();
       this.currentView = view;
       // A rebuild is a (re)open: the feed is only measurable once attached
       // (createCoachView runs updateCoachView while detached → scrollHeight 0),
@@ -1468,6 +1507,13 @@ export class OverlayController {
       pendingNode: null,
       pendingAnswerTextNode: null,
       pendingQuestion: null,
+      pendingWaitEl: null,
+      pendingWaitLabelNode: null,
+      pendingWaitElapsedNode: null,
+      pendingAnswerEl: null,
+      pendingStartedAt: null,
+      pendingDebugEl: null,
+      pendingDebugLogEl: null,
       emptyStateNode: null,
     };
     this.updateCoachView(view, model);
@@ -1885,11 +1931,19 @@ export class OverlayController {
     const sv = model.sessionView;
     const streaming = model.operationId !== null && sv.pendingQuestion !== undefined;
     if (!streaming) {
+      this.clearCoachWaitTimer();
       if (view.pendingNode) {
         view.pendingNode.remove();
         view.pendingNode = null;
         view.pendingAnswerTextNode = null;
         view.pendingQuestion = null;
+        view.pendingWaitEl = null;
+        view.pendingWaitLabelNode = null;
+        view.pendingWaitElapsedNode = null;
+        view.pendingAnswerEl = null;
+        view.pendingStartedAt = null;
+        view.pendingDebugEl = null;
+        view.pendingDebugLogEl = null;
       }
       return;
     }
@@ -1897,7 +1951,7 @@ export class OverlayController {
     const question = sv.pendingQuestion ?? '';
     if (!view.pendingNode || view.pendingQuestion !== question) {
       // New turn — (re)build the pending node once; from here only its answer
-      // text node is mutated as chunks arrive.
+      // text node, the wait row's texts, and the debug log rows are mutated.
       const built = this.createCoachPendingNode(question);
       if (view.pendingNode) {
         view.pendingNode.replaceWith(built.wrapper);
@@ -1907,11 +1961,89 @@ export class OverlayController {
       view.pendingNode = built.wrapper;
       view.pendingAnswerTextNode = built.answerText;
       view.pendingQuestion = question;
+      view.pendingWaitEl = built.waitEl;
+      view.pendingWaitLabelNode = built.waitLabel;
+      view.pendingWaitElapsedNode = built.waitElapsed;
+      view.pendingAnswerEl = built.answerEl;
+      view.pendingDebugEl = null;
+      view.pendingDebugLogEl = null;
     }
-    const answer = sv.pendingAnswerText && sv.pendingAnswerText.length > 0 ? sv.pendingAnswerText : '…';
-    if (view.pendingAnswerTextNode && view.pendingAnswerTextNode.data !== answer) {
-      view.pendingAnswerTextNode.data = answer;
+    view.pendingStartedAt = sv.pendingStartedAt ?? null;
+
+    // First streamed token flips the bubble: wait narration out, answer in
+    // (E81). Both nodes persist — the flip is a class toggle, not a rebuild.
+    const hasAnswerText = Boolean(sv.pendingAnswerText && sv.pendingAnswerText.length > 0);
+    view.pendingWaitEl?.classList.toggle('chatgoose-hidden', hasAnswerText);
+    view.pendingAnswerEl?.classList.toggle('chatgoose-hidden', !hasAnswerText);
+    if (hasAnswerText) {
+      this.clearCoachWaitTimer();
+      const answer = sv.pendingAnswerText ?? '';
+      if (view.pendingAnswerTextNode && view.pendingAnswerTextNode.data !== answer) {
+        view.pendingAnswerTextNode.data = answer;
+      }
+    } else {
+      const label = sv.pendingWaitLabel ?? 'Думаю…';
+      if (view.pendingWaitLabelNode && view.pendingWaitLabelNode.data !== label) {
+        view.pendingWaitLabelNode.data = label;
+      }
+      this.refreshCoachWaitElapsed(view);
+      if (this.coachWaitTimer === null) {
+        this.coachWaitTimer = window.setInterval(() => {
+          if (this.currentView?.kind !== 'coach' || !this.currentView.pendingWaitEl) {
+            this.clearCoachWaitTimer();
+            return;
+          }
+          this.refreshCoachWaitElapsed(this.currentView);
+        }, 1000);
+      }
     }
+
+    this.reconcileCoachPendingDebug(view, sv);
+  }
+
+  /** Tick the pending wait row's elapsed counter (E81). */
+  private refreshCoachWaitElapsed(view: CoachViewState): void {
+    if (!view.pendingWaitElapsedNode || view.pendingStartedAt === null) {
+      return;
+    }
+    const text = formatCoachWaitElapsed(Date.now() - view.pendingStartedAt);
+    if (view.pendingWaitElapsedNode.data !== text) {
+      view.pendingWaitElapsedNode.data = text;
+    }
+  }
+
+  /** The collapsed live «Отладка» stage log under the pending wait row (E81,
+   * debugMode only). The <details> node persists across updates so the
+   * open/closed toggle survives; only the log rows are replaced. */
+  private reconcileCoachPendingDebug(
+    view: CoachViewState,
+    sv: CoachOverlaySessionView,
+  ): void {
+    const snapshot = sv.pendingProfiling;
+    if (!snapshot) {
+      if (view.pendingDebugEl) {
+        view.pendingDebugEl.remove();
+        view.pendingDebugEl = null;
+        view.pendingDebugLogEl = null;
+      }
+      return;
+    }
+    if (!view.pendingDebugEl || !view.pendingDebugLogEl) {
+      const details = document.createElement('details');
+      details.className = 'chatgoose-coach-debug';
+      const summary = document.createElement('summary');
+      summary.className = 'chatgoose-coach-debug-summary';
+      summary.textContent = 'Отладка';
+      const log = document.createElement('div');
+      log.className = 'chatgoose-coach-debug-log';
+      details.append(summary, log);
+      view.pendingNode?.append(details);
+      view.pendingDebugEl = details;
+      view.pendingDebugLogEl = log;
+    }
+    view.pendingDebugLogEl.replaceChildren(
+      ...snapshot.logEntries.map((entry) => this.createProfilingLogRow(entry)),
+    );
   }
 
   private reconcileCoachEmptyState(
@@ -1996,13 +2128,20 @@ export class OverlayController {
     if (item.answerProse) {
       const answer = document.createElement('div');
       answer.className = 'chatgoose-coach-answer';
-      // E79 / Core #204: preset advice shares E77's structured Help blocks.
-      // Unlabelled ordinary Coach prose keeps the current text-only fallback.
+      // createElement/textContent ONLY (never innerHTML) — the T5 parser
+      // neutralises column-0 fences but not every CommonMark form. Three
+      // display tiers: E79/Core #204 preset advice with pinned labels gets
+      // E77's structured Help blocks; otherwise model-volunteered markdown
+      // (bold headers, lists) renders as blocks via the recap's structural
+      // builder (E81); plain prose keeps the raw pre-wrap text path.
       const structured = renderCoachingBlocks(item.answerProse);
+      const blocks = structured ? null : renderCoachProse(item.answerProse);
       if (structured) {
         answer.append(structured);
+      } else if (blocks) {
+        answer.classList.add('chatgoose-md', 'chatgoose-coach-answer-md');
+        answer.append(blocks);
       } else {
-        // textContent ONLY: model text never reaches innerHTML.
         answer.textContent = item.answerProse;
       }
       wrapper.append(answer);
@@ -2027,7 +2166,74 @@ export class OverlayController {
     if (item.turnContext) {
       wrapper.append(this.createCoachTurnContextLine(item.turnContext));
     }
+
+    // Debug footer (E81): timings + tokens + the «Промпт» opener. Exists only
+    // when debugMode was on during the turn (the debug object's presence).
+    if (item.debug) {
+      wrapper.append(this.createCoachDebugFooter(item.debug));
+    }
     return wrapper;
+  }
+
+  /** The completed exchange's one-line debug footer (E81): total / TTFB
+   * timings, priced tokens, and — while the E28 echo token is alive — the
+   * «Промпт» button opening the real prompt on the extension-origin page. */
+  private createCoachDebugFooter(debug: CoachTurnDebug): HTMLDivElement {
+    const footer = document.createElement('div');
+    footer.className = 'chatgoose-coach-debug-footer';
+
+    const parts: string[] = [];
+    const profiling = debug.profiling;
+    if (profiling) {
+      const ttfb = profiling.stages.find((stage) => stage.key === 'llm-ttfb');
+      parts.push(
+        ttfb?.durationMs !== undefined
+          ? `${formatProfilingElapsed(profiling.elapsedMs)} · ttfb ${formatProfilingElapsed(ttfb.durationMs)}`
+          : formatProfilingElapsed(profiling.elapsedMs),
+      );
+    }
+    const spend = debug.llmSpend;
+    if (spend) {
+      parts.push(
+        `${formatCompactTokens(spend.totalTokens)} tok · ${formatUsd(spend.totalUsd, spend.approximate)}`,
+      );
+    }
+    for (const part of parts) {
+      const span = document.createElement('span');
+      span.textContent = part;
+      footer.append(span);
+    }
+
+    if (debug.promptEcho?.state === 'available') {
+      const token = debug.promptEcho.viewerToken;
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'chatgoose-coach-debug-prompt';
+      open.textContent = 'Промпт ↗';
+      // The token travels ONLY through this closure into the runtime call
+      // (E28) — never into an attribute the page could read.
+      open.addEventListener('click', () => {
+        this.callbacks.onOpenDebugPrompt?.(token);
+      });
+      footer.append(open);
+    }
+    return footer;
+  }
+
+  /** Collapsed «Отладка» stage log for a feed node (E81, debugMode only). */
+  private createCoachDebugLogDetails(
+    profiling: OperationProfilingSnapshot,
+  ): HTMLDetailsElement {
+    const details = document.createElement('details');
+    details.className = 'chatgoose-coach-debug';
+    const summary = document.createElement('summary');
+    summary.className = 'chatgoose-coach-debug-summary';
+    summary.textContent = 'Отладка';
+    const log = document.createElement('div');
+    log.className = 'chatgoose-coach-debug-log';
+    log.append(...profiling.logEntries.map((entry) => this.createProfilingLogRow(entry)));
+    details.append(summary, log);
+    return details;
   }
 
   /** The collapsed, expand-in-place «Отправлено коучу…» line (spec §8.2). The
@@ -2111,6 +2317,11 @@ export class OverlayController {
       );
       wrapper.append(actions);
     }
+
+    // E81 (debugMode only): the stage log shows WHERE the turn died.
+    if (item.profiling) {
+      wrapper.append(this.createCoachDebugLogDetails(item.profiling));
+    }
     return wrapper;
   }
 
@@ -2153,18 +2364,43 @@ export class OverlayController {
     return bubble;
   }
 
-  private createCoachPendingNode(question: string): { wrapper: HTMLDivElement; answerText: Text } {
+  private createCoachPendingNode(question: string): {
+    wrapper: HTMLDivElement;
+    answerText: Text;
+    waitEl: HTMLDivElement;
+    waitLabel: Text;
+    waitElapsed: Text;
+    answerEl: HTMLDivElement;
+  } {
     const wrapper = document.createElement('div');
     wrapper.className = 'chatgoose-coach-exchange chatgoose-coach-pending';
     wrapper.setAttribute('aria-busy', 'true');
     wrapper.append(this.createCoachQuestionBubble(question));
 
-    const answer = document.createElement('div');
-    answer.className = 'chatgoose-coach-answer chatgoose-coach-answer-streaming';
-    const answerText = document.createTextNode('…');
-    answer.append(answerText);
-    wrapper.append(answer);
-    return { wrapper, answerText };
+    // E81 wait narration: stage label + elapsed counter live in the bubble
+    // until the first streamed token swaps in the answer node (a class flip
+    // in reconcileCoachPending — both nodes are built once, here).
+    const waitEl = document.createElement('div');
+    waitEl.className = 'chatgoose-coach-wait';
+    waitEl.setAttribute('role', 'status');
+    const waitLabelEl = document.createElement('span');
+    waitLabelEl.className = 'chatgoose-coach-wait-label';
+    const waitLabel = document.createTextNode('Думаю…');
+    waitLabelEl.append(waitLabel);
+    const waitElapsedEl = document.createElement('span');
+    waitElapsedEl.className = 'chatgoose-coach-wait-elapsed';
+    const waitElapsed = document.createTextNode('0 с');
+    waitElapsedEl.append(waitElapsed);
+    waitEl.append(waitLabelEl, waitElapsedEl);
+    wrapper.append(waitEl);
+
+    const answerEl = document.createElement('div');
+    answerEl.className =
+      'chatgoose-coach-answer chatgoose-coach-answer-streaming chatgoose-hidden';
+    const answerText = document.createTextNode('');
+    answerEl.append(answerText);
+    wrapper.append(answerEl);
+    return { wrapper, answerText, waitEl, waitLabel, waitElapsed, answerEl };
   }
 
   private createCoachEmptyState(view: CoachViewState): HTMLDivElement {
