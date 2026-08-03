@@ -3004,7 +3004,16 @@ export class OverlayController {
         : null;
 
       if (structuredEvaluation) {
-        section.append(structuredEvaluation);
+        // E83: the structured Review re-voices as the recap document — the
+        // evaluation and recommendations share one stream frame and read as
+        // a single serif dossier instead of two bare card stacks.
+        const doc = document.createElement('div');
+        doc.className = 'chatgoose-stream chatgoose-review-doc';
+        doc.append(structuredEvaluation);
+        if (model.reviewMeta.recommendations) {
+          doc.append(renderReviewRecommendations(model.reviewMeta.recommendations));
+        }
+        section.append(doc);
       } else if (model.reviewMeta.evaluation) {
         const evalSection = document.createElement('div');
         evalSection.className = 'chatgoose-card';
@@ -3018,21 +3027,17 @@ export class OverlayController {
         section.append(evalSection);
       }
 
-      if (model.reviewMeta.recommendations) {
-        if (structuredEvaluation) {
-          section.append(renderReviewRecommendations(model.reviewMeta.recommendations));
-        } else {
-          const recSection = document.createElement('div');
-          recSection.className = 'chatgoose-card';
-          const recTitle = document.createElement('div');
-          recTitle.className = 'chatgoose-card-title';
-          recTitle.textContent = 'Recommendations';
-          const recText = document.createElement('div');
-          recText.className = 'chatgoose-card-text';
-          recText.textContent = model.reviewMeta.recommendations;
-          recSection.append(recTitle, recText);
-          section.append(recSection);
-        }
+      if (model.reviewMeta.recommendations && !structuredEvaluation) {
+        const recSection = document.createElement('div');
+        recSection.className = 'chatgoose-card';
+        const recTitle = document.createElement('div');
+        recTitle.className = 'chatgoose-card-title';
+        recTitle.textContent = 'Recommendations';
+        const recText = document.createElement('div');
+        recText.className = 'chatgoose-card-text';
+        recText.textContent = model.reviewMeta.recommendations;
+        recSection.append(recTitle, recText);
+        section.append(recSection);
       }
     } else if (model.feature === 'fan-summary' && model.rawText.trim()) {
       const body = document.createElement('div');
