@@ -794,6 +794,34 @@ describe('OverlayController', () => {
     });
   });
 
+  it('wraps a structured Chat Review in one recap-voiced document frame (E83)', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    const model = createReadOnlyModel();
+    model.reviewMeta = {
+      rating: 7,
+      evaluation: 'ВЕРДИКТ: Диалог живой.\nДЕНЬГИ: Конвертировано $15.',
+      recommendations: '1. Вместо молчания - ре-энгейдж.',
+      parseFallback: false,
+    };
+    controller.render(model);
+
+    const doc = document.querySelector('.chatgoose-stream.chatgoose-review-doc');
+    expect(doc).not.toBeNull();
+    // Evaluation AND recommendations live inside the one frame — no bare
+    // analysis roots on the overlay surface, no card fallback.
+    const analyses = [...doc!.querySelectorAll('.chatgoose-analysis')];
+    expect(analyses).toHaveLength(2);
+    expect(document.querySelectorAll('.chatgoose-analysis')).toHaveLength(2);
+    expect(doc!.textContent).toContain('Рекомендации');
+    expect(document.querySelector('.chatgoose-card-title')).toBeNull();
+  });
+
   it('renders Fan Summary copy action next to Refresh and copies the summary text', async () => {
     const mockCopy = vi.mocked(copyToClipboard);
     const controller = new OverlayController({

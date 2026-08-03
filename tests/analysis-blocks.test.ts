@@ -57,11 +57,48 @@ describe('analysis blocks', () => {
       const fix = items[0]!.querySelector('.chatgoose-analysis-fix-text');
       // Outer quotes are stripped; the message itself is intact.
       expect(fix!.textContent).toBe('кстати, вижу что подписка закончилась, скучаю 🥺');
+      // A bare marker carries no placement note.
+      expect(items[0]!.querySelector('.chatgoose-analysis-fix-where')).toBeNull();
       // The mistake body keeps the text before the marker, without the fix.
       expect(items[0]!.textContent).toContain('ре-энгейджа нет.');
       expect(items[0]!.textContent).not.toContain('Как надо было:');
       // An item without the marker gets no fix block.
       expect(items[1]!.querySelector('.chatgoose-analysis-fix')).toBeNull();
+    });
+
+    it('extracts the fix when the marker carries a parenthetical placement note', () => {
+      const host = renderReviewEvaluation(
+        [
+          'ВЕРДИКТ: Диалог живой.',
+          '',
+          'ОШИБКИ:',
+          '1. Нет якоря на продление. Как надо было (где-то после "Ok Lora 😘"): "btw I realized your sub is ending soon..."',
+          '2. Фото питомца в кризис. Как надо было (после "[Photo]"): вообще не отправлять.',
+        ].join('\n'),
+      )!;
+      const items = [...host.querySelectorAll('.chatgoose-analysis-item')];
+      expect(items).toHaveLength(2);
+
+      // The fix still becomes a card — the parenthetical no longer breaks it…
+      expect(items[0]!.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe(
+        'btw I realized your sub is ending soon...',
+      );
+      // …and the note itself rides the card label, not the item body.
+      expect(items[0]!.querySelector('.chatgoose-analysis-fix-where')!.textContent).toBe(
+        ' · где-то после "Ok Lora 😘"',
+      );
+      // The marker (with its note) leaves the item BODY — only the card
+      // label says «Как надо было» now.
+      expect(items[0]!.querySelector('.chatgoose-analysis-b')!.textContent).toBe(
+        'Нет якоря на продление.',
+      );
+
+      expect(items[1]!.querySelector('.chatgoose-analysis-fix-where')!.textContent).toBe(
+        ' · после "[Photo]"',
+      );
+      expect(items[1]!.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe(
+        'вообще не отправлять.',
+      );
     });
 
     it('decorates money amounts and transcript quotes', () => {

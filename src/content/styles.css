@@ -2239,6 +2239,66 @@ ol.chatgoose-md-list {
   overflow-wrap: anywhere;
 }
 
+/* The marker's placement note («· после "[Photo]"») rides the fix label in
+   the quiet ink — lowercase against the label's uppercase, so the WHERE
+   never outshouts the WHAT. */
+.chatgoose-analysis-fix-where {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  color: var(--chatgoose-ink-low);
+}
+
+/* E83: the completed Review re-voices as the recap document (owner ruling:
+   «сравни с рекапом просто»). The DOM stays the shared analysis language;
+   this modifier — set next to .chatgoose-stream on the wrapper — only
+   changes the voice: serif document body inside the dashed stream frame,
+   numbered items as document entries instead of bordered working cards.
+   Help's overlay (a cached/legacy surface since E79/E80) and the coach feed
+   keep the card language. */
+.chatgoose-review-doc {
+  white-space: normal;
+  display: grid;
+  gap: 12px;
+}
+
+.chatgoose-review-doc .chatgoose-analysis-b {
+  font-family: var(--chatgoose-font-serif);
+  font-size: 15px;
+}
+
+.chatgoose-review-doc .chatgoose-analysis-item {
+  border: none;
+  background: none;
+  padding: 0;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+}
+
+/* Document numbering: the chip flattens to «1.» in the margin — no box, no
+   semantic color; inside a serif document the red-on-clay chip shouts. */
+.chatgoose-review-doc .chatgoose-analysis-item-n {
+  background: none;
+  border: none;
+  width: auto;
+  height: auto;
+  display: block;
+  justify-self: end;
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+  margin-top: 2px;
+}
+
+.chatgoose-review-doc .chatgoose-analysis-item-n::after {
+  content: '.';
+}
+
+/* Inside the warm stream frame the fix card's draft fill would vanish
+   (draft-bg on draft-bg) — it stands on paper instead. */
+.chatgoose-review-doc .chatgoose-analysis-fix {
+  background: var(--chatgoose-bg1);
+}
+
 /* ─── Errors ─────────────────────────────────────────────────── */
 
 .chatgoose-inline-error {

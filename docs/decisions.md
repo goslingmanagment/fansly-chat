@@ -96,6 +96,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E80 | 2026-08-02 | The Help button leaves the toolbar (owner ruling, supersedes E79's button-stays default and E76's Help restoration): Help's home is INSIDE Coach — a clay preset chip in the empty state and leading the follow-up row; hotkey H stays as the fast path |
 | E81 | 2026-08-02 | Coach waits become narrated (stage progress + elapsed counter in the pending bubble), debugMode gains coach surfaces (live stage log, timings/tokens footer, per-turn «Промпт» opener, failure log), analysis headers unify on the recap treatment, and coach answers with model markdown render as structural blocks |
 | E82 | 2026-08-02 | Full and short Recap remain independent end-to-end: exact two-slot UI availability + two completed-surface slots; either lights the ready dot, Refresh preserves size, and short remains excluded only from the single full Hub dossier |
+| E83 | 2026-08-03 | The completed Review re-voices as the recap document (revises E77/E78's working-card split for Review only): evaluation + recommendations share one serif stream frame, numbered items become document entries; the «Как надо было» parser accepts a parenthetical placement note and shows it in the card label |
 
 ## Entries
 
@@ -2876,3 +2877,32 @@ profile. Consequently a short-only ready state never enters the full-dossier
 retry path. No storage migration, SDK change, AI call semantics, or extra Fansly
 egress is required. Suppressed/stale terminal operations still cannot update
 either current-chat slot.
+
+**E83 (2026-08-03).** The completed Review joins the recap's document voice
+(owner ruling on a live #201 result: the working-card build read as broken
+markup next to the recap — «сравни с рекапом просто»). This revises, for
+REVIEW ONLY, E77/E78's split «the recap is read as a dossier, Help/Review are
+scanned as working cards»: a Review is also a multi-screen text the chatter
+READS, and rendering it as bare sans cards directly on the overlay surface is
+why it looked unfinished — the recap owed its cohesion to the stream frame,
+the serif document body, and terracotta staying scarce.
+
+Display-only, on the shared analysis DOM: the structured evaluation and
+recommendations now render inside ONE `chatgoose-stream` frame with a
+`chatgoose-review-doc` modifier that re-voices the existing classes — serif
+15px body, numbered mistakes/recommendations flatten from bordered working
+cards to document entries («1.» in the margin, no box, no semantic-red chip),
+and the «Как надо было» card stands on paper (`bg1`) because the draft fill
+disappears against the frame's own draft background. The pre-#201 fallback
+card path, Help's standalone overlay (a cached/legacy surface since E79/E80),
+the coach feed's situational blocks, and copy/acceptance flows are untouched.
+
+The same change fixes why the fix-card looked like a one-off glitch: the
+marker parser only knew a bare «Как надо было:», while real output writes a
+parenthetical placement between the phrase and the colon («Как надо было
+(где-то после "Ok Lora 😘"): …») — on the motivating screenshot two of three
+fixes drowned in item prose. `FIX_MARKER_RE` now accepts the parenthetical
+(≤120 chars) and the note rides the card label in quiet lowercase ink
+(«Как надо было · где-то после "Ok Lora 😘"»), keeping the WHERE from
+outshouting the WHAT. Stored raw strings, wire history, and copy text remain
+byte-identical; the createElement/textContent injection contract holds.

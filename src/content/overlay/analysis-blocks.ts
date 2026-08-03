@@ -142,14 +142,21 @@ interface NumberedItem {
   body: string;
   /** The «Как надо было:» tail — a ready-to-send message example. */
   fix: string | null;
+  /** The marker's parenthetical placement note («после "[Photo]"»), parens
+   *  stripped — rides the fix card's label. */
+  fixWhere: string | null;
 }
 
 const ITEM_START_RE = /^[ \t]*\d{1,2}[.)][ \t]+/gm;
 /** The marker sits mid-sentence in real output («…заслуживает прямого
- * разговора. Как надо было: …»), so it is NOT line-anchored; the trailing
+ * разговора. Как надо было: …»), so it is NOT line-anchored, and it often
+ * carries a parenthetical placement note before the colon («Как надо было
+ * (где-то после "Ok Lora 😘"): …») — without accepting that note, the fix
+ * drowns in the item prose instead of becoming a card (E83); the trailing
  * colon/dash keeps ordinary prose («я объясню, как надо было») from
  * matching. */
-const FIX_MARKER_RE = /[«"]?как надо было[»"]?[ \t]*[:\-—–][ \t]*/i;
+const FIX_MARKER_RE =
+  /[«"]?как надо было[»"]?[ \t]*(?:\(([^)\n]{1,120})\))?[ \t]*[:\-—–][ \t]*/i;
 
 function splitNumberedItems(body: string): { lead: string; items: NumberedItem[] } {
   const starts: Array<{ start: number; bodyStart: number }> = [];
@@ -168,11 +175,12 @@ function splitNumberedItems(body: string): { lead: string; items: NumberedItem[]
 
 function parseItem(text: string): NumberedItem {
   const marker = FIX_MARKER_RE.exec(text);
-  if (!marker) return { body: text, fix: null };
+  if (!marker) return { body: text, fix: null, fixWhere: null };
   const fixStart = (marker.index ?? 0) + marker[0].length;
   return {
     body: text.slice(0, marker.index).trim(),
     fix: stripWrappingQuotes(text.slice(fixStart).trim()) || null,
+    fixWhere: marker[1]?.trim() || null,
   };
 }
 
@@ -214,12 +222,18 @@ function buildBody(text: string): HTMLElement {
   return body;
 }
 
-function buildFixBlock(fix: string): HTMLElement {
+function buildFixBlock(fix: string, where: string | null): HTMLElement {
   const block = document.createElement('div');
   block.className = 'chatgoose-analysis-fix';
   const label = document.createElement('div');
   label.className = 'chatgoose-analysis-fix-label';
-  label.textContent = 'Как надо было';
+  label.append('Как надо было');
+  if (where) {
+    const placement = document.createElement('span');
+    placement.className = 'chatgoose-analysis-fix-where';
+    placement.textContent = ` · ${where}`;
+    label.append(placement);
+  }
   const text = document.createElement('div');
   text.className = 'chatgoose-analysis-fix-text';
   text.textContent = fix;
@@ -242,7 +256,7 @@ function buildNumberedItems(
     const body = document.createElement('div');
     body.className = 'chatgoose-analysis-item-body';
     body.append(buildBody(item.body));
-    if (withFix && item.fix) body.append(buildFixBlock(item.fix));
+    if (withFix && item.fix) body.append(buildFixBlock(item.fix, item.fixWhere));
     row.append(chip, body);
     host.append(row);
   });
