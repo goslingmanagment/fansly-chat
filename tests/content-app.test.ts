@@ -859,6 +859,54 @@ describe('ChatGooseContentApp', () => {
     }));
   });
 
+  it('enables Fix on the first edit when Fansly creates its textarea after toolbar mount', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const textarea = mountConversationComposer();
+    const host = textarea.parentElement!;
+    textarea.remove();
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.renderButtonBar();
+    const fix = app.buttonBar.buttons.get('improve-draft') as HTMLButtonElement;
+    expect(fix.disabled).toBe(true);
+
+    // The host and route survive; only the editor is materialized on focus.
+    host.append(textarea);
+    textarea.value = 'hey Alex hope your Sunday is going good';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(fix.disabled).toBe(false);
+    textarea.value = '';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(fix.disabled).toBe(true);
+  });
+
+  it('tracks a replaced composer while ignoring unrelated inputs and detaches on disconnect', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const previous = mountConversationComposer();
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.renderButtonBar();
+    const fix = app.buttonBar.buttons.get('improve-draft') as HTMLButtonElement;
+    const replacement = document.createElement('textarea');
+    previous.replaceWith(replacement);
+    // Give jsdom the visible layout result that the live browser provides.
+    Object.defineProperty(replacement, 'offsetParent', { configurable: true, get: () => replacement.parentElement });
+    replacement.value = 'new draft';
+    const unrelated = document.createElement('textarea');
+    document.body.append(unrelated);
+    unrelated.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(fix.disabled).toBe(true);
+    replacement.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(fix.disabled).toBe(false);
+
+    app.detachDraftTextareaObserver();
+    replacement.value = '';
+    replacement.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(fix.disabled).toBe(false);
+  });
+
   it('sends the current composer draft with improve-draft operations', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
@@ -1802,10 +1850,12 @@ describe('ChatGooseContentApp', () => {
 
     const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
       .find((button) => button.textContent === 'Reopen');
-    expect(reopenButton?.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(reopenButton).toBeUndefined();
 
-    reopenButton?.click();
-    await vi.waitFor(() => expect(app.comparePanelVisible).toBe(true));
+    // The toolbar entry is gone; the retained internal restore path still
+    // accepts a matching cached result without generating again.
+    expect(await app.restoreCompletedComparePanel()).toBe(true);
+    expect(app.comparePanelVisible).toBe(true);
 
     expect(app.inlinePanel.root.querySelector('.chatgoose-compare-tab')?.textContent).toContain('Closer (current)');
   });
@@ -1835,16 +1885,16 @@ describe('ChatGooseContentApp', () => {
     const buttonBarRoot = app.buttonBar.root as HTMLElement;
     const reopenButton = (Array.from(buttonBarRoot.querySelectorAll('button')) as HTMLButtonElement[])
       .find((button) => button.textContent === 'Reopen');
-    expect(reopenButton?.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(reopenButton).toBeUndefined();
 
-    reopenButton?.click();
-    await vi.waitFor(() => expect(app.completedCompareCache.get('group-1')).toBeNull());
+    expect(await app.restoreCompletedComparePanelInternal(true)).toBe(false);
+    expect(app.completedCompareCache.get('group-1')).toBeNull();
 
     expect(app.comparePanelVisible).toBe(false);
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain('Saved compare is outdated. Run Compare again.');
   });
 
-  it('closing a completed compare hides the panel, preserves the cache, and exposes Reopen', async () => {
+  it('closing a completed compare hides the panel and preserves the cache without adding Reopen', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;
 
@@ -1881,7 +1931,7 @@ describe('ChatGooseContentApp', () => {
     expect(app.comparePanelVisible).toBe(false);
     expect(app.activeCompareModel).toBeNull();
     expect(app.completedCompareCache.get('group-1')).not.toBeNull();
-    expect(reopenButton?.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(reopenButton).toBeUndefined();
   });
 
   it('port disconnect resets all surfaces and state', async () => {

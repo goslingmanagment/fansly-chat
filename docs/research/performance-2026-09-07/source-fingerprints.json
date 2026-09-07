@@ -1,0 +1,27 @@
+{
+  "capturedAt": "2026-09-07T05:19:52.115534+00:00",
+  "head": "1a74b8114235f95818425f49699178e5f451e29e",
+  "scope": "Current dirty worktree. Hashes captured at end of research; timings apply to synthetic fixtures, not live Firefox/Fansly.",
+  "benchmarkHardware": "Apple M4 Pro",
+  "sources": {
+    "src/content/spenders/spenders-board-controller.ts": "a77e455bda5d00f929a898886de530fe8ffe327f8547bff0bb24dec9ebf41161",
+    "src/content/styles.css": "b5d9a297747a22a366f70542777c6eab90d129761ce50a1cb445c2b9ec9626af",
+    "src/background/spenders-service.ts": "78a93eba008418be13146211fcb88993a8257cc4e230ef6126331cd3411d8ad5",
+    "src/background/fansly-client.ts": "51d6ee752521fd75ee3d64ea93f7e6139abc16b7cee5ea4c2d2ad50d0cf1e03d",
+    "src/background/agency-hub-client.ts": "45c2c4fd7f6ed2edda56266f2fb5fb83a583901c25616efd033b513f2c433f06",
+    "src/content/index.ts": "ebb41798df50e291ab8983eda87a7fd50431ef4ce80940a2417dd0e766be23ae",
+    "src/content/route-watcher.ts": "10de7d84f40c51b4c72fa0e27551e7b0f1021893e485b6dfe65cc8d1b127e4e9",
+    "src/content/scroll-compensation.ts": "40d7599ecc668f763402fd40e3293664514e9c41e41e13dd801d34046733a182",
+    "src/content/conversation-dom.ts": "91ca95c0c17c76241c35a7d6db6229cd9d5a9a200c7005e26d1e00d79b50c834",
+    "src/content/conversation-mount-controller.ts": "4d4073cd1a9ef55972f230be7ff7305ea1d396d5c6f111508af6b059f4274dab",
+    "src/content/overlay/overlay-controller.ts": "828511c2ea38c09b2ebb88286a354becbd1a32482fa1e462633b4d33f15f9f4f",
+    "src/content/voice/voice-panel.ts": "2feea84ed76511f315de62b71ee572a681263bd5a51b313d1a3fba5db0ec940d",
+    "src/background/storage-coordinator.ts": "eddac62905964939cde1f33f9ec42c83f4666d76fc512bfea636b1623a3687cc",
+    "src/shared/migrations.ts": "2855ef3fe74e22be7dd0f1cbbb4f7028d0626ba739e1e7dbfca30f97d7a789a3",
+    "src/shared/constants.ts": "51d0d118fff275449e2982060dbe851791cc3c9ded5d5949d5a94a85dee93b4f",
+    "src/content/bootstrap.ts": "6b9c9133dd2f1ceff2eee023ba48810701156dee8f6ae90602831837c2e91005",
+    "esbuild.config.mjs": "153710b3dc5676d31cdc705d72e1709ae65f142c0cf6515fea08e89789cd6975",
+    "package.json": "717141d0146923193768fb8fe32e176db1b1e76ae3cc47149a64c57652995bec",
+    "pnpm-lock.yaml": "5a21320d97dee5b22460f8e2aab96b334c7dcc84e71be96ba38ae3ed1e9c21dd"
+  }
+}

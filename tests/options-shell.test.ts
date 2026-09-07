@@ -304,12 +304,11 @@ describe('options cabinet shell', () => {
       // …and for `.chatgoose-badge` it means every onboarding step wears the
       // green «готово», done or not.
       'chatgoose-badge',
-      // Wave B/C surfaces: the token provenance row, «Что мешает», the catalog
-      // staleness marker, the clamp chip and the inline rename editor.
+      // Wave B/C surfaces: token provenance, «Что мешает», the clamp chip
+      // and the inline rename editor.
       'chatgoose-hub-srow',
       'chatgoose-hub-danger',
       'chatgoose-todo',
-      'chatgoose-persona-catage',
       'chatgoose-row-clamped',
       'chatgoose-account-rename-input',
     ]) {

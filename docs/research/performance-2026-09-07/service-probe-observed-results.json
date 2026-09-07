@@ -1,0 +1,14 @@
+{
+  "note": "Observed from equivalent scripts run in-memory against current checkout on 2026-09-07. All I/O was mocked; elapsed values are fixture timings, not production p95.",
+  "cachedNames": {
+    "beforeMonth": { "firstSnapshot": { "atMs": 1.0104589999999973, "customName": null, "groupId": null }, "complete": false, "namesRequests": 0 },
+    "final": { "atMs": 102.50420900000002, "customName": "Cached custom name", "groupId": "g1", "namesRequests": 0 }
+  },
+  "chatMap": {
+    "elapsedMs": 7324.406792,
+    "groupsRequests": 5,
+    "namesRequests": 3,
+    "finalRows": 150,
+    "finalKnownChatIds": 0
+  }
+}

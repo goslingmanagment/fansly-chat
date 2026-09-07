@@ -9,6 +9,7 @@ readonly BASE_URL="https://ext.gosling-agency.ru"
 readonly PRODUCTION_AGENCY_HUB_BASE_URL="https://gosling-agency.ru"
 readonly EXTENSION_ID="chatgoose@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
+readonly WHATS_NEW_PAGE_FILE="$ROOT_DIR/whats-new-2.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
 readonly CHANGELOG_PAGE_FILE="$ROOT_DIR/changelog.html"
 readonly INSTALL_PAGE_ASSET="$ROOT_DIR/mascot.png"
@@ -16,6 +17,7 @@ readonly LATEST_XPI_NAME="chatgoose-latest.xpi"
 readonly REMOTE_UPDATES_PATH="$REMOTE_DIR/updates.json"
 readonly REMOTE_INDEX_PATH="$REMOTE_DIR/index.html"
 readonly REMOTE_MASCOT_PATH="$REMOTE_DIR/mascot.png"
+readonly REMOTE_WHATS_NEW_PATH="$REMOTE_DIR/whats-new-2.html"
 readonly REMOTE_GUIDE_PATH="$REMOTE_DIR/guide.html"
 readonly REMOTE_CHANGELOG_PATH="$REMOTE_DIR/changelog.html"
 readonly REMOTE_LATEST_XPI_PATH="$REMOTE_DIR/$LATEST_XPI_NAME"
@@ -131,6 +133,8 @@ restore_release_pages() {
   fi
 }
 
+# The landing is versionless except its footer. The fixed 2.0 overview and
+# its navigation label are historical content, never release stamp targets.
 stamp_install_page_version() {
   local version="$1"
 
@@ -139,14 +143,6 @@ stamp_install_page_version() {
 
     const [filePath, version] = process.argv.slice(1);
     const replacements = [
-      {
-        description: "install hero version",
-        pattern: /(<span class="eyebrow rise d1"><span class="dot"><\/span> Версия )[^<]+( · Firefox<\/span>)/,
-      },
-      {
-        description: "install whats-new link version",
-        pattern: /(<a class="btn-ghost" href="#whatsnew">Что нового в )[^<]+( →<\/a>)/,
-      },
       {
         description: "install footer version",
         pattern: /(<p class="footer">ChatGoose v)[^<]+( &middot; Gosling Agency<\/p>)/,
@@ -422,6 +418,7 @@ main() {
   require_command git
 
   require_file "$INSTALL_PAGE_FILE"
+  require_file "$WHATS_NEW_PAGE_FILE"
   require_file "$GUIDE_PAGE_FILE"
   require_file "$CHANGELOG_PAGE_FILE"
   require_file "$INSTALL_PAGE_ASSET"
@@ -524,6 +521,8 @@ EOF
   remote_tmp_updates="$REMOTE_DIR/.updates.json.upload.$$"
   remote_tmp_index="$REMOTE_DIR/.index.html.upload.$$"
   remote_tmp_mascot="$REMOTE_DIR/.mascot.png.upload.$$"
+  local remote_tmp_whats_new
+  remote_tmp_whats_new="$REMOTE_DIR/.whats-new-2.html.upload.$$"
   local remote_tmp_guide
   remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
   local remote_tmp_changelog
@@ -537,14 +536,16 @@ EOF
   scp "$INSTALL_PAGE_ASSET" "${VPS_HOST}:${remote_tmp_mascot}"
   scp "$GUIDE_PAGE_FILE" "${VPS_HOST}:${remote_tmp_guide}"
   scp "$CHANGELOG_PAGE_FILE" "${VPS_HOST}:${remote_tmp_changelog}"
+  scp "$WHATS_NEW_PAGE_FILE" "${VPS_HOST}:${remote_tmp_whats_new}"
   restore_release_pages
 
   ssh "$VPS_HOST" "
     set -euo pipefail
-    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide' '$remote_tmp_changelog'
+    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide' '$remote_tmp_changelog' '$remote_tmp_whats_new'
     mv '$remote_tmp_xpi' '$REMOTE_DIR/$xpi_name'
     cp '$REMOTE_DIR/$xpi_name' '$remote_tmp_latest_xpi'
     chmod 644 '$remote_tmp_latest_xpi'
+    mv '$remote_tmp_whats_new' '$REMOTE_WHATS_NEW_PATH'
     mv '$remote_tmp_latest_xpi' '$REMOTE_LATEST_XPI_PATH'
     mv '$remote_tmp_updates' '$REMOTE_UPDATES_PATH'
     mv '$remote_tmp_index' '$REMOTE_INDEX_PATH'
@@ -555,6 +556,9 @@ EOF
 
   log "Verifying public URLs"
   verify_http_200_with_retry "${BASE_URL}/" "install page"
+  verify_http_200_with_retry "${BASE_URL}/whats-new-2.html" "2.0 walkthrough"
+  verify_http_200_with_retry "${BASE_URL}/guide.html" "guide"
+  verify_http_200_with_retry "${BASE_URL}/changelog.html" "changelog"
   verify_http_200_with_retry "${BASE_URL}/updates.json" "updates manifest"
   verify_http_200_with_retry "$xpi_url" "versioned XPI"
   verify_http_200_with_retry "$latest_xpi_url" "latest XPI"

@@ -1011,6 +1011,12 @@ export class VoiceService {
         script: message.script,
         sentOnce: true,
       });
+      // Custody joins the repository's async FIFO. Navigation may complete
+      // while that acknowledgement waits, so fence the live recipient again
+      // at the actual paid dispatch boundary.
+      if (attachRefusal(binding, this.deps.tabContexts.get(tabId)) !== null) {
+        throw new ChatGooseError('voice_source_invalid');
+      }
       const view = await this.deps.agencyHubClient.createVoiceNote(
         state.settings,
         page.pageLabel,

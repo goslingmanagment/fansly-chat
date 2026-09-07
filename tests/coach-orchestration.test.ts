@@ -341,6 +341,61 @@ describe('Coach orchestration', () => {
     });
   });
 
+  it('refreshes unavailable recap metadata after a successful Coach turn', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { state: 'unavailable', full: null, short: null };
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('question');
+    const sendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
+    sendMessage.mockClear();
+    recapStatusResponse = { state: 'ok', full: freshSlot(), short: null };
+    app.handleComplete({
+      type: 'operation:complete', operationId: pendingOpId(app),
+      result: { rawText: 'Advice', parts: [] },
+    });
+    await flush();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(app.activeCoachSession.recapStatus).toEqual(recapStatusResponse);
+  });
+
+  it('does not apply the post-success recap response after the Coach session closes', async () => {
+    const app = await makeReadyApp();
+    recapStatusResponse = { state: 'unavailable', full: null, short: null };
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('question');
+    const session = app.activeCoachSession;
+    let resolveStatus!: (value: unknown) => void;
+    recapStatusResponse = new Promise((resolve) => { resolveStatus = resolve; });
+    app.handleComplete({
+      type: 'operation:complete', operationId: pendingOpId(app),
+      result: { rawText: 'Advice', parts: [] },
+    });
+    app.activeCoachSession = null;
+    resolveStatus({ state: 'ok', full: freshSlot(), short: null });
+    await flush();
+    expect(session.recapStatus.state).toBe('unavailable');
+  });
+
+  it.each(['known', 'empty', 'stale'])('does not refresh recap metadata for %s completion', async (kind) => {
+    const app = await makeReadyApp();
+    recapStatusResponse = kind === 'known'
+      ? { state: 'ok', full: freshSlot(), short: null }
+      : { state: 'unavailable', full: null, short: null };
+    app.openCoach();
+    await flush();
+    await app.submitCoachQuestion('question');
+    const sendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
+    sendMessage.mockClear();
+    app.handleCoachComplete({
+      type: 'operation:complete', operationId: kind === 'stale' ? 'old-operation' : pendingOpId(app),
+      result: { rawText: kind === 'empty' ? ' ' : 'Advice', parts: [] },
+    });
+    await flush();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('does not issue an unscoped recap-status read without a mapped persona definition', async () => {
     const app = await makeReadyApp();
     const sendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
@@ -905,6 +960,53 @@ describe('Coach orchestration', () => {
     (app.port.send as any).mockClear();
     app.pickStandaloneRecap('short');
     expect(lastSent(app)).toMatchObject({ feature: 'fan-summary', summaryMode: 'short', forceRegenerate: true });
+  });
+
+  it('waits for initial recap metadata before opening the newest short slot', async () => {
+    const app = await makeReadyApp();
+    let resolveStatus!: (value: unknown) => void;
+    recapStatusResponse = new Promise((resolve) => { resolveStatus = resolve; });
+    app.openRecapPicker();
+    const pending = document.querySelector<HTMLButtonElement>('.chatgoose-recap-picker-last')!;
+    expect(pending.disabled).toBe(true);
+    (app.port.send as any).mockClear();
+    pending.click();
+    expect(app.port.send).not.toHaveBeenCalled();
+    resolveStatus({ state: 'ok', full: freshSlot({ ageMs: 120_000 }), short: freshSlot({ ageMs: 1000, requestedCount: 300 }) });
+    await flush();
+    const ready = document.querySelector<HTMLButtonElement>('.chatgoose-recap-picker-last')!;
+    expect(ready.disabled).toBe(false);
+    ready.click();
+    expect(lastSent(app)).toMatchObject({ viewCachedOnly: true, summaryMode: 'short', forceRegenerate: false });
+  });
+
+  it.each(['invalid', 'rejected'])('settles %s picker metadata to unavailable and keeps local-cache opening', async (kind) => {
+    const app = await makeReadyApp();
+    if (kind === 'invalid') {
+      recapStatusResponse = { malformed: true };
+    } else {
+      (browser.runtime.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('offline'));
+    }
+    app.openRecapPicker();
+    await flush();
+    expect(app.recapPickerModel.recapStatus.state).toBe('unavailable');
+    const button = document.querySelector<HTMLButtonElement>('.chatgoose-recap-picker-last')!;
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(lastSent(app)).toMatchObject({ viewCachedOnly: true, forceRegenerate: false });
+  });
+
+  it.each(['invalid', 'rejected', 'valid'])('ignores late %s metadata after picker closes', async (kind) => {
+    const app = await makeReadyApp();
+    let resolveStatus!: (value: unknown) => void;
+    let rejectStatus!: (reason: Error) => void;
+    recapStatusResponse = new Promise((resolve, reject) => { resolveStatus = resolve; rejectStatus = reject; });
+    app.openRecapPicker();
+    app.closeRecapPicker();
+    if (kind === 'rejected') rejectStatus(new Error('offline'));
+    else resolveStatus(kind === 'valid' ? { full: freshSlot(), short: null } : { malformed: true });
+    await flush();
+    expect(app.recapPickerModel).toBeNull();
   });
 
   it('«Открыть последний» dispatches a view-cached-only fan-summary (no forceRegenerate)', async () => {
@@ -2206,6 +2308,15 @@ describe('Coach orchestration', () => {
 
   it('typing into the Fansly composer re-renders the open coach surface (review P2)', async () => {
     const app = await makeReadyApp();
+    const route = document.createElement('app-messages-conversation-route');
+    const container = document.createElement('app-group-message-container');
+    const host = document.createElement('app-group-message-input');
+    const textarea = document.createElement('textarea');
+    Object.defineProperty(textarea, 'offsetParent', { get: () => host });
+    host.append(textarea);
+    container.append(host);
+    route.append(container);
+    document.body.append(route);
     draftHolder.value = '';
     app.openCoach();
     await flush();
@@ -2213,7 +2324,8 @@ describe('Coach orchestration', () => {
     expect(box?.disabled).toBe(true);
 
     draftHolder.value = 'now non-empty';
-    (app as any).handleDraftInput();
+    textarea.value = draftHolder.value;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
     const after = document.querySelector<HTMLInputElement>('.chatgoose-coach-draft-attach-box');
     expect(after?.disabled).toBe(false);
   });

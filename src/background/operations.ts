@@ -2126,6 +2126,7 @@ export class OperationCoordinator {
         if (!await this.isSummarySyncTaskCurrent(summarySyncTask)) {
           throw new ChatGooseError('chat_changed');
         }
+        this.assertActive(tabId, payload.operationId);
         const zeroSpend = createZeroLlmSpendSummary();
         this.sendComplete(tabId, {
           type: 'operation:complete',
@@ -3144,6 +3145,9 @@ export class OperationCoordinator {
       );
       assertInsertableFeatureResult(payload.feature, result);
       await this.assertPersonaIdentityCurrent(personaIdentity);
+      // Cancellation can land during the fresh storage read above, after the
+      // stream's active check. Never commit that abandoned result or recap.
+      this.assertActive(tabId, payload.operationId);
 
       let summarySyncTask: AgencyHubSummarySyncTask | null = null;
       if (payload.feature === 'fan-summary') {
@@ -3165,6 +3169,7 @@ export class OperationCoordinator {
         // is the cache identity, and the equality gate is gone.
         const shouldCacheSummary = spendingDataVerified && subscriptionLookupVerified;
         const isCommitCurrent = (state: PersistedState): boolean =>
+          this.getActive(tabId)?.operationId === payload.operationId &&
           this.isLatestSummaryCommit(
             validated.urlGroupId,
             summaryCacheMode,
@@ -3281,6 +3286,9 @@ export class OperationCoordinator {
           }
         }
       }
+      // Recap persistence and Hub-sync eligibility perform additional awaits.
+      // A cancelled turn must not publish success or increment usage counters.
+      this.assertActive(tabId, payload.operationId);
       const completedSpend = latestLlmSpend ?? createZeroLlmSpendSummary();
       // generationRef (spec §3): the gateway meta-frame requestId, captured in
       // acceptanceContexts on onMeta. Threaded to content so a later coach draft

@@ -23,18 +23,8 @@ describe('release page stamping', () => {
     const install = readRepoFile('install.html');
     const changelog = readRepoFile('changelog.html');
 
-    const stampedInstallHero = replaceExactlyOnce(
-      install,
-      /(<span class="eyebrow rise d1"><span class="dot"><\/span> Версия )[^<]+( · Firefox<\/span>)/,
-      '$19.8.7$2',
-    );
-    const stampedInstallLink = replaceExactlyOnce(
-      stampedInstallHero,
-      /(<a class="btn-ghost" href="#whatsnew">Что нового в )[^<]+( →<\/a>)/,
-      '$19.8.7$2',
-    );
     const stampedInstall = replaceExactlyOnce(
-      stampedInstallLink,
+      install,
       /(<p class="footer">ChatGoose )v[^<]+( &middot; Gosling Agency<\/p>)/,
       '$1v9.8.7$2',
     );
@@ -49,22 +39,60 @@ describe('release page stamping', () => {
       '$1v9.8.7$2',
     );
 
-    expect(stampedInstall).toContain('Версия 9.8.7 · Firefox');
-    expect(stampedInstall).toContain('Что нового в 9.8.7 →');
+    expect(stampedInstall).toContain('<a class="btn-ghost" href="whats-new-2.html">Что нового в 2.0 →</a>');
+    expect(stampedInstall).not.toContain('Что нового в 9.8.7');
     expect(stampedInstall).toContain('ChatGoose v9.8.7');
     expect(stampedChangelog).toContain('<span class="nav-version">v9.8.7</span>');
     expect(stampedChangelog).toContain('<p>v9.8.7 &middot; Gosling Agency');
   });
 
-  it('makes both deploy scripts fail closed over all three install version slots', () => {
+  it('makes both deploy scripts fail closed over the single install footer version slot', () => {
     const deploy = readRepoFile('scripts/deploy.sh');
     const deployPages = readRepoFile('scripts/deploy-pages.sh');
 
     for (const script of [deploy, deployPages]) {
-      expect(script).toContain('Версия )[^<]+( · Firefox');
-      expect(script).toContain('Что нового в )[^<]+( →');
+      expect(script).not.toContain('Версия )[^<]+( · Firefox');
+      expect(script).not.toContain('Что нового в )[^<]+( →');
       expect(script).toContain('ChatGoose v)[^<]+( &middot; Gosling Agency');
       expect(script).toContain('matches.length !== 1');
+    }
+  });
+
+
+  it('publishes the fixed 2.0 walkthrough before pages linking to it, without stamping it', () => {
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const pages = readRepoFile('scripts/deploy-pages.sh');
+    for (const script of [deploy, pages]) {
+      expect(script).toContain('readonly WHATS_NEW_PAGE_FILE="$ROOT_DIR/whats-new-2.html"');
+      expect(script).toContain('scp "$WHATS_NEW_PAGE_FILE" "${VPS_HOST}:${remote_tmp_whats_new}"');
+      expect(script).toContain('remote_tmp_whats_new="$REMOTE_DIR/.whats-new-2.html.upload.$$"');
+      expect(script.indexOf("mv '$remote_tmp_whats_new'"))
+        .toBeLessThan(script.indexOf("mv '$remote_tmp_index'"));
+      expect(script).not.toMatch(/stamp\w*[^\n]*\$WHATS_NEW_PAGE_FILE/);
+    }
+    for (const entryPoint of ["mv '$remote_tmp_latest_xpi'", "mv '$remote_tmp_updates'"]) {
+      expect(deploy.indexOf("mv '$remote_tmp_whats_new'"))
+        .toBeLessThan(deploy.indexOf(entryPoint));
+    }
+    const main = deploy.indexOf('main() {');
+    const signing = deploy.indexOf('  web-ext sign', main);
+    const preflight = deploy.indexOf('require_file "$WHATS_NEW_PAGE_FILE"', main);
+    expect(preflight).toBeGreaterThan(main);
+    expect(preflight).toBeLessThan(signing);
+    expect(deploy).toContain('REMOTE_WHATS_NEW_PATH="$REMOTE_DIR/whats-new-2.html"');
+    expect(deploy).toContain('verify_http_200_with_retry "${BASE_URL}/whats-new-2.html"');
+    expect(pages).toContain('[[ -f "$file" ]] || fail');
+    expect(pages).toContain('for page in index.html guide.html changelog.html whats-new-2.html');
+    expect(pages).toContain('[[ "$status" == "200" ]] || fail');
+  });
+
+  it('keeps local landing filenames out of public page links', () => {
+    for (const page of ['install.html', 'whats-new-2.html', 'changelog.html', 'guide.html']) {
+      const html = readRepoFile(page);
+      expect(html).not.toMatch(/href=["'](?:\.\/|\/)?install\.html(?:["'#?])/);
+      if (page !== 'whats-new-2.html') {
+        expect(html).toContain('href="whats-new-2.html"');
+      }
     }
   });
 

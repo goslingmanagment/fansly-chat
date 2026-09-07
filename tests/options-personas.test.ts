@@ -195,14 +195,13 @@ describe('«Персоны» pane', () => {
     expect(emptyText()).toBe(COPY.personas.emptyConfirmed);
     const catalogRow =
       page.document.querySelector<HTMLElement>('[data-role="persona-catalog"]');
-    // Label and value are separate nodes of the catalog card (E62): «Обновлён»
+    // Label and value are separate nodes of the catalog card: «Сохранён»
     // is the key, the formatted date is the value.
     expect(catalogRow?.textContent).toContain(COPY.personas.catalogUpdatedLabel);
     expect(catalogRow?.textContent).toContain(formatCatalogChangedDate(fetchedAt));
-    // Fresh catalog (< 48h): no staleness marker. It rides the catalog card's
-    // head since E62, not the fact line.
+    // A saved-content date does not determine freshness of the latest poll.
     const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
-    expect(age?.hidden).toBe(true);
+    expect(age).toBeNull();
   });
 
   it('names the hub the catalog came from by its WHOLE address', async () => {
@@ -240,7 +239,7 @@ describe('«Персоны» pane', () => {
     expect(page.document.body.textContent).not.toContain(fingerprint);
   });
 
-  it('marks a stale catalog with its age in days once it is older than 48h', async () => {
+  it('does not confuse an old content timestamp with failed or stale synchronization', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
       agencyHubApiKey: '',
@@ -255,8 +254,10 @@ describe('«Персоны» pane', () => {
       },
     });
     const age = page.document.querySelector<HTMLElement>('.chatgoose-persona-catage');
-    expect(age?.hidden).toBe(false);
-    expect(age?.textContent).toBe(COPY.personas.catalogAge.replace('{n}', '11'));
+    expect(age).toBeNull();
+    expect(page.document.body.textContent).toContain(COPY.personas.catalogRefreshHint);
+    expect(page.document.querySelector('[data-role="persona-catalog"]')?.textContent)
+      .toContain(COPY.personas.catalogUpdatedLabel);
   });
 
   it('renders a row with the built-in badge, mono version and mapping count', async () => {

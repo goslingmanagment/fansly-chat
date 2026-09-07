@@ -19,20 +19,24 @@ ChatGoose is a client of the Agency Hub kernel in `../hub`:
 - Money and top-spenders data are served by core; the extension does not compute
   its own financial truth.
 
-The exact shipped version is defined by `package.json` and `manifest.json`.
+The local source version is defined by `package.json` and `manifest.json`.
 Release history is in [CHANGELOG.md](CHANGELOG.md). Do not copy a version number
 from prose when checking what is installed or live; verify the signed update feed.
 
 ## Features
 
-- **Reply** — draft a context-aware response, with tone and split-message modes.
-- **Improve** — rewrite the current composer draft.
-- **Help** — coaching and suggested next moves.
-- **Summary** — update the fan relationship profile.
-- **Review** — evaluate the conversation and chatter performance.
-- **Ping** — re-engage an inactive fan.
-- **Hi** — greeting for a new or very short conversation.
-- **Spenders board** — kernel-backed ranking and reactivation context.
+- **Reply / Fix** — draft or improve a reply, with tone and Split controls.
+- **Coach** — ask follow-up questions about the current fan, attach a draft,
+  and use the **Help** situation-analysis preset (also available through H).
+- **Recap** — independently cached short (up to 300 messages) and full
+  (configurable up to 3000) fan summaries; only the full dossier syncs to Hub.
+- **Review** — a readable conversation evaluation with recommendations and examples.
+- **Voice** — script, paid audio takes, preview, MP3 download, and native Fansly
+  attachment, only for pages whose Hub capability enables it. Sending stays manual.
+- **Ping / Hi** — re-engage an inactive fan or greet a new conversation.
+- **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
+- **Settings cabinet** — seven panes for status, Hub, personas, accounts,
+  generation, hotkeys, and appearance; includes sign-out and a support report.
 
 AI output is always a draft. ChatGoose never sends an AI response without an
 explicit human action and never auto-retries an indeterminate send.
@@ -79,11 +83,20 @@ Important references:
 
 ## Release
 
+Release 2.0.0 is dated 2026-09-08. Verify the signed update feed when checking
+which version is currently available. Agency Hub selects the models and generation
+settings; the [2.0 changelog](CHANGELOG.md#200) records the server-side update.
+Voice audio is generated separately through ElevenLabs for accounts enabled
+by the administrator.
+
 Releases ship from `main`. Keep `package.json` and `manifest.json` versions equal,
 update `CHANGELOG.md` and `changelog.html`, run `pnpm check`, then use
 `scripts/deploy.sh`. The deploy script signs the extension, updates the
 self-hosted feed, and verifies served version consistency.
 
-The public `install.html`, `guide.html`, and `changelog.html` pages are shipped
-with the release and must describe the same kernel/device-token architecture as
-this README.
+The public pages ship together: `install.html` becomes the versionless product
+landing at `index.html`; `whats-new-2.html` is the detailed 2.0 walkthrough;
+`guide.html` explains everyday use; `changelog.html` retains version history.
+The extension links to both the walkthrough and archive from Settings and the
+popup. Both deploy scripts publish the walkthrough before any new entry point
+links to it. Keep the fixed 2.0 title and URL independent of future version stamps.

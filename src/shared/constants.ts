@@ -56,6 +56,8 @@ export const LAST_SEEN_VERSION_STORAGE_KEY = 'chatgoose:lastSeenVersion';
  * viewport. Adding the anchor is a release-2.0 commit that MUST follow the
  * anchored page's deploy, never precede it. */
 export const CHANGELOG_URL = 'https://ext.gosling-agency.ru/changelog.html';
+/** Detailed 2.0 release guide; deployed beside the chronological archive. */
+export const WHATS_NEW_2_URL = 'https://ext.gosling-agency.ru/whats-new-2.html';
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,

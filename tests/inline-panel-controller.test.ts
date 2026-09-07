@@ -193,19 +193,23 @@ describe('InlinePanelController', () => {
 
   function createController(overrides?: Partial<{
     onClose: () => void;
+    isKeyboardBlocked: () => boolean;
     onExpand: () => void;
     onCancel: (operationId: string) => void;
     onRerun: (feature: string) => void;
     onCompareRerun: () => void;
     onCompareTabSelect: (cardId: string) => void;
+    onAcceptance: (operationId: string, action: 'copied' | 'inserted', partIndex: number) => void;
   }>) {
     return new InlinePanelController({
       onClose: overrides?.onClose ?? (() => undefined),
+      isKeyboardBlocked: overrides?.isKeyboardBlocked,
       onExpand: overrides?.onExpand ?? (() => undefined),
       onCancel: overrides?.onCancel ?? (() => undefined),
       onRerun: overrides?.onRerun ?? (() => undefined),
       onCompareRerun: overrides?.onCompareRerun ?? (() => undefined),
       onCompareTabSelect: overrides?.onCompareTabSelect ?? (() => undefined),
+      onAcceptance: overrides?.onAcceptance,
     });
   }
 
@@ -456,6 +460,22 @@ describe('InlinePanelController', () => {
     // Different operationId → body rebuilt, new stream element
     expect(stream2).not.toBe(stream1);
     expect(stream2.textContent).toBe('second');
+  });
+
+  it('labels Hi results as alternative greetings without changing Split or Ping headings', () => {
+    const controller = createController();
+    document.body.append(controller.root);
+    const model = createReplyModel([createPart('Hello', 0), createPart('Hey', 1)]);
+    model.feature = 'hi-greeting';
+    controller.render(model);
+    const titles = () => Array.from(controller.root.querySelectorAll('.chatgoose-card-title')).map((node) => node.textContent);
+    expect(titles()).toEqual(['Variant 1', 'Variant 2']);
+    expect(controller.root.textContent).toContain('Choose one greeting.');
+    controller.render({ ...model, feature: 'fast-reply', splitModeRequested: true });
+    expect(titles()).toEqual(['Message 1', 'Follow-up 2']);
+    expect(controller.root.textContent).not.toContain('Choose one greeting.');
+    controller.render({ ...model, feature: 'ping', parts: [model.parts[0]!] });
+    expect(titles()).toEqual(['Message 1']);
   });
 
   it('shows Inserted earlier status when part.insertedOnce is true', () => {
@@ -1014,7 +1034,83 @@ describe('InlinePanelController', () => {
     expect(requireElement(controller.root, '.chatgoose-inline-error').textContent).toContain('Draft failed');
   });
 
+  it.each(['copy', 'insert'] as const)('keeps delayed %s acceptance attached to its original operation', async (action) => {
+    const textarea = await import('../src/content/textarea.js');
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const method = action === 'copy' ? textarea.copyToClipboard : textarea.insertIntoFanslyTextarea;
+    vi.mocked(method).mockReturnValueOnce(pending);
+    const onAcceptance = vi.fn();
+    const controller = createController({ onAcceptance });
+    document.body.append(controller.root);
+    controller.render(createReplyModel([createPart('Old reply')], { operationId: 'old-op' }));
+    const selector = action === 'copy'
+      ? '.chatgoose-card-actions .chatgoose-button-secondary'
+      : '.chatgoose-card-actions .chatgoose-button';
+    requireElement<HTMLButtonElement>(controller.root, selector).click();
+    controller.render(createReplyModel([createPart('New reply')], { operationId: 'new-op' }));
+    const newCard = requireElement(controller.root, '.chatgoose-card');
+    finish();
+    await vi.waitFor(() => {
+      expect(onAcceptance).toHaveBeenCalledWith('old-op', action === 'copy' ? 'copied' : 'inserted', 0);
+    });
+    expect(onAcceptance).toHaveBeenCalledTimes(1);
+    expect(requireElement(controller.root, '.chatgoose-card')).toBe(newCard);
+  });
+
+  it('does not put a delayed clipboard failure onto the next result', async () => {
+    const { copyToClipboard } = await import('../src/content/textarea.js');
+    let fail!: (error: Error) => void;
+    vi.mocked(copyToClipboard).mockReturnValueOnce(new Promise<void>((_, reject) => { fail = reject; }));
+    const controller = createController();
+    document.body.append(controller.root);
+    controller.render(createReplyModel([createPart('Old reply')]));
+    requireElement<HTMLButtonElement>(controller.root, '.chatgoose-card-actions .chatgoose-button-secondary').click();
+    controller.render(createReplyModel([createPart('New reply')], { operationId: 'new-op' }));
+    fail(new Error('Clipboard denied'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.root.querySelector('.chatgoose-inline-error')).toBeNull();
+    expect(controller.root.textContent).toContain('New reply');
+  });
+
   // ─── Enter-to-insert ─────────────────────────────────────────
+
+  it.each(['Enter', ' '])('cancels native %s activation of a covered focused Insert button', async (key) => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    let covered = false;
+    const controller = createController({ isKeyboardBlocked: () => covered });
+    document.body.append(controller.root);
+    controller.render(createReplyModel([createPart('Must stay out of composer')]));
+    const insert = requireElement<HTMLButtonElement>(controller.root, '.chatgoose-card-actions .chatgoose-button');
+    insert.focus();
+    covered = true;
+    const keydown = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    // jsdom does not synthesize native button activation. Model the browser's
+    // default click only if the keydown was not cancelled by the page.
+    if (insert.dispatchEvent(keydown)) insert.click();
+    await Promise.resolve();
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+    // A queued/native click must be fenced at the action boundary too.
+    insert.click();
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+  });
+
+  it('leaves Enter and Escape to the covering reference surface', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const onClose = vi.fn();
+    const controller = createController({ onClose, isKeyboardBlocked: () => true });
+    document.body.append(controller.root);
+    controller.render(createReplyModel([createPart('Hidden behind board')]));
+    (document.activeElement as HTMLElement)?.blur?.();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 
   it('Enter inserts the first part for a visible fast-reply', async () => {
     const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');

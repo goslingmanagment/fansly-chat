@@ -224,7 +224,12 @@ export class HoverHintController {
   }
 
   private show(element: HTMLElement): void {
-    if (!this.enabled) {
+    // Keyboard focus supersedes any hover dwell still waiting on another cell.
+    this.clearShowTimer();
+    if (!this.enabled || !element.isConnected ||
+      !this.container?.contains(element) ||
+      element.closest('.chatgoose-hidden')) {
+      this.hide();
       return;
     }
     const entry = this.anchors.find((anchor) => anchor.element === element);

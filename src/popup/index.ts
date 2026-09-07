@@ -1,6 +1,7 @@
 import { sendRuntimeRequest } from '../shared/runtime-request.js';
 import { installUiTheme, readUiThemeSetting } from '../shared/theme.js';
 import type { PopupStatus } from '../shared/types.js';
+import { CHANGELOG_URL, WHATS_NEW_2_URL } from '../shared/constants.js';
 
 const rootElement = document.getElementById('chatgoose-popup-root');
 const extensionVersion = browser.runtime.getManifest().version;
@@ -99,31 +100,53 @@ function createIdRow(
   copy.type = 'button';
   copy.className = 'chatgoose-popup-copy';
   copy.title = `Скопировать ${id}`;
+  copy.setAttribute('aria-label', `${label}: скопировать ${id}`);
   const value = document.createElement('span');
   value.className = name ? 'chatgoose-popup-kv-name' : 'chatgoose-popup-kv-value';
   value.textContent = shownText;
+  value.setAttribute('aria-live', 'polite');
   copy.append(value, createCopyGlyph());
 
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
+  const showCopyFeedback = (done: boolean): void => {
+    copy.classList.toggle('chatgoose-popup-copy-done', done);
+    value.textContent = done ? 'Скопировано' : 'Не удалось скопировать';
+    if (restoreTimer !== undefined) clearTimeout(restoreTimer);
+    restoreTimer = setTimeout(() => {
+      copy.classList.remove('chatgoose-popup-copy-done');
+      value.textContent = shownText;
+    }, COPY_FEEDBACK_MS);
+  };
   copy.addEventListener('click', () => {
-    void navigator.clipboard
-      ?.writeText(id)
-      .then(() => {
-        copy.classList.add('chatgoose-popup-copy-done');
-        value.textContent = 'Скопировано';
-        if (restoreTimer !== undefined) {
-          clearTimeout(restoreTimer);
-        }
-        restoreTimer = setTimeout(() => {
-          copy.classList.remove('chatgoose-popup-copy-done');
-          value.textContent = shownText;
-        }, COPY_FEEDBACK_MS);
-      })
-      .catch(() => {});
+    if (!navigator.clipboard) {
+      showCopyFeedback(false);
+      return;
+    }
+    void navigator.clipboard.writeText(id)
+      .then(() => showCopyFeedback(true))
+      .catch(() => showCopyFeedback(false));
   });
 
   row.append(copy);
   return row;
+}
+
+function createReleaseLinks(): HTMLElement {
+  const links = document.createElement('nav');
+  links.className = 'chatgoose-popup-release-links';
+  links.setAttribute('aria-label', 'Обновления ChatGoose');
+  for (const [label, url] of [
+    ['Что нового в 2.0', WHATS_NEW_2_URL],
+    ['История версий', CHANGELOG_URL],
+  ] as const) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.textContent = label;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    links.append(link);
+  }
+  return links;
 }
 
 function renderUnavailable(): void {
@@ -146,7 +169,7 @@ function renderUnavailable(): void {
     void browser.runtime.openOptionsPage();
   });
 
-  root.append(createVersionTag(), title, message, button);
+  root.append(createVersionTag(), title, message, button, createReleaseLinks());
 }
 
 async function render(): Promise<void> {
@@ -239,7 +262,7 @@ async function render(): Promise<void> {
       });
   });
 
-  root.append(createVersionTag(), title, panel, button);
+  root.append(createVersionTag(), title, panel, button, createReleaseLinks());
 }
 
 // Theme must never block the popup: without readable settings it stays on

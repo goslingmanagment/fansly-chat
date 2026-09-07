@@ -86,6 +86,23 @@ describe('HoverHintController', () => {
     expect(visibleText()).toEqual({ title: 'Reply', body: 'Ответ на переписку' });
   });
 
+  it('does not let an earlier hover replace the newly focused control hint', () => {
+    hover(container, 10, 210);
+    vi.advanceTimersByTime(500);
+    second.focus();
+    expect(visibleText()?.title).toBe('Fix');
+    vi.advanceTimersByTime(1000);
+    expect(visibleText()?.title).toBe('Fix');
+    expect(second.getAttribute('aria-describedby')).toBe(layer()?.id);
+  });
+
+  it('discards a pending hint when its control disappears during dwell', () => {
+    hover(container, 10, 210);
+    first.remove();
+    vi.advanceTimersByTime(1000);
+    expect(visibleText()).toBeNull();
+  });
+
   it('does not fire for a pointer merely crossing the row', () => {
     // The way to Reply passes over its neighbours; none of them may speak.
     hover(container, 10, 210);

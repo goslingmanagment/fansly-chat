@@ -60,6 +60,7 @@ import {
   AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   CHANGELOG_URL,
+  WHATS_NEW_2_URL,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
   IMPROVE_MAX_MESSAGE_COUNT,
@@ -469,26 +470,30 @@ function createCopyableId(fullId: string): HTMLButtonElement {
   button.type = 'button';
   button.className = 'chatgoose-copy-id';
   button.title = COPY.accounts.idCopyTitle.replace('{id}', fullId);
+  button.setAttribute('aria-label', button.title);
+  button.setAttribute('aria-live', 'polite');
   // The bare id, no «ID аккаунта:» prefix — the meta line it lives in is the
   // ONE place the full id appears (the heading carries the name or short id).
   const idText = fullId;
   button.textContent = idText;
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
+  const showCopyResult = (copied: boolean): void => {
+    button.classList.toggle('chatgoose-copy-id-done', copied);
+    button.textContent = copied ? COPY.accounts.idCopied : COPY.accounts.idCopyFailed;
+    if (restoreTimer !== undefined) clearTimeout(restoreTimer);
+    restoreTimer = setTimeout(() => {
+      button.classList.remove('chatgoose-copy-id-done');
+      button.textContent = idText;
+    }, COPY_FEEDBACK_MS);
+  };
   button.addEventListener('click', () => {
-    void navigator.clipboard
-      ?.writeText(fullId)
-      .then(() => {
-        button.classList.add('chatgoose-copy-id-done');
-        button.textContent = COPY.accounts.idCopied;
-        if (restoreTimer !== undefined) {
-          clearTimeout(restoreTimer);
-        }
-        restoreTimer = setTimeout(() => {
-          button.classList.remove('chatgoose-copy-id-done');
-          button.textContent = idText;
-        }, COPY_FEEDBACK_MS);
-      })
-      .catch(() => {});
+    if (!navigator.clipboard) {
+      showCopyResult(false);
+      return;
+    }
+    void navigator.clipboard.writeText(fullId)
+      .then(() => showCopyResult(true))
+      .catch(() => showCopyResult(false));
   });
   return button;
 }
@@ -714,14 +719,23 @@ async function render(): Promise<void> {
   };
   const railFoot = renderRailFoot(shell.railFootSlot, {
     version: extensionVersion,
-    changelogUrl: CHANGELOG_URL,
+    changelogUrl: WHATS_NEW_2_URL,
     onOpenChangelog: () => {
       markVersionSeen();
-      void browser.tabs.create({ url: CHANGELOG_URL }).catch((error: unknown) => {
+      void browser.tabs.create({ url: WHATS_NEW_2_URL }).catch((error: unknown) => {
         console.error('Failed to open the changelog', error);
       });
     },
   });
+
+  const versionHistory = document.createElement('a');
+  versionHistory.className = 'chatgoose-cabinet-changelog chatgoose-cabinet-history';
+  versionHistory.dataset.role = 'rail-version-history';
+  versionHistory.href = CHANGELOG_URL;
+  versionHistory.target = '_blank';
+  versionHistory.rel = 'noopener noreferrer';
+  versionHistory.textContent = COPY.rail.versionHistory;
+  shell.railFootSlot.append(versionHistory);
 
   // ─── Первый запуск: чеклист ────────────────────────────────
   // Shown only on a genuinely untouched install, and it stays until every step
@@ -3564,17 +3578,25 @@ async function render(): Promise<void> {
   saveToast.className = 'chatgoose-save-toast';
   saveToast.setAttribute('role', 'status');
   saveToast.setAttribute('aria-live', 'polite');
-  saveToast.textContent = COPY.common.saved;
+  const saveToastMessage = document.createElement('span');
+  const retrySaveButton = createButton(COPY.common.retrySave, true);
+  retrySaveButton.hidden = true;
+  saveToast.append(saveToastMessage, retrySaveButton);
   document.body.append(saveToast);
   let saveToastTimer: number | undefined;
-  const showSaveToast = (): void => {
+  const showSaveToast = (failed = false): void => {
+    saveToastMessage.textContent = failed ? COPY.common.saveFailed : COPY.common.saved;
+    saveToast.dataset.failed = String(failed);
+    retrySaveButton.hidden = !failed;
     saveToast.classList.add('chatgoose-save-toast-visible');
     if (saveToastTimer !== undefined) {
       window.clearTimeout(saveToastTimer);
     }
-    saveToastTimer = window.setTimeout(() => {
-      saveToast.classList.remove('chatgoose-save-toast-visible');
-    }, 1600);
+    if (!failed) {
+      saveToastTimer = window.setTimeout(() => {
+        saveToast.classList.remove('chatgoose-save-toast-visible');
+      }, 1600);
+    }
   };
   cleanupTasks.push(() => {
     if (saveToastTimer !== undefined) {
@@ -3755,6 +3777,13 @@ async function render(): Promise<void> {
     const settled = execution
       .catch((error: unknown) => {
         console.error('Failed to save Settings changes', error);
+        // Only the newest snapshot may report failure or restore dirty state.
+        // An older rejected write must not undo a newer successful save, nor
+        // revive a snapshot invalidated by the custody/future-schema fence.
+        if (!disposed && futureSchemaObserved === null && snapshotVersion === settingsSnapshotVersion) {
+          settingsDirty = true;
+          showSaveToast(true);
+        }
       });
     settingsSaveChain = settled;
     settingsSaveChainSignature = formSignature;
@@ -3768,6 +3797,13 @@ async function render(): Promise<void> {
   };
 
   const saveSettingsDebounced = debounce(queueSettingsSave, 350);
+  retrySaveButton.addEventListener('click', () => {
+    saveSettingsDebounced.cancel();
+    retrySaveButton.disabled = true;
+    void queueSettingsSave().finally(() => {
+      retrySaveButton.disabled = false;
+    });
+  });
   const scheduleSettingsSave = (): void => {
     if (futureSchemaObserved !== null) return;
     settingsDirty = true;
@@ -3911,36 +3947,50 @@ async function render(): Promise<void> {
   personalitiesList.className = 'chatgoose-persona-rows';
   let refreshAccountMappingPersonalityOptions: (() => void) | null = null;
 
-  // Catalog status row (М2 anatomy): label · fact · mono staleness at the
-  // right edge, then the refresh action with its hint inline.
-  // «Каталог · обновлён {дата}» is one fact line of the catalog card now; the
-  // staleness marker moved to that card's head (E62).
+  // Date of the last saved catalog contents, not the latest fetch.
   const personaCatalogRow = document.createElement('div');
   personaCatalogRow.dataset.role = 'persona-catalog';
   personaCatalogRow.className = 'chatgoose-fact';
   const personaCatalogLabel = document.createElement('span');
   personaCatalogLabel.className = 'chatgoose-fact-k';
-  // «Обновлён» — the card it lives in is already called «Каталог» (E62).
+  // Background write suppression makes this a content snapshot date.
   personaCatalogLabel.textContent = COPY.personas.catalogUpdatedLabel;
   const personaCatalogFact = document.createElement('span');
   personaCatalogFact.className = 'chatgoose-fact-v';
-  const personaCatalogAge = document.createElement('span');
-  personaCatalogAge.className = 'chatgoose-persona-catage';
-  personaCatalogAge.hidden = true;
   personaCatalogRow.append(personaCatalogLabel, personaCatalogFact);
   // There is no standalone «refetch the catalog» operation, and inventing one is
   // out of scope: the background re-reads the catalog after a SUCCESSFUL
   // connection test, so the button says exactly what it does.
   const personaRefreshButton = createButton(COPY.personas.catalogRefresh, true);
   personaRefreshButton.dataset.role = 'persona-catalog-refresh';
+  const personaRefreshResult = document.createElement('div');
+  personaRefreshResult.className = 'chatgoose-status-hint';
+  personaRefreshResult.dataset.role = 'persona-refresh-result';
+  personaRefreshResult.setAttribute('role', 'status');
+  personaRefreshResult.setAttribute('aria-live', 'polite');
   personaRefreshButton.addEventListener('click', () => {
     personaRefreshButton.disabled = true;
+    personaRefreshResult.textContent = COPY.personas.catalogChecking;
     void (async () => {
       try {
         await refreshAgencyHubPermissionState();
         if (!disposed) {
           await runAgencyHubConnectionTest({ force: true, saveFirst: true });
+          if (disposed) return;
+          // The RPC confirms connectivity, not catalog freshness: the catalog
+          // controller keeps failed polls out of this response. State only the
+          // outcome we know, beside the button that requested it.
+          personaRefreshResult.textContent = agencyHubConnectionFeedback.kind === 'connected'
+            ? COPY.personas.catalogConnectionChecked
+            : agencyHubConnectionFeedback.kind === 'failed'
+              ? agencyHubConnectionFeedback.error.message
+              : agencyHubConnectionFeedback.kind === 'testing' || agencyHubConnectionFeedback.kind === 'pending'
+                ? COPY.personas.catalogChecking
+                : COPY.personas.catalogConnectionSetup;
         }
+      } catch (error) {
+        console.error('Failed to check Agency Hub from the persona catalog', error);
+        if (!disposed) personaRefreshResult.textContent = createUserError('hub_request_failed').message;
       } finally {
         if (!disposed) personaRefreshButton.disabled = false;
       }
@@ -3976,19 +4026,9 @@ async function render(): Promise<void> {
     shell.setMicro('personas', personasMicro);
     const changedDate = formatCatalogChangedDate(state.personaCatalogFetchedAt);
     personaCatalogFact.textContent = changedDate ?? COPY.personas.catalogNever;
-    // Staleness marker: only once the catalog is older than 48h — a fresh date
-    // needs no age, and «0 дн назад» would be noise (the reverted #46 rule).
-    const changedAt = state.personaCatalogFetchedAt === null
-      ? Number.NaN
-      : Date.parse(state.personaCatalogFetchedAt);
-    const ageMs = Number.isFinite(changedAt) ? Date.now() - changedAt : Number.NaN;
-    const staleDays = Number.isFinite(ageMs) && ageMs >= 48 * 3_600_000
-      ? Math.floor(ageMs / 86_400_000)
-      : null;
-    personaCatalogAge.textContent = staleDays === null
-      ? ''
-      : COPY.personas.catalogAge.replace('{n}', String(staleDays));
-    personaCatalogAge.hidden = staleDays === null;
+    // Identical catalog polls deliberately do not write storage. This stamp
+    // dates the saved contents, never the last successful connectivity check;
+    // the former amber age badge falsely diagnosed an unchanged catalog as stale.
     // Which hub this catalog belongs to. The source is «baseUrl|hash» — only the
     // address half is meaningful to a chatter, and the hash is a credential
     // fingerprint that has no business on screen. The address is shown WHOLE:
@@ -4169,8 +4209,7 @@ async function render(): Promise<void> {
   const personaCatalogTitle = document.createElement('span');
   personaCatalogTitle.className = 'chatgoose-panecard-title';
   personaCatalogTitle.textContent = COPY.personas.catalogCardTitle;
-  // The staleness marker rides the card head — visible (amber) only past 48h.
-  personaCatalogHead.append(personaCatalogTitle, personaCatalogAge);
+  personaCatalogHead.append(personaCatalogTitle);
   const personaCatalogFacts = document.createElement('div');
   personaCatalogFacts.className = 'chatgoose-facts';
   personaCatalogFacts.append(personaCatalogRow, personaSourceFact);
@@ -4178,6 +4217,7 @@ async function render(): Promise<void> {
     personaCatalogHead,
     personaCatalogFacts,
     personaActions,
+    personaRefreshResult,
     personaRefreshHint,
   );
   const personaArchiveCard = document.createElement('div');
@@ -4842,20 +4882,32 @@ async function render(): Promise<void> {
       labelInput.className = 'chatgoose-input chatgoose-account-rename-input';
       labelInput.dataset.accountLabelInput = accountId;
       labelInput.placeholder = COPY.accounts.renameEmpty;
+      labelInput.setAttribute('aria-label', `${COPY.accounts.renameTitle}: ${view.label}`);
+      labelInput.title = COPY.accounts.renameHint;
       labelInput.maxLength = 60;
       labelInput.value = view.localLabel ?? '';
       labelInput.hidden = true;
+
+      const editFeedback = document.createElement('div');
+      editFeedback.className = 'chatgoose-meta';
+      editFeedback.style.gridColumn = '1 / -1';
+      editFeedback.setAttribute('role', 'status');
+      editFeedback.dataset.role = 'account-edit-feedback';
+      editFeedback.hidden = true;
 
       const closeEditor = (): void => {
         labelInput.hidden = true;
         labelInput.value = view.localLabel ?? '';
         renameButton.hidden = false;
         labelNode.hidden = false;
+        editFeedback.hidden = true;
       };
       renameButton.addEventListener('click', () => {
         labelNode.hidden = true;
         renameButton.hidden = true;
         labelInput.hidden = false;
+        editFeedback.textContent = COPY.accounts.renameHint;
+        editFeedback.hidden = false;
         labelInput.focus();
         labelInput.select();
       });
@@ -4863,6 +4915,7 @@ async function render(): Promise<void> {
         if (event.key === 'Escape') {
           event.preventDefault();
           closeEditor();
+          renameButton.focus();
           return;
         }
         if (event.key !== 'Enter') {
@@ -4891,6 +4944,8 @@ async function render(): Promise<void> {
             console.error('Failed to save the local account label', error);
             if (!disposed) {
               labelInput.disabled = false;
+              editFeedback.textContent = `${COPY.common.saveFailed}. ${COPY.accounts.renameHint}`;
+              editFeedback.hidden = false;
               labelInput.focus();
             }
           }
@@ -4993,6 +5048,8 @@ async function render(): Promise<void> {
             if (!disposed) {
               select.dataset.mappingPending = 'false';
               select.disabled = false;
+              editFeedback.textContent = COPY.common.saveFailed;
+              editFeedback.hidden = false;
               refreshAccountMappingPersonalityOptions?.();
             }
           }
@@ -5020,9 +5077,32 @@ async function render(): Promise<void> {
         const focusTab = createButton(COPY.accounts.focusTab, true);
         focusTab.dataset.accountFocusTab = accountId;
         focusTab.addEventListener('click', () => {
+          const clearFocusFailure = (): void => {
+            // This slot also belongs to rename/mapping. A successful tab
+            // action must not erase their independently reported failures.
+            if (editFeedback.textContent === COPY.accounts.focusTabFailed) {
+              editFeedback.textContent = '';
+              editFeedback.hidden = true;
+            }
+          };
+          clearFocusFailure();
+          focusTab.disabled = true;
+          const showFocusFailure = (): void => {
+            if (disposed) return;
+            editFeedback.textContent = COPY.accounts.focusTabFailed;
+            editFeedback.hidden = false;
+          };
           void sendRuntimeRequest('focusAccountTab', { accountId })
+            .then((reply) => {
+              if (!reply?.ok) showFocusFailure();
+              else clearFocusFailure();
+            })
             .catch((error: unknown) => {
               console.error('Failed to focus the Fansly tab', error);
+              showFocusFailure();
+            })
+            .finally(() => {
+              focusTab.disabled = false;
             });
         });
         actions.append(focusTab);
@@ -5035,6 +5115,7 @@ async function render(): Promise<void> {
       } else {
         row.append(dot, head, actions, sub, select);
       }
+      row.append(editFeedback);
       groupFor(view.state).append(row);
     });
 
