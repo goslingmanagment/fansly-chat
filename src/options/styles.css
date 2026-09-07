@@ -28,7 +28,7 @@
   --chatgoose-field: #ffffff;
   --chatgoose-ink: #1f1e1d;
   --chatgoose-ink-mid: #5d5a52;
-  --chatgoose-ink-low: #97928a;
+  --chatgoose-ink-low: #6d695f;
   --chatgoose-clay: #d97757;
   --chatgoose-clay-deep: #c2603f;
   --chatgoose-clay-ink: #c2603f;
@@ -61,7 +61,7 @@
   --chatgoose-field: #1b1a17;
   --chatgoose-ink: #e9e6df;
   --chatgoose-ink-mid: #a39e93;
-  --chatgoose-ink-low: #6f6a60;
+  --chatgoose-ink-low: #969084;
   --chatgoose-clay-ink: #d97757;
   --chatgoose-clay-bg: #3f2b21;
   --chatgoose-clay-line: #61412f;
@@ -224,6 +224,11 @@ input[type='checkbox'] {
   color: var(--chatgoose-ink-mid);
   font-size: 12px;
   text-decoration: none;
+}
+
+.chatgoose-cabinet-history {
+  color: var(--chatgoose-ink-low);
+  font-weight: 400;
 }
 
 .chatgoose-cabinet-changelog:hover {
@@ -957,6 +962,11 @@ input[type='checkbox'] {
 
 /* Save whisper: confirms the debounced write without demanding attention. */
 .chatgoose-save-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
   position: fixed;
   right: 16px;
   bottom: 16px;
@@ -980,6 +990,17 @@ input[type='checkbox'] {
 
 .chatgoose-save-toast-visible {
   opacity: 1;
+}
+
+.chatgoose-save-toast[data-failed="true"] {
+  color: var(--chatgoose-bad);
+  border-color: currentColor;
+  background: var(--chatgoose-bg1);
+  pointer-events: auto;
+}
+
+.chatgoose-save-toast button[hidden] {
+  display: none;
 }
 
 /* Account-id line doubles as its own copy button. */
@@ -1844,14 +1865,7 @@ input[type='checkbox'] {
    died with E62: «Обновлён» is a plain `.chatgoose-fact` line inside the
    «Каталог» card now, and the staleness marker moved to that card's head. */
 
-/* Visible only when the catalog is stale (>48h) — amber by definition. */
-.chatgoose-persona-catage {
-  justify-self: end;
-  text-align: right;
-  font: 400 11.5px/1.4 var(--chatgoose-font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--chatgoose-amber);
-}
+
 
 /* ── «Аккаунты» rows: two dense lines (М2) ──
    Line one: dot · name cluster · state pills. Line two: mono meta
@@ -2100,6 +2114,7 @@ input[type='checkbox'] {
     flex-basis: 100%;
     margin-top: 8px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     padding: 8px 4px 0;
@@ -2241,17 +2256,6 @@ input[type='checkbox'] {
   color: var(--chatgoose-ink-low);
   margin-right: 2px;
 }
-
-/* The staleness marker rides the catalog card's head. */
-.chatgoose-panecard-head .chatgoose-persona-catage {
-  justify-self: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--chatgoose-amber-line);
-  border-radius: 999px;
-  background: var(--chatgoose-amber-bg);
-}
-
-.chatgoose-persona-catage[hidden] { display: none; }
 
 /* ── «Аккаунты»: groups by state (E62) ── */
 .chatgoose-account-group + .chatgoose-account-group {

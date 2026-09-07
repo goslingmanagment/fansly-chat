@@ -343,7 +343,7 @@ export class ChatGooseContentApp {
   private voiceRenderFrame: number | null = null;
   private readonly suppressedTerminalOpIds = new Set<string>();
   private activeImproveDraftCacheKey: string | null = null;
-  private observedDraftTextarea: HTMLTextAreaElement | null = null;
+  private observedDraftDocument: Document | null = null;
   private hasDraftText = false;
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
   private deepOverlayModel: OverlayViewModel | null = null;
@@ -443,7 +443,13 @@ export class ChatGooseContentApp {
   });
   private pendingInitialHotkeyGeneration = 0;
 
-  private readonly handleDraftInput = (): void => {
+  private readonly handleDraftInput = (event: Event): void => {
+    // Fansly creates/replaces the native textarea on focus without replacing
+    // the mounted input host. Resolve each event against the live composer so
+    // its first edit is observed, while Coach/search/other inputs stay outside.
+    if (event.target !== findActiveConversationTextarea()) {
+      return;
+    }
     const nextHasDraftText = this.computeHasDraftText();
     if (nextHasDraftText === this.hasDraftText) {
       return;
@@ -510,12 +516,6 @@ export class ChatGooseContentApp {
       }
       this.startFeature(feature, false);
     },
-    onCompareClick: () => {
-      void this.startCompare(false);
-    },
-    onCompareRestoreClick: () => {
-      void this.reopenCompletedCompare();
-    },
     onReplyModeToggle: () => this.toggleNextFastReplyMode(),
     onToneSelect: (tone) => this.armReplyTone(tone),
     onVoiceClick: () => this.openVoicePanel(),
@@ -537,6 +537,9 @@ export class ChatGooseContentApp {
   private readonly completedOverlayCache = new CompletedOverlayCache();
   private readonly completedCompareCache = new CompletedCompareCache();
   private readonly inlinePanel = new InlinePanelController({
+    isKeyboardBlocked: () =>
+      (this.cheatsheetController?.isOpen() ?? false) ||
+      (this.boardController?.isOpen() ?? false),
     onAcceptance: (operationId, action, partIndex) => {
       this.port.send({ type: 'operation:acceptance', operationId, action, partIndex });
     },
@@ -1015,13 +1018,25 @@ export class ChatGooseContentApp {
         fanAccountId: null,
         personaDefinitionId,
       });
-      if (!isRecapStatusResponse(status) || this.recapPickerModel !== picker) {
+      if (this.recapPickerModel !== picker) {
         return;
       }
-      this.recapPickerModel = { ...picker, recapStatus: status };
+      this.recapPickerModel = {
+        ...picker,
+        recapStatus: isRecapStatusResponse(status)
+          ? status
+          : { state: 'unavailable', full: null, short: null },
+      };
       this.renderSurfaces();
     } catch {
-      // Best-effort — the picker just leaves «Открыть последний» disabled.
+      if (this.recapPickerModel !== picker) {
+        return;
+      }
+      this.recapPickerModel = {
+        ...picker,
+        recapStatus: { state: 'unavailable', full: null, short: null },
+      };
+      this.renderSurfaces();
     }
   }
 
@@ -1221,7 +1236,6 @@ export class ChatGooseContentApp {
       this.nextReplyTone,
       this.hasDraftText,
       activeLoading,
-      this.hasRestorableCompletedCompare(),
     );
   }
 
@@ -1756,10 +1770,6 @@ export class ChatGooseContentApp {
     // E24: Split stays armed (sticky flag); the tone is consumed + remembered.
     this.lastSentReplyTone = compareReplyTone;
     this.resetNextReplyTone();
-  }
-
-  private async reopenCompletedCompare(): Promise<void> {
-    await this.restoreCompletedComparePanelInternal(true);
   }
 
   private toggleNextFastReplyMode(): void {
@@ -2941,6 +2951,13 @@ export class ChatGooseContentApp {
     this.clearCoachOperationState();
     this.rebuildCoachModel();
     this.renderAll();
+    // A cold tab cannot check recap metadata until an operation resolves its
+    // fan identity. Retry that unavailable read once after a usable answer;
+    // refreshCoachRecapStatus fences the response to this same open session.
+    if (answerRaw.trim() && session.recapStatus?.state === 'unavailable') {
+      const promise = this.refreshCoachRecapStatus(session);
+      this.coachRecapStatusRead = { session, promise };
+    }
   }
 
   /** Assemble a coach turn's debug provenance (E81), or undefined when the
@@ -4007,21 +4024,21 @@ export class ChatGooseContentApp {
   }
 
   private detachDraftTextareaObserver(): void {
-    if (!this.observedDraftTextarea) {
+    if (!this.observedDraftDocument) {
       return;
     }
-    this.observedDraftTextarea.removeEventListener('input', this.handleDraftInput);
-    this.observedDraftTextarea.removeEventListener('change', this.handleDraftInput);
-    this.observedDraftTextarea = null;
+    this.observedDraftDocument.removeEventListener('input', this.handleDraftInput, true);
+    this.observedDraftDocument.removeEventListener('change', this.handleDraftInput, true);
+    this.observedDraftDocument = null;
   }
 
   private syncDraftTextareaObserver(): void {
     const textarea = findActiveConversationTextarea();
-    if (textarea !== this.observedDraftTextarea) {
+    if (this.observedDraftDocument !== document) {
       this.detachDraftTextareaObserver();
-      this.observedDraftTextarea = textarea;
-      this.observedDraftTextarea?.addEventListener('input', this.handleDraftInput);
-      this.observedDraftTextarea?.addEventListener('change', this.handleDraftInput);
+      this.observedDraftDocument = document;
+      document.addEventListener('input', this.handleDraftInput, true);
+      document.addEventListener('change', this.handleDraftInput, true);
     }
     this.hasDraftText = Boolean(textarea?.value.trim());
   }
@@ -4040,15 +4057,6 @@ export class ChatGooseContentApp {
 
   private async restoreCompletedComparePanel(): Promise<boolean> {
     return this.restoreCompletedComparePanelInternal(false);
-  }
-
-  private hasRestorableCompletedCompare(): boolean {
-    return Boolean(
-      !this.activeFeature &&
-      !this.activeCompareModel &&
-      !this.comparePanelVisible &&
-      this.completedCompareCache.get(this.currentGroupId),
-    );
   }
 
   private async restoreCompletedComparePanelInternal(

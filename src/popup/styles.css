@@ -328,3 +328,27 @@ body {
   letter-spacing: 0.05em;
   pointer-events: none;
 }
+
+.chatgoose-popup-release-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border-top: 1px solid var(--chatgoose-line);
+  padding-top: 10px;
+  font-size: 12px;
+}
+
+.chatgoose-popup-release-links a {
+  color: var(--chatgoose-ink-mid);
+  text-underline-offset: 3px;
+}
+
+.chatgoose-popup-release-links a:first-child {
+  color: var(--chatgoose-clay-ink);
+  font-weight: 600;
+}
+
+.chatgoose-popup-release-links a:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 3px;
+}

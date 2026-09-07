@@ -707,6 +707,33 @@ describe('VoiceService SDK transport', () => {
     ]);
   });
 
+  it.each([
+    { groupId: 'group-2' },
+    { accountId: 'creator-2' },
+    { fanAccountId: 'fan-2' },
+    { routeNonce: 4 },
+  ])('refuses paid dispatch when the live binding changes during custody acknowledgement: %j', async (change) => {
+    const harness = createHarness({
+      assertPendingCreate: async () => {
+        // The repository waits for earlier writes in its per-attempt FIFO;
+        // navigation can finish after the service's preceding route check.
+        Object.assign(harness.currentContext, change);
+      },
+    });
+
+    await createAttempt(harness);
+
+    expect(harness.assertPendingCreate).toHaveBeenCalledOnce();
+    expect(harness.hub.createVoiceNote).not.toHaveBeenCalled();
+    expect(harness.sent).toEqual([
+      expect.objectContaining({
+        type: 'voice:noteError',
+        source: 'create',
+        code: 'voice_source_invalid',
+      }),
+    ]);
+  });
+
   it('recovers status after a worker restart only when the persisted source still matches', async () => {
     const statusView = voiceView({ state: 'dispatched' });
     const restarted = createHarness({

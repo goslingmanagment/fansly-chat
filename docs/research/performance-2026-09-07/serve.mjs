@@ -1,0 +1,12 @@
+import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import path from 'node:path';
+const repo = process.cwd();
+const require = createRequire(path.join(repo, 'package.json'));
+const esbuild = require('esbuild');
+const harness = await readFile(new URL('./harness.ts', import.meta.url), 'utf8');
+const built = await esbuild.build({stdin:{contents:harness,resolveDir:repo,sourcefile:'perf-harness.ts',loader:'ts'},bundle:true,write:false,format:'iife',platform:'browser',target:['firefox128'],minifySyntax:true,minifyWhitespace:true,define:{__CHATGOOSE_BUILD_TIME__:'"benchmark"'}});
+const css = await readFile(path.join(repo,'src/content/styles.css'),'utf8');
+const html = '<!doctype html><html><head><meta charset="utf-8"><title>ChatGoose synthetic performance study</title><style>'+css+'</style></head><body><h1>ChatGoose synthetic performance study</h1><p>No Fansly or Hub requests. Actual current board controller and stylesheet; synthetic fans. Measurements include instrumentation.</p><button id="run">Run benchmark</button><pre id="results">Ready</pre><script src="/harness.js"></script></body></html>';
+createServer((req,res)=>{ if(req.url==='/harness.js'){res.setHeader('Content-Type','text/javascript');res.end(built.outputFiles[0].contents);}else{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html);}}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port);});

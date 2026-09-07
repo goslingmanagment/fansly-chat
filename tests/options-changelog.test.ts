@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { COPY } from '../src/options/copy.js';
-import { CHANGELOG_URL } from '../src/shared/constants.js';
+import { CHANGELOG_URL, WHATS_NEW_2_URL } from '../src/shared/constants.js';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
 import type { OnboardingSnapshot } from '../src/shared/types.js';
@@ -53,7 +53,7 @@ describe('options rail footer — changelog', () => {
     await page.flushAsync();
 
     expect(page.lastSeenWrites()).toEqual([MOUNTED_VERSION]);
-    expect(page.openedTabs()).toEqual([CHANGELOG_URL]);
+    expect(page.openedTabs()).toEqual([WHATS_NEW_2_URL]);
     expect(dot(page).hidden).toBe(true);
   });
 
@@ -64,8 +64,21 @@ describe('options rail footer — changelog', () => {
     });
 
     expect(dot(page).hidden).toBe(true);
-    // Already recorded — no redundant write.
     expect(page.lastSeenWrites()).toEqual([]);
+  });
+
+  it('separates the detailed 2.0 guide from the version archive with safe web links', async () => {
+    const page = await mountOptionsPage();
+    const guide = link(page);
+    const archive = page.document.querySelector<HTMLAnchorElement>('[data-role="rail-version-history"]')!;
+    expect(guide.href).toBe(WHATS_NEW_2_URL);
+    expect(guide.textContent).toContain(COPY.rail.changelog);
+    expect(archive.href).toBe(CHANGELOG_URL);
+    expect(archive.textContent).toBe(COPY.rail.versionHistory);
+    for (const anchor of [guide, archive]) {
+      expect(anchor.target).toBe('_blank');
+      expect(anchor.rel).toContain('noopener');
+    }
   });
 
   it('records the version silently on a first run instead of showing a dot', async () => {
@@ -93,7 +106,7 @@ describe('options rail footer — changelog', () => {
     await page.flushAsync();
 
     // The tab still opens — a failed bookkeeping write must not break the link.
-    expect(page.openedTabs()).toEqual([CHANGELOG_URL]);
+    expect(page.openedTabs()).toEqual([WHATS_NEW_2_URL]);
     // …and the dot stays: an unread release note is the safe side.
     expect(dot(page).hidden).toBe(false);
   });

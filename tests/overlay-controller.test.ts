@@ -473,6 +473,7 @@ describe('OverlayController', () => {
     expect(requireElement<HTMLDivElement>('.chatgoose-profiling-log')).toBe(log);
     expect(log.scrollTop).toBe(72);
     expect(log.textContent).toContain('Loaded messages page 3/40 (25 msgs, 75 collected)');
+    expect(log.closest('details')).toBeNull();
   });
 
   it('keeps the loading profiling log pinned to the bottom when new entries append', () => {
@@ -648,6 +649,20 @@ describe('OverlayController', () => {
     });
     expect(typeof debugSpy.mock.calls[1]?.[1]?.durationMs).toBe('number');
     expect(typeof debugSpy.mock.calls[1]?.[1]?.timestamp).toBe('string');
+  });
+
+  it('labels expanded Hi alternatives consistently with inline greetings', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined, onCancel: () => undefined,
+      onRerun: () => undefined, onCollapse: () => undefined,
+    });
+    const model = createReplyModel(createPart('Hello'));
+    model.feature = 'hi-greeting';
+    model.parts.push({ ...createPart('Hey'), sequenceIndex: 1, id: 'second' });
+    controller.render(model);
+    expect(Array.from(document.querySelectorAll('.chatgoose-card-title')).map((node) => node.textContent))
+      .toEqual(['Variant 1', 'Variant 2']);
+    expect(document.body.textContent).toContain('Choose one greeting.');
   });
 
   it('keeps the shell mounted while rebuilding low-frequency reply content', () => {
@@ -917,6 +932,29 @@ describe('OverlayController', () => {
     );
   });
 
+  it('puts the completed Review before collapsed diagnostics while preserving the full snapshot', () => {
+    const controller = new OverlayController({
+      onClose: () => undefined, onCancel: () => undefined,
+      onRerun: () => undefined, onCollapse: () => undefined,
+    });
+    const model = createReadOnlyModel();
+    model.profiling = createProfilingSnapshot();
+    controller.render(model);
+    const details = requireElement<HTMLDetailsElement>('.chatgoose-completed-profiling');
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toContain('Отладка');
+    const grid = details.parentElement!;
+    const children = Array.from(grid.children);
+    const evaluation = children.find((child) => child.textContent?.includes('Solid'))!;
+    expect(children.indexOf(evaluation)).toBeLessThan(children.indexOf(details));
+    expect(details.textContent).toContain('Load messages');
+    expect(details.textContent).toContain('cache read 90');
+    const summary = details.querySelector('summary')!;
+    summary.click();
+    expect(details.open).toBe(true);
+    expect(details.querySelector('.chatgoose-profiling-summary')?.textContent).toContain('Total');
+  });
+
   it('renders profiling summary below the error block when profiling is present', () => {
     const controller = new OverlayController({
       onClose: () => undefined,
@@ -942,6 +980,7 @@ describe('OverlayController', () => {
     expect(grid.firstElementChild?.textContent).toContain('CG-APP-01');
     expect(grid.firstElementChild?.textContent).toContain('Something broke');
     expect(grid.children[1]?.textContent).toContain('Pipeline Profiling');
+    expect(grid.children[1]?.closest('details')).toBeNull();
   });
 
   it('renders spend summary and model cost row in completed reply views', () => {

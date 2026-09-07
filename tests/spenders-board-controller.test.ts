@@ -163,6 +163,34 @@ describe('SpendersBoardController', () => {
     expect(openChat).toHaveBeenCalledWith('group-3');
   });
 
+  it('owns focus during loading, traps Tab, and restores the original control on close', async () => {
+    const oldInsert = document.createElement('button');
+    oldInsert.textContent = 'Insert';
+    document.body.append(oldInsert);
+    oldInsert.focus();
+    let finish!: (result: SpendersListResponse) => void;
+    const controller = new SpendersBoardController(makeDeps({
+      fetchList: () => new Promise((resolve) => { finish = resolve; }),
+    }));
+    const loading = controller.show();
+    const panel = document.querySelector<HTMLElement>('.chatgoose-board-panel')!;
+    expect(document.activeElement).toBe(panel);
+    expect(panel.getAttribute('aria-modal')).toBe('true');
+    // A late autofocus from the underlying reply cannot reclaim focus.
+    oldInsert.focus();
+    expect(document.activeElement).toBe(panel);
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    const close = document.activeElement as HTMLButtonElement;
+    expect(close.textContent).toBe('Close (Esc)');
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(close);
+    finish({ ok: true, result: makeResult() });
+    await loading;
+    expect(document.activeElement).toBe(document.querySelector('.chatgoose-board-panel'));
+    controller.close();
+    expect(document.activeElement).toBe(oldInsert);
+  });
+
   it('closes on Escape', async () => {
     const board = new SpendersBoardController(makeDeps());
     await board.show();
@@ -251,6 +279,33 @@ describe('SpendersBoardController', () => {
       'find chat',
     );
     expect(rows()[0]!.querySelector('.chatgoose-board-row-chatstate')).toBeNull();
+  });
+
+  it('names row buttons by fan and spend while describing chat availability separately', async () => {
+    const result = makeResult({
+      entries: [
+        entry('fan-ghost', null, 'Ghost', 900, 25),
+        entry('fan-deleted', null, null, 400, null, null, '2026-07-20T10:00:00.000Z'),
+      ],
+      fanCount: 2,
+    });
+    const board = new SpendersBoardController(
+      makeDeps({ fetchList: async () => ({ ok: true, result }) }),
+    );
+    await board.show();
+    for (const row of rows()) {
+      expect(row.getAttribute('aria-label')).toContain(
+        row.querySelector('.chatgoose-board-row-name')!.textContent!,
+      );
+      expect(row.getAttribute('aria-label')).toContain(
+        `Lifetime ${row.querySelector('.chatgoose-board-row-amount')!.textContent}`,
+      );
+      expect(document.getElementById(row.getAttribute('aria-describedby')!))
+        .toBe(row.querySelector('.chatgoose-board-row-chatstate'));
+    }
+    expect(rows()[0]!.getAttribute('aria-label')).toContain('@ghost');
+    expect(rows()[0]!.getAttribute('aria-label')).toContain('This month');
+    expect(rows()[1]!.getAttribute('aria-label')).toContain('fan-deleted');
   });
 
   it('lazily resolves the chat for an unmapped entry and opens it', async () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import type { PopupStatus } from '../src/shared/types.js';
+import { CHANGELOG_URL, WHATS_NEW_2_URL } from '../src/shared/constants.js';
 
 function installDom() {
   const dom = new JSDOM(
@@ -68,6 +69,23 @@ describe('Popup', () => {
       expect(rootText()).toContain('Не удалось связаться с ChatGoose');
       expect(rootText()).toContain('Открыть настройки');
     });
+  });
+
+  it.each([false, true])('offers the release guide and archive even with unreachable runtime (%s)', async (unavailable) => {
+    await loadPopup(async () => {
+      if (unavailable) throw new Error('unreachable');
+      return makeStatus();
+    });
+    await vi.waitFor(() => expect(document.querySelectorAll('.chatgoose-popup-release-links a')).toHaveLength(2));
+    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('.chatgoose-popup-release-links a'));
+    expect(links.map((link) => [link.textContent, link.href])).toEqual([
+      ['Что нового в 2.0', WHATS_NEW_2_URL],
+      ['История версий', CHANGELOG_URL],
+    ]);
+    for (const link of links) {
+      expect(link.target).toBe('_blank');
+      expect(link.rel).toContain('noopener');
+    }
   });
 
   it('shows the Fansly connection state as a pill', async () => {
@@ -176,6 +194,16 @@ describe('Popup', () => {
     await vi.waitFor(() => {
       expect(rootText()).toContain('Скопировано');
     });
+  });
+
+  it.each([false, true])('shows copy failure when clipboard is unavailable or rejects (%s)', async (available) => {
+    await loadPopup(async () => makeStatus({ groupId: null }));
+    vi.stubGlobal('navigator', available
+      ? { clipboard: { writeText: vi.fn(async () => { throw new Error('denied'); }) } }
+      : {});
+    await vi.waitFor(() => expect(rootText()).toContain('acc-1'));
+    document.querySelector<HTMLButtonElement>('.chatgoose-popup-copy')!.click();
+    await vi.waitFor(() => expect(rootText()).toContain('Не удалось скопировать'));
   });
 
   it('prefers human names over ids and still copies the id', async () => {

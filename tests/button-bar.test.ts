@@ -88,8 +88,6 @@ const noop = () => undefined;
 function makeBar(overrides: Partial<ConstructorParameters<typeof ButtonBar>[0]> = {}) {
   return new ButtonBar({
     onFeatureClick: noop,
-    onCompareClick: noop,
-    onCompareRestoreClick: noop,
     onReplyModeToggle: noop,
     onToneSelect: noop,
     onVoiceClick: noop,
@@ -112,17 +110,15 @@ describe('ButtonBar toolbar visibility', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders Compare in the toolbar and enables it when compare cards are available', () => {
+  it('never mounts Compare or contextual Reopen, including a cached result', () => {
     const bar = makeBar();
     document.body.append(bar.root);
-
-    bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const compare = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Compare');
-
-    expect(compare).toBeDefined();
-    expect(compare?.disabled).toBe(false);
+    for (const restorable of [false, true]) {
+      bar.render(buildState(), null, 'default', 'none', true, false, restorable);
+      const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button')).map(labelOf);
+      expect(labels).not.toContain('Compare');
+      expect(labels).not.toContain('Reopen');
+    }
   });
 
   it('renders Recap as a row button (no overflow ⋯ menu)', () => {
@@ -359,40 +355,18 @@ describe('ButtonBar toolbar visibility', () => {
     expect(voiceSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('renders Review, Compare, and the contextual Reopen entry; Help left the bar (E80)', () => {
+  it('keeps Review while Help and Compare have no toolbar entry', () => {
     const bar = makeBar();
     document.body.append(bar.root);
-
     bar.render(buildState(), null, 'default', 'none', true, false, false);
-
-    const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button'))
-      .map(labelOf);
-
-    // E80: Help lives inside Coach (preset chip); the bar has no Help button.
+    const labels = Array.from(bar.root.querySelectorAll<HTMLButtonElement>('button')).map(labelOf);
     expect(labels).not.toContain('Help');
+    expect(labels).not.toContain('Compare');
+    expect(labels).not.toContain('Reopen');
     expect(labels).toContain('Review');
-    expect(labels).toContain('Compare');
-    expect(labels).toContain('Reopen');
-    expect(buttonByLabel(bar.root, 'Reopen')?.classList.contains('chatgoose-hidden')).toBe(true);
     expect(hintFor(buttonByLabel(bar.root, 'Review')).body).toContain('Оценка');
-    expect(hintFor(buttonByLabel(bar.root, 'Compare')).body).toContain('Сравнивает');
   });
 
-  it('shows Reopen only when a completed Compare can be restored', () => {
-    const onCompareRestoreClick = vi.fn();
-    const bar = makeBar({ onCompareRestoreClick });
-    document.body.append(bar.root);
-
-    bar.render(buildState(), null, 'default', 'none', true, false, true);
-
-    const reopen = buttonByLabel(bar.root, 'Reopen');
-    expect(reopen?.classList.contains('chatgoose-hidden')).toBe(false);
-    expect(reopen?.disabled).toBe(false);
-    expect(hintFor(reopen).body).toContain('готовый результат Compare');
-
-    reopen?.click();
-    expect(onCompareRestoreClick).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe('ButtonBar tone groove (E24)', () => {
@@ -711,8 +685,6 @@ describe('ButtonBar improve draft state', () => {
     const hiIndex = children.findIndex((child) => labelOf(child) === 'Hi');
     const pingIndex = children.findIndex((child) => labelOf(child) === 'Ping');
     const reviewIndex = children.findIndex((child) => labelOf(child) === 'Review');
-    const compareIndex = children.findIndex((child) => labelOf(child) === 'Compare');
-    const reopenIndex = children.findIndex((child) => labelOf(child) === 'Reopen');
     const recapIndex = children.findIndex((child) => labelOf(child) === 'Recap');
     const coachIndex = children.findIndex((child) => labelOf(child) === 'Coach');
     const warningIndex = children.findIndex((child) =>
@@ -731,9 +703,7 @@ describe('ButtonBar improve draft state', () => {
     expect(pingIndex).toBe(hiIndex + 1);
     // E80: Review follows Ping directly — the bar has no Help button.
     expect(reviewIndex).toBe(pingIndex + 1);
-    expect(compareIndex).toBe(reviewIndex + 1);
-    expect(reopenIndex).toBe(compareIndex + 1);
-    expect(recapIndex).toBe(reopenIndex + 1);
+    expect(recapIndex).toBe(reviewIndex + 1);
     // Coach joins the fan-side cluster right after Recap (spec §10).
     expect(coachIndex).toBe(recapIndex + 1);
     expect(warningIndex).toBe(coachIndex + 1);

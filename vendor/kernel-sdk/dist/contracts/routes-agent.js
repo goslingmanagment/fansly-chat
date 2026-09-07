@@ -50,7 +50,7 @@ import { agentExportPolicyValues } from "../shared/index";
 import { z } from "zod";
 import { AGENT_CLAIM_FIELDS, AGENT_PLANE_COUNT, AGENT_PLANE_NAMES, } from "./agent-read-registry";
 import { AGENT_CAPABILITIES } from "./agent-read-capabilities";
-import { AGENT_DATASET_FIELD_KINDS, AGENT_DATASET_NAMES, AGENT_PLANNED_DATASET_NAMES, } from "./agent-read-datasets";
+import { AGENT_DATASET_FILTER_OPS, AGENT_DATASET_FIELD_KINDS, AGENT_DATASET_NAMES, AGENT_PLANNED_DATASET_NAMES, AGENT_RFC3339_TIMESTAMP_PATTERN, } from "./agent-read-datasets";
 import { errorResponseSchema, fanLookupParamsSchema, fanSearchMatchKindEnum, mills, pageParamsSchema, paginationQuerySchema, platformEnum, queryBooleanSchema, sortDirEnum, transactionStateEnum, transactionTypeEnum, } from "./primitives";
 // ---------------------------------------------------------------------------
 // §17.0.1 — plane primitives
@@ -62,7 +62,7 @@ import { errorResponseSchema, fanLookupParamsSchema, fanSearchMatchKindEnum, mil
  * precedents in this repository and the OpenAPI generator's behaviour on it is
  * unverified; a regex gives the same guarantee on proven house mechanics.
  */
-export const agentIsoTimestamp = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/, "RFC 3339 timestamp with explicit offset");
+export const agentIsoTimestamp = z.string().regex(AGENT_RFC3339_TIMESTAMP_PATTERN, "RFC 3339 timestamp with explicit offset");
 export const agentSha256Hex = z.string().length(64).regex(/^[0-9a-f]{64}$/);
 export const agentCursorString = z.string().min(1).max(2048).regex(/^[A-Za-z0-9_-]+$/);
 /**
@@ -441,6 +441,30 @@ export const agentBlockerEnum = z.enum([
     /** R-008: this response consumed a cursor, so its traversal crossed pages of a
      *  mutable sort key and rows can have moved between them. */
     "mutable_sort_key_traversal",
+    /**
+     * The `vault_media` dataset is serving an inventory NO FULL WALK HAS EVER
+     * PROVEN. Either the scope holds a page with no live creator-vault album at
+     * all (the roster was never captured or projected — nothing to prove against),
+     * or at least one live album (`vaultKind = creator`, no `missingSince`) has no
+     * completed full walk whose expected count equals the roster it actually saw.
+     * The rows returned are then a LOWER BOUND on what the Vault holds. It does
+     * not invalidate row-level proofs: a member's `missingSince` is written only
+     * after a complete walk of ITS album and stays an absence-from-that-walk fact;
+     * what the blocker denies is any claim about the Vault as a whole.
+     *
+     * WHY IT EXISTS: the catalog lane walks albums under a daily call cap, and a
+     * page whose Vault exceeds one day's cap never finishes the lane in a day.
+     * `/health` is green (catalog is excluded from sync-health by design) and
+     * `succeeded_at` never moves, so nothing else in the system told a reader that
+     * the inventory it was reading had never been completed.
+     *
+     * Emitted by the `vault_media` dataset read only; a scope holding ≥1 unproven
+     * page raises it. STALENESS OF AN OLD PROOF IS NOT PART OF IT (v1, #247): a
+     * walk completed a year ago still counts as proven, and the per-album
+     * `lastFullWalkAt` / `fullWalkRef` / `fullWalkObservedCount` on the rows are
+     * where a reader judges age.
+     */
+    "vault_inventory_unproven",
 ]);
 export const agentConclusionSchema = z.object({
     blockers: z.array(agentBlockerEnum),
@@ -547,7 +571,7 @@ export const agentMembershipStateEnum = z.enum(["active", "inactive", "unknown"]
  * whose vendored runtime schema still carries the old `z.literal`.
  */
 export const agentExportPolicyEnum = z.enum(agentExportPolicyValues);
-/** = `syncStreamEnum` (schema.ts), exactly eleven. */
+/** = `syncStreamEnum` (schema.ts), exactly seventeen. */
 export const agentSyncStreamEnum = z.enum([
     "light",
     "fan_identities",
@@ -560,6 +584,13 @@ export const agentSyncStreamEnum = z.enum([
     "followers_reconcile",
     "fan_earnings",
     "purchase_history",
+    "posts",
+    "stats_snapshot",
+    "notifications",
+    "catalog",
+    "post_replies",
+    "payouts",
+    "media_stats",
 ]);
 /** = CHECK `observations_source_check`, exactly seven. */
 export const agentObservationSourceEnum = z.enum([
@@ -749,7 +780,21 @@ export const agentResolveResponseSchema = z.object({
 export const agentPersonQuerySchema = z.object({
     ...agentClaimQuerySchema.shape,
     pageLabel: z.string().min(1).optional(),
-}).strict().superRefine((value, ctx) => addAgentIssues(agentClaimQueryIssues(value), ctx));
+}).strict().superRefine((value, ctx) => addAgentIssues([
+    ...agentClaimQueryIssues(value),
+    ...(value.claimFields?.includes("postTipMessageText") === true
+        ? [{
+                path: ["claimFields"],
+                message: "postTipMessageText is available only through the post_tips dataset",
+            }]
+        : []),
+    ...(value.claimFields?.includes("tipMessageText") === true
+        ? [{
+                path: ["claimFields"],
+                message: "tipMessageText is available only through the tip_transactions dataset",
+            }]
+        : []),
+], ctx));
 export const agentPersonResponseSchema = z.object({
     /** null = no row in the VISIBLE scope. It does NOT mean the fan does not exist,
      *  and `capture.scopeNarrowing` is mandatory precisely so the difference shows. */
@@ -812,6 +857,28 @@ export const agentPersonResponseSchema = z.object({
             transactionCount: z.number().int().nonnegative(),
         }).strict()),
     }).strict().nullable(),
+    /**
+     * Individually captured Fansly tips with exact donor-to-post attribution.
+     *
+     * This is deliberately separate from `money`: the same payment can also be
+     * present in `transactions`, so folding these rows into the lifetime totals
+     * would double-count it. `null` means the key holds no `read:money`; an empty
+     * `items` array means this serving projection has no matching captured rows.
+     */
+    postTips: z.object({
+        items: z.array(z.object({
+            pageLabel: z.string(),
+            platform: platformEnum,
+            postTipPostRef: z.string().min(1).max(500),
+            postTipRef: z.string().min(1).max(500),
+            postTipOccurredAt: agentIsoTimestamp,
+            postTipAmountMills: mills,
+            postTipGoalRef: z.string().min(1).max(500).nullable(),
+            fieldStates: z.partialRecord(agentClaimFieldEnum, agentFieldStateSchema),
+        }).strict()).max(200),
+        /** The card is a bounded recent view, not an unbounded export. */
+        capped: z.boolean(),
+    }).strict().nullable(),
     /** null without `read:money`: a subscription price is money. */
     subscriptions: z.array(z.object({
         pageLabel: z.string(),
@@ -859,13 +926,15 @@ export const agentPersonResponseSchema = z.object({
 export const agentTimelineLaneEnum = z.enum([
     "messages",
     "money",
+    /** Attribution view. Amounts can describe the same payment as `money`, so it
+     *  remains a separate lane and must never be added to transaction totals. */
+    "post_tips",
     "subscriptions",
     "follows",
     "presence",
 ]);
-/** `message.ppv_unlocked` is ABSENT and that is normative: it canonicalizes but
- *  projects into nothing, and lives only in `domain_events`, which the plane may
- *  not read. There is nowhere to serve it from. */
+/** `message.ppv_unlocked` is ABSENT and that is normative: it canonicalizes into
+ *  `domain_events`, but no timeline or dataset exposes that event. */
 export const agentTimelineKindEnum = z.enum([
     "message.received",
     "message.sent",
@@ -873,6 +942,7 @@ export const agentTimelineKindEnum = z.enum([
     "transaction.posted",
     "transaction.pending",
     "tip.received",
+    "post_tip.received",
     "subscription.started",
     "subscription.renewed",
     "subscription.ended",
@@ -884,7 +954,7 @@ export const agentTimelineKindEnum = z.enum([
 export const agentPersonTimelineQuerySchema = z.object({
     from: agentIsoTimestamp.optional(),
     to: agentIsoTimestamp.optional(),
-    lanes: z.preprocess((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]), z.array(agentTimelineLaneEnum).min(1).max(5).optional()),
+    lanes: z.preprocess((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]), z.array(agentTimelineLaneEnum).min(1).max(6).optional()),
     pageLabel: z.string().min(1).optional(),
     sortDir: sortDirEnum.default("desc"),
     limit: paginationQuerySchema.shape.limit,
@@ -893,6 +963,18 @@ export const agentPersonTimelineQuerySchema = z.object({
 }).strict().superRefine((value, ctx) => addAgentIssues([
     ...agentWindowIssues(value),
     ...agentClaimQueryIssues(value),
+    ...(value.claimFields?.includes("postTipMessageText") === true
+        ? [{
+                path: ["claimFields"],
+                message: "postTipMessageText is available only through the post_tips dataset",
+            }]
+        : []),
+    ...(value.claimFields?.includes("tipMessageText") === true
+        ? [{
+                path: ["claimFields"],
+                message: "tipMessageText is available only through the tip_transactions dataset",
+            }]
+        : []),
     ...agentCursorScopeIssues(value, [
         ...WINDOW_SCOPE_FIELDS,
         "lanes",
@@ -923,6 +1005,14 @@ export const agentTimelineItemSchema = z.object({
     textLength: z.number().int().nonnegative().nullable(),
     hasMedia: z.boolean().nullable(),
     isTip: z.boolean().nullable(),
+    /** Populated only for `lane:"post_tips"`. These names deliberately match the
+     *  claim registry and dataset contract so an agent does not have to translate
+     *  between three vocabularies for the same fact. */
+    postTipPostRef: z.string().min(1).max(500).nullable(),
+    postTipRef: z.string().min(1).max(500).nullable(),
+    postTipOccurredAt: agentIsoTimestamp.nullable(),
+    postTipAmountMills: mills.nullable(),
+    postTipGoalRef: z.string().min(1).max(500).nullable(),
     fieldStates: z.partialRecord(agentClaimFieldEnum, agentFieldStateSchema),
     provenance: agentProvenanceSchema,
 }).strict();
@@ -1365,15 +1455,7 @@ export const agentPageDatasetParamsSchema = z.object({
 /** `contains` and `between` are excluded on purpose: `contains` is an
  *  unindexable ILIKE (the trap §6 exists to avoid), and `between` is `gte`+`lte`. */
 export const agentDatasetFilterOpEnum = z.enum([
-    "eq",
-    "neq",
-    "lt",
-    "lte",
-    "gt",
-    "gte",
-    "in",
-    "is_null",
-    "is_not_null",
+    ...AGENT_DATASET_FILTER_OPS,
 ]);
 export const agentDatasetQueryBodySchema = z.object({
     from: agentIsoTimestamp.optional(),
@@ -1394,7 +1476,10 @@ export const agentDatasetQueryBodySchema = z.object({
     sort: z.array(z.object({
         field: z.string().min(1).max(64).regex(/^[a-z][a-zA-Z0-9]*$/),
         dir: sortDirEnum,
-    }).strict()).max(2).default([]),
+        // The v1 cursor carries one rendered sort value plus the stable row key.
+        // Accepting a second term would be dishonest: the repository cannot encode
+        // it in either ORDER BY/resume state and used to ignore it silently.
+    }).strict()).max(1).default([]),
     limit: z.number().int().min(1).max(200).default(50),
     cursor: agentCursorString.optional(),
     claim: agentClaimSchema.optional(),
@@ -1785,7 +1870,7 @@ export const agentRouteSchemas = {
         // empty data plus scopeNarrowing, because a static 404 would collapse "no
         // such fan" into "the fan is on a page outside this key's grant" — the exact
         // mistake this plane exists to prevent. Do not "fix" it as a bug.
-        summary: "One fan across every granted page: identity, memberships, threads, money, subscriptions."
+        summary: "One fan across every granted page: identity, memberships, threads, money, post-tip attribution, subscriptions."
             + " Never 404s: an out-of-grant fan answers 200-empty with scopeNarrowing (spec 5.6)",
         params: fanLookupParamsSchema,
         querystring: agentPersonQuerySchema,
@@ -1801,7 +1886,7 @@ export const agentRouteSchemas = {
     agentPersonTimeline: {
         auth: { kind: "agentKey" },
         tags: ["agent"],
-        summary: "Merged per-fan timeline across lanes (money, subscriptions, follows, message refs)."
+        summary: "Merged per-fan timeline across lanes (money, post-tip attribution, subscriptions, follows, message refs)."
             + " Never 404s: an out-of-grant fan answers 200-empty with scopeNarrowing (spec 5.6)",
         params: fanLookupParamsSchema,
         querystring: agentPersonTimelineQuerySchema,

@@ -330,6 +330,12 @@ interface CoachHintGroup {
   label: string;
   hints: readonly string[];
 }
+// A targeted guard for Cyrillic leaking into fan-facing drafts, not a general
+// language classifier. Preserve every original byte for the chatter to review.
+const COACH_DRAFT_CYRILLIC = /\p{Script=Cyrillic}/u;
+const COACH_DRAFT_LANGUAGE_NOTE =
+  'В черновике есть кириллица. Попроси Coach переписать его на английском.';
+
 const COACH_HINT_GROUPS: readonly CoachHintGroup[] = [
   {
     label: 'Продать',
@@ -1426,6 +1432,7 @@ export class OverlayController {
     textarea.value = model.sessionView.composerText;
     textarea.addEventListener('input', () => {
       this.autosizeCoachComposer(textarea);
+      send.disabled = textarea.disabled || !textarea.value.trim();
       this.callbacks.onCoachComposerInput?.(textarea.value);
     });
     textarea.addEventListener('keydown', (event) => {
@@ -1568,9 +1575,6 @@ export class OverlayController {
     if (view.composerTextarea.disabled !== disabled) {
       view.composerTextarea.disabled = disabled;
     }
-    if (view.sendButton.disabled !== disabled) {
-      view.sendButton.disabled = disabled;
-    }
     view.sendButton.classList.toggle('chatgoose-hidden', streaming);
     view.cancelButton.classList.toggle('chatgoose-hidden', !streaming);
     // Restore the composer text when unfocused — never clobber a live caret.
@@ -1585,6 +1589,7 @@ export class OverlayController {
     ) {
       view.composerTextarea.value = sv.composerText;
     }
+    view.sendButton.disabled = disabled || !view.composerTextarea.value.trim();
 
     // Snapshot the scroll pin BEFORE any feed mutation so streaming (or a new
     // committed item) only auto-scrolls when the chatter was already at bottom.
@@ -2088,6 +2093,9 @@ export class OverlayController {
     }
     textarea.classList.remove('chatgoose-coach-input-overlimit');
     textarea.value = '';
+    if (this.currentView?.kind === 'coach' && this.currentView.composerTextarea === textarea) {
+      this.currentView.sendButton.disabled = true;
+    }
     this.autosizeCoachComposer(textarea);
     // Keep the orchestrator's persisted composerText in sync with the clear.
     this.callbacks.onCoachComposerInput?.('');
@@ -2440,6 +2448,7 @@ export class OverlayController {
       for (const hint of group.hints) {
         const chip = this.createCoachButton(hint, 'chatgoose-coach-hint', () => {
           view.composerTextarea.value = hint;
+          view.sendButton.disabled = view.composerTextarea.disabled || !hint.trim();
           this.autosizeCoachComposer(view.composerTextarea);
           this.callbacks.onCoachComposerInput?.(hint);
           view.composerTextarea.focus();
@@ -2629,8 +2638,20 @@ export class OverlayController {
       void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'copied');
     });
 
+    const containsCyrillic = COACH_DRAFT_CYRILLIC.test(draft.text);
+    insert.disabled = containsCyrillic;
+    copy.disabled = containsCyrillic;
     actions.append(insert, keep, copy);
-    card.append(title, text, actions);
+    card.append(title, text);
+    if (containsCyrillic) {
+      const note = document.createElement('div');
+      note.className = 'chatgoose-inline-error';
+      note.dataset.role = 'coach-draft-language-note';
+      note.setAttribute('role', 'status');
+      note.textContent = COACH_DRAFT_LANGUAGE_NOTE;
+      card.append(note);
+    }
+    card.append(actions);
     return card;
   }
 
@@ -2642,6 +2663,9 @@ export class OverlayController {
     draft: CoachOverlayDraft,
     action: 'inserted' | 'copied',
   ): Promise<void> {
+    // Recheck at the side-effect boundary too: stale/cached cards and callers
+    // bypassing a disabled control must not copy or insert Cyrillic drafts.
+    if (COACH_DRAFT_CYRILLIC.test(draft.text)) return;
     try {
       if (action === 'inserted') {
         const expectedGroupId = this.model.kind === 'coach'
@@ -2792,11 +2816,19 @@ export class OverlayController {
     if (model.error) {
       section.append(createUserErrorBlock(model.error));
     } else if (model.parts.length > 0) {
+      if (model.feature === 'hi-greeting' && model.parts.length > 1) {
+        const note = document.createElement('div');
+        note.className = 'chatgoose-inline-note';
+        note.textContent = 'Choose one greeting.';
+        section.append(note);
+      }
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {
         parts.append(
-          this.createPartCard(getReplyPartTitle(part, model.splitModeRequested), part, {
+          this.createPartCard(model.feature === 'hi-greeting'
+              ? `Variant ${part.sequenceIndex + 1}`
+              : getReplyPartTitle(part, model.splitModeRequested), part, {
             ...getSplitPartCardOptions(part, model.splitModeRequested, model.parts.length),
             status: part.insertedOnce ? 'Inserted earlier.' : undefined,
             autoPassThrough: true,
@@ -2915,14 +2947,21 @@ export class OverlayController {
       () => this.callbacks.onRecapOpenLast?.(),
     );
     openLast.classList.add('chatgoose-recap-picker-last');
-    // Only an answered status with empty slots confirms there is nothing to
-    // open. `unavailable` means the Hub could not be checked; local cache lookup
-    // is still useful and does not require a generation.
-    if (model.recapStatus && model.recapStatus.state !== 'unavailable' && !hasStored) {
+    // Wait for initial metadata so an early click cannot choose an older full
+    // recap before learning about a newer short slot. An answered empty status
+    // confirms nothing is stored; unavailable still permits local-cache lookup.
+    if (!model.recapStatus || (model.recapStatus.state !== 'unavailable' && !hasStored)) {
       openLast.disabled = true;
     }
     actions.append(full, short, openLast);
     section.append(actions);
+    if (model.recapStatus === null) {
+      const loading = document.createElement('div');
+      loading.className = 'chatgoose-recap-picker-status';
+      loading.setAttribute('role', 'status');
+      loading.textContent = 'Проверяю сохранённые рекапы…';
+      section.append(loading);
+    }
 
     // Enter (unmodified) picks Полный — the ⌘⇧S+Enter muscle memory (spec §5).
     section.addEventListener('keydown', (event) => {
@@ -2949,10 +2988,6 @@ export class OverlayController {
     const spend = model.llmSpend;
     if (spend) {
       section.append(this.renderSpendStrip(spend));
-    }
-
-    if (model.profiling) {
-      section.append(this.renderProfilingCard(model.profiling, 'summary'));
     }
 
     if (model.reviewMeta?.rating) {
@@ -3049,6 +3084,19 @@ export class OverlayController {
       body.className = 'chatgoose-stream';
       body.textContent = model.rawText;
       section.append(body);
+    }
+
+    if (model.profiling) {
+      // Completed dossiers lead with their result. Keep the full diagnostic
+      // snapshot one disclosure away; live progress and error diagnosis retain
+      // their expanded render paths.
+      const details = document.createElement('details');
+      details.className = 'chatgoose-debug-inspector chatgoose-completed-profiling';
+      const summary = document.createElement('summary');
+      summary.className = 'chatgoose-debug-summary';
+      summary.textContent = `Отладка · ${formatProfilingElapsed(model.profiling.elapsedMs)}`;
+      details.append(summary, this.renderProfilingCard(model.profiling, 'summary'));
+      section.append(details);
     }
 
     if (model.debugPrompt) {

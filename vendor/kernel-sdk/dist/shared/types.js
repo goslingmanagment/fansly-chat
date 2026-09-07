@@ -107,7 +107,16 @@ export const aiUsageFeatures = [
     // Voice notes: the ElevenLabs TTS lane's script-generation feature.
     "voice-script",
 ];
+export const FANSLY_CLIENT_CHECK_ROUTES = [
+    "message",
+    "group",
+    "account",
+    "earnings",
+    "messagingGroups",
+    "subscribers",
+    "media",
+];
 export const syncHealthStates = ["healthy", "degraded", "suspicious", "failed"];
 export const httpRequestStates = ["started", "success", "retry", "failed"];
-export const httpRequestFailureKinds = ["timeout", "transport", "http", "provider"];
+export const httpRequestFailureKinds = ["timeout", "transport", "http", "provider", "policy"];
 export const syncTelemetryEventSeverities = ["info", "warn", "error"];

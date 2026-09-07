@@ -1429,7 +1429,7 @@ export class VoicePanel {
       case 'indeterminate':
         return `Вариант ${ordinal} · статус неизвестен`;
       case 'failed_after_dispatch':
-        return `Вариант ${ordinal} · ошибка после списания`;
+        return `Вариант ${ordinal} · не удалось · символы могли списаться`;
       case 'failed_definite':
         return `Вариант ${ordinal} · не удалось · символы не потрачены`;
       case 'quota_denied':
@@ -1458,10 +1458,26 @@ export class VoicePanel {
       state === 'indeterminate' ||
       state === 'failed_after_dispatch' ||
       state === 'artifact_expired';
-    if (!needsFreeCheck && !needsPaidRegen) {
+    const needsFailureGuidance = state === 'failed_definite' || state === 'failed_after_dispatch';
+    if (!needsFreeCheck && !needsPaidRegen && !needsFailureGuidance) {
       return null;
     }
     const actions = el('div', 'chatgoose-voice-take-recovery');
+    if (needsFailureGuidance) {
+      // Status currently carries a state-derived code, not the upstream cause.
+      // Give the manager a lookup id without inventing a billing diagnosis or
+      // displaying untrusted provider prose. A new synthesis stays manual.
+      const guidance = state === 'failed_definite'
+        ? 'Попросите менеджера проверить доступ к ElevenLabs и оплату подписки перед новым вариантом.'
+        : 'Попросите менеджера проверить результат запроса в Agency Hub перед новой генерацией.';
+      const detail = el(
+        'div',
+        'chatgoose-voice-error-detail',
+        `${guidance} Номер войса: ${take.voiceNoteId}.`,
+      );
+      detail.setAttribute('role', 'status');
+      actions.append(detail);
+    }
     if (needsFreeCheck) {
       const check = el(
         'button',

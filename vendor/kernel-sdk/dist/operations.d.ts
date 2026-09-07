@@ -75,6 +75,18 @@ export declare const kernelOperations: {
         readonly method: "GET";
         readonly path: "/api/v1/admin/device-token-adoption";
     };
+    readonly adminFollowersReconcileOverrideApply: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/sync/followers-reconcile/blast-radius/apply";
+    };
+    readonly adminFollowersReconcileOverridePreview: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/sync/followers-reconcile/blast-radius/preview";
+    };
+    readonly adminFollowersReconcileReset: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/sync/followers-reconcile/reset";
+    };
     readonly adminGrantModel: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/users/:username/models";
@@ -115,6 +127,10 @@ export declare const kernelOperations: {
         readonly method: "GET";
         readonly path: "/api/v1/admin/models";
     };
+    readonly adminOfapiBindingRefresh: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/webhook/bindings";
+    };
     readonly adminOfapiCaptureAttemptResolve: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/ofapi/capture/attempts/:attemptId/resolve";
@@ -122,6 +138,10 @@ export declare const kernelOperations: {
     readonly adminOfapiCaptureControl: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/ofapi/capture/controls";
+    };
+    readonly adminOfapiCaptureJobCancel: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/capture/jobs/:jobId/cancel";
     };
     readonly adminOfapiCaptureJobReplay: {
         readonly method: "POST";
@@ -138,6 +158,10 @@ export declare const kernelOperations: {
     readonly adminOfapiCoverageRevoke: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/ofapi/capture/coverage/:pageId/:chatId/revoke";
+    };
+    readonly adminOfapiCredentialPreflight: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/webhook/preflight";
     };
     readonly adminOfapiCreditsDaily: {
         readonly method: "GET";
@@ -187,13 +211,49 @@ export declare const kernelOperations: {
         readonly method: "GET";
         readonly path: "/api/v1/admin/ofapi/spend/comparison";
     };
+    readonly adminOfapiWebhookCollectionPolicy: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/webhook/collection-policy";
+    };
+    readonly adminOfapiWebhookCollectionPolicyApply: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/webhook/collection-policy/apply";
+    };
+    readonly adminOfapiWebhookCollectionPolicySave: {
+        readonly method: "PUT";
+        readonly path: "/api/v1/admin/ofapi/webhook/collection-policy";
+    };
+    readonly adminOfapiWebhookDeliveries: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/webhook/deliveries";
+    };
+    readonly adminOfapiWebhookDeliverySync: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/webhook/deliveries/sync";
+    };
+    readonly adminOfapiWebhookEventCatalog: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/webhook/event-catalog";
+    };
+    readonly adminOfapiWebhookEventCatalogRefresh: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/webhook/event-catalog/refresh";
+    };
     readonly adminOfapiWebhookReconcile: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/ofapi/webhook/reconcile";
     };
+    readonly adminOfapiWebhookRedeliver: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/webhook/deliveries/redeliver";
+    };
     readonly adminOfapiWebhookRegister: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/ofapi/webhook";
+    };
+    readonly adminOfapiWebhookReplay: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/webhook/replay";
     };
     readonly adminOfapiWebhookStatus: {
         readonly method: "GET";
@@ -435,6 +495,14 @@ export declare const kernelOperations: {
         readonly method: "POST";
         readonly path: "/api/v1/ofapi/commands/:commandId/cancel";
     };
+    readonly contentComments: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/content/comments";
+    };
+    readonly contentMedia: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/content/media";
+    };
     readonly createFanNote: {
         readonly method: "POST";
         readonly path: "/api/v1/pages/:pageLabel/fans/:platformUserId/notes";
@@ -515,6 +583,14 @@ export declare const kernelOperations: {
         readonly method: "GET";
         readonly path: "/api/v1/models";
     };
+    readonly moneyPayouts: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/money/payouts";
+    };
+    readonly moneyRevenueMix: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/money/revenue-mix";
+    };
     readonly notificationsDiscoverChats: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/notifications/discover-chats";
@@ -551,13 +627,177 @@ export declare const kernelOperations: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/notifications/test";
     };
+    readonly ofapiActionCancel: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/actions/:id/cancel";
+    };
+    readonly ofapiActionDispatch: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/actions/:id/dispatch";
+    };
+    readonly ofapiActionGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/actions/:id";
+    };
+    readonly ofapiActionList: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/actions";
+    };
+    readonly ofapiActionPrepare: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/actions";
+    };
+    readonly ofapiActionRepair: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/actions/:id/repair";
+    };
+    readonly ofapiBannedWordsAdminGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/banned-words";
+    };
+    readonly ofapiBannedWordsGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/ofapi/banned-words";
+    };
+    readonly ofapiBannedWordsPreview: {
+        readonly method: "POST";
+        readonly path: "/api/v1/ofapi/banned-words/preview";
+    };
+    readonly ofapiBannedWordsRefresh: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/banned-words/refresh";
+    };
+    readonly ofapiCollectionApply: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/collection/apply";
+    };
+    readonly ofapiCollectionGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/collection";
+    };
+    readonly ofapiCollectionJobCreate: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/collection/jobs";
+    };
+    readonly ofapiCollectionJobFinishIncomplete: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/collection/jobs/:id/finish-incomplete";
+    };
+    readonly ofapiCollectionJobResume: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/collection/jobs/:id/resume";
+    };
+    readonly ofapiCollectionPreview: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/collection/preview";
+    };
+    readonly ofapiContentEventsGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/content/events";
+    };
     readonly ofapiCreditsChatterSummary: {
         readonly method: "GET";
         readonly path: "/api/v1/ofapi/credits/summary";
     };
+    readonly ofapiExportInventoryGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/export-inventory";
+    };
+    readonly ofapiExportInventoryRefresh: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/export-inventory/refresh";
+    };
+    readonly ofapiKeyScopeApply: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/key-scope";
+    };
+    readonly ofapiKeyScopeGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/key-scope";
+    };
+    readonly ofapiMarketingDispatch: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/marketing/intents/:id/dispatch";
+    };
+    readonly ofapiMarketingGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/marketing";
+    };
+    readonly ofapiMarketingPostbacksRefresh: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/marketing/postbacks/refresh";
+    };
+    readonly ofapiMarketingPrepare: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/marketing/intents";
+    };
+    readonly ofapiMarketingRebuild: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/marketing/rebuild";
+    };
+    readonly ofapiMediaGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/media";
+    };
+    readonly ofapiMediaHandoff: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/media/handoff";
+    };
+    readonly ofapiMediaSourceCreate: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/media/sources";
+    };
+    readonly ofapiMediaUploadCreate: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/media/uploads";
+    };
+    readonly ofapiMediaUploadResume: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/media/uploads/:jobId/resume";
+    };
+    readonly ofapiProfileVisitorsGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/profile-visitors";
+    };
+    readonly ofapiReadCollectionsGet: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/collection/results";
+    };
     readonly ofapiReadGateway: {
         readonly method: "GET";
         readonly path: "/api/v1/ofapi/read/*";
+    };
+    readonly ofapiTypedExportApprove: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/exports/:jobId/approve";
+    };
+    readonly ofapiTypedExportArtifact: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/exports/:jobId/artifact";
+    };
+    readonly ofapiTypedExportControl: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/exports/:jobId/control";
+    };
+    readonly ofapiTypedExportCreate: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/exports";
+    };
+    readonly ofapiTypedExportList: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/exports";
+    };
+    readonly ofapiTypedExportResume: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/exports/:jobId/resume";
+    };
+    readonly ofapiTypedExportRows: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ofapi/exports/:jobId/rows";
+    };
+    readonly ofapiVendorUsageRefresh: {
+        readonly method: "POST";
+        readonly path: "/api/v1/admin/ofapi/vendor-usage";
     };
     readonly ofapiWebhookReceive: {
         readonly method: "POST";
@@ -702,6 +942,22 @@ export declare const kernelOperations: {
     readonly spenders: {
         readonly method: "GET";
         readonly path: "/api/v2/spenders";
+    };
+    readonly statsCoverage: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/coverage";
+    };
+    readonly statsMedia: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/media";
+    };
+    readonly statsTags: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/tags";
+    };
+    readonly statsTraffic: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/traffic";
     };
     readonly syncOverview: {
         readonly method: "GET";

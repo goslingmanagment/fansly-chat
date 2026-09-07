@@ -145,6 +145,8 @@ interface NumberedItem {
   /** The marker's parenthetical placement note («после "[Photo]"»), parens
    *  stripped — rides the fix card's label. */
   fixWhere: string | null;
+  /** Commentary after an unambiguous quoted example, outside the fan text. */
+  afterFix: string | null;
 }
 
 const ITEM_START_RE = /^[ \t]*\d{1,2}[.)][ \t]+/gm;
@@ -175,13 +177,58 @@ function splitNumberedItems(body: string): { lead: string; items: NumberedItem[]
 
 function parseItem(text: string): NumberedItem {
   const marker = FIX_MARKER_RE.exec(text);
-  if (!marker) return { body: text, fix: null, fixWhere: null };
+  if (!marker) return { body: text, fix: null, fixWhere: null, afterFix: null };
   const fixStart = (marker.index ?? 0) + marker[0].length;
+  const tail = text.slice(fixStart).trim();
+  const quoted = splitQuotedFix(tail);
   return {
     body: text.slice(0, marker.index).trim(),
-    fix: stripWrappingQuotes(text.slice(fixStart).trim()) || null,
+    fix: quoted?.fix ?? (stripWrappingQuotes(tail) || null),
     fixWhere: marker[1]?.trim() || null,
+    afterFix: quoted?.afterFix ?? null,
   };
+}
+
+/** Only split a clearly delimited leading quote followed by prose.
+ * Unquoted replies, unmatched/nested/same-delimiter embedded quotes retain
+ * the old fallback. Apostrophes and escaped quotes never terminate a reply;
+ * newlines inside its delimiters belong to the reply, regardless of language. */
+function splitQuotedFix(text: string): { fix: string; afterFix: string } | null {
+  const pairs = [['"', '"'], ['“', '”'], ['«', '»']] as const;
+  for (const [open, close] of pairs) {
+    if (!text.startsWith(open)) continue;
+    let closing = -1;
+    for (let i = 1; i < text.length; i += 1) {
+      if (text[i] === '\\') {
+        i += 1;
+        continue;
+      }
+      if (text[i] !== open && text[i] !== close) continue;
+      if (text[i] !== close) return null;
+      closing = i;
+      break;
+    }
+    if (closing <= 1) return null;
+    const fix = text.slice(1, closing).trim();
+    const remainder = text.slice(closing + 1);
+    // Sentence punctuation may sit immediately outside the quotation marks.
+    // Keep it in the commentary rather than dropping it or inserting it into
+    // the proposed fan message.
+    if (!/^(?:\s|[.,;:!?—–-](?:\s|$))/.test(remainder)) return null;
+    const afterFix = remainder.trim();
+    const commentary = afterFix.replace(/^[.,;:!?—–-]+\s*/, '');
+    // A second quoted alternative is not an explanatory tail.
+    if (/^(?:or|alternatively|или|либо|(?:ещ[её]|другой|второй)\s+вариант|вариант\s*\d)(?=$|[\s:—–-])/iu.test(commentary)) return null;
+    // Review commentary is Russian. Once it clearly starts as commentary,
+    // quotes later in that commentary are independent of the leading reply.
+    // Otherwise additional same-delimiter quotes remain ambiguous (embedded
+    // quotes or multiple proposed replies), so retain the old fallback.
+    const hasMoreDelimiters = Array.from(afterFix.matchAll(/(?<!\\)["“”«»]/gu))
+      .some((match) => match[0] === open || match[0] === close);
+    if (hasMoreDelimiters && !/^\p{Script=Cyrillic}/u.test(commentary)) return null;
+    return fix && afterFix ? { fix, afterFix } : null;
+  }
+  return null;
 }
 
 /** «"кстати, вижу…"» → «кстати, вижу…» — only when ONE pair wraps it all. */
@@ -257,6 +304,7 @@ function buildNumberedItems(
     body.className = 'chatgoose-analysis-item-body';
     body.append(buildBody(item.body));
     if (withFix && item.fix) body.append(buildFixBlock(item.fix, item.fixWhere));
+    if (withFix && item.afterFix) body.append(buildBody(item.afterFix));
     row.append(chip, body);
     host.append(row);
   });

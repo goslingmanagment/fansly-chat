@@ -101,6 +101,58 @@ describe('analysis blocks', () => {
       );
     });
 
+    it.each(['\n', ' '])('keeps commentary after a quoted replacement outside its card (%j)', (separator) => {
+      const host = renderReviewEvaluation(
+        `ВЕРДИКТ: Пропущен вопрос.\nОШИБКИ:\n1. Фраза "всё хорошо" не помогает. Как надо было (после приветствия): "Hey, how are you?"${separator}Здесь нужен мягкий вопрос.`,
+      )!;
+      expect(host.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe('Hey, how are you?');
+      expect(host.querySelector('.chatgoose-analysis-fix-where')!.textContent).toContain('после приветствия');
+      const body = host.querySelector('.chatgoose-analysis-item-body')!;
+      expect(body.lastElementChild!.textContent).toBe('Здесь нужен мягкий вопрос.');
+      expect(body.lastElementChild!.className).toBe('chatgoose-analysis-b');
+      expect(body.firstElementChild!.textContent).toBe('Фраза "всё хорошо" не помогает.');
+    });
+
+    it.each([
+      ['"', '"'], ['“', '”'], ['«', '»'],
+    ])('preserves multiline replies and apostrophes inside %s%s', (open, close) => {
+      const reply = "I'm thinking of you.\nWhat's on your mind?";
+      const host = renderReviewEvaluation(`ВЕРДИКТ: Хорошо.\nОШИБКИ:\n1. Как надо было: ${open}${reply}${close}\nНе торопи ответ.`)!;
+      expect(host.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe(reply);
+      expect(host.querySelector('.chatgoose-analysis-item-body')!.lastElementChild!.textContent).toBe('Не торопи ответ.');
+    });
+
+    it.each([
+      'Hey, I missed you.\nHow are you?',
+      '"Hey, you look "cute" today."\nНе торопи ответ.',
+      '"Hey, I missed you.\nНе закрыта цитата.',
+      '"First option" or "Second option"\nВыбери вариант.',
+      '"First option" или "Second option"\nВыбери вариант.',
+      '"First option"\nВторой вариант: "Second option"',
+    ])('keeps ambiguous or unquoted replacement intact: %s', (tail) => {
+      const host = renderReviewEvaluation(`ВЕРДИКТ: Хорошо.\nОШИБКИ:\n1. Как надо было: ${tail}`)!;
+      expect(host.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe(tail);
+    });
+
+    it.each([
+      ['"Hey, how was work?"\nВместо "расскажи подробнее" задай конкретный вопрос.', 'Hey, how was work?', 'Вместо "расскажи подробнее" задай конкретный вопрос.'],
+      ['"Hey!". Пояснение', 'Hey!', '. Пояснение'],
+      ['“Hey!” — Поясни, почему не “расскажи подробнее”.', 'Hey!', '— Поясни, почему не “расскажи подробнее”.'],
+    ])('separates commentary with its own quotes or boundary punctuation: %s', (tail, reply, commentary) => {
+      const host = renderReviewEvaluation(`ВЕРДИКТ: Хорошо.\nОШИБКИ:\n1. Как надо было: ${tail}`)!;
+      expect(host.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe(reply);
+      const body = host.querySelector('.chatgoose-analysis-item-body')!;
+      expect(body.lastElementChild!.className).toBe('chatgoose-analysis-b');
+      expect(body.lastElementChild!.textContent).toBe(commentary);
+    });
+
+    it('does not terminate the replacement at escaped embedded quotes', () => {
+      const reply = 'You said \\"miss you\\" yesterday.\nI miss you too.';
+      const host = renderReviewEvaluation(`ВЕРДИКТ: Хорошо.\nОШИБКИ:\n1. Как надо было: "${reply}"\nПоддержи его.`)!;
+      expect(host.querySelector('.chatgoose-analysis-fix-text')!.textContent).toBe(reply);
+      expect(host.querySelector('.chatgoose-analysis-item-body')!.lastElementChild!.textContent).toBe('Поддержи его.');
+    });
+
     it('decorates money amounts and transcript quotes', () => {
       const host = renderReviewEvaluation(EVALUATION)!;
       const money = [...host.querySelectorAll('.chatgoose-analysis-money')].map((el) => el.textContent);

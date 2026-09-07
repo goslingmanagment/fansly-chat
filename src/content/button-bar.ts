@@ -36,8 +36,6 @@ const FEATURE_HINTS: Record<FeatureType, string> = {
 /** Controls that are not `FeatureType` entries but still need explaining. */
 const VOICE_HINT = 'Голосовая заметка на текущем черновике';
 const SPLIT_HINT = 'Ответ придёт серией из 2–3 сообщений. Отправлять руками, по одному';
-const COMPARE_HINT = 'Сравнивает текущий ответ с сохранёнными вариантами';
-const REOPEN_COMPARE_HINT = 'Снова открывает последний готовый результат Compare';
 const ACCOUNT_WARNING_HINT =
   'Расширение не видит, в каком аккаунте Fansly открыт этот чат — перезагрузите страницу Fansly';
 
@@ -81,8 +79,6 @@ const TONE_CYCLE_LETTER = 'O';
 
 interface ButtonBarCallbacks {
   onFeatureClick: (feature: FeatureType) => void;
-  onCompareClick: () => void;
-  onCompareRestoreClick: () => void;
   onReplyModeToggle: () => void;
   /** A tone segment was clicked — ARM the tone for the next Reply (or disarm
    *  the already-armed one). Never generates by itself (E24 options model). */
@@ -119,7 +115,6 @@ export class ButtonBar {
   // would sit fully disabled and silent. That case — and only that case —
   // keeps a chip.
   private readonly accountWarning: HTMLElement;
-  private readonly compareRestoreButton!: HTMLButtonElement;
   // Split — multi-message reply mode (preferSplit). Sticky until toggled off
   // (E24). It lives INSIDE the options capsule since E73: `supportsReplyMode`
   // is true for `fast-reply` alone, so Split is an option of one button exactly
@@ -178,20 +173,6 @@ export class ButtonBar {
       'chatgoose-toolbar-button-summary',
       'chatgoose-toolbar-right-start',
     );
-
-    const compareButton = document.createElement('button');
-    compareButton.type = 'button';
-    compareButton.className = 'chatgoose-button chatgoose-toolbar-button';
-    compareButton.textContent = 'Compare';
-    compareButton.addEventListener('click', () => this.callbacks.onCompareClick());
-    this.buttons.set('compare', compareButton);
-
-    this.compareRestoreButton = document.createElement('button');
-    this.compareRestoreButton.type = 'button';
-    this.compareRestoreButton.className =
-      'chatgoose-button chatgoose-toolbar-button chatgoose-button-secondary chatgoose-toolbar-button-secondary chatgoose-hidden';
-    this.compareRestoreButton.textContent = 'Reopen';
-    this.compareRestoreButton.addEventListener('click', () => this.callbacks.onCompareRestoreClick());
 
     this.replyModeToggle = document.createElement('button');
     this.replyModeToggle.type = 'button';
@@ -262,8 +243,8 @@ export class ButtonBar {
     // Bar v2 order (E24): the Reply cluster (trigger + tone groove + Split
     // flag), then draft tools, then situational openers, then — pinned right —
     // the "about the fan" side (Recap + Coach). Hairline seams mark the group
-    // boundaries. Every implemented action has a direct entry point; Reopen
-    // appears only while a completed Compare result can be restored.
+    // boundaries. Compare and its contextual Reopen were removed by owner
+    // request; their generation engine remains outside this toolbar.
     this.root.append(
       replyButton,
       this.replyOptions,
@@ -273,8 +254,6 @@ export class ButtonBar {
       hiButton,
       pingButton,
       reviewButton,
-      compareButton,
-      this.compareRestoreButton,
       summaryButton,
       // Coach sits in the "about the fan" cluster, right after Recap (spec §10).
       this.coachButton,
@@ -330,16 +309,6 @@ export class ButtonBar {
       // Coach is not a TOOLBAR_FEATURES entry, so it has no corner keycap of
       // its own — its combo lives here.
       body: `${FEATURE_HINTS['coach-chat']} · ${comboLabel('C', this.platform)}`,
-    }));
-
-    this.hints.register(this.buttons.get('compare')!, () => ({
-      title: 'Compare',
-      body: COMPARE_HINT,
-    }));
-
-    this.hints.register(this.compareRestoreButton, () => ({
-      title: 'Reopen',
-      body: REOPEN_COMPARE_HINT,
     }));
 
     this.hints.register(this.voiceButton, () => ({ title: 'Voice', body: VOICE_HINT }));
@@ -436,7 +405,8 @@ export class ButtonBar {
     nextReplyTone: ReplyTone,
     hasDraftText: boolean,
     activeLoading = false,
-    showCompareRestore = false,
+    // Kept as an ignored positional argument for existing render callers.
+    _showCompareRestore = false,
   ): void {
     const hasState = Boolean(state?.groupId);
     this.root.classList.toggle('chatgoose-hidden', !hasState);
@@ -461,8 +431,6 @@ export class ButtonBar {
 
     const disableForPrereqs =
       !state.connected || !state.hasApiKey || !state.hasPersonalities || !state.mappedPersonalityId;
-    const disableCompareForPrereqs =
-      !state.connected || !state.hasApiKey || state.compareCardCount < 2;
 
     for (const entry of TOOLBAR_FEATURES) {
       const button = this.buttons.get(entry.feature)!;
@@ -482,13 +450,6 @@ export class ButtonBar {
       'chatgoose-toolbar-button-summary-ready',
       hasAvailableRecap(state),
     );
-
-    const compareButton = this.buttons.get('compare')!;
-    const compareActive = activeAction === 'compare';
-    compareButton.disabled =
-      Boolean(activeAction && !compareActive) || disableCompareForPrereqs;
-    this.compareRestoreButton.classList.toggle('chatgoose-hidden', !showCompareRestore);
-    this.compareRestoreButton.disabled = Boolean(activeAction);
 
     // Coach: enabled once its prereqs are met (it needs a mapped persona + key +
     // connection to generate). A streaming coach turn reports as

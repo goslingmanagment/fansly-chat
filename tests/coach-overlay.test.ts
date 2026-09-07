@@ -21,6 +21,7 @@ import { OverlayController } from '../src/content/overlay/overlay-controller.js'
 import { installContentStyles } from '../src/content/dom-anchor.js';
 import {
   insertIntoFanslyTextarea,
+  copyToClipboard,
   getActiveConversationDraftText,
 } from '../src/content/textarea.js';
 import type {
@@ -297,6 +298,7 @@ describe('OverlayController — coach chat mode', () => {
 
     const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
     expect(textarea.value).toBe('Просит скидку — что ответить?');
+    expect(requireElement<HTMLButtonElement>('.chatgoose-coach-send').disabled).toBe(false);
     expect(callbacks.onCoachComposerInput).toHaveBeenCalledWith('Просит скидку — что ответить?');
     expect(callbacks.onCoachSubmit).not.toHaveBeenCalled();
   });
@@ -454,6 +456,28 @@ describe('OverlayController — coach chat mode', () => {
   });
 
   // ─── Composer (spec §5/§6) ────────────────────────────────────────────────
+
+  it('disables empty or whitespace Send and updates immediately on editing, submission and restore', () => {
+    const { controller, callbacks } = makeController();
+    controller.render(createCoachModel());
+    const textarea = requireElement<HTMLTextAreaElement>('.chatgoose-coach-input');
+    const send = requireElement<HTMLButtonElement>('.chatgoose-coach-send');
+    expect(send.disabled).toBe(true);
+    textarea.value = ' \n ';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(send.disabled).toBe(true);
+    textarea.value = 'question';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(send.disabled).toBe(false);
+    send.click();
+    expect(callbacks.onCoachSubmit).toHaveBeenCalledWith('question', 'composer');
+    expect(send.disabled).toBe(true);
+    controller.render(createCoachModel({ composerText: 'restored question' }));
+    expect(send.disabled).toBe(false);
+    textarea.value = '';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(send.disabled).toBe(true);
+  });
 
   it('submits the composer on Enter with the RU placeholder and clears it', () => {
     const { controller, callbacks } = makeController();
@@ -1297,6 +1321,55 @@ describe('OverlayController — coach chat mode', () => {
     expect(document.querySelector('.chatgoose-coach-feed')).not.toBeNull();
   });
 
+  it.each(['Привет', 'Hey, не дави на него', 'Hello, Ї and Ѣ'])('preserves but blocks a Cyrillic draft: %s', async (text) => {
+    const { controller, callbacks } = makeController();
+    const draft = { text, index: 0 };
+    controller.render(createCoachModel({
+      feedItems: [exchangeItem('cached-op', 'q', 'Русский разбор', [draft])],
+    }));
+    const card = document.querySelector('.chatgoose-coach-draft')!;
+    expect(card.querySelector('.chatgoose-card-text')!.textContent).toBe(text);
+    expect(card.querySelector('[data-role="coach-draft-language-note"]')!.textContent)
+      .toContain('Попроси Coach переписать его на английском');
+    const copy = Array.from(card.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Копировать')!;
+    const insert = card.querySelector<HTMLButtonElement>('.chatgoose-coach-draft-insert')!;
+    expect(copy.disabled).toBe(true);
+    expect(insert.disabled).toBe(true);
+    copy.click();
+    insert.click();
+    // Exercise the acceptance boundary even when UI disabling is bypassed.
+    const internal = controller as unknown as {
+      acceptCoachDraft: (op: string, ref: undefined, draft: {text: string; index: number}, action: 'copied' | 'inserted') => Promise<void>;
+    };
+    await internal.acceptCoachDraft('cached-op', undefined, draft, 'copied');
+    await internal.acceptCoachDraft('cached-op', undefined, draft, 'inserted');
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(callbacks.onCoachRetry).not.toHaveBeenCalled();
+  });
+
+  it('allows English with emoji, accented Latin names and URLs despite Russian analysis', async () => {
+    const { controller } = makeController();
+    const text = "Hey José and Jose\u0301 😘 I'm here: https://example.test/hello";
+    controller.render(createCoachModel({
+      feedItems: [exchangeItem('en-op', 'q', 'Русский совет остаётся вне черновика.', [{text, index: 0}])],
+    }));
+    const card = document.querySelector('.chatgoose-coach-draft')!;
+    expect(card.querySelector('[data-role="coach-draft-language-note"]')).toBeNull();
+    const copy = Array.from(card.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Копировать')!;
+    const insert = card.querySelector<HTMLButtonElement>('.chatgoose-coach-draft-insert')!;
+    expect(copy.disabled).toBe(false);
+    expect(insert.disabled).toBe(false);
+    copy.click();
+    await vi.waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(text));
+    insert.click();
+    await vi.waitFor(() => expect(insertIntoFanslyTextarea).toHaveBeenCalledWith(text));
+  });
+
   it('draft «Копировать» does NOT collapse the overlay and attributes the CARD index', async () => {
     const { controller, callbacks } = makeController();
     controller.render(
@@ -1763,10 +1836,11 @@ describe('OverlayController — recap start dialog (spec §5)', () => {
     expect(callbacks.onRecapPick).toHaveBeenCalledWith('full');
   });
 
-  it('keeps «Открыть последний» live while the status is still unknown', () => {
+  it('disables «Открыть последний» while initial metadata is pending', () => {
     const { controller } = makeController();
     controller.render(createRecapPickerModel(null));
-    expect(requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last').disabled).toBe(false);
+    expect(requireElement<HTMLButtonElement>('.chatgoose-recap-picker-last').disabled).toBe(true);
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Проверяю сохранённые рекапы');
   });
 
   it('keeps «Открыть последний» live when recap status is unavailable', () => {

@@ -1225,6 +1225,36 @@ describe('Options page settings and read-only personas', () => {
     expect(retryWrite.agencyHubApiKey).toBe('new-key');
   });
 
+  it('shows a persistent save failure and retries the current form on request', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+    failNextStorageSet?.();
+    const quickInput = document.querySelector<HTMLInputElement>('input[type="number"][max="200"]')!;
+    quickInput.value = '74';
+    quickInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushMicrotasks();
+
+    const toast = document.querySelector<HTMLElement>('.chatgoose-save-toast')!;
+    expect(currentState.settings.quickMessageCount).toBe(30);
+    expect(toast.textContent).toContain(COPY.common.saveFailed);
+    expect(toast.dataset.failed).toBe('true');
+    toast.querySelector<HTMLButtonElement>('button')!.click();
+    await vi.waitFor(() => expect(currentState.settings.quickMessageCount).toBe(74));
+    await vi.waitFor(() => expect(toast.textContent).toContain(COPY.common.saved));
+    expect(toast.querySelector<HTMLButtonElement>('button')!.hidden).toBe(true);
+  });
+
+  it('retries a failed count write on pagehide without another edit', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+    failNextStorageSet?.();
+    const quickInput = document.querySelector<HTMLInputElement>('input[type="number"][max="200"]')!;
+    quickInput.value = '74';
+    quickInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushMicrotasks();
+    expect(currentState.settings.quickMessageCount).toBe(30);
+    window.dispatchEvent(new Event('pagehide'));
+    await vi.waitFor(() => expect(currentState.settings.quickMessageCount).toBe(74));
+  });
+
   it('retries a failed explicit API-key write on pagehide without another edit', async () => {
     await loadOptionsPage({
       state: makeState({
@@ -1857,6 +1887,8 @@ describe('Options «Аккаунты» pane', () => {
     expect(editor.hidden).toBe(false);
     expect(editor.value).toBe('Лора');
     expect(rowLabel('acc-live')).toBe('Lora (@lora)');
+    expect(accountRow('acc-live').querySelector('[data-role="account-edit-feedback"]')?.textContent)
+      .toContain(COPY.common.saveFailed);
   });
 
   it('shows the observed kernel page only once a generation proved the binding', async () => {

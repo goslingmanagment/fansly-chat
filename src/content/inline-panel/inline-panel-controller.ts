@@ -34,6 +34,8 @@ import {
 
 interface InlinePanelCallbacks {
   onClose: () => void;
+  /** A reference surface above the reply owns Enter/Escape while open. */
+  isKeyboardBlocked?: () => boolean;
   onExpand: () => void;
   onCancel: (operationId: string) => void;
   onRerun: (feature: FeatureType) => void;
@@ -203,6 +205,7 @@ export class InlinePanelController {
 
     // Escape handler with scope guard
     document.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || event.isComposing || this.callbacks.isKeyboardBlocked?.()) return;
       if (event.key === 'Escape' && this.model.kind !== 'hidden' && !this.root.classList.contains('chatgoose-hidden')) {
         if (isEditableElement(document.activeElement)) return;
         this.callbacks.onClose();
@@ -211,8 +214,15 @@ export class InlinePanelController {
 
     // Enter-to-insert for completed fast replies
     document.addEventListener('keydown', (event) => {
+      if (this.callbacks.isKeyboardBlocked?.()) {
+        // Returning alone leaves native keyboard activation on a focused Insert
+        // button alive. Cancel that default as well as the global shortcut.
+        if ((event.key === 'Enter' || event.key === ' ') &&
+          this.root.contains(document.activeElement)) event.preventDefault();
+        return;
+      }
       if (
-        event.key !== 'Enter' ||
+        event.key !== 'Enter' || event.defaultPrevented || this.callbacks.isKeyboardBlocked?.() ||
         event.metaKey || event.ctrlKey || event.altKey || event.shiftKey ||
         event.repeat || event.isComposing
       ) return;
@@ -551,12 +561,20 @@ export class InlinePanelController {
     if (model.error) {
       section.append(createUserErrorBlock(model.error));
     } else if (model.parts.length > 0) {
+      if (model.feature === 'hi-greeting' && model.parts.length > 1) {
+        const note = document.createElement('div');
+        note.className = 'chatgoose-inline-note';
+        note.textContent = 'Choose one greeting.';
+        section.append(note);
+      }
       const parts = document.createElement('div');
       parts.className = 'chatgoose-parts';
       model.parts.forEach((part) => {
         parts.append(
           this.createPartCard(
-            getReplyPartTitle(part, model.splitModeRequested),
+            model.feature === 'hi-greeting'
+              ? `Variant ${part.sequenceIndex + 1}`
+              : getReplyPartTitle(part, model.splitModeRequested),
             part,
             {
               ...getSplitPartCardOptions(part, model.splitModeRequested, model.parts.length),
@@ -997,14 +1015,18 @@ export class InlinePanelController {
     copy.className = 'chatgoose-button chatgoose-button-secondary';
     copy.textContent = 'Copy';
     copy.addEventListener('click', async () => {
+      if (this.callbacks.isKeyboardBlocked?.()) return;
+      const actionModel = this.model;
       try {
         await copyToClipboard(part.text);
-        if ('operationId' in this.model && typeof this.model.operationId === 'string') {
-          this.callbacks.onAcceptance?.(this.model.operationId, 'copied', part.sequenceIndex);
+        if ('operationId' in actionModel && typeof actionModel.operationId === 'string') {
+          this.callbacks.onAcceptance?.(actionModel.operationId, 'copied', part.sequenceIndex);
         }
+        if (this.model !== actionModel) return;
         this.inlineError = null;
         this.render(this.model);
       } catch (error) {
+        if (this.model !== actionModel) return;
         this.inlineError = toUserError(error);
         this.render(this.model, { preserveInlineError: true });
       }
@@ -1030,6 +1052,8 @@ export class InlinePanelController {
   }
 
   private async insertPart(part: OverlayInsertPart): Promise<void> {
+    if (this.callbacks.isKeyboardBlocked?.()) return;
+    const actionModel = this.model;
     try {
       // LIVE route check (mirrors the overlay/coach guards): the polled route
       // lags a chat switch by up to 500ms — never insert into a foreign chat.
@@ -1041,14 +1065,21 @@ export class InlinePanelController {
       await insertIntoFanslyTextarea(part.text);
       part.insertedOnce = true;
       part.insertedAt = Date.now();
-      this.inlineError = null;
-      if ('operationId' in this.model && typeof this.model.operationId === 'string') {
-        this.callbacks.onAcceptance?.(this.model.operationId, 'inserted', part.sequenceIndex);
+      if ('operationId' in actionModel && typeof actionModel.operationId === 'string') {
+        this.callbacks.onAcceptance?.(actionModel.operationId, 'inserted', part.sequenceIndex);
       }
+      // Clipboard/insertion completion may arrive after a chat or result switch.
+      // Attribute the action to its original operation and leave the new UI alone.
+      if (this.model !== actionModel) {
+        part.insertedAt = null;
+        return;
+      }
+      this.inlineError = null;
       this.render(this.model);
       this.scheduleInsertedReset(part);
       this.queueComposerFocus();
     } catch (error) {
+      if (this.model !== actionModel) return;
       this.inlineError = toUserError(error);
       this.render(this.model, { preserveInlineError: true });
     }

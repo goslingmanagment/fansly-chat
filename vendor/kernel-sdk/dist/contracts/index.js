@@ -23,3 +23,16 @@ export * from "./agent-read-datasets";
 // out-of-workspace consumers (the extension) can import it from @kernel/sdk and
 // apply it to a terminal stop reason before committing/attaching a generation.
 export { isOutputExhausted } from "../shared/index";
+export * from "./ofapi-vendor-usage";
+export * from "./routes-ofapi-vendor";
+export * from "./routes-ofapi-collection";
+export * from "./ofapi-extended-commands";
+export * from "./routes-ofapi-banned-words";
+export * from "./routes-ofapi-read-collections";
+export * from "./ofapi-smart-links";
+export * from "./routes-ofapi-exports";
+export * from "./routes-ofapi-media";
+export * from "./ofapi-actions";
+export * from "./ofapi-actions-collections";
+export * from "./ofapi-actions-publishing";
+export * from "./ofapi-actions-account";

@@ -149,6 +149,7 @@ function relativeTime(builtAt: number): string {
 export class SpendersBoardController {
   private readonly root = ensureBoardRoot();
   private open = false;
+  private previousFocus: HTMLElement | null = null;
   private loading = false;
   private result: SpendersListResult | null = null;
   private activeTier: ActiveTier = 'all';
@@ -179,6 +180,11 @@ export class SpendersBoardController {
 
   constructor(private readonly deps: SpendersBoardDeps) {
     document.addEventListener('keydown', (event) => this.handleKeydown(event));
+    document.addEventListener('focusin', (event) => {
+      if (this.open && event.target instanceof HTMLElement && !this.root.contains(event.target)) {
+        this.focusPanel();
+      }
+    });
   }
 
   isOpen(): boolean {
@@ -203,6 +209,9 @@ export class SpendersBoardController {
   }
 
   async show(): Promise<void> {
+    if (!this.open) {
+      this.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     this.open = true;
     document.body.classList.add('chatgoose-scroll-lock');
     // The background owns the 10-minute cache. Always ask it on open so a
@@ -222,6 +231,9 @@ export class SpendersBoardController {
     this.releaseProgressReferences();
     document.body.classList.remove('chatgoose-scroll-lock');
     this.root.replaceChildren();
+    const previousFocus = this.previousFocus;
+    this.previousFocus = null;
+    if (previousFocus?.isConnected) previousFocus.focus();
   }
 
   /** Cold-build progress pushed from the background over the content port
@@ -363,6 +375,10 @@ export class SpendersBoardController {
 
     const panel = document.createElement('div');
     panel.className = 'chatgoose-board-panel';
+    panel.tabIndex = -1;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Spenders');
     if (entering) {
       panel.classList.add('chatgoose-board-panel-enter');
     }
@@ -370,6 +386,13 @@ export class SpendersBoardController {
 
     backdrop.append(panel);
     this.root.replaceChildren(backdrop);
+    // Even the loading shell must own focus: a retained Insert button behind
+    // the backdrop otherwise receives native Enter activation.
+    this.focusPanel();
+  }
+
+  private focusPanel(): void {
+    this.root.querySelector<HTMLElement>('.chatgoose-board-panel')?.focus();
   }
 
   private buildHeader(): HTMLElement {
@@ -951,6 +974,20 @@ export class SpendersBoardController {
     }
 
     row.append(avatar, main, amounts);
+    // Give the button its own identity: a descendant status chip's tooltip
+    // can otherwise become the row's entire name in Firefox accessibility.
+    // Keep changing chat availability as a description, never as its name.
+    const identity = [entryName(entry)];
+    if (entry.username) identity.push(`@${entry.username}`);
+    if (entry.deletedAt != null && !hasSearchTerm(entry)) identity.push(entry.fanAccountId);
+    identity.push(`Lifetime ${amount.textContent}`);
+    if (delta) identity.push(`This month ${delta}`);
+    row.setAttribute('aria-label', identity.join(', '));
+    const chatDescription = nameLine.querySelector<HTMLElement>('.chatgoose-board-row-chatstate');
+    if (chatDescription) {
+      chatDescription.id = `chatgoose-spender-state-${entry.fanAccountId}`;
+      row.setAttribute('aria-describedby', chatDescription.id);
+    }
     return row;
   }
 
@@ -1068,6 +1105,19 @@ export class SpendersBoardController {
 
   private handleKeydown(event: KeyboardEvent): void {
     if (!this.open || event.isComposing) return;
+
+    if (event.key === 'Tab') {
+      const controls = Array.from(this.root.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => !element.closest('.chatgoose-hidden'));
+      const current = controls.indexOf(document.activeElement as HTMLElement);
+      const next = current < 0 ? (event.shiftKey ? controls.length - 1 : 0)
+        : (current + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+      event.preventDefault();
+      if (controls[next]) controls[next].focus();
+      else this.focusPanel();
+      return;
+    }
 
     // Typing in the search box: letters filter (j/k must not move the
     // cursor); Esc clears-then-closes; Enter opens the top match; arrows

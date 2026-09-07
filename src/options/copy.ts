@@ -50,7 +50,8 @@ export const COPY = {
     brand: 'ChatGoose',
     brandSubtitle: 'Настройки · Fansly',
     ariaLabel: 'Разделы настроек',
-    changelog: 'Changelog',
+    changelog: 'Что нового в 2.0',
+    versionHistory: 'История версий',
     changelogUnseen: 'нов.',
     changelogUnseenTitle: 'Расширение обновилось — что нового',
     versionPrefix: 'v',
@@ -110,10 +111,10 @@ export const COPY = {
     unknownSubtitle: 'Открытых шагов нет, но связь с Hub проверить не удалось.',
     /** Subline under the «Нужно N действий» headline. It used to repeat the
      * pane's own subtitle word for word, one block below it. */
-    readinessRouteSub: 'Открытые шаги — справа, с кнопкой к каждому.',
+    readinessRouteSub: 'Выполни шаги в блоке «Что мешает».',
     /** The pane's promise, printed under its title (E61) — it used to be
      * reachable only through the report button's tooltip. */
-    paneHonesty: 'Строки честные — «неизвестно» значит «неизвестно».',
+    paneHonesty: 'Если данные недоступны, это указано в строке.',
     /** Names of the ACTIONABLE prerequisites the readiness aggregate counts.
      * Observational rows (quota, Spenders, activity) are deliberately absent —
      * an unknown quota is not a broken install. */
@@ -243,7 +244,7 @@ export const COPY = {
       '«Скопировать отчёт» — текстовый снимок этой страницы (версия, статусы, последние ошибки) в буфер, прислать в поддержку одним сообщением.',
     /** Tooltip on the report button — the honesty clause that used to close
      * `reportHint` before the visible hint shrank to a single line. */
-    reportHonesty: 'Строки честные: «неизвестно» — это «неизвестно».',
+    reportHonesty: 'Скопировать статусы и последние ошибки без паролей и токенов.',
   },
 
   /**
@@ -416,12 +417,11 @@ export const COPY = {
     statusArchived: 'архивная',
     archivedMapped: 'выбери замену',
     catalogNever: 'ещё не обновлялся',
-    /** Staleness marker at the right edge of the catalog row — shown (amber)
-     * only once the catalog is older than 48 hours; an absolute timestamp
-     * alone hides how stale it is. */
-    catalogAge: '{n} дн назад',
     catalogRefresh: 'Проверить связь и обновить',
-    catalogRefreshHint: 'Каталог перечитывается после успешной проверки связи с ядром.',
+    catalogChecking: 'Проверяем связь с Agency Hub…',
+    catalogConnectionChecked: 'Связь с Agency Hub проверена.',
+    catalogConnectionSetup: 'Подключи Agency Hub в разделе «Agency Hub».',
+    catalogRefreshHint: 'Каталог перечитывается после успешной проверки связи. Дата сохранения меняется только при изменении данных каталога.',
     /** Second line of a persona row: which accounts sit on it. The pane held the
      * mapping and printed only its size (E62). The caption CARRIES that size now
      * (E67): the right-edge «аккаунтов · 6» counted the very chips printed
@@ -432,7 +432,7 @@ export const COPY = {
      * «Каталог ядра» — said nothing about what this card is FOR (E67). */
     catalogCardTitle: 'Синхронизация',
     listCardTitle: 'Каталог ядра',
-    catalogUpdatedLabel: 'Обновлён',
+    catalogUpdatedLabel: 'Сохранён',
     catalogSourceLabel: 'Источник',
     catalogSourceUnknown: 'неизвестен',
     toAccounts: 'К аккаунтам →',
@@ -478,15 +478,18 @@ export const COPY = {
     personaSelectMissing: 'Недоступная персона · {key}',
     idCopyTitle: 'Скопировать {id}',
     idCopied: 'Скопировано ✓',
+    idCopyFailed: 'Не удалось скопировать',
     /** aria-label of the per-account persona <select>; `{label}` is the row's
      * visible heading (handle, local label, or shortened id). */
     personaSelectAria: 'Персона аккаунта {label}',
     focusTab: 'к вкладке',
+    focusTabFailed: 'Не удалось открыть вкладку Fansly. Открой её вручную.',
     renameTitle: 'Изменить подпись',
     renameEmpty: 'подписать…',
     renameLocalTitle: 'Локальная подпись',
     renameSave: 'Сохранить',
     renameCancel: 'Отмена',
+    renameHint: 'Enter — сохранить, Esc — отменить',
     subTabActive: 'вкладка активна',
     subSeenAt: 'была {when}',
     /** `{when}` forms for `subSeenAt` — a bare «21:40» three days later lies. */
@@ -586,6 +589,8 @@ export const COPY = {
 
   common: {
     saved: 'Сохранено ✓',
+    saveFailed: 'Изменения не сохранены',
+    retrySave: 'Повторить',
     copy: 'Копировать',
     copied: 'Скопировано ✓',
     show: 'Показать',

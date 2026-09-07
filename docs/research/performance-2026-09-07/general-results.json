@@ -1,0 +1,225 @@
+{
+  "scope": "Node/JSDOM synthetic operation counts, no Firefox layout/paint or real storage I/O",
+  "results": [
+    {
+      "scenario": "current source build, sourcemap excluded, stable audit timestamp",
+      "entry": "src/content/bootstrap.ts",
+      "bytes": 17340,
+      "voiceBytes": 0,
+      "largestInputs": [
+        [
+          "src/content/bootstrap.ts",
+          {
+            "bytesInOutput": 5231
+          }
+        ],
+        [
+          "src/content/bootstrap.css",
+          {
+            "bytesInOutput": 2456
+          }
+        ],
+        [
+          "src/shared/features.ts",
+          {
+            "bytesInOutput": 2242
+          }
+        ],
+        [
+          "src/shared/hotkeys.ts",
+          {
+            "bytesInOutput": 2003
+          }
+        ],
+        [
+          "src/shared/theme.ts",
+          {
+            "bytesInOutput": 1390
+          }
+        ],
+        [
+          "src/content/bootstrap-keepalive.ts",
+          {
+            "bytesInOutput": 1053
+          }
+        ],
+        [
+          "src/shared/keymap.ts",
+          {
+            "bytesInOutput": 790
+          }
+        ],
+        [
+          "src/content/spenders/board-launcher.ts",
+          {
+            "bytesInOutput": 788
+          }
+        ],
+        [
+          "src/shared/constants.ts",
+          {
+            "bytesInOutput": 622
+          }
+        ],
+        [
+          "src/content/route-watcher.ts",
+          {
+            "bytesInOutput": 462
+          }
+        ]
+      ]
+    },
+    {
+      "scenario": "current source build, sourcemap excluded, stable audit timestamp",
+      "entry": "src/content/index.ts",
+      "bytes": 446449,
+      "voiceBytes": 74866,
+      "largestInputs": [
+        [
+          "src/content/overlay/overlay-controller.ts",
+          {
+            "bytesInOutput": 82148
+          }
+        ],
+        [
+          "src/content/index.ts",
+          {
+            "bytesInOutput": 76194
+          }
+        ],
+        [
+          "src/content/voice/voice-panel.ts",
+          {
+            "bytesInOutput": 40930
+          }
+        ],
+        [
+          "src/shared/errors.ts",
+          {
+            "bytesInOutput": 38090
+          }
+        ],
+        [
+          "src/content/spenders/spenders-board-controller.ts",
+          {
+            "bytesInOutput": 27286
+          }
+        ],
+        [
+          "src/content/voice/attempt-controller.ts",
+          {
+            "bytesInOutput": 24245
+          }
+        ],
+        [
+          "src/content/inline-panel/inline-panel-controller.ts",
+          {
+            "bytesInOutput": 22568
+          }
+        ],
+        [
+          "src/content/button-bar.ts",
+          {
+            "bytesInOutput": 14499
+          }
+        ],
+        [
+          "src/shared/protocol.ts",
+          {
+            "bytesInOutput": 9928
+          }
+        ],
+        [
+          "src/content/overlay/analysis-blocks.ts",
+          {
+            "bytesInOutput": 8434
+          }
+        ]
+      ]
+    },
+    {
+      "scenario": "coach 100 token frames, unchanged 20-row profile",
+      "debug": false,
+      "childListRecords": 0,
+      "createdElements": 0,
+      "firstProfileRowReused": null,
+      "jsdomAggregateMs": 3.6289580000000115
+    },
+    {
+      "scenario": "coach 100 token frames, unchanged 20-row profile",
+      "debug": true,
+      "childListRecords": 100,
+      "createdElements": 6000,
+      "firstProfileRowReused": false,
+      "jsdomAggregateMs": 43.966499999999996
+    },
+    {
+      "scenario": "coach 100 streaming frames",
+      "feedItems": 0,
+      "initialDomElements": 49,
+      "feedKeyCalls": 0,
+      "p50Ms": 0.016000000000019554,
+      "p95Ms": 0.025874999999984993
+    },
+    {
+      "scenario": "coach 100 streaming frames",
+      "feedItems": 20,
+      "initialDomElements": 111,
+      "feedKeyCalls": 4000,
+      "p50Ms": 0.024625000000014552,
+      "p95Ms": 0.03808300000002873
+    },
+    {
+      "scenario": "coach 100 streaming frames",
+      "feedItems": 50,
+      "initialDomElements": 201,
+      "feedKeyCalls": 10000,
+      "p50Ms": 0.026707999999985077,
+      "p95Ms": 0.04362500000002001
+    },
+    {
+      "scenario": "coach 100 streaming frames",
+      "feedItems": 200,
+      "initialDomElements": 651,
+      "feedKeyCalls": 40000,
+      "p50Ms": 0.050666999999975815,
+      "p95Ms": 0.06895900000000665
+    },
+    {
+      "scenario": "coach 100 streaming frames",
+      "feedItems": 1000,
+      "initialDomElements": 3051,
+      "feedKeyCalls": 200000,
+      "p50Ms": 0.19687499999997726,
+      "p95Ms": 0.28866699999997536
+    },
+    {
+      "scenario": "settings patch normalizes recap cache, browser storage mocked",
+      "entries": 0,
+      "p50Ms": 0.003249999999979991,
+      "p95Ms": 0.02491599999996197,
+      "unchangedEntryReused": null
+    },
+    {
+      "scenario": "settings patch normalizes recap cache, browser storage mocked",
+      "entries": 100,
+      "p50Ms": 0.02766699999995126,
+      "p95Ms": 0.08379200000001674,
+      "unchangedEntryReused": false
+    },
+    {
+      "scenario": "settings patch normalizes recap cache, browser storage mocked",
+      "entries": 1000,
+      "p50Ms": 0.27091699999994034,
+      "p95Ms": 0.6782920000000559,
+      "unchangedEntryReused": false
+    },
+    {
+      "scenario": "settings patch normalizes recap cache, browser storage mocked",
+      "entries": 10000,
+      "p50Ms": 4.753916000000004,
+      "p95Ms": 5.177583000000027,
+      "unchangedEntryReused": false
+    }
+  ]
+}

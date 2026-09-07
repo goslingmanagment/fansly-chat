@@ -53,7 +53,7 @@ export type AgentClaimClassDefinition = {
     readonly fields: Readonly<Record<string, AgentClaimFieldDefinition>>;
 };
 /**
- * The six claim classes. A request may declare `claim.fields`; each field maps
+ * The seven claim classes. A request may declare `claim.fields`; each field maps
  * to exactly one class (pinned by test), and the conclusion is evaluated against
  * the union of the REQUIRED planes of the named fields.
  *
@@ -114,6 +114,18 @@ export declare const AGENT_CLAIM_CLASSES: {
             readonly purchaseState: {
                 readonly required: readonly ["message_archive", "dm_message_archive"];
             };
+            readonly contextState: {
+                readonly required: readonly ["transactions", "transaction_tip_contexts"];
+            };
+            readonly capturedConversationRef: {
+                readonly required: readonly ["transactions", "transaction_tip_contexts"];
+            };
+            readonly tipMessageText: {
+                readonly required: readonly ["transactions", "transaction_tip_contexts"];
+            };
+            readonly messageMediaOffer: {
+                readonly required: readonly ["message_media_offers"];
+            };
         };
     };
     readonly money: {
@@ -137,6 +149,9 @@ export declare const AGENT_CLAIM_CLASSES: {
             readonly transactionState: {
                 readonly required: readonly ["transactions"];
             };
+            readonly correlationRef: {
+                readonly required: readonly ["transactions"];
+            };
             readonly refundState: {
                 readonly required: readonly ["transactions"];
             };
@@ -145,6 +160,18 @@ export declare const AGENT_CLAIM_CLASSES: {
             };
             readonly lifetimeSpendMills: {
                 readonly required: readonly ["fan_spend_lifetime"];
+            };
+            readonly revenueMixDay: {
+                readonly required: readonly ["revenue_mix_daily"];
+            };
+            readonly payoutRequest: {
+                readonly required: readonly ["page_payout_requests"];
+            };
+            readonly ofapiFinancialMetric: {
+                readonly required: readonly ["ofapi_read_snapshots"];
+            };
+            readonly payoutMethod: {
+                readonly required: readonly ["page_payout_methods"];
             };
         };
     };
@@ -169,7 +196,7 @@ export declare const AGENT_CLAIM_CLASSES: {
         };
     };
     readonly subscription: {
-        readonly evidentiary: readonly [];
+        readonly evidentiary: readonly ["domain_events"];
         readonly fields: {
             readonly subscriptionState: {
                 readonly required: readonly ["page_subscriptions"];
@@ -207,6 +234,140 @@ export declare const AGENT_CLAIM_CLASSES: {
             };
             readonly fanFlag: {
                 readonly required: readonly ["fan_flags"];
+            };
+        };
+    };
+    readonly content: {
+        readonly evidentiary: readonly ["observations", "sync_raw_payloads"];
+        readonly fields: {
+            readonly postRef: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly postText: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly publishedAt: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly firstObservedAt: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly lastObservedAt: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly attachmentCount: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly fypFlags: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly wallRefs: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly rawMedia: {
+                readonly required: readonly ["creator_raw_media"];
+            };
+            readonly vaultInventory: {
+                readonly required: readonly ["creator_vault_album_members", "creator_vault_album_scans"];
+            };
+            readonly postAttachment: {
+                readonly required: readonly ["creator_posts", "creator_media", "creator_media_bundles", "creator_raw_media"];
+            };
+            readonly postTargetTipAmountMills: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly attachmentTipAmountMills: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly postTipTotalMills: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly tipGoalLinked: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly tipGoalRef: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly tipGoalLabelText: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly tipGoalTargetMills: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly tipGoalCurrentMills: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly tipGoalAmountsHidden: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly postTipPostRef: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly postTipRef: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly tipSenderPlatformUserId: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly postTipOccurredAt: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly postTipAmountMills: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly receiverTransactionRef: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly postTipGoalRef: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly postTipMessageText: {
+                readonly required: readonly ["creator_post_tips"];
+            };
+            readonly linkedPostCount: {
+                readonly required: readonly ["creator_posts"];
+            };
+            readonly trafficBucket: {
+                readonly required: readonly ["stats_traffic_buckets"];
+            };
+            readonly topMediaWindow: {
+                readonly required: readonly ["stats_top_media"];
+            };
+            readonly topTagWindow: {
+                readonly required: readonly ["stats_top_tags"];
+            };
+            readonly mediaTagWindow: {
+                readonly required: readonly ["fansly_media_tag_stats"];
+            };
+            readonly platformTagCounter: {
+                readonly required: readonly ["platform_tag_daily"];
+            };
+            readonly mediaOffer: {
+                readonly required: readonly ["creator_media"];
+            };
+            readonly vaultAlbum: {
+                readonly required: readonly ["creator_vault_albums"];
+            };
+            readonly vaultAlbumMember: {
+                readonly required: readonly ["creator_vault_album_members"];
+            };
+            readonly subscriptionTier: {
+                readonly required: readonly ["page_subscription_tiers"];
+            };
+            readonly subscriptionTierPlan: {
+                readonly required: readonly ["page_subscription_tier_plans"];
+            };
+            readonly postComment: {
+                readonly required: readonly ["post_comments"];
+            };
+            readonly postLike: {
+                readonly required: readonly ["post_likes"];
+            };
+            readonly platformNotification: {
+                readonly required: readonly ["platform_notifications"];
+            };
+            readonly captureCoverageRow: {
+                readonly required: readonly ["capture_coverage"];
             };
         };
     };

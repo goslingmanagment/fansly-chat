@@ -97,6 +97,16 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E81 | 2026-08-02 | Coach waits become narrated (stage progress + elapsed counter in the pending bubble), debugMode gains coach surfaces (live stage log, timings/tokens footer, per-turn «Промпт» opener, failure log), analysis headers unify on the recap treatment, and coach answers with model markdown render as structural blocks |
 | E82 | 2026-08-02 | Full and short Recap remain independent end-to-end: exact two-slot UI availability + two completed-surface slots; either lights the ready dot, Refresh preserves size, and short remains excluded only from the single full Hub dossier |
 | E83 | 2026-08-03 | The completed Review re-voices as the recap document (revises E77/E78's working-card split for Review only): evaluation + recommendations share one serif stream frame, numbered items become document entries; the «Как надо было» parser accepts a parenthetical placement note and shows it in the card label |
+| E84 | 2026-09-06 | Release audit: cancellation fences post-stream finalization and queued recap writes; paid Voice rechecks the live recipient after custody acknowledgement; inline async feedback retains its originating operation and yields keyboard ownership to reference surfaces; Cabinet write failures remain visible and retryable |
+| E85 | 2026-09-06 | Re-vendor the complete generated SDK from proven production Core 7fac98f310d6 for the 2.0 release gate; contract hash 46f7a01e6b6339c302b16cf4c592dd95199ee5ed2337536c11156d4154859fcc |
+| E86 | 2026-09-06 | Prepare local 2.0.0 candidate metadata and current user documentation; candidate labels distinguish it from the published 1.9.11 feed; publication remains a separate step |
+| E90 | 2026-09-07 | Add the implemented Hub prompt rework to the 2.0 walkthrough and changelogs, explicitly pending Hub rollout; distinguish it from the September 6 research and already-deployed Help/Review changes |
+| E91 | 2026-09-07 | Proposed fan messages are always English; analysis keeps its own audience language. Hub prompts pending rollout; targeted client Cyrillic guard and separate Review commentary preserve original text |
+| E92 | 2026-09-07 | One release journey: versionless ChatGoose landing, fixed 2.0 walkthrough, guide and version archive; links in Settings/popup, source-verified optimizations, walkthrough published before new extension entry points |
+| E93 | 2026-09-07 | The 2.0 walkthrough leads with Voice and a three-step interactive reference; feature parameters and expandable technical notes add source-verified detail without changing release readiness |
+| E94 | 2026-09-07 | Rewrite the 2.0 walkthrough in conversational Russian around chatter situations; preserve Voice-first order, technical parameters, readiness and all page behavior |
+| E95 | 2026-09-07 | Restore the main landing's full product story: everyday writing, context and analysis, Spenders, then one compact 2.0 chapter; responsive writing examples replace the main Coach demo |
+| E96 | 2026-09-07 | Give 2.0 more presence alongside the full product: early announcement, a Voice-led release chapter after writing, and illustrated Coach/Recap stories before the remaining core sections |
 
 ## Entries
 
@@ -2906,3 +2916,531 @@ fixes drowned in item prose. `FIX_MARKER_RE` now accepts the parenthetical
 («Как надо было · где-то после "Ok Lora 😘"»), keeping the WHERE from
 outshouting the WHAT. Stored raw strings, wire history, and copy text remain
 byte-identical; the createElement/textContent injection contract holds.
+
+**E84 (2026-09-06).** The 2.0 release audit adds checks at asynchronous action
+boundaries. Generation finalization rechecks active operation identity after a
+fresh persona read, after recap persistence, and before delivering success.
+Queued full/short recap writes also require that operation to remain active in
+their existing newest-result/persona predicate. A browser storage write already
+submitted cannot be cancelled atomically; these checks prevent abandoned queued
+writes and late success without introducing rollback or deletion.
+
+Paid Voice create rechecks account/group/fan/routeNonce immediately after its
+custody FIFO acknowledgement and before Hub dispatch. Existing frozen request
+identity, same-id recovery, and manual attachment semantics continue to apply.
+Terminal Voice failures provide a support note id and a manager action without
+inventing a provider cause absent from the status contract. A failure after
+dispatch says symbols may have been charged; billed-null is not certain spend.
+Inline Copy/Insert captures its originating result before awaiting completion;
+acceptance cannot be attributed to a replacement result, and late feedback does
+not redraw that result. Spenders and the cheatsheet own Enter/Escape while open.
+Spenders takes focus in loading, error and result shells, traps Tab and late
+underlying autofocus, and restores connected prior focus on close. Covered
+Inline controls also cancel native Enter/Space activation and refuse Insert/Copy
+callbacks; returning from a document shortcut alone does not stop native clicks.
+Toolbar focus cancels stale hover dwell and detached/hidden anchors cannot open
+hints. These are client lifecycle changes, with no new prompts or settings shape.
+
+The Cabinet preserves the newest failed settings snapshot as dirty, displays a
+persistent failure with explicit Retry, and reports failed account edits and
+popup clipboard operations. Credential and future-schema fences still govern
+retry. Account rename explains Enter/Escape and restores keyboard focus on
+cancel. Status copy names actual information and the relevant block, independent
+of column placement; secondary text is readable in both themes.
+Persona connectivity checks now show pending and result text in the Persona
+pane itself. A successful connectivity response does not assert that the
+independent catalog fetch succeeded. Account ID copy and focus-tab failures are
+visible beside the action; focus-tab requests remain single-flight.
+The persona catalog date is labelled as a saved snapshot date. Identical catalog
+polls intentionally avoid storage writes, so `personaCatalogFetchedAt` does not
+measure the most recent successful poll; the E62 amber age badge is withdrawn
+because an old unchanged snapshot does not prove stale synchronization.
+
+Live Firefox testing also exposed Fansly creating its native textarea only on
+focus inside a stable input host. Draft input/change observation now delegates
+through the document while accepting only the existing strictly resolved active
+conversation textarea. The first edit and replacement textarea update Fix and
+Coach draft availability; unrelated fields remain outside this path. Native
+draft reading and insertion semantics are unchanged.
+
+Coach disables Send for an empty or whitespace-only question and updates the
+control on edits, hint selection, restoration and submission. After a usable
+Coach answer, an unavailable recap status is retried once through the existing
+metadata read: the operation has now resolved the fan identity that a cold tab
+may lack. Existing session identity checks reject a late response after close
+or navigation; known statuses and stale/empty completions do not trigger it.
+The standalone Recap picker waits for its initial metadata result before
+enabling Open last, so a fast click cannot prefer an older full cache while a
+newer short recap exists. Failed or invalid reads become unavailable under the
+same picker fence and retain the existing local-cache fallback. Full and Short
+remain explicit refresh actions and do not wait for this metadata.
+
+The same live acceptance pass refines presentation without changing generation
+contracts: Hi alternatives are labelled Variant with Choose one guidance in
+both inline and expanded views, rather than implying sequential Split parts.
+Completed read-only documents collapse profiling so the result leads; pending
+operations and errors retain their diagnostic visibility. Spenders row
+accessible names include fan identity and lifetime/month spend, while chat-state
+help is linked through `aria-describedby` instead of replacing that identity
+with a generic tooltip. Focused tests cover these changes; final GUI reloading
+and release acceptance are tracked in `docs/release-2.0-acceptance.md`.
+
+**E85 (2026-09-06).** The release SDK snapshot is generated from clean Core
+`7fac98f310d673134c8dcb5dd6596e126e7f9e69`, independently identified by the running
+API image revision and its committed SDK hash matching the public health route.
+Generation uses Core's unmodified vendor script in an isolated clean checkout;
+the working Hub checkout and production remain unchanged. The full generated
+snapshot replaces the old `d19ee3a` pin, satisfying the exact deployed-contract
+gate rather than weakening it. A second independent generation is byte-identical.
+
+**E86 (2026-09-06).** `package.json` and `manifest.json` advance together to
+2.0.0 as a local release candidate. README, install, guide and both changelogs
+describe the Cabinet, Coach/Help, independent Recaps, Review, gated Voice and
+current toolbar/Spenders behavior. Historical release text remains intact;
+outdated present-tense guide instructions are superseded by the current paths.
+Candidate labels remain until separately approved publication; no signing, feed
+update or release announcement follows from this preparation. The public feed
+was independently observed at 1.9.11. Writing research is a proposal for Hub
+prompt experiments, not an implemented or measured model-quality change.
+
+**E87 (2026-09-06).** The existing `install.html` becomes the ChatGoose 2.0
+release landing page, retaining the self-hosted distribution path and the three
+exact version-stamping slots used by both deployment scripts. The page extends
+the paper/clay brand with Cyrillic Source Serif headings and product examples:
+Coach scenarios, separate Recap formats, Review, and a light/dark Cabinet demo.
+Examples are authored, fictional illustrations of the workflow, not captured
+model results or claims about prompt-quality improvements. Spenders example
+amounts follow the existing tier boundaries; Help is shown inside Coach.
+
+The two tab groups support click, arrow/Home/End keys and roving focus; the
+Cabinet theme switch changes only its local example. These controls make no
+network or AI requests. CSS and script are inline, and the existing 128px icon
+is embedded unchanged, so the landing adds no upload dependencies to the static
+page deploy. The existing external font source remains in use. Installation
+links name the current published build and target the production XPI explicitly,
+including in local previews. Candidate and Voice readiness labels remain until
+the corresponding release and live acceptance gates are satisfied.
+
+**E88 (2026-09-06).** `whats-new-2.html` is a separate, practical release
+walkthrough for existing ChatGoose users. The general `install.html` landing is
+preserved. The new page covers only additions and changes in 2.0, explaining
+entry points, work steps, context limits and retention rather than repeating the
+full product catalogue. Its Cabinet explorer is a local seven-tab reference;
+clicks do not change extension settings. On small screens Recap comparison rows
+place their shared label above two readable format columns.
+
+Implementation details were checked against current code: Coach uses the quick
+window directly and obtains deep context through Recap; its memory and recap
+storage have different lifetimes. Voice tone selection precedes script editing
+because a tone change regenerates the script. The page retains candidate and
+incomplete live Voice acceptance disclosures. This alternate page is not wired
+into signing, the update feed or public deployment by this change.
+
+
+**E89 (2026-09-06).** At the owner's request, the chat action bar removes
+Compare entirely, together with its contextual Reopen button. This supersedes
+the Compare/Reopen visibility parts of E76 and E80: Review now leads directly
+into Recap. The button nodes, hover hints, prerequisites, event callbacks and
+content-side reopen affordance checks are deleted. No replacement menu or
+shortcut is introduced. Compare has no entry in the shared hotkey table.
+The existing compare protocol/engine and result-handling code are retained;
+this UI removal does not change storage, prompts or shared SDK contracts.
+Current guide entries advertising Compare are removed; historical changelog
+entries and generated architecture maps remain historical evidence.
+
+**E90 (2026-09-07).** The release walkthrough and both changelogs include
+the separately implemented Hub prompt work from `1746d006`, `f3bb7888` and
+`1702c086` (Core Decision #252): Reply structural instructions and varied
+positive examples, Fix draft-length examples, and revised Hi/Ping register.
+The page labels these as prepared, pending Hub rollout. It also describes the
+already-deployed Help/Review citation and next-action behavior (Core #201/#203).
+
+Fresh read-only inspection found the running API image labelled
+`agency-hub.source-revision=2475b3046332`; none of the three September prompt
+commits is its ancestor. Its prompt tree matches the previously observed
+`7fac98f` tree exactly. The running compiled `api.js` independently contains the
+old Reply structure and Fix ban-list headings, while the new Reply v10 end-task
+self-check, structural sentence and Fix one-liner sentence are absent. This
+supersedes any inference that a newer API revision necessarily includes those
+prompt changes. The September 6 research remains a historical read-only report;
+the later implementation is distinct work. No prompt, model, persona, Hub
+configuration or deployment is changed here.
+
+The two landing examples are copied from the prepared prompt templates and
+labelled as instructional examples, not observed generations. No judge win rate
+is presented as a general quality or conversion metric. Prompt publication is
+independent of installing the extension. Remove the pending label only after
+the actual Hub rollout is verified.
+
+
+**E91 (2026-09-07).** The owner clarifies the audience rule: every proposed
+fan-facing message is English, regardless of the language of the fan, chatter,
+source draft, persona notes or history. This supersedes the fan-language wording
+in E79/E80 and earlier Help/Review descriptions for proposed messages only.
+Help/Review analysis remains Russian; ordinary Coach advice follows the
+chatter's language. Evidence quotes retain their original language.
+
+The separate Hub patch applies this rule to Coach, Help, Review replacements,
+Fix, Reply, Hi, Ping and generated Voice scripts. It removes competing
+fan-language instructions and keeps Russian explanations outside draft fences,
+suggestion tags and quoted replacement messages. The patch is pending rollout:
+changing this extension or its documentation does not publish server prompts.
+The earlier deployed citation/structured-analysis improvements remain distinct
+from this pending language correction and the separate E90 style rework.
+
+The client preserves the original Coach draft but disables Copy/Insert when it
+contains Cyrillic, checking again at the acceptance boundary. This is a targeted
+Cyrillic detector, not an English-language classifier: other languages can pass,
+and an English sentence containing a Cyrillic name can be blocked. No automatic
+translation, paid retry or silent text deletion is introduced. Review rendering
+separates a clearly quoted replacement from following commentary; ambiguous
+quoting retains the original text rather than guessing away content. Protocol,
+SDK and storage shapes are unchanged. Final verification, packaged artifacts
+and deployment evidence are tracked in `docs/release-2.0-language-fix.md`.
+
+
+**E92 (2026-09-07).** The owner chooses one continuous release journey.
+`install.html`, deployed as `index.html`, remains the ChatGoose product landing.
+Its normal Reply/Fix/Hi/Ping introduction leads into a concise 2.0 section,
+Coach example and linked feature cards. Voice has one full example on the main
+page. The detailed scenarios, settings reference and limitations live in
+`whats-new-2.html`; `guide.html` explains normal use and `changelog.html` keeps
+the chronological archive. The four pages share paper/clay colors, Cyrillic
+Source Serif headings, Hanken Grotesk text and the existing brand asset.
+
+This supersedes E87's release-only main-page framing, duplicate Recap/Cabinet
+interactive examples on that page and three mutable landing version slots.
+The detailed examples remain in the walkthrough; the main retains its three
+Coach scenarios. Only its footer is version-stamped now. The fixed 2.0 title,
+URL and navigation label are historical content, unaffected by later version
+bumps. E88's local-alternative-only deployment status is superseded: both
+release scripts preflight, upload and verify the walkthrough. Its atomic
+rename precedes the new latest XPI, update feed and pages linking to it. All
+existing signing, clean-main, exact SDK and announcement gates remain.
+
+Settings and the popup expose a prominent "Что нового в 2.0" web link plus
+a separate "История версий" link. Settings retains E59's seen-version marker
+and failure behavior. Popup links remain available when runtime status cannot
+be read. No automatic tab opening, settings migration or AI request is added.
+
+The optimization section is based on changes after published 1.9.11: lazy chat
+UI loading and incremental/batched streaming rendering (`d9d54a0`), independent
+completed recap results (`5ff8d49`) and visible Coach stages/elapsed time
+(`aaa75b7`). The 1.9.11 tag and the separately recorded deployed revision have
+identical trees. Progressive Spenders snapshots (`ea35aaba`) were already in
+that release and are not claimed as new. No latency, token or percentage gain
+is asserted without measurement; pending Hub cache work is not presented as
+a deployed browser optimization.
+
+Three independent GPT-6 Astra reviewers checked the implemented interfaces,
+copy and publication path. Follow-up fixes remove duplicate mobile navigation,
+synchronize Cabinet tab orientation with its layout, preserve archive text on
+320px screens and clarify Review examples. Keyboard interaction, local links,
+responsive layouts, release scripts and the complete client check are recorded
+in `docs/release-2.0-landing.md`. This is prepared local source and preview, not
+a website publication, Hub deployment, signed release or Firefox installation.
+E90/E91 prompt rollout and live Voice acceptance remain separate pending work.
+
+
+**E93 (2026-09-07).** The owner asks for a stronger feature presentation and
+a little more technical information in `whats-new-2.html`, with Voice first.
+Voice now leads the overview, navigation and numbered sections. The compact
+overview cards open each section; Voice has an interactive text/takes/attachment
+reference. Its example is authored and explicitly contains no playable audio.
+Tone names are informational text, not inert buttons. Cabinet and Voice tab
+groups maintain independent selection and accessible keyboard behavior.
+
+Each major feature leads with a practical result and a short parameter strip.
+Expandable details explain Voice profiles/output/recovery, Coach context,
+Recap freshness, Cabinet storage/diagnostics, Hub prompts and incremental
+rendering. Existing public fragment URLs and release-stamping rules remain.
+The page identifies Voice defaults as profile defaults, not observed settings
+of a particular account: ElevenLabs `eleven_v3`, `mp3_44100_128`, an advisory
+600-character editor guide and a 14-characters/second duration estimate.
+Multiple takes, character spend and manual attachment/send boundaries are
+checked against the current client and Hub source. No speed, audio-quality or
+live acceptance result is invented.
+
+Prepared prompt work and incomplete paid Voice acceptance retain their labels.
+This changes only the walkthrough presentation and its documentation, not
+extension runtime, Hub configuration or publication state. Independent
+GPT-6 Astra source and interface reviews, local route/tab/details checks and
+320/390/1280px visual verification are recorded in the landing acceptance log.
+
+
+**E94 (2026-09-07).** The owner finds the walkthrough copy too dry. Its
+introductions, feature headings, examples and supporting labels now start from
+familiar work situations: answering with a voice note, asking Coach about a
+draft, returning to an old chat and finding a setting. The register is direct,
+conversational Russian with restrained use of the Goose brand. Technical
+parameters, audience-language rules, model/profile defaults and pending release
+conditions remain explicit. Prompt improvements are described as instructions
+and goals, not guaranteed model behavior.
+
+This is a copy-only revision of E93. DOM structure, element attributes, CSS, JS,
+links and interactive state behavior remain unchanged. An independent GPT-6
+Astra editorial review checked tone and unsupported promises; its two wording
+clarifications were incorporated. Browser layout checks and a structural
+comparison are recorded in the landing acceptance log.
+
+
+**E95 (2026-09-07).** The owner finds the main page too focused on 2.0. The
+versionless product landing now introduces the entire ChatGoose workflow:
+Reply/Fix/Hi/Ping examples, four tones, personas and Split, then Recap/Help/Review
+and a standalone Spenders section. A chapter navigation exposes that breadth
+after the hero. The hero's secondary action opens product capabilities and its
+supporting copy identifies Agency Hub access as a requirement.
+
+This supersedes E92's large three-scenario Coach example, five release cards
+and separate Voice example on the main page. Those main-page presentations
+and their unused styles are removed. One compact 2.0 chapter follows the core
+features, leads with Voice and links to the detailed walkthrough. The E93/E94
+Voice-first walkthrough, approved copy, release-readiness labels, historical
+2.0 URLs and footer-only version stamping remain unchanged.
+
+The main writing examples are authored local UI states, not live generations.
+They switch between four scenarios with one visible panel and roving keyboard
+focus. Below 800px the list becomes a compact horizontal row; its ARIA
+orientation and arrow-key behavior track viewport changes. The fan dossier and
+Spenders table use explicitly fictional data. AI never sends automatically.
+
+The existing capabilities were checked against published 1.9.11. Conversational
+Coach, independent short/full Recap results, the Cabinet, Voice and prepared
+prompt changes remain in the separate 2.0 chapter. Copy does not claim that
+streaming itself is new, that persona bindings originate in Hub, or that the
+pending Hub prompt work has deployed. Independent GPT-6 Astra editorial and
+visual reviews, responsive interaction checks and release-page validation are
+recorded in `docs/release-2.0-landing.md`. This revision changes the local landing
+and documentation only.
+
+
+**E96 (2026-09-07).** The owner finds E95's compact release chapter too quiet.
+The main now exposes a 2.0 announcement above the product hero and places the
+expanded update chapter after the everyday writing examples. The hero,
+Reply/Fix/Hi/Ping, personas, tones, Split, Recap/Help/Review and Spenders remain.
+Chapter navigation follows the new reading order.
+
+This supersedes E95's six small release links at the end of the core catalog.
+Voice leads with a text-to-attachment illustration and a walkthrough link;
+Coach and the two Recap formats have illustrated stories. Cabinet, prepared
+prompt work and rendering optimizations follow in smaller linked descriptions.
+The overview CTA is visually prominent. The approved detailed walkthrough is
+unchanged. Voice examples contain no audio or playback control, generation
+cost and Hub setup remain explicit, and publication readiness is unchanged.
+
+Short Recap takes up to 300 messages; full Recap defaults to 3000 and exposes
+its own depth setting. The illustration's note identifies that distinction.
+The expanded main adds no AI call or new interactive example state. Independent
+GPT-6 Astra editorial and desktop visual reviews and responsive verification
+are recorded in `docs/release-2.0-landing.md`. No publication or runtime change.
+
+
+**E97 (2026-09-07).** The owner requests fresh independent critics and a large
+Telegram changelog. Three GPT-6 Astra agents review interface consistency,
+source accuracy and announcement copy. Valid findings are fixed in the guide:
+current action and tone names, Hi and Spenders coverage, accurate Coach context,
+the pending English-only rollout, and a complete hotkey reference. Landing links
+open the relevant guide fragments. Existing public anchors remain available.
+
+Guide FAQ controls now use native details/summary with keyboard focus and
+unclipped answers. Narrow-screen navigation no longer obscures anchor headings;
+reduced-motion preferences are respected. Unsupported cache-limit and aggregate
+deep-timeout claims are removed in favor of the actual storage and staged
+operation behavior. These are documentation and page-interface corrections;
+extension runtime is unchanged by this pass.
+
+The Telegram draft contains four detailed messages, with Voice first and
+specific changes to Coach, Recap, settings, prompts and rendering. It describes
+preparation and keeps incomplete Voice acceptance and separate Hub rollout
+explicit. Its public bodies are separate from editor-only evidence and release
+checks. No Telegram message is sent. Page verification, independent final review
+and a fresh read-only production snapshot are recorded in
+`docs/release-2.0-pages-review.md`. Publication and signing remain unperformed.
+
+
+**E98 (2026-09-07).** The owner asks to check how ChatGoose announcements
+were actually written before. Read-only history from the configured ChatGoose
+Telegram channel provides the primary style reference: version heading,
+short release summary, grouped change bullets and specific technical details.
+The 1.3.0, 1.4.x and 1.5.0 posts are the principal large-release examples;
+1.2.x prompt updates show the same direct treatment of prompt changes.
+
+This supersedes E97's four-message tutorial-style announcement. The revised
+draft is one substantial release post: Voice first, then the other additions,
+fixes and implementation details, without imagined work scenarios, repeated
+introductions or transitions between installments. Existing features are not
+reintroduced as new. The preparation status and pending Voice/Hub work remain
+explicit; internal publication checks are kept outside the post body.
+
+E39 already uses Rich Markdown `sendRichMessage` with a 32768-character local
+validation limit, so the draft is validated as one post rather than split at
+the plain-message limit. The draft remains separate from the automatic
+announcer's `CHANGELOG.md` input until release copy is finalized. No posting,
+deployment or runtime change is performed by this editorial revision.
+
+
+**E99 (2026-09-07).** The owner wants the Telegram copy written for the
+completed release, not as a preparation announcement. This supersedes E98's
+preparation tense in the post body. The draft now opens with the release
+announcement and describes the shipped client, pages and Hub prompt changes
+in completed/present tense. Voice requirements, paid takes and the actual
+limits of language checks remain part of the feature descriptions.
+
+The separate editor note identifies this as copy for release day. It retains
+the pending acceptance and deployment conditions and does not treat the new
+wording as proof that production changed. Only the announcement draft and
+editorial records change; no deployment, publication or message sending occurs.
+
+
+**E100 (2026-09-07).** The owner asks whether the approved announcement will
+actually be sent with the same formatting as earlier releases. The audit finds
+that the standalone draft is correct but the real CLI still extracts the old
+short preparation copy from CHANGELOG.md. The full E99 release-day body is now
+the canonical `## 2.0.0` entry; older release entries remain unchanged. The
+editor-only notes stay outside the send input. Exact output equality is checked
+after extraction and composition, including the release heading.
+
+Read-only Telegram retrieval confirms that published messages 48, 54, 55 and
+57 are complete RichMessage objects for 1.6.0, 1.9.8, 1.9.9 and 1.9.11. Their
+native heading/list/bold/code blocks explain why the generic history reader
+returned an empty plain text field. The existing E39 sendRichMessage adapter
+is retained unchanged. CLI preflight, 34 announce tests and an offline capture
+of the exact outgoing Markdown pass. No live test post or release is sent.
+
+
+**E101 (2026-09-07).** The owner recalls the Sonnet 5 low migration that the
+production-only check missed. The prepared Hub branch worktree-prompt-audit-fixes
+contains commit 298bb6f32a6ebd2b55feb71f9f250110a204d635 (Decision #252): Sonnet 5
+with low effort for Reply/Ping and the delegated Fix/Hi/voice-script policies,
+plus pricing and provider-request coverage. Help/Review/Coach retain Sonnet 4.6
+medium; Recap retains Opus 4.6. The change is implemented and committed, while
+the inspected main and production build still use the previous defaults.
+
+The release-day announcement now includes this scoped model change in both
+CHANGELOG.md and its review draft. The editor-only checklist requires deploying
+the prepared Hub work before the announcement describes it as shipped. The
+earlier production observation remains valid; it must not be generalized into
+a claim that the migration had never been implemented. No Hub code, merge,
+deployment or AI generation is performed by this documentation correction.
+
+
+**E102 (2026-09-07).** The owner explicitly extends the prepared Sonnet 5
+low defaults to Help, Review and Coach without requesting another comparative
+generation test. This supersedes the retained Sonnet 4.6 medium scope in E101:
+Reply, Fix, Hi, Ping, voice-script, Help, Review and Coach now belong to the
+prepared Sonnet 5 low change; Recap remains on Opus 4.6. The Hub implementation
+is prepared in worktree-prompt-audit-fixes on top of 298bb6f3. E101 and the
+earlier production observations remain historical evidence, not the final
+release scope. No measured improvement to analysis quality is asserted.
+
+The canonical CHANGELOG.md section and its Telegram draft are synchronized
+through the actual extractor/composer. The editor checklist requires the
+additional Help/Review/Coach changes, not just 298bb6f3, before publication.
+The exact post artifact, character count and SHA-256 are refreshed; only the
+read-only announcement preflight runs in this documentation pass. No message,
+release or deployment is sent by this change.
+
+
+**E103 (2026-09-07).** The owner-authorized Hub rollout is confirmed by
+`/Users/dmitriy/Documents/Codex/2026-09-07/chatgoose-hub-release/verification.json`,
+recorded at 2026-09-07T17:54:39.300397+00:00 (20:54:39 Moscow). Production source
+is b123b54b98e1b169d3b17cc5f9b749c1e62a2520. The deploy exits 0, API and sync
+health return 200, and api/worker/scheduler are healthy. Production and local
+API artifacts match; the local Hub CLI is rebuilt at the same source revision.
+
+The deployed stack includes E90 prompt changes, the restored E91 English-only
+audience boundary and all eight E102 Sonnet 5 low defaults; Recap remains on
+Opus 4.6. The prepared branch Decision #252 is renumbered to Hub #273 on
+integration. Compiled proof records nine English-only template occurrences.
+This confirms delivery of the instructions, not guaranteed model compliance
+or measured analysis-quality gains. Earlier production snapshots and E101/E102
+preparation records are retained as history.
+
+PR https://github.com/goslingmanagment/core/pull/146 is still awaiting
+Static/Quality Gate and main merge at receipt time; deployment is not evidence
+of a completed merge. Extension signing/feed/pages, exact SDK compatibility,
+paid Voice acceptance and Telegram publication remain separate unfinished
+gates. Only the draft editor checklist and these records change: the canonical
+post stays 10990 characters with SHA-256
+bbe2bde54faef906484ed39d7d1d4355761eaff429a3e48433f82fa84cf13547.
+
+
+E103 completion at 2026-09-07T17:55:53Z: PR #146 passed Static, all three
+Integration shards and Quality Gate, then merged as
+`d575cfa84d4c908d4e5db0bbf50a49e8981b4d12`. Local main is fast-forwarded.
+The merged and deployed commits have the same git tree
+`55f2493f6a876d6c30e74272f519648bef557fdc`; their diff is empty. Production and
+its pinned CLI retain the verified source revision b123b54b98e1, whose tree
+matches the squash merge. The receipt now records both identities.
+
+**E104 (2026-09-08).** The owner authorizes publishing extension 2.0.0 and
+the prepared Telegram announcement after the E103 Hub rollout and client
+compatibility check. The landing, fixed 2.0 walkthrough, changelog and README
+now use release-day status dated September 8; earlier candidate observations
+remain historical. Hub owns all model selection; the detailed changelogs name
+the eight Sonnet 5 low features and retain Opus 4.6 for Recap. README links to
+that record instead of embedding provider selection in client setup prose.
+
+The approved outgoing Markdown remains byte-identical to E103: 10990 Unicode
+characters, SHA-256
+`bbe2bde54faef906484ed39d7d1d4355761eaff429a3e48433f82fa84cf13547`.
+The sender and destination were independently resolved through Telegram:
+`@gooseadminposterbot` to ChatGoose / `@goosemusechat`, channel
+`-1003807184653`. The release script's announcement can be deferred with
+`SKIP_ANNOUNCE=1` until the signed public XPI hashes are independently checked;
+then the existing announcement CLI is called exactly once. An indeterminate
+send requires reading the channel before any retry.
+
+Voice remains an administrator-enabled, account-specific feature. A fresh
+read-only check through the configured production service proxy returned
+`missing_permissions` for subscription and voice metadata with the active
+key; this does not establish its billing state or a synthesis failure. The
+existing voice profile is present. Paid audio generation, listening, native
+attachment and a fresh installed-Firefox run are not claimed as completed
+by this publication. No payment, synthesis, Voice flag or key change is part
+of this release operation.
+
+Before committing, the final client check passed: 111 test files / 2108 tests,
+typecheck, lint, cutover gates and build. Publication still requires the
+normal clean-main, CI, exact production SDK, signing and served-feed gates.
+Release receipts are collected under
+`/Users/dmitriy/Documents/Codex/2026-09-08/chatgoose-2.0-release/`; a backup of
+the previous public pages, feed and signed 1.9.11 packages was made before
+deployment. This entry records authorization and preparation, not a completed
+upload or delivered Telegram post.
+
+**E105 (2026-09-08).** The 2.0 release SDK is regenerated in full from clean
+Core `d575cfa84d4c908d4e5db0bbf50a49e8981b4d12`, whose git tree equals the
+E103 deployed `b123b54b`. This supersedes E85's older production snapshot for
+the upcoming signed package. The current production contract and generated
+manifest both equal
+`da876ec6191cf75b84db068747a43f17e878ad3789a224f49d8a9fcc2e24654b`.
+
+The isolated source `/tmp/chatgoose-sdk-source-20260908` stayed clean after
+official `pnpm contracts:generate` and `node scripts/vendor-sdk.mjs` runs.
+All 83 generated files were verified against the saved per-file SHA-256
+receipt; there were no hand edits or dirty-source override. The complete
+extension check passed with this exact snapshot. The generated vendor and
+this provenance record form their own commit, preserving the E37 exact
+production-contract release gate rather than bypassing it on the basis of
+the narrower AI compatibility check.
+
+**E106 (2026-09-08).** The release PR's first CI run (`34165613928`) exhausts
+the Node heap near 2 GiB in the three OperationCoordinator test partitions.
+An unchanged local run with `NODE_OPTIONS=--max-old-space-size=2048`, `CI=true`
+and two workers reproduces the same three worker failures. The ordinary local
+Node runtime has a larger default heap, so its earlier green result did not
+exercise this constraint.
+
+`operations-suite.ts` now retains the actual `@kernel/sdk` module through a
+transparent Vitest factory across its per-test `vi.resetModules()` calls.
+The generated SDK/Zod graph is loaded once per isolated test file; stateful
+application modules still reset for every test. No SDK export, schema, test
+assertion or production behavior is replaced, and no CI heap limit is raised.
+All 151 tests in the three affected files pass at the same 2 GiB limit and
+two-worker setting after this change. The full check and GitHub CI remain
+mandatory before signing; the failed run is not bypassed.
+
+The complete `NODE_OPTIONS=--max-old-space-size=2048 CI=true pnpm check`
+then passes: 111 files, 2108 tests, typecheck, lint, gates and build. GitHub's
+rerun will validate the same change on its Node 22 Linux runner.

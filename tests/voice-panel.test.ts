@@ -745,6 +745,36 @@ describe('VoicePanel — лента', () => {
     expect(harness!.root.querySelector('audio')).toBeNull();
   });
 
+  it.each(['failed_definite', 'failed_after_dispatch'] as const)(
+    'makes terminal %s actionable without inventing a provider diagnosis or retrying',
+    async (state) => {
+      const attemptId = await toScriptPhase();
+      const clientRequestId = await harness!.controller.generateTake();
+      harness!.sent.length = 0;
+      await feed({
+        type: 'voice:noteView',
+        attemptId,
+        clientRequestId,
+        view: view({
+          voiceNoteId: 10,
+          state,
+          billed: state === 'failed_definite' ? false : null,
+          errorCode: `voice_${state}`,
+        }),
+      });
+
+      const text = textOf(harness!.root);
+      expect(text).toContain('Номер войса: 10.');
+      expect(text).toContain('Попросите менеджера проверить');
+      expect(text).not.toContain('ошибка после списания');
+      expect(text).not.toContain('payment_issue');
+      expect(text).toContain(state === 'failed_definite'
+        ? 'символы не потрачены'
+        : 'символы могли списаться');
+      expect(harness!.sent.filter((message) => message.type === 'voice:noteCreate')).toEqual([]);
+    },
+  );
+
   it('«+ Ещё вариант» synthesises the same script under a fresh request', async () => {
     const attemptId = await toScriptPhase();
     await toCompletedTake(attemptId);

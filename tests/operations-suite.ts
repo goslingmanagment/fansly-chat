@@ -34,6 +34,11 @@ import type {
   SummaryCacheEntry,
 } from '../src/shared/types.js';
 
+// Keep the real, stateless SDK graph across resetModules below. Recreating
+// all generated Zod contracts per operation test exhausts CI's 2 GiB heap;
+// application modules still reset, and no SDK exports or schemas are replaced.
+vi.mock(import('@kernel/sdk'), async (importOriginal) => importOriginal());
+
 let mockStorage: Record<string, unknown> = {};
 let currentNow = 1_700_000_000_000;
 let activeStorageCoordinator: {
@@ -5347,6 +5352,113 @@ describe(`OperationCoordinator (${part})`, () => {
   }
 
   if (part === 'output-and-coach') {
+  it('completes Hi with three independent variants at the ten-message limit', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(10), pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({
+      fanslyClient,
+      anthropicRawText: 'hey :) [VARIANT] coffee or tea? [VARIANT] tell me a bad joke',
+    });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-valid', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    expect(postedMessages(port).find((message) => message.type === 'operation:complete'))
+      .toMatchObject({ operationId: 'hi-valid', result: {
+        parts: ['hey :)', 'coffee or tea?', 'tell me a bad joke'],
+      } });
+    expect(postedMessages(port).some((message) => message.type === 'operation:error')).toBe(false);
+  });
+
+  it('refuses Hi above ten messages with a named error before calling the kernel', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(11), pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({ fanslyClient });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-too-long', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(postedMessages(port).find((message) => message.type === 'operation:error'))
+      .toMatchObject({ operationId: 'hi-too-long', error: { key: 'hi_too_many_messages' } });
+    expect(postedMessages(port).some((message) => message.type === 'operation:complete')).toBe(false);
+  });
+
+  it.each(['fast-reply', 'coach-chat', 'fan-summary'])(
+    'does not complete a cancelled %s while final persona validation is pending',
+    async (feature) => {
+      const { coordinator, port, kernelGateway } = await createCoordinatorHarness();
+      const previousSummary = structuredClone(mockStorage['summary:group-1']);
+      let releaseValidation!: () => void;
+      let enteredValidation!: () => void;
+      const entered = new Promise<void>((resolve) => { enteredValidation = resolve; });
+      const blocked = new Promise<void>((resolve) => { releaseValidation = resolve; });
+      const original = coordinator.assertPersonaIdentityCurrent.bind(coordinator);
+      vi.spyOn(coordinator, 'assertPersonaIdentityCurrent').mockImplementation(async (...args) => {
+        await original(...args);
+        if (kernelGateway.streamFeature.mock.calls.length > 0) {
+          enteredValidation();
+          await blocked;
+        }
+      });
+      const running = coordinator.startOperation(1, {
+        type: 'operation:start', operationId: 'cancel-after-stream', feature,
+        groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice',
+        forceRegenerate: true, replyMode: 'default',
+        ...(feature === 'coach-chat'
+          ? { chatterQuestion: 'What next?', coachSessionId: 'session-1' }
+          : {}),
+      });
+      await entered;
+      await coordinator.cancelOperation(1);
+      releaseValidation();
+      await running;
+      expect(postedMessages(port).filter((message) =>
+        message.type === 'operation:complete' || message.type === 'operation:error',
+      )).toEqual([]);
+      expect(mockStorage['summary:group-1']).toEqual(previousSummary);
+    },
+  );
+
+  it.each(['short', 'full'])(
+    'does not persist a cancelled %s recap waiting for the storage writer',
+    async (summaryMode) => {
+      const fanslyClient = buildFanslyClientMock();
+      fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
+      fanslyClient.getFanSubscriptionContext.mockResolvedValue(buildSubscriptionContext());
+      const { coordinator, storageCoordinator, port } = await createCoordinatorHarness({ fanslyClient });
+      const key = summaryMode === 'short' ? 'summary-short:group-1' : 'summary:group-1';
+      const previousSummary = structuredClone(mockStorage[key]);
+      const save = storageCoordinator.saveSummaryCacheIfCurrent.bind(storageCoordinator);
+      let releaseWriter!: () => void;
+      let enteredWriter!: () => void;
+      const entered = new Promise<void>((resolve) => { enteredWriter = resolve; });
+      const blocked = new Promise<void>((resolve) => { releaseWriter = resolve; });
+      vi.spyOn(storageCoordinator, 'saveSummaryCacheIfCurrent').mockImplementation(async (...args) => {
+        enteredWriter();
+        await blocked;
+        return save(...args);
+      });
+      const running = coordinator.startOperation(1, {
+        type: 'operation:start', operationId: 'cancel-before-cache', feature: 'fan-summary',
+        groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice',
+        forceRegenerate: true, summaryMode,
+      });
+      await entered;
+      await coordinator.cancelOperation(1);
+      releaseWriter();
+      await running;
+      expect(mockStorage[key]).toEqual(previousSummary);
+      expect(postedMessages(port).filter((message) =>
+        message.type === 'operation:complete' || message.type === 'operation:error',
+      )).toEqual([]);
+    },
+  );
   it('sanitizes leaked Gemini meta text before returning insertable reply parts', async () => {
     const { coordinator, port } = await createCoordinatorHarness({
       anthropicRawText:

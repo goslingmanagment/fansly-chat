@@ -19,7 +19,7 @@
  * Design reference: `investigations/agent-read-api-design-2026-07-31.md` §5.
  */
 /**
- * The six claim classes. A request may declare `claim.fields`; each field maps
+ * The seven claim classes. A request may declare `claim.fields`; each field maps
  * to exactly one class (pinned by test), and the conclusion is evaluated against
  * the union of the REQUIRED planes of the named fields.
  *
@@ -48,6 +48,19 @@ export const AGENT_CLAIM_CLASSES = {
             messageCount: { required: ["message_archive", "dm_message_archive"] },
             coverageStatus: { required: ["message_archive", "dm_message_archive"] },
             purchaseState: { required: ["message_archive", "dm_message_archive"] },
+            // Context is served over the active transaction population. The sidecar
+            // alone can prove the bytes of one captured note, but it cannot prove
+            // which ledger tips are missing context; both planes are authoritative
+            // for an all-in-scope claim.
+            contextState: { required: ["transactions", "transaction_tip_contexts"] },
+            capturedConversationRef: { required: ["transactions", "transaction_tip_contexts"] },
+            tipMessageText: { required: ["transactions", "transaction_tip_contexts"] },
+            // ── endpoints-cover (WP-S1) ──────────────────────────────────────────
+            // What was OFFERED and what was BOUGHT inside a DM. It belongs to the
+            // messages class, not to money, because the fact it discloses is about a
+            // conversation — the scope-pairing rule (`read:messages` AND
+            // `read:money`) is the capability half of the same judgement.
+            messageMediaOffer: { required: ["message_media_offers"] },
         },
     },
     money: {
@@ -59,6 +72,7 @@ export const AGENT_CLAIM_CLASSES = {
             amountMills: { required: ["transactions"] },
             currency: { required: ["transactions"] },
             transactionState: { required: ["transactions"] },
+            correlationRef: { required: ["transactions"] },
             // Refund/chargeback outcome of a transaction. Declared as its own field
             // because `transactionState` alone reads as observable while neither
             // platform's capture can actually answer "was this refunded": Fansly has
@@ -72,6 +86,15 @@ export const AGENT_CLAIM_CLASSES = {
             // Lifetime totals have their own rollup; reading `transactions` for a
             // window says nothing about a lifetime figure.
             lifetimeSpendMills: { required: ["fan_spend_lifetime"] },
+            // ── endpoints-cover (WP-S1) ──────────────────────────────────────────
+            // The platform's own earnings breakdown and the money-OUT head. Neither
+            // is the ledger: `revenue_mix_daily` is what Fansly says it paid, and
+            // `transactions` is what we recorded arriving. Reading one proves nothing
+            // about the other, which is exactly why they get separate planes.
+            revenueMixDay: { required: ["revenue_mix_daily"] },
+            payoutRequest: { required: ["page_payout_requests"] },
+            ofapiFinancialMetric: { required: ["ofapi_read_snapshots"] },
+            payoutMethod: { required: ["page_payout_methods"] },
         },
     },
     identity: {
@@ -86,7 +109,7 @@ export const AGENT_CLAIM_CLASSES = {
         },
     },
     subscription: {
-        evidentiary: [],
+        evidentiary: ["domain_events"],
         fields: {
             subscriptionState: { required: ["page_subscriptions"] },
             subscriptionPriceMills: { required: ["page_subscriptions"] },
@@ -111,6 +134,74 @@ export const AGENT_CLAIM_CLASSES = {
             summaryText: { required: ["fan_summaries"] },
             profileBody: { required: ["fan_profiles"] },
             fanFlag: { required: ["fan_flags"] },
+        },
+    },
+    content: {
+        // The current-head projections are authoritative for creator-post material
+        // and monetization snapshots. Per-tip rows have their own immutable plane;
+        // journal rows remain lineage evidence and are not re-read by dataset #10.
+        evidentiary: ["observations", "sync_raw_payloads"],
+        fields: {
+            postRef: { required: ["creator_posts"] },
+            postText: { required: ["creator_posts"] },
+            publishedAt: { required: ["creator_posts"] },
+            firstObservedAt: { required: ["creator_posts"] },
+            lastObservedAt: { required: ["creator_posts"] },
+            attachmentCount: { required: ["creator_posts"] },
+            fypFlags: { required: ["creator_posts"] },
+            wallRefs: { required: ["creator_posts"] },
+            rawMedia: { required: ["creator_raw_media"] },
+            vaultInventory: { required: ["creator_vault_album_members", "creator_vault_album_scans"] },
+            postAttachment: { required: ["creator_posts", "creator_media", "creator_media_bundles", "creator_raw_media"] },
+            postTargetTipAmountMills: { required: ["creator_posts"] },
+            attachmentTipAmountMills: { required: ["creator_posts"] },
+            postTipTotalMills: { required: ["creator_posts"] },
+            tipGoalLinked: { required: ["creator_posts"] },
+            tipGoalRef: { required: ["creator_posts"] },
+            tipGoalLabelText: { required: ["creator_posts"] },
+            tipGoalTargetMills: { required: ["creator_posts"] },
+            tipGoalCurrentMills: { required: ["creator_posts"] },
+            tipGoalAmountsHidden: { required: ["creator_posts"] },
+            postTipPostRef: { required: ["creator_post_tips"] },
+            postTipRef: { required: ["creator_post_tips"] },
+            tipSenderPlatformUserId: { required: ["creator_post_tips"] },
+            postTipOccurredAt: { required: ["creator_post_tips"] },
+            postTipAmountMills: { required: ["creator_post_tips"] },
+            receiverTransactionRef: { required: ["creator_post_tips"] },
+            postTipGoalRef: { required: ["creator_post_tips"] },
+            postTipMessageText: { required: ["creator_post_tips"] },
+            linkedPostCount: { required: ["creator_posts"] },
+            // ── endpoints-cover (WP-S1) ──────────────────────────────────────────
+            // One field per NEW physical store, each minting the plane name the
+            // matching dataset then declares. Without these, every one of those
+            // datasets would be stuck on the forbidden `readPlanes: []` — legal, and
+            // silently fatal to the capture-floor epistemics the coverage story
+            // depends on.
+            //
+            // They live in `content` rather than in a new class because the class
+            // vocabulary is CLOSED: a class is a disclosure boundary (money and
+            // messages gate capabilities), not a filing cabinet, and inventing an
+            // eighth to hold "statistics" would have added a boundary nobody
+            // enforces. `capture_coverage` is the one that reads oddly here and it
+            // stays: what a page's capture reaches back to is a fact ABOUT the
+            // content planes, and no other class answers for it at all.
+            trafficBucket: { required: ["stats_traffic_buckets"] },
+            topMediaWindow: { required: ["stats_top_media"] },
+            topTagWindow: { required: ["stats_top_tags"] },
+            mediaTagWindow: { required: ["fansly_media_tag_stats"] },
+            platformTagCounter: { required: ["platform_tag_daily"] },
+            mediaOffer: { required: ["creator_media"] },
+            vaultAlbum: { required: ["creator_vault_albums"] },
+            vaultAlbumMember: { required: ["creator_vault_album_members"] },
+            subscriptionTier: { required: ["page_subscription_tiers"] },
+            // Its OWN store, not the tier's: the tier head carries a base price and
+            // the plan carries the price, so reading tiers proves nothing about what
+            // plans exist.
+            subscriptionTierPlan: { required: ["page_subscription_tier_plans"] },
+            postComment: { required: ["post_comments"] },
+            postLike: { required: ["post_likes"] },
+            platformNotification: { required: ["platform_notifications"] },
+            captureCoverageRow: { required: ["capture_coverage"] },
         },
     },
 };
