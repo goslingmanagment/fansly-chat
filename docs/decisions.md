@@ -3424,3 +3424,23 @@ extension check passed with this exact snapshot. The generated vendor and
 this provenance record form their own commit, preserving the E37 exact
 production-contract release gate rather than bypassing it on the basis of
 the narrower AI compatibility check.
+
+**E106 (2026-09-08).** The release PR's first CI run (`34165613928`) exhausts
+the Node heap near 2 GiB in the three OperationCoordinator test partitions.
+An unchanged local run with `NODE_OPTIONS=--max-old-space-size=2048`, `CI=true`
+and two workers reproduces the same three worker failures. The ordinary local
+Node runtime has a larger default heap, so its earlier green result did not
+exercise this constraint.
+
+`operations-suite.ts` now retains the actual `@kernel/sdk` module through a
+transparent Vitest factory across its per-test `vi.resetModules()` calls.
+The generated SDK/Zod graph is loaded once per isolated test file; stateful
+application modules still reset for every test. No SDK export, schema, test
+assertion or production behavior is replaced, and no CI heap limit is raised.
+All 151 tests in the three affected files pass at the same 2 GiB limit and
+two-worker setting after this change. The full check and GitHub CI remain
+mandatory before signing; the failed run is not bypassed.
+
+The complete `NODE_OPTIONS=--max-old-space-size=2048 CI=true pnpm check`
+then passes: 111 files, 2108 tests, typecheck, lint, gates and build. GitHub's
+rerun will validate the same change on its Node 22 Linux runner.

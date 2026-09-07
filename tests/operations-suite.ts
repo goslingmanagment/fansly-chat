@@ -34,6 +34,11 @@ import type {
   SummaryCacheEntry,
 } from '../src/shared/types.js';
 
+// Keep the real, stateless SDK graph across resetModules below. Recreating
+// all generated Zod contracts per operation test exhausts CI's 2 GiB heap;
+// application modules still reset, and no SDK exports or schemas are replaced.
+vi.mock(import('@kernel/sdk'), async (importOriginal) => importOriginal());
+
 let mockStorage: Record<string, unknown> = {};
 let currentNow = 1_700_000_000_000;
 let activeStorageCoordinator: {
