@@ -3444,3 +3444,25 @@ mandatory before signing; the failed run is not bypassed.
 The complete `NODE_OPTIONS=--max-old-space-size=2048 CI=true pnpm check`
 then passes: 111 files, 2108 tests, typecheck, lint, gates and build. GitHub's
 rerun will validate the same change on its Node 22 Linux runner.
+
+**E107 (2026-09-08).** A fresh mobile review of the published 2.0 walkthrough
+finds no page-wide overflow at 320–1024 CSS pixels, but its overview descriptions
+share a narrow column with the link arrow. At 320px the longest title exceeds
+that column and leaves less than 1px before the arrow. Voice/Cabinet tabs and
+standalone footer links also have smaller tap areas than the mobile target.
+
+Below 580px, overview descriptions use the full card width with 13px text;
+arrows occupy only the heading row. At 365px and below, tighter side padding
+and column gaps give the title more room, with an emergency word-wrap fallback.
+Navigation, standalone footer links and example tabs have a minimum 44px tap
+height below 850px. This is CSS-only: the approved copy, fragment URLs, example
+behavior and extension package remain unchanged.
+
+Fresh browser checks cover 320, 360, 390, 430 and 768px plus both sides of the
+580/700/850px breakpoints and desktop widths through 1280px. All six technical
+disclosures open, all seven Cabinet panels switch, Voice steps switch and
+mobile arrow-key navigation wraps correctly. DOM measurements find no outer
+overflow, including with every disclosure open. The evidence is browser viewport
+testing, not an on-device Safari or full assistive-technology acceptance test.
+Current screenshots and measurements are recorded in
+`docs/release-2.0-mobile-review.md` and its linked local evidence folder.

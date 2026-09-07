@@ -305,6 +305,18 @@ h1{font-size:36px}
 @media(max-width:700px){.voice-studio{grid-template-columns:1fr}.voice-demo{border-left:0;border-top:1px solid #d5b59d}.voice-demo-panel{min-height:250px}.voice-story .voice-story-note{max-width:420px}}
 @media(max-width:580px){.overview{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.overview-row{padding:14px 12px;min-height:107px}.overview-row b{font-size:14px}.overview-row p{font-size:12px}.feature-specs{padding:0;border-bottom:0}.feature-specs>div{padding:14px 0!important;grid-column:1/-1;display:grid;grid-template-columns:90px minmax(0,1fr);gap:15px;border-right:0;border-bottom:1px solid var(--line)!important}.feature-specs dt{padding-top:4px}.feature-specs dd{margin:0}.feature-specs b{font-size:23px}.feature-specs dd span{margin-top:2px}.voice-story{padding:24px}.voice-demo{padding:20px}.voice-demo-panel blockquote{font-size:25px}.technical-specs>div{grid-template-columns:1fr;gap:6px}.feature-voice>.feature-head{display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px}.feature-voice>.feature-head>.badge{display:inline-block;grid-column:2;grid-row:1;justify-self:start;margin:0}.feature-voice>.feature-head>.section-index{grid-column:1;grid-row:2}.feature-voice>.feature-head>.feature-title{grid-column:2;grid-row:2}}
 
+/* Keep mobile descriptions readable and navigation comfortable to tap. */
+@media(max-width:850px){
+.top-links a,.top-links .secondary,.link-row a,.footer-links a{display:inline-flex;align-items:center;min-height:44px}
+.voice-tabs button,.settings-tabs button{min-height:44px}
+}
+@media(max-width:580px){
+.overview-row b{overflow-wrap:anywhere}
+.overview-row p{grid-column:1/-1;font-size:13px}
+.overview-row>span:last-child{grid-row:1}
+}
+@media(max-width:365px){.overview-row{padding-inline:10px;column-gap:4px}}
+
 </style></head>
 <body>
 <a class="skip" href="#overview">К содержанию</a>
