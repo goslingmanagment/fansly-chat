@@ -73,11 +73,16 @@ export declare const fanFlagTypes: readonly ["whale", "vip", "risky"];
 export type FanFlagType = (typeof fanFlagTypes)[number];
 export declare const aiUsageFeatures: readonly ["fast-reply", "improve-draft", "help-me", "fan-summary", "chat-review", "scan", "ping", "hi-greeting", "workboard-closing", "coach-chat", "voice-script"];
 export type AiUsageFeature = (typeof aiUsageFeatures)[number];
+export declare const FANSLY_CLIENT_CHECK_ROUTES: readonly ["message", "group", "account", "earnings", "messagingGroups", "subscribers", "media"];
+export type FanslyClientCheckRoute = (typeof FANSLY_CLIENT_CHECK_ROUTES)[number];
 export interface FanslySessionBundle {
     authorization: string;
     fanslyClientId?: string;
+    /** Legacy pasted value. Retained for credential compatibility, never reused
+     * across routes by the adapter. */
     fanslyClientCheck?: string;
     fanslySessionId?: string;
+    routeChecks?: Partial<Record<FanslyClientCheckRoute, string>>;
 }
 export interface OnlyMonsterTokenBundle {
     token: string;
@@ -98,7 +103,7 @@ export declare const syncHealthStates: readonly ["healthy", "degraded", "suspici
 export type SyncHealth = (typeof syncHealthStates)[number];
 export declare const httpRequestStates: readonly ["started", "success", "retry", "failed"];
 export type HttpRequestState = (typeof httpRequestStates)[number];
-export declare const httpRequestFailureKinds: readonly ["timeout", "transport", "http", "provider"];
+export declare const httpRequestFailureKinds: readonly ["timeout", "transport", "http", "provider", "policy"];
 export type HttpRequestFailureKind = (typeof httpRequestFailureKinds)[number];
 export declare const syncTelemetryEventSeverities: readonly ["info", "warn", "error"];
 export type SyncTelemetryEventSeverity = (typeof syncTelemetryEventSeverities)[number];

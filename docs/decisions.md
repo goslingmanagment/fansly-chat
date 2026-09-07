@@ -3408,3 +3408,19 @@ Release receipts are collected under
 the previous public pages, feed and signed 1.9.11 packages was made before
 deployment. This entry records authorization and preparation, not a completed
 upload or delivered Telegram post.
+
+**E105 (2026-09-08).** The 2.0 release SDK is regenerated in full from clean
+Core `d575cfa84d4c908d4e5db0bbf50a49e8981b4d12`, whose git tree equals the
+E103 deployed `b123b54b`. This supersedes E85's older production snapshot for
+the upcoming signed package. The current production contract and generated
+manifest both equal
+`da876ec6191cf75b84db068747a43f17e878ad3789a224f49d8a9fcc2e24654b`.
+
+The isolated source `/tmp/chatgoose-sdk-source-20260908` stayed clean after
+official `pnpm contracts:generate` and `node scripts/vendor-sdk.mjs` runs.
+All 83 generated files were verified against the saved per-file SHA-256
+receipt; there were no hand edits or dirty-source override. The complete
+extension check passed with this exact snapshot. The generated vendor and
+this provenance record form their own commit, preserving the E37 exact
+production-contract release gate rather than bypassing it on the basis of
+the narrower AI compatibility check.
